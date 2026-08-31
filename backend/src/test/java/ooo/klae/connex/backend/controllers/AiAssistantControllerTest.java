@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -34,6 +35,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCallReadService;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService;
 import ooo.klae.connex.backend.ai.assistant.AiChatAttachmentService;
+import ooo.klae.connex.backend.config.AiAssistantNavigationAdmissionFilter;
 import ooo.klae.connex.backend.dto.AiChatMessageCreateRequest;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
@@ -82,7 +84,41 @@ class AiAssistantControllerTest {
                         service, turnService, toolCallReadService,
                         writeToolService, attachmentService))
             .setControllerAdvice(new GlobalExceptionHandler(errorReporter, new TenantContext()))
+            .addFilter(new AiAssistantNavigationAdmissionFilter())
             .build();
+    }
+
+    @Test
+    void documentDestinationCannotReachAnAssistantRead() throws Exception {
+        mockMvc.perform(get("/api/ai/assistant/sessions/42")
+                .header("Sec-Fetch-Dest", " document "))
+            .andExpect(status().isForbidden())
+            .andExpect(header().string("Cache-Control", "no-store"));
+
+        verify(service, never()).get(anyInt(), anyInt(), anyInt());
+    }
+
+    @Test
+    void navigationModeCannotReachAnAssistantRead() throws Exception {
+        mockMvc.perform(get("/api/ai/assistant/sessions/42")
+                .header("Sec-Fetch-Mode", "NAVIGATE"))
+            .andExpect(status().isForbidden())
+            .andExpect(header().string("Cache-Control", "no-store"));
+
+        verify(service, never()).get(anyInt(), anyInt(), anyInt());
+    }
+
+    @Test
+    void fetchMetadataAbsenceAndEmptyDestinationAdmitAssistantReads() throws Exception {
+        when(service.get(42, 1, 50)).thenReturn(detail());
+
+        mockMvc.perform(get("/api/ai/assistant/sessions/42"))
+            .andExpect(status().isOk());
+        mockMvc.perform(get("/api/ai/assistant/sessions/42")
+                .header("Sec-Fetch-Dest", "empty"))
+            .andExpect(status().isOk());
+
+        verify(service, times(2)).get(42, 1, 50);
     }
 
     @Test

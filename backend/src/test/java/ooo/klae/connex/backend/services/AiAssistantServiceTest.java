@@ -19,12 +19,17 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCallReadService;
+import ooo.klae.connex.backend.ai.assistant.AiChatAttachmentService;
+import ooo.klae.connex.backend.ai.assistant.AiChatTurnPersistenceService;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatParticipant;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -60,6 +65,8 @@ class AiAssistantServiceTest extends AbstractServiceTest {
 
     @Autowired private AiAssistantService service;
     @Autowired private AiAssistantToolCallReadService toolCallReadService;
+    @Autowired private AiChatAttachmentService attachmentService;
+    @Autowired private AiChatTurnPersistenceService turnPersistenceService;
     @Autowired private AiChatMapper chatMapper;
     @Autowired private RoleMapper roleMapper;
     @Autowired private AuditLogMapper auditLogMapper;
@@ -158,30 +165,70 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     }
 
     /**
-     * An administrator reading a session someone else created is a privacy-accountability event
-     * under the APPI entrustee posture, so both the list and the detail read record it. The record
-     * carries only the session id and the scope, never transcript text or any caller-supplied
-     * value, so it cannot be used to plant chosen text in the trail.
+     * Every disclosed surface shares the same metadata-only accountability record. This route
+     * matrix makes deleting any one choke-point call observable instead of allowing neighboring
+     * routes to keep a broad audit assertion green.
      */
-    @Test
-    void accessibleSessionReadsByAnAdminAreRecordedWithoutCallerSuppliedText() {
-        AiChatSession session = sharedSession(currentUser, "Shared oversight room");
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {
+        "page",
+        "get",
+        "invitations",
+        "participants",
+        "presence",
+        "attachments",
+        "turn",
+        "toolCalls",
+        "toolCall"
+    })
+    void everyAccessibleSessionDisclosureByAnAdminRecordsExactlyOneMetadataOnlyRow(String route) {
+        String sessionTitle = "caller-text-must-not-be-audited-" + unique();
+        AiChatSession session = sharedSession(currentUser, sessionTitle);
         User admin = aiUser("admin");
-        chatMapper.insertParticipant(workspace.getId(), session.getId(), admin.getId());
+        int toolCallId = prepareAdministrativeRead(route, session, admin);
         authenticateAs(admin, workspace.getId());
+        assertEquals(admin, SecurityContextHolder.getContext().getAuthentication().getPrincipal());
 
-        service.get(session.getId(), 1, 50);
-        service.page(1, 25);
+        invokeAdministrativeRead(route, session, toolCallId);
 
         List<AuditLog> records = auditLogMapper.findByEntity(
             workspace.getId(), "ai_chat_session", session.getId(), 10, 0);
-        assertEquals(2, records.size());
-        records.forEach(record -> {
-            assertEquals("ai.assistant.session.read", record.getAction());
-            assertEquals(admin.getId(), record.getActorId());
-            assertEquals("{\"scope\": \"accessible\"}", record.getChanges());
-            assertEquals("Assistant session " + session.getId(), record.getTargetLabel());
-        });
+        assertEquals(1, records.size());
+        AuditLog record = records.getFirst();
+        assertEquals("ai.assistant.session.read", record.getAction());
+        assertEquals(admin.getId(), record.getActorId());
+        assertEquals("{\"scope\": \"accessible\"}", record.getChanges());
+        assertEquals("Assistant session " + session.getId(), record.getTargetLabel());
+        assertEquals("Administrative assistant session read", record.getSummary());
+        assertFalse(record.getTargetLabel().contains(sessionTitle));
+        assertFalse(record.getChanges().contains(sessionTitle));
+    }
+
+    @Test
+    void accessibleSessionReadsWithoutAdministrativePermissionProduceNoAuditRow() {
+        AiChatSession session = sharedSession(currentUser, "Ordinary shared read");
+        User member = aiUser("member");
+        chatMapper.insertParticipant(workspace.getId(), session.getId(), member.getId());
+        authenticateAs(member, workspace.getId());
+        assertEquals(member, SecurityContextHolder.getContext().getAuthentication().getPrincipal());
+
+        service.get(session.getId(), 1, 50);
+
+        assertTrue(auditLogMapper.findByEntity(
+                workspace.getId(), "ai_chat_session", session.getId(), 10, 0).isEmpty());
+    }
+
+    @Test
+    void administratorsReadingTheirOwnSessionProduceNoAuditRow() {
+        User admin = aiUser("admin");
+        AiChatSession session = sharedSession(admin, "Administrator-owned session");
+        authenticateAs(admin, workspace.getId());
+        assertEquals(admin, SecurityContextHolder.getContext().getAuthentication().getPrincipal());
+
+        service.get(session.getId(), 1, 50);
+
+        assertTrue(auditLogMapper.findByEntity(
+                workspace.getId(), "ai_chat_session", session.getId(), 10, 0).isEmpty());
     }
 
     @Test
@@ -935,6 +982,57 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         assertNotNull(before);
         assertNotNull(after);
         assertEquals(before.getLastMessageAt(), after.getLastMessageAt());
+    }
+
+    private int prepareAdministrativeRead(String route, AiChatSession session, User reader) {
+        if ("invitations".equals(route)) {
+            chatMapper.insertInvitation(
+                    workspace.getId(), session.getId(), reader.getId(), currentUser.getId());
+        } else {
+            chatMapper.insertParticipant(workspace.getId(), session.getId(), reader.getId());
+        }
+        if ("turn".equals(route)) {
+            return turn(session.getId(), currentUser);
+        }
+        if (!"toolCall".equals(route)) {
+            return 0;
+        }
+        Person target = newPerson(newCompany());
+        AiChatMessage request = new AiChatMessage();
+        request.setWorkspaceId(workspace.getId());
+        request.setSessionId(session.getId());
+        request.setSeq(1);
+        request.setAuthorKind("user");
+        request.setAuthorUserId(currentUser.getId());
+        request.setContent("Create a note with caller-controlled text " + unique());
+        chatMapper.insertMessage(request);
+        AiChatToolCall toolCall = new AiChatToolCall();
+        toolCall.setWorkspaceId(workspace.getId());
+        toolCall.setMessageId(request.getId());
+        toolCall.setToolName("create_note");
+        toolCall.setStatus("executed");
+        toolCall.setArgumentsJson("{\"tool\":\"create_note\",\"tier\":\"auto\","
+                + "\"restrictionEpoch\":1,\"target\":{\"kind\":\"person\",\"id\":"
+                + target.getId() + "},\"request\":{\"handle\":\"r1\"}}");
+        toolCall.setResultJson("{}");
+        toolCall.setIdempotencyKey("turn-19-step-1");
+        chatMapper.insertToolCall(toolCall);
+        return toolCall.getId();
+    }
+
+    private void invokeAdministrativeRead(String route, AiChatSession session, int relatedId) {
+        switch (route) {
+            case "page" -> service.page(1, 25);
+            case "get" -> service.get(session.getId(), 1, 50);
+            case "invitations" -> service.pageInvitations(1, 25);
+            case "participants" -> service.participants(session.getId());
+            case "presence" -> service.presence(session.getId());
+            case "attachments" -> attachmentService.list(session.getId());
+            case "turn" -> turnPersistenceService.readTurn(session.getId(), relatedId);
+            case "toolCalls" -> toolCallReadService.list(session.getId(), false);
+            case "toolCall" -> toolCallReadService.get(session.getId(), relatedId);
+            default -> throw new IllegalArgumentException("Unknown administrative read route");
+        }
     }
 
     private AiChatSession sharedSession(User owner, String title) {

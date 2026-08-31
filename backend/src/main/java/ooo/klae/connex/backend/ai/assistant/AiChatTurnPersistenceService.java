@@ -65,6 +65,7 @@ public class AiChatTurnPersistenceService {
     private final AiWorkspaceGovernanceService governanceService;
     private final AiAssistantIdentifierResolver identifierResolver;
     private final AiAssistantToolExecutor toolExecutor;
+    private final AiAssistantSessionReadAudit sessionReadAudit;
     private final Clock clock;
     private final AiChatRealtimeDispatcher realtimeDispatcher;
     private final ObjectMapper objectMapper;
@@ -223,6 +224,7 @@ public class AiChatTurnPersistenceService {
         if (turn == null) {
             throw inaccessible();
         }
+        sessionReadAudit.recordAccessible(workspaceId, userId, session);
         return expireIfStale(turn, expiryCutoff());
     }
 

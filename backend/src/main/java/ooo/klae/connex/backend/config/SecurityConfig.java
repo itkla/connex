@@ -214,6 +214,7 @@ public class SecurityConfig {
         http.addFilterAfter(
             new OneTimeLinkExchangeAdmissionFilter(loginRateLimiter, clientIpResolver),
             CsrfFilter.class);
+        http.addFilterAfter(new AiAssistantNavigationAdmissionFilter(), CsrfFilter.class);
         http.addFilterBefore(new MetricsScrapeTokenFilter(metricsScrapeToken), AuthorizationFilter.class);
         http.addFilterBefore(
             new SessionEpochFilter(userMapper, sessionSecurityService, webSocketSessions),

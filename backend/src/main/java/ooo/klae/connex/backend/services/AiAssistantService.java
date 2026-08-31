@@ -80,13 +80,13 @@ public class AiAssistantService {
         int userId = currentUserId();
         List<AiChatSession> sessions = chatMapper.listAccessibleSessions(
             workspaceId, userId, size, offset);
-        auditAdministrativeReads(workspaceId, userId, sessions);
+        sessionReadAudit.recordAccessible(workspaceId, userId, sessions);
         List<AiChatSessionDto> items = sessions.stream().map(AiChatSessionDto::from).toList();
         return new PageResponse<>(items, chatMapper.countAccessibleSessions(workspaceId, userId));
     }
 
     /** Returns pending invitations addressed to the authenticated workspace member. */
-    @Transactional(readOnly = true)
+    @Transactional
     @RequirePermission(Permission.AI_USE)
     public PageResponse<AiChatSessionDto> pageInvitations(int page, int size) {
         int offset = pageOffset(page, size);
@@ -94,6 +94,7 @@ public class AiAssistantService {
         int userId = currentUserId();
         List<AiChatSession> sessions = chatMapper.listInvitedSessions(
                 workspaceId, userId, size, offset);
+        sessionReadAudit.recordAccessible(workspaceId, userId, sessions);
         return new PageResponse<>(
                 sessions.stream().map(AiChatSessionDto::from).toList(),
                 chatMapper.countInvitedSessions(workspaceId, userId));
@@ -147,7 +148,6 @@ public class AiAssistantService {
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
         AiChatSession session = requireAccessible(workspaceId, userId, id);
-        auditAdministrativeReads(workspaceId, userId, List.of(session));
         return detail(workspaceId, userId, id, messageSize, offset, session);
     }
 
@@ -427,7 +427,7 @@ public class AiAssistantService {
     }
 
     /** Lists the owner and participant states visible to the current session member. */
-    @Transactional(readOnly = true)
+    @Transactional
     @RequirePermission(Permission.AI_USE)
     public List<AiChatParticipantDto> participants(int id) {
         int workspaceId = currentWorkspaceId();
@@ -437,7 +437,7 @@ public class AiAssistantService {
     }
 
     /** Returns live presence after current session authorization. */
-    @Transactional(readOnly = true)
+    @Transactional
     @RequirePermission(Permission.AI_USE)
     public AiChatPresenceDto presence(int id) {
         int workspaceId = currentWorkspaceId();
@@ -450,7 +450,7 @@ public class AiAssistantService {
     }
 
     /** Records one authorized presence heartbeat and broadcasts a metadata-only invalidation. */
-    @Transactional(readOnly = true)
+    @Transactional
     @RequirePermission(Permission.AI_USE)
     public AiChatPresenceDto touchPresence(int id, boolean typing) {
         int workspaceId = currentWorkspaceId();
@@ -465,7 +465,7 @@ public class AiAssistantService {
     }
 
     /** Removes the authenticated participant's presence without leaving the session. */
-    @Transactional(readOnly = true)
+    @Transactional
     @RequirePermission(Permission.AI_USE)
     public void leavePresence(int id) {
         int workspaceId = currentWorkspaceId();
@@ -628,22 +628,7 @@ public class AiAssistantService {
     }
 
     private void auditRetainedRead(AiChatSession session) {
-        auditSessionRead(session, "retained");
-    }
-
-    private void auditSessionRead(AiChatSession session, String scope) {
-        sessionReadAudit.record(session.getId(), scope);
-    }
-
-    private void auditAdministrativeReads(
-            int workspaceId, int userId, List<AiChatSession> sessions) {
-        if (!workspaceService.permissionsFor(workspaceId, userId)
-                .contains(Permission.AI_SESSION_ADMIN)) {
-            return;
-        }
-        sessions.stream()
-            .filter(session -> !Objects.equals(session.getCreatedByUserId(), userId))
-            .forEach(session -> auditSessionRead(session, "accessible"));
+        sessionReadAudit.record(session.getId(), "retained");
     }
 
     private AiChatSession requireAccessible(int workspaceId, int userId, int id) {
@@ -651,6 +636,7 @@ public class AiAssistantService {
         if (session == null) {
             throw inaccessible();
         }
+        sessionReadAudit.recordAccessible(workspaceId, userId, session);
         return session;
     }
 

@@ -82,6 +82,7 @@ class AiChatTurnPersistenceServiceTest {
                 governanceService,
                 identifierResolver,
                 toolExecutor,
+                mock(AiAssistantSessionReadAudit.class),
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 realtimeDispatcher,
                 JsonMapper.builder().build());
@@ -423,6 +424,7 @@ class AiChatTurnPersistenceServiceTest {
                 governanceService,
                 identifierResolver,
                 toolExecutor,
+                mock(AiAssistantSessionReadAudit.class),
                 Clock.systemUTC(),
                 dispatcher,
                 JsonMapper.builder().build());
