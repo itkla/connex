@@ -207,7 +207,11 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     @Test
     void accessibleSessionReadsWithoutAdministrativePermissionProduceNoAuditRow() {
         AiChatSession session = sharedSession(currentUser, "Ordinary shared read");
-        User member = aiUser("member");
+        User member = newUser();
+        WorkspaceRole aiUseOnly = customRole(
+                "AI use without oversight", List.of(Permission.AI_USE.name()));
+        workspaceMapper.setMemberCustomRole(
+                workspace.getId(), member.getId(), aiUseOnly.getId());
         chatMapper.insertParticipant(workspace.getId(), session.getId(), member.getId());
         authenticateAs(member, workspace.getId());
         assertEquals(member, SecurityContextHolder.getContext().getAuthentication().getPrincipal());
