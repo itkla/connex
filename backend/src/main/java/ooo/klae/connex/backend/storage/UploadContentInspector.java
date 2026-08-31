@@ -78,8 +78,10 @@ import tools.jackson.databind.ObjectMapper;
  * limited to 512 entries, 64 MiB expanded content, a 100:1 compression ratio, and 4 MiB per XML
  * part. XML DTDs and external entities are disabled. OOXML is bound by exact main-part,
  * content-type, and relationship evidence with a Word field-command allowlist. ODF is bound by an
- * element-namespace allowlist plus an office-namespace element allowlist, with script and form
- * vocabularies excluded entirely.
+ * element-namespace allowlist plus closed office- and animation-namespace element allowlists, with
+ * script and form vocabularies excluded entirely. {@code office:binary-data} is excluded because
+ * inline base64 payloads are never decoded, so an inline image cannot be inspected the way a real
+ * raster upload is; documents must reference package parts instead.
  *
  * <p>The single ODF part {@code META-INF/documentsignatures.xml} is instead admitted through its
  * own closed signature vocabulary so that digitally signed documents remain uploadable. That
@@ -174,13 +176,18 @@ public class UploadContentInspector implements AutoCloseable {
         "http://www.w3.org/2003/g/data-view#",
         "http://www.w3.org/TR/css3-text/");
     private static final Set<String> ODF_OFFICE_ELEMENTS = Set.of(
-        "annotation", "annotation-end", "automatic-styles", "binary-data", "body",
+        "annotation", "annotation-end", "automatic-styles", "body",
         "change-info", "chart", "document", "document-content", "document-meta",
         "document-settings", "document-styles", "drawing", "font-face-decls", "forms",
         "image", "master-styles", "meta", "presentation", "scripts", "settings",
         "spreadsheet", "styles", "text");
     private static final Set<String> ODF_EMPTY_ONLY_OFFICE_ELEMENTS = Set.of(
         "forms", "scripts");
+    private static final String ODF_ANIMATION_NAMESPACE =
+        "urn:oasis:names:tc:opendocument:xmlns:animation:1.0";
+    private static final Set<String> ODF_ANIMATION_ELEMENTS = Set.of(
+        "animate", "animatecolor", "animatemotion", "animatetransform", "audio",
+        "iterate", "par", "param", "seq", "set", "transitionfilter");
     private static final String ODF_SIGNATURE_PART = "META-INF/documentsignatures.xml";
     private static final Set<String> ODF_SIGNATURE_NAMESPACES = Set.of(
         "urn:oasis:names:tc:opendocument:xmlns:digitalsignature:1.0",
@@ -1764,6 +1771,10 @@ public class UploadContentInspector implements AutoCloseable {
                 if (ODF_OFFICE_NAMESPACE.equals(uri)
                         && !ODF_OFFICE_ELEMENTS.contains(normalizedElement)) {
                     throw new SAXException("ODF office element is not allowed");
+                }
+                if (ODF_ANIMATION_NAMESPACE.equals(uri)
+                        && !ODF_ANIMATION_ELEMENTS.contains(normalizedElement)) {
+                    throw new SAXException("ODF animation element is not allowed");
                 }
                 if (ddeName(normalizedElement)) {
                     throw new SAXException("ODF DDE content is not allowed");

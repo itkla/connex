@@ -341,6 +341,20 @@ class UploadContentInspectorTest {
                     document)));
     }
 
+    @ParameterizedTest
+    @MethodSource("odfUninspectableActiveDocuments")
+    void rejectsOdfInlineBinaryDataAndAnimationCommands(String mainXml) throws Exception {
+        byte[] document = odfPackage(UploadFormat.ODT, mainXml, null);
+
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "document.odt",
+                    "application/vnd.oasis.opendocument.text",
+                    document)));
+    }
+
     @Test
     void stripsImageMetadataBeforeReturningStorageEligibleBytes() throws Exception {
         byte[] script = "<script>alert(1)</script>".getBytes(StandardCharsets.US_ASCII);
@@ -894,6 +908,22 @@ class UploadContentInspectorTest {
                     + "<office:spreadsheet><table:dde-links><table:dde-link/>"
                     + "</table:dde-links></office:spreadsheet></office:body>"
                     + "</office:document-content>"));
+    }
+
+    /** Supplies inert ODF roots whose payloads cannot be inspected or invoke application verbs. */
+    private static Stream<String> odfUninspectableActiveDocuments() {
+        String root = "<office:document-content xmlns:office=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:office:1.0\" ";
+        return Stream.of(
+            root + "xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\">"
+                + "<office:body><office:text><draw:frame><draw:image "
+                + "draw:mime-type=\"image/svg+xml\"><office:binary-data>PHN2Zz48c2NyaXB0"
+                + "Lz48L3N2Zz4=</office:binary-data></draw:image></draw:frame>"
+                + "</office:text></office:body></office:document-content>",
+            root + "xmlns:anim=\"urn:oasis:names:tc:opendocument:xmlns:animation:1.0\">"
+                + "<office:body><office:text><anim:par><anim:command "
+                + "anim:command=\"custom\"/></anim:par></office:text></office:body>"
+                + "</office:document-content>");
     }
 
     /** Supplies inert ODF package roots using excluded or unknown element namespaces. */
