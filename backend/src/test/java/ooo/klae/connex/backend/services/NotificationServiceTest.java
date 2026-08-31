@@ -82,20 +82,25 @@ class NotificationServiceTest {
     }
 
     @Test
-    void restoreAfterTerminalApprovalKeepsSourceResolution() {
+    void restoreAfterTerminalApprovalClearsReadButKeepsSourceResolution() {
         Notification terminal = approvalRequestNotification();
         terminal.setResolvedAt("2026-08-30 12:00:00");
-        when(notificationMapper.findById(42, 99)).thenReturn(terminal);
+        terminal.setReadAt("2026-08-30 13:00:00");
+        Notification restoredRow = approvalRequestNotification();
+        restoredRow.setResolvedAt("2026-08-30 12:00:00");
+        when(notificationMapper.findById(42, 99)).thenReturn(terminal, restoredRow);
         when(notificationMapper.findByIdForUpdate(42, 99)).thenReturn(terminal);
-        when(notificationMapper.getStateVersion(42)).thenReturn(17L);
+        when(notificationMapper.restoreResolvedApprovalRequest(7, 42, 99)).thenReturn(1);
+        when(stateVersionService.bumpNow(42)).thenReturn(18L);
         approvalRestoreLocks(false);
 
         NotificationDto restored = service.restore(99);
 
         assertEquals("2026-08-30 12:00:00", restored.getResolvedAt());
+        assertNull(restored.getReadAt());
         verify(notificationMapper, never()).restore(42, 99);
         verify(notificationMapper, never()).restoreActionableApprovalRequest(7, 42, 99);
-        verify(notificationMapper, never()).restoreResolvedApprovalRequest(7, 42, 99);
+        verify(notificationMapper).restoreResolvedApprovalRequest(7, 42, 99);
     }
 
     @Test

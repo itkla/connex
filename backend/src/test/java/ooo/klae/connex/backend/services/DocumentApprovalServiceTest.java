@@ -1637,6 +1637,11 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         DocumentApprovalDto requested = approvalService.requestApproval(
             deal.getId(), document.id(), null);
         int stepId = stepOf(requested, 1).id();
+        Notification original = notificationMapper.findByDedupe(
+            workspace.getId(), bob.getId(),
+            "document.approval_request:" + requested.id() + ":" + stepId
+                + ":requested:" + bob.getId());
+        assertNotNull(original);
 
         authenticateAs(bob, workspace.getId());
         DocumentApprovalDto delegated = approvalService.createDelegation(
@@ -1655,6 +1660,10 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         assertEquals(List.of(carol.getId()), stepOf(delegated, 1).effectiveApproverIds());
         assertEquals(1, approverSnapshotCount(stepId));
         assertEquals(bob.getId(), stepOf(delegated, 1).approvers().getFirst().getUserId());
+        assertNotNull(notificationMapper.findById(bob.getId(), original.getId()).getResolvedAt());
+        assertEquals(List.of(carol.getId()),
+            notificationMapper.findUnresolvedApprovalRequestRecipientIds(
+                workspace.getId(), document.id()));
 
         assertThrows(ForbiddenException.class,
             () -> approvalService.decide(deal.getId(), document.id(), "approved", null, null));
@@ -1662,6 +1671,33 @@ class DocumentApprovalServiceTest extends AbstractServiceTest {
         authenticateAs(carol, workspace.getId());
         assertEquals("approved",
             approvalService.decide(deal.getId(), document.id(), "approved", null, null).status());
+    }
+
+    @Test
+    void reassignmentResolvesTheDepartedApproversRequestNotification() {
+        User bob = approver();
+        User carol = approver();
+        chainPolicy("sequential", step(1, "Manager", bob));
+        Deal deal = jpyDeal();
+        DealDocumentDto document = generate(deal);
+        DocumentApprovalDto requested = approvalService.requestApproval(
+            deal.getId(), document.id(), null);
+        int stepId = stepOf(requested, 1).id();
+        Notification original = notificationMapper.findByDedupe(
+            workspace.getId(), bob.getId(),
+            "document.approval_request:" + requested.id() + ":" + stepId
+                + ":requested:" + bob.getId());
+        assertNotNull(original);
+
+        approvalService.replaceStepApprovers(
+            deal.getId(), document.id(), stepId, approverList(carol), null);
+
+        assertNotNull(notificationMapper.findById(bob.getId(), original.getId()).getResolvedAt());
+        assertEquals(List.of(carol.getId()),
+            notificationMapper.findUnresolvedApprovalRequestRecipientIds(
+                workspace.getId(), document.id()));
+        assertEquals(List.of(carol.getId()), approvalService.getForDocument(
+            deal.getId(), document.id()).getFirst().steps().getFirst().effectiveApproverIds());
     }
 
     @Test

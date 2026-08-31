@@ -1,14 +1,23 @@
 package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.Import;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import org.junit.jupiter.api.AfterEach;
@@ -26,6 +35,7 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -41,7 +51,47 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional
+@Import(AbstractServiceTest.ApprovalMutationTestConfiguration.class)
 abstract class AbstractServiceTest {
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class ApprovalMutationTestConfiguration {
+        @Bean
+        @Primary
+        ApprovalMutationRetryService testApprovalMutationRetryService(
+                PlatformTransactionManager transactionManager) {
+            return new JoiningApprovalMutationRetryService(transactionManager);
+        }
+    }
+
+    static final class JoiningApprovalMutationRetryService
+            extends ApprovalMutationRetryService {
+        private final PlatformTransactionManager transactionManager;
+
+        JoiningApprovalMutationRetryService(PlatformTransactionManager transactionManager) {
+            super(transactionManager);
+            this.transactionManager = transactionManager;
+        }
+
+        @Override
+        public <T> T execute(Supplier<T> mutation) {
+            Objects.requireNonNull(mutation, "mutation");
+            for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+                try {
+                    TransactionTemplate template = new TransactionTemplate(transactionManager);
+                    template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
+                    template.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+                    T result = template.execute(status -> mutation.get());
+                    return Objects.requireNonNull(result, "Approval mutation returned no result");
+                } catch (ApprovalRecipientSetChangedException exception) {
+                    if (attempt == MAX_ATTEMPTS) {
+                        throw new ConflictException("Approval changed; refresh and try again");
+                    }
+                }
+            }
+            throw new IllegalStateException("Approval mutation retry loop did not terminate");
+        }
+    }
 
     @Autowired protected UserMapper userMapper;
     @Autowired protected CompanyMapper companyMapper;

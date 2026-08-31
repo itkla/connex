@@ -6,9 +6,13 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.ApprovalInboxCursor;
@@ -41,8 +45,9 @@ public class DocumentApprovalWorkItemProvider implements WorkItemProvider {
     }
 
     @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public WorkItemProviderResult load(WorkItemProviderQuery query) {
-        List<WorkItemDto> scannedItems = new ArrayList<>();
+        Map<String, WorkItemDto> scannedItems = new LinkedHashMap<>();
         ApprovalInboxCursor cursor = null;
         int rawRows = 0;
         boolean exhausted = false;
@@ -54,7 +59,7 @@ public class DocumentApprovalWorkItemProvider implements WorkItemProvider {
                 query.asOf(), cursor, rawLimit);
             page.items().stream()
                 .map(item -> toDto(item, query))
-                .forEach(scannedItems::add);
+                .forEach(item -> scannedItems.putIfAbsent(item.id(), item));
             rawRows += page.rawRowCount();
             if (page.exhausted()) {
                 exhausted = true;
@@ -65,7 +70,7 @@ public class DocumentApprovalWorkItemProvider implements WorkItemProvider {
             }
             cursor = page.nextCursor();
         }
-        List<WorkItemDto> allItems = scannedItems.stream()
+        List<WorkItemDto> allItems = new ArrayList<>(scannedItems.values()).stream()
             .sorted(WorkItemOrdering.comparator())
             .toList();
         List<WorkItemDto> matching = query.urgencies().isEmpty()
@@ -114,7 +119,8 @@ public class DocumentApprovalWorkItemProvider implements WorkItemProvider {
             : WorkItemProjectionSupport.instant(item.dueAt());
         LocalDate dueDate = dueAt == null ? null : LocalDate.ofInstant(dueAt, ZoneOffset.UTC);
         WorkItemUrgency urgency = item.escalated()
-                || (dueAt != null && dueAt.isBefore(query.asOf()))
+                || (dueAt != null
+                    && dueAt.isBefore(query.asOf().truncatedTo(ChronoUnit.SECONDS)))
             ? WorkItemUrgency.high
             : WorkItemUrgency.normal;
         Integer days = dueDate == null ? null : Math.toIntExact(Math.abs(
@@ -149,7 +155,7 @@ public class DocumentApprovalWorkItemProvider implements WorkItemProvider {
                 "deal",
                 item.dealId(),
                 item.dealName(),
-                "/records/deals/" + item.dealId(),
+                "/records/deals/" + item.dealId() + "#deal-documents",
                 item.stepId(),
                 item.stepOrder(),
                 item.stepName(),

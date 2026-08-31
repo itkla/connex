@@ -671,7 +671,9 @@
       AND n.id = #{id}
       AND n.type = 'document.approval_request'
       AND n.source_type = 'deal_document'
-      AND (n.dismissed_at IS NOT NULL OR n.resolved_at IS NULL)
+      AND (n.dismissed_at IS NOT NULL OR n.resolved_at IS NULL
+        OR n.read_at IS NOT NULL OR n.snoozed_until IS NOT NULL
+        OR n.snooze_timezone IS NOT NULL)
   </update>
 
   <update id="snooze">

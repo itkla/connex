@@ -293,7 +293,9 @@ public class NotificationService {
             requireMutation(notificationMapper.restoreActionableApprovalRequest(
                 workspaceId, recipientId, id), id);
         } else {
-            if (locked.getDismissedAt() == null && locked.getResolvedAt() != null) {
+            if (locked.getDismissedAt() == null && locked.getResolvedAt() != null
+                    && locked.getReadAt() == null && locked.getSnoozedUntil() == null
+                    && locked.getSnoozeTimezone() == null) {
                 return response(recipientId, locked);
             }
             requireMutation(notificationMapper.restoreResolvedApprovalRequest(

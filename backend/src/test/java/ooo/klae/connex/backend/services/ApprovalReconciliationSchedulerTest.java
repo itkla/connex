@@ -186,7 +186,7 @@ class ApprovalReconciliationSchedulerTest {
         verify(transactionManager, times(2)).getTransaction(definitions.capture());
         assertTrue(definitions.getAllValues().stream()
             .allMatch(definition -> definition.getPropagationBehavior()
-                == TransactionDefinition.PROPAGATION_REQUIRED));
+                == TransactionDefinition.PROPAGATION_REQUIRES_NEW));
         assertTrue(definitions.getAllValues().stream()
             .allMatch(definition -> definition.getIsolationLevel()
                 == TransactionDefinition.ISOLATION_READ_COMMITTED));

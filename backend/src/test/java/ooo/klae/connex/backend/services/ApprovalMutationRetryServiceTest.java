@@ -8,10 +8,13 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -35,6 +38,17 @@ class ApprovalMutationRetryServiceTest {
         assertEquals(ApprovalMutationRetryService.MAX_ATTEMPTS, attempts.get());
         verify(transactionManager, times(2)).rollback(any());
         verify(transactionManager).commit(any());
+        ArgumentCaptor<TransactionDefinition> definitions =
+            ArgumentCaptor.forClass(TransactionDefinition.class);
+        verify(transactionManager, times(ApprovalMutationRetryService.MAX_ATTEMPTS))
+            .getTransaction(definitions.capture());
+        assertEquals(List.of(
+            TransactionDefinition.PROPAGATION_REQUIRES_NEW,
+            TransactionDefinition.PROPAGATION_REQUIRES_NEW,
+            TransactionDefinition.PROPAGATION_REQUIRES_NEW),
+            definitions.getAllValues().stream()
+                .map(TransactionDefinition::getPropagationBehavior)
+                .toList());
     }
 
     @Test

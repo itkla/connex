@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.integration;
 
 import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -22,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
@@ -78,6 +80,7 @@ class MyWorkReconciliationIntegrationTest {
     @Autowired private RoleMapper roleMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     private MockMvc mockMvc;
     private Workspace workspace;
@@ -208,6 +211,51 @@ class MyWorkReconciliationIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.dismissedAt").doesNotExist())
             .andExpect(jsonPath("$.resolvedAt").isNotEmpty());
+    }
+
+    @Test
+    void expiredWorkItemDecisionCommitsExpiryBeforeReturningConflict() throws Exception {
+        User actor = user("expiry-actor");
+        User requester = user("expiry-requester");
+        workspaceMapper.addMember(workspace.getId(), actor.getId(), "member");
+        workspaceMapper.addMember(workspace.getId(), requester.getId(), "member");
+        assignApproverRole(actor);
+        MockHttpSession session = login(actor.getUsername());
+        ApprovalFixture fixture = approval(actor, requester);
+        Notification notification = approvalRequest(actor, fixture.document());
+        notificationMapper.upsert(notification);
+        jdbcTemplate.update(
+            "UPDATE document_approval_step SET activated_at = TIMESTAMPADD(HOUR, -2, "
+                + "CURRENT_TIMESTAMP), due_at = TIMESTAMPADD(HOUR, -1, CURRENT_TIMESTAMP) "
+                + "WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), fixture.step().getId());
+        JsonNode item = firstItem(session, "document_approval");
+
+        mockMvc.perform(post(
+                "/api/my-work/document-approvals/{id}/decision", fixture.approval().getId())
+                .header("X-Workspace-Id", workspace.getId())
+                .header("If-Match", item.get("etag").asText())
+                .session(session)
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of(
+                    "stepId", fixture.step().getId(), "decision", "approved"))))
+            .andExpect(status().isConflict());
+
+        assertEquals("expired", approvalMapper.getById(
+            workspace.getId(), fixture.approval().getId()).getStatus());
+        assertEquals("expired", jdbcTemplate.queryForObject(
+            "SELECT status FROM document_approval_step WHERE workspace_id = ? AND id = ?",
+            String.class, workspace.getId(), fixture.step().getId()));
+        assertEquals("draft", jdbcTemplate.queryForObject(
+            "SELECT status FROM deal_document WHERE workspace_id = ? AND id = ?",
+            String.class, workspace.getId(), fixture.document().getId()));
+        assertEquals(0L, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM document_approval_decision "
+                + "WHERE workspace_id = ? AND approval_id = ?",
+            Long.class, workspace.getId(), fixture.approval().getId()));
+        assertNotNull(notificationMapper.findById(actor.getId(), notification.getId())
+            .getResolvedAt());
     }
 
     private JsonNode firstItem(MockHttpSession session, String source) throws Exception {

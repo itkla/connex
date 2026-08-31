@@ -22,6 +22,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.dto.ApprovalInboxCursor;
 import ooo.klae.connex.backend.dto.ApprovalInboxItemDto;
@@ -108,6 +110,68 @@ class DocumentApprovalWorkItemProviderTest {
     }
 
     @Test
+    void midScanFreshnessMutationCannotDuplicateAnApprovalStep() {
+        ApprovalInboxCursor cursor = cursor(1);
+        when(approvalService.scanInbox(AS_OF, null, 200)).thenReturn(page(
+            List.of(item(8, 21, null, false,
+                Instant.parse("2026-08-21T00:00:00Z"), "a".repeat(64))),
+            cursor,
+            200,
+            false));
+        when(approvalService.scanInbox(AS_OF, cursor, 200)).thenReturn(page(
+            List.of(
+                item(8, 21, null, false,
+                    Instant.parse("2026-08-22T00:00:00Z"), "b".repeat(64)),
+                item(9, 22, null, false)),
+            null,
+            2,
+            true));
+
+        var result = provider().load(new WorkItemProviderQuery(
+            7, 42, TODAY, AS_OF, Set.of(), 25));
+
+        assertEquals(List.of(
+            "document_approval:8:21",
+            "document_approval:9:22"), result.items().stream().map(row -> row.id()).toList());
+        assertEquals(2, result.matchingTotal());
+        assertEquals(2, result.overallTotal());
+    }
+
+    @Test
+    void scanUsesOneRepeatableReadSnapshot() throws ReflectiveOperationException {
+        Transactional transaction = DocumentApprovalWorkItemProvider.class
+            .getMethod("load", WorkItemProviderQuery.class)
+            .getAnnotation(Transactional.class);
+
+        assertTrue(transaction.readOnly());
+        assertEquals(Isolation.REPEATABLE_READ, transaction.isolation());
+    }
+
+    @Test
+    void wholeSecondDeadlineMatchesSqlUrgencyPartition() {
+        Instant subsecondAsOf = AS_OF.plusNanos(900_000_000);
+        when(approvalService.scanInbox(subsecondAsOf, null, 200)).thenReturn(page(
+            List.of(item(8, 21, "2026-08-30 12:00:00", false)), null, 1, true));
+
+        var result = provider().load(new WorkItemProviderQuery(
+            7, 42, TODAY, subsecondAsOf, Set.of(), 25));
+
+        assertEquals(WorkItemUrgency.normal, result.items().getFirst().urgency());
+    }
+
+    @Test
+    void openContextUsesCanonicalDealDocumentsAnchor() {
+        when(approvalService.scanInbox(AS_OF, null, 200)).thenReturn(page(
+            List.of(item(8, 21, null, false)), null, 1, true));
+
+        var result = provider().load(new WorkItemProviderQuery(
+            7, 42, TODAY, AS_OF, Set.of(), 25));
+
+        assertEquals("/records/deals/5#deal-documents",
+            result.items().getFirst().context().href());
+    }
+
+    @Test
     void delegatesTheExactStepAndChainVersion() {
         provider().execute(8, new WorkItemActionCommand(
             WorkItemAction.approve,
@@ -143,6 +207,22 @@ class DocumentApprovalWorkItemProviderTest {
             int stepId,
             String dueAt,
             boolean escalated) {
+        return item(
+            approvalId,
+            stepId,
+            dueAt,
+            escalated,
+            Instant.parse("2026-08-21T00:00:00Z"),
+            "a".repeat(64));
+    }
+
+    private static ApprovalInboxItemDto item(
+            int approvalId,
+            int stepId,
+            String dueAt,
+            boolean escalated,
+            Instant freshnessAt,
+            String currentVersion) {
         return new ApprovalInboxItemDto(
             approvalId,
             5,
@@ -160,7 +240,7 @@ class DocumentApprovalWorkItemProviderTest {
             7,
             "Requester",
             "2026-08-20 00:00:00",
-            Instant.parse("2026-08-21T00:00:00Z"),
-            "a".repeat(64));
+            freshnessAt,
+            currentVersion);
     }
 }
