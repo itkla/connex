@@ -296,6 +296,52 @@ class UploadContentInspectorTest {
     }
 
     @Test
+    void acceptsDigitallySignedOdfDocuments() throws Exception {
+        byte[] document = odfPackageWithExtraPart(
+            "META-INF/documentsignatures.xml", documentSignatureXml());
+
+        assertEquals(UploadFormat.ODT, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from(
+                "signed.odt",
+                "application/vnd.oasis.opendocument.text",
+                document)).format());
+    }
+
+    @Test
+    void rejectsOdfMacroSignaturesEvenWhenDocumentSignaturesAreAdmitted() throws Exception {
+        byte[] document = odfPackageWithExtraPart(
+            "META-INF/macrosignatures.xml", documentSignatureXml());
+
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "macro-signed.odt",
+                    "application/vnd.oasis.opendocument.text",
+                    document)));
+    }
+
+    @Test
+    void rejectsActiveContentSmuggledIntoTheOdfSignaturePart() throws Exception {
+        String smuggled = "<dsig:document-signatures xmlns:dsig=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:digitalsignature:1.0\" "
+            + "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\">"
+            + "<office:dde-source office:dde-application=\"cmd\"/>"
+            + "</dsig:document-signatures>";
+        byte[] document = odfPackageWithExtraPart(
+            "META-INF/documentsignatures.xml", smuggled);
+
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "smuggled.odt",
+                    "application/vnd.oasis.opendocument.text",
+                    document)));
+    }
+
+    @Test
     void stripsImageMetadataBeforeReturningStorageEligibleBytes() throws Exception {
         byte[] script = "<script>alert(1)</script>".getBytes(StandardCharsets.US_ASCII);
         byte[] gifWithComment = gifWithComment(image("gif"), script);
@@ -1128,6 +1174,53 @@ class UploadContentInspectorTest {
             }
         }
         return output.toByteArray();
+    }
+
+    /** Builds an ODT package carrying one additional named XML part. */
+    private static byte[] odfPackageWithExtraPart(String partName, String partXml)
+            throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
+            byte[] mimeType = UploadFormat.ODT.contentTypes().iterator().next()
+                .getBytes(StandardCharsets.US_ASCII);
+            ZipEntry mimeTypeEntry = new ZipEntry("mimetype");
+            CRC32 crc = new CRC32();
+            crc.update(mimeType);
+            mimeTypeEntry.setMethod(ZipEntry.STORED);
+            mimeTypeEntry.setSize(mimeType.length);
+            mimeTypeEntry.setCompressedSize(mimeType.length);
+            mimeTypeEntry.setCrc(crc.getValue());
+            zip.putNextEntry(mimeTypeEntry);
+            zip.write(mimeType);
+            zip.closeEntry();
+            put(zip, "content.xml",
+                defaultMainXml(UploadFormat.ODT).getBytes(StandardCharsets.UTF_8));
+            put(zip, "META-INF/manifest.xml", ("<manifest:manifest xmlns:manifest=\""
+                + "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\"/>")
+                .getBytes(StandardCharsets.UTF_8));
+            put(zip, partName, partXml.getBytes(StandardCharsets.UTF_8));
+        }
+        return output.toByteArray();
+    }
+
+    /** Builds a LibreOffice-shaped XMLDSig document signature including its {@code Object} block. */
+    private static String documentSignatureXml() {
+        return "<dsig:document-signatures xmlns:dsig=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:digitalsignature:1.0\">"
+            + "<Signature xmlns=\"http://www.w3.org/2000/09/xmldsig#\" Id=\"s1\">"
+            + "<SignedInfo><CanonicalizationMethod Algorithm=\""
+            + "http://www.w3.org/TR/2001/REC-xml-c14n-20010315\"/>"
+            + "<SignatureMethod Algorithm=\""
+            + "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256\"/>"
+            + "<Reference URI=\"content.xml\"><DigestMethod Algorithm=\""
+            + "http://www.w3.org/2001/04/xmlenc#sha256\"/>"
+            + "<DigestValue>aGFzaA==</DigestValue></Reference></SignedInfo>"
+            + "<SignatureValue>c2ln</SignatureValue><KeyInfo><X509Data>"
+            + "<X509Certificate>Y2VydA==</X509Certificate></X509Data></KeyInfo>"
+            + "<Object><SignatureProperties><SignatureProperty Id=\"p1\" Target=\"#s1\">"
+            + "<dc:date xmlns:dc=\"http://purl.org/dc/elements/1.1/\">2026-08-31T00:00:00"
+            + "</dc:date></SignatureProperty></SignatureProperties></Object>"
+            + "</Signature></dsig:document-signatures>";
     }
 
     private static String contentTypesXml(UploadFormat format) {

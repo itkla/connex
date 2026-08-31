@@ -79,8 +79,15 @@ import tools.jackson.databind.ObjectMapper;
  * part. XML DTDs and external entities are disabled. OOXML is bound by exact main-part,
  * content-type, and relationship evidence with a Word field-command allowlist. ODF is bound by an
  * element-namespace allowlist plus an office-namespace element allowlist, with script and form
- * vocabularies excluded entirely. Parser error, timeout, ambiguous structure, active content, and
- * any exceeded bound all fail closed.
+ * vocabularies excluded entirely.
+ *
+ * <p>The single ODF part {@code META-INF/documentsignatures.xml} is instead admitted through its
+ * own closed signature vocabulary so that digitally signed documents remain uploadable. That
+ * exemption is deliberately keyed on the exact part name and must not be widened to every
+ * signature-shaped part: an ODF package may also carry {@code META-INF/macrosignatures.xml}, and a
+ * signed macro is still a macro. Macro signature parts carry no exemption, so they fall to the
+ * ordinary ODF namespace allowlist and are refused. Parser error, timeout, ambiguous structure,
+ * active content, and any exceeded bound all fail closed.
  *
  * <p>The returned {@link InspectedUpload} is authoritative: stored bytes, length, digest, response
  * metadata, migration verification, and downstream provider input must all derive from that exact
@@ -174,6 +181,28 @@ public class UploadContentInspector implements AutoCloseable {
         "spreadsheet", "styles", "text");
     private static final Set<String> ODF_EMPTY_ONLY_OFFICE_ELEMENTS = Set.of(
         "forms", "scripts");
+    private static final String ODF_SIGNATURE_PART = "META-INF/documentsignatures.xml";
+    private static final Set<String> ODF_SIGNATURE_NAMESPACES = Set.of(
+        "urn:oasis:names:tc:opendocument:xmlns:digitalsignature:1.0",
+        "http://www.w3.org/2000/09/xmldsig#",
+        "http://uri.etsi.org/01903/v1.1.1#",
+        "http://uri.etsi.org/01903/v1.3.2#",
+        "http://purl.org/dc/elements/1.1/");
+    private static final Set<String> ODF_SIGNATURE_ELEMENTS = Set.of(
+        "document-signatures", "signature", "signedinfo", "canonicalizationmethod",
+        "signaturemethod", "reference", "transforms", "transform", "digestmethod",
+        "digestvalue", "signaturevalue", "keyinfo", "keyname", "keyvalue", "rsakeyvalue",
+        "modulus", "exponent", "dsakeyvalue", "eckeyvalue", "namedcurve", "publickey",
+        "x509data", "x509certificate", "x509issuerserial", "x509issuername",
+        "x509serialnumber", "x509subjectname", "x509ski", "x509crl", "retrievalmethod",
+        "object", "manifest", "signatureproperties", "signatureproperty",
+        "hmacoutputlength", "xpath", "date", "qualifyingproperties", "signedproperties",
+        "signedsignatureproperties", "signingtime", "signingcertificate", "cert",
+        "certdigest", "issuerserial", "signeddataobjectproperties", "unsignedproperties",
+        "unsignedsignatureproperties", "signaturepolicyidentifier",
+        "signaturepolicyimplied", "claimedroles", "claimedrole",
+        "signatureproductionplace", "city", "stateorprovince", "postalcode",
+        "countryname");
     private static final Set<String> ACTIVE_XML_ELEMENTS = Set.of(
         "script", "event-listener", "event-listeners", "altchunk", "object",
         "oleobject", "control", "dde-source", "dde-connection", "dde-connection-decl",
@@ -1677,6 +1706,7 @@ public class UploadContentInspector implements AutoCloseable {
         private final Deadline deadline;
         private final String entryName;
         private final boolean odfPackage;
+        private final boolean odfSignaturePart;
         private final boolean contentTypesDocument;
         private final boolean rootRelationshipsDocument;
         private final boolean relationshipsDocument;
@@ -1697,6 +1727,7 @@ public class UploadContentInspector implements AutoCloseable {
             this.deadline = deadline;
             this.entryName = entryName;
             this.odfPackage = odfPackage;
+            odfSignaturePart = odfPackage && ODF_SIGNATURE_PART.equals(entryName);
             contentTypesDocument = "[Content_Types].xml".equals(entryName);
             rootRelationshipsDocument = "_rels/.rels".equals(entryName);
             relationshipsDocument = entryName.toLowerCase(Locale.ROOT).endsWith(".rels");
@@ -1718,7 +1749,12 @@ public class UploadContentInspector implements AutoCloseable {
                 root = new XmlRoot(uri, element);
             }
             String normalizedElement = element.toLowerCase(Locale.ROOT);
-            if (odfPackage) {
+            if (odfSignaturePart) {
+                if (!ODF_SIGNATURE_NAMESPACES.contains(uri)
+                        || !ODF_SIGNATURE_ELEMENTS.contains(normalizedElement)) {
+                    throw new SAXException("ODF signature content is not allowed");
+                }
+            } else if (odfPackage) {
                 if (emptyOnlyOfficeElementDepth > 0) {
                     throw new SAXException("ODF office element must be empty");
                 }
@@ -1737,7 +1773,7 @@ public class UploadContentInspector implements AutoCloseable {
                     emptyOnlyOfficeElementDepth = depth;
                 }
             }
-            if (ACTIVE_XML_ELEMENTS.contains(normalizedElement)) {
+            if (!odfSignaturePart && ACTIVE_XML_ELEMENTS.contains(normalizedElement)) {
                 throw new SAXException("Active XML content is not allowed");
             }
             inspectWordFieldStart(uri, normalizedElement, attributes);
