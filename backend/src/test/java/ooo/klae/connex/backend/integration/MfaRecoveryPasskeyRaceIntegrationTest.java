@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -15,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Collections;
 import java.util.HexFormat;
 import java.util.UUID;
 
@@ -36,6 +38,8 @@ import org.springframework.security.web.webauthn.api.ImmutableCredentialRecord;
 import org.springframework.security.web.webauthn.api.ImmutablePublicKeyCose;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialType;
 import org.springframework.security.web.webauthn.management.UserCredentialRepository;
+import org.springframework.session.Session;
+import org.springframework.session.SessionRepository;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -90,6 +94,7 @@ class MfaRecoveryPasskeyRaceIntegrationTest {
     @Autowired private WebauthnUserEntityMapper userEntityMapper;
     @Autowired private WebauthnCredentialMapper credentialMapper;
     @Autowired private UserCredentialRepository userCredentials;
+    @Autowired private SessionRepository<? extends Session> sessionRepository;
 
     private MockMvc mockMvc;
 
@@ -177,31 +182,55 @@ class MfaRecoveryPasskeyRaceIntegrationTest {
     }
 
     /**
-     * A concurrent login on the ceremony session itself rotates its logical id, and the stamp that
-     * login writes is the epoch its credential was verified against, which recovery has already
-     * advanced past. The handoff must move with the rotation, or the sole surviving session of an
-     * account whose credentials were just deleted could never be repaired.
+     * Rotation after the handoff is granted: the stored row keeps its primary id, so the rotated
+     * ceremony session still repairs even though it now presents a different logical id.
      */
     @Test
-    void theHandoffSurvivesASameSessionLoginRotation() throws Exception {
+    void theHandoffSurvivesARotationAfterTheGrant() throws Exception {
         User account = passwordlessAccount();
         enrollPasskey(account);
-        User principalReadBeforeRecovery = userMapper.getUserByUsername(account.getUsername());
-        assertNotNull(principalReadBeforeRecovery);
         MockHttpServletRequest ceremonyRequest = establishSession(account);
-        String ceremonySessionId = ceremonyRequest.getSession(false).getId();
 
         int recoveryEpoch = recover(ceremonyRequest, account);
 
-        authService.establishAuthenticatedSession(
-                principalReadBeforeRecovery, ceremonyRequest, new MockHttpServletResponse());
-        MockHttpSession rotatedSession = (MockHttpSession) ceremonyRequest.getSession(false);
-        assertNotEquals(ceremonySessionId, rotatedSession.getId());
+        MockHttpSession ceremonySession = (MockHttpSession) ceremonyRequest.getSession(false);
+        MockHttpSession rotatedSession = rotateStoredSession(ceremonySession);
+        assertNotEquals(ceremonySession.getId(), rotatedSession.getId());
+        rotatedSession.removeAttribute(SessionSecurityService.SESSION_EPOCH_ATTR);
         SecurityContextHolder.clearContext();
 
         mockMvc.perform(get("/api/auth/me").session(rotatedSession))
                 .andExpect(status().isOk());
         assertEquals(recoveryEpoch, sessionSecurityService.sessionEpoch(rotatedSession));
+    }
+
+    /**
+     * Rotation that commits before recovery takes the account lock. A request's view of its own
+     * session id is fixed for its lifetime, so recovery is holding a stale id it cannot detect by
+     * re-reading. Resolving the row identity under the lock refuses the ceremony outright, leaving
+     * the credentials in place — the account is never left with nothing to sign in with.
+     */
+    @Test
+    void aRotationCommittedBeforeTheLockIsRefusedWithCredentialsIntact() {
+        User account = passwordlessAccount();
+        enrollPasskey(account);
+        MockHttpServletRequest ceremonyRequest = establishSession(account);
+        MockHttpSession ceremonySession = (MockHttpSession) ceremonyRequest.getSession(false);
+        int epochBeforeRecovery = userMapper.currentSessionEpoch(account.getId());
+
+        rotateStoredSession(ceremonySession);
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(account, null, account.getAuthorities()));
+        PasskeyRecoveryRequest request = new PasskeyRecoveryRequest();
+        request.setRecoveryToken(RECOVERY_TOKEN);
+
+        assertThrows(ForbiddenException.class,
+                () -> mfaRecoveryService.recover(request, ceremonyRequest));
+
+        assertTrue(credentialMapper.existsByUserId(account.getId()));
+        assertEquals(epochBeforeRecovery, userMapper.currentSessionEpoch(account.getId()));
+        assertNull(userMapper.epochRestampGrant(account.getId()));
     }
 
     @Test
@@ -250,12 +279,60 @@ class MfaRecoveryPasskeyRaceIntegrationTest {
         return epoch;
     }
 
+    /**
+     * A servlet session whose id is backed by a real row in the shared session store, so the
+     * handoff's primary-id lookup resolves exactly as it does in production.
+     */
+    private MockHttpSession storeBackedSession() {
+        return new MockHttpSession(context.getServletContext(), createStored(sessionRepository));
+    }
+
+    private static <S extends Session> String createStored(SessionRepository<S> repository) {
+        S created = repository.createSession();
+        repository.save(created);
+        return created.getId();
+    }
+
+    private static <S extends Session> String rotateStored(
+            SessionRepository<S> repository, String sessionId) {
+        S stored = repository.findById(sessionId);
+        assertNotNull(stored);
+        String rotated = stored.changeSessionId();
+        repository.save(stored);
+        return rotated;
+    }
+
+    /**
+     * Models Spring Session's fixation rotation: the stored row keeps its primary id and its
+     * attributes while the logical session id the client presents is replaced.
+     */
+    private MockHttpSession rotateStoredSession(MockHttpSession session) {
+        String rotated = rotateStored(sessionRepository, session.getId());
+        MockHttpSession rotatedSession = new MockHttpSession(context.getServletContext(), rotated);
+        copyAttributes(session, rotatedSession);
+        return rotatedSession;
+    }
+
+    /**
+     * Establishes a session and binds the result to a real row in the shared session store, as the
+     * production ceremony does. The login rotates the servlet session id, and only the id it ends
+     * on is the one Spring Session persists.
+     */
     private MockHttpServletRequest establishSession(User verifiedPrincipal) {
         MockHttpServletRequest request = new MockHttpServletRequest(context.getServletContext());
         request.setSession(new MockHttpSession(context.getServletContext()));
         authService.establishAuthenticatedSession(
                 verifiedPrincipal, request, new MockHttpServletResponse());
+        MockHttpSession established = (MockHttpSession) request.getSession(false);
+        MockHttpSession stored = storeBackedSession();
+        copyAttributes(established, stored);
+        request.setSession(stored);
         return request;
+    }
+
+    private static void copyAttributes(MockHttpSession from, MockHttpSession to) {
+        Collections.list(from.getAttributeNames())
+                .forEach(name -> to.setAttribute(name, from.getAttribute(name)));
     }
 
     private User passwordlessAccount() {

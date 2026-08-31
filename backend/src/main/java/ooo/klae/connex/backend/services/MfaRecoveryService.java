@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
@@ -25,6 +26,7 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
 public class MfaRecoveryService {
     private final AuthService authService;
     private final UserMapper userMapper;
+    private final SpringSessionMapper springSessionMapper;
     private final WebAuthnService webAuthnService;
     private final SessionSecurityService sessionSecurityService;
     private final PrivilegedMfaProperties privilegedMfaProperties;
@@ -35,6 +37,14 @@ public class MfaRecoveryService {
     /**
      * Verifies the account and operator proofs, removes inaccessible credentials, and appends the
      * audit record in the same transaction.
+     *
+     * <p>The handoff names the ceremony session's stable {@code SPRING_SESSION.PRIMARY_ID},
+     * resolved once the account lock is held. A request's view of its own logical session id is
+     * fixed for its whole lifetime, so a concurrent authentication that rotates the ceremony
+     * session leaves that id stale wherever it is read — re-reading it later would return the same
+     * cached value. Resolving the row identity under the lock instead means a rotation that has
+     * already committed is detected and refused before any credential is deleted, and one that has
+     * not yet committed still resolves to the same physical row the rotation will keep.
      *
      * @param request submitted recovery proofs
      * @param httpRequest authenticated servlet request
@@ -50,6 +60,10 @@ public class MfaRecoveryService {
         User user = authService.getCurrentUser();
         if (userMapper.lockById(user.getId()) == null) {
             throw new ResourceNotFoundException("Not authenticated");
+        }
+        String ceremonySessionPrimaryId = springSessionMapper.primaryIdBySessionId(ceremonySessionId);
+        if (ceremonySessionPrimaryId == null) {
+            throw new ForbiddenException("Authenticated session required");
         }
         authService.requireFirstPasskeyBootstrapAuthentication(
                 user.getId(), request.getCurrentPassword(), httpRequest);
@@ -72,7 +86,7 @@ public class MfaRecoveryService {
         if (newEpoch == null) {
             throw new IllegalStateException("Advanced session epoch is unavailable");
         }
-        if (userMapper.grantEpochRestamp(user.getId(), ceremonySessionId, newEpoch) != 1) {
+        if (userMapper.grantEpochRestamp(user.getId(), ceremonySessionPrimaryId, newEpoch) != 1) {
             throw new IllegalStateException("Session epoch restamp grant failed");
         }
         sessionSecurityService.clearRecentAuthentication(httpRequest);

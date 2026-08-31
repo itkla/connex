@@ -80,16 +80,8 @@ public interface UserMapper {
     int bumpSessionEpoch(int id);
     int grantEpochRestamp(
         @Param("id") int id,
-        @Param("sessionId") String sessionId,
+        @Param("sessionPrimaryId") String sessionPrimaryId,
         @Param("epoch") int epoch);
-    /**
-     * Moves an outstanding recovery handoff onto a rotated logical session id, matching only the
-     * account and the exact previous id so no other session or account can adopt it.
-     */
-    int rebindEpochRestampGrant(
-        @Param("id") int id,
-        @Param("previousSessionId") String previousSessionId,
-        @Param("sessionId") String sessionId);
     SessionEpochRestampGrant epochRestampGrant(int id);
     int clearEpochRestampGrant(int id);
     int updatePasswordHash(@Param("id") int id, @Param("passwordHash") String passwordHash);

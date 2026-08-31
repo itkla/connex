@@ -15,6 +15,8 @@ import java.time.Instant;
 import java.time.ZoneId;
 
 import org.junit.jupiter.api.AfterEach;
+import static org.mockito.Mockito.mock;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -28,6 +30,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.SessionSecurityProperties;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
+import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
 class SessionSecurityServiceTest {
@@ -42,7 +45,10 @@ class SessionSecurityServiceTest {
         properties.setAbsoluteTimeout(Duration.ofHours(12));
         properties.setRecentAuthenticationWindow(Duration.ofMinutes(10));
         service = new SessionSecurityService(
-                properties, clock, org.mockito.Mockito.mock(UserMapper.class));
+                properties,
+                clock,
+                mock(UserMapper.class),
+                mock(SpringSessionMapper.class));
     }
 
     @AfterEach

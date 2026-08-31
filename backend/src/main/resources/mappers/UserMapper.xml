@@ -247,37 +247,30 @@
   <update id="bumpSessionEpoch">
     UPDATE app_user
     SET session_epoch = session_epoch + 1,
-        epoch_restamp_session_id = NULL,
+        epoch_restamp_session_primary_id = NULL,
         epoch_restamp_epoch = NULL
     WHERE id = #{id}
   </update>
 
   <update id="grantEpochRestamp">
     UPDATE app_user
-    SET epoch_restamp_session_id = #{sessionId},
+    SET epoch_restamp_session_primary_id = #{sessionPrimaryId},
         epoch_restamp_epoch = #{epoch}
     WHERE id = #{id}
   </update>
 
-  <update id="rebindEpochRestampGrant">
-    UPDATE app_user
-    SET epoch_restamp_session_id = #{sessionId}
-    WHERE id = #{id}
-      AND epoch_restamp_session_id = #{previousSessionId}
-  </update>
-
   <select id="epochRestampGrant"
       resultType="ooo.klae.connex.backend.session.SessionEpochRestampGrant">
-    SELECT epoch_restamp_session_id AS sessionId, epoch_restamp_epoch AS epoch
+    SELECT epoch_restamp_session_primary_id AS sessionPrimaryId, epoch_restamp_epoch AS epoch
     FROM app_user
     WHERE id = #{id}
-      AND epoch_restamp_session_id IS NOT NULL
+      AND epoch_restamp_session_primary_id IS NOT NULL
       AND epoch_restamp_epoch IS NOT NULL
   </select>
 
   <update id="clearEpochRestampGrant">
     UPDATE app_user
-    SET epoch_restamp_session_id = NULL,
+    SET epoch_restamp_session_primary_id = NULL,
         epoch_restamp_epoch = NULL
     WHERE id = #{id}
   </update>

@@ -13,8 +13,15 @@
 -- surviving session after its credentials are gone.
 --
 -- These columns make the post-commit restamp a durable handoff. Recovery advances
--- session_epoch and records the logical HttpSession id plus the new epoch in the
--- same locked transaction. The controller stamps the ceremony session only after
+-- session_epoch and records the ceremony session's SPRING_SESSION.PRIMARY_ID plus
+-- the new epoch in the same locked transaction.
+--
+-- The primary id, not the logical session id, is what the handoff names. Spring
+-- Session rotates SESSION_ID on every authentication while keeping the same
+-- physical row, and a request's view of its own session id is fixed for the whole
+-- request -- so a concurrent login on the ceremony session can make that id stale
+-- no matter where recovery reads it. Binding to the row identity removes that
+-- race instead of trying to observe it. The controller stamps the ceremony session only after
 -- commit. If that servlet-session write is lost, SessionEpochFilter may repeat the
 -- stamp on a later request only when both the session id and the current account
 -- epoch match the durable grant. No other session can use the handoff, and a later
@@ -29,13 +36,13 @@
 -- ============================================================================
 
 ALTER TABLE app_user
-    ADD COLUMN epoch_restamp_session_id VARCHAR(255) NULL AFTER session_epoch,
-    ADD COLUMN epoch_restamp_epoch INT NULL AFTER epoch_restamp_session_id,
+    ADD COLUMN epoch_restamp_session_primary_id CHAR(36) NULL AFTER session_epoch,
+    ADD COLUMN epoch_restamp_epoch INT NULL AFTER epoch_restamp_session_primary_id,
     ADD CONSTRAINT chk_app_user_epoch_restamp_grant
         CHECK (
-            (epoch_restamp_session_id IS NULL AND epoch_restamp_epoch IS NULL)
+            (epoch_restamp_session_primary_id IS NULL AND epoch_restamp_epoch IS NULL)
             OR (
-                epoch_restamp_session_id IS NOT NULL
+                epoch_restamp_session_primary_id IS NOT NULL
                 AND epoch_restamp_epoch IS NOT NULL
                 AND epoch_restamp_epoch >= 0
             )

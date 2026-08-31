@@ -1,10 +1,10 @@
 package ooo.klae.connex.backend.session;
 
 /**
- * Durable authorization for one logical servlet session to adopt a recovery epoch.
+ * Durable authorization for one physical session row to adopt a recovery epoch.
  *
- * @param sessionId the recovering ceremony's logical {@code HttpSession.getId()}
+ * @param sessionPrimaryId the recovering ceremony session's stable {@code SPRING_SESSION.PRIMARY_ID}
  * @param epoch the account epoch committed by the recovery transaction
  */
-public record SessionEpochRestampGrant(String sessionId, int epoch) {
+public record SessionEpochRestampGrant(String sessionPrimaryId, int epoch) {
 }

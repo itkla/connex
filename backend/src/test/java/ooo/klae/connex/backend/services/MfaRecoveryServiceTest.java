@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.session.AccountSessionIndex;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
@@ -40,6 +41,7 @@ class MfaRecoveryServiceTest {
     private static final Instant NOW = Instant.parse("2026-08-13T12:00:00Z");
     private final AuthService authService = mock(AuthService.class);
     private final UserMapper userMapper = mock(UserMapper.class);
+    private final SpringSessionMapper springSessionMapper = mock(SpringSessionMapper.class);
     private final WebAuthnService webAuthnService = mock(WebAuthnService.class);
     private final SessionSecurityService sessionSecurityService = mock(SessionSecurityService.class);
     private final AuditService auditService = mock(AuditService.class);
@@ -51,6 +53,7 @@ class MfaRecoveryServiceTest {
     private final MfaRecoveryService service = new MfaRecoveryService(
             authService,
             userMapper,
+            springSessionMapper,
             webAuthnService,
             sessionSecurityService,
             properties,
@@ -64,6 +67,8 @@ class MfaRecoveryServiceTest {
         when(userMapper.bumpSessionEpoch(7)).thenReturn(1);
         when(userMapper.currentSessionEpoch(7)).thenReturn(4);
         when(userMapper.grantEpochRestamp(eq(7), any(), eq(4))).thenReturn(1);
+        when(springSessionMapper.primaryIdBySessionId(any()))
+                .thenReturn("ceremony-session-primary-id");
     }
 
     @Test
@@ -99,12 +104,15 @@ class MfaRecoveryServiceTest {
         InOrder proofOrder = inOrder(
                 authService,
                 userMapper,
+                springSessionMapper,
                 webAuthnService,
                 auditService,
                 sessionSecurityService,
                 sessionRegistry);
         proofOrder.verify(authService).getCurrentUser();
         proofOrder.verify(userMapper).lockById(7);
+        proofOrder.verify(springSessionMapper)
+                .primaryIdBySessionId(httpRequest.getSession(false).getId());
         proofOrder.verify(authService).requireFirstPasskeyBootstrapAuthentication(
                 7, "current-password", httpRequest);
         proofOrder.verify(webAuthnService).recover(7);
@@ -120,7 +128,7 @@ class MfaRecoveryServiceTest {
         proofOrder.verify(userMapper).bumpSessionEpoch(7);
         proofOrder.verify(userMapper).currentSessionEpoch(7);
         proofOrder.verify(userMapper).grantEpochRestamp(
-                7, httpRequest.getSession(false).getId(), 4);
+                7, "ceremony-session-primary-id", 4);
         proofOrder.verify(sessionSecurityService).clearRecentAuthentication(httpRequest);
         proofOrder.verify(sessionRegistry).getAllSessions(new AccountSessionIndex(7), false);
     }
