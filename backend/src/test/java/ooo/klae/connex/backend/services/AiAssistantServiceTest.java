@@ -29,7 +29,6 @@ import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCallReadService;
 import ooo.klae.connex.backend.ai.assistant.AiChatAttachmentService;
-import ooo.klae.connex.backend.ai.assistant.AiChatTurnPersistenceService;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatParticipant;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -66,7 +65,6 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     @Autowired private AiAssistantService service;
     @Autowired private AiAssistantToolCallReadService toolCallReadService;
     @Autowired private AiChatAttachmentService attachmentService;
-    @Autowired private AiChatTurnPersistenceService turnPersistenceService;
     @Autowired private AiChatMapper chatMapper;
     @Autowired private RoleMapper roleMapper;
     @Autowired private AuditLogMapper auditLogMapper;
@@ -174,10 +172,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         "page",
         "get",
         "invitations",
-        "participants",
-        "presence",
         "attachments",
-        "turn",
         "toolCalls",
         "toolCall"
     })
@@ -217,6 +212,28 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         assertEquals(member, SecurityContextHolder.getContext().getAuthentication().getPrincipal());
 
         service.get(session.getId(), 1, 50);
+
+        assertTrue(auditLogMapper.findByEntity(
+                workspace.getId(), "ai_chat_session", session.getId(), 10, 0).isEmpty());
+    }
+
+    /**
+     * Liveness surfaces are deliberately exempt. The client heartbeats presence every four seconds
+     * and refreshes participants on every realtime frame, so recording them would bury the
+     * accountability trail under liveness noise, and neither projection carries transcript,
+     * attachment or tool-call content.
+     */
+    @Test
+    void livenessSurfacesAreExemptAndProduceNoAuditRow() {
+        AiChatSession session = sharedSession(currentUser, "Liveness only");
+        User admin = aiUser("admin");
+        chatMapper.insertParticipant(workspace.getId(), session.getId(), admin.getId());
+        authenticateAs(admin, workspace.getId());
+
+        service.participants(session.getId());
+        service.presence(session.getId());
+        service.touchPresence(session.getId(), true);
+        service.leavePresence(session.getId());
 
         assertTrue(auditLogMapper.findByEntity(
                 workspace.getId(), "ai_chat_session", session.getId(), 10, 0).isEmpty());
@@ -995,9 +1012,6 @@ class AiAssistantServiceTest extends AbstractServiceTest {
         } else {
             chatMapper.insertParticipant(workspace.getId(), session.getId(), reader.getId());
         }
-        if ("turn".equals(route)) {
-            return turn(session.getId(), currentUser);
-        }
         if (!"toolCall".equals(route)) {
             return 0;
         }
@@ -1029,10 +1043,7 @@ class AiAssistantServiceTest extends AbstractServiceTest {
             case "page" -> service.page(1, 25);
             case "get" -> service.get(session.getId(), 1, 50);
             case "invitations" -> service.pageInvitations(1, 25);
-            case "participants" -> service.participants(session.getId());
-            case "presence" -> service.presence(session.getId());
             case "attachments" -> attachmentService.list(session.getId());
-            case "turn" -> turnPersistenceService.readTurn(session.getId(), relatedId);
             case "toolCalls" -> toolCallReadService.list(session.getId(), false);
             case "toolCall" -> toolCallReadService.get(session.getId(), relatedId);
             default -> throw new IllegalArgumentException("Unknown administrative read route");

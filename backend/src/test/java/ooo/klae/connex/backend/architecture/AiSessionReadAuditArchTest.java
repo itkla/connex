@@ -40,13 +40,14 @@ class AiSessionReadAuditArchTest {
             Map.entry("page", "page"),
             Map.entry("invitations", "invitations"),
             Map.entry("get", "get"),
-            Map.entry("participants", "participants"),
-            Map.entry("presence", "presence"),
-            Map.entry("touchPresence", "presence"),
             Map.entry("listAttachments", "attachments"),
-            Map.entry("getTurn", "turn"),
             Map.entry("listToolCalls", "toolCalls"),
             Map.entry("getToolCall", "toolCall"));
+
+    private static final Map<String, String> DISCLOSING_UNIT_COVERED = Map.of(
+            "startTurn",
+            "src/test/java/ooo/klae/connex/backend/ai/assistant/"
+                    + "AiChatTurnPersistenceServiceTest.java");
 
     private static final Set<String> DISCLOSING_RETAINED = Set.of(
             "pageRetained",
@@ -59,7 +60,19 @@ class AiSessionReadAuditArchTest {
             Map.entry("update", "changes only a caller-owned session"),
             Map.entry("setShared", "changes only a caller-owned session"),
             Map.entry("invite", "changes only a caller-owned session relationship"),
-            Map.entry("join", "acts only on the caller's invitation relationship"),
+            Map.entry("join", "accepts an invitation the owner addressed to the caller, and "
+                    + "returns only metadata the audited invitation list already recorded"),
+            Map.entry("getTurn", "a polling surface whose partial answer text is a view of the "
+                    + "transcript already recorded at the session read; auditing it under the "
+                    + "membership, session and turn locks it holds would invert lock order "
+                    + "against membership mutation"),
+            Map.entry("participants", "membership metadata only, carrying no transcript, "
+                    + "attachment or tool-call content, and refreshed on every realtime frame"),
+            Map.entry("presence", "liveness and typing state only, polled on a four-second "
+                    + "heartbeat; recording it would bury the trail rather than document a "
+                    + "disclosure"),
+            Map.entry("touchPresence", "the same four-second liveness heartbeat, writing only "
+                    + "ephemeral presence"),
             Map.entry("leave", "acts only on the caller's participant relationship"),
             Map.entry("removeParticipant", "changes only a caller-owned session relationship"),
             Map.entry("leavePresence", "removes only the caller's ephemeral presence"),
@@ -67,7 +80,6 @@ class AiSessionReadAuditArchTest {
             Map.entry("uploadAttachment", "returns only the attachment the caller uploaded"),
             Map.entry("deleteAttachment", "returns no session content"),
             Map.entry("appendMessage", "returns only the message the caller authored"),
-            Map.entry("startTurn", "returns only a handle for the caller's new turn"),
             Map.entry("previewScope", "reads no assistant session or transcript"),
             Map.entry("cancelTurn", "returns no session content"),
             Map.entry("approveToolCall", "acts on the caller-authorized approval relationship"),
@@ -77,7 +89,7 @@ class AiSessionReadAuditArchTest {
     private static final Map<String, Map<String, String>> CHOKE_POINTS = Map.of(
             "ooo/klae/connex/backend/services/AiAssistantService.java",
             Map.of(
-                    "requireAccessible", "sessionReadAudit.recordAccessible(",
+                    "get", "sessionReadAudit.recordAccessible(",
                     "page", "sessionReadAudit.recordAccessible(",
                     "pageInvitations", "sessionReadAudit.recordAccessible("),
             "ooo/klae/connex/backend/ai/assistant/AiAssistantToolCallReadService.java",
@@ -85,7 +97,9 @@ class AiSessionReadAuditArchTest {
             "ooo/klae/connex/backend/ai/assistant/AiChatAttachmentService.java",
             Map.of("requireAccessibleSession", "sessionReadAudit.recordAccessible("),
             "ooo/klae/connex/backend/ai/assistant/AiChatTurnPersistenceService.java",
-            Map.of("readTurn", "sessionReadAudit.recordAccessible("));
+            Map.of(
+                    "queue#AiChatQueryScope scope", "auditAgentLoopRead(",
+                    "auditAgentLoopRead", "sessionReadAudit.recordAccessible("));
 
     @Test
     void everyAssistantHandlerHasExactlyOneDisclosureClassification() {
@@ -95,6 +109,7 @@ class AiSessionReadAuditArchTest {
                 continue;
             }
             boolean disclosing = DISCLOSING_ACCESSIBLE.containsKey(method.getName())
+                    || DISCLOSING_UNIT_COVERED.containsKey(method.getName())
                     || DISCLOSING_RETAINED.contains(method.getName());
             boolean exempt = EXEMPT.containsKey(method.getName());
             if (disclosing == exempt) {
@@ -113,9 +128,13 @@ class AiSessionReadAuditArchTest {
             String source = Files.readString(
                     SOURCE_ROOT.resolve(sourceEntry.getKey()), StandardCharsets.UTF_8);
             for (Map.Entry<String, String> methodEntry : sourceEntry.getValue().entrySet()) {
-                String body = methodBody(source, methodEntry.getKey());
+                String key = methodEntry.getKey();
+                int hash = key.indexOf('#');
+                String methodName = hash < 0 ? key : key.substring(0, hash);
+                String discriminator = hash < 0 ? "" : key.substring(hash + 1);
+                String body = methodBody(source, methodName, discriminator);
                 if (!body.contains(methodEntry.getValue())) {
-                    violations.add(methodEntry.getKey());
+                    violations.add(key);
                 }
             }
         }
@@ -143,6 +162,21 @@ class AiSessionReadAuditArchTest {
                         + missing);
     }
 
+    @Test
+    void everyUnitCoveredDisclosingHandlerIsAssertedByItsNamedTest() throws IOException {
+        List<String> violations = new ArrayList<>();
+        for (Map.Entry<String, String> entry : DISCLOSING_UNIT_COVERED.entrySet()) {
+            String source = Files.readString(
+                    Path.of(entry.getValue()), StandardCharsets.UTF_8);
+            if (!source.contains("recordAccessible")) {
+                violations.add(entry.getKey());
+            }
+        }
+        assertTrue(violations.isEmpty(),
+                "Disclosing assistant routes whose named test asserts no audit record: "
+                        + violations);
+    }
+
     private static boolean isHandler(Method method) {
         return Modifier.isPublic(method.getModifiers())
                 && (method.isAnnotationPresent(GetMapping.class)
@@ -152,7 +186,8 @@ class AiSessionReadAuditArchTest {
                     || method.isAnnotationPresent(DeleteMapping.class));
     }
 
-    private static String methodBody(String source, String methodName) {
+    private static String methodBody(
+            String source, String methodName, String signatureDiscriminator) {
         String[] lines = source.split("\\R", -1);
         int offset = 0;
         int signature = -1;
@@ -161,7 +196,9 @@ class AiSessionReadAuditArchTest {
             if ((trimmed.startsWith("public ")
                     || trimmed.startsWith("private ")
                     || trimmed.startsWith("protected "))
-                    && trimmed.matches(".*\\b" + methodName + "\\s*\\(.*")) {
+                    && trimmed.matches(".*\\b" + methodName + "\\s*\\(.*")
+                    && (signatureDiscriminator.isEmpty()
+                        || signatureOf(source, offset).contains(signatureDiscriminator))) {
                 signature = offset;
                 break;
             }
@@ -179,6 +216,11 @@ class AiSessionReadAuditArchTest {
             throw new AssertionError("Could not match method body for " + methodName);
         }
         return source.substring(openingBrace + 1, closingBrace);
+    }
+
+    private static String signatureOf(String source, int signatureStart) {
+        int openingBrace = source.indexOf('{', signatureStart);
+        return openingBrace < 0 ? "" : source.substring(signatureStart, openingBrace);
     }
 
     private static int matchingBrace(String source, int openingBrace) {

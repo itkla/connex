@@ -119,6 +119,7 @@ public class AiChatTurnPersistenceService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         requireActiveAiAccess(workspaceId, userId);
+        auditAgentLoopRead(workspaceId, userId, sessionId);
         workspaceService.lockAndRequireMember(workspaceId, userId);
         workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
         List<Integer> activeMemberIds = activeMemberIds(workspaceId, userId);
@@ -208,7 +209,15 @@ public class AiChatTurnPersistenceService {
                 skillKey, skillVersion) == 1;
     }
 
-    /** Returns one authorized durable turn after applying its lazy generation deadline. */
+    /**
+     * Returns one authorized durable turn after applying its lazy generation deadline.
+     *
+     * <p>Deliberately not audited. This method holds the caller's membership, session and turn
+     * locks, and an audit append then takes shared locks on the actor, workspace and organization
+     * rows — the opposite order from a membership mutation, which is a deadlock cycle on a route
+     * the client polls once per second. The {@code partialContent} it projects is a view of the
+     * transcript whose disclosure is already recorded at the session read.
+     */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_USE)
     public AiChatTurn readTurn(int sessionId, int turnId) {
@@ -224,8 +233,31 @@ public class AiChatTurnPersistenceService {
         if (turn == null) {
             throw inaccessible();
         }
-        sessionReadAudit.recordAccessible(workspaceId, userId, session);
         return expireIfStale(turn, expiryCutoff());
+    }
+
+    /**
+     * Records the administrative agent-loop read before any membership, session or turn lock is
+     * taken.
+     *
+     * <p>Starting a turn is an action against another member's transcript, not a view of it, so it
+     * earns its own record rather than relying on the session read. Placement is the whole point:
+     * an audit append takes shared locks on the actor, workspace and organization rows, and a
+     * membership mutation takes those same roots before {@code workspace_member}. Appending here,
+     * ahead of {@code lockAndRequireMember}, keeps both paths in one global order and removes the
+     * cycle. An independent transaction would not help — it acquires the same roots on a second
+     * connection while this one still holds {@code workspace_member}, which deadlocks against
+     * itself.
+     *
+     * <p>The lookup is the unlocked accessible-session read, so it adds no lock of its own, and the
+     * append shares this transaction: a turn that is later refused rolls the row back with it.
+     */
+    private void auditAgentLoopRead(int workspaceId, int userId, int sessionId) {
+        AiChatSession session = chatMapper.getAccessibleSessionById(
+                workspaceId, userId, sessionId);
+        if (session != null) {
+            sessionReadAudit.recordAccessible(workspaceId, userId, session);
+        }
     }
 
     /** Marks a queued turn running after re-locking membership and session authorization. */

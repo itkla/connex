@@ -53,6 +53,8 @@ class AiChatTurnPersistenceServiceTest {
             7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of());
     private static final Instant NOW = Instant.parse("2026-08-12T00:00:00Z");
 
+    private AiAssistantSessionReadAudit sessionReadAudit;
+    private AiChatSession auditedSession;
     private AiChatMapper chatMapper;
     private AttachmentMapper attachmentMapper;
     private WorkspaceService workspaceService;
@@ -74,6 +76,7 @@ class AiChatTurnPersistenceServiceTest {
         identifierResolver = mock(AiAssistantIdentifierResolver.class);
         toolExecutor = mock(AiAssistantToolExecutor.class);
         realtimeDispatcher = mock(AiChatRealtimeDispatcher.class);
+        sessionReadAudit = mock(AiAssistantSessionReadAudit.class);
         service = new AiChatTurnPersistenceService(
                 chatMapper,
                 attachmentMapper,
@@ -82,11 +85,12 @@ class AiChatTurnPersistenceServiceTest {
                 governanceService,
                 identifierResolver,
                 toolExecutor,
-                mock(AiAssistantSessionReadAudit.class),
+                sessionReadAudit,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 realtimeDispatcher,
                 JsonMapper.builder().build());
         AiChatSession session = new AiChatSession();
+        auditedSession = session;
         session.setId(TURN.sessionId());
         session.setCreatedByUserId(TURN.userId());
         session.setVisibility("private");
@@ -98,6 +102,8 @@ class AiChatTurnPersistenceServiceTest {
         storedTurn.setRequestedByUserId(TURN.userId());
         storedTurn.setStatus("running");
         when(chatMapper.getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+        when(chatMapper.getAccessibleSessionById(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
         when(chatMapper.getTurnByIdForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(storedTurn);
@@ -474,6 +480,44 @@ class AiChatTurnPersistenceServiceTest {
                         && message.getStructuredJson().contains("\"value\":\"Ada Lovelace\"")
                         && message.getStructuredJson().contains("\"kind\":\"deal\"")
                         && message.getStructuredJson().contains("\"id\":47")));
+    }
+
+    /**
+     * Starting a turn runs the agent loop over another member's transcript, so it earns its own
+     * record. The ordering is the fix, not an accident: appending the row before
+     * {@code lockAndRequireMember} keeps this path and a membership mutation in one global lock
+     * order. Reverting the placement reintroduces the deadlock cycle, so the order is asserted.
+     */
+    @Test
+    void queueingATurnRecordsTheAgentLoopReadBeforeTakingAnyLock() {
+        when(chatMapper.listActiveTurnsBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of());
+        when(chatMapper.countActiveTurns(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(0);
+        when(attachmentMapper.getAssistantSessionAttachments(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(List.of());
+        when(chatMapper.nextMessageSequence(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(2);
+
+        service.queue(
+                TURN.sessionId(), new AiChatTurnCreateRequest("A question", List.of()),
+                TURN.restrictionEpoch());
+
+        InOrder ordered = inOrder(sessionReadAudit, workspaceService);
+        ordered.verify(sessionReadAudit).recordAccessible(
+                TURN.workspaceId(), TURN.userId(), auditedSession);
+        ordered.verify(workspaceService).lockAndRequireMember(
+                TURN.workspaceId(), TURN.userId());
+    }
+
+    /** Following your own turn polls this route once per second, so it must record nothing. */
+    @Test
+    void readingATurnRecordsNothingOnThePollingPath() {
+        service.readTurn(TURN.sessionId(), TURN.turnId());
+        service.readTurn(TURN.sessionId(), TURN.turnId());
+
+        verify(sessionReadAudit, never()).recordAccessible(
+                anyInt(), anyInt(), any(AiChatSession.class));
     }
 
     @Test

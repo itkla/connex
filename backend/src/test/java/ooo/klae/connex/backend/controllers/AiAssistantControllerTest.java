@@ -84,41 +84,63 @@ class AiAssistantControllerTest {
                         service, turnService, toolCallReadService,
                         writeToolService, attachmentService))
             .setControllerAdvice(new GlobalExceptionHandler(errorReporter, new TenantContext()))
-            .addFilter(new AiAssistantNavigationAdmissionFilter())
+            .addFilter(new AiAssistantNavigationAdmissionFilter(
+                    new String[] {"https://app.example.com"}))
             .build();
     }
 
     @Test
-    void documentDestinationCannotReachAnAssistantRead() throws Exception {
+    void subresourceDestinationsCannotReachAnAssistantRead() throws Exception {
+        for (String destination : new String[] {"document", "image", "script", "iframe"}) {
+            mockMvc.perform(get("/api/ai/assistant/sessions/42")
+                    .header("Sec-Fetch-Dest", destination))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("Cache-Control", "no-store"));
+        }
+        verify(service, never()).get(anyInt(), anyInt(), anyInt());
+    }
+
+    /**
+     * A SAML deployment sets {@code SameSite=None}, so an opaque cross-site fetch would otherwise
+     * carry the session cookie into an audited read without ever navigating.
+     */
+    @Test
+    void opaqueCrossSiteFetchesCannotReachAnAssistantRead() throws Exception {
         mockMvc.perform(get("/api/ai/assistant/sessions/42")
-                .header("Sec-Fetch-Dest", " document "))
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", "no-store"));
+                .header("Sec-Fetch-Dest", "empty")
+                .header("Sec-Fetch-Mode", "no-cors")
+                .header("Sec-Fetch-Site", "cross-site"))
+            .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/ai/assistant/sessions/42")
+                .header("Sec-Fetch-Dest", "empty")
+                .header("Sec-Fetch-Mode", "cors")
+                .header("Sec-Fetch-Site", "cross-site")
+                .header("Origin", "https://evil.example.com"))
+            .andExpect(status().isForbidden());
 
         verify(service, never()).get(anyInt(), anyInt(), anyInt());
     }
 
     @Test
-    void navigationModeCannotReachAnAssistantRead() throws Exception {
-        mockMvc.perform(get("/api/ai/assistant/sessions/42")
-                .header("Sec-Fetch-Mode", "NAVIGATE"))
-            .andExpect(status().isForbidden())
-            .andExpect(header().string("Cache-Control", "no-store"));
-
-        verify(service, never()).get(anyInt(), anyInt(), anyInt());
-    }
-
-    @Test
-    void fetchMetadataAbsenceAndEmptyDestinationAdmitAssistantReads() throws Exception {
+    void sameOriginAbsentMetadataAndAllowlistedCrossOriginFetchesAreAdmitted() throws Exception {
         when(service.get(42, 1, 50)).thenReturn(detail());
 
         mockMvc.perform(get("/api/ai/assistant/sessions/42"))
             .andExpect(status().isOk());
         mockMvc.perform(get("/api/ai/assistant/sessions/42")
-                .header("Sec-Fetch-Dest", "empty"))
+                .header("Sec-Fetch-Dest", "empty")
+                .header("Sec-Fetch-Mode", "cors")
+                .header("Sec-Fetch-Site", "same-origin"))
+            .andExpect(status().isOk());
+        mockMvc.perform(get("/api/ai/assistant/sessions/42")
+                .header("Sec-Fetch-Dest", "empty")
+                .header("Sec-Fetch-Mode", "cors")
+                .header("Sec-Fetch-Site", "cross-site")
+                .header("Origin", "https://app.example.com"))
             .andExpect(status().isOk());
 
-        verify(service, times(2)).get(42, 1, 50);
+        verify(service, times(3)).get(42, 1, 50);
     }
 
     @Test
