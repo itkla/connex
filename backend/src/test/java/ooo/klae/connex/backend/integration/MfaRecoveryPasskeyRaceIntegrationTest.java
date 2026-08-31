@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -173,6 +174,34 @@ class MfaRecoveryPasskeyRaceIntegrationTest {
 
         assertEquals(recoveryEpoch, sessionSecurityService.sessionEpoch(ceremonySession));
         assertNotNull(userMapper.epochRestampGrant(account.getId()));
+    }
+
+    /**
+     * A concurrent login on the ceremony session itself rotates its logical id, and the stamp that
+     * login writes is the epoch its credential was verified against, which recovery has already
+     * advanced past. The handoff must move with the rotation, or the sole surviving session of an
+     * account whose credentials were just deleted could never be repaired.
+     */
+    @Test
+    void theHandoffSurvivesASameSessionLoginRotation() throws Exception {
+        User account = passwordlessAccount();
+        enrollPasskey(account);
+        User principalReadBeforeRecovery = userMapper.getUserByUsername(account.getUsername());
+        assertNotNull(principalReadBeforeRecovery);
+        MockHttpServletRequest ceremonyRequest = establishSession(account);
+        String ceremonySessionId = ceremonyRequest.getSession(false).getId();
+
+        int recoveryEpoch = recover(ceremonyRequest, account);
+
+        authService.establishAuthenticatedSession(
+                principalReadBeforeRecovery, ceremonyRequest, new MockHttpServletResponse());
+        MockHttpSession rotatedSession = (MockHttpSession) ceremonyRequest.getSession(false);
+        assertNotEquals(ceremonySessionId, rotatedSession.getId());
+        SecurityContextHolder.clearContext();
+
+        mockMvc.perform(get("/api/auth/me").session(rotatedSession))
+                .andExpect(status().isOk());
+        assertEquals(recoveryEpoch, sessionSecurityService.sessionEpoch(rotatedSession));
     }
 
     @Test

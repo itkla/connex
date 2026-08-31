@@ -256,7 +256,9 @@ public class AuthService {
                 oneTimeLinkFlowService.replaceSessionPreservingFlows(httpRequest);
                 SecurityContextHolder.clearContext();
             } else {
+                String rotatedFrom = existingSession.getId();
                 httpRequest.changeSessionId();
+                carryRecoveryHandoffAcrossRotation(refreshedUser.getId(), rotatedFrom, httpRequest);
             }
         }
 
@@ -282,6 +284,32 @@ public class AuthService {
     }
 
         /**
+     * Moves an outstanding MFA-recovery epoch handoff onto the rotated logical session id.
+     *
+     * <p>Session-fixation rotation keeps the physical session and its attributes but replaces the
+     * logical id the handoff names. The stamp written just below is the epoch the presented
+     * credential was verified against, which recovery may already have advanced past, so a rotated
+     * ceremony session can be left stamped behind the account. Without carrying the handoff across
+     * the rotation there would be nothing left to repair it, and for an account whose credentials
+     * recovery has just deleted that is a permanent lockout.
+     *
+     * <p>Only a handoff naming this account and this exact previous id is moved, so a rotation on
+     * any other session leaves it untouched.
+     *
+     * @param userId the account this session is being established for
+     * @param rotatedFrom the logical session id in force before the rotation
+     * @param httpRequest the request whose session was rotated
+     */
+    private void carryRecoveryHandoffAcrossRotation(
+            int userId, String rotatedFrom, HttpServletRequest httpRequest) {
+        HttpSession rotated = httpRequest.getSession(false);
+        if (rotated == null || rotated.getId().equals(rotatedFrom)) {
+            return;
+        }
+        userMapper.rebindEpochRestampGrant(userId, rotatedFrom, rotated.getId());
+    }
+
+    /**
      * Ends an authenticated ceremony without leaving its principal signed in.
      *
      * <p>Used by every SSO exit that is not a completed login. The upstream authentication filter

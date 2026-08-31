@@ -259,6 +259,13 @@
     WHERE id = #{id}
   </update>
 
+  <update id="rebindEpochRestampGrant">
+    UPDATE app_user
+    SET epoch_restamp_session_id = #{sessionId}
+    WHERE id = #{id}
+      AND epoch_restamp_session_id = #{previousSessionId}
+  </update>
+
   <select id="epochRestampGrant"
       resultType="ooo.klae.connex.backend.session.SessionEpochRestampGrant">
     SELECT epoch_restamp_session_id AS sessionId, epoch_restamp_epoch AS epoch
