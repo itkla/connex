@@ -108,14 +108,23 @@ covers. Add later baselines or batch triages to that log rather than starting a 
 ## False positives and suppressions
 
 Suppressions are exceptional, and source-level ignore comments are not permitted. Prefer fixing the
-construct so the query can understand it. Connex currently has one repository-wide query exclusion:
-`java/potentially-weak-cryptographic-algorithm`, governed by [#1295](https://github.com/itkla/connex/issues/1295).
-It covers the SHA-1 index required by the HIBP k-anonymity Range API, not password storage. CodeQL
-query filters can select the exact query ID but cannot combine it with the source path that produced
-one result; query-path filters identify the query file, while a source `paths-ignore` would suppress
-all CodeQL coverage for that source. The exact rule ID is therefore the narrowest supported scope.
-The adjacent metadata in `.github/codeql/codeql-config.yml` makes the exception expire on
-2027-02-14, with re-review due 2027-01-14 and earlier reassessment on its listed triggers.
+construct so the query can understand it. **Connex has no repository-wide query exclusions, and the
+filter list in `.github/codeql/codeql-config.yml` is asserted empty by
+`test_security_workflow.py`.**
+
+It used to have one: `java/potentially-weak-cryptographic-algorithm`, for the SHA-1 index the HIBP
+k-anonymity Range API requires, governed by
+[#1295](https://github.com/itkla/connex/issues/1295). That exclusion was removed in
+[#1464](https://github.com/itkla/connex/issues/1464) because its scope was wrong in a way the
+annotation concealed. A CodeQL query filter can name the exact query ID but cannot combine it with
+the source path that produced one result, so excluding a query to accept one finding silences it for
+**every** occurrence — in that case, for every other MD5 and SHA-1 in the backend, including token
+handling, signatures and authentication, where it would be a real finding. The rule ID is the
+narrowest available *filter*; it is not the narrowest available *control*.
+
+A dismissal is. It applies to one alert at one location, leaves the query live everywhere else, and
+carries the same accountability record. **Accept a false positive by dismissing its alert, never by
+filtering its query.**
 
 If evidence proves another false positive:
 
@@ -128,10 +137,11 @@ If evidence proves another false positive:
 4. Reopen and reassess the alert at expiry, when the affected code or data flow changes, or when the
    query is materially updated. A renewed dismissal requires a new fixed expiry and review.
 
-Every `.github/codeql/` query filter must have
-adjacent YAML comments containing the tracking issue, reason, owner, approval, expiry, and re-review
-date. An open-ended filter is forbidden. The same fixed-term exception and escalation rules apply
-to `won't fix` or `used in tests` dismissals.
+The filter list must stay empty. If a case ever genuinely cannot be expressed as a dismissal, the
+filter that carries it must have adjacent YAML comments containing the tracking issue, reason,
+owner, approval, expiry, and re-review date; an open-ended filter is forbidden, and the emptiness
+assertion in `test_security_workflow.py` must be updated deliberately rather than deleted. The same
+fixed-term exception and escalation rules apply to `won't fix` or `used in tests` dismissals.
 
 ## Workflow failure proof and independent retest
 
