@@ -32,41 +32,29 @@ permissions:
   contents: read
   issues: write
 
-concurrency:
-  # Every reportable event shares one group; everything else gets a unique one.
-  #
-  # Both halves are load-bearing, and each fixes a different failure. GitHub keeps one pending run
-  # per group and a newly queued run evicts it even with cancel-in-progress false -- so anything
-  # that is NOT going to report must not share a group with something that is, or it silently
-  # discards a real alert. The job-level condition is far too late to prevent that: scheduling
-  # happens first, so a skipped run still occupies the group.
-  #
-  # Conversely, all reportable events must share ONE group, because the job reads then writes the
-  # tracking issue and `gh` has no atomic upsert. Two reportable runs in parallel -- a failure and a
-  # timed_out, say -- would both see no issue and both create one.
-  #
-  # Serialising them means a second alert can be evicted while the first is still running. That is
-  # the right way round to lose: the issue is already open, so main is already flagged.
-  group: >-
-    main-red-alert-${{
-      (github.event.workflow_run.event == 'push'
-        && contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion))
-      && 'reportable'
-      || format('ignored-{0}', github.run_id) }}
-  cancel-in-progress: false
+# No concurrency control, on purpose. Reportability depends on whether the run reflects the current
+# main HEAD, which cannot be evaluated in a concurrency expression — so any group keyed on conclusion
+# alone either lets a stale event evict a real pending alert (GitHub keeps one pending run per group
+# and a new queued run replaces it) or lets non-reportable events serialise ahead of real ones. Two
+# earlier attempts here did exactly that. Instead every event runs independently, correctness is
+# decided in the step against live state, and the rolling-issue race is made idempotent by a dedup
+# sweep rather than by serialisation.
 
 jobs:
   alert:
     name: Open or update the red-main report
     # workflow_run branch filters match the *triggering* workflow's branch, and the monitored
-    # workflows also run on pull_request -- so a fork branch merely named "main" would otherwise
+    # workflows also run on pull_request — so a fork branch merely named "main" would otherwise
     # report the repository's main as red. Requiring a push settles it.
     #
-    # timed_out is terminal and distinct from failure: these workflows carry explicit time limits,
-    # and a run that exhausts one leaves main just as non-green.
+    # failure, timed_out and cancelled are all terminal states in which the workflow did not
+    # succeed. These workflows carry explicit time limits, and a required run that is cancelled or
+    # times out leaves main just as non-green as one that fails. The step then filters to runs that
+    # actually reflect current main, which a coarse conclusion check here cannot do.
     if: >-
       github.event.workflow_run.event == 'push'
-      && contains(fromJSON('["failure", "timed_out"]'), github.event.workflow_run.conclusion)
+      && contains(fromJSON('["failure", "timed_out", "cancelled"]'),
+                  github.event.workflow_run.conclusion)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -76,17 +64,37 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           set -euo pipefail
 
+          # Only report when this run reflects the current tip of main.
+          #
+          # A failed rerun of an older commit keeps its original push event and main branch, so
+          # without this it would open a "main is red" issue for a commit main has already moved
+          # past. And a run superseded on the current commit — React Doctor cancels its own older
+          # run by concurrency — is a cancelled conclusion that does not mean main is red. Both are
+          # excluded by requiring the head to be current main AND this to be the newest run of its
+          # workflow for that head.
+          current="$(gh api "repos/$REPO/commits/main" --jq '.sha')"
+          if [ "$HEAD_SHA" != "$current" ]; then
+            echo "Run head ${HEAD_SHA:0:9} is not current main ${current:0:9}; not reporting."
+            exit 0
+          fi
+          latest="$(gh api \
+            "repos/$REPO/actions/workflows/$WORKFLOW_ID/runs?head_sha=$HEAD_SHA&per_page=100" \
+            --jq '[.workflow_runs[].id] | max // empty')"
+          if [ -n "$latest" ] && [ "$RUN_ID" != "$latest" ]; then
+            echo "Run $RUN_ID is superseded by $latest for this commit; not reporting."
+            exit 0
+          fi
+
           # One rolling issue rather than one per failure: a red main usually produces several
           # failing workflows for the same commit, and a burst of issues is its own kind of noise.
           title='main is red'
-          existing="$(gh issue list --repo "$REPO" --state open --label ci-main-red \
-            --json number --jq '.[0].number // empty')"
-
           body="$(printf '%s\n' \
             "\`$RUN_NAME\` concluded \`$CONCLUSION\` on \`main\` at \`${HEAD_SHA:0:9}\`." \
             "" \
@@ -97,10 +105,25 @@ jobs:
             "" \
             "Close this issue once \`main\` is green again.")"
 
+          gh label create ci-main-red --repo "$REPO" --color B60205 \
+            --description "main is failing" 2>/dev/null || true
+
+          existing="$(gh issue list --repo "$REPO" --state open --label ci-main-red \
+            --json number --jq '.[0].number // empty')"
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "$REPO" --body "$body"
           else
-            gh label create ci-main-red --repo "$REPO" --color B60205 \
-              --description "main is failing" 2>/dev/null || true
             gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body"
           fi
+
+          # Converge the rolling-issue invariant without serialisation. Two events that both saw no
+          # issue and both created one leave duplicates; every run keeps the lowest-numbered open
+          # ci-main-red issue and closes the rest, so any ordering settles on one.
+          mapfile -t open_issues < <(gh issue list --repo "$REPO" --state open --label ci-main-red \
+            --json number --jq 'sort_by(.number) | .[].number')
+          keep="${open_issues[0]}"
+          for number in "${open_issues[@]}"; do
+            if [ "$number" != "$keep" ]; then
+              gh issue close "$number" --repo "$REPO" --comment "Duplicate of #$keep." || true
+            fi
+          done
