@@ -10,6 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -79,7 +80,7 @@ class SupportBundleControllerTest {
 
     @Test
     void returnsTheBundleWithHardenedDownloadHeaders() throws Exception {
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID))
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID))
             .andExpect(status().isOk())
             .andExpect(header().string("Content-Type", "application/zip"))
             .andExpect(header().string("Cache-Control", "no-store"))
@@ -91,12 +92,26 @@ class SupportBundleControllerTest {
                 org.hamcrest.Matchers.containsString("attachment")));
     }
 
+    /**
+     * Bundle assembly writes two durable {@code audit_log} rows and streams an organization data
+     * export, so it must not be reachable by a cross-site top-level navigation. {@code JSESSIONID}
+     * is {@code SameSite=Lax}, which is sent on exactly that request, so the route may not answer
+     * {@code GET} and the service must never be invoked by one.
+     */
+    @Test
+    void aGetIsRejectedAndNeverAssemblesABundle() throws Exception {
+        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID))
+            .andExpect(status().isMethodNotAllowed());
+
+        verify(supportBundleService, never()).generate(any(), anyInt());
+    }
+
     @Test
     void aNonOrgAdminIsRefused() throws Exception {
         doThrow(new ForbiddenException("not an org admin"))
             .when(supportBundleService).generate(any(), anyInt());
 
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID))
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID))
             .andExpect(status().isForbidden());
     }
 
@@ -105,7 +120,7 @@ class SupportBundleControllerTest {
         doThrow(new RecentAuthenticationRequiredException())
             .when(supportBundleService).generate(any(), anyInt());
 
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID))
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID))
             .andExpect(status().is4xxClientError());
     }
 
@@ -114,13 +129,13 @@ class SupportBundleControllerTest {
         doThrow(new TooManyRequestsException("busy"))
             .when(supportBundleService).generate(any(), anyInt());
 
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID))
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID))
             .andExpect(status().isTooManyRequests());
     }
 
     @Test
     void anEntityFilterInTheCallersOwnOrganizationResolvesItsWorkspace() throws Exception {
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID)
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID)
                 .param("entityType", "person")
                 .param("entityId", "412"))
             .andExpect(status().isOk());
@@ -142,7 +157,7 @@ class SupportBundleControllerTest {
     void anEntityFilterAgainstAForeignOrganizationsWorkspaceIsNotFound() throws Exception {
         when(workspaceService.getOrgId(WORKSPACE_ID)).thenReturn(ORG_ID + 1);
 
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID)
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID)
                 .param("entityType", "person")
                 .param("entityId", "412"))
             .andExpect(status().isNotFound());
@@ -156,7 +171,7 @@ class SupportBundleControllerTest {
         doThrow(new ForbiddenException("no AUDIT_READ"))
             .when(workspaceService).requirePermission(Permission.AUDIT_READ);
 
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID)
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID)
                 .param("entityType", "person")
                 .param("entityId", "412"))
             .andExpect(status().isForbidden());
@@ -171,7 +186,7 @@ class SupportBundleControllerTest {
      */
     @Test
     void theOrganizationIsConfirmedBeforeTheWorkspacePermission() throws Exception {
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID)
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID)
                 .param("entityType", "person")
                 .param("entityId", "412"))
             .andExpect(status().isOk());
@@ -185,7 +200,7 @@ class SupportBundleControllerTest {
     void anEntityFilterWithoutAnActiveWorkspaceIsRejected() throws Exception {
         when(tenantContext.getWorkspaceId()).thenReturn(null);
 
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID)
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID)
                 .param("entityType", "person")
                 .param("entityId", "412"))
             .andExpect(status().isBadRequest());
@@ -195,11 +210,11 @@ class SupportBundleControllerTest {
 
     @Test
     void aHalfSuppliedEntityFilterIsRejected() throws Exception {
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID)
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID)
                 .param("entityType", "person"))
             .andExpect(status().isBadRequest());
 
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID)
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID)
                 .param("entityId", "412"))
             .andExpect(status().isBadRequest());
 
@@ -208,20 +223,20 @@ class SupportBundleControllerTest {
 
     @Test
     void malformedFiltersAreRejectedBeforeAnyWorkIsDone() throws Exception {
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID)
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID)
                 .param("correlationId", "has space"))
             .andExpect(status().isBadRequest());
 
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID)
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID)
                 .param("since", "not-an-instant"))
             .andExpect(status().isBadRequest());
 
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID)
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID)
                 .param("entityType", "Person!")
                 .param("entityId", "412"))
             .andExpect(status().isBadRequest());
 
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID)
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID)
                 .param("entityType", "person")
                 .param("entityId", "-1"))
             .andExpect(status().isBadRequest());
@@ -234,7 +249,7 @@ class SupportBundleControllerTest {
         doThrow(new ResourceNotFoundException("missing"))
             .when(supportBundleService).generate(any(), anyInt());
 
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID))
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID))
             .andExpect(status().isNotFound());
     }
 
@@ -244,7 +259,7 @@ class SupportBundleControllerTest {
                 "Support bundle exceeded its uncompressed ceiling; narrow the window with since"))
             .when(supportBundleService).generate(any(), anyInt());
 
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID))
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID))
             .andExpect(status().isPayloadTooLarge())
             .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content()
                 .string(org.hamcrest.Matchers.containsString("narrow the window")));
@@ -252,7 +267,7 @@ class SupportBundleControllerTest {
 
     @Test
     void theWorkspaceIsNotConsultedWithoutAnEntityFilter() throws Exception {
-        mockMvc.perform(get("/api/orgs/{orgId}/support-bundle", ORG_ID))
+        mockMvc.perform(post("/api/orgs/{orgId}/support-bundle", ORG_ID))
             .andExpect(status().isOk());
 
         verify(workspaceService, never()).getOrgId(anyInt());

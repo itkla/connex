@@ -15,7 +15,6 @@ import ooo.klae.connex.backend.dto.SecretStoreDiagnosticsDto;
 import ooo.klae.connex.backend.dto.SecretStoreKeyDiagnosticDto;
 import ooo.klae.connex.backend.dto.SecretStoreSecretDiagnosticDto;
 import ooo.klae.connex.backend.mappers.SecretValueMapper;
-import ooo.klae.connex.backend.services.AuditService;
 
 /**
  * Builds key-lifecycle diagnostics for encrypted integration secrets without
@@ -34,22 +33,17 @@ public class SecretStoreLifecycleService {
     private final SecretValueMapper secretValueMapper;
     private final SecretStoreCrypto crypto;
     private final SecretStoreProperties properties;
-    private final AuditService auditService;
 
     public SecretStoreDiagnosticsDto diagnostics() {
         return diagnostics(null, null, true);
     }
 
     public SecretStoreDiagnosticsDto diagnosticsForWorkspace(int workspaceId) {
-        SecretStoreDiagnosticsDto diagnostics = diagnostics("workspace", workspaceId, false);
-        auditDiagnostics("workspace", workspaceId, workspaceId, null, diagnostics);
-        return diagnostics;
+        return diagnostics("workspace", workspaceId, false);
     }
 
     public SecretStoreDiagnosticsDto diagnosticsForOrg(int orgId) {
-        SecretStoreDiagnosticsDto diagnostics = diagnostics("organization", orgId, false);
-        auditDiagnostics("organization", orgId, null, orgId, diagnostics);
-        return diagnostics;
+        return diagnostics("organization", orgId, false);
     }
 
     public boolean hasBlockingFailures(SecretStoreDiagnosticsDto diagnostics) {
@@ -170,20 +164,6 @@ public class SecretStoreLifecycleService {
             diagnostics.put(keyId, keyDiagnostic(keyId));
         }
         return diagnostics;
-    }
-
-    private void auditDiagnostics(String entityType, int entityId, Integer workspaceId, Integer orgId,
-            SecretStoreDiagnosticsDto diagnostics) {
-        auditService.recordScoped("secret_store.diagnostics.read", entityType, entityId, workspaceId, orgId,
-                "secret_store", "Secret store diagnostics read", Map.of(
-                        "healthy", diagnostics.isHealthy(),
-                        "available", diagnostics.isAvailable(),
-                        "totalSecrets", diagnostics.getTotalSecrets(),
-                        "staleSecrets", diagnostics.getStaleSecrets(),
-                        "missingKeySecrets", diagnostics.getMissingKeySecrets(),
-                        "disabledKeySecrets", diagnostics.getDisabledKeySecrets(),
-                        "mismatchedSecrets", diagnostics.getMismatchedSecrets(),
-                        "unsupportedAlgorithmSecrets", diagnostics.getUnsupportedAlgorithmSecrets()));
     }
 
     private SecretStoreKeyDiagnosticDto keyDiagnostic(String keyId) {

@@ -9,8 +9,8 @@ import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -46,7 +46,8 @@ public class SupportBundleController {
     private final TenantContext tenantContext;
 
     /**
-     * Returns the redacted support bundle for one organization.
+     * Returns the redacted support bundle for one organization over POST because assembly is a
+     * recorded, non-idempotent export.
      *
      * @param orgId         the organization to collect for
      * @param correlationId the correlation id filter, or null
@@ -55,7 +56,7 @@ public class SupportBundleController {
      * @param since         the ISO-8601 window start, or null for the default seven days
      * @return the ZIP response
      */
-    @GetMapping("/support-bundle")
+    @PostMapping("/support-bundle")
     public ResponseEntity<byte[]> supportBundle(
             @PathVariable int orgId,
             @RequestParam(required = false) String correlationId,

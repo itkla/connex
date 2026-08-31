@@ -596,20 +596,33 @@ run_collect() {
     chmod 0600 "$cookie"
     local stub="$SANDBOX/curl-stub"
     mkdir -p "$stub"
+    # The bundle endpoint is POST and therefore CSRF-protected, so collect.sh now issues two
+    # requests: GET /api/auth/csrf for the token, then the POST. The stub answers both, keyed on the
+    # trailing URL argument.
     cat > "$stub/curl" <<STUB
 #!/bin/bash
 out=""
 headers=""
+url=""
 while [ "\$#" -gt 0 ]; do
     case "\$1" in
         --output) out="\$2"; shift 2 ;;
         --dump-header) headers="\$2"; shift 2 ;;
-        *) shift ;;
+        -*) shift ;;
+        *) url="\$1"; shift ;;
     esac
 done
-cp "$SANDBOX/publish-src/bundle.zip" "\$out"
-printf 'HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\n\r\n' > "\$headers"
-printf '200'
+case "\$url" in
+    */api/auth/csrf)
+        printf '{"token":"test-csrf-token","headerName":"X-CSRF-TOKEN","parameterName":"_csrf","requestIdentity":"test"}' > "\$out"
+        printf '200'
+        ;;
+    *)
+        cp "$SANDBOX/publish-src/bundle.zip" "\$out"
+        printf 'HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\n\r\n' > "\$headers"
+        printf '200'
+        ;;
+esac
 STUB
     chmod +x "$stub/curl"
     PATH="$stub:$PATH" bash "$BUNDLE_DIR/collect.sh" \
@@ -761,6 +774,21 @@ case_read_strips_terminal_control_sequences() (
     fi
 )
 
+# The bundle endpoint is POST and therefore CSRF-protected, so collect.sh fetches a token from
+# GET /api/auth/csrf before every download. Each curl stub delegates that first request here and
+# keeps its own behaviour for the bundle request, so the stubs still exercise the path under test
+# rather than short-circuiting at the token step.
+stub_csrf_request() {
+    local url="$1" out="$2"
+    case "$url" in
+        */api/auth/csrf)
+            printf '{"token":"test-csrf-token","headerName":"X-CSRF-TOKEN","parameterName":"_csrf","requestIdentity":"test"}' > "$out"
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 # (g) support_bundle_download had no coverage at all, which is how the mawk content-type defect
 # reached a review. curl is stubbed so the real function runs offline.
 case_download_accepts_a_real_zip_response() (
@@ -775,14 +803,16 @@ case_download_accepts_a_real_zip_response() (
     WORKSPACE_ID=
     CORRELATION_ID=; ENTITY_TYPE=; ENTITY_ID=; SINCE=
     curl() {
-        local out="" headers=""
+        local out="" headers="" url=""
         while [ "$#" -gt 0 ]; do
             case "$1" in
                 --output) out="$2"; shift 2 ;;
                 --dump-header) headers="$2"; shift 2 ;;
-                *) shift ;;
+                -*) shift ;;
+                *) url="$1"; shift ;;
             esac
         done
+        if stub_csrf_request "$url" "$out"; then printf '200'; return 0; fi
         printf 'PK\003\004stub-zip-bytes' > "$out"
         printf 'HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\n\r\n' > "$headers"
         printf '200'
@@ -801,14 +831,16 @@ case_download_rejects_a_non_zip_response() (
     CORRELATION_ID=; ENTITY_TYPE=; ENTITY_ID=; SINCE=
     COOKIE_FILE="$SANDBOX/dl-cookies"
     curl() {
-        local out="" headers=""
+        local out="" headers="" url=""
         while [ "$#" -gt 0 ]; do
             case "$1" in
                 --output) out="$2"; shift 2 ;;
                 --dump-header) headers="$2"; shift 2 ;;
-                *) shift ;;
+                -*) shift ;;
+                *) url="$1"; shift ;;
             esac
         done
+        if stub_csrf_request "$url" "$out"; then printf '200'; return 0; fi
         printf '<html>login</html>' > "$out"
         printf 'HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n' > "$headers"
         printf '200'
@@ -828,10 +860,16 @@ case_download_maps_auth_failures() (
     CORRELATION_ID=; ENTITY_TYPE=; ENTITY_ID=; SINCE=
     COOKIE_FILE="$SANDBOX/dl-cookies"
     curl() {
-        local headers=""
+        local headers="" out="" url=""
         while [ "$#" -gt 0 ]; do
-            case "$1" in --dump-header) headers="$2"; shift 2 ;; *) shift ;; esac
+            case "$1" in
+                --dump-header) headers="$2"; shift 2 ;;
+                --output) out="$2"; shift 2 ;;
+                -*) shift ;;
+                *) url="$1"; shift ;;
+            esac
         done
+        if stub_csrf_request "$url" "$out"; then printf '200'; return 0; fi
         printf 'HTTP/1.1 403 Forbidden\r\n\r\n' > "$headers"
         printf '403'
     }
@@ -848,10 +886,16 @@ case_download_rejects_transport_failure() (
     CORRELATION_ID=; ENTITY_TYPE=; ENTITY_ID=; SINCE=
     COOKIE_FILE="$SANDBOX/dl-cookies"
     curl() {
-        local headers=""
+        local headers="" out="" url=""
         while [ "$#" -gt 0 ]; do
-            case "$1" in --dump-header) headers="$2"; shift 2 ;; *) shift ;; esac
+            case "$1" in
+                --dump-header) headers="$2"; shift 2 ;;
+                --output) out="$2"; shift 2 ;;
+                -*) shift ;;
+                *) url="$1"; shift ;;
+            esac
         done
+        if stub_csrf_request "$url" "$out"; then printf '200'; return 0; fi
         : > "$headers"
         return 7
     }
@@ -1158,14 +1202,16 @@ case_collect_journal_end_to_end() (
     printf 'session\n' > "$cookie"
     chmod 0600 "$cookie"
     curl() {
-        local body="" headers=""
+        local body="" headers="" url=""
         while [ "$#" -gt 0 ]; do
             case "$1" in
                 --output) body="$2"; shift 2 ;;
                 --dump-header) headers="$2"; shift 2 ;;
-                *) shift ;;
+                -*) shift ;;
+                *) url="$1"; shift ;;
             esac
         done
+        if stub_csrf_request "$url" "$body"; then printf '200'; return 0; fi
         cp "$backend_archive" "$body"
         printf 'HTTP/1.1 200 OK\r\nContent-Type: application/zip\r\n\r\n' > "$headers"
         printf '200'

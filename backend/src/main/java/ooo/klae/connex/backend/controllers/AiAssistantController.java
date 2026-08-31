@@ -46,7 +46,6 @@ import ooo.klae.connex.backend.dto.AiChatTurnAcceptedDto;
 import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
 import ooo.klae.connex.backend.dto.AiChatTurnDto;
 import ooo.klae.connex.backend.dto.PageResponse;
-import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.services.AiAssistantService;
 import ooo.klae.connex.backend.storage.UploadSource;
 
@@ -55,8 +54,6 @@ import ooo.klae.connex.backend.storage.UploadSource;
 @RequestMapping("/api/ai/assistant/sessions")
 @RequiredArgsConstructor
 public class AiAssistantController {
-    private static final String RETAINED_SCOPE = "retained";
-
     private final AiAssistantService assistantService;
     private final AiAssistantTurnService turnService;
     private final AiAssistantToolCallReadService toolCallReadService;
@@ -67,15 +64,19 @@ public class AiAssistantController {
     @GetMapping
     public PageResponse<AiChatSessionDto> page(
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "25") int size,
-            @RequestParam(required = false) String scope) {
-        if (scope == null) {
-            return assistantService.page(page, size);
-        }
-        if (RETAINED_SCOPE.equals(scope)) {
-            return assistantService.pageRetained(page, size);
-        }
-        throw unsupportedScope();
+            @RequestParam(defaultValue = "25") int size) {
+        return assistantService.page(page, size);
+    }
+
+    /**
+     * Returns retained sessions over POST because the read is recorded in the audit trail and
+     * must not be reachable by URL alone.
+     */
+    @PostMapping("/retained")
+    public PageResponse<AiChatSessionDto> pageRetained(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "25") int size) {
+        return assistantService.pageRetained(page, size);
     }
 
     /** Returns pending shared-session invitations addressed to the caller. */
@@ -100,15 +101,20 @@ public class AiAssistantController {
     public AiChatSessionDetailDto get(
             @PathVariable int id,
             @RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "50") int size,
-            @RequestParam(required = false) String scope) {
-        if (scope == null) {
-            return assistantService.get(id, page, size);
-        }
-        if (RETAINED_SCOPE.equals(scope)) {
-            return assistantService.getRetained(id, page, size);
-        }
-        throw unsupportedScope();
+            @RequestParam(defaultValue = "50") int size) {
+        return assistantService.get(id, page, size);
+    }
+
+    /**
+     * Returns one retained session over POST because the read is recorded in the audit trail and
+     * must not be reachable by URL alone.
+     */
+    @PostMapping("/{id:\\d+}/retained")
+    public AiChatSessionDetailDto getRetained(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "50") int size) {
+        return assistantService.getRetained(id, page, size);
     }
 
     /** Renames and/or archives an owned session. */
@@ -268,30 +274,38 @@ public class AiAssistantController {
     @GetMapping("/{sessionId:\\d+}/tool-calls")
     public List<AiAssistantToolCallReadDto> listToolCalls(
             @PathVariable int sessionId,
-            @RequestParam(defaultValue = "false") boolean pendingOnly,
-            @RequestParam(required = false) String scope) {
-        if (scope == null) {
-            return toolCallReadService.list(sessionId, pendingOnly);
-        }
-        if (RETAINED_SCOPE.equals(scope)) {
-            return toolCallReadService.listRetained(sessionId, pendingOnly);
-        }
-        throw unsupportedScope();
+            @RequestParam(defaultValue = "false") boolean pendingOnly) {
+        return toolCallReadService.list(sessionId, pendingOnly);
+    }
+
+    /**
+     * Returns retained tool calls over POST because the read is recorded in the audit trail and
+     * must not be reachable by URL alone.
+     */
+    @PostMapping("/{sessionId:\\d+}/tool-calls/retained")
+    public List<AiAssistantToolCallReadDto> listRetainedToolCalls(
+            @PathVariable int sessionId,
+            @RequestParam(defaultValue = "false") boolean pendingOnly) {
+        return toolCallReadService.listRetained(sessionId, pendingOnly);
     }
 
     /** Returns one viewer-safe write-tool call in the authorized session. */
     @GetMapping("/{sessionId:\\d+}/tool-calls/{toolCallId:\\d+}")
     public AiAssistantToolCallReadDto getToolCall(
             @PathVariable int sessionId,
-            @PathVariable int toolCallId,
-            @RequestParam(required = false) String scope) {
-        if (scope == null) {
-            return toolCallReadService.get(sessionId, toolCallId);
-        }
-        if (RETAINED_SCOPE.equals(scope)) {
-            return toolCallReadService.getRetained(sessionId, toolCallId);
-        }
-        throw unsupportedScope();
+            @PathVariable int toolCallId) {
+        return toolCallReadService.get(sessionId, toolCallId);
+    }
+
+    /**
+     * Returns one retained tool call over POST because the read is recorded in the audit trail and
+     * must not be reachable by URL alone.
+     */
+    @PostMapping("/{sessionId:\\d+}/tool-calls/{toolCallId:\\d+}/retained")
+    public AiAssistantToolCallReadDto getRetainedToolCall(
+            @PathVariable int sessionId,
+            @PathVariable int toolCallId) {
+        return toolCallReadService.getRetained(sessionId, toolCallId);
     }
 
     /** Explicitly approves and executes one confirm-tier tool call. */
@@ -316,9 +330,5 @@ public class AiAssistantController {
             @PathVariable int sessionId,
             @PathVariable int toolCallId) {
         return writeToolService.undo(sessionId, toolCallId);
-    }
-
-    private static BadRequestException unsupportedScope() {
-        return new BadRequestException("Assistant session scope must be retained when provided");
     }
 }

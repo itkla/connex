@@ -39,6 +39,8 @@ WORKSPACE_ID=
 INCLUDE_JOURNAL=false
 JOURNAL_UNIT=connex-backend.service
 JOURNAL_UNIT_SET=false
+CSRF_HEADER_NAME=
+CSRF_TOKEN=
 
 support_bundle_usage() {
     sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
@@ -434,9 +436,46 @@ support_bundle_classify_status() {
     esac
 }
 
+# The bundle endpoint is served over POST because assembling and exporting a bundle writes durable
+# audit_log rows, and a GET would let a cross-site top-level navigation forge those records. POST is
+# CSRF-protected, so the token has to be fetched with the same session cookie first. Spring stores
+# the token in the HTTP session rather than a cookie here, so no cookie jar has to be written back.
+support_bundle_fetch_csrf_token() {
+    local body status
+    body="$WORK_DIR/csrf.json"
+    status="$(curl \
+        --silent \
+        --show-error \
+        --no-progress-meter \
+        --location-trusted \
+        --max-redirs 0 \
+        --proto '=https,http' \
+        --max-time 60 \
+        --cookie "$COOKIE_FILE" \
+        --output "$body" \
+        --write-out '%{http_code}' \
+        "$BASE_URL/api/auth/csrf" 2>/dev/null || true)"
+    if [[ ! "$status" =~ ^[0-9]{3}$ ]]; then
+        support_bundle_log error request_failed reason transport_failure
+        return "$EXIT_API"
+    fi
+    if [ "$status" != "200" ]; then
+        support_bundle_log error request_rejected reason csrf_token_unavailable status "$status" \
+            remedy "sign in as an organization administrator and export a fresh cookie file"
+        return "$EXIT_AUTH"
+    fi
+    CSRF_HEADER_NAME="$(jq -r '.headerName // empty' < "$body")"
+    CSRF_TOKEN="$(jq -r '.token // empty' < "$body")"
+    if [ -z "$CSRF_HEADER_NAME" ] || [ -z "$CSRF_TOKEN" ]; then
+        support_bundle_log error request_failed reason csrf_token_malformed
+        return "$EXIT_API"
+    fi
+}
+
 support_bundle_download() {
     local destination="$1"
     local url status content_type headers
+    support_bundle_fetch_csrf_token || return $?
     url="$BASE_URL/api/orgs/$ORG_ID/support-bundle$(support_bundle_build_query)"
     headers="$WORK_DIR/response-headers"
     local -a curl_arguments=(
@@ -448,7 +487,9 @@ support_bundle_download() {
         --max-redirs 0
         --proto '=https,http'
         --max-time 900
+        --request POST
         --cookie "$COOKIE_FILE"
+        --header "$CSRF_HEADER_NAME: $CSRF_TOKEN"
         --dump-header "$headers"
         --output "$destination"
         --write-out '%{http_code}'

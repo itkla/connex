@@ -157,6 +157,33 @@ class AiAssistantServiceTest extends AbstractServiceTest {
             workspace.getId(), "ai_chat_session", session.getId(), 10, 0).size());
     }
 
+    /**
+     * An administrator reading a session someone else created is a privacy-accountability event
+     * under the APPI entrustee posture, so both the list and the detail read record it. The record
+     * carries only the session id and the scope, never transcript text or any caller-supplied
+     * value, so it cannot be used to plant chosen text in the trail.
+     */
+    @Test
+    void accessibleSessionReadsByAnAdminAreRecordedWithoutCallerSuppliedText() {
+        AiChatSession session = sharedSession(currentUser, "Shared oversight room");
+        User admin = aiUser("admin");
+        chatMapper.insertParticipant(workspace.getId(), session.getId(), admin.getId());
+        authenticateAs(admin, workspace.getId());
+
+        service.get(session.getId(), 1, 50);
+        service.page(1, 25);
+
+        List<AuditLog> records = auditLogMapper.findByEntity(
+            workspace.getId(), "ai_chat_session", session.getId(), 10, 0);
+        assertEquals(2, records.size());
+        records.forEach(record -> {
+            assertEquals("ai.assistant.session.read", record.getAction());
+            assertEquals(admin.getId(), record.getActorId());
+            assertEquals("{\"scope\": \"accessible\"}", record.getChanges());
+            assertEquals("Assistant session " + session.getId(), record.getTargetLabel());
+        });
+    }
+
     @Test
     void sameWorkspaceNonParticipantAndOtherTenantUseIdenticalForbiddenMessage() {
         AiChatSession session = sharedSession(currentUser, "Protected room");

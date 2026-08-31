@@ -28,7 +28,7 @@ An open-ended suppression is forbidden by [STATIC_ANALYSIS.md](STATIC_ANALYSIS.m
 
 | Count | Severity | Rule | Disposition |
 | --- | --- | --- | --- |
-| 38 | high | `java/csrf-unprotected-request-type` | False positive — dismissal pending independent review |
+| 38 | high | `java/csrf-unprotected-request-type` | Split by the 2026-08-30 independent re-review: mostly false positive, **7 real** (remediated below), 2 accepted by design |
 | 6 | high | `java/user-controlled-bypass` | False positive — dismissal pending independent review |
 | 4 | high | `java/polynomial-redos` | **Remediated** |
 | 3 | high | `java/tainted-arithmetic` | False positive — dismissal pending independent review |
@@ -85,6 +85,134 @@ necessarily CSRF-exempt. Re-check that the handler still records nothing before 
 one — that property, not the alert count, is what matters.
 
 ## Remediated
+
+### `java/csrf-unprotected-request-type` — #110, #111, #114, #141, #142, #143, #144 (7 alerts)
+
+The 2026-08-30 independent re-review of the baseline
+([#1296](https://github.com/itkla/connex/issues/1296)) found that seven of the CSRF alerts are
+**real**, not false positives. All seven are a `@GetMapping` that inserts a durable `audit_log` row
+on a normal successful request. `JSESSIONID` is `SameSite=Lax`
+(`backend/src/main/resources/application.yml:524`), and `Lax` **is** sent on cross-site top-level
+`GET` navigation, so an attacker page could navigate a signed-in victim to any of these URLs and
+forge entries in the evidence trail under that victim's actor id. The attacker cannot read the
+response; the write is the impact.
+
+These seven sit in the set of nine CSRF sites that were closed as `fixed` and re-raised under new
+numbers on 2026-08-26 and so never received an individual dismissal record. The log's own standing
+instruction — *"Re-check that the handler still records nothing before dismissing the next one"* —
+is what had not been applied to them.
+
+Each site was decided on its merits, using only the two remedies this log already set as precedent:
+remove the audit write where the read does not warrant an evidence entry, or move the recording
+behind an explicit state-changing route.
+
+| Alert | Handler | Remedy |
+| --- | --- | --- |
+| #141 | `SearchController.search` | **Removed** the audit write |
+| #144 | `SupportBundleController.supportBundle` | **Moved** the whole operation to `POST` |
+| #143 / #142 | `SecretStoreDiagnosticsController` workspace / org diagnostics | **Removed** the audit write |
+| #114 / #111 / #110 | `AiAssistantController` `?scope=retained` reads | **Moved** to explicit `POST` routes |
+
+- **#141 — removed.** `SearchService:117` wrote `auditService.record("search", "search", null,
+  query, ...)`, placing the **raw, untrimmed** caller query in the row's `targetLabel`. That is the
+  worst of the seven: it let a cross-site navigation plant attacker-chosen free text in the trail,
+  where it would later mislead a human reading the audit UI or a downstream consumer of the support
+  bundle's `audit-slice.csv`. No peer read surface — companies, people, deals, notes, tasks — records
+  an access row, and no runbook or compliance document requires one for search, so the write was
+  removed outright, matching the `DocumentDeliveryService.downloadArtifact` precedent. `/api/search`
+  could not have moved to `POST`: `frontend/app/(app)/search/page.tsx` calls it from a React Server
+  Component, and `frontend/app/lib/api.ts` deliberately omits the CSRF header during SSR.
+- **#143 / #142 — removed.** `SecretStoreLifecycleService` wrote a `secret_store.diagnostics.read`
+  row from `diagnosticsForWorkspace` and `diagnosticsForOrg`. The payload is metadata-only key-health
+  counters and never contains plaintext, ciphertext, wrapped data keys, or key material. Decisive
+  fact: `TenantDiagnosticsService:122` and `:149` call those very same methods, so
+  `GET /api/workspaces/{id}/diagnostics` and `GET /api/orgs/{id}/diagnostics` — the endpoints the
+  settings diagnostics panel actually renders — emitted the same row on every panel load and were
+  vulnerable in the same way without being flagged. Moving only the two flagged routes to `POST`
+  would therefore have left the defect reachable. Removing the write closes all four GETs at once.
+  `AuditService.SECRET_ACTIONS` and the `secret_store.diagnostics.read` display label are
+  **deliberately retained**: `AuditService.sensitiveAction` uses them on the read/export path, and
+  `audit_log` is append-only, so historical rows must keep rendering correctly.
+- **#144 — moved to `POST`.** The handler wrote two rows through `recordStrictIndependentScoped`
+  (an independent transaction, so they survive an outer rollback), ran full bundle assembly under a
+  concurrency permit, and returned `Content-Disposition: attachment` — a forged navigation also
+  dropped a ZIP of redacted organization data into the victim's downloads. Those audit rows are a
+  genuine export-disclosure record and had to be kept, so the method was what was wrong. The route is
+  now `POST /api/orgs/{orgId}/support-bundle`. There were no frontend callers;
+  `deploy/support-bundle/collect.sh` now fetches a token from `GET /api/auth/csrf` with the same
+  cookie jar and echoes it in the configured header, and `docs/SUPPORT_BUNDLE.md`,
+  `docs/INTERNAL_OPERATIONS_RUNBOOK.md`, `docs/DEPLOYMENT.md` and
+  `deploy/support-bundle/README.md` were corrected. `docs/SUPPORT_BUNDLE.md` had previously
+  documented this exact exposure as an accepted risk; that paragraph now records the fix.
+- **#114 / #111 / #110 — moved to `POST`.** The `?scope=retained` branches disclose a **departed**
+  workspace member's private assistant transcripts to an `AI_SESSION_ADMIN`, and record the
+  disclosure. That record is a genuine privacy artifact, so removing it was not acceptable; the read
+  moved instead, to `POST /retained`, `POST /{id}/retained`, `POST /{sessionId}/tool-calls/retained`
+  and `POST /{sessionId}/tool-calls/{toolCallId}/retained`. The `scope` query parameter is gone from
+  the four GET handlers, which now fall through to the caller's own accessible-session read — a
+  fail-safe outcome, since that read cannot return a departed member's private session. This cost
+  nothing at the client: no frontend caller ever sent `scope`, and the API-client wrappers do not
+  accept the argument. `AiAssistantController` already served `POST /scope-preview`, a POST that
+  performs a read, so the shape was established in that class.
+- **Deliberately NOT removed: the "accessible"-scope administrative read audit.** Alert #114 is
+  raised on the `get()` handler, which additionally reaches
+  `AiAssistantService.auditAdministrativeReads` and inserts an `ai.assistant.session.read` row with
+  `{"scope": "accessible"}` whenever an `AI_SESSION_ADMIN` reads a session they did not create.
+  Removing it would have made the flagged `GET` handler write-free and fully closed the alert, and
+  an earlier revision of this change did remove it. That removal was **reversed by product
+  decision**: "an administrator read another user's AI session" is a privacy-accountability record
+  under the APPI entrustee posture, and deleting an accountability record to close a CSRF-forgery
+  vector is not an acceptable trade. The record is preserved as it was, reusing the existing
+  `AiAssistantSessionReadAudit` mechanism.
+
+  **Residual, recorded deliberately:** because that row is still written from a `GET`, a cross-site
+  top-level navigation can still cause it, so `#114` is expected to remain open on the `get()`
+  handler even after this change. The severe half of #114 — the `?scope=retained` branch, which
+  disclosed a departed member's private transcript and produced the most damaging false entry — is
+  fully closed by the move to `POST`. Closing the remaining half and preserving the accountability
+  record are mutually exclusive without also serving `GET /api/ai/assistant/sessions/{id}` over
+  `POST`, which would break the primary assistant read path in the SPA. That trade is left to the
+  Security Owner rather than decided here.
+
+  For the record, the exposure the residual row carries is bounded: `auditAdministrativeReads`
+  reaches a session only through the `accessibleSession` SQL fragment
+  (`AiChatMapper.xml:104-114`), which is *own session OR shared session you have joined*, and
+  holding `AI_SESSION_ADMIN` does **not** widen that predicate by one row. A forged row can
+  therefore only ever name a session the victim had already been deliberately granted access to,
+  and it carries no caller-supplied text — only the session id and a fixed scope string — so it
+  cannot be used to plant chosen content in the trail the way #141 could.
+
+Regression coverage: `SearchTenantIsolationTest` asserts a search writes no `search` row and plants
+no caller text in any `target_label`; `SecretStoreLifecycleServiceTest` asserts both diagnostics
+scopes write no row; `SupportBundleControllerTest` asserts a `GET` is refused and never reaches
+assembly; `AiAssistantControllerTest` asserts the retained reads are `POST`-only and that the retired
+`?scope=retained` query string never reaches a recorded read; `AiAssistantServiceTest` asserts an
+admin's accessible-session read is still recorded and that the row carries no caller-supplied text.
+
+### `java/csrf-unprotected-request-type` — #112, #148: accepted by design (`won't fix`)
+
+The same re-review left these two open as UNCERTAIN, on the ground that each persists a
+server-generated timestamp reflecting *when the forged request arrived*. Re-derived at
+`origin/main` = `e5a8d3ee0`, both are accepted rather than changed. **Neither writes to
+`audit_log`**, neither attributes an actor, and — the point the UNCERTAIN framing missed — **neither
+timestamp can be moved anywhere except toward the truth.**
+
+- **#112** — `AiAssistantController.getTurn` → `AiChatTurnPersistenceService.expireIfStale`. The
+  `updateTurnTerminal` statement (`AiChatMapper.xml:640-657`) sets **only** `status` and
+  `terminal_reason`; it writes no timestamp column at all. It is additionally guarded by
+  `AND updated_at <= #{updatedBefore}`, where the cutoff is a full `DURABLE_LIFETIME` in the past, so
+  it fires only on a turn that has been untouched past its expiry and is already due to be
+  `TIMED_OUT`. The only timestamp that moves is the table's own `updated_at` bookkeeping column.
+- **#148** — `WorkflowManualRunController.get` → `completeInvocationIfActive`
+  (`WorkflowOperationsMapper.xml:394-401`) sets `completed_at` on an invocation whose constituent
+  records are **already terminal** and whose `completed_at` is still `NULL`. The earliest value a
+  forged request can write is the invocation's true completion moment, and the next legitimate read
+  would write the same value. An attacker can only make the stamp *more* accurate, never fabricate a
+  completion that did not occur.
+
+The correct dismissal reason for both is **`won't fix` (accepted risk)**, not `false positive` —
+they do mutate durable state on a `GET`, exactly as the query claims. No alert state was changed as
+part of this remediation.
 
 ### `java/spring-disabled-csrf-protection` — #10
 

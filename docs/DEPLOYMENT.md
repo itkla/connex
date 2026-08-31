@@ -662,7 +662,7 @@ with host access, but those
 user-data-bearing lines do not belong in an artefact sent to support.
 
 **Support bundle:** an organization administrator can download a redacted, manifest-bearing
-support bundle from `GET /api/orgs/{orgId}/support-bundle` and hand it to a support engineer, so a
+support bundle from `POST /api/orgs/{orgId}/support-bundle` and hand it to a support engineer, so a
 ticket can be diagnosed without database or SSH access. The bundle carries readiness, allowlisted
 configuration, migration history, redacted client-error metadata, and a windowed audit slice — and
 never carries secrets, hosts, record values, or personal names. The audit slice labels its

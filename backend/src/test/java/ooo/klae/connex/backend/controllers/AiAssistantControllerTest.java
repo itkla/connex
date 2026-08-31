@@ -2,7 +2,10 @@ package ooo.klae.connex.backend.controllers;
 
 import static org.hamcrest.Matchers.hasKey;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -323,17 +326,13 @@ class AiAssistantControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value(29))
             .andExpect(jsonPath("$.requestSummary").value("Assign an owner"));
-        mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls?scope=retained"))
+        mockMvc.perform(post("/api/ai/assistant/sessions/42/tool-calls/retained"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].id").value(29));
-        mockMvc.perform(get(
-                "/api/ai/assistant/sessions/42/tool-calls/29?scope=retained"))
+        mockMvc.perform(post(
+                "/api/ai/assistant/sessions/42/tool-calls/29/retained"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value(29));
-        mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls?scope=all"))
-            .andExpect(status().isBadRequest());
-        mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls/29?scope=all"))
-            .andExpect(status().isBadRequest());
 
         verify(toolCallReadService).list(42, false);
         verify(toolCallReadService).list(42, true);
@@ -369,24 +368,55 @@ class AiAssistantControllerTest {
         verify(service).get(42, 1, 50);
     }
 
+    /**
+     * Retained reads disclose a departed member's transcripts and record the disclosure in the
+     * audit trail, so they are served over {@code POST}. {@code JSESSIONID} is
+     * {@code SameSite=Lax}, which is sent on cross-site top-level {@code GET} navigation, so a
+     * URL alone must never be able to trigger one.
+     */
     @Test
-    void retainedScopeDispatchesToTheSeparateOversightMethods() throws Exception {
+    void retainedReadsAreServedOverPostOnly() throws Exception {
         when(service.pageRetained(1, 25)).thenReturn(new PageResponse<>(List.of(session()), 1));
         when(service.getRetained(42, 1, 50)).thenReturn(detail());
 
-        mockMvc.perform(get("/api/ai/assistant/sessions?scope=retained"))
+        mockMvc.perform(post("/api/ai/assistant/sessions/retained"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.total").value(1));
-        mockMvc.perform(get("/api/ai/assistant/sessions/42?scope=retained"))
+        mockMvc.perform(post("/api/ai/assistant/sessions/42/retained"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.session.id").value(42));
-        mockMvc.perform(get("/api/ai/assistant/sessions?scope=all"))
-            .andExpect(status().isBadRequest());
-        mockMvc.perform(get("/api/ai/assistant/sessions/42?scope=all"))
-            .andExpect(status().isBadRequest());
 
         verify(service).pageRetained(1, 25);
         verify(service).getRetained(42, 1, 50);
+    }
+
+    /**
+     * The retired {@code ?scope=retained} query string must no longer reach any recorded read. It
+     * now falls through to the caller's own accessible-session read, which cannot return a
+     * departed member's private session.
+     */
+    @Test
+    void theRetiredRetainedScopeQueryStringNeverReachesARecordedRead() throws Exception {
+        when(service.page(1, 25)).thenReturn(new PageResponse<>(List.of(session()), 1));
+        when(service.get(42, 1, 50)).thenReturn(detail());
+        when(toolCallReadService.list(42, false)).thenReturn(List.of());
+        when(toolCallReadService.get(42, 29)).thenReturn(null);
+
+        mockMvc.perform(get("/api/ai/assistant/sessions?scope=retained"))
+            .andExpect(status().isOk());
+        mockMvc.perform(get("/api/ai/assistant/sessions/42?scope=retained"))
+            .andExpect(status().isOk());
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls?scope=retained"))
+            .andExpect(status().isOk());
+        mockMvc.perform(get("/api/ai/assistant/sessions/42/tool-calls/29?scope=retained"))
+            .andExpect(status().isOk());
+
+        verify(service).page(1, 25);
+        verify(service).get(42, 1, 50);
+        verify(service, never()).pageRetained(anyInt(), anyInt());
+        verify(service, never()).getRetained(anyInt(), anyInt(), anyInt());
+        verify(toolCallReadService, never()).listRetained(anyInt(), anyBoolean());
+        verify(toolCallReadService, never()).getRetained(anyInt(), anyInt());
     }
 
     @Test
