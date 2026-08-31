@@ -273,7 +273,10 @@ public class ManagedObjectService implements ApplicationRunner {
             UploadSource.from(fileName, contentType, bytes));
     }
 
-    /** Stores one byte-exact immutable document-delivery artifact in managed tenant storage. */
+    /**
+     * Stores one byte-exact immutable document-delivery artifact in managed tenant storage after
+     * inspection against {@link UploadPurpose#DOCUMENT_DELIVERY_ARTIFACT}.
+     */
     @Transactional(propagation = Propagation.MANDATORY)
     public StoredArtifact storeDocumentArtifact(
             int workspaceId,
@@ -287,17 +290,22 @@ public class ManagedObjectService implements ApplicationRunner {
             throw new BadRequestException("Document-delivery artifact is invalid");
         }
         String extension = "application/pdf".equals(contentType) ? "pdf" : "json";
+        InspectedUpload upload = uploadContentInspector.inspect(
+            UploadPurpose.DOCUMENT_DELIVERY_ARTIFACT,
+            UploadSource.from(kind + "." + extension, contentType, bytes));
+        byte[] content = upload.content();
+        byte[] checksum = upload.sha256();
+        UploadSource inspectedSource = upload.source();
         String key = documentArtifactKey(
             workspaceId, deliveryId, kind + "-" + UUID.randomUUID() + "." + extension);
-        byte[] checksum = sha256Digest().digest(bytes);
         storeTenant(
             workspaceId,
             key,
-            UploadSource.from(kind + "." + extension, contentType, bytes),
-            contentType,
+            inspectedSource,
+            upload.contentType(),
             checksum);
         return new StoredArtifact(
-            key, contentType, bytes.length, HexFormat.of().formatHex(checksum));
+            key, upload.contentType(), content.length, HexFormat.of().formatHex(checksum));
     }
 
     @Transactional(propagation = Propagation.MANDATORY)

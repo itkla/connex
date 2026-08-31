@@ -80,6 +80,24 @@ class UploadPolicyTest {
     }
 
     @Test
+    void registersFormatsForEveryUploadPurpose() {
+        for (UploadPurpose purpose : UploadPurpose.values()) {
+            UploadSource source = switch (purpose) {
+                case ATTACHMENT -> UploadSource.from(
+                    "brief.pdf", "application/pdf", new byte[] {1});
+                case INLINE_IMAGE, PROFILE_IMAGE, BUSINESS_CARD_IMAGE -> UploadSource.from(
+                    "photo.png", "image/png", new byte[] {1});
+                case ASSISTANT_CONTEXT, DOCUMENT_DELIVERY_ARTIFACT -> UploadSource.from(
+                    "data.json", "application/json", new byte[] {1});
+                case CSV_IMPORT_SOURCE -> UploadSource.from(
+                    "contacts.csv", "text/csv", new byte[] {1});
+            };
+
+            assertDoesNotThrow(() -> policy.validate(purpose, source));
+        }
+    }
+
+    @Test
     void rejectsConfiguredOversize() {
         assertThrows(
             RequestBodyTooLargeException.class,

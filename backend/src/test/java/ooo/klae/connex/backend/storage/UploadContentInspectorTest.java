@@ -211,6 +211,90 @@ class UploadContentInspectorTest {
             UploadSource.from("fields.docx", docxContentType(), simpleFields)).format());
     }
 
+    @ParameterizedTest
+    @MethodSource("odfDdeDocuments")
+    void rejectsOdfDdeElements(UploadFormat format, String mainXml) throws Exception {
+        byte[] document = odfPackage(format, mainXml, null);
+
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "document." + format.canonicalExtension(),
+                    format.canonicalContentType(),
+                    document)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("odfExcludedNamespaceDocuments")
+    void rejectsOdfElementsOutsideTheNamespaceAllowlist(String mainXml) throws Exception {
+        byte[] document = odfPackage(UploadFormat.ODT, mainXml, null);
+
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "document.odt",
+                    "application/vnd.oasis.opendocument.text",
+                    document)));
+    }
+
+    @Test
+    void rejectsNonEmptyOdfScriptsElement() throws Exception {
+        String mainXml = "<office:document-content xmlns:office=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:office:1.0\">"
+            + "<office:scripts><office:text/></office:scripts>"
+            + "</office:document-content>";
+        byte[] document = odfPackage(UploadFormat.ODT, mainXml, null);
+
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "document.odt",
+                    "application/vnd.oasis.opendocument.text",
+                    document)));
+    }
+
+    @Test
+    void acceptsUnusedActiveOdfNamespaceDeclarationsAndEmptyOfficeContainers()
+            throws Exception {
+        String mainXml = "<office:document-content xmlns:office=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:office:1.0\" "
+            + "xmlns:script=\"urn:oasis:names:tc:opendocument:xmlns:script:1.0\" "
+            + "xmlns:form=\"urn:oasis:names:tc:opendocument:xmlns:form:1.0\">"
+            + "<office:scripts/><office:body><office:text><office:forms/>"
+            + "</office:text></office:body></office:document-content>";
+        byte[] document = odfPackage(UploadFormat.ODT, mainXml, null);
+
+        assertEquals(UploadFormat.ODT, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from(
+                "document.odt",
+                "application/vnd.oasis.opendocument.text",
+                document)).format());
+    }
+
+    @Test
+    void acceptsLegitimateOdfNamesThatContainTheLettersDde() throws Exception {
+        String mainXml = "<office:document-content xmlns:office=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:office:1.0\" "
+            + "xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">"
+            + "<office:body><office:text><text:p>"
+            + "<text:hidden-paragraph text:condition=\"ooow:false\" text:is-hidden=\"true\"/>"
+            + "<text:hidden-text text:condition=\"ooow:false\" text:is-hidden=\"false\" "
+            + "text:string-value=\"visible\"/>"
+            + "</text:p></office:text></office:body></office:document-content>";
+        byte[] document = odfPackage(UploadFormat.ODT, mainXml, null);
+
+        assertEquals(UploadFormat.ODT, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from(
+                "document.odt",
+                "application/vnd.oasis.opendocument.text",
+                document)).format());
+    }
+
     @Test
     void stripsImageMetadataBeforeReturningStorageEligibleBytes() throws Exception {
         byte[] script = "<script>alert(1)</script>".getBytes(StandardCharsets.US_ASCII);
@@ -729,6 +813,54 @@ class UploadContentInspectorTest {
             Arguments.of(UploadPurpose.CSV_IMPORT_SOURCE, "people.csv", "text/csv", UploadFormat.CSV, "name,email\nAda,ada@example.com\n".getBytes(StandardCharsets.UTF_8)),
             Arguments.of(UploadPurpose.ASSISTANT_CONTEXT, "notes.md", "text/markdown", UploadFormat.MARKDOWN, "# Notes\nSafe".getBytes(StandardCharsets.UTF_8)),
             Arguments.of(UploadPurpose.ASSISTANT_CONTEXT, "data.json", "application/json", UploadFormat.JSON, "{\"safe\":true}".getBytes(StandardCharsets.UTF_8)));
+    }
+
+    /** Supplies inert ODF package roots containing each refused DDE element family. */
+    private static Stream<Arguments> odfDdeDocuments() {
+        String officeNamespace = "urn:oasis:names:tc:opendocument:xmlns:office:1.0";
+        String textNamespace = "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
+        String tableNamespace = "urn:oasis:names:tc:opendocument:xmlns:table:1.0";
+        return Stream.of(
+            Arguments.of(
+                UploadFormat.ODT,
+                "<office:document-content xmlns:office=\"" + officeNamespace + "\">"
+                    + "<office:body><office:text><office:dde-source "
+                    + "office:dde-application=\"cmd\" office:dde-topic=\"system\" "
+                    + "office:dde-item=\"calc.exe\" office:automatic-update=\"true\"/>"
+                    + "</office:text></office:body></office:document-content>"),
+            Arguments.of(
+                UploadFormat.ODT,
+                "<office:document-content xmlns:office=\"" + officeNamespace + "\" "
+                    + "xmlns:text=\"" + textNamespace + "\"><office:body><office:text>"
+                    + "<text:dde-connection-decls><text:dde-connection-decl/>"
+                    + "</text:dde-connection-decls></office:text></office:body>"
+                    + "</office:document-content>"),
+            Arguments.of(
+                UploadFormat.ODT,
+                "<office:document-content xmlns:office=\"" + officeNamespace + "\" "
+                    + "xmlns:text=\"" + textNamespace + "\"><office:body><office:text>"
+                    + "<text:dde-connection/></office:text></office:body>"
+                    + "</office:document-content>"),
+            Arguments.of(
+                UploadFormat.ODS,
+                "<office:document-content xmlns:office=\"" + officeNamespace + "\" "
+                    + "xmlns:table=\"" + tableNamespace + "\"><office:body>"
+                    + "<office:spreadsheet><table:dde-links><table:dde-link/>"
+                    + "</table:dde-links></office:spreadsheet></office:body>"
+                    + "</office:document-content>"));
+    }
+
+    /** Supplies inert ODF package roots using excluded or unknown element namespaces. */
+    private static Stream<String> odfExcludedNamespaceDocuments() {
+        String root = "<office:document-content xmlns:office=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:office:1.0\" ";
+        return Stream.of(
+            root + "xmlns:script=\"urn:oasis:names:tc:opendocument:xmlns:script:1.0\">"
+                + "<script:event-listener/></office:document-content>",
+            root + "xmlns:form=\"urn:oasis:names:tc:opendocument:xmlns:form:1.0\">"
+                + "<form:form/></office:document-content>",
+            root + "xmlns:evil=\"http://example.invalid/evil\">"
+                + "<evil:payload/></office:document-content>");
     }
 
     private static Stream<Arguments> invalidFormats() {
