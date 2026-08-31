@@ -18,6 +18,7 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,6 +39,7 @@ import ooo.klae.connex.backend.dto.NotificationCountsDto;
 
 class NotificationMapperTest extends AbstractMapperTest {
     @Autowired private NotificationMapper notificationMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private TaskMapper taskMapper;
 
     @Test
@@ -661,6 +663,63 @@ class NotificationMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void dealCloseWorkIsWorkspaceRecipientSourceAndSnoozeScoped() {
+        User recipient = newUser();
+        User otherRecipient = newUser();
+        Company company = newCompany();
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+        Notification visible = dealClose(recipient, deal, "critical", 301);
+        Notification other = dealClose(otherRecipient, deal, "critical", 302);
+        Notification snoozed = dealClose(recipient, deal, "warning", 303);
+        notificationMapper.upsert(visible);
+        notificationMapper.upsert(other);
+        notificationMapper.upsert(snoozed);
+        notificationMapper.snooze(
+            recipient.getId(), snoozed.getId(), "2026-08-31 00:00:00", "UTC");
+
+        List<Notification> rows = notificationMapper.findActiveDealCloseWork(
+            workspace.getId(), recipient.getId(), "2026-08-30 00:00:00",
+            List.of("critical", "warning"), 10);
+
+        assertEquals(List.of(visible.getId()), rows.stream().map(Notification::getId).toList());
+        assertEquals(1, notificationMapper.countActiveDealCloseWork(
+            workspace.getId(), recipient.getId(), "2026-08-30 00:00:00",
+            List.of("critical", "warning")));
+        assertNull(notificationMapper.findActiveDealCloseByIdForUpdate(
+            workspace.getId(), otherRecipient.getId(), visible.getId(),
+            "2026-08-30 00:00:00", List.of()));
+    }
+
+    @Test
+    void approvalRequestResolutionIsDocumentRecipientAndWorkspaceScoped() {
+        User first = newUser();
+        User second = newUser();
+        Notification firstRequest = approvalRequest(first, 701, 401);
+        Notification secondRequest = approvalRequest(second, 701, 402);
+        Notification otherDocument = approvalRequest(first, 702, 403);
+        notificationMapper.upsert(firstRequest);
+        notificationMapper.upsert(secondRequest);
+        notificationMapper.upsert(otherDocument);
+        jdbcTemplate.update(
+            "UPDATE notification SET dismissed_at = CURRENT_TIMESTAMP WHERE id = ?",
+            firstRequest.getId());
+
+        assertEquals(List.of(first.getId(), second.getId()).stream().sorted().toList(),
+            notificationMapper.findUnresolvedApprovalRequestRecipientIds(workspace.getId(), 701));
+        assertEquals(1, notificationMapper.resolveApprovalRequestsForRecipient(
+            workspace.getId(), 701, first.getId(), "2026-08-30 00:00:00"));
+
+        assertEquals(List.of(first.getId()),
+            notificationMapper.findUnresolvedApprovalRequestRecipientIds(workspace.getId(), 702));
+        assertEquals(List.of(second.getId()),
+            notificationMapper.findUnresolvedApprovalRequestRecipientIds(workspace.getId(), 701));
+        assertEquals(0, notificationMapper.resolveApprovalRequestsForRecipient(
+            workspace.getId() + 1, 701, second.getId(), "2026-08-30 00:00:00"));
+    }
+
+    @Test
     void inactiveMembershipAndDeletedSourcesAreInaccessibleToReadsAndMutations() {
         User recipient = newUser();
         Task task = new Task();
@@ -801,6 +860,33 @@ class NotificationMapperTest extends AbstractMapperTest {
         notification.setData("{\"taskId\":" + sourceId + "}");
         notification.setDedupeKey("task.due:" + sourceId);
         notification.setTriggeredAt(triggeredAt);
+        return notification;
+    }
+
+    private Notification dealClose(User recipient, Deal deal, String severity, int dedupeId) {
+        Notification notification = reminder(
+            recipient, severity, "2026-08-29 00:00:00", dedupeId);
+        notification.setType("deal.close");
+        notification.setCategory("deal");
+        notification.setTitle("Deal closing");
+        notification.setSourceType("deal");
+        notification.setSourceId(deal.getId());
+        notification.setContextType("deal");
+        notification.setContextId(deal.getId());
+        notification.setData("{\"dealId\":" + deal.getId()
+            + ",\"expectedCloseDate\":\"2026-08-31\"}");
+        notification.setDedupeKey("deal.close:" + dedupeId);
+        return notification;
+    }
+
+    private Notification approvalRequest(User recipient, int documentId, int dedupeId) {
+        Notification notification = reminder(
+            recipient, "info", "2026-08-29 00:00:00", dedupeId);
+        notification.setType("document.approval_request");
+        notification.setCategory("document");
+        notification.setSourceType("deal_document");
+        notification.setSourceId(documentId);
+        notification.setDedupeKey("document.approval_request:" + dedupeId);
         return notification;
     }
 }

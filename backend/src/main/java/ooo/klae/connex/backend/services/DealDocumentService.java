@@ -75,6 +75,7 @@ public class DealDocumentService {
     private final DocumentDeliveryService documentDeliveryService;
     private final RuleTriggerPublisher ruleTriggers;
     private final ObjectMapper objectMapper;
+    private final ApprovalMutationRetryService approvalMutationRetryService;
 
     private static final Set<String> CLIENT_TARGET_STATUSES = Set.of("draft", "final", "superseded");
     private static final int MAX_VERSION_ATTEMPTS = 5;
@@ -217,20 +218,28 @@ public class DealDocumentService {
      * approval policy matches; the approval flow is the only path to {@code final} for such
      * documents. Superseding a sent document voids its live delivery before the status changes.
      */
-    @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealDocumentDto updateStatus(int dealId, int documentId, String status) {
+        if (status == null || !CLIENT_TARGET_STATUSES.contains(status)) {
+            throw new BadRequestException("status must be one of: draft, final, superseded");
+        }
+        return approvalMutationRetryService.execute(() -> updateStatusLocked(
+            dealId, documentId, status));
+    }
+
+    private DealDocumentDto updateStatusLocked(int dealId, int documentId, String status) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
-        Set<Permission> lockedPermissions = workspaceService.lockedPermissionsFor(workspaceId, actorId);
+        DocumentApprovalService.ApprovalMutationLocks approvalLocks =
+            approvalService.lockApprovalMutationRecipients(workspaceId, documentId, actorId);
+        Set<Permission> lockedPermissions = approvalLocks.actorPermissions();
         if (!lockedPermissions.contains(Permission.DEAL_UPDATE)) {
             throw new ForbiddenException("Requires the DEAL_UPDATE permission in this workspace");
         }
         Deal deal = lockDeal(workspaceId, dealId);
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
-        if (status == null || !CLIENT_TARGET_STATUSES.contains(status)) {
-            throw new BadRequestException("status must be one of: draft, final, superseded");
-        }
+        approvalService.requireApprovalMutationRecipientsUnchanged(
+            approvalLocks, workspaceId, documentId);
         List<ApprovalPolicy> policies = policyService.activePolicies(workspaceId);
         if (document.getStatus().equals(status)) {
             return enrichWith(workspaceId, document, policies);
@@ -242,7 +251,8 @@ public class DealDocumentService {
             requireNoMatchingPolicy(policies, document);
         }
         if ("pending_approval".equals(document.getStatus())) {
-            approvalService.cancelPendingOnSupersede(workspaceId, deal, document);
+            approvalService.cancelPendingOnSupersede(
+                workspaceId, deal, document, approvalLocks);
         }
         if ("superseded".equals(status) && "sent".equals(document.getStatus())) {
             if (!lockedPermissions.contains(Permission.DOCUMENT_SEND)) {

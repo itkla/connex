@@ -173,6 +173,41 @@ public interface NotificationMapper {
         @Param("id") int id
     );
 
+    List<Notification> findActiveDealCloseWork(
+        @Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId,
+        @Param("asOf") String asOf,
+        @Param("severities") List<String> severities,
+        @Param("limit") int limit
+    );
+
+    long countActiveDealCloseWork(
+        @Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId,
+        @Param("asOf") String asOf,
+        @Param("severities") List<String> severities
+    );
+
+    Notification findActiveDealCloseByIdForUpdate(
+        @Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId,
+        @Param("id") int id,
+        @Param("asOf") String asOf,
+        @Param("severities") List<String> severities
+    );
+
+    List<Integer> findUnresolvedApprovalRequestRecipientIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("documentId") int documentId
+    );
+
+    int resolveApprovalRequestsForRecipient(
+        @Param("workspaceId") int workspaceId,
+        @Param("documentId") int documentId,
+        @Param("recipientId") int recipientId,
+        @Param("resolvedAt") String resolvedAt
+    );
+
     int markRead(
         @Param("recipientId") int recipientId,
         @Param("id") int id
@@ -189,6 +224,18 @@ public interface NotificationMapper {
     );
 
     int restore(
+        @Param("recipientId") int recipientId,
+        @Param("id") int id
+    );
+
+    int restoreActionableApprovalRequest(
+        @Param("workspaceId") int workspaceId,
+        @Param("recipientId") int recipientId,
+        @Param("id") int id
+    );
+
+    int restoreResolvedApprovalRequest(
+        @Param("workspaceId") int workspaceId,
         @Param("recipientId") int recipientId,
         @Param("id") int id
     );

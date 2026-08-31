@@ -579,15 +579,63 @@ public class WorkspaceService {
     }
 
     /**
-     * Holds the active workspace authorization root exclusively for a reconciliation sweep. The
-     * lock serializes explicit authorization-root mutations and active membership inserts whose
-     * foreign-key checks take a shared lock on this workspace row. Member and permission reads made
-     * after it remain valid until the surrounding transaction completes.
+     * Locks the actor and every possible approval-notification recipient through the global
+     * user-root, workspace-root, membership, and custom-role hierarchy. Recipient memberships may
+     * be inactive because terminal convergence must still update their retained notifications.
      */
-    void lockApprovalReconciliationAuthorizationRoot(int workspaceId) {
-        if (workspaceMapper.lockActiveIdentity(workspaceId) == null) {
-            throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
+    public Set<Permission> lockApprovalMutationMemberships(
+            int workspaceId, int actorId, Set<Integer> recipientIds) {
+        Objects.requireNonNull(recipientIds, "recipientIds");
+        TreeSet<Integer> userIds = new TreeSet<>(recipientIds);
+        if (!systemActor.is(actorId)) {
+            userIds.add(actorId);
         }
+        boolean actorUserAvailable = systemActor.is(actorId);
+        for (int userId : userIds) {
+            Integer lockedUserId = userMapper.lockByIdForShare(userId);
+            if (userId == actorId) {
+                actorUserAvailable = lockedUserId != null
+                    && !userMapper.isAccountDeletionReserved(userId);
+            }
+        }
+        if (workspaceMapper.lockActiveWorkspaceForShare(workspaceId) == null) {
+            return EnumSet.noneOf(Permission.class);
+        }
+        Map<Integer, WorkspaceMember> memberships = new LinkedHashMap<>();
+        TreeSet<Integer> roleIds = new TreeSet<>();
+        for (int userId : userIds) {
+            WorkspaceMember membership = workspaceMapper.lockAuthorizationMembership(
+                workspaceId, userId);
+            if (isExactMembership(membership, workspaceId, userId)) {
+                memberships.put(userId, membership);
+                if ("active".equals(membership.getStatus()) && membership.getRoleId() != null) {
+                    roleIds.add(membership.getRoleId());
+                }
+            }
+        }
+        Map<Integer, Set<Permission>> rolePermissions = new LinkedHashMap<>();
+        for (int roleId : roleIds) {
+            if (roleMapper.lockRole(workspaceId, roleId) != null) {
+                List<String> lockedPermissions = roleMapper.lockPermissions(workspaceId, roleId);
+                if (lockedPermissions != null) {
+                    rolePermissions.put(roleId, parsePermissions(lockedPermissions));
+                }
+            }
+        }
+        if (systemActor.is(actorId)) {
+            return systemActor.permissions();
+        }
+        WorkspaceMember actorMembership = memberships.get(actorId);
+        if (!actorUserAvailable || actorMembership == null
+                || !"active".equals(actorMembership.getStatus())) {
+            return EnumSet.noneOf(Permission.class);
+        }
+        if (actorMembership.getRoleId() != null) {
+            return rolePermissions.getOrDefault(
+                actorMembership.getRoleId(), EnumSet.noneOf(Permission.class));
+        }
+        Role role = Role.of(actorMembership.getRole());
+        return role == null ? EnumSet.noneOf(Permission.class) : builtInPermissions(role);
     }
 
     /** Returns the current member's effective permissions in the active workspace. */

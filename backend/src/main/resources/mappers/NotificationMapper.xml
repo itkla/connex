@@ -527,6 +527,83 @@
     FOR UPDATE
   </select>
 
+  <sql id="activeDealCloseWorkScope">
+    n.workspace_id = #{workspaceId}
+    AND n.recipient_id = #{recipientId}
+    AND n.type = 'deal.close'
+    AND n.source_type = 'deal'
+    AND n.dismissed_at IS NULL
+    AND n.resolved_at IS NULL
+    AND (n.snoozed_until IS NULL OR n.snoozed_until &lt;= #{asOf})
+    AND EXISTS (
+      SELECT 1 FROM workspace_member work_member
+      WHERE work_member.workspace_id = #{workspaceId}
+        AND work_member.user_id = #{recipientId}
+        AND work_member.status = 'active'
+    )
+    AND EXISTS (
+      SELECT 1 FROM deal work_deal
+      WHERE work_deal.workspace_id = #{workspaceId}
+        AND work_deal.id = n.source_id
+    )
+    <if test="severities != null and !severities.isEmpty()">
+      AND n.severity IN
+      <foreach collection="severities" item="severity" open="(" separator="," close=")">
+        #{severity}
+      </foreach>
+    </if>
+  </sql>
+
+  <select id="findActiveDealCloseWork" resultMap="NotificationResult">
+    SELECT <include refid="notificationColumns"/>
+    FROM notification n
+    WHERE <include refid="activeDealCloseWorkScope"/>
+    ORDER BY
+      CASE n.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+      STR_TO_DATE(JSON_UNQUOTE(JSON_EXTRACT(n.data, '$.expectedCloseDate')), '%Y-%m-%d'),
+      COALESCE(n.updated_at, n.triggered_at),
+      n.id
+    LIMIT #{limit}
+  </select>
+
+  <select id="countActiveDealCloseWork" resultType="long">
+    SELECT COUNT(*)
+    FROM notification n
+    WHERE <include refid="activeDealCloseWorkScope"/>
+  </select>
+
+  <select id="findActiveDealCloseByIdForUpdate" resultMap="NotificationResult">
+    SELECT <include refid="notificationColumns"/>
+    FROM notification n
+    WHERE <include refid="activeDealCloseWorkScope"/>
+      AND n.id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="findUnresolvedApprovalRequestRecipientIds" resultType="int">
+    SELECT DISTINCT recipient_id
+    FROM notification
+    WHERE workspace_id = #{workspaceId}
+      AND source_type = 'deal_document'
+      AND source_id = #{documentId}
+      AND type = 'document.approval_request'
+      AND resolved_at IS NULL
+    ORDER BY recipient_id
+  </select>
+
+  <update id="resolveApprovalRequestsForRecipient">
+    UPDATE notification
+    SET resolved_at = #{resolvedAt},
+        snoozed_until = NULL,
+        snooze_timezone = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND source_type = 'deal_document'
+      AND source_id = #{documentId}
+      AND recipient_id = #{recipientId}
+      AND type = 'document.approval_request'
+      AND resolved_at IS NULL
+  </update>
+
   <update id="markRead">
     UPDATE notification n
     SET read_at = CURRENT_TIMESTAMP
@@ -567,6 +644,36 @@
       AND <include refid="contextAccessible"/>
       AND n.id = #{id}
       AND (n.dismissed_at IS NOT NULL OR n.resolved_at IS NOT NULL)
+  </update>
+
+  <update id="restoreActionableApprovalRequest">
+    UPDATE notification n
+    SET dismissed_at = NULL, resolved_at = NULL, read_at = NULL,
+        snoozed_until = NULL, snooze_timezone = NULL
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+      AND n.workspace_id = #{workspaceId}
+      AND n.id = #{id}
+      AND n.type = 'document.approval_request'
+      AND n.source_type = 'deal_document'
+      AND (n.dismissed_at IS NOT NULL OR n.resolved_at IS NOT NULL)
+  </update>
+
+  <update id="restoreResolvedApprovalRequest">
+    UPDATE notification n
+    SET dismissed_at = NULL, resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP), read_at = NULL,
+        snoozed_until = NULL, snooze_timezone = NULL
+    WHERE <include refid="inboxScope"/>
+      AND <include refid="contentAccessible"/>
+      AND <include refid="contextAccessible"/>
+      AND n.workspace_id = #{workspaceId}
+      AND n.id = #{id}
+      AND n.type = 'document.approval_request'
+      AND n.source_type = 'deal_document'
+      AND (n.dismissed_at IS NOT NULL OR n.resolved_at IS NULL
+        OR n.read_at IS NOT NULL OR n.snoozed_until IS NOT NULL
+        OR n.snooze_timezone IS NOT NULL)
   </update>
 
   <update id="snooze">

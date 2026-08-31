@@ -105,6 +105,52 @@
     LIMIT #{limit}
   </select>
 
+  <sql id="workUrgency">
+    CASE
+      WHEN due_date IS NOT NULL AND due_date &lt; #{today} THEN 'critical'
+      WHEN due_date = #{today} THEN 'high'
+      WHEN due_date IS NOT NULL AND due_date &lt;= DATE_ADD(#{today}, INTERVAL 7 DAY) THEN 'normal'
+      ELSE 'low'
+    END
+  </sql>
+
+  <sql id="openAssignedWorkScope">
+    workspace_id = #{workspaceId}
+    AND assigned_to_id = #{assignedToId}
+    AND completed = FALSE
+    AND status IN ('todo', 'in_progress')
+    <if test="urgencies != null and !urgencies.isEmpty()">
+      AND <include refid="workUrgency"/> IN
+      <foreach collection="urgencies" item="urgency" open="(" separator="," close=")">
+        #{urgency}
+      </foreach>
+    </if>
+  </sql>
+
+  <select id="findOpenAssignedWork" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/>
+    FROM task
+    WHERE <include refid="openAssignedWorkScope"/>
+    ORDER BY
+      CASE <include refid="workUrgency"/>
+        WHEN 'critical' THEN 0
+        WHEN 'high' THEN 1
+        WHEN 'normal' THEN 2
+        ELSE 3
+      END,
+      due_date IS NULL,
+      due_date,
+      COALESCE(updated_at, created_at),
+      id
+    LIMIT #{limit}
+  </select>
+
+  <select id="countOpenAssignedWork" resultType="long">
+    SELECT COUNT(*)
+    FROM task
+    WHERE <include refid="openAssignedWorkScope"/>
+  </select>
+
   <!-- Overdue first, then soonest due. The brief states counts and the first rows only, so the
        ordering is what decides which commitments are named at all. -->
   <select id="getAiAssistantWorkCommitments"

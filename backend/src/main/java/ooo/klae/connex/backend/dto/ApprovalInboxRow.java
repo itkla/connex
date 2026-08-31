@@ -20,6 +20,9 @@ package ooo.klae.connex.backend.dto;
  * @param escalatedAt   when the step widened after its deadline, null when it never did
  * @param requestedBy   requesting user id
  * @param requestedAt   when approval was requested
+ * @param urgencyRank   exact My Work urgency band rank at the requested snapshot
+ * @param dueDateKey    nullable-last UTC due-date ordering key
+ * @param freshnessAt   latest authoritative chain state change ordering key
  */
 public record ApprovalInboxRow(
     int approvalId,
@@ -36,6 +39,14 @@ public record ApprovalInboxRow(
     String dueAt,
     String escalatedAt,
     Integer requestedBy,
-    String requestedAt
+    String requestedAt,
+    int urgencyRank,
+    String dueDateKey,
+    String freshnessAt
 ) {
+    /** Returns this raw row's complete approval-provider keyset cursor. */
+    public ApprovalInboxCursor cursor() {
+        return new ApprovalInboxCursor(
+            urgencyRank, dueDateKey, freshnessAt, approvalId, stepId);
+    }
 }

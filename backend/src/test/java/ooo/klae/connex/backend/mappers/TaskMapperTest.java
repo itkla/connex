@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.mappers;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -211,6 +212,38 @@ class TaskMapperTest extends AbstractMapperTest {
         assertEquals(List.of(first.getId(), second.getId()), page.stream().map(Task::getId).toList());
         assertEquals(3, taskMapper.countTasks(pageWorkspace.getId()));
         assertTrue(page.stream().noneMatch(task -> task.getId() == foreign.getId()));
+    }
+
+    @Test
+    void openAssignedWorkIsWorkspaceActorUrgencyAndStateScoped() {
+        User actor = newUser();
+        User other = newUser();
+        Task overdue = build("overdue", actor, null, null);
+        overdue.setDueDate("2026-08-29");
+        taskMapper.insert(overdue);
+        Task today = build("today", actor, null, null);
+        today.setDueDate("2026-08-30");
+        taskMapper.insert(today);
+        Task otherActor = build("other", other, null, null);
+        otherActor.setDueDate("2026-08-29");
+        taskMapper.insert(otherActor);
+        Workspace foreignWorkspace = newWorkspace();
+        Task foreign = build("foreign", actor, null, null);
+        foreign.setWorkspaceId(foreignWorkspace.getId());
+        foreign.setDueDate("2026-08-29");
+        taskMapper.insert(foreign);
+        taskMapper.moveTask(workspace.getId(), today.getId(), "done", true, 0);
+
+        List<Task> rows = taskMapper.findOpenAssignedWork(
+            workspace.getId(), actor.getId(), LocalDate.parse("2026-08-30"),
+            Set.of("critical"), 10);
+
+        assertEquals(List.of(overdue.getId()), rows.stream().map(Task::getId).toList());
+        assertEquals(1, taskMapper.countOpenAssignedWork(
+            workspace.getId(), actor.getId(), LocalDate.parse("2026-08-30"),
+            Set.of("critical")));
+        assertEquals(1, taskMapper.countOpenAssignedWork(
+            workspace.getId(), actor.getId(), LocalDate.parse("2026-08-30"), Set.of()));
     }
 
     @Test

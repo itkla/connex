@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.beans.DocumentApprovalStep;
 import ooo.klae.connex.backend.beans.DocumentApprovalStepAssignment;
 import ooo.klae.connex.backend.dto.ApprovalImpactSummaryRow;
 import ooo.klae.connex.backend.dto.ApprovalInboxRow;
+import ooo.klae.connex.backend.dto.ApprovalInboxCursor;
 import ooo.klae.connex.backend.dto.ApprovalReminderRow;
 
 /** Mapper for {@code document_approval} and its frozen chain; every statement is workspace-scoped. */
@@ -71,5 +72,6 @@ public interface DocumentApprovalMapper {
     int advanceRemindedRound(@Param("workspaceId") int workspaceId, @Param("id") int id,
         @Param("round") int round, @Param("expectedRound") int expectedRound);
     List<ApprovalInboxRow> findActionableSteps(@Param("workspaceId") int workspaceId,
-        @Param("userId") int userId, @Param("offset") int offset, @Param("limit") int limit);
+        @Param("userId") int userId, @Param("asOf") String asOf,
+        @Param("after") ApprovalInboxCursor after, @Param("limit") int limit);
 }
