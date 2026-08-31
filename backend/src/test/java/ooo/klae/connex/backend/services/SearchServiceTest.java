@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.verify;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -10,6 +11,7 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,6 +32,7 @@ import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.SearchResultsDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.DocumentTemplateMapper;
@@ -37,6 +40,7 @@ import ooo.klae.connex.backend.mappers.ProductMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.util.LikePattern;
 
 @Transactional(isolation = Isolation.READ_COMMITTED)
 class SearchServiceTest extends AbstractServiceTest {
@@ -52,6 +56,7 @@ class SearchServiceTest extends AbstractServiceTest {
     @Autowired private DealDocumentMapper dealDocumentMapper;
     @Autowired private WorkflowMapper workflowMapper;
     @Autowired private RoleMapper roleMapper;
+    @MockitoSpyBean private AttachmentMapper attachmentMapper;
 
     @Test
     void blankQueryReturnsEmptyResults() {
@@ -76,6 +81,16 @@ class SearchServiceTest extends AbstractServiceTest {
         Company company = newCompany();
         SearchResultsDto results = searchService.search(company.getName());
         assertTrue(results.getCompanies().stream().anyMatch(c -> c.getId() == company.getId()));
+    }
+
+    @Test
+    void attachmentSearchReceivesCurrentUserId() {
+        String query = "attachment-user-" + unique();
+
+        searchService.search(query);
+
+        verify(attachmentMapper).search(
+            workspace.getId(), LikePattern.containing(query), currentUser.getId());
     }
 
     @Test

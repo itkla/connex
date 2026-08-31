@@ -58,13 +58,13 @@ class AttachmentReadServiceTest {
         Attachment second = attachment(2, 5, "user", 9, 8, null);
         Attachment third = attachment(3, 5, "user", 8, 7, null);
         List<Attachment> attachments = List.of(first, second, third);
-        when(attachmentMapper.getAll(5)).thenReturn(attachments);
+        when(attachmentMapper.getAll(5, 7)).thenReturn(attachments);
         when(userMapper.getDisplayNamesByIds(List.of(7, 8))).thenReturn(List.of(
             new UserDisplayNameDto(7, "User Seven")));
         when(userMapper.getActiveWorkspaceMemberDisplayNamesByIds(5, List.of(8, 9)))
             .thenReturn(List.of(new UserDisplayNameDto(9, "User Nine")));
 
-        List<Attachment> result = service.getAll(5);
+        List<Attachment> result = service.getAll(5, 7);
 
         assertSame(attachments, result);
         assertEquals(List.of(1, 2, 3), result.stream().map(Attachment::getId).toList());
@@ -84,10 +84,10 @@ class AttachmentReadServiceTest {
         for (int id = 1; id <= 1_001; id++) {
             attachments.add(attachment(id, 5, "company", id, id, null));
         }
-        when(attachmentMapper.getAll(5)).thenReturn(attachments);
+        when(attachmentMapper.getAll(5, 7)).thenReturn(attachments);
         when(userMapper.getDisplayNamesByIds(any())).thenReturn(List.of());
 
-        service.getAll(5);
+        service.getAll(5, 7);
 
         ArgumentCaptor<List<Integer>> batches = ArgumentCaptor.captor();
         verify(userMapper, times(2)).getDisplayNamesByIds(batches.capture());
@@ -97,10 +97,10 @@ class AttachmentReadServiceTest {
 
     @Test
     void hydrationRejectsRowsOutsideTheRequestedWorkspaceBeforeControlLookup() {
-        when(attachmentMapper.getAll(5)).thenReturn(List.of(
+        when(attachmentMapper.getAll(5, 7)).thenReturn(List.of(
             attachment(1, 6, "company", 41, 7, null)));
 
-        assertThrows(IllegalStateException.class, () -> service.getAll(5));
+        assertThrows(IllegalStateException.class, () -> service.getAll(5, 7));
 
         verify(tenantWorkScope, never()).unrouted(any());
         verify(userMapper, never()).getDisplayNamesByIds(any());
@@ -109,12 +109,12 @@ class AttachmentReadServiceTest {
     @Test
     void hydrationRejectsControlResultsOutsideTheirCandidateBatch() {
         allowUnroutedWork();
-        when(attachmentMapper.getAll(5)).thenReturn(List.of(
+        when(attachmentMapper.getAll(5, 7)).thenReturn(List.of(
             attachment(1, 5, "company", 41, 7, null)));
         when(userMapper.getDisplayNamesByIds(List.of(7)))
             .thenReturn(List.of(new UserDisplayNameDto(8, "Escaped")));
 
-        assertThrows(IllegalStateException.class, () -> service.getAll(5));
+        assertThrows(IllegalStateException.class, () -> service.getAll(5, 7));
     }
 
     @Test
@@ -124,12 +124,12 @@ class AttachmentReadServiceTest {
         Attachment otherUploader = attachment(2, 5, "company", 42, 8, null);
         Attachment currentTarget = attachment(3, 5, "user", 7, 8, null);
         Attachment otherTarget = attachment(4, 5, "user", 8, 7, null);
-        when(attachmentMapper.getAll(5)).thenReturn(List.of(
+        when(attachmentMapper.getAll(5, 7)).thenReturn(List.of(
             currentUploader, otherUploader, currentTarget, otherTarget));
         when(authService.getCurrentPrincipal()).thenReturn(principal);
         TransactionSynchronizationManager.setActualTransactionActive(true);
 
-        assertThrows(IllegalStateException.class, () -> service.getAll(5));
+        assertThrows(IllegalStateException.class, () -> service.getAll(5, 7));
 
         verify(tenantWorkScope, never()).unrouted(any());
         verify(userMapper, never()).getDisplayNamesByIds(any());
@@ -140,16 +140,25 @@ class AttachmentReadServiceTest {
         User principal = user(7, "Current User");
         Attachment currentUploader = attachment(1, 5, "company", 41, 7, null);
         Attachment currentTarget = attachment(2, 5, "user", 7, 7, null);
-        when(attachmentMapper.getAll(5)).thenReturn(List.of(currentUploader, currentTarget));
+        when(attachmentMapper.getAll(5, 7)).thenReturn(List.of(currentUploader, currentTarget));
         when(authService.getCurrentPrincipal()).thenReturn(principal);
         TransactionSynchronizationManager.setActualTransactionActive(true);
 
-        service.getAll(5);
+        service.getAll(5, 7);
 
         assertEquals("Current User", currentUploader.getUploadedBy().getDisplayName());
         assertEquals("Current User", currentTarget.getUploadedBy().getDisplayName());
         assertEquals("Current User", currentTarget.getEntityLabel());
         verify(tenantWorkScope, never()).unrouted(any());
+    }
+
+    @Test
+    void getAllThreadsCurrentUserIdToMapper() {
+        when(attachmentMapper.getAll(5, 7)).thenReturn(List.of());
+
+        service.getAll(5, 7);
+
+        verify(attachmentMapper).getAll(5, 7);
     }
 
     @Test

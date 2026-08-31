@@ -39,9 +39,9 @@ public class AttachmentReadService {
             attachmentMapper.getByEntity(workspaceId, entityType, entityId));
     }
 
-    /** Returns all attachments in one workspace with user labels hydrated separately. */
-    public List<Attachment> getAll(int workspaceId) {
-        return hydrate(workspaceId, attachmentMapper.getAll(workspaceId));
+    /** Returns all attachments visible to one workspace member with user labels hydrated separately. */
+    public List<Attachment> getAll(int workspaceId, int currentUserId) {
+        return hydrate(workspaceId, attachmentMapper.getAll(workspaceId, currentUserId));
     }
 
     /** Returns one workspace-owned attachment with user labels hydrated separately. */

@@ -131,7 +131,7 @@ public class SearchService {
             notes.stream().map(NoteDto::from).toList(),
             tasks.stream().map(TaskDto::from).toList(),
             userMapper.search(workspaceId, pattern).stream().map(UserDto::from).toList(),
-            attachmentMapper.search(workspaceId, pattern).stream().map(AttachmentDto::from).toList(),
+            attachmentMapper.search(workspaceId, pattern, userId).stream().map(AttachmentDto::from).toList(),
             productMapper.search(workspaceId, pattern),
             gated(permissions, Permission.CAMPAIGN_VIEW,
                 () -> campaignMapper.searchCampaigns(workspaceId, pattern)),

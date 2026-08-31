@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.mappers;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -12,13 +14,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.FacetCount;
 
 class AttachmentMapperTest extends AbstractMapperTest {
 
     @Autowired AttachmentMapper attachmentMapper;
+    @Autowired NoteMapper noteMapper;
 
     private Attachment build(int workspaceId, String fileName, String entityType, int entityId, User uploadedBy) {
         Attachment a = new Attachment();
@@ -119,10 +124,11 @@ class AttachmentMapperTest extends AbstractMapperTest {
      */
     @Test
     void getAll_includesInsertedRow() {
-        Attachment a = build(workspace.getId(), "listed.pdf", "deal", 1, newUser());
+        User user = newUser();
+        Attachment a = build(workspace.getId(), "listed.pdf", "deal", 1, user);
         attachmentMapper.insert(a);
 
-        List<Attachment> all = attachmentMapper.getAll(workspace.getId());
+        List<Attachment> all = attachmentMapper.getAll(workspace.getId(), user.getId());
 
         assertTrue(all.stream().anyMatch(x -> x.getId() == a.getId()));
     }
@@ -142,7 +148,8 @@ class AttachmentMapperTest extends AbstractMapperTest {
         attachmentMapper.insert(foreign);
 
         assertNull(attachmentMapper.getById(workspace.getId(), foreign.getId()));
-        assertTrue(attachmentMapper.getAll(workspace.getId()).stream().noneMatch(a -> a.getId() == foreign.getId()));
+        assertTrue(attachmentMapper.getAll(workspace.getId(), user.getId()).stream()
+            .noneMatch(a -> a.getId() == foreign.getId()));
         assertTrue(attachmentMapper.getByEntity(workspace.getId(), "deal", 1).stream().noneMatch(a -> a.getId() == foreign.getId()));
 
         // cross-workspace delete affects zero rows; the foreign row survives in its own workspace
@@ -150,8 +157,126 @@ class AttachmentMapperTest extends AbstractMapperTest {
         assertNotNull(attachmentMapper.getById(other.getId(), foreign.getId()));
 
         // facet counts are per-workspace
-        long otherTotal = attachmentMapper.totalCount(other.getId());
+        long otherTotal = attachmentMapper.totalCount(other.getId(), user.getId());
         assertEquals(1, otherTotal);
+    }
+
+    @Test
+    void aggregateReadsFilterPrivateAndDanglingNoteAttachments() {
+        Workspace visibilityWorkspace = newWorkspace();
+        User author = newUser();
+        User reader = newUser();
+        workspaceMapper.addMember(visibilityWorkspace.getId(), author.getId(), "member");
+        workspaceMapper.addMember(visibilityWorkspace.getId(), reader.getId(), "member");
+        Note privateNote = newNote(visibilityWorkspace.getId(), author, "private");
+        Note workspaceNote = newNote(visibilityWorkspace.getId(), author, "workspace");
+        Company company = newCompany(visibilityWorkspace.getId());
+        Tag privateTag = newTag(visibilityWorkspace.getId());
+        Tag visibleTag = newTag(visibilityWorkspace.getId());
+        Tag danglingTag = newTag(visibilityWorkspace.getId());
+        Attachment privateAttachment = build(
+            visibilityWorkspace.getId(), "private-secret.zip", "note", privateNote.getId(), author);
+        privateAttachment.setContentType("application/zip");
+        privateAttachment.setSize(101L);
+        Attachment workspaceAttachment = build(
+            visibilityWorkspace.getId(), "workspace-visible.pdf", "note", workspaceNote.getId(), author);
+        workspaceAttachment.setSize(20L);
+        Attachment danglingAttachment = build(
+            visibilityWorkspace.getId(), "dangling.txt", "note", -1, author);
+        danglingAttachment.setContentType("text/plain");
+        danglingAttachment.setSize(1_000L);
+        Attachment companyAttachment = build(
+            visibilityWorkspace.getId(), "company.png", "company", company.getId(), author);
+        companyAttachment.setContentType("image/png");
+        companyAttachment.setSize(30L);
+        attachmentMapper.insert(privateAttachment);
+        attachmentMapper.insert(workspaceAttachment);
+        attachmentMapper.insert(danglingAttachment);
+        attachmentMapper.insert(companyAttachment);
+        attachmentMapper.addTag(
+            visibilityWorkspace.getId(), privateAttachment.getId(), privateTag.getId());
+        attachmentMapper.addTag(
+            visibilityWorkspace.getId(), workspaceAttachment.getId(), visibleTag.getId());
+        attachmentMapper.addTag(
+            visibilityWorkspace.getId(), companyAttachment.getId(), visibleTag.getId());
+        attachmentMapper.addTag(
+            visibilityWorkspace.getId(), danglingAttachment.getId(), danglingTag.getId());
+        List<Integer> authorIds = sortedIds(
+            privateAttachment, workspaceAttachment, companyAttachment);
+        List<Integer> readerIds = sortedIds(workspaceAttachment, companyAttachment);
+
+        assertEquals(authorIds, sortedIds(
+            attachmentMapper.getAll(visibilityWorkspace.getId(), author.getId())));
+        assertEquals(readerIds, sortedIds(
+            attachmentMapper.getAll(visibilityWorkspace.getId(), reader.getId())));
+        assertEquals(authorIds, sortedIds(attachmentMapper.getPage(
+            visibilityWorkspace.getId(), author.getId(), null, null,
+            null, null, null, null, 100, 0)));
+        assertEquals(readerIds, sortedIds(attachmentMapper.getPage(
+            visibilityWorkspace.getId(), reader.getId(), null, null,
+            null, null, null, null, 100, 0)));
+        assertEquals(3, attachmentMapper.countPage(
+            visibilityWorkspace.getId(), author.getId(), null, null,
+            null, null, null));
+        assertEquals(2, attachmentMapper.countPage(
+            visibilityWorkspace.getId(), reader.getId(), null, null,
+            null, null, null));
+        assertEquals(List.of(privateAttachment.getId()), sortedIds(attachmentMapper.getPage(
+            visibilityWorkspace.getId(), author.getId(), "%private-secret%", null,
+            null, null, null, null, 100, 0)));
+        assertEquals(List.of(), sortedIds(attachmentMapper.getPage(
+            visibilityWorkspace.getId(), reader.getId(), "%private-secret%", null,
+            null, null, null, null, 100, 0)));
+        assertEquals(1, attachmentMapper.countPage(
+            visibilityWorkspace.getId(), author.getId(), "%private-secret%",
+            null, null, null, null));
+        assertEquals(0, attachmentMapper.countPage(
+            visibilityWorkspace.getId(), reader.getId(), "%private-secret%",
+            null, null, null, null));
+        assertEquals(sortedIds(privateAttachment, workspaceAttachment),
+            sortedIds(attachmentMapper.getPage(
+                visibilityWorkspace.getId(), author.getId(), null, null,
+                null, null, null, true, 100, 0)));
+        assertEquals(List.of(workspaceAttachment.getId()),
+            sortedIds(attachmentMapper.getPage(
+                visibilityWorkspace.getId(), reader.getId(), null, null,
+                null, null, null, true, 100, 0)));
+        assertEquals(2, attachmentMapper.countPage(
+            visibilityWorkspace.getId(), author.getId(), null,
+            null, null, null, true));
+        assertEquals(1, attachmentMapper.countPage(
+            visibilityWorkspace.getId(), reader.getId(), null,
+            null, null, null, true));
+        assertEquals(Map.of("note", 2L, "company", 1L), facetCounts(
+            attachmentMapper.countsBySource(visibilityWorkspace.getId(), author.getId())));
+        assertEquals(Map.of("note", 1L, "company", 1L), facetCounts(
+            attachmentMapper.countsBySource(visibilityWorkspace.getId(), reader.getId())));
+        assertEquals(Map.of("archive", 1L, "pdf", 1L, "image", 1L), facetCounts(
+            attachmentMapper.countsByKind(visibilityWorkspace.getId(), author.getId())));
+        assertEquals(Map.of("pdf", 1L, "image", 1L), facetCounts(
+            attachmentMapper.countsByKind(visibilityWorkspace.getId(), reader.getId())));
+        assertEquals(Map.of(
+            String.valueOf(privateTag.getId()), 1L,
+            String.valueOf(visibleTag.getId()), 2L), facetCounts(
+                attachmentMapper.countsByTag(visibilityWorkspace.getId(), author.getId())));
+        assertEquals(Map.of(String.valueOf(visibleTag.getId()), 2L), facetCounts(
+            attachmentMapper.countsByTag(visibilityWorkspace.getId(), reader.getId())));
+        assertEquals(2, attachmentMapper.countOrphaned(
+            visibilityWorkspace.getId(), author.getId()));
+        assertEquals(1, attachmentMapper.countOrphaned(
+            visibilityWorkspace.getId(), reader.getId()));
+        assertEquals(3, attachmentMapper.totalCount(
+            visibilityWorkspace.getId(), author.getId()));
+        assertEquals(2, attachmentMapper.totalCount(
+            visibilityWorkspace.getId(), reader.getId()));
+        assertEquals(151, attachmentMapper.totalSize(
+            visibilityWorkspace.getId(), author.getId()));
+        assertEquals(50, attachmentMapper.totalSize(
+            visibilityWorkspace.getId(), reader.getId()));
+        assertEquals(List.of(privateAttachment.getId()), sortedIds(attachmentMapper.search(
+            visibilityWorkspace.getId(), "%private-secret%", author.getId())));
+        assertEquals(List.of(), sortedIds(attachmentMapper.search(
+            visibilityWorkspace.getId(), "%private-secret%", reader.getId())));
     }
 
     /**
@@ -176,5 +301,44 @@ class AttachmentMapperTest extends AbstractMapperTest {
         ws.setSlug("ws_" + unique());
         workspaceMapper.insert(ws);
         return ws;
+    }
+
+    private Note newNote(int workspaceId, User author, String visibility) {
+        Note note = new Note();
+        note.setWorkspaceId(workspaceId);
+        note.setContent("Attachment visibility " + unique());
+        note.setVisibility(visibility);
+        note.setAuthor(author);
+        noteMapper.insert(note);
+        return note;
+    }
+
+    private Company newCompany(int workspaceId) {
+        Company company = new Company();
+        company.setWorkspaceId(workspaceId);
+        company.setName("Attachment company " + unique());
+        companyMapper.insert(company);
+        return company;
+    }
+
+    private Tag newTag(int workspaceId) {
+        Tag tag = new Tag();
+        tag.setWorkspaceId(workspaceId);
+        tag.setName("attachment_tag_" + unique());
+        tag.setColor("#abcdef");
+        tagMapper.insert(tag);
+        return tag;
+    }
+
+    private static List<Integer> sortedIds(Attachment... attachments) {
+        return List.of(attachments).stream().map(Attachment::getId).sorted().toList();
+    }
+
+    private static List<Integer> sortedIds(List<Attachment> attachments) {
+        return attachments.stream().map(Attachment::getId).sorted().toList();
+    }
+
+    private static Map<String, Long> facetCounts(List<FacetCount> facets) {
+        return facets.stream().collect(Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
     }
 }

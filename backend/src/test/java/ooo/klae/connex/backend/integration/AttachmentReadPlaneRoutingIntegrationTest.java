@@ -99,6 +99,9 @@ class AttachmentReadPlaneRoutingIntegrationTest {
             statement.execute("CREATE TABLE " + scratchCatalog + ".attachment_tag ("
                 + "attachment_id INT NOT NULL, tag_id INT NOT NULL, "
                 + "PRIMARY KEY (attachment_id, tag_id))");
+            statement.execute("CREATE TABLE " + scratchCatalog + ".note ("
+                + "id INT PRIMARY KEY, workspace_id INT NOT NULL, visibility VARCHAR(16) NOT NULL, "
+                + "author_id INT NOT NULL)");
             insertFixtures(connection);
         }
 
@@ -164,7 +167,7 @@ class AttachmentReadPlaneRoutingIntegrationTest {
     void directReadsHydrateControlLabelsWithoutControlTablesInTenantCatalog() throws SQLException {
         tenantContext.set(workspaceId, orgId, uploaderId, "org_admin", scratchCatalog);
         try {
-            List<Attachment> all = attachmentReadService.getAll(workspaceId);
+            List<Attachment> all = attachmentReadService.getAll(workspaceId, uploaderId);
             List<Attachment> byEntity = attachmentReadService.getByEntity(
                 workspaceId, "user", targetUserId);
             Attachment byId = attachmentReadService.getById(workspaceId, 2);

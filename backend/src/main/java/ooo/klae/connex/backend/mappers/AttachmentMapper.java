@@ -12,7 +12,9 @@ import java.util.List;
 
 public interface AttachmentMapper {
     List<Attachment> getByEntity(@Param("workspaceId") int workspaceId, @Param("entityType") String entityType, @Param("entityId") int entityId);
-    List<Attachment> getAll(int workspaceId);
+    List<Attachment> getAll(
+        @Param("workspaceId") int workspaceId,
+        @Param("currentUserId") int currentUserId);
     Attachment getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Attachment getCreatedById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Attachment getMetadataById(@Param("workspaceId") int workspaceId, @Param("id") int id);
@@ -42,23 +44,40 @@ public interface AttachmentMapper {
     int countUrlInOtherWorkspaces(@Param("workspaceId") int workspaceId, @Param("url") String url);
     /** Locks every same-workspace attachment reference for an exact URL. */
     List<Integer> lockIdsByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
-    List<Attachment> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
+    List<Attachment> search(
+        @Param("workspaceId") int workspaceId,
+        @Param("query") String query,
+        @Param("currentUserId") int currentUserId);
     int insert(Attachment attachment);
     int delete(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int deleteByEntity(@Param("workspaceId") int workspaceId, @Param("entityType") String entityType, @Param("entityId") int entityId);
-    List<Attachment> getPage(@Param("workspaceId") int workspaceId, @Param("query") String query, @Param("sort") String sort,
+    List<Attachment> getPage(@Param("workspaceId") int workspaceId, @Param("currentUserId") int currentUserId,
+        @Param("query") String query, @Param("sort") String sort,
         @Param("types") List<String> types, @Param("kinds") List<String> kinds,
         @Param("tagIds") List<Integer> tagIds, @Param("orphaned") Boolean orphaned,
         @Param("limit") int limit, @Param("offset") int offset);
-    long countPage(@Param("workspaceId") int workspaceId, @Param("query") String query, @Param("types") List<String> types,
+    long countPage(@Param("workspaceId") int workspaceId, @Param("currentUserId") int currentUserId,
+        @Param("query") String query, @Param("types") List<String> types,
         @Param("kinds") List<String> kinds, @Param("tagIds") List<Integer> tagIds,
         @Param("orphaned") Boolean orphaned);
-    List<FacetCount> countsBySource(int workspaceId);
-    List<FacetCount> countsByKind(int workspaceId);
-    List<FacetCount> countsByTag(int workspaceId);
-    long countOrphaned(int workspaceId);
-    long totalCount(int workspaceId);
-    long totalSize(int workspaceId);
+    List<FacetCount> countsBySource(
+        @Param("workspaceId") int workspaceId,
+        @Param("currentUserId") int currentUserId);
+    List<FacetCount> countsByKind(
+        @Param("workspaceId") int workspaceId,
+        @Param("currentUserId") int currentUserId);
+    List<FacetCount> countsByTag(
+        @Param("workspaceId") int workspaceId,
+        @Param("currentUserId") int currentUserId);
+    long countOrphaned(
+        @Param("workspaceId") int workspaceId,
+        @Param("currentUserId") int currentUserId);
+    long totalCount(
+        @Param("workspaceId") int workspaceId,
+        @Param("currentUserId") int currentUserId);
+    long totalSize(
+        @Param("workspaceId") int workspaceId,
+        @Param("currentUserId") int currentUserId);
 
     int addTag(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId, @Param("tagId") int tagId);
     int removeTag(@Param("workspaceId") int workspaceId, @Param("attachmentId") int attachmentId, @Param("tagId") int tagId);

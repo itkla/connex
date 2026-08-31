@@ -66,28 +66,33 @@ public class AttachmentService {
     }
 
     public List<Attachment> getAll() {
-        return attachmentReadService.getAll(workspaceService.getCurrentWorkspaceId());
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int currentUserId = workspaceService.getCurrentUserId();
+        return attachmentReadService.getAll(workspaceId, currentUserId);
     }
 
     public List<Attachment> getPage(String query, String sort, List<String> types, List<String> kinds,
             List<Integer> tagIds, Boolean orphaned, int limit, int offset) {
-        return attachmentMapper.getPage(workspaceService.getCurrentWorkspaceId(), query, sort, types, kinds, tagIds, orphaned, limit, offset);
+        return attachmentMapper.getPage(workspaceService.getCurrentWorkspaceId(),
+            workspaceService.getCurrentUserId(), query, sort, types, kinds, tagIds, orphaned, limit, offset);
     }
 
     public long countPage(String query, List<String> types, List<String> kinds, List<Integer> tagIds,
             Boolean orphaned) {
-        return attachmentMapper.countPage(workspaceService.getCurrentWorkspaceId(), query, types, kinds, tagIds, orphaned);
+        return attachmentMapper.countPage(workspaceService.getCurrentWorkspaceId(),
+            workspaceService.getCurrentUserId(), query, types, kinds, tagIds, orphaned);
     }
 
     public AttachmentFacets facets() {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int currentUserId = workspaceService.getCurrentUserId();
         return new AttachmentFacets(
-            attachmentMapper.countsBySource(workspaceId),
-            attachmentMapper.countsByKind(workspaceId),
-            attachmentMapper.countsByTag(workspaceId),
-            attachmentMapper.countOrphaned(workspaceId),
-            attachmentMapper.totalCount(workspaceId),
-            attachmentMapper.totalSize(workspaceId)
+            attachmentMapper.countsBySource(workspaceId, currentUserId),
+            attachmentMapper.countsByKind(workspaceId, currentUserId),
+            attachmentMapper.countsByTag(workspaceId, currentUserId),
+            attachmentMapper.countOrphaned(workspaceId, currentUserId),
+            attachmentMapper.totalCount(workspaceId, currentUserId),
+            attachmentMapper.totalSize(workspaceId, currentUserId)
         );
     }
 
@@ -199,10 +204,11 @@ public class AttachmentService {
      */
     @RequirePermission(Permission.ATTACHMENT_DELETE)
     public Attachment getByUrl(String url) {
-        Attachment attachment = attachmentReadService.getByUrl(
-            workspaceService.getCurrentWorkspaceId(), url);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        Attachment attachment = attachmentReadService.getByUrl(workspaceId, url);
         if (attachment == null) throw new ResourceNotFoundException("Attachment not found for url");
         requireGenericAttachmentType(attachment.getEntityType());
+        requireVisibleNoteTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId());
         return attachment;
     }
 
