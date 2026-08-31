@@ -742,7 +742,7 @@ only what an operator needs at ticket time.
 
 | | |
 |---|---|
-| In-product | `GET /api/orgs/{orgId}/support-bundle` — organization administrator **plus WebAuthn step-up** |
+| In-product | `POST /api/orgs/{orgId}/support-bundle` — organization administrator **plus WebAuthn step-up** |
 | Operator tooling | [`deploy/support-bundle/collect.sh`](../deploy/support-bundle/collect.sh) to collect, [`read.sh`](../deploy/support-bundle/read.sh) to inspect — both executable, invoked directly |
 | Assembly | **Synchronous**, not streamed |
 | Bounds | 64 MB uncompressed ceiling and a 30-second budget, both **fail closed**; collection queries carry a 20-second database statement timeout |

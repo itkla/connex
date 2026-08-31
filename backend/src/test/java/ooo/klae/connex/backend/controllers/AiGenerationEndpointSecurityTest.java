@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.controllers;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -8,37 +10,31 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import org.apache.ibatis.session.SqlSessionFactory;
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
-import org.springframework.context.annotation.ComponentScan;
-import org.springframework.context.annotation.FilterType;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
-import org.springframework.security.test.context.support.WithAnonymousUser;
-import org.springframework.security.test.context.support.WithMockUser;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.web.servlet.MockMvc;
-
+import java.util.List;
 import ooo.klae.connex.backend.ai.AiGenerationAdapterService;
 import ooo.klae.connex.backend.ai.AiGenerationService;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCallReadService;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantTurnService;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolService;
+import ooo.klae.connex.backend.ai.assistant.AiChatAttachmentService;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
 import ooo.klae.connex.backend.capability.CapabilityEntitlement;
 import ooo.klae.connex.backend.config.LogoutAuditHandler;
 import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.config.SecurityConfig;
-import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
-import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
 import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
+import ooo.klae.connex.backend.dto.BusinessCardAvailabilityResponse;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
-import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
-import ooo.klae.connex.backend.services.BulkOperationService;
+import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
+import ooo.klae.connex.backend.services.AiAssistantService;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.AuthService;
+import ooo.klae.connex.backend.services.BulkOperationService;
 import ooo.klae.connex.backend.services.BusinessCardService;
 import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.DealService;
@@ -47,6 +43,7 @@ import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.MemberScopeResolver;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
+import ooo.klae.connex.backend.services.SupportBundleService;
 import ooo.klae.connex.backend.services.WarmPathService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.sso.CompositeClientRegistrationRepository;
@@ -59,13 +56,28 @@ import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.tenant.WorkspaceRequestResolver;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
+import org.apache.ibatis.session.SqlSessionFactory;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
+import org.springframework.context.annotation.Import;
+import org.springframework.security.test.context.support.WithAnonymousUser;
+import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(
     controllers = {
+        AiAssistantController.class,
         AiGenerationController.class,
         BusinessCardController.class,
         DealController.class,
-        IntroductionController.class
+        IntroductionController.class,
+        SupportBundleController.class
     },
     excludeFilters = @ComponentScan.Filter(
         type = FilterType.ASSIGNABLE_TYPE,
@@ -114,6 +126,44 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private LogoutAuditHandler logoutAuditHandler;
     @MockitoBean private LoginRateLimiter loginRateLimiter;
     @MockitoBean private ClientIpResolver clientIpResolver;
+    @MockitoBean private AiAssistantService aiAssistantService;
+    @MockitoBean private AiAssistantTurnService aiAssistantTurnService;
+    @MockitoBean private AiAssistantToolCallReadService aiAssistantToolCallReadService;
+    @MockitoBean private AiAssistantWriteToolService aiAssistantWriteToolService;
+    @MockitoBean private AiChatAttachmentService aiChatAttachmentService;
+    @MockitoBean private SupportBundleService supportBundleService;
+    @MockitoBean private AuthService authService;
+
+    /**
+     * The routes that were moved off {@code GET} because they write durable {@code audit_log} rows
+     * must stay off it. {@code JSESSIONID} is {@code SameSite=Lax} and is sent on cross-site
+     * top-level {@code GET} navigation, so a regression here — a reinstated {@code @GetMapping}, or
+     * a new {@code csrf.ignoringRequestMatchers} entry covering these paths — would silently undo
+     * the fix. This runs through the real {@link SecurityConfig} filter chain, unlike the
+     * standalone-MockMvc controller tests, so it is what actually proves CSRF is enforced.
+     */
+    @Test
+    void auditRecordingReadsAreGetRefusedAndCsrfProtected() throws Exception {
+        User actor = new User();
+        actor.setId(7);
+        when(authService.getCurrentUser()).thenReturn(actor);
+        when(supportBundleService.generate(any(), anyInt()))
+                .thenReturn(new SupportBundleService.SupportBundle("bundle.zip", new byte[] { 1 }));
+
+        for (String path : List.of(
+                "/api/ai/assistant/sessions/retained",
+                "/api/ai/assistant/sessions/42/retained",
+                "/api/ai/assistant/sessions/42/tool-calls/retained",
+                "/api/ai/assistant/sessions/42/tool-calls/29/retained",
+                "/api/orgs/3/support-bundle")) {
+            mockMvc.perform(get(path))
+                    .andExpect(status().isMethodNotAllowed());
+            mockMvc.perform(post(path))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(post(path).with(csrf().asHeader()))
+                    .andExpect(status().isOk());
+        }
+    }
 
     @Test
     void providerGeneratingEndpointsRejectGetAndRequireCsrfForPost() throws Exception {

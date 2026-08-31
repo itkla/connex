@@ -14,7 +14,7 @@ order, under what deployment posture*. It never answers *what the record said*.
 
 ## Contents
 
-`GET /api/orgs/{orgId}/support-bundle` streams a ZIP containing:
+`POST /api/orgs/{orgId}/support-bundle` streams a ZIP containing:
 
 | Entry | What it holds |
 |---|---|
@@ -245,10 +245,14 @@ deployment's own logs locally.
 - **`CONNEX_RECENT_AUTHENTICATION_WINDOW` must never be `0` in production.** Zero disables the
   step-up requirement globally, which would leave this organization-wide export behind an ordinary
   session.
-- The endpoint is a `GET`, so a malicious page could cause a signed-in administrator's browser to
-  request bundles. It cannot read the response — CORS, CORP, and the attachment disposition all
-  hold — but it can consume the concurrency limit and write audit rows attributing downloads to
-  that administrator. The terminal-outcome audit event makes such activity legible.
+- The endpoint is a `POST`, and therefore CSRF-protected. It used to be a `GET`, which let a
+  malicious page navigate a signed-in administrator's browser to it: the attacker could not read the
+  response — CORS, CORP, and the attachment disposition all held — but the request still consumed
+  the concurrency limit, dropped a ZIP of redacted organization data into that administrator's
+  downloads, and wrote audit rows attributing an export to them. `JSESSIONID` is `SameSite=Lax`,
+  which *is* sent on cross-site top-level GET navigation, so that was reachable in practice. Callers
+  must now echo the CSRF token from `GET /api/auth/csrf` in the configured header;
+  [`deploy/support-bundle/collect.sh`](../deploy/support-bundle/collect.sh) does this automatically.
 
 ## Operational notes
 

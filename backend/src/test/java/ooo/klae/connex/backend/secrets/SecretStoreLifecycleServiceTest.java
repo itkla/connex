@@ -3,11 +3,7 @@ package ooo.klae.connex.backend.secrets;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -126,7 +122,7 @@ class SecretStoreLifecycleServiceTest {
     }
 
     @Test
-    void scopedDiagnosticsDoNotExposeUnrelatedKeyringMetadataAndAreAudited() {
+    void scopedDiagnosticsDoNotExposeUnrelatedKeyringMetadata() {
         int workspaceId = workspaceId();
         String oldKey = base64Key((byte) 22);
         String newKey = base64Key((byte) 23);
@@ -138,17 +134,43 @@ class SecretStoreLifecycleServiceTest {
         Map<String, SecretStoreProperties.KeyMetadata> metadata = new LinkedHashMap<>();
         metadata.put("unrelated-v9", metadata("security", "customer"));
         properties.setMetadata(metadata);
-        AuditService auditService = mock(AuditService.class);
         SecretStoreLifecycleService service = new SecretStoreLifecycleService(secretValueMapper,
-                new SecretStoreCrypto(properties), properties, auditService);
+                new SecretStoreCrypto(properties), properties);
 
         SecretStoreDiagnosticsDto diagnostics = service.diagnosticsForWorkspace(workspaceId);
 
         assertTrue(diagnostics.getKeys().stream().anyMatch(key -> "old-v1".equals(key.getKeyId())));
         assertTrue(diagnostics.getKeys().stream().anyMatch(key -> "new-v2".equals(key.getKeyId())));
         assertTrue(diagnostics.getKeys().stream().noneMatch(key -> "unrelated-v9".equals(key.getKeyId())));
-        verify(auditService).recordScoped(eq("secret_store.diagnostics.read"), eq("workspace"), eq(workspaceId),
-                eq(workspaceId), isNull(), eq("secret_store"), eq("Secret store diagnostics read"), any());
+    }
+
+    /**
+     * Both diagnostics reads are served over {@code GET}, and {@code JSESSIONID} is
+     * {@code SameSite=Lax}, which is sent on cross-site top-level navigation. Recording the read
+     * would therefore let an attacker page forge secret-store inspection evidence against a
+     * signed-in administrator, so neither scope may write an audit row.
+     */
+    @Test
+    void scopedDiagnosticsReadsWriteNoAuditRow() {
+        int workspaceId = workspaceId();
+        int orgId = orgId();
+        String key = base64Key((byte) 25);
+        store("active-v1", key, Map.of(), Set.of())
+                .put(SecretPurpose.WORKSPACE_SMTP_PASSWORD, workspaceId, "secret");
+        SecretStoreLifecycleService service = lifecycle("active-v1", key, Map.of(), Set.of());
+        long before = diagnosticsReadAuditRows();
+
+        service.diagnosticsForWorkspace(workspaceId);
+        service.diagnosticsForOrg(orgId);
+
+        assertEquals(before, diagnosticsReadAuditRows());
+    }
+
+    private long diagnosticsReadAuditRows() {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_log WHERE action = ?", Long.class,
+                "secret_store.diagnostics.read");
+        return count == null ? 0L : count;
     }
 
     private SecretStore store(String keyId, String masterKey, Map<String, String> keys, Set<String> disabledKeyIds) {
@@ -161,7 +183,7 @@ class SecretStoreLifecycleServiceTest {
             Map<String, String> keys, Set<String> disabledKeyIds) {
         SecretStoreProperties properties = properties(keyId, masterKey, keys, disabledKeyIds);
         return new SecretStoreLifecycleService(secretValueMapper, new SecretStoreCrypto(properties),
-                properties, mock(AuditService.class));
+                properties);
     }
 
     private static SecretStoreProperties properties(String keyId, String masterKey,

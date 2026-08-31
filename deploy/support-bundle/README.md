@@ -4,7 +4,7 @@ Operator-side commands for downloading, verifying, and reading a **redacted**
 Connex support bundle.
 
 The bundle itself is produced by the backend at
-`GET /api/orgs/{orgId}/support-bundle`. What it contains, what it never
+`POST /api/orgs/{orgId}/support-bundle`. What it contains, what it never
 contains, and the full redaction contract are documented in
 [`docs/SUPPORT_BUNDLE.md`](../../docs/SUPPORT_BUNDLE.md). Read that first — these
 scripts download and verify the backend bundle; `collect.sh` can also append the

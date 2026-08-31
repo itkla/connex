@@ -89,7 +89,6 @@ public class SearchService {
     private final DocumentTemplateMapper documentTemplateMapper;
     private final DealDocumentMapper dealDocumentMapper;
     private final WorkflowMapper workflowMapper;
-    private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final ReferenceService referenceService;
 
@@ -114,7 +113,6 @@ public class SearchService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
         Set<Permission> permissions = workspaceService.permissionsFor(workspaceId, userId);
-        auditService.record("search", "search", null, query, "Search performed", null);
         List<Activity> activities = searchVisibleActivities(workspaceId, pattern, needle);
         List<Note> notes = mergeVisibleNotes(
             searchVisibleNotes(workspaceId, pattern, needle, userId),

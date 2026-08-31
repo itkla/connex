@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -18,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
@@ -98,6 +100,7 @@ class SearchTenantIsolationTest {
     @Autowired private WorkflowMapper workflowMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private PasswordEncoder passwordEncoder;
+    @Autowired private JdbcTemplate jdbcTemplate;
 
     private MockMvc mockMvc;
 
@@ -106,6 +109,49 @@ class SearchTenantIsolationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
+    }
+
+    /**
+     * Search used to write an {@code audit_log} row whose target label was the raw, untrimmed
+     * caller query. {@code JSESSIONID} is {@code SameSite=Lax}, which is sent on cross-site
+     * top-level {@code GET} navigation, so any page could append attacker-chosen free text to the
+     * evidence trail under a victim's actor id. No peer read surface records an access row, so
+     * search must not either.
+     */
+    @Test
+    void searchWritesNoAuditRowAndCannotPlantAttackerTextInTheTrail() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Organization organization = newOrganization();
+        Workspace workspace = newWorkspace(organization);
+        User actor = newMember(workspace);
+        workspaceMapper.updateMemberRole(workspace.getId(), actor.getId(), "owner");
+        String sentinel = "AuditProbe" + unique();
+        newCompany(workspace, sentinel);
+        MockHttpSession session = login(actor.getUsername());
+        long before = auditRowCount();
+
+        mockMvc.perform(get("/api/search")
+                        .queryParam("query", "  " + sentinel + "  ")
+                        .header("X-Workspace-Id", workspace.getId())
+                        .session(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.companies.length()").value(1));
+
+        assertEquals(before, auditRowCount());
+        assertEquals(0L, sentinelAuditRowCount(sentinel));
+    }
+
+    private long auditRowCount() {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_log WHERE action = ?", Long.class, "search");
+        return count == null ? 0L : count;
+    }
+
+    private long sentinelAuditRowCount(String sentinel) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_log WHERE target_label LIKE ?", Long.class,
+                "%" + sentinel + "%");
+        return count == null ? 0L : count;
     }
 
     @Test

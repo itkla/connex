@@ -126,4 +126,18 @@ set +a
 - Optional OCR sidecar: `docker compose --profile ocr up -d ocr`
 - Full backend suite: CI-owned through `Backend — build & test`
 
+Three tooling traps that cost real time:
+
+- **`--tests` patterns match method names, not just class names.** `--tests '*Arch*'` also selects
+  every test method containing `arch`, such as `archiveIsIdempotent...`, dragging unrelated
+  database-backed classes into a run you intended to be narrow. Use fully qualified class names.
+- **A `--tests` run killed by a tool timeout can leave its Gradle test worker orphaned**, still
+  holding the test schema. The next run then appears to hang with no test output while deadlocking
+  against your own orphan. Check for a worker whose `-Dorg.gradle.internal.worker.tmpdir` points at
+  your worktree and whose elapsed time predates your current run, and kill it before retrying:
+  `ps -eo pid,etimes,args | grep GradleWorkerMain`.
+- **`gh pr edit` fails on this repo** with `GraphQL: Projects (classic) is being deprecated`, and
+  silently leaves the body unchanged. Use the REST fallback and verify:
+  `gh api -X PATCH repos/itkla/connex/pulls/<n> -f body=@file`.
+
 The `dev` profile is for local HTTP/database posture only. Production and staging exceptions, TLS requirements, audit-integrity configuration, seeder/maintenance posture, and deployment sequencing belong to the linked runbooks, not this always-loaded guide.
