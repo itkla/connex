@@ -90,7 +90,7 @@ public class MfaRecoveryService {
             throw new IllegalStateException("Session epoch restamp grant failed");
         }
         sessionSecurityService.clearRecentAuthentication(httpRequest);
-        expireOtherSessions(user, ceremonySessionId);
+        expireOtherSessions(user, ceremonySessionPrimaryId);
         return newEpoch;
     }
 
@@ -111,9 +111,10 @@ public class MfaRecoveryService {
      * session whose row is written after that enumeration.
      *
      * @param user the recovering account
-     * @param ceremonySessionId the logical session id completing the ceremony
+     * @param ceremonySessionPrimaryId the store row completing the ceremony
      */
-    private void expireOtherSessions(User user, String ceremonySessionId) {
-        accountSessionRevocationService.expireAllExcept(user.getId(), ceremonySessionId);
+    private void expireOtherSessions(User user, String ceremonySessionPrimaryId) {
+        accountSessionRevocationService.expireAllExceptSessionRow(
+                user.getId(), ceremonySessionPrimaryId);
     }
 }

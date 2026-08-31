@@ -47,7 +47,7 @@ class MfaRecoveryServiceTest {
     private final AuditService auditService = mock(AuditService.class);
     private final SessionRegistry sessionRegistry = mock(SessionRegistry.class);
     private final AccountSessionRevocationService accountSessionRevocationService =
-            new AccountSessionRevocationService(sessionRegistry);
+            new AccountSessionRevocationService(sessionRegistry, springSessionMapper);
     private final PrivilegedMfaProperties properties = properties();
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final MfaRecoveryService service = new MfaRecoveryService(
@@ -80,6 +80,8 @@ class MfaRecoveryServiceTest {
         SessionInformation other = new SessionInformation(user, "another-session", java.util.Date.from(NOW));
         when(authService.getCurrentUser()).thenReturn(user);
         when(webAuthnService.recover(7)).thenReturn(1);
+        when(springSessionMapper.primaryIdBySessionId(currentId)).thenReturn("ceremony-primary");
+        when(springSessionMapper.primaryIdBySessionId("another-session")).thenReturn("other-primary");
         when(sessionRegistry.getAllSessions(new AccountSessionIndex(7), false)).thenReturn(java.util.List.of(current, other));
 
         int epoch = service.recover(request("operator-proof"), httpRequest);

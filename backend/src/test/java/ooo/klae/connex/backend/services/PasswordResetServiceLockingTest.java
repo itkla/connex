@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.beans.PasswordResetToken;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BreachedPasswordCheckUnavailableException;
 import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
+import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.password.BreachedPasswordLookup;
 import ooo.klae.connex.backend.password.BreachedPasswordSourceUnavailableException;
@@ -49,7 +50,7 @@ class PasswordResetServiceLockingTest {
                 mock(PasswordResetEmailService.class),
                 mock(PasswordResetRateLimiter.class),
                 auditService,
-                new AccountSessionRevocationService(mock(SessionRegistry.class)),
+                new AccountSessionRevocationService(mock(SessionRegistry.class), mock(SpringSessionMapper.class)),
                 mock(SsoConnectionService.class));
         PasswordResetToken token = new PasswordResetToken();
         token.setUserId(41);

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doAnswer;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -17,6 +18,7 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.HexFormat;
 import java.util.UUID;
 
@@ -32,7 +34,10 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.session.SessionRegistry;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.security.web.webauthn.api.ImmutableCredentialRecord;
 import org.springframework.security.web.webauthn.api.ImmutablePublicKeyCose;
@@ -41,6 +46,7 @@ import org.springframework.security.web.webauthn.management.UserCredentialReposi
 import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -50,6 +56,7 @@ import org.springframework.web.context.WebApplicationContext;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WebauthnCredentialMapper;
 import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
@@ -95,6 +102,8 @@ class MfaRecoveryPasskeyRaceIntegrationTest {
     @Autowired private WebauthnCredentialMapper credentialMapper;
     @Autowired private UserCredentialRepository userCredentials;
     @Autowired private SessionRepository<? extends Session> sessionRepository;
+    @Autowired private SessionRegistry sessionRegistry;
+    @MockitoSpyBean private SpringSessionMapper springSessionMapper;
 
     private MockMvc mockMvc;
 
@@ -233,6 +242,39 @@ class MfaRecoveryPasskeyRaceIntegrationTest {
         assertNull(userMapper.epochRestampGrant(account.getId()));
     }
 
+    /**
+     * The interval the primary-id binding alone does not cover: a fixation rotation commits in
+     * Spring Session's own transaction after recovery resolved the ceremony row but before it
+     * enumerates. Excluding by the captured logical id would expire the very row the handoff names,
+     * leaving a credential-less account with nothing live to enrol from.
+     */
+    @Test
+    void aRotationBetweenLookupAndEnumerationDoesNotExpireTheCeremonyRow() {
+        User account = passwordlessAccount();
+        enrollPasskey(account);
+        MockHttpServletRequest ceremonyRequest = establishSession(account);
+        MockHttpSession ceremonySession = (MockHttpSession) ceremonyRequest.getSession(false);
+        MockHttpSession otherSession = storeBackedSession(account);
+        String ceremonySessionId = ceremonySession.getId();
+        String ceremonyPrimaryId = springSessionMapper.primaryIdBySessionId(ceremonySessionId);
+        assertNotNull(ceremonyPrimaryId);
+
+        AtomicReference<String> rotatedId = new AtomicReference<>();
+        doAnswer(invocation -> {
+            if (rotatedId.get() == null) {
+                rotatedId.set(rotateStored(sessionRepository, ceremonySessionId));
+            }
+            return ceremonyPrimaryId;
+        }).when(springSessionMapper).primaryIdBySessionId(ceremonySessionId);
+
+        recover(ceremonyRequest, account);
+
+        assertNotNull(rotatedId.get());
+        assertNotEquals(ceremonySessionId, rotatedId.get());
+        assertFalse(sessionRegistry.getSessionInformation(rotatedId.get()).isExpired());
+        assertTrue(sessionRegistry.getSessionInformation(otherSession.getId()).isExpired());
+    }
+
     @Test
     void theGrantCannotRepairAnotherSession() throws Exception {
         User account = passwordlessAccount();
@@ -283,12 +325,25 @@ class MfaRecoveryPasskeyRaceIntegrationTest {
      * A servlet session whose id is backed by a real row in the shared session store, so the
      * handoff's primary-id lookup resolves exactly as it does in production.
      */
-    private MockHttpSession storeBackedSession() {
-        return new MockHttpSession(context.getServletContext(), createStored(sessionRepository));
+    /**
+     * A servlet session backed by a real store row that carries the account's security context, so
+     * {@code AccountSessionIndexResolver} files it under the account and revocation can actually
+     * enumerate it. A row without that context is invisible to enumeration and would make any
+     * assertion about expiry vacuous.
+     */
+    private MockHttpSession storeBackedSession(User principal) {
+        return new MockHttpSession(
+                context.getServletContext(), createStored(sessionRepository, principal));
     }
 
-    private static <S extends Session> String createStored(SessionRepository<S> repository) {
+    private static <S extends Session> String createStored(
+            SessionRepository<S> repository, User principal) {
         S created = repository.createSession();
+        SecurityContext securityContext = SecurityContextHolder.createEmptyContext();
+        securityContext.setAuthentication(new UsernamePasswordAuthenticationToken(
+                principal, null, principal.getAuthorities()));
+        created.setAttribute(
+                HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, securityContext);
         repository.save(created);
         return created.getId();
     }
@@ -324,7 +379,7 @@ class MfaRecoveryPasskeyRaceIntegrationTest {
         authService.establishAuthenticatedSession(
                 verifiedPrincipal, request, new MockHttpServletResponse());
         MockHttpSession established = (MockHttpSession) request.getSession(false);
-        MockHttpSession stored = storeBackedSession();
+        MockHttpSession stored = storeBackedSession(verifiedPrincipal);
         copyAttributes(established, stored);
         request.setSession(stored);
         return request;
