@@ -24,7 +24,10 @@ public interface AttachmentMapper {
         @Param("ids") List<Integer> ids,
         @Param("currentUserId") int currentUserId
     );
-    Attachment getByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
+    Attachment getByUrl(
+        @Param("workspaceId") int workspaceId,
+        @Param("url") String url,
+        @Param("currentUserId") int currentUserId);
     Attachment getMetadataByUrl(@Param("workspaceId") int workspaceId, @Param("url") String url);
     List<Attachment> getAssistantSessionAttachments(
         @Param("workspaceId") int workspaceId,

@@ -82,6 +82,7 @@
       COALESCE(c.name, p.name, d.name) AS entity_label
     <include refid="tenantAttachJoins"/>
     WHERE a.workspace_id = #{workspaceId} AND a.url = #{url}
+      <include refid="noteVisibilityPredicate"/>
     LIMIT 1
   </select>
 

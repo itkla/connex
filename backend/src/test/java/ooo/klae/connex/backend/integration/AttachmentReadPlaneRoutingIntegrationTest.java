@@ -172,7 +172,7 @@ class AttachmentReadPlaneRoutingIntegrationTest {
                 workspaceId, "user", targetUserId);
             Attachment byId = attachmentReadService.getById(workspaceId, 2);
             Attachment byUrl = attachmentReadService.getByUrl(
-                workspaceId, "/attachments/control-target.pdf");
+                workspaceId, "/attachments/control-target.pdf", uploaderId);
 
             assertEquals(List.of(1, 2, 3, 4), all.stream().map(Attachment::getId).toList());
             assertEquals("Control Uploader", all.get(0).getUploadedBy().getDisplayName());

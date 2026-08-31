@@ -99,7 +99,7 @@ class AttachmentMapperXmlTest {
         assertTrue(xml.indexOf("AND (a.entity_type != 'note' OR EXISTS")
             == xml.lastIndexOf("AND (a.entity_type != 'note' OR EXISTS"));
         for (String statement : List.of(
-                "getAll", "search", "attachPageWhere",
+                "getAll", "search", "attachPageWhere", "getByUrl",
                 "countsBySource", "countsByKind", "countsByTag",
                 "countOrphaned", "totalCount", "totalSize", "getVisibleIdsIn")) {
             assertTrue(block(xml, statement).contains("noteVisibilityPredicate"), statement);

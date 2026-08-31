@@ -129,7 +129,7 @@ class AttachmentServiceNoteTargetTest {
     @Test
     void getByUrlRejectsInvisibleNoteTarget() {
         Attachment attachment = noteAttachment(41);
-        when(attachmentReadService.getByUrl(5, attachment.getUrl())).thenReturn(attachment);
+        when(attachmentReadService.getByUrl(5, attachment.getUrl(), 7)).thenReturn(attachment);
         when(noteMapper.getVisibleNoteById(5, 41, 7)).thenReturn(null);
 
         assertThrows(ResourceNotFoundException.class,
@@ -139,7 +139,7 @@ class AttachmentServiceNoteTargetTest {
     @Test
     void getByUrlAllowsVisibleNoteTarget() {
         Attachment attachment = noteAttachment(41);
-        when(attachmentReadService.getByUrl(5, attachment.getUrl())).thenReturn(attachment);
+        when(attachmentReadService.getByUrl(5, attachment.getUrl(), 7)).thenReturn(attachment);
         when(noteMapper.getVisibleNoteById(5, 41, 7)).thenReturn(new Note());
 
         assertSame(attachment, service.getByUrl(attachment.getUrl()));

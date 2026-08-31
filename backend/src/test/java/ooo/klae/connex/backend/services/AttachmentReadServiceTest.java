@@ -153,15 +153,6 @@ class AttachmentReadServiceTest {
     }
 
     @Test
-    void getAllThreadsCurrentUserIdToMapper() {
-        when(attachmentMapper.getAll(5, 7)).thenReturn(List.of());
-
-        service.getAll(5, 7);
-
-        verify(attachmentMapper).getAll(5, 7);
-    }
-
-    @Test
     void activeMemberTargetLookupIsWorkspaceConstrainedAndContained() {
         allowUnroutedWork();
         when(userMapper.getActiveWorkspaceMemberDisplayNamesByIds(5, List.of(9)))

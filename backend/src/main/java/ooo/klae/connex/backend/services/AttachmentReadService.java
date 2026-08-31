@@ -49,9 +49,9 @@ public class AttachmentReadService {
         return hydrate(workspaceId, attachmentMapper.getById(workspaceId, id));
     }
 
-    /** Returns one workspace-owned attachment for an exact URL with user labels hydrated separately. */
-    public Attachment getByUrl(int workspaceId, String url) {
-        return hydrate(workspaceId, attachmentMapper.getByUrl(workspaceId, url));
+    /** Returns the attachment an exact URL resolves to for one member, with user labels hydrated separately. */
+    public Attachment getByUrl(int workspaceId, String url, int currentUserId) {
+        return hydrate(workspaceId, attachmentMapper.getByUrl(workspaceId, url, currentUserId));
     }
 
     Attachment hydrate(int workspaceId, Attachment attachment) {

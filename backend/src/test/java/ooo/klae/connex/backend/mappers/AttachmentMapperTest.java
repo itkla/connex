@@ -295,6 +295,47 @@ class AttachmentMapperTest extends AbstractMapperTest {
         assertTrue(tagMapper.getTagsByAttachmentId(workspace.getId(), a.getId()).isEmpty());
     }
 
+    @Test
+    void getByUrlPrefersTheVisibleRowWhenOneUrlIsSharedByTwoAttachments() {
+        for (boolean privateFirst : List.of(true, false)) {
+            Workspace sharedWorkspace = newWorkspace();
+            User author = newUser();
+            User reader = newUser();
+            workspaceMapper.addMember(sharedWorkspace.getId(), author.getId(), "member");
+            workspaceMapper.addMember(sharedWorkspace.getId(), reader.getId(), "member");
+            Note privateNote = newNote(sharedWorkspace.getId(), author, "private");
+            Company company = newCompany(sharedWorkspace.getId());
+            String sharedUrl = "https://files.example.com/shared-" + unique();
+            Attachment privateAttachment = build(
+                sharedWorkspace.getId(), "private.zip", "note", privateNote.getId(), author);
+            privateAttachment.setUrl(sharedUrl);
+            Attachment visibleAttachment = build(
+                sharedWorkspace.getId(), "visible.pdf", "company", company.getId(), author);
+            visibleAttachment.setUrl(sharedUrl);
+
+            if (privateFirst) {
+                attachmentMapper.insert(privateAttachment);
+                attachmentMapper.insert(visibleAttachment);
+            } else {
+                attachmentMapper.insert(visibleAttachment);
+                attachmentMapper.insert(privateAttachment);
+            }
+
+            Attachment forReader = attachmentMapper.getByUrl(
+                sharedWorkspace.getId(), sharedUrl, reader.getId());
+            assertNotNull(forReader, "a reader must still resolve the visible row");
+            assertEquals(visibleAttachment.getId(), forReader.getId(),
+                "the invisible row must never shadow the visible one");
+
+            Attachment forAuthor = attachmentMapper.getByUrl(
+                sharedWorkspace.getId(), sharedUrl, author.getId());
+            assertNotNull(forAuthor);
+            assertTrue(
+                forAuthor.getId() == privateAttachment.getId()
+                    || forAuthor.getId() == visibleAttachment.getId());
+        }
+    }
+
     private Workspace newWorkspace() {
         Workspace ws = new Workspace();
         ws.setName("WS " + unique());

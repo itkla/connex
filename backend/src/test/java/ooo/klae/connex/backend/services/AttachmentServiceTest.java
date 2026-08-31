@@ -104,7 +104,7 @@ class AttachmentServiceTest extends AbstractServiceTest {
         assertEquals(created.getId(), attachmentService.getByUrl(url).getId());
         assertThrows(ResourceNotFoundException.class,
             () -> attachmentService.getByUrl("/attachments/company/missing-" + unique() + ".png"));
-        assertNull(attachmentMapper.getByUrl(workspace.getId() + 100_000, url),
+        assertNull(attachmentMapper.getByUrl(workspace.getId() + 100_000, url, currentUser.getId()),
             "another workspace must not resolve this blob url");
     }
 

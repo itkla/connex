@@ -205,7 +205,8 @@ public class AttachmentService {
     @RequirePermission(Permission.ATTACHMENT_DELETE)
     public Attachment getByUrl(String url) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Attachment attachment = attachmentReadService.getByUrl(workspaceId, url);
+        Attachment attachment = attachmentReadService.getByUrl(
+            workspaceId, url, workspaceService.getCurrentUserId());
         if (attachment == null) throw new ResourceNotFoundException("Attachment not found for url");
         requireGenericAttachmentType(attachment.getEntityType());
         requireVisibleNoteTarget(workspaceId, attachment.getEntityType(), attachment.getEntityId());
