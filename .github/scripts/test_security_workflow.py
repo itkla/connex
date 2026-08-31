@@ -36,29 +36,17 @@ class SecurityWorkflowTest(unittest.TestCase):
                 )
                 self.assertNotIn("continue-on-error", str(self.job(job_name)))
 
-    def test_codeql_filter_is_exact_and_has_fixed_term_approval_metadata(self) -> None:
-        self.assertEqual(
-            [
-                {
-                    "exclude": {
-                        "id": "java/potentially-weak-cryptographic-algorithm"
-                    }
-                }
-            ],
-            self.codeql_config["query-filters"],
-        )
-        for required_annotation in (
-            "Tracking issue: #1295",
-            "Reason: HIBP k-anonymity Range API mandates SHA-1; index key only, never password storage.",
-            "Owner: Hunter Nakagawa (Founder)",
-            "Approver: Security Owner role",
-            "Expiry: 2027-02-14",
-            "Re-review: 2027-01-14",
-            "Additional re-evaluation triggers: HIBP offers a stronger hash mode; the data flow changes;",
-            "the query is materially updated.",
-        ):
-            with self.subTest(annotation=required_annotation):
-                self.assertIn(required_annotation, self.codeql_config_text)
+    def test_no_query_is_silenced_repository_wide(self) -> None:
+        """A query filter cannot be scoped to one finding.
+
+        `java/potentially-weak-cryptographic-algorithm` was excluded here for the SHA-1 that HIBP's
+        k-anonymity Range API mandates (#1295). Because a filter applies to the whole analysis, that
+        one accepted use silenced the query for every other MD5 and SHA-1 in the backend. An accepted
+        finding belongs in a dismissal, which is scoped to its location and carries the same
+        accountability metadata; this keeps the filter list empty so the trade cannot be made again
+        by adding an entry (#1464).
+        """
+        self.assertEqual([], self.codeql_config["query-filters"])
         self.assertNotIn("paths-ignore", self.codeql_config)
 
     def test_backend_codeql_uses_manual_java_26_build(self) -> None:
