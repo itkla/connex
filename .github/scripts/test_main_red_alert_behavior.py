@@ -35,6 +35,7 @@ GH_STUB = textwrap.dedent(
         if [ "$n" = "${GH_MAIN_FAIL_ON_CALL:-0}" ]; then exit 1; fi
         printf '%s' "$GH_CURRENT_MAIN"; exit 0 ;;
       "api repos/"*"/actions/workflows/"*)
+        if [ "${GH_WORKFLOW_RUNS_FAILS:-}" = "1" ]; then exit 1; fi
         printf '%s' "$GH_LATEST_RUN"; exit 0 ;;
       "api repos/"*"/actions/runs/"*)
         jqexpr=""; prev=""
@@ -43,7 +44,10 @@ GH_STUB = textwrap.dedent(
           | jq -r "$jqexpr"; exit 0 ;;
       "issue list"*)
         c=$(( $(cat "$GH_LIST_CALLS" 2>/dev/null || echo 0) + 1 )); echo "$c" > "$GH_LIST_CALLS"
-        val="$GH_ISSUE_LIST"; [ "$c" -ge 2 ] && [ -n "${GH_ISSUE_LIST_2:-}" ] && val="$GH_ISSUE_LIST_2"
+        if [ -n "${GH_LIST_FAIL_FROM:-}" ] && [ "$c" -ge "$GH_LIST_FAIL_FROM" ]; then exit 1; fi
+        val="$GH_ISSUE_LIST"
+        [ "$c" -ge 2 ] && [ -n "${GH_ISSUE_LIST_2:-}" ] && val="$GH_ISSUE_LIST_2"
+        [ "$c" -ge 3 ] && [ -n "${GH_ISSUE_LIST_3:-}" ] && val="$GH_ISSUE_LIST_3"
         jqexpr=""; prev=""
         for a in "$@"; do [ "$prev" = "--jq" ] && jqexpr="$a"; prev="$a"; done
         if [ -n "$jqexpr" ]; then printf '%s' "$val" | jq -r "$jqexpr"
@@ -87,6 +91,9 @@ def run_step(env_overrides, gh_env):
             "GH_RUN_STATUS": "completed",
             "GH_RUN_CONCLUSION": '"failure"',
             "GH_ISSUE_LIST_2": "",
+            "GH_ISSUE_LIST_3": "",
+            "GH_LIST_FAIL_FROM": "",
+            "GH_WORKFLOW_RUNS_FAILS": "0",
             "GH_CURRENT_MAIN": CURRENT_MAIN,
             "GH_LATEST_RUN": "1000",
             "GH_ISSUE_LIST": "[]",
@@ -160,13 +167,39 @@ class RedMainAlertBehavior(unittest.TestCase):
         self.assertEqual([], actions, "a run mid-rerun must not report")
 
     def test_a_target_closed_before_the_comment_is_reconverged(self):
-        # Issue #9 open at lookup; closed before the sweep. Without the recreate, main would be red
-        # with no open alert.
+        # Issue #9 open at lookup; closed before the sweep; the recreate then shows up on the
+        # re-list. Without the recreate, main would be red with no open alert.
         result, actions = run_step(
-            {}, {"GH_ISSUE_LIST": '[{"number": 9}]', "GH_ISSUE_LIST_2": "[]"})
+            {}, {"GH_ISSUE_LIST": '[{"number": 9}]', "GH_ISSUE_LIST_2": "[]",
+                 "GH_ISSUE_LIST_3": '[{"number": 31}]'})
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("comment 9", actions)
+        self.assertEqual(1, actions.count("create"))
+
+    def test_a_sweep_list_failure_does_not_mint_a_duplicate(self):
+        # The report already landed as a comment; a transient failure of the sweep's list call must
+        # not be read as "no open issues" and create a second one.
+        result, actions = run_step(
+            {}, {"GH_ISSUE_LIST": '[{"number": 9}]', "GH_LIST_FAIL_FROM": "2"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("comment 9", actions)
+        self.assertNotIn("create", actions)
+
+    def test_a_supersession_lookup_failure_still_reports(self):
+        # An Actions API blip is insufficient evidence of supersession; like the other checks it
+        # must fall toward alerting, not abort red before any issue exists.
+        result, actions = run_step({}, {"GH_WORKFLOW_RUNS_FAILS": "1"})
+        self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("create", actions)
+
+    def test_concurrent_recreates_are_deduplicated_in_the_same_run(self):
+        # Two jobs both recreate after a mid-flight close; the re-list pass must settle on one.
+        result, actions = run_step(
+            {}, {"GH_ISSUE_LIST": '[{"number": 9}]', "GH_ISSUE_LIST_2": "[]",
+                 "GH_ISSUE_LIST_3": '[{"number": 31}, {"number": 32}]'})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(1, actions.count("create"))
+        self.assertIn("close 32", actions)
 
     def test_the_comment_targets_the_issue_the_sweep_keeps(self):
         # Two open issues, in gh's default newest-first order (highest number first). The sweep

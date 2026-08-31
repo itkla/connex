@@ -104,7 +104,7 @@ jobs:
           esac
           latest="$(gh api \
             "repos/$REPO/actions/workflows/$WORKFLOW_ID/runs?head_sha=$HEAD_SHA&event=push&per_page=100" \
-            --jq '[.workflow_runs[].id] | max // empty')"
+            --jq '[.workflow_runs[].id] | max // empty' 2>/dev/null || true)"
           if [ -n "$latest" ] && [ "$RUN_ID" != "$latest" ]; then
             echo "Run $RUN_ID is superseded by push run $latest for this commit; not reporting."
             exit 0
@@ -143,20 +143,32 @@ jobs:
 
           # Converge on exactly one OPEN rolling issue, without serialisation.
           #
-          # Two guarantees, both needed. If the sweep finds none open, the issue this run touched was
-          # closed underneath it -- a maintainer closing on an observed recovery just as a new failure
-          # arrives -- and gh issue comment does not reopen; recreate so main-red stays visible. If it
-          # finds several -- a create/create race -- keep the lowest-numbered and close the rest, so
-          # any ordering settles on one.
-          mapfile -t open_issues < <(gh issue list --repo "$REPO" --state open --label ci-main-red \
-            --limit 100 --json number --jq 'sort_by(.number) | .[].number')
-          if [ "${#open_issues[@]}" -eq 0 ]; then
-            gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body"
-            exit 0
-          fi
-          keep="${open_issues[0]}"
-          for number in "${open_issues[@]}"; do
-            if [ "$number" != "$keep" ]; then
-              gh issue close "$number" --repo "$REPO" --comment "Duplicate of #$keep." || true
+          # If the sweep finds none open, the issue this run touched was closed underneath it -- a
+          # maintainer closing on an observed recovery just as a new failure arrives -- and gh issue
+          # comment does not reopen; recreate so main-red stays visible, then LIST AGAIN so a
+          # concurrent recreate is deduplicated in this run rather than left as a second open alert.
+          # If it finds several, keep the lowest-numbered and close the rest.
+          #
+          # A failed list is not an empty list: emptiness triggers a create, so trusting a transient
+          # API error's empty result would mint a duplicate beside the issue just commented on. On
+          # failure the sweep is skipped -- the report itself already landed above.
+          for attempt in 1 2; do
+            if ! issues_json="$(gh issue list --repo "$REPO" --state open --label ci-main-red \
+              --limit 100 --json number 2>/dev/null)"; then
+              echo "Sweep list failed; leaving convergence to the next event."
+              break
             fi
+            mapfile -t open_issues < <(printf '%s' "$issues_json" \
+              | jq -r 'sort_by(.number) | .[].number')
+            if [ "${#open_issues[@]}" -eq 0 ]; then
+              gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body"
+              continue
+            fi
+            keep="${open_issues[0]}"
+            for number in "${open_issues[@]}"; do
+              if [ "$number" != "$keep" ]; then
+                gh issue close "$number" --repo "$REPO" --comment "Duplicate of #$keep." || true
+              fi
+            done
+            break
           done
