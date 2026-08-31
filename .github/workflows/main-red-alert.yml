@@ -87,6 +87,18 @@ jobs:
             echo "Run head ${HEAD_SHA:0:9} is not current main ${current:0:9}; not reporting."
             exit 0
           fi
+          # A re-run keeps this run's id and bumps run_attempt, so the newest-id check below cannot
+          # tell that a later attempt has since fixed or is re-running it. Read the run's live state:
+          # only a still-failing terminal conclusion should report. An API error falls through to
+          # report rather than suppress, for the same reason the recheck does.
+          live="$(gh api "repos/$REPO/actions/runs/$RUN_ID" \
+            --jq '.status + ":" + (.conclusion // "none")' 2>/dev/null || echo unknown)"
+          case "$live" in
+            completed:failure|completed:timed_out|completed:cancelled|unknown) : ;;
+            *)
+              echo "Run $RUN_ID is now $live (re-run or still running); not reporting."
+              exit 0 ;;
+          esac
           latest="$(gh api \
             "repos/$REPO/actions/workflows/$WORKFLOW_ID/runs?head_sha=$HEAD_SHA&event=push&per_page=100" \
             --jq '[.workflow_runs[].id] | max // empty')"
@@ -126,12 +138,17 @@ jobs:
             gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body"
           fi
 
-          # Converge the rolling-issue invariant without serialisation. Two events that both saw no
-          # issue and both created one leave duplicates; every run keeps the lowest-numbered open
-          # ci-main-red issue and closes the rest, so any ordering settles on one.
+          # Converge on exactly one OPEN rolling issue, without serialisation.
+          #
+          # Two guarantees, both needed. If the sweep finds none open, the issue this run touched was
+          # closed underneath it -- a maintainer closing on an observed recovery just as a new failure
+          # arrives -- and gh issue comment does not reopen; recreate so main-red stays visible. If it
+          # finds several -- a create/create race -- keep the lowest-numbered and close the rest, so
+          # any ordering settles on one.
           mapfile -t open_issues < <(gh issue list --repo "$REPO" --state open --label ci-main-red \
             --limit 100 --json number --jq 'sort_by(.number) | .[].number')
           if [ "${#open_issues[@]}" -eq 0 ]; then
+            gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body"
             exit 0
           fi
           keep="${open_issues[0]}"
