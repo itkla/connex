@@ -100,6 +100,24 @@ class MainRedAlertCoverage(unittest.TestCase):
         self.assertIn('HEAD_SHA" != "$current', step)
         self.assertIn("superseded", step)
 
+    def test_the_job_can_read_the_actions_api_it_calls(self):
+        doc = yaml.safe_load(ALERT.read_text())
+        # The supersession check lists workflow runs; without actions: read that 403s and set -e
+        # aborts before any issue is opened, so the alert silently never fires.
+        self.assertEqual("read", doc["permissions"]["actions"])
+
+    def test_supersession_considers_only_push_runs(self):
+        step = yaml.safe_load(ALERT.read_text())["jobs"]["alert"]["steps"][0]["run"]
+        # A later workflow_dispatch or scheduled run of the same workflow has a higher id; without
+        # the event filter it would falsely mark a red push run as superseded.
+        self.assertIn("event=push", step)
+
+    def test_main_is_rechecked_before_the_issue_is_mutated(self):
+        step = yaml.safe_load(ALERT.read_text())["jobs"]["alert"]["steps"][0]["run"]
+        # The head is read once up front and again immediately before create/comment, so a push that
+        # advances main mid-check cannot publish a report for a commit main has left behind.
+        self.assertEqual(2, step.count('repos/$REPO/commits/main'))
+
     def test_duplicate_rolling_issues_are_converged(self):
         step = yaml.safe_load(ALERT.read_text())["jobs"]["alert"]["steps"][0]["run"]
         self.assertIn("issue close", step)

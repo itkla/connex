@@ -30,6 +30,9 @@ on:
 
 permissions:
   contents: read
+  # Listing workflow runs for the supersession check requires actions: read. Without it the gh api
+  # call 403s and set -e aborts before any issue is created -- the alert failing to alert.
+  actions: read
   issues: write
 
 # No concurrency control, on purpose. Reportability depends on whether the run reflects the current
@@ -85,10 +88,10 @@ jobs:
             exit 0
           fi
           latest="$(gh api \
-            "repos/$REPO/actions/workflows/$WORKFLOW_ID/runs?head_sha=$HEAD_SHA&per_page=100" \
+            "repos/$REPO/actions/workflows/$WORKFLOW_ID/runs?head_sha=$HEAD_SHA&event=push&per_page=100" \
             --jq '[.workflow_runs[].id] | max // empty')"
           if [ -n "$latest" ] && [ "$RUN_ID" != "$latest" ]; then
-            echo "Run $RUN_ID is superseded by $latest for this commit; not reporting."
+            echo "Run $RUN_ID is superseded by push run $latest for this commit; not reporting."
             exit 0
           fi
 
@@ -105,11 +108,18 @@ jobs:
             "" \
             "Close this issue once \`main\` is green again.")"
 
+          recheck="$(gh api "repos/$REPO/commits/main" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$recheck" ] && [ "$recheck" != "$current" ]; then
+            echo "main advanced past ${current:0:9} during the check; a run for the new head will "\
+              "report if it is red. Not publishing a stale report."
+            exit 0
+          fi
+
           gh label create ci-main-red --repo "$REPO" --color B60205 \
             --description "main is failing" 2>/dev/null || true
 
           existing="$(gh issue list --repo "$REPO" --state open --label ci-main-red \
-            --json number --jq '.[0].number // empty')"
+            --limit 100 --json number --jq 'sort_by(.number) | .[0].number // empty')"
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "$REPO" --body "$body"
           else
@@ -120,7 +130,10 @@ jobs:
           # issue and both created one leave duplicates; every run keeps the lowest-numbered open
           # ci-main-red issue and closes the rest, so any ordering settles on one.
           mapfile -t open_issues < <(gh issue list --repo "$REPO" --state open --label ci-main-red \
-            --json number --jq 'sort_by(.number) | .[].number')
+            --limit 100 --json number --jq 'sort_by(.number) | .[].number')
+          if [ "${#open_issues[@]}" -eq 0 ]; then
+            exit 0
+          fi
           keep="${open_issues[0]}"
           for number in "${open_issues[@]}"; do
             if [ "$number" != "$keep" ]; then
