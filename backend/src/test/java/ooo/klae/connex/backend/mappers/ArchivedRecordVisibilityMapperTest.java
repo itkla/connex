@@ -190,13 +190,14 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
     /** P1-4: the file browser labels every file with its owner's name. */
     @Test
     void fileBrowserStopsLabellingFilesWithArchivedOwners() {
+        User reader = newUser();
         Company owner = newCompany();
         Person contact = newPerson(owner);
         Attachment companyFile = newAttachment("company", owner.getId());
         Attachment contactFile = newAttachment("person", contact.getId());
 
-        assertEquals(owner.getName(), pagedLabel(companyFile));
-        assertEquals(contact.getName(), pagedLabel(contactFile));
+        assertEquals(owner.getName(), pagedLabel(companyFile, reader.getId()));
+        assertEquals(contact.getName(), pagedLabel(contactFile, reader.getId()));
         assertEquals(owner.getName(),
             attachmentMapper.getByEntity(workspace.getId(), "company", owner.getId())
                 .getFirst().getEntityLabel());
@@ -204,13 +205,13 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         assertEquals(1, companyMapper.archive(workspace.getId(), owner.getId()));
         assertEquals(1, personMapper.archive(workspace.getId(), contact.getId()));
 
-        assertNull(pagedLabel(companyFile));
-        assertNull(pagedLabel(contactFile));
+        assertNull(pagedLabel(companyFile, reader.getId()));
+        assertNull(pagedLabel(contactFile, reader.getId()));
         assertNull(attachmentMapper.getByEntity(workspace.getId(), "company", owner.getId())
             .getFirst().getEntityLabel());
-        assertEquals(2, attachmentMapper.countOrphaned(workspace.getId()));
+        assertEquals(2, attachmentMapper.countOrphaned(workspace.getId(), reader.getId()));
 
-        assertEquals(2, attachmentMapper.getPage(workspace.getId(), null, null, null, null, null,
+        assertEquals(2, attachmentMapper.getPage(workspace.getId(), reader.getId(), null, null, null, null, null,
             null, 100, 0).size());
         assertNotNull(attachmentMapper.getMetadataById(workspace.getId(), companyFile.getId()));
     }
@@ -378,8 +379,8 @@ class ArchivedRecordVisibilityMapperTest extends AbstractMapperTest {
         return attachment;
     }
 
-    private String pagedLabel(Attachment attachment) {
-        return attachmentMapper.getPage(workspace.getId(), null, null, null, null, null, null, 100, 0)
+    private String pagedLabel(Attachment attachment, int currentUserId) {
+        return attachmentMapper.getPage(workspace.getId(), currentUserId, null, null, null, null, null, null, 100, 0)
             .stream().filter(row -> row.getId() == attachment.getId()).findFirst().orElseThrow()
             .getEntityLabel();
     }

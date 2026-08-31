@@ -84,6 +84,28 @@ class AttachmentMapperXmlTest {
                 .contains("entity_type != 'ai_chat_session'"));
     }
 
+    @Test
+    void aggregateReadsIncludeTheSingleNoteVisibilityPredicate() throws IOException {
+        String xml = mapperXml();
+        String predicate = block(xml, "noteVisibilityPredicate");
+
+        assertTrue(predicate.contains("a.entity_type != 'note' OR EXISTS"));
+        assertTrue(predicate.contains("FROM note n"));
+        assertTrue(predicate.contains("n.workspace_id = a.workspace_id"));
+        assertTrue(predicate.contains("n.id = a.entity_id"));
+        assertTrue(predicate.contains(
+            "n.visibility = 'workspace' OR n.author_id = #{currentUserId}"));
+        assertFalse(predicate.contains("ai_chat_session"));
+        assertTrue(xml.indexOf("AND (a.entity_type != 'note' OR EXISTS")
+            == xml.lastIndexOf("AND (a.entity_type != 'note' OR EXISTS"));
+        for (String statement : List.of(
+                "getAll", "search", "attachPageWhere", "getByUrl",
+                "countsBySource", "countsByKind", "countsByTag",
+                "countOrphaned", "totalCount", "totalSize", "getVisibleIdsIn")) {
+            assertTrue(block(xml, statement).contains("noteVisibilityPredicate"), statement);
+        }
+    }
+
     private static String block(String xml, String id) {
         Matcher matcher = BLOCK.matcher(xml);
         while (matcher.find()) {
