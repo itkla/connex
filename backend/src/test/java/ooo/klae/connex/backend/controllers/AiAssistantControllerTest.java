@@ -391,6 +391,30 @@ class AiAssistantControllerTest {
     }
 
     /**
+     * The four retained routes must not answer {@code GET} at all. This is the property the move
+     * exists for: {@code JSESSIONID} is {@code SameSite=Lax} and is sent on cross-site top-level
+     * {@code GET} navigation, so if any of these were reachable by URL alone the fix would be
+     * undone. Method-not-allowed also proves the paths are mapped, so a typo in a route would fail
+     * here as 404 rather than pass silently.
+     */
+    @Test
+    void theRetainedRoutesRefuseGet() throws Exception {
+        for (String path : List.of(
+                "/api/ai/assistant/sessions/retained",
+                "/api/ai/assistant/sessions/42/retained",
+                "/api/ai/assistant/sessions/42/tool-calls/retained",
+                "/api/ai/assistant/sessions/42/tool-calls/29/retained")) {
+            mockMvc.perform(get(path))
+                .andExpect(status().isMethodNotAllowed());
+        }
+
+        verify(service, never()).pageRetained(anyInt(), anyInt());
+        verify(service, never()).getRetained(anyInt(), anyInt(), anyInt());
+        verify(toolCallReadService, never()).listRetained(anyInt(), anyBoolean());
+        verify(toolCallReadService, never()).getRetained(anyInt(), anyInt());
+    }
+
+    /**
      * The retired {@code ?scope=retained} query string must no longer reach any recorded read. It
      * now falls through to the caller's own accessible-session read, which cannot return a
      * departed member's private session.

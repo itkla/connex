@@ -455,18 +455,37 @@ support_bundle_fetch_csrf_token() {
         --output "$body" \
         --write-out '%{http_code}' \
         "$BASE_URL/api/auth/csrf" 2>/dev/null || true)"
-    if [[ ! "$status" =~ ^[0-9]{3}$ ]]; then
+    # curl reports 000 on a transport failure, which is three digits and would otherwise be
+    # misread as an HTTP status. Only 401/403 mean "reauthenticate"; every other non-200 is a
+    # backend or network fault and must use the API exit class, not the auth one.
+    if [[ ! "$status" =~ ^[0-9]{3}$ ]] || [ "$status" = "000" ]; then
         support_bundle_log error request_failed reason transport_failure
         return "$EXIT_API"
     fi
-    if [ "$status" != "200" ]; then
-        support_bundle_log error request_rejected reason csrf_token_unavailable status "$status" \
-            remedy "sign in as an organization administrator and export a fresh cookie file"
-        return "$EXIT_AUTH"
+    case "$status" in
+        200) ;;
+        401|403)
+            support_bundle_log error request_rejected reason csrf_token_unauthenticated \
+                status "$status" \
+                remedy "sign in as an organization administrator and export a fresh cookie file"
+            return "$EXIT_AUTH"
+            ;;
+        *)
+            support_bundle_log error request_failed reason csrf_token_unavailable status "$status"
+            return "$EXIT_API"
+            ;;
+    esac
+    # jq -r renders numbers and booleans as bare words, so a non-string field would pass an
+    # emptiness check and then be sent verbatim as a header. Require real JSON strings.
+    if ! jq -e '(.headerName | type == "string") and (.token | type == "string")' \
+            < "$body" >/dev/null 2>&1; then
+        support_bundle_log error request_failed reason csrf_token_malformed
+        return "$EXIT_API"
     fi
-    CSRF_HEADER_NAME="$(jq -r '.headerName // empty' < "$body")"
-    CSRF_TOKEN="$(jq -r '.token // empty' < "$body")"
-    if [ -z "$CSRF_HEADER_NAME" ] || [ -z "$CSRF_TOKEN" ]; then
+    CSRF_HEADER_NAME="$(jq -r '.headerName' < "$body")"
+    CSRF_TOKEN="$(jq -r '.token' < "$body")"
+    if [ -z "$CSRF_HEADER_NAME" ] || [ -z "$CSRF_TOKEN" ] \
+            || [[ ! "$CSRF_HEADER_NAME" =~ ^[A-Za-z0-9_-]+$ ]]; then
         support_bundle_log error request_failed reason csrf_token_malformed
         return "$EXIT_API"
     fi
