@@ -1,0 +1,174 @@
+name: Alert on a red main
+
+# Why this exists rather than a merge queue.
+#
+# main sat red on "OCR — contract tests" for five consecutive merges and nobody noticed (#1481).
+# That is a DETECTION failure, not a prevention one: every contributing pull request was green,
+# because pull requests path-filter jobs the merge does not (classify-ci-changes.py runs the
+# complete suite only for non-pull_request events).
+#
+# A merge queue would also close the gap, and the workflows already declare merge_group triggers so
+# it can be switched on. It was not, deliberately: the backend suite runs ~33 minutes and every
+# merge would serialise behind it, and a break caused by external toolchain drift on an unchanged
+# tree — which is exactly what #1481 was — would convert "main is red and unnoticed" into "nobody
+# can merge anything". For a repository merging a handful of times a day, detection is the
+# proportionate half of that trade. Revisit if the team grows or if a red main starts costing more
+# than a stalled queue would.
+
+on:
+  workflow_run:
+    # Every workflow that runs on a push to main. A gap here is a workflow whose failure goes
+    # unreported, which is the whole defect this exists to close, so it is checked by a test.
+    workflows:
+      - Agent guide context budget
+      - CI
+      - Deploy smoke
+      - React Doctor
+      - Security
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  # Listing workflow runs for the supersession check requires actions: read. Without it the gh api
+  # call 403s and set -e aborts before any issue is created -- the alert failing to alert.
+  actions: read
+  issues: write
+
+# No concurrency control, on purpose. Reportability depends on whether the run reflects the current
+# main HEAD, which cannot be evaluated in a concurrency expression — so any group keyed on conclusion
+# alone either lets a stale event evict a real pending alert (GitHub keeps one pending run per group
+# and a new queued run replaces it) or lets non-reportable events serialise ahead of real ones. Two
+# earlier attempts here did exactly that. Instead every event runs independently, correctness is
+# decided in the step against live state, and the rolling-issue race is made idempotent by a dedup
+# sweep rather than by serialisation.
+
+jobs:
+  alert:
+    name: Open or update the red-main report
+    # workflow_run branch filters match the *triggering* workflow's branch, and the monitored
+    # workflows also run on pull_request — so a fork branch merely named "main" would otherwise
+    # report the repository's main as red. Requiring a push settles it.
+    #
+    # failure, timed_out, cancelled and startup_failure are the terminal conclusions in which the
+    # workflow did not succeed: explicit time limits can expire, a required run can be cancelled,
+    # and a workflow-file error concludes startup_failure without running a single job. The
+    # remaining documented conclusions are excluded on purpose -- success and neutral are green,
+    # skipped ran nothing, action_required is a pending approval rather than a result, and stale is
+    # a superseded run whose replacement reports for itself. The step then filters to runs that
+    # actually reflect current main, which a coarse conclusion check here cannot do.
+    if: >-
+      github.event.workflow_run.event == 'push'
+      && contains(fromJSON('["failure", "timed_out", "cancelled", "startup_failure"]'),
+                  github.event.workflow_run.conclusion)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Report the failure on a tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          set -euo pipefail
+
+          # Only report when this run reflects the current tip of main.
+          #
+          # A failed rerun of an older commit keeps its original push event and main branch, so
+          # without this it would open a "main is red" issue for a commit main has already moved
+          # past. And a run superseded on the current commit — React Doctor cancels its own older
+          # run by concurrency — is a cancelled conclusion that does not mean main is red. Both are
+          # excluded by requiring the head to be current main AND this to be the newest run of its
+          # workflow for that head.
+          current="$(gh api "repos/$REPO/commits/main" --jq '.sha')"
+          if [ "$HEAD_SHA" != "$current" ]; then
+            echo "Run head ${HEAD_SHA:0:9} is not current main ${current:0:9}; not reporting."
+            exit 0
+          fi
+          # A re-run keeps this run's id and bumps run_attempt, so the newest-id check below cannot
+          # tell that a later attempt has since fixed or is re-running it. Read the run's live state:
+          # only a still-failing terminal conclusion should report. An API error falls through to
+          # report rather than suppress, for the same reason the recheck does.
+          live="$(gh api "repos/$REPO/actions/runs/$RUN_ID" \
+            --jq '.status + ":" + (.conclusion // "none")' 2>/dev/null || echo unknown)"
+          case "$live" in
+            completed:failure|completed:timed_out|completed:cancelled|completed:startup_failure|unknown) : ;;
+            *)
+              echo "Run $RUN_ID is now $live (re-run or still running); not reporting."
+              exit 0 ;;
+          esac
+          latest="$(gh api \
+            "repos/$REPO/actions/workflows/$WORKFLOW_ID/runs?head_sha=$HEAD_SHA&event=push&per_page=100" \
+            --jq '[.workflow_runs[].id] | max // empty' 2>/dev/null || true)"
+          if [ -n "$latest" ] && [ "$RUN_ID" != "$latest" ]; then
+            echo "Run $RUN_ID is superseded by push run $latest for this commit; not reporting."
+            exit 0
+          fi
+
+          # One rolling issue rather than one per failure: a red main usually produces several
+          # failing workflows for the same commit, and a burst of issues is its own kind of noise.
+          title='main is red'
+          body="$(printf '%s\n' \
+            "\`$RUN_NAME\` concluded \`$CONCLUSION\` on \`main\` at \`${HEAD_SHA:0:9}\`." \
+            "" \
+            "$RUN_URL" \
+            "" \
+            "Pull requests path-filter jobs that a merge does not, so a green pull request does not" \
+            "imply a green merge. Check the merge commit's own checks, not the pull request's." \
+            "" \
+            "Close this issue once \`main\` is green again.")"
+
+          recheck="$(gh api "repos/$REPO/commits/main" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$recheck" ] && [ "$recheck" != "$current" ]; then
+            echo "main advanced past ${current:0:9} during the check; a run for the new head will "\
+              "report if it is red. Not publishing a stale report."
+            exit 0
+          fi
+
+          gh label create ci-main-red --repo "$REPO" --color B60205 \
+            --description "main is failing" 2>/dev/null || true
+
+          existing="$(gh issue list --repo "$REPO" --state open --label ci-main-red \
+            --limit 100 --json number --jq 'sort_by(.number) | .[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body"
+          fi
+
+          # Converge on exactly one OPEN rolling issue, without serialisation.
+          #
+          # If the sweep finds none open, the issue this run touched was closed underneath it -- a
+          # maintainer closing on an observed recovery just as a new failure arrives -- and gh issue
+          # comment does not reopen; recreate so main-red stays visible, then LIST AGAIN so a
+          # concurrent recreate is deduplicated in this run rather than left as a second open alert.
+          # If it finds several, keep the lowest-numbered and close the rest.
+          #
+          # A failed list is not an empty list: emptiness triggers a create, so trusting a transient
+          # API error's empty result would mint a duplicate beside the issue just commented on. On
+          # failure the sweep is skipped -- the report itself already landed above.
+          for attempt in 1 2; do
+            if ! issues_json="$(gh issue list --repo "$REPO" --state open --label ci-main-red \
+              --limit 100 --json number 2>/dev/null)"; then
+              echo "Sweep list failed; leaving convergence to the next event."
+              break
+            fi
+            mapfile -t open_issues < <(printf '%s' "$issues_json" \
+              | jq -r 'sort_by(.number) | .[].number')
+            if [ "${#open_issues[@]}" -eq 0 ]; then
+              gh issue create --repo "$REPO" --title "$title" --label ci-main-red --body "$body"
+              continue
+            fi
+            keep="${open_issues[0]}"
+            for number in "${open_issues[@]}"; do
+              if [ "$number" != "$keep" ]; then
+                gh issue close "$number" --repo "$REPO" --comment "Duplicate of #$keep." || true
+              fi
+            done
+            break
+          done

@@ -74,6 +74,10 @@ jobs:
         run: python .github/scripts/test_codeql_alerts.py
       - name: Regression-test security workflow gates
         run: python .github/scripts/test_security_workflow.py
+      - name: Regression-test the red-main alert coverage
+        run: python .github/scripts/test_main_red_alert.py
+      - name: Regression-test the red-main alert behaviour
+        run: python .github/scripts/test_main_red_alert_behavior.py
       - name: Regression-test edge security headers
         run: python .github/scripts/test_edge_security_headers.py
       - name: Regression-test release delivery invariants
