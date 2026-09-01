@@ -24,9 +24,10 @@ export default async function TodayPriorities({
 
     if (!summary.ok) {
         return (
+            <div className="overflow-hidden rounded-2xl border border-border bg-card">
             <Link
                 href="/me"
-                className="group flex items-center gap-3 rounded-2xl border border-border bg-card px-5 py-3.5 transition-colors hover:bg-muted/50"
+                className="group flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-muted/50"
             >
                 <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
                     <QueueListIcon className="size-4" aria-hidden="true" />
@@ -37,6 +38,7 @@ export default async function TodayPriorities({
                     <ArrowRightIcon className="size-3.5" aria-hidden="true" />
                 </span>
             </Link>
+            </div>
         );
     }
 
@@ -44,9 +46,10 @@ export default async function TodayPriorities({
     const incomplete = !data.totalsComplete || data.availability !== 'available';
     if (data.availability === 'unavailable') {
         return (
+            <div className="overflow-hidden rounded-2xl border border-border bg-card">
             <Link
                 href="/me"
-                className="group flex items-center gap-3 rounded-2xl border border-border bg-card px-5 py-3.5 transition-colors hover:bg-muted/50"
+                className="group flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-muted/50"
             >
                 <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
                     <QueueListIcon className="size-4" aria-hidden="true" />
@@ -57,6 +60,7 @@ export default async function TodayPriorities({
                     <ArrowRightIcon className="size-3.5" aria-hidden="true" />
                 </span>
             </Link>
+            </div>
         );
     }
     if (data.knownTotal === 0 && !incomplete) {
@@ -68,9 +72,10 @@ export default async function TodayPriorities({
         : t('myWorkCount', { count: data.knownTotal });
 
     return (
+        <div className="overflow-hidden rounded-2xl border border-border bg-card">
         <Link
             href="/me"
-            className="group flex items-center gap-3 rounded-2xl border border-border bg-card px-5 py-3.5 transition-colors hover:bg-muted/50"
+            className="group flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-muted/50"
         >
             <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-light/60 text-foreground">
                 <QueueListIcon className="size-4" aria-hidden="true" />
@@ -92,5 +97,6 @@ export default async function TodayPriorities({
                 <ArrowRightIcon className="size-3.5" aria-hidden="true" />
             </span>
         </Link>
+        </div>
     );
 }
