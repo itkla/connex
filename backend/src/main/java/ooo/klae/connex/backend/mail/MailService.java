@@ -53,6 +53,12 @@ public class MailService {
         deliverQuietly(config, message, "workspace " + workspaceId);
     }
 
+    /** Returns whether the instance default sender currently resolves to a usable transport. */
+    public boolean hasUsableInstanceTransport() {
+        ResolvedMailConfig config = resolver.resolveInstance();
+        return config != null && config.usable();
+    }
+
     /** Returns whether the workspace currently resolves to a usable SMTP transport. */
     public boolean hasUsableWorkspaceTransport(int workspaceId) {
         ResolvedMailConfig config = resolver.resolveForWorkspace(workspaceId);

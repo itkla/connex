@@ -21,6 +21,7 @@ import org.springframework.security.web.webauthn.management.WebAuthnRelyingParty
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WebauthnCredentialMapper;
 import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
+import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationPolicy;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -41,6 +42,7 @@ class WebAuthnServiceTest {
                 credentialMapper,
                 mock(UserMapper.class),
                 mock(PrivilegedAccountService.class),
+                mock(PasskeyBootstrapConfirmationPolicy.class),
                 mock(AuditService.class));
         when(credentialMapper.existsByUserId(7)).thenReturn(true);
 
@@ -59,7 +61,8 @@ class WebAuthnServiceTest {
         WebAuthnService service = new WebAuthnService(
             relyingParty, credentials, userEntities,
             mock(WebauthnCredentialMapper.class), userMapper,
-            mock(PrivilegedAccountService.class), mock(AuditService.class));
+            mock(PrivilegedAccountService.class),
+            mock(PasskeyBootstrapConfirmationPolicy.class), mock(AuditService.class));
         PublicKeyCredentialCreationOptions options = mock(PublicKeyCredentialCreationOptions.class);
         PublicKeyCredentialUserEntity optionUser = mock(PublicKeyCredentialUserEntity.class);
         Bytes handle = new Bytes(new byte[] {1, 2, 3});
@@ -70,7 +73,7 @@ class WebAuthnServiceTest {
         when(userMapper.currentSessionEpoch(8)).thenReturn(0);
 
         assertThrows(BadCredentialsException.class, () -> service.finishRegistration(
-            8, 0, options, null, "work key"));
+            8, 0, true, options, null, "work key"));
 
         verify(relyingParty, never()).registerCredential(org.mockito.ArgumentMatchers.any());
         verify(credentials, never()).save(org.mockito.ArgumentMatchers.any());
@@ -85,7 +88,8 @@ class WebAuthnServiceTest {
         AuditService auditService = mock(AuditService.class);
         WebAuthnService service = new WebAuthnService(
                 relyingParty, credentials, userEntities, mock(WebauthnCredentialMapper.class),
-                userMapper, mock(PrivilegedAccountService.class), auditService);
+                userMapper, mock(PrivilegedAccountService.class),
+                mock(PasskeyBootstrapConfirmationPolicy.class), auditService);
         PublicKeyCredentialCreationOptions options = mock(PublicKeyCredentialCreationOptions.class);
         PublicKeyCredentialUserEntity optionUser = mock(PublicKeyCredentialUserEntity.class);
         PublicKeyCredential<AuthenticatorAttestationResponse> credential = mock();
@@ -102,7 +106,7 @@ class WebAuthnServiceTest {
         when(userMapper.currentSessionEpoch(7)).thenReturn(3);
         when(userMapper.getUserById(7)).thenReturn(user);
 
-        service.finishRegistration(7, 3, options, credential, "Work key");
+        service.finishRegistration(7, 3, true, options, credential, "Work key");
 
         verify(credentials).save(record);
         verify(userMapper).clearEpochRestampGrant(7);
@@ -127,12 +131,13 @@ class WebAuthnServiceTest {
                 mock(WebauthnCredentialMapper.class),
                 userMapper,
                 mock(PrivilegedAccountService.class),
+                mock(PasskeyBootstrapConfirmationPolicy.class),
                 mock(AuditService.class));
         when(userMapper.lockById(7)).thenReturn(7);
         when(userMapper.currentSessionEpoch(7)).thenReturn(4);
 
         assertThrows(ForbiddenException.class, () -> service.finishRegistration(
-                7, 3, mock(PublicKeyCredentialCreationOptions.class), null, "Work key"));
+                7, 3, true, mock(PublicKeyCredentialCreationOptions.class), null, "Work key"));
 
         verify(relyingParty, never()).registerCredential(any());
         verify(credentials, never()).save(any());
@@ -149,7 +154,7 @@ class WebAuthnServiceTest {
         PrivilegedAccountService privilegedAccounts = mock(PrivilegedAccountService.class);
         WebAuthnService service = new WebAuthnService(
                 relyingParty, credentials, userEntities, credentialMapper, userMapper, privilegedAccounts,
-                mock(AuditService.class));
+                mock(PasskeyBootstrapConfirmationPolicy.class), mock(AuditService.class));
         Bytes credentialId = Bytes.random();
         WebauthnUserEntityRow entity = new WebauthnUserEntityRow();
         entity.setId("handle");
@@ -181,7 +186,8 @@ class WebAuthnServiceTest {
         AuditService auditService = mock(AuditService.class);
         WebAuthnService service = new WebAuthnService(
                 mock(WebAuthnRelyingPartyOperations.class), credentials, userEntities,
-                credentialMapper, userMapper, privilegedAccounts, auditService);
+                credentialMapper, userMapper, privilegedAccounts,
+                mock(PasskeyBootstrapConfirmationPolicy.class), auditService);
         Bytes credentialId = Bytes.random();
         WebauthnUserEntityRow entity = new WebauthnUserEntityRow();
         entity.setId("handle");

@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WebauthnCredentialMapper;
 import ooo.klae.connex.backend.mappers.WebauthnUserEntityMapper;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationPolicy;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 
 import lombok.RequiredArgsConstructor;
@@ -57,6 +58,7 @@ public class WebAuthnService {
     private final WebauthnCredentialMapper credentialMapper;
     private final UserMapper userMapper;
     private final PrivilegedAccountService privilegedAccountService;
+    private final PasskeyBootstrapConfirmationPolicy bootstrapConfirmationPolicy;
     private final AuditService auditService;
 
     /**
@@ -85,7 +87,14 @@ public class WebAuthnService {
      * recovery handoff in the same transaction, so neither can commit without the other.
      *
      * @param expectedUserId the authenticated account completing the ceremony
+     * <p>The same lock carries the first-passkey confirmation fence (#1506). Privilege is read
+     * here, not at options time, because an account can be promoted between the two phases: a
+     * ceremony started while unprivileged would otherwise finish as a privileged enrollment and
+     * stamp the session as stepped-up without the out-of-band proof ever being required.
+     *
      * @param expectedSessionEpoch the epoch stamped into the request's authenticated session
+     * @param bootstrapConfirmationSatisfied whether the session carries a redeemed out-of-band
+     *     first-passkey confirmation
      * @param options the options issued in {@link #createRegistrationOptions}
      * @param credential the client's attestation response
      * @param label the user-supplied nickname
@@ -95,6 +104,7 @@ public class WebAuthnService {
     public CredentialRecord finishRegistration(
             int expectedUserId,
             Integer expectedSessionEpoch,
+            boolean bootstrapConfirmationSatisfied,
             PublicKeyCredentialCreationOptions options,
             PublicKeyCredential<AuthenticatorAttestationResponse> credential,
             String label) {
@@ -106,6 +116,12 @@ public class WebAuthnService {
                 || currentSessionEpoch == null
                 || !expectedSessionEpoch.equals(currentSessionEpoch)) {
             throw new ForbiddenException("Authenticated session is no longer current");
+        }
+        if (!hasPasskey(expectedUserId)
+                && !bootstrapConfirmationSatisfied
+                && bootstrapConfirmationPolicy.requiresConfirmation(expectedUserId)) {
+            throw new ForbiddenException(
+                    "Confirm the emailed enrollment link before adding the first passkey");
         }
         PublicKeyCredentialUserEntity optionUser = options.getUser();
         Integer optionUserId = optionUser == null

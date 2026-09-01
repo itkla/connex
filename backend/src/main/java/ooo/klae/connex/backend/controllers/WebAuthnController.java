@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.dto.PasskeyRegistrationOptionsRequest;
 import ooo.klae.connex.backend.dto.PasskeyRegistrationRequirementsDto;
 import ooo.klae.connex.backend.dto.RenamePasskeyRequest;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
+import ooo.klae.connex.backend.dto.OneTimeLinkExchangeRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
@@ -42,6 +43,7 @@ import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.MfaRecoveryService;
+import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
@@ -85,16 +87,46 @@ public class WebAuthnController {
     private final SessionSecurityService sessionSecurityService;
     private final AuditService auditService;
     private final MfaRecoveryService mfaRecoveryService;
+    private final PasskeyBootstrapConfirmationService bootstrapConfirmationService;
 
     /**
      * Reports whether the current account must confirm its password for first-passkey enrollment.
      */
     @GetMapping("/register/requirements")
-    public PasskeyRegistrationRequirementsDto registrationRequirements() {
+    public PasskeyRegistrationRequirementsDto registrationRequirements(HttpServletRequest req) {
         User user = authService.getCurrentUser();
         boolean currentPasswordRequired = !webAuthnService.hasPasskey(user.getId())
                 && authService.hasPasswordCredential(user.getId());
-        return new PasskeyRegistrationRequirementsDto(currentPasswordRequired);
+        boolean emailConfirmationRequired = bootstrapConfirmationService.isRequiredFor(user.getId());
+        boolean emailConfirmationSatisfied = emailConfirmationRequired
+                && bootstrapConfirmationService.isSatisfiedFor(user, req);
+        return new PasskeyRegistrationRequirementsDto(
+                currentPasswordRequired, emailConfirmationRequired, emailConfirmationSatisfied);
+    }
+
+    /**
+     * Mails a single-use enrollment confirmation to the account's own address. Required before a
+     * privileged, password-backed account may enroll its first passkey, so a stolen password on
+     * its own cannot install an attacker-controlled second factor.
+     */
+    @PostMapping("/register/confirmation")
+    public Map<String, String> requestBootstrapConfirmation(HttpServletRequest req) {
+        User user = authService.getCurrentUser();
+        bootstrapConfirmationService.request(
+                user, req, clientIpResolver.resolve(req));
+        return Map.of("message", "Check your email for an enrollment confirmation link");
+    }
+
+    /**
+     * Redeems the emailed confirmation and stamps the current session. The bearer arrives in the
+     * link fragment, so it never reaches the server as part of a URL.
+     */
+    @PostMapping("/register/confirmation/exchange")
+    public Map<String, String> exchangeBootstrapConfirmation(
+            @Valid @RequestBody OneTimeLinkExchangeRequest request, HttpServletRequest req) {
+        User user = authService.getCurrentUser();
+        bootstrapConfirmationService.redeem(user, request.getToken(), req);
+        return Map.of("message", "Enrollment confirmed; you can now add your passkey");
     }
 
     /**
@@ -133,8 +165,11 @@ public class WebAuthnController {
             authorizePasskeyRegistrationVerify(user, req);
             PublicKeyCredential<AuthenticatorAttestationResponse> credential = json.read(body, ATTESTATION_TYPE);
             Integer expectedSessionEpoch = sessionSecurityService.sessionEpoch(req.getSession(false));
+            boolean bootstrapConfirmationSatisfied =
+                bootstrapConfirmationService.isSatisfiedFor(user, req);
             CredentialRecord record = webAuthnService.finishRegistration(
-                    user.getId(), expectedSessionEpoch, options, credential, label);
+                    user.getId(), expectedSessionEpoch, bootstrapConfirmationSatisfied,
+                    options, credential, label);
             sessionSecurityService.markStepUp(req, user.getId());
             return Map.of("credentialId", record.getCredentialId().toBase64UrlString());
         } catch (RequestBodyTooLargeException ex) {
@@ -150,6 +185,7 @@ public class WebAuthnController {
         } finally {
             creationOptions.save(req, res, null);
             sessionSecurityService.clearFirstPasskeyBootstrap(req);
+            sessionSecurityService.clearPasskeyBootstrapConfirmation(req);
         }
     }
 
@@ -335,6 +371,7 @@ public class WebAuthnController {
             throw exception;
         }
         sessionSecurityService.completeRecoveryStamp(httpRequest, epoch);
+        bootstrapConfirmationService.invalidateForUser(user.getId());
         return Map.of("message", "Passkeys removed; enroll a replacement passkey to continue");
     }
 
@@ -359,6 +396,7 @@ public class WebAuthnController {
         }
         String password = request == null ? null : request.getCurrentPassword();
         authService.requireFirstPasskeyBootstrapAuthentication(user.getId(), password, httpRequest);
+        requireBootstrapConfirmation(user, httpRequest);
         return true;
     }
 
@@ -370,5 +408,31 @@ public class WebAuthnController {
         if (!sessionSecurityService.hasFreshFirstPasskeyBootstrap(httpRequest, user.getId())) {
             throw new BadRequestException("Current password confirmation required");
         }
+        requireBootstrapConfirmation(user, httpRequest);
+    }
+
+    /**
+     * Refuses a first-passkey enrollment that lacks the out-of-band confirmation this account
+     * currently needs. Evaluated at both ceremony phases, and again under the account lock in
+     * {@code WebAuthnService.finishRegistration}, so a promotion mid-ceremony cannot slip through.
+     */
+    private void requireBootstrapConfirmation(User user, HttpServletRequest httpRequest) {
+        if (!bootstrapConfirmationService.isRequiredFor(user.getId())) {
+            return;
+        }
+        if (bootstrapConfirmationService.isSatisfiedFor(user, httpRequest)) {
+            return;
+        }
+        auditService.recordStrictFailureIndependentScoped(
+                "auth.passkey.bootstrap_confirmation.required",
+                "user",
+                user.getId(),
+                null,
+                null,
+                user.getDisplayName(),
+                "First-passkey enrollment refused pending emailed confirmation",
+                "bootstrap_confirmation_required");
+        throw new ForbiddenException(
+                "Confirm the emailed enrollment link before adding the first passkey");
     }
 }

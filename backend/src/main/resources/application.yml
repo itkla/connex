@@ -146,6 +146,23 @@ connex:
             recovery-token-sha256: ${CONNEX_PRIVILEGED_MFA_RECOVERY_TOKEN_SHA256:}
             recovery-expires-at: ${CONNEX_PRIVILEGED_MFA_RECOVERY_EXPIRES_AT:}
             recovery-actor: ${CONNEX_PRIVILEGED_MFA_RECOVERY_ACTOR:}
+            # Out-of-band confirmation for a FIRST passkey on a privileged account (#1506).
+            # Fail-closed: enrollment is refused until the emailed link is redeemed, so a stolen
+            # password alone cannot install an attacker-controlled second factor. Independent of
+            # `enforced` above, because a first enrollment stamps step-up either way.
+            # An instance that leaves email-enabled false CANNOT enroll a privileged,
+            # password-backed account at all; configure instance SMTP (connex.mail.*) and set
+            # email-enabled, or disable this as a documented staged-rollout exception.
+            bootstrap-confirmation:
+                enabled: ${CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_ENABLED:true}
+                email-enabled: ${CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_EMAIL_ENABLED:false}
+                base-url: ${CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_BASE_URL:http://localhost:3000}
+                token-expiry-minutes: ${CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_TOKEN_EXPIRY_MINUTES:30}
+                request-window-seconds: ${CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_REQUEST_WINDOW_SECONDS:900}
+                max-requests: ${CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_MAX_REQUESTS:5}
+                scheduling-enabled: ${CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_SCHEDULING_ENABLED:true}
+                cleanup-delay-ms: ${CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_CLEANUP_DELAY_MS:3600000}
+                initial-delay-ms: ${CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_INITIAL_DELAY_MS:3600000}
         breached-passwords:
             source: ${CONNEX_BREACHED_PASSWORD_SOURCE:REMOTE}
             offline-file: ${CONNEX_BREACHED_PASSWORD_OFFLINE_FILE:}

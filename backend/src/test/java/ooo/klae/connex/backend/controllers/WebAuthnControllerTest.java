@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -50,6 +51,7 @@ import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.MfaRecoveryService;
+import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
@@ -72,6 +74,8 @@ class WebAuthnControllerTest {
     private final SessionSecurityService sessionSecurityService = mock(SessionSecurityService.class);
     private final AuditService auditService = mock(AuditService.class);
     private final MfaRecoveryService mfaRecoveryService = mock(MfaRecoveryService.class);
+    private final PasskeyBootstrapConfirmationService bootstrapConfirmationService =
+        mock(PasskeyBootstrapConfirmationService.class);
     private final WebAuthnController controller = new WebAuthnController(
         webAuthnService,
         authService,
@@ -83,7 +87,8 @@ class WebAuthnControllerTest {
         ssoConnectionService,
         sessionSecurityService,
         auditService,
-        mfaRecoveryService);
+        mfaRecoveryService,
+        bootstrapConfirmationService);
 
     @AfterEach
     void clearSecurityContext() {
@@ -155,7 +160,7 @@ class WebAuthnControllerTest {
         when(webAuthnService.hasPasskey(7)).thenReturn(false);
         when(authService.hasPasswordCredential(7)).thenReturn(true);
 
-        assertTrue(controller.registrationRequirements().currentPasswordRequired());
+        assertTrue(controller.registrationRequirements(new MockHttpServletRequest()).currentPasswordRequired());
     }
 
     @Test
@@ -165,7 +170,7 @@ class WebAuthnControllerTest {
         when(webAuthnService.hasPasskey(7)).thenReturn(false);
         when(authService.hasPasswordCredential(7)).thenReturn(false);
 
-        assertFalse(controller.registrationRequirements().currentPasswordRequired());
+        assertFalse(controller.registrationRequirements(new MockHttpServletRequest()).currentPasswordRequired());
     }
 
     @Test
@@ -174,7 +179,7 @@ class WebAuthnControllerTest {
         when(authService.getCurrentUser()).thenReturn(user);
         when(webAuthnService.hasPasskey(7)).thenReturn(true);
 
-        assertFalse(controller.registrationRequirements().currentPasswordRequired());
+        assertFalse(controller.registrationRequirements(new MockHttpServletRequest()).currentPasswordRequired());
         verify(authService, never()).hasPasswordCredential(anyInt());
     }
 
@@ -210,7 +215,8 @@ class WebAuthnControllerTest {
         assertThrows(BadRequestException.class,
             () -> controller.registerVerify("work key", "{}", request, response));
 
-        verify(webAuthnService, never()).finishRegistration(anyInt(), any(), any(), any(), any());
+        verify(webAuthnService, never()).finishRegistration(
+            anyInt(), any(), anyBoolean(), any(), any(), any());
     }
 
     @Test
@@ -231,14 +237,14 @@ class WebAuthnControllerTest {
                 .<TypeReference<PublicKeyCredential<AuthenticatorAttestationResponse>>>any()))
                 .thenReturn(credential);
         when(sessionSecurityService.sessionEpoch(request.getSession(false))).thenReturn(6);
-        when(webAuthnService.finishRegistration(7, 6, options, credential, "work key"))
+        when(webAuthnService.finishRegistration(7, 6, false, options, credential, "work key"))
                 .thenReturn(record);
         when(record.getCredentialId()).thenReturn(Bytes.random());
 
         registrationController.registerVerify("work key", "{}", request, response);
 
         verify(sessionSecurityService).sessionEpoch(request.getSession(false));
-        verify(webAuthnService).finishRegistration(7, 6, options, credential, "work key");
+        verify(webAuthnService).finishRegistration(7, 6, false, options, credential, "work key");
     }
 
     @Test
@@ -565,6 +571,121 @@ class WebAuthnControllerTest {
         verify(sessionSecurityService, never()).markStepUp(any(), anyInt());
     }
 
+    @Test
+    void registerOptions_privilegedFirstPasskeyRefusedWithoutEmailedConfirmation() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PasskeyRegistrationOptionsRequest body = new PasskeyRegistrationOptionsRequest();
+        body.setCurrentPassword("Str0ng!Pass");
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(false);
+        when(bootstrapConfirmationService.isRequiredFor(7)).thenReturn(true);
+        when(sessionSecurityService.hasFreshPasskeyBootstrapConfirmation(request, 7))
+            .thenReturn(false);
+
+        assertThrows(ForbiddenException.class,
+            () -> controller.registerOptions(body, request, response));
+
+        verify(webAuthnService, never()).createRegistrationOptions(any());
+        verify(sessionSecurityService, never()).markFirstPasskeyBootstrap(any(), anyInt());
+    }
+
+    @Test
+    void registerOptions_privilegedFirstPasskeyProceedsWithRedeemedConfirmation() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PasskeyRegistrationOptionsRequest body = new PasskeyRegistrationOptionsRequest();
+        body.setCurrentPassword("Str0ng!Pass");
+        PublicKeyCredentialCreationOptions options = mock(PublicKeyCredentialCreationOptions.class);
+        WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
+        WebAuthnController registrationController = controller(mapper);
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(false);
+        when(bootstrapConfirmationService.isRequiredFor(7)).thenReturn(true);
+        when(sessionSecurityService.hasFreshPasskeyBootstrapConfirmation(request, 7))
+            .thenReturn(true);
+        when(webAuthnService.createRegistrationOptions(any())).thenReturn(options);
+        when(mapper.write(options)).thenReturn("{}");
+
+        registrationController.registerOptions(body, request, response);
+
+        verify(authService).requireFirstPasskeyBootstrapAuthentication(7, "Str0ng!Pass", request);
+        verify(sessionSecurityService).markFirstPasskeyBootstrap(request, 7);
+    }
+
+    @Test
+    void registerVerify_privilegedFirstPasskeyRefusedWhenPromotedAfterOptions() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        when(creationOptions.load(request))
+            .thenReturn(mock(PublicKeyCredentialCreationOptions.class));
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(false);
+        when(sessionSecurityService.hasFreshFirstPasskeyBootstrap(request, 7)).thenReturn(true);
+        when(bootstrapConfirmationService.isRequiredFor(7)).thenReturn(true);
+        when(sessionSecurityService.hasFreshPasskeyBootstrapConfirmation(request, 7))
+            .thenReturn(false);
+
+        assertThrows(ForbiddenException.class,
+            () -> controller.registerVerify("work key", "{}", request, response));
+
+        verify(webAuthnService, never()).finishRegistration(
+            anyInt(), any(), anyBoolean(), any(), any(), any());
+    }
+
+    @Test
+    void registerVerify_passesTheRedeemedConfirmationIntoTheUnderLockFence() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.getSession();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PublicKeyCredentialCreationOptions options = mock(PublicKeyCredentialCreationOptions.class);
+        PublicKeyCredential<AuthenticatorAttestationResponse> credential = mock();
+        CredentialRecord record = mock(CredentialRecord.class);
+        WebAuthnJsonMapper mapper = mock(WebAuthnJsonMapper.class);
+        WebAuthnController registrationController = controller(mapper);
+        when(creationOptions.load(request)).thenReturn(options);
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(false);
+        when(sessionSecurityService.hasFreshFirstPasskeyBootstrap(request, 7)).thenReturn(true);
+        when(bootstrapConfirmationService.isRequiredFor(7)).thenReturn(true);
+        when(sessionSecurityService.hasFreshPasskeyBootstrapConfirmation(request, 7))
+            .thenReturn(true);
+        when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers
+                .<TypeReference<PublicKeyCredential<AuthenticatorAttestationResponse>>>any()))
+                .thenReturn(credential);
+        when(sessionSecurityService.sessionEpoch(request.getSession(false))).thenReturn(6);
+        when(webAuthnService.finishRegistration(7, 6, true, options, credential, "work key"))
+                .thenReturn(record);
+        when(record.getCredentialId()).thenReturn(Bytes.random());
+
+        registrationController.registerVerify("work key", "{}", request, response);
+
+        verify(webAuthnService).finishRegistration(7, 6, true, options, credential, "work key");
+        verify(sessionSecurityService).clearPasskeyBootstrapConfirmation(request);
+    }
+
+    @Test
+    void recover_retiresOutstandingEnrollmentConfirmations() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        PasskeyRecoveryRequest body = new PasskeyRecoveryRequest();
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(mfaRecoveryService.recover(body, request)).thenReturn(9);
+
+        controller.recoverCredentials(body, request);
+
+        verify(sessionSecurityService).completeRecoveryStamp(request, 9);
+        verify(bootstrapConfirmationService).invalidateForUser(7);
+    }
+
     private WebAuthnController controller(WebAuthnJsonMapper mapper) {
         return new WebAuthnController(
             webAuthnService,
@@ -577,7 +698,8 @@ class WebAuthnControllerTest {
             ssoConnectionService,
             sessionSecurityService,
             auditService,
-            mfaRecoveryService);
+            mfaRecoveryService,
+            bootstrapConfirmationService);
     }
 
     private static User user(int id) {
