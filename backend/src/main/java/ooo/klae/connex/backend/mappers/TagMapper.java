@@ -15,6 +15,7 @@ import java.util.Map;
 public interface TagMapper {
     List<Tag> getAllTags(int workspaceId);
     Tag getTagById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Tag getTagByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Tag getTagByName(@Param("workspaceId") int workspaceId, @Param("name") String name);
     List<Tag> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);

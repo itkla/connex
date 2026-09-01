@@ -48,6 +48,7 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
 import ooo.klae.connex.backend.mappers.RecordCommentMapper;
+import ooo.klae.connex.backend.mappers.RecordCreationTemplateMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
@@ -89,6 +90,7 @@ class UserOffboardingOrderTest {
     @Mock private SavedViewMapper savedViewMapper;
     @Mock private RelationshipSignalMapper relationshipSignalMapper;
     @Mock private RecordCommentMapper recordCommentMapper;
+    @Mock private RecordCreationTemplateMapper recordCreationTemplateMapper;
     @Mock private UserDashboardMapper userDashboardMapper;
     @Mock private UserMapper userMapper;
     @Mock private WorkspaceMapper workspaceMapper;
@@ -234,7 +236,7 @@ class UserOffboardingOrderTest {
             userMapper, notificationMapper, savedViewPreferenceMapper, savedViewMapper,
             dealDuplicateReviewProofMapper, aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             stateVersionService, companyMapper,
-            personMapper, dealMapper, workflowOffboardingService, suppressionMapper,
+            personMapper, dealMapper, recordCreationTemplateMapper, workflowOffboardingService, suppressionMapper,
             relationshipSignalMapper, recordCommentMapper);
         order.verify(userMapper).lockById(9);
         order.verify(notificationMapper).findRecipientIdsByActor(9);
@@ -263,6 +265,7 @@ class UserOffboardingOrderTest {
         order.verify(companyMapper).clearOwnershipAnywhere(9);
         order.verify(personMapper).clearOwnershipAnywhere(9);
         order.verify(dealMapper).clearOwnershipAnywhere(9);
+        order.verify(recordCreationTemplateMapper).clearUserReferencesAnywhere(9);
         order.verify(aiChatMapper).clearSessionCreatorsAnywhere(9);
         order.verify(aiChatMapper).clearMessageAuthorsAnywhere(9);
         order.verify(aiChatMapper).clearToolCallExecutorsAnywhere(9);

@@ -125,6 +125,7 @@ public interface CompanyMapper {
     long countArchivedCompanies(@Param("workspaceId") int workspaceId);
     List<Company> getCompaniesByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Company getCompanyById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Company getVisibleCompanyByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Company getOwnedCompanyByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /** The owned company only when it is archived; the restore path's pre-image read. */
     Company getOwnedArchivedCompanyById(@Param("workspaceId") int workspaceId, @Param("id") int id);

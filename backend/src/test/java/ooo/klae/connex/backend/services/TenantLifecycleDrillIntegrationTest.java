@@ -17,6 +17,7 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -51,6 +52,12 @@ import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.TenantResidualReport;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
+import ooo.klae.connex.backend.dto.recordcreation.LocalizedTextDto;
+import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateCreateRequestDto;
+import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateDefinitionDto;
+import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateDto;
+import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateFieldDto;
+import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateGroupDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.AiOutputCacheMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
@@ -64,6 +71,7 @@ import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ObjectStorageProperties;
 import ooo.klae.connex.backend.tenant.ControlWorkspaceLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
+import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.NONE,
@@ -89,6 +97,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     @Autowired private AuditLogMapper auditLogMapper;
     @Autowired private AuditIntegrityService auditIntegrityService;
     @Autowired private IdentityBackfillTransaction identityBackfillTransaction;
+    @Autowired private RecordCreationTemplateService recordCreationTemplateService;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private JdbcTemplate jdbcTemplate;
 
@@ -168,6 +177,9 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertTrue(entries.containsKey("data/task.jsonl"));
         assertTrue(entries.containsKey("data/custom_field_definition.jsonl"));
         assertTrue(entries.containsKey("data/custom_field_value.jsonl"));
+        assertTrue(entries.containsKey("data/record_creation_template_set.jsonl"));
+        assertTrue(entries.containsKey("data/record_creation_template.jsonl"));
+        assertTrue(entries.containsKey("data/record_creation_template_version.jsonl"));
         assertTrue(entries.containsKey("data/notification.jsonl"));
         assertTrue(entries.containsKey("data/saved_view.jsonl"));
         assertTrue(entries.containsKey("data/ai_output_cache.jsonl"));
@@ -185,6 +197,11 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertTrue(text(entries, "data/ai_chat_message.jsonl").contains(fixture.chatMessage()));
         assertTrue(text(entries, "data/ai_chat_tool_call.jsonl").contains(fixture.toolName()));
         assertTrue(text(entries, "data/ai_chat_turn.jsonl").contains(fixture.terminalReason()));
+        assertTrue(text(entries, "data/record_creation_template_set.jsonl").contains("person"));
+        assertTrue(text(entries, "data/record_creation_template.jsonl")
+            .contains(Integer.toString(fixture.templateRootId())));
+        assertTrue(text(entries, "data/record_creation_template_version.jsonl")
+            .contains(fixture.templateName()));
         assertArrayEquals(BINARY, entries.get("objects/" + fixture.objectKey()));
         String manifest = text(entries, "manifest.json");
         assertTrue(manifest.contains("\"schemaVersion\":1"));
@@ -222,6 +239,9 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertEquals(0, rowCount("ai_chat_message"));
         assertEquals(0, rowCount("ai_chat_tool_call"));
         assertEquals(0, rowCount("ai_chat_turn"));
+        assertEquals(0, rowCount("record_creation_template_set"));
+        assertEquals(0, rowCount("record_creation_template"));
+        assertEquals(0, rowCount("record_creation_template_version"));
         assertFalse(Files.exists(fixture.objectPath()));
         assertEquals(0, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM workspace WHERE id = ?",
@@ -568,6 +588,22 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertTrue(rowCount("person_identity") > 0);
         assertTrue(rowCount("company_identity") > 0);
         assertTrue(collisionMemberships > 0);
+        String templateName = "Lifecycle template " + unique();
+        RecordCreationTemplateDto template = recordCreationTemplateService.create(
+            new RecordCreationTemplateCreateRequestDto(
+                RecordCreationRecordType.person,
+                new LocalizedTextDto(templateName, "ライフサイクルテンプレート"),
+                null,
+                new RecordCreationTemplateDefinitionDto(1, List.of(
+                    new RecordCreationTemplateGroupDto(
+                        "basics",
+                        new LocalizedTextDto("Basics", "基本情報"),
+                        null,
+                        List.of(new RecordCreationTemplateFieldDto(
+                            "name", false, null, null, null))))),
+                true,
+                0));
+        int templateRootId = Integer.parseInt(template.id().substring("workspace:".length()));
         StoredBinary binary = storeAttachment(company);
         String token = binary.url().substring("/api/attachments/content/".length());
         String objectKey = "workspaces/" + drillWorkspace.getId()
@@ -581,7 +617,9 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             chatTitle,
             chatMessage,
             toolName,
-            terminalReason);
+            terminalReason,
+            templateRootId,
+            templateName);
     }
 
     private int rowCount(String table) {
@@ -638,6 +676,8 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             String chatTitle,
             String chatMessage,
             String toolName,
-            String terminalReason) {
+            String terminalReason,
+            int templateRootId,
+            String templateName) {
     }
 }

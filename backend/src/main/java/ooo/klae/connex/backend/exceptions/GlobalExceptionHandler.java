@@ -30,6 +30,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.connectedaccounts.nativeflow.NativeConnectException;
+import ooo.klae.connex.backend.dto.recordcreation.RecordCreationErrorDto;
 import ooo.klae.connex.backend.observability.CorrelationIds;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.SupportBundleService;
@@ -56,6 +57,12 @@ public class GlobalExceptionHandler {
 
     private final ErrorReporter errorReporter;
     private final TenantContext tenantContext;
+
+    @ExceptionHandler(RecordCreationTemplateException.class)
+    public ResponseEntity<RecordCreationErrorDto>
+            recordCreationTemplate(RecordCreationTemplateException ex) {
+        return ResponseEntity.status(ex.status()).body(ex.error());
+    }
 
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<Map<String, String>> notFound(ResourceNotFoundException ex) {

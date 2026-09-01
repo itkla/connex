@@ -76,6 +76,22 @@
       WHERE s.pipeline_id = #{id} AND s.workspace_id = #{targetWorkspaceId})
   </select>
 
+  <select id="lockCompanyShareForWorkspace" resultType="int">
+    SELECT company_id FROM company_share
+    WHERE company_id = #{id} AND workspace_id = #{workspaceId}
+    FOR UPDATE
+  </select>
+  <select id="lockPersonShareForWorkspace" resultType="int">
+    SELECT person_id FROM person_share
+    WHERE person_id = #{id} AND workspace_id = #{workspaceId}
+    FOR UPDATE
+  </select>
+  <select id="lockPipelineShareForWorkspace" resultType="int">
+    SELECT pipeline_id FROM pipeline_share
+    WHERE pipeline_id = #{id} AND workspace_id = #{workspaceId}
+    FOR UPDATE
+  </select>
+
   <!-- Revocation and listing anchor on the owning workspace in SQL, so a share row
        is only ever touched or read through the workspace that owns the record. -->
   <delete id="unshareCompany">

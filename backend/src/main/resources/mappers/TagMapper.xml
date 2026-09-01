@@ -20,6 +20,12 @@
     SELECT id, workspace_id, name, color FROM tag WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
+  <select id="getTagByIdForUpdate" resultType="Tag">
+    SELECT id, workspace_id, name, color FROM tag
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="getTagByName" resultType="Tag">
     SELECT id, workspace_id, name, color FROM tag WHERE workspace_id = #{workspaceId} AND name = #{name}
   </select>

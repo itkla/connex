@@ -112,6 +112,8 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         Workspace otherWorkspace = newOtherWorkspace();
         Company otherCompany = companyInWorkspace(otherWorkspace, target.getId());
         Person otherPerson = personInWorkspace(otherWorkspace, target.getId());
+        int templateRoot = recordCreationTemplateFor(workspace.getId(), target.getId());
+        int otherTemplateRoot = recordCreationTemplateFor(otherWorkspace.getId(), target.getId());
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 1);
 
@@ -187,6 +189,8 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             otherWorkspace.getId(), otherCompany.getId()).getOwnerId());
         assertNull(personMapper.getPersonById(
             otherWorkspace.getId(), otherPerson.getId()).getOwnerId());
+        assertTemplateActorsCleared(workspace.getId(), templateRoot);
+        assertTemplateActorsCleared(otherWorkspace.getId(), otherTemplateRoot);
         assertNull(dealMapper.getDealById(workspace.getId(), deal.getId()).getOwnerId());
         assertTrue(dealMapper.getCollaborators(workspace.getId(), deal.getId()).isEmpty());
         assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());
@@ -628,5 +632,43 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         entry.setCreatedById(user.getId());
         suppressionMapper.insert(entry);
         return entry;
+    }
+
+    private int recordCreationTemplateFor(int workspaceId, int actorId) {
+        jdbcTemplate.update(
+            "INSERT IGNORE INTO record_creation_template_set (workspace_id, record_type) VALUES (?, 'person')",
+            workspaceId);
+        jdbcTemplate.update(
+            "INSERT INTO record_creation_template "
+                + "(workspace_id, record_type, status, position, created_by_id, updated_by_id) "
+                + "VALUES (?, 'person', 'disabled', 0, ?, ?)",
+            workspaceId, actorId, actorId);
+        int rootId = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Integer.class);
+        jdbcTemplate.update(
+            "INSERT INTO record_creation_template_version "
+                + "(workspace_id, template_id, version_number, name_en, name_ja, definition_json, "
+                + "definition_hash, created_by_id) "
+                + "VALUES (?, ?, 1, 'Template', 'テンプレート', "
+                + "'{\"schemaVersion\":1,\"groups\":[]}', "
+                + "UNHEX(SHA2('{\"schemaVersion\":1,\"groups\":[]}', 256)), ?)",
+            workspaceId, rootId, actorId);
+        long versionId = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        jdbcTemplate.update(
+            "UPDATE record_creation_template SET current_version_id = ? WHERE workspace_id = ? AND id = ?",
+            versionId, workspaceId, rootId);
+        return rootId;
+    }
+
+    private void assertTemplateActorsCleared(int workspaceId, int rootId) {
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT created_by_id FROM record_creation_template WHERE workspace_id = ? AND id = ?",
+            Integer.class, workspaceId, rootId));
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT updated_by_id FROM record_creation_template WHERE workspace_id = ? AND id = ?",
+            Integer.class, workspaceId, rootId));
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT created_by_id FROM record_creation_template_version "
+                + "WHERE workspace_id = ? AND template_id = ?",
+            Integer.class, workspaceId, rootId));
     }
 }

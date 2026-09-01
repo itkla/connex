@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import ooo.klae.connex.backend.services.InteractionHistoryImportService;
 import ooo.klae.connex.backend.services.ProductImportService;
+import ooo.klae.connex.backend.services.RecordCreationTemplateService;
 import ooo.klae.connex.backend.services.WorkflowRunReadService;
 import ooo.klae.connex.backend.services.WorkflowRunOperationService;
 import ooo.klae.connex.backend.services.WorkflowInterventionService;
@@ -66,6 +67,7 @@ class RbacEnforcementArchTest {
         "BusinessCardService", "CampaignService", "CampaignSendService", "ConsentService",
         "SuppressionService", "WarmPathService", "InteractionHistoryImportService",
         "ProductImportService",
+        "RecordCreationTemplateService",
         "PersonQualificationService", "QualificationCriterionService");
 
     /** Verb prefixes that denote a state-changing public method in these services. */
@@ -92,6 +94,29 @@ class RbacEnforcementArchTest {
         assertTrue(violations.isEmpty(),
             "State-changing entity-service methods missing @RequirePermission "
                 + "(add the annotation, or if genuinely public-by-design, exempt it explicitly here): " + violations);
+    }
+
+    @Test
+    void recordCreationTemplateAdminSurfaceRequiresCustomFieldManage() {
+        List<String> violations = new ArrayList<>();
+        int publicMethods = 0;
+        for (Method method : RecordCreationTemplateService.class.getDeclaredMethods()) {
+            if (!Modifier.isPublic(method.getModifiers())
+                    || method.isSynthetic()
+                    || method.isBridge()) {
+                continue;
+            }
+            publicMethods++;
+            RequirePermission permission = method.getAnnotation(RequirePermission.class);
+            if (permission == null || permission.value() != Permission.CUSTOM_FIELD_MANAGE) {
+                violations.add(method.getName());
+            }
+        }
+        assertEquals(13, publicMethods,
+            "Record creation template admin surface changed without updating the RBAC guard");
+        assertTrue(violations.isEmpty(),
+            "Every record creation template admin method must require CUSTOM_FIELD_MANAGE: "
+                + violations);
     }
 
     @Test

@@ -48,6 +48,12 @@
     WHERE <include refid="visible"/> AND id = #{id}
   </select>
 
+  <select id="getVisiblePipelineByIdForUpdate" resultType="Pipeline">
+    SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
+    WHERE <include refid="visible"/> AND id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="getOwnedPipelineById" resultMap="PipelineFullResult">
     SELECT id, workspace_id, name, created_at, updated_at FROM pipeline
     WHERE workspace_id = #{workspaceId} AND id = #{id}
@@ -95,6 +101,20 @@
               JOIN workspace vws ON vws.id = ps.workspace_id
               JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
               WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
+  </select>
+
+  <select id="getVisibleStageByIdForUpdate" resultMap="StageResult">
+    SELECT stage.id, stage.workspace_id, stage.name, stage.pipeline_id, stage.position,
+           stage.is_success, stage.is_failure
+    FROM stage
+    JOIN pipeline ON pipeline.id = stage.pipeline_id AND pipeline.workspace_id = stage.workspace_id
+    WHERE stage.id = #{id}
+      AND (pipeline.workspace_id = #{workspaceId}
+           OR EXISTS (SELECT 1 FROM pipeline_share ps
+              JOIN workspace vws ON vws.id = ps.workspace_id
+              JOIN workspace ows ON ows.id = pipeline.workspace_id AND ows.org_id = vws.org_id
+              WHERE ps.pipeline_id = pipeline.id AND ps.workspace_id = #{workspaceId}))
+    FOR UPDATE
   </select>
 
   <select id="getAllStages" resultMap="StageResult">

@@ -279,6 +279,13 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("report_snapshot", 250));
         raw.add(direct("report_definition", 260));
         raw.add(direct("custom_field_value", 270));
+        raw.add(direct("record_creation_template_version", 271));
+        raw.add(direct(
+            "record_creation_template",
+            272,
+            nullify("current_version_id")
+        ));
+        raw.add(direct("record_creation_template_set", 273));
         raw.add(direct("custom_field_definition", 280));
         raw.add(direct("contact_channel_consent_event", 290));
         raw.add(direct("contact_channel_consent", 300));
