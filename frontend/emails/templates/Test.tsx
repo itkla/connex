@@ -1,6 +1,5 @@
 import * as React from "react";
-import { Heading, Text } from "@react-email/components";
-import { Layout, content } from "./Layout.js";
+import { Heading, Layout, Lead, Panel, PanelRow } from "./Layout.js";
 
 type TestProps = {
     locale?: "en" | "ja";
@@ -16,16 +15,20 @@ export default function Test({ locale = "en", recipient = "{{recipient}}" }: Tes
         <Layout
             lang={locale}
             preview={japanese ? "Connex テストメール" : "Connex email test"}
-            eyebrow="Connex"
+            category={japanese ? "診断" : "Diagnostics"}
+            footnote={japanese
+                ? "このメールは、ワークスペースのメール設定からテスト送信が実行されたため送信されました。"
+                : "You received this because a test message was sent from your workspace email settings."}
         >
-            <Heading style={content.heading}>
-                {japanese ? "メール設定は正常です" : "Your email settings work"}
-            </Heading>
-            <Text style={{ ...content.paragraph, marginBottom: "32px" }}>
+            <Heading>{japanese ? "メール設定は正常です" : "Your email settings work"}</Heading>
+            <Lead>
                 {japanese
-                    ? <>これは {recipient} 宛てに送信されたテストメールです。このメールを受信できていれば、設定済みのSMTPサーバーを通じて Connex からメールを送信できます。</>
-                    : <>This is a test message sent to {recipient}. If you're reading it, Connex can deliver email through your configured SMTP transport.</>}
-            </Text>
+                    ? "これは Connex からのテストメールです。このメールが届いているため、設定済みの SMTP 経由でメールを配信できることが確認できました。"
+                    : "This is a test message from Connex. Because it arrived, your workspace can deliver email through the SMTP transport you configured."}
+            </Lead>
+            <Panel>
+                <PanelRow label={japanese ? "送信先" : "Delivered to"} value={recipient} />
+            </Panel>
         </Layout>
     );
 }

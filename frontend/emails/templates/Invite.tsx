@@ -1,6 +1,5 @@
 import * as React from "react";
-import { Button, Heading, Link, Text } from "@react-email/components";
-import { Layout, content } from "./Layout.js";
+import { Cta, Fallback, Heading, Layout, Lead, Panel, PanelRow } from "./Layout.js";
 
 type InviteProps = {
     workspaceName?: string;
@@ -10,8 +9,11 @@ type InviteProps = {
 };
 
 /**
- * Workspace invitation email. Props default to {@code {{token}}} placeholders so
- * the rendered HTML is a template the backend fills in.
+ * Workspace invitation email. The workspace name is carried in a panel rather
+ * than the headline because it is caller-supplied and can be long; the subject
+ * line and preview text still lead with it. Props default to
+ * {@code {{token}}} placeholders so the rendered HTML is a template the backend
+ * fills in.
  */
 export default function Invite({
     workspaceName = "{{workspaceName}}",
@@ -22,24 +24,19 @@ export default function Invite({
     return (
         <Layout
             preview={`You've been invited to ${workspaceName}`}
-            eyebrow="Connex"
-            footer="If you weren't expecting this invitation, you can ignore this email."
+            category="Invitation"
+            footnote="If you weren't expecting this invitation, you can ignore this email."
         >
-            <Heading style={content.heading}>You've been invited to {workspaceName}</Heading>
-            <Text style={content.paragraph}>
-                {inviterName} invited you to join <strong style={content.strong}>{workspaceName}</strong> on Connex
-                as a {role}. Accept the invitation to get started.
-            </Text>
-            <Button href={acceptUrl} style={content.button}>
-                Accept invitation
-            </Button>
-            <Text style={content.fallback}>
-                If the button doesn't work, copy and paste this link into your browser:
-                <br />
-                <Link href={acceptUrl} style={content.fallbackLink}>
-                    {acceptUrl}
-                </Link>
-            </Text>
+            <Heading>You've been invited</Heading>
+            <Lead>
+                {`${inviterName} invited you to join them on Connex. Accept below to set up your account and start working together.`}
+            </Lead>
+            <Panel>
+                <PanelRow label="Workspace" value={workspaceName} />
+                <PanelRow label="Your role" value={role} />
+            </Panel>
+            <Cta href={acceptUrl}>Accept invitation</Cta>
+            <Fallback href={acceptUrl} label="If the button doesn't work, copy and paste this link into your browser:" />
         </Layout>
     );
 }

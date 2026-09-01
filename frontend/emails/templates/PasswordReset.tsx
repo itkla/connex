@@ -1,6 +1,5 @@
 import * as React from "react";
-import { Button, Heading, Link, Text } from "@react-email/components";
-import { Layout, content } from "./Layout.js";
+import { Cta, Fallback, Heading, Layout, Lead, Panel, PanelRow } from "./Layout.js";
 
 type PasswordResetProps = {
     locale?: "en" | "ja";
@@ -23,29 +22,30 @@ export default function PasswordReset({
         <Layout
             lang={locale}
             preview={japanese ? "Connex パスワードのリセット" : "Reset your Connex password"}
-            eyebrow="Connex"
-            footer={japanese
-                ? "パスワードのリセットをリクエストしていない場合は、このメールを無視してください。"
-                : "If you didn't request a password reset, you can safely ignore this email."}
+            category={japanese ? "セキュリティ" : "Security"}
+            footnote={japanese
+                ? "パスワードのリセットをリクエストしていない場合は、このメールを無視してください。パスワードは変更されません。"
+                : "If you didn't request a password reset, you can safely ignore this email. Your password stays the same."}
         >
-            <Heading style={content.heading}>{japanese ? "パスワードをリセット" : "Reset your password"}</Heading>
-            <Text style={content.paragraph}>
+            <Heading>{japanese ? "パスワードをリセット" : "Reset your password"}</Heading>
+            <Lead>
                 {japanese
-                    ? <>{displayName}さん、Connex パスワードのリセットがリクエストされました。下のボタンから新しいパスワードを設定してください。このリンクは {expiryMinutes} 分後に有効期限が切れます。</>
-                    : <>Hi {displayName}, we received a request to reset your Connex password. Click below to choose a new one. This link expires in {expiryMinutes} minutes.</>}
-            </Text>
-            <Button href={resetUrl} style={content.button}>
-                {japanese ? "パスワードをリセット" : "Reset password"}
-            </Button>
-            <Text style={content.fallback}>
-                {japanese
+                    ? `${displayName}さん、Connex アカウントのパスワードをリセットするリクエストを受け付けました。下のボタンから新しいパスワードを設定してください。`
+                    : `Hi ${displayName}, we received a request to reset the password on your Connex account. Choose a new one below.`}
+            </Lead>
+            <Panel>
+                <PanelRow
+                    label={japanese ? "リンクの有効期限" : "Link expires in"}
+                    value={japanese ? `${expiryMinutes} 分` : `${expiryMinutes} minutes`}
+                />
+            </Panel>
+            <Cta href={resetUrl}>{japanese ? "パスワードをリセット" : "Reset password"}</Cta>
+            <Fallback
+                href={resetUrl}
+                label={japanese
                     ? "ボタンが機能しない場合は、次のリンクをコピーし、ブラウザのアドレス欄に貼り付けてください。"
                     : "If the button doesn't work, copy and paste this link into your browser:"}
-                <br />
-                <Link href={resetUrl} style={content.fallbackLink}>
-                    {resetUrl}
-                </Link>
-            </Text>
+            />
         </Layout>
     );
 }

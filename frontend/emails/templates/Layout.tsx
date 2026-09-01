@@ -1,112 +1,309 @@
 import * as React from "react";
-import { Body, Container, Head, Html, Preview, Section, Text } from "@react-email/components";
+import {
+    Body,
+    Button,
+    Column,
+    Container,
+    Head,
+    Heading as EmailHeading,
+    Hr,
+    Html,
+    Link,
+    Preview,
+    Row,
+    Section,
+    Text,
+} from "@react-email/components";
+import { cardWidth, enhancementCss, fontStack, palette } from "./theme.js";
 
-const styles = {
-    body: {
+const shell = {
+    page: {
         margin: 0,
         padding: 0,
-        backgroundColor: "#f4f4f5",
-        fontFamily:
-            "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif",
+        backgroundColor: palette.page,
     },
-    outer: { padding: "32px 0" },
+    outer: { padding: "40px 0", backgroundColor: palette.page },
     card: {
-        width: "480px",
+        width: `${cardWidth}px`,
         maxWidth: "100%",
-        backgroundColor: "#ffffff",
-        borderRadius: "12px",
-        border: "1px solid #e4e4e7",
-        overflow: "hidden",
+        backgroundColor: palette.surface,
+        borderRadius: "14px",
+        border: `1px solid ${palette.hairline}`,
     },
-    eyebrow: {
+    masthead: {
+        backgroundColor: palette.masthead,
+        padding: "20px 40px",
+        borderRadius: "13px 13px 0 0",
+    },
+    mark: { width: "10px", verticalAlign: "middle" as const },
+    markDot: {
         margin: 0,
-        padding: "32px 40px 8px 40px",
-        fontSize: "12px",
-        fontWeight: 700,
-        color: "#71717a",
-        letterSpacing: "0.12em",
-        textTransform: "uppercase" as const,
+        width: "10px",
+        height: "10px",
+        backgroundColor: palette.brand,
+        borderRadius: "3px",
+        fontSize: "1px",
+        lineHeight: "10px",
     },
-    footer: {
-        margin: "16px 0 0 0",
+    wordmark: {
+        margin: 0,
+        paddingLeft: "10px",
+        fontSize: "15px",
+        lineHeight: "20px",
+        fontWeight: 700,
+        letterSpacing: "-0.01em",
+        color: palette.mastheadInk,
+    },
+    category: {
+        margin: 0,
+        fontSize: "11px",
+        lineHeight: "20px",
+        fontWeight: 600,
+        letterSpacing: "0.1em",
+        textTransform: "uppercase" as const,
+        color: palette.mastheadMuted,
+        textAlign: "right" as const,
+    },
+    tail: { margin: 0, fontSize: "1px", lineHeight: "36px", color: palette.surface },
+    footnote: {
+        margin: "22px 0 0 0",
+        padding: "0 40px",
+        fontSize: "13px",
+        lineHeight: "1.55",
+        color: palette.mutedOnPage,
+        textAlign: "center" as const,
+    },
+    signature: {
+        margin: "10px 0 0 0",
         fontSize: "12px",
-        color: "#a1a1aa",
+        lineHeight: "1.4",
+        fontWeight: 600,
+        letterSpacing: "0.02em",
+        color: palette.mutedOnPage,
         textAlign: "center" as const,
     },
 } as const;
 
-const japaneseFontFamily =
-    "-apple-system,BlinkMacSystemFont,'Noto Sans JP','Segoe UI',sans-serif";
-
 type LayoutProps = {
     preview: string;
-    eyebrow: string;
-    lang?: string;
-    footer?: string;
+    category: string;
+    lang?: "en" | "ja";
+    footnote?: string;
     children: React.ReactNode;
 };
 
 /**
- * Shared shell for every Connex transactional email: the card, the uppercase
- * wordmark eyebrow, and an optional muted footer line. Renders to inline-styled,
- * email-client-safe HTML via React Email primitives.
+ * Shared shell for every Connex transactional email: the ink masthead carrying
+ * the brand mark and a category label, the content card, and a muted closing
+ * note. Renders to inline-styled, email-client-safe HTML via React Email.
  */
-export function Layout({ preview, eyebrow, lang = "en", footer, children }: LayoutProps) {
+export function Layout({ preview, category, lang = "en", footnote, children }: LayoutProps) {
     return (
         <Html lang={lang}>
-            <Head />
+            <Head>
+                <meta name="color-scheme" content="light dark" />
+                <meta name="supported-color-schemes" content="light dark" />
+                <style dangerouslySetInnerHTML={{ __html: enhancementCss }} />
+            </Head>
             <Preview>{preview}</Preview>
             <Body
+                className="cx-page"
                 style={{
-                    ...styles.body,
-                    fontFamily: lang === "ja" ? japaneseFontFamily : styles.body.fontFamily,
+                    ...shell.page,
+                    fontFamily: lang === "ja" ? fontStack.japanese : fontStack.latin,
                 }}
             >
-                <Section style={styles.outer}>
-                    <Container style={styles.card}>
-                        <Text style={styles.eyebrow}>{eyebrow}</Text>
+                <Section className="cx-page" style={shell.outer}>
+                    <Container className="cx-card" style={shell.card}>
+                        <Section className="cx-masthead cx-pad" style={shell.masthead}>
+                            <Row>
+                                <Column style={shell.mark}>
+                                    <Text style={shell.markDot}>{"​"}</Text>
+                                </Column>
+                                <Column>
+                                    <Text style={shell.wordmark}>Connex</Text>
+                                </Column>
+                                <Column>
+                                    <Text style={shell.category}>{category}</Text>
+                                </Column>
+                            </Row>
+                        </Section>
                         {children}
+                        <Text style={shell.tail}>{"​"}</Text>
                     </Container>
-                    {footer ? <Text style={styles.footer}>{footer}</Text> : null}
+                    {footnote ? (
+                        <Text className="cx-footnote cx-pad" style={shell.footnote}>
+                            {footnote}
+                        </Text>
+                    ) : null}
+                    <Text className="cx-footnote" style={shell.signature}>
+                        Connex
+                    </Text>
                 </Section>
             </Body>
         </Html>
     );
 }
 
-export const content = {
+const block = {
     heading: {
-        margin: "8px 0 12px 0",
+        margin: "36px 0 0 0",
         padding: "0 40px",
-        fontSize: "28px",
-        lineHeight: "1.25",
-        fontWeight: 600,
-        color: "#18181b",
-        letterSpacing: "-0.02em",
+        fontSize: "30px",
+        lineHeight: "1.22",
+        fontWeight: 700,
+        letterSpacing: "-0.022em",
+        color: palette.ink,
     } as const,
-    paragraph: {
-        margin: "0 0 24px 0",
+    subline: {
+        margin: "10px 0 0 0",
         padding: "0 40px",
-        fontSize: "15px",
-        lineHeight: "1.6",
-        color: "#52525b",
+        fontSize: "14px",
+        lineHeight: "1.5",
+        color: palette.muted,
     } as const,
-    button: {
-        margin: "0 40px",
-        backgroundColor: "#18181b",
-        color: "#ffffff",
-        fontSize: "15px",
+    lead: {
+        margin: "20px 0 0 0",
+        padding: "0 40px",
+        fontSize: "16px",
+        lineHeight: "1.65",
+        color: palette.body,
+    } as const,
+    inset: { padding: "28px 40px 0 40px" } as const,
+    panel: {
+        backgroundColor: palette.surfaceSunken,
+        border: `1px solid ${palette.hairline}`,
+        borderRadius: "10px",
+        padding: "2px 18px 16px 18px",
+    } as const,
+    panelLabel: {
+        margin: "14px 0 0 0",
+        fontSize: "12px",
+        lineHeight: "1.4",
         fontWeight: 600,
-        padding: "12px 24px",
-        borderRadius: "8px",
+        letterSpacing: "0.04em",
+        color: palette.muted,
+    } as const,
+    panelValue: {
+        margin: "3px 0 0 0",
+        fontSize: "15px",
+        lineHeight: "1.45",
+        fontWeight: 600,
+        color: palette.ink,
+        wordBreak: "break-word" as const,
+    } as const,
+    cta: {
+        backgroundColor: palette.brand,
+        color: palette.brandInk,
+        fontSize: "15px",
+        lineHeight: "1.2",
+        fontWeight: 700,
+        letterSpacing: "-0.005em",
+        padding: "14px 28px",
+        borderRadius: "10px",
+    } as const,
+    rule: {
+        margin: "32px 40px 0 40px",
+        width: "auto",
+        borderTop: `1px solid ${palette.hairline}`,
     } as const,
     fallback: {
-        margin: 0,
-        padding: "24px 40px 32px 40px",
+        margin: "18px 0 0 0",
+        padding: "0 40px",
         fontSize: "13px",
         lineHeight: "1.6",
-        color: "#a1a1aa",
+        color: palette.muted,
     } as const,
-    fallbackLink: { color: "#71717a", wordBreak: "break-all" as const },
-    strong: { color: "#18181b" },
+    fallbackLink: { color: palette.muted, wordBreak: "break-all" as const } as const,
 };
+
+/** Primary message headline. */
+export function Heading({ children }: { children: string }) {
+    return (
+        <EmailHeading as="h1" className="cx-heading" style={block.heading}>
+            {children}
+        </EmailHeading>
+    );
+}
+
+/** Muted qualifier directly beneath the headline (a reporting period, a workspace). */
+export function Subline({ children }: { children: string }) {
+    return (
+        <Text className="cx-muted" style={block.subline}>
+            {children}
+        </Text>
+    );
+}
+
+/** Body prose. Pass one interpolated string so clients receive unbroken text. */
+export function Lead({ children }: { children: string }) {
+    return (
+        <Text className="cx-lead" style={block.lead}>
+            {children}
+        </Text>
+    );
+}
+
+/** Sunken panel holding the factual detail of the message. */
+export function Panel({ children }: { children: React.ReactNode }) {
+    return (
+        <Section className="cx-pad" style={block.inset}>
+            <Section className="cx-panel" style={block.panel}>
+                {children}
+            </Section>
+        </Section>
+    );
+}
+
+/** One label/value pair inside a {@link Panel}. */
+export function PanelRow({ label, value }: { label: string; value: string }) {
+    return (
+        <>
+            <Text className="cx-panel-label" style={block.panelLabel}>
+                {label}
+            </Text>
+            <Text className="cx-panel-value" style={block.panelValue}>
+                {value}
+            </Text>
+        </>
+    );
+}
+
+/**
+ * Primary call to action. Uses React Email's {@code Button} so the rendered
+ * anchor keeps the {@code mso-padding-alt} and {@code mso-text-raise} hints that
+ * stop Outlook's Word renderer from collapsing the padding to a text-sized target.
+ */
+export function Cta({ href, children }: { href: string; children: string }) {
+    return (
+        <Section className="cx-pad" style={block.inset}>
+            <Button className="cx-cta" href={href} style={block.cta}>
+                {children}
+            </Button>
+        </Section>
+    );
+}
+
+/** Hairline separating the action from the supporting detail. */
+export function Divider() {
+    return <Hr className="cx-rule" style={block.rule} />;
+}
+
+/** Copy-and-paste escape hatch for clients that strip the button. */
+export function Fallback({ href, label }: { href: string; label: string }) {
+    return (
+        <>
+            <Divider />
+            <Text className="cx-fallback cx-pad" style={block.fallback}>
+                {label}
+            </Text>
+            <Text className="cx-fallback cx-pad" style={{ ...block.fallback, margin: "6px 0 0 0" }}>
+                <Link className="cx-fallback-link" href={href} style={block.fallbackLink}>
+                    {href}
+                </Link>
+            </Text>
+        </>
+    );
+}
+
+export { block };

@@ -1,6 +1,7 @@
 import * as React from "react";
-import { Button, Column, Heading, Row, Section, Text } from "@react-email/components";
-import { Layout, content } from "./Layout.js";
+import { Column, Row, Section, Text } from "@react-email/components";
+import { Cta, Heading, Layout, Lead, Subline } from "./Layout.js";
+import { palette } from "./theme.js";
 
 type ReportDeliveryProps = {
     locale?: "en" | "ja";
@@ -15,38 +16,37 @@ type ReportDeliveryProps = {
 };
 
 const styles = {
-    period: {
-        margin: "0 0 20px 0",
-        padding: "0 40px",
-        fontSize: "13px",
-        lineHeight: "1.5",
-        color: "#71717a",
+    inset: { padding: "28px 40px 0 40px" },
+    band: {
+        borderTop: `1px solid ${palette.hairline}`,
+        borderBottom: `1px solid ${palette.hairline}`,
+        padding: "22px 0",
     },
-    figures: {
-        margin: "0 40px 24px 40px",
-        width: "400px",
-        maxWidth: "calc(100% - 80px)",
-        border: "1px solid #e4e4e7",
-        borderRadius: "10px",
-    },
-    figure: {
-        padding: "16px",
-        verticalAlign: "top" as const,
+    figure: { width: "50%", paddingRight: "16px", verticalAlign: "top" as const },
+    rule: {
+        margin: 0,
+        width: "26px",
+        borderTop: `2px solid ${palette.brand}`,
+        fontSize: "1px",
+        lineHeight: "1px",
     },
     figureLabel: {
-        margin: 0,
-        fontSize: "12px",
+        margin: "14px 0 0 0",
+        fontSize: "11px",
         lineHeight: "1.4",
-        color: "#71717a",
+        fontWeight: 600,
+        letterSpacing: "0.08em",
+        textTransform: "uppercase" as const,
+        color: palette.muted,
     },
     figureValue: {
-        margin: "4px 0 0 0",
-        fontSize: "20px",
-        lineHeight: "1.3",
-        fontWeight: 600,
-        color: "#18181b",
+        margin: "6px 0 0 0",
+        fontSize: "30px",
+        lineHeight: "1.2",
+        fontWeight: 700,
+        letterSpacing: "-0.02em",
+        color: palette.ink,
     },
-    buttonWrap: { paddingBottom: "32px" },
 } as const;
 
 /** Scheduled report summary email in English or Japanese. */
@@ -66,31 +66,39 @@ export default function ReportDelivery({
         <Layout
             lang={locale}
             preview={japanese ? `${reportName} の定期レポート` : `Scheduled report: ${reportName}`}
-            eyebrow="Connex Reports"
-            footer={japanese
+            category={japanese ? "レポート" : "Report"}
+            footnote={japanese
                 ? "このメールは、ワークスペースのレポート配信先に指定されているため送信されました。"
                 : "You received this because you are an active member selected for this report delivery."}
         >
-            <Heading style={content.heading}>{reportName}</Heading>
-            <Text style={styles.period}>{period}</Text>
-            <Text style={content.paragraph}>{summary}</Text>
-            <Section style={styles.figures}>
-                <Row>
-                    <Column style={styles.figure}>
-                        <Text style={styles.figureLabel}>{headlineOneLabel}</Text>
-                        <Text style={styles.figureValue}>{headlineOneValue}</Text>
-                    </Column>
-                    <Column style={styles.figure}>
-                        <Text style={styles.figureLabel}>{headlineTwoLabel}</Text>
-                        <Text style={styles.figureValue}>{headlineTwoValue}</Text>
-                    </Column>
-                </Row>
+            <Heading>{reportName}</Heading>
+            <Subline>{period}</Subline>
+            <Lead>{summary}</Lead>
+            <Section className="cx-pad" style={styles.inset}>
+                <Section className="cx-rule" style={styles.band}>
+                    <Row>
+                        <Column className="cx-figure" style={styles.figure}>
+                            <Text style={styles.rule}>{"​"}</Text>
+                            <Text className="cx-figure-label" style={styles.figureLabel}>
+                                {headlineOneLabel}
+                            </Text>
+                            <Text className="cx-figure-value" style={styles.figureValue}>
+                                {headlineOneValue}
+                            </Text>
+                        </Column>
+                        <Column className="cx-figure" style={styles.figure}>
+                            <Text style={styles.rule}>{"​"}</Text>
+                            <Text className="cx-figure-label" style={styles.figureLabel}>
+                                {headlineTwoLabel}
+                            </Text>
+                            <Text className="cx-figure-value" style={styles.figureValue}>
+                                {headlineTwoValue}
+                            </Text>
+                        </Column>
+                    </Row>
+                </Section>
             </Section>
-            <Section style={styles.buttonWrap}>
-                <Button href={actionUrl} style={content.button}>
-                    {japanese ? "Connex で表示" : "View report"}
-                </Button>
-            </Section>
+            <Cta href={actionUrl}>{japanese ? "Connex で表示" : "View report"}</Cta>
         </Layout>
     );
 }
