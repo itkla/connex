@@ -54,8 +54,8 @@ class RecordCreationTemplateMigrationIntegrationTest {
             .dataSource(scratchUrl, username, password)
             .locations("classpath:db/migration/tenant")
             .baselineOnMigrate(true)
-            .baselineVersion(MigrationVersion.fromVersion("193"))
-            .target(MigrationVersion.fromVersion("194"))
+            .baselineVersion(MigrationVersion.fromVersion("194"))
+            .target(MigrationVersion.fromVersion("195"))
             .outOfOrder(false)
             .load();
         flyway.migrate();
