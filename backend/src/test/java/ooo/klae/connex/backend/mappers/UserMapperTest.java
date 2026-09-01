@@ -288,6 +288,100 @@ class UserMapperTest extends AbstractMapperTest {
         assertTrue(userMapper.isPrivilegedAccount(user.getId()));
     }
 
+    /**
+     * The refusal predicate must separate an account that administers other people from one that
+     * only administers itself, and acquiring a further sole-member scope must never win back the
+     * exclusion.
+     */
+    @Test
+    void privilegeOverOtherAccountsExcludesScopesTheAccountInhabitsAlone() {
+        User solo = newUnassignedUser();
+        int soloOrg = newOrganization();
+        int soloWorkspace = newWorkspace(soloOrg);
+        workspaceMapper.addMember(soloWorkspace, solo.getId(), "owner");
+
+        assertTrue(userMapper.isPrivilegedAccount(solo.getId()));
+        assertFalse(userMapper.holdsPrivilegeOverOtherAccounts(solo.getId()));
+
+        User colleague = newUnassignedUser();
+        workspaceMapper.addMember(soloWorkspace, colleague.getId(), "member");
+
+        assertTrue(userMapper.holdsPrivilegeOverOtherAccounts(solo.getId()));
+        assertFalse(userMapper.holdsPrivilegeOverOtherAccounts(colleague.getId()));
+    }
+
+    /**
+     * Pins the property the refusal rests on: a thief holding an administrator's password cannot
+     * manufacture the sole-principal exclusion by creating a personal workspace, because refusal is
+     * evaluated across every scope the account holds privilege in.
+     */
+    @Test
+    void afurtherSoleMemberScopeCannotWinBackTheExclusion() {
+        User admin = newUnassignedUser();
+        int sharedOrg = newOrganization();
+        int populated = newWorkspace(sharedOrg);
+        workspaceMapper.addMember(populated, admin.getId(), "admin");
+        workspaceMapper.addMember(populated, newUnassignedUser().getId(), "member");
+        assertTrue(userMapper.holdsPrivilegeOverOtherAccounts(admin.getId()));
+
+        int personalOrg = newOrganization();
+        int personal = newWorkspace(personalOrg);
+        workspaceMapper.addMember(personal, admin.getId(), "owner");
+
+        assertTrue(userMapper.holdsPrivilegeOverOtherAccounts(admin.getId()));
+    }
+
+    /**
+     * A custom role carrying administrative permissions counts, and an org membership sees the
+     * organization's workspace members as principals it administers.
+     */
+    @Test
+    void privilegeOverOtherAccountsCoversCustomRolesAndOrgMembership() {
+        int org = newOrganization();
+        int populated = newWorkspace(org);
+        User custom = newUnassignedUser();
+        User other = newUnassignedUser();
+        workspaceMapper.addMember(populated, custom.getId(), "member");
+        workspaceMapper.addMember(populated, other.getId(), "member");
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(populated);
+        role.setName("scoped-admin-" + unique());
+        roleMapper.insertRole(role);
+        workspaceMapper.setMemberCustomRole(populated, custom.getId(), role.getId());
+        roleMapper.insertPermissions(populated, role.getId(), List.of("MEMBER_MANAGE"));
+
+        assertTrue(userMapper.holdsPrivilegeOverOtherAccounts(custom.getId()));
+
+        roleMapper.clearPermissions(populated, role.getId());
+        roleMapper.insertPermissions(populated, role.getId(), List.of("REPORT_READ"));
+        assertFalse(userMapper.holdsPrivilegeOverOtherAccounts(custom.getId()));
+
+        User orgMember = newUnassignedUser();
+        orgMemberMapper.addMember(org, orgMember.getId(), "admin");
+        assertTrue(userMapper.holdsPrivilegeOverOtherAccounts(orgMember.getId()));
+    }
+
+    private int newOrganization() {
+        String suffix = unique();
+        jdbcTemplate.update(
+            "INSERT INTO organization (name, slug) VALUES (?, ?)", "Org " + suffix, "org-" + suffix);
+        Integer id = jdbcTemplate.queryForObject(
+            "SELECT id FROM organization WHERE slug = ?", Integer.class, "org-" + suffix);
+        assertNotNull(id);
+        return id;
+    }
+
+    private int newWorkspace(int orgId) {
+        String suffix = unique();
+        jdbcTemplate.update(
+            "INSERT INTO workspace (name, slug, org_id) VALUES (?, ?, ?)",
+            "Workspace " + suffix, "ws-" + suffix, orgId);
+        Integer id = jdbcTemplate.queryForObject(
+            "SELECT id FROM workspace WHERE slug = ?", Integer.class, "ws-" + suffix);
+        assertNotNull(id);
+        return id;
+    }
+
     private User newUnassignedUser() {
         String suffix = unique();
         User user = new User();

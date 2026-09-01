@@ -1558,7 +1558,7 @@ export function getPasskeys(init: RequestInit = {}) {
 }
 
 export function getPasskeyRegistrationRequirements(init: RequestInit = {}) {
-    return getJson<{ currentPasswordRequired: boolean }>(
+    return getJson<{ currentPasswordRequired: boolean; operatorAuthorizationRequired: boolean }>(
         "/api/auth/webauthn/register/requirements",
         { cache: "no-store", ...init },
     );

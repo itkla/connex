@@ -119,6 +119,7 @@ export default function SecurityPanel() {
     const supported = usePasskeySupport();
     const [adding, setAdding] = useState(false);
     const [currentPasswordRequired, setCurrentPasswordRequired] = useState(false);
+    const [operatorAuthorizationRequired, setOperatorAuthorizationRequired] = useState(false);
     const [passwordOpen, setPasswordOpen] = useState(false);
     const [currentPassword, setCurrentPassword] = useState("");
     const [passwordError, setPasswordError] = useState<string | null>(null);
@@ -143,6 +144,7 @@ export default function SecurityPanel() {
                 if (!cancelled) {
                     setPasskeys(loaded);
                     setCurrentPasswordRequired(requirements.currentPasswordRequired);
+                    setOperatorAuthorizationRequired(requirements.operatorAuthorizationRequired);
                 }
             } catch {
                 if (!cancelled) {
@@ -164,6 +166,7 @@ export default function SecurityPanel() {
         completePrivilegedMfaEnrollment();
         setPasskeys(await getPasskeys());
         setCurrentPasswordRequired(false);
+        setOperatorAuthorizationRequired(false);
         toastSuccess(t("added"));
     };
 
@@ -184,6 +187,9 @@ export default function SecurityPanel() {
                 toastInfo(t(registrationStarted ? "canceled" : "stepUpCanceled"));
             } else if (handlePasskeyStepUpError(err)) {
                 return;
+            } else if (err instanceof ApiError && err.code === "PRIVILEGED_PASSKEY_BOOTSTRAP_FORBIDDEN") {
+                setOperatorAuthorizationRequired(true);
+                toastError(t("privilegedBootstrapForbidden"));
             } else if (err instanceof ApiError && err.status === 403 && passkeys.length === 0) {
                 toastError(t("freshSignInRequired"));
             } else {
@@ -319,6 +325,11 @@ export default function SecurityPanel() {
                                 <p className="text-sm font-medium text-foreground">{t("emptyTitle")}</p>
                                 <p className="max-w-sm text-sm text-muted-foreground">{t("emptyBody")}</p>
                             </div>
+                            {operatorAuthorizationRequired ? (
+                                <p className="max-w-sm text-sm text-muted-foreground">
+                                    {t("privilegedBootstrapForbidden")}
+                                </p>
+                            ) : null}
                             <div className="pt-1">{addButton}</div>
                         </div>
                     ) : (

@@ -57,6 +57,7 @@
     "passwordDescription": "Enter your current password before adding your first passkey.",
     "passwordLabel": "Current password",
     "incorrectPassword": "That password is incorrect. Try again.",
+    "privilegedBootstrapForbidden": "This account administers other members, so a password alone cannot add its first passkey. Ask an administrator to remove that authority while you enroll, or an operator for a recovery authorization.",
     "freshSignInRequired": "Sign out and sign in again before adding your first passkey.",
     "stepUpCanceled": "Passkey verification was canceled.",
     "continue": "Continue",

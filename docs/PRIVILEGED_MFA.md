@@ -27,6 +27,34 @@ session is newly established and bound to the same account. It does not satisfy 
 operation. Only a verified WebAuthn assertion, a passkey login, or the just-completed passkey
 registration ceremony creates the recent-MFA stamp.
 
+## First enrollment on an account that administers others
+
+A password alone does not enroll the first passkey for an account that currently holds privilege in
+a scope containing another principal. That account's password is exactly what the policy exists to
+contain: without this refusal, a stolen password would enroll an attacker-held authenticator and,
+through the step-up that enrollment grants, reach role changes, invitations, provider secrets, and
+exports. The refusal answers `403` with `PRIVILEGED_PASSKEY_BOOTSTRAP_FORBIDDEN` and is recorded as
+`auth.passkey.bootstrap.denied`. It is evaluated after the password itself has been verified, so it
+never reveals which accounts are privileged to a caller who does not already hold the password.
+
+An account that administers nobody but itself still enrolls with its password, and is recorded as
+`auth.passkey.bootstrap.authorized` with a `sole_principal` grant. This carve-out is what keeps
+first enrollment self-service: a self-serve registration provisions its own organization, workspace,
+and owner membership in the same transaction, so such an account is privileged from the instant it
+exists and holds no other credential. The carve-out cannot be manufactured, because the refusal is
+evaluated across every scope the account holds privilege in — acquiring a further sole-member
+workspace can only lose the exclusion, never earn it.
+
+Three routes therefore exist for an account that does administer others and has no passkey:
+
+1. an administrator removes that authority for the duration of enrollment, and restores it after;
+2. an operator authorizes the recovery ceremony below, which grants the ceremony session the right
+   to enroll a replacement; or
+3. the deployment has not yet turned enforcement on, in which case nothing is refused.
+
+An account that is the sole `owner` of a workspace that has other members has no first route,
+because the last owner cannot be demoted. Its path is the operator ceremony.
+
 ## High-risk operations
 
 The existing service boundaries require recent WebAuthn verification for role and membership
@@ -61,6 +89,12 @@ user recovering their own account with both:
 1. the account's current password, or a freshly established same-account federated session for a
    passwordless account; and
 2. a random, out-of-band token issued by an operator and configured only as a SHA-256 digest.
+
+The ceremony removes whatever credentials exist, which may legitimately be none: it is an
+authorization ceremony as much as a deletion, and an account that administers others but has never
+enrolled uses it to obtain the right to enroll a first passkey. The grant it writes is bound to both
+the account and the ceremony session, so a concurrent session for the same account cannot ride it,
+and it is cleared once a replacement passkey is enrolled.
 
 The operator must set all three values and restart the backend:
 

@@ -49,7 +49,9 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
+import ooo.klae.connex.backend.exceptions.PrivilegedBootstrapForbiddenException;
 import ooo.klae.connex.backend.services.MfaRecoveryService;
+import ooo.klae.connex.backend.services.PasskeyBootstrapAuthorizationService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
@@ -72,6 +74,8 @@ class WebAuthnControllerTest {
     private final SessionSecurityService sessionSecurityService = mock(SessionSecurityService.class);
     private final AuditService auditService = mock(AuditService.class);
     private final MfaRecoveryService mfaRecoveryService = mock(MfaRecoveryService.class);
+    private final PasskeyBootstrapAuthorizationService passkeyBootstrapAuthorizationService =
+        mock(PasskeyBootstrapAuthorizationService.class);
     private final WebAuthnController controller = new WebAuthnController(
         webAuthnService,
         authService,
@@ -83,7 +87,8 @@ class WebAuthnControllerTest {
         ssoConnectionService,
         sessionSecurityService,
         auditService,
-        mfaRecoveryService);
+        mfaRecoveryService,
+        passkeyBootstrapAuthorizationService);
 
     @AfterEach
     void clearSecurityContext() {
@@ -149,13 +154,56 @@ class WebAuthnControllerTest {
     }
 
     @Test
+    void registerOptions_refusedPrivilegedBootstrapDoesNotCreateChallengeOrMarker() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PasskeyRegistrationOptionsRequest body = new PasskeyRegistrationOptionsRequest();
+        body.setCurrentPassword("correct-horse");
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(false);
+        doThrow(new PrivilegedBootstrapForbiddenException("administers other members"))
+            .when(passkeyBootstrapAuthorizationService)
+            .requireFirstPasskeyBootstrapAuthorization(user, request);
+
+        assertThrows(PrivilegedBootstrapForbiddenException.class,
+            () -> controller.registerOptions(body, request, response));
+
+        verify(webAuthnService, never()).createRegistrationOptions(any());
+        verify(sessionSecurityService, never()).markFirstPasskeyBootstrap(any(), anyInt());
+    }
+
+    @Test
+    void registerOptions_bootstrapAuthorizationRunsAfterTheAccountProof() {
+        User user = user(7);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        PasskeyRegistrationOptionsRequest body = new PasskeyRegistrationOptionsRequest();
+        body.setCurrentPassword("wrong");
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(webAuthnService.hasPasskey(7)).thenReturn(false);
+        doThrow(new BadCredentialsException("Incorrect password"))
+            .when(authService).requireFirstPasskeyBootstrapAuthentication(7, "wrong", request);
+
+        assertThrows(BadCredentialsException.class,
+            () -> controller.registerOptions(body, request, response));
+
+        verify(passkeyBootstrapAuthorizationService, never())
+            .requireFirstPasskeyBootstrapAuthorization(any(), any());
+    }
+
+    @Test
     void registrationRequirements_firstPasswordBackedPasskeyRequiresCurrentPassword() {
         User user = user(7);
         when(authService.getCurrentUser()).thenReturn(user);
         when(webAuthnService.hasPasskey(7)).thenReturn(false);
         when(authService.hasPasswordCredential(7)).thenReturn(true);
 
-        assertTrue(controller.registrationRequirements().currentPasswordRequired());
+        assertTrue(controller.registrationRequirements(new MockHttpServletRequest()).currentPasswordRequired());
     }
 
     @Test
@@ -165,7 +213,7 @@ class WebAuthnControllerTest {
         when(webAuthnService.hasPasskey(7)).thenReturn(false);
         when(authService.hasPasswordCredential(7)).thenReturn(false);
 
-        assertFalse(controller.registrationRequirements().currentPasswordRequired());
+        assertFalse(controller.registrationRequirements(new MockHttpServletRequest()).currentPasswordRequired());
     }
 
     @Test
@@ -174,7 +222,7 @@ class WebAuthnControllerTest {
         when(authService.getCurrentUser()).thenReturn(user);
         when(webAuthnService.hasPasskey(7)).thenReturn(true);
 
-        assertFalse(controller.registrationRequirements().currentPasswordRequired());
+        assertFalse(controller.registrationRequirements(new MockHttpServletRequest()).currentPasswordRequired());
         verify(authService, never()).hasPasswordCredential(anyInt());
     }
 
@@ -577,7 +625,8 @@ class WebAuthnControllerTest {
             ssoConnectionService,
             sessionSecurityService,
             auditService,
-            mfaRecoveryService);
+            mfaRecoveryService,
+            passkeyBootstrapAuthorizationService);
     }
 
     private static User user(int id) {
