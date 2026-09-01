@@ -53,6 +53,19 @@ public class MailService {
         deliverQuietly(config, message, "workspace " + workspaceId);
     }
 
+    /**
+     * Delivers account-level mail through the instance sender synchronously, throwing on failure.
+     *
+     * <p>{@link #sendInstance(MailMessage)} is fire-and-forget and swallows delivery errors, which
+     * is right for notifications but wrong when the message is the only way a caller can finish an
+     * operation. Callers that must report an outage use this instead.
+     *
+     * @param message the message to deliver
+     */
+    public void sendInstanceNow(MailMessage message) {
+        sendNow(resolver.resolveInstance(), message);
+    }
+
     /** Returns whether the instance default sender currently resolves to a usable transport. */
     public boolean hasUsableInstanceTransport() {
         ResolvedMailConfig config = resolver.resolveInstance();

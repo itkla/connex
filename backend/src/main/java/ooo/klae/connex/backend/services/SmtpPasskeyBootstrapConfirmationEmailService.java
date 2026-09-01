@@ -17,7 +17,9 @@ import ooo.klae.connex.backend.mail.MailService;
 /**
  * Real SMTP delivery of first-passkey enrollment confirmations, active when
  * {@code connex.security.privileged-mfa.bootstrap-confirmation.email-enabled=true} (the seam
- * contract). That same flag stands the
+ * contract). Delivery is synchronous and propagates transport failures: a confined account has
+ * nowhere else to go, so silently dropping this message would be a soft lockout. That same flag
+ * stands the
  * {@link LoggingPasskeyBootstrapConfirmationEmailService} down, so exactly one delivery bean
  * exists. The bearer rides in the URL fragment, so it never reaches a server log, a proxy, or a
  * {@code Referer} header.
@@ -63,6 +65,6 @@ public class SmtpPasskeyBootstrapConfirmationEmailService
                         "confirmUrl", link,
                         "expiryMinutes", String.valueOf(tokenExpiryMinutes)));
         String subject = Locale.JAPANESE.equals(locale) ? JAPANESE_SUBJECT : ENGLISH_SUBJECT;
-        mailService.sendInstance(MailMessage.html(user.getEmail(), subject, body));
+        mailService.sendInstanceNow(MailMessage.html(user.getEmail(), subject, body));
     }
 }

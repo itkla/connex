@@ -79,7 +79,8 @@
     "confirmationSent": "確認メールを送信しました。メールをご確認ください。",
     "confirmationFailed": "確認メールを送信できませんでした",
     "confirmationUnavailable": "このインスタンスはメールを送信できません。管理者に設定を依頼してください。",
-    "confirmationRequired": "最初のパスキーを追加する前に、メールのリンクを確認してください"
+    "confirmationRequired": "最初のパスキーを追加する前に、メールのリンクを確認してください",
+    "confirmationSatisfied": "確認が完了しました。パスキーを追加できます。"
   },
   "AccountConnections": {
     "title": "連携アカウント",

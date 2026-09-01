@@ -132,7 +132,7 @@ public class PasskeyBootstrapConfirmationService {
         String rawToken = OneTimeTokenDigest.generate();
         tokenMapper.insert(user.getId(), OneTimeTokenDigest.sha256(rawToken), sessionPrimaryId,
                 requestIp, tokenExpiryMinutes);
-        afterCommit(() -> emailService.sendConfirmationEmail(user, rawToken));
+        afterCommit(() -> deliverConfirmation(user, rawToken));
 
         auditService.recordStrictScoped(
                 "auth.passkey.bootstrap_confirmation.requested",
@@ -194,6 +194,27 @@ public class PasskeyBootstrapConfirmationService {
     @Transactional
     public void invalidateForUser(int userId) {
         tokenMapper.invalidateForUser(userId);
+    }
+
+    /**
+     * Delivers the confirmation and reports a transport failure to the caller.
+     *
+     * <p>Delivery runs after the issuing transaction commits, so no network I/O is done while the
+     * row lock is held, and it is synchronous so a DNS, TLS, authentication, or unreachable-server
+     * failure reaches the caller instead of being swallowed. Announcing success for a message that
+     * never arrives would be a soft lockout: the account is confined to enrollment and has no
+     * other route forward. The committed token simply goes unused and expires.
+     *
+     * @param user the account awaiting the confirmation
+     * @param rawToken the bearer being delivered
+     */
+    private void deliverConfirmation(User user, String rawToken) {
+        try {
+            emailService.sendConfirmationEmail(user, rawToken);
+        } catch (RuntimeException exception) {
+            throw new MailTransportUnavailableException(
+                    "The enrollment confirmation email could not be delivered");
+        }
     }
 
     /**

@@ -79,7 +79,8 @@
     "confirmationSent": "Confirmation sent. Check your email.",
     "confirmationFailed": "Could not send the confirmation email",
     "confirmationUnavailable": "This instance cannot send email. Ask an administrator to configure it.",
-    "confirmationRequired": "Confirm the emailed link before adding your first passkey"
+    "confirmationRequired": "Confirm the emailed link before adding your first passkey",
+    "confirmationSatisfied": "Confirmed. You can add your passkey now."
   },
   "AccountConnections": {
     "title": "Connected accounts",

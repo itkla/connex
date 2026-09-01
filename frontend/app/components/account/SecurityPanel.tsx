@@ -127,7 +127,6 @@ export default function SecurityPanel() {
     const [confirmingPassword, setConfirmingPassword] = useState(false);
     const [emailConfirmationRequired, setEmailConfirmationRequired] = useState(false);
     const [emailConfirmationSatisfied, setEmailConfirmationSatisfied] = useState(false);
-    const [confirmationOpen, setConfirmationOpen] = useState(false);
     const [sendingConfirmation, setSendingConfirmation] = useState(false);
 
     const [renameTarget, setRenameTarget] = useState<Passkey | null>(null);
@@ -196,7 +195,7 @@ export default function SecurityPanel() {
 
     const addPasskey = async () => {
         if (passkeys.length === 0 && emailConfirmationRequired && !emailConfirmationSatisfied) {
-            setConfirmationOpen(true);
+            toastError(t("confirmationRequired"));
             return;
         }
         if (passkeys.length === 0 && currentPasswordRequired) {
@@ -330,6 +329,35 @@ export default function SecurityPanel() {
                     <p className="rounded-2xl border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
                         {t("unsupported")}
                     </p>
+                )}
+
+                {supported && !loading && emailConfirmationRequired && (
+                    <div className="mx-6 rounded-2xl border border-border bg-card px-5 py-4">
+                        <h3 className="text-sm font-medium text-foreground">
+                            {t("confirmationTitle")}
+                        </h3>
+                        <p className="mt-1 max-w-prose text-sm text-muted-foreground">
+                            {emailConfirmationSatisfied
+                                ? t("confirmationSatisfied")
+                                : t("confirmationDescription")}
+                        </p>
+                        {!emailConfirmationSatisfied && (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="inline"
+                                onClick={() => void sendConfirmation()}
+                                disabled={sendingConfirmation}
+                                className="mt-3"
+                            >
+                                {sendingConfirmation ? (
+                                    <Loader2Icon className="size-4 animate-spin" />
+                                ) : (
+                                    t("confirmationSend")
+                                )}
+                            </Button>
+                        )}
+                    </div>
                 )}
 
                 {supported &&
@@ -468,38 +496,6 @@ export default function SecurityPanel() {
                             </Button>
                         </DialogFooter>
                     </form>
-                </DialogContent>
-            </Dialog>
-
-            <Dialog
-                open={confirmationOpen}
-                onOpenChange={(open) => {
-                    if (sendingConfirmation) return;
-                    setConfirmationOpen(open);
-                }}
-            >
-                <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>{t("confirmationTitle")}</DialogTitle>
-                        <DialogDescription>{t("confirmationDescription")}</DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                        <DialogClose asChild>
-                            <Button type="button" variant="outline" disabled={sendingConfirmation}>
-                                {t("cancel")}
-                            </Button>
-                        </DialogClose>
-                        <Button
-                            type="button"
-                            onClick={() => void sendConfirmation()}
-                            disabled={sendingConfirmation}
-                            className="bg-brand text-white hover:bg-brand-hover"
-                        >
-                            {sendingConfirmation
-                                ? <Loader2Icon className="size-4 animate-spin" />
-                                : t("confirmationSend")}
-                        </Button>
-                    </DialogFooter>
                 </DialogContent>
             </Dialog>
 
