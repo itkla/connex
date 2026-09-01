@@ -16,6 +16,7 @@ import { ApiError, exchangePasskeyBootstrapConfirmation } from "@/app/lib/api";
 import { settingsDestination } from "@/app/lib/settingsEntryPoints";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
+import { Button } from "@/components/ui/button";
 
 type Status = "validating" | "invalid" | "signIn" | "success";
 
@@ -61,7 +62,7 @@ export function ConfirmPasskeyForm() {
             <div className="relative flex min-h-[100dvh] flex-col px-6 py-10 sm:px-10 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:px-14 lg:py-12">
                 <Link
                     href="/"
-                    className="flex w-fit items-center gap-2.5 rounded-lg transition-opacity duration-150 ease-out hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand lg:hidden"
+                    className="flex w-fit items-center gap-2.5 rounded-lg transition-opacity duration-(--motion-micro) ease-out hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand lg:hidden"
                 >
                     <span className="size-3 rounded-[5px] bg-brand" aria-hidden="true" />
                     <span className="text-lg font-bold tracking-tight text-foreground">{tForm("brand")}</span>
@@ -85,13 +86,12 @@ export function ConfirmPasskeyForm() {
                                 <p className="mt-3 text-base leading-relaxed text-muted-foreground text-pretty">
                                     {t("invalidBody")}
                                 </p>
-                                <Link
-                                    href={securityHref}
-                                    className="mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98]"
-                                >
-                                    {t("continue")}
-                                    <ArrowRightIcon className="size-4" />
-                                </Link>
+                                <Button asChild variant="brand" size="page" className="mt-8">
+                                    <Link href={securityHref}>
+                                        {t("continue")}
+                                        <ArrowRightIcon className="size-4" />
+                                    </Link>
+                                </Button>
                             </div>
                         )}
 
@@ -104,13 +104,12 @@ export function ConfirmPasskeyForm() {
                                 <p className="mt-3 text-base leading-relaxed text-muted-foreground text-pretty">
                                     {t("signInBody")}
                                 </p>
-                                <Link
-                                    href="/auth/login"
-                                    className="mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98]"
-                                >
-                                    {t("backToLogin")}
-                                    <ArrowRightIcon className="size-4" />
-                                </Link>
+                                <Button asChild variant="brand" size="page" className="mt-8">
+                                    <Link href="/auth/login">
+                                        {t("backToLogin")}
+                                        <ArrowRightIcon className="size-4" />
+                                    </Link>
+                                </Button>
                             </div>
                         )}
 
@@ -123,13 +122,12 @@ export function ConfirmPasskeyForm() {
                                 <p className="mt-3 text-base leading-relaxed text-muted-foreground text-pretty">
                                     {t("successBody")}
                                 </p>
-                                <Link
-                                    href={securityHref}
-                                    className="mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98]"
-                                >
-                                    {t("continue")}
-                                    <ArrowRightIcon className="size-4" />
-                                </Link>
+                                <Button asChild variant="brand" size="page" className="mt-8">
+                                    <Link href={securityHref}>
+                                        {t("continue")}
+                                        <ArrowRightIcon className="size-4" />
+                                    </Link>
+                                </Button>
                             </div>
                         )}
 
@@ -140,7 +138,7 @@ export function ConfirmPasskeyForm() {
                             >
                                 <Link
                                     href="/auth/login"
-                                    className="inline-flex items-center gap-1.5 font-semibold text-foreground underline decoration-brand decoration-2 underline-offset-4 transition-colors duration-150 ease-out hover:decoration-brand-hover"
+                                    className="inline-flex items-center gap-1.5 font-semibold text-foreground underline decoration-brand decoration-2 underline-offset-4 transition-colors duration-(--motion-micro) ease-out hover:decoration-brand-hover"
                                 >
                                     <ArrowLeftIcon className="size-4" />
                                     {t("backToLogin")}
