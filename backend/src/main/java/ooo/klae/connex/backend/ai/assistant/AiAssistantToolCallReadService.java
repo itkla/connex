@@ -77,7 +77,7 @@ public class AiAssistantToolCallReadService {
     private final Clock clock;
 
     /** Returns up to 100 safe write-tool cards in one authorized session. */
-    @Transactional(readOnly = true)
+    @Transactional
     public List<AiAssistantToolCallReadDto> list(int sessionId, boolean pendingOnly) {
         Viewer viewer = currentViewer();
         AiChatSession session = requireReadableSession(viewer, sessionId);
@@ -98,7 +98,7 @@ public class AiAssistantToolCallReadService {
     }
 
     /** Returns one safe write-tool card in an authorized session. */
-    @Transactional(readOnly = true)
+    @Transactional
     public AiAssistantToolCallReadDto get(int sessionId, int toolCallId) {
         Viewer viewer = currentViewer();
         AiChatSession session = requireReadableSession(viewer, sessionId);
@@ -945,6 +945,8 @@ public class AiAssistantToolCallReadService {
         if (session == null) {
             throw inaccessible();
         }
+        sessionReadAudit.recordAccessible(
+                viewer.workspaceId(), viewer.userId(), session);
         return session;
     }
 

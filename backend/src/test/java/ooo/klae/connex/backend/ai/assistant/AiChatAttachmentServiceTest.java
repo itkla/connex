@@ -66,6 +66,7 @@ class AiChatAttachmentServiceTest {
                 workspaceService,
                 authService,
                 mock(AuditService.class),
+                mock(AiAssistantSessionReadAudit.class),
                 realtimeDispatcher);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         when(workspaceService.getCurrentUserId()).thenReturn(USER_ID);

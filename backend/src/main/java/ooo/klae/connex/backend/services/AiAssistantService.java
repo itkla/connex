@@ -80,13 +80,13 @@ public class AiAssistantService {
         int userId = currentUserId();
         List<AiChatSession> sessions = chatMapper.listAccessibleSessions(
             workspaceId, userId, size, offset);
-        auditAdministrativeReads(workspaceId, userId, sessions);
+        sessionReadAudit.recordAccessible(workspaceId, userId, sessions);
         List<AiChatSessionDto> items = sessions.stream().map(AiChatSessionDto::from).toList();
         return new PageResponse<>(items, chatMapper.countAccessibleSessions(workspaceId, userId));
     }
 
     /** Returns pending invitations addressed to the authenticated workspace member. */
-    @Transactional(readOnly = true)
+    @Transactional
     @RequirePermission(Permission.AI_USE)
     public PageResponse<AiChatSessionDto> pageInvitations(int page, int size) {
         int offset = pageOffset(page, size);
@@ -94,6 +94,7 @@ public class AiAssistantService {
         int userId = currentUserId();
         List<AiChatSession> sessions = chatMapper.listInvitedSessions(
                 workspaceId, userId, size, offset);
+        sessionReadAudit.recordAccessible(workspaceId, userId, sessions);
         return new PageResponse<>(
                 sessions.stream().map(AiChatSessionDto::from).toList(),
                 chatMapper.countInvitedSessions(workspaceId, userId));
@@ -147,7 +148,7 @@ public class AiAssistantService {
         int workspaceId = currentWorkspaceId();
         int userId = currentUserId();
         AiChatSession session = requireAccessible(workspaceId, userId, id);
-        auditAdministrativeReads(workspaceId, userId, List.of(session));
+        sessionReadAudit.recordAccessible(workspaceId, userId, session);
         return detail(workspaceId, userId, id, messageSize, offset, session);
     }
 
@@ -628,22 +629,7 @@ public class AiAssistantService {
     }
 
     private void auditRetainedRead(AiChatSession session) {
-        auditSessionRead(session, "retained");
-    }
-
-    private void auditSessionRead(AiChatSession session, String scope) {
-        sessionReadAudit.record(session.getId(), scope);
-    }
-
-    private void auditAdministrativeReads(
-            int workspaceId, int userId, List<AiChatSession> sessions) {
-        if (!workspaceService.permissionsFor(workspaceId, userId)
-                .contains(Permission.AI_SESSION_ADMIN)) {
-            return;
-        }
-        sessions.stream()
-            .filter(session -> !Objects.equals(session.getCreatedByUserId(), userId))
-            .forEach(session -> auditSessionRead(session, "accessible"));
+        sessionReadAudit.record(session.getId(), "retained");
     }
 
     private AiChatSession requireAccessible(int workspaceId, int userId, int id) {

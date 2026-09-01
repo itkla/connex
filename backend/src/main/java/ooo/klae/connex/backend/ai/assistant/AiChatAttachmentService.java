@@ -45,10 +45,11 @@ public class AiChatAttachmentService {
     private final WorkspaceService workspaceService;
     private final AuthService authService;
     private final AuditService auditService;
+    private final AiAssistantSessionReadAudit sessionReadAudit;
     private final AiChatRealtimeDispatcher realtimeDispatcher;
 
     /** Returns every attachment visible through one currently authorized active session. */
-    @Transactional(readOnly = true)
+    @Transactional
     @RequirePermission(Permission.AI_USE)
     public List<AiChatAttachmentDto> list(int sessionId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -156,6 +157,7 @@ public class AiChatAttachmentService {
             throw inaccessible();
         }
         requireActiveSessionAndAuthor(workspaceId, userId, session);
+        sessionReadAudit.recordAccessible(workspaceId, userId, session);
         return session;
     }
 

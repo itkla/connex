@@ -201,7 +201,8 @@ public class SecurityConfig {
             LoginRateLimiter loginRateLimiter,
             ClientIpResolver clientIpResolver,
             @Value("${connex.metrics.scrape-token:}") String metricsScrapeToken,
-            @Value("${connex.sso.enabled:false}") boolean ssoEnabled) throws Exception {
+            @Value("${connex.sso.enabled:false}") boolean ssoEnabled,
+            @Value("${connex.cors.allowed-origins}") String[] corsAllowedOrigins) throws Exception {
         boolean oauthEnabled = ssoEnabled || socialLoginClientRegistrations.anyEnabled();
         http.addFilterAfter(new AbsoluteSessionTimeoutFilter(sessionSecurityService), SecurityContextHolderFilter.class);
         http.addFilterAfter(
@@ -213,6 +214,9 @@ public class SecurityConfig {
             CsrfFilter.class);
         http.addFilterAfter(
             new OneTimeLinkExchangeAdmissionFilter(loginRateLimiter, clientIpResolver),
+            CsrfFilter.class);
+        http.addFilterAfter(
+            new AiAssistantNavigationAdmissionFilter(corsAllowedOrigins),
             CsrfFilter.class);
         http.addFilterBefore(new MetricsScrapeTokenFilter(metricsScrapeToken), AuthorizationFilter.class);
         http.addFilterBefore(
