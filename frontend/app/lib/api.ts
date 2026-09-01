@@ -360,6 +360,7 @@ const CSRF_RETRY_EXEMPT_MUTATION_PATHS = new Set([
 const RECENT_AUTHENTICATION_REQUIRED_CODE = "RECENT_AUTHENTICATION_REQUIRED";
 export const PASSKEY_ENROLLMENT_REQUIRED_CODE = "PASSKEY_ENROLLMENT_REQUIRED";
 export const PRIVILEGED_MFA_ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
+export const MAIL_TRANSPORT_UNAVAILABLE_CODE = "MAIL_TRANSPORT_UNAVAILABLE";
 export const PASSKEY_STEP_UP_CANCELED_CODE = "PASSKEY_STEP_UP_CANCELED";
 export const PASSKEY_STEP_UP_FAILED_CODE = "PASSKEY_STEP_UP_FAILED";
 const PRIVILEGED_MFA_ENROLLMENT_ROUTE = settingsDestination("personal.security").href;
@@ -376,6 +377,8 @@ const PRIVILEGED_MFA_ENROLLMENT_POST_PATHS = new Set([
     "/api/auth/logout",
     "/api/auth/webauthn/register/options",
     "/api/auth/webauthn/register",
+    "/api/auth/webauthn/register/confirmation",
+    "/api/auth/webauthn/register/confirmation/exchange",
     "/api/auth/webauthn/recover",
 ]);
 const PASSKEY_STEP_UP_PATHS = new Set([
@@ -1558,9 +1561,28 @@ export function getPasskeys(init: RequestInit = {}) {
 }
 
 export function getPasskeyRegistrationRequirements(init: RequestInit = {}) {
-    return getJson<{ currentPasswordRequired: boolean }>(
+    return getJson<Types.PasskeyRegistrationRequirements>(
         "/api/auth/webauthn/register/requirements",
         { cache: "no-store", ...init },
+    );
+}
+
+/**
+ * Asks the backend to email a single-use confirmation for enrolling a first passkey. Required
+ * for an account that currently holds privilege, so a stolen password alone cannot enroll one.
+ */
+export function requestPasskeyBootstrapConfirmation() {
+    return postJson<Types.AuthResponse>("/api/auth/webauthn/register/confirmation", {});
+}
+
+/**
+ * Redeems the emailed enrollment confirmation for the current session.
+ * @param token raw bearer taken from the link fragment
+ */
+export function exchangePasskeyBootstrapConfirmation(token: string) {
+    return postJson<Types.AuthResponse>(
+        "/api/auth/webauthn/register/confirmation/exchange",
+        { token },
     );
 }
 

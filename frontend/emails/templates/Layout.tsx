@@ -1,6 +1,7 @@
 import * as React from "react";
 import {
     Body,
+    Button,
     Column,
     Container,
     Head,
@@ -191,9 +192,7 @@ const block = {
         color: palette.ink,
         wordBreak: "break-word" as const,
     } as const,
-    ctaRow: { margin: 0 } as const,
     cta: {
-        display: "inline-block",
         backgroundColor: palette.brand,
         color: palette.brandInk,
         fontSize: "15px",
@@ -270,15 +269,17 @@ export function PanelRow({ label, value }: { label: string; value: string }) {
     );
 }
 
-/** Primary call to action. The label is the anchor's only child. */
+/**
+ * Primary call to action. Uses React Email's {@code Button} so the rendered
+ * anchor keeps the {@code mso-padding-alt} and {@code mso-text-raise} hints that
+ * stop Outlook's Word renderer from collapsing the padding to a text-sized target.
+ */
 export function Cta({ href, children }: { href: string; children: string }) {
     return (
         <Section className="cx-pad" style={block.inset}>
-            <Text style={block.ctaRow}>
-                <Link className="cx-cta" href={href} style={block.cta}>
-                    {children}
-                </Link>
-            </Text>
+            <Button className="cx-cta" href={href} style={block.cta}>
+                {children}
+            </Button>
         </Section>
     );
 }

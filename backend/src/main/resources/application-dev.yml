@@ -36,3 +36,9 @@ connex:
     audit:
         integrity:
             hmac-secret: ${CONNEX_AUDIT_INTEGRITY_HMAC_SECRET:dev-audit-integrity-hmac-secret-change-me}
+    security:
+        privileged-mfa:
+            bootstrap-confirmation:
+                # Local dev has no SMTP, so a fail-closed emailed confirmation would leave every
+                # privileged account unable to enroll its first passkey. Never enable dev in prod.
+                enabled: ${CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_ENABLED:false}

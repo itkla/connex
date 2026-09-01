@@ -142,7 +142,7 @@ class ReportDeliverySchedulerTest {
         assertTrue(body.contains(">Won revenue</p>"));
         assertTrue(body.contains(">$125,000</p>"));
         assertTrue(body.contains("href=\"https://app.example.com/insights/reports/33/snapshots/55\""));
-        assertTrue(body.contains(">View report</a>"));
+        assertTrue(body.contains(">View report</span>"));
         assertFalse(body.contains("{{"));
         verify(auditService).recordScoped(
                 "report.schedule.delivery", "report_schedule", SCHEDULE_ID,
@@ -203,7 +203,7 @@ class ReportDeliverySchedulerTest {
         assertTrue(body.contains("定期レポートを Connex で確認できます。"));
         assertTrue(body.contains(">レポート</p>"));
         assertTrue(body.contains(">準備完了</p>"));
-        assertTrue(body.contains(">Connex で表示</a>"));
+        assertTrue(body.contains(">Connex で表示</span>"));
         assertTrue(body.contains("このメールは、ワークスペースのレポート配信先に指定されているため送信されました。"));
         assertFalse(body.contains("{{"));
     }

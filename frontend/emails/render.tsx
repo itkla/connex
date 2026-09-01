@@ -12,6 +12,7 @@ import NotificationEmail from "./templates/NotificationEmail.js";
 import ReportDelivery from "./templates/ReportDelivery.js";
 import VerifyEmail from "./templates/VerifyEmail.js";
 import DocumentSignature from "./templates/DocumentSignature.js";
+import PasskeyBootstrapConfirmation from "./templates/PasskeyBootstrapConfirmation.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const outDir = join(here, "..", "..", "backend", "src", "main", "resources", "templates", "emails");
@@ -30,6 +31,14 @@ const templates: Array<{ name: string; element: React.ReactElement }> = [
     { name: "report-delivery.ja.html", element: <ReportDelivery locale="ja" /> },
     { name: "document-signature.en.html", element: <DocumentSignature locale="en" /> },
     { name: "document-signature.ja.html", element: <DocumentSignature locale="ja" /> },
+    {
+        name: "passkey-bootstrap-confirmation.en.html",
+        element: <PasskeyBootstrapConfirmation locale="en" />,
+    },
+    {
+        name: "passkey-bootstrap-confirmation.ja.html",
+        element: <PasskeyBootstrapConfirmation locale="ja" />,
+    },
 ];
 
 const requestedNames = new Set(process.argv.slice(2).filter((name) => name !== "--"));

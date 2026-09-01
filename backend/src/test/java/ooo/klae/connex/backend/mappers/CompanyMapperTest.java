@@ -579,6 +579,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         visible.setAuthor(current);
         visible.setPerson(person);
         noteMapper.insert(visible);
+        setNoteCreatedAt(visible, "2026-07-01 10:00:00");
         Note ownPrivate = new Note();
         ownPrivate.setWorkspaceId(workspace.getId());
         ownPrivate.setContent("Own private");
@@ -586,6 +587,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         ownPrivate.setAuthor(current);
         ownPrivate.setDeal(deal);
         noteMapper.insert(ownPrivate);
+        setNoteCreatedAt(ownPrivate, "2026-07-01 10:00:00");
         Note otherPrivate = new Note();
         otherPrivate.setWorkspaceId(workspace.getId());
         otherPrivate.setContent("Other private");
@@ -593,6 +595,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         otherPrivate.setAuthor(other);
         otherPrivate.setPerson(person);
         noteMapper.insert(otherPrivate);
+        setNoteCreatedAt(otherPrivate, "2026-07-01 10:00:00");
 
         CompanyEngagementCountsDto counts = companyMapper.getCompanyEngagementCounts(
             workspace.getId(), company.getId());
@@ -833,5 +836,11 @@ class CompanyMapperTest extends AbstractMapperTest {
         new JdbcTemplate(dataSource).update(
             "UPDATE company SET created_at = ?, updated_at = ? WHERE id = ?",
             Timestamp.valueOf(createdAt), Timestamp.valueOf(updatedAt), company.getId());
+    }
+
+    private void setNoteCreatedAt(Note note, String createdAt) {
+        new JdbcTemplate(dataSource).update(
+            "UPDATE note SET created_at = ? WHERE id = ?",
+            Timestamp.valueOf(createdAt), note.getId());
     }
 }

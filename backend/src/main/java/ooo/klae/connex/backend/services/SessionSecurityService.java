@@ -38,6 +38,9 @@ public class SessionSecurityService {
     public static final String SESSION_EPOCH_ATTR = "connex.sessionEpoch";
     public static final String FIRST_PASSKEY_BOOTSTRAP_AT_ATTR = "connex.firstPasskeyBootstrapAt";
     public static final String FIRST_PASSKEY_BOOTSTRAP_USER_ATTR = "connex.firstPasskeyBootstrapUserId";
+    public static final String PASSKEY_BOOTSTRAP_CONFIRMED_AT_ATTR = "connex.passkeyBootstrapConfirmedAt";
+    public static final String PASSKEY_BOOTSTRAP_CONFIRMED_USER_ATTR =
+        "connex.passkeyBootstrapConfirmedUserId";
 
     private final SessionSecurityProperties properties;
     private final Clock clock;
@@ -140,6 +143,8 @@ public class SessionSecurityService {
         session.removeAttribute(SESSION_EPOCH_ATTR);
         session.removeAttribute(FIRST_PASSKEY_BOOTSTRAP_AT_ATTR);
         session.removeAttribute(FIRST_PASSKEY_BOOTSTRAP_USER_ATTR);
+        session.removeAttribute(PASSKEY_BOOTSTRAP_CONFIRMED_AT_ATTR);
+        session.removeAttribute(PASSKEY_BOOTSTRAP_CONFIRMED_USER_ATTR);
     }
 
     /**
@@ -212,6 +217,56 @@ public class SessionSecurityService {
         if (session != null) {
             session.removeAttribute(FIRST_PASSKEY_BOOTSTRAP_AT_ATTR);
             session.removeAttribute(FIRST_PASSKEY_BOOTSTRAP_USER_ATTR);
+        }
+    }
+
+    /**
+     * Records that this session redeemed an emailed first-passkey enrollment confirmation.
+     *
+     * <p>The stamp is deliberately session-bound rather than account-bound. An attacker holding
+     * only the password can request a confirmation, but the link is delivered to the account
+     * owner's mailbox; an account-bound stamp would let the owner's redemption authorize the
+     * attacker's waiting session.
+     *
+     * @param request current servlet request
+     * @param userId the account that redeemed the confirmation
+     */
+    public void markPasskeyBootstrapConfirmation(HttpServletRequest request, int userId) {
+        HttpSession session = request.getSession();
+        session.setAttribute(PASSKEY_BOOTSTRAP_CONFIRMED_AT_ATTR, clock.millis());
+        session.setAttribute(PASSKEY_BOOTSTRAP_CONFIRMED_USER_ATTR, userId);
+    }
+
+    /**
+     * Whether this session holds an unexpired confirmation redeemed by the same account.
+     *
+     * @param request current servlet request
+     * @param userId the account attempting enrollment
+     * @return true when a same-account confirmation is present and still inside the window
+     */
+    public boolean hasFreshPasskeyBootstrapConfirmation(HttpServletRequest request, int userId) {
+        HttpSession session = request.getSession(false);
+        if (session == null) {
+            return false;
+        }
+        Long confirmedAt = longAttribute(session, PASSKEY_BOOTSTRAP_CONFIRMED_AT_ATTR);
+        Integer confirmedUserId = integerAttribute(session, PASSKEY_BOOTSTRAP_CONFIRMED_USER_ATTR);
+        boolean fresh = confirmedAt != null
+            && confirmedUserId != null
+            && confirmedUserId == userId
+            && isWithinRecentAuthenticationWindow(confirmedAt);
+        if (!fresh) {
+            clearPasskeyBootstrapConfirmation(request);
+        }
+        return fresh;
+    }
+
+    /** Clears any redeemed first-passkey enrollment confirmation from the current session. */
+    public void clearPasskeyBootstrapConfirmation(HttpServletRequest request) {
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            session.removeAttribute(PASSKEY_BOOTSTRAP_CONFIRMED_AT_ATTR);
+            session.removeAttribute(PASSKEY_BOOTSTRAP_CONFIRMED_USER_ATTR);
         }
     }
 

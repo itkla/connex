@@ -305,6 +305,7 @@ class MfaRecoveryPasskeyRaceIntegrationTest {
         assertThrows(ForbiddenException.class, () -> webAuthnService.finishRegistration(
                 account.getId(),
                 admittedEpoch,
+                true,
                 null,
                 null,
                 "replacement"));

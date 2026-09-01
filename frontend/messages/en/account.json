@@ -71,7 +71,16 @@
     "removed": "Passkey removed",
     "removeFailed": "Couldn't remove that passkey. Please try again.",
     "loadFailed": "Couldn't load your passkeys.",
-    "retry": "Try again"
+    "retry": "Try again",
+    "confirmationTitle": "Confirm by email",
+    "confirmationDescription": "Your account has administrative access, so adding the first passkey needs a confirmation emailed to you. Open the link in this browser, then add your passkey.",
+    "confirmationSend": "Email me a confirmation",
+    "confirmationSending": "Sending",
+    "confirmationSent": "Confirmation sent. Check your email.",
+    "confirmationFailed": "Could not send the confirmation email",
+    "confirmationUnavailable": "This instance cannot send email. Ask an administrator to configure it.",
+    "confirmationRequired": "Confirm the emailed link before adding your first passkey",
+    "confirmationSatisfied": "Confirmed. You can add your passkey now."
   },
   "AccountConnections": {
     "title": "Connected accounts",
