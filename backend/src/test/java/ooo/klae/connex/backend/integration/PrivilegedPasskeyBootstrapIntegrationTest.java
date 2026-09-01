@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -108,8 +109,8 @@ class PrivilegedPasskeyBootstrapIntegrationTest {
     @Test
     void anAccountAdministeringOthersCannotBootstrapWithItsPasswordAlone() throws Exception {
         User admin = passwordAccount();
-        int org = newOrganization();
-        int workspace = newWorkspace(org);
+        int orgId = newOrganization();
+        int workspace = newWorkspace(orgId);
         workspaceMapper.addMember(workspace, admin.getId(), "admin");
         workspaceMapper.addMember(workspace, passwordAccount().getId(), "member");
         MockHttpSession session = authenticatedSession(admin);
@@ -121,7 +122,7 @@ class PrivilegedPasskeyBootstrapIntegrationTest {
                         .content("{\"currentPassword\":\"" + PASSWORD + "\"}"))
                 .andExpect(status().isForbidden())
                 .andExpect(content().string(
-                        org.hamcrest.Matchers.containsString("PRIVILEGED_PASSKEY_BOOTSTRAP_FORBIDDEN")));
+                        containsString("PRIVILEGED_PASSKEY_BOOTSTRAP_FORBIDDEN")));
 
         assertFalse(sessionSecurityService.hasFreshFirstPasskeyBootstrap(
                 requestFor(session), admin.getId()));
@@ -135,8 +136,8 @@ class PrivilegedPasskeyBootstrapIntegrationTest {
     @Test
     void anAccountAdministeringNobodyElseStillBootstrapsWithItsPassword() throws Exception {
         User founder = passwordAccount();
-        int org = newOrganization();
-        int workspace = newWorkspace(org);
+        int orgId = newOrganization();
+        int workspace = newWorkspace(orgId);
         workspaceMapper.addMember(workspace, founder.getId(), "owner");
         assertTrue(userMapper.isPrivilegedAccount(founder.getId()));
         assertFalse(userMapper.holdsPrivilegeOverOtherAccounts(founder.getId()));
@@ -155,8 +156,8 @@ class PrivilegedPasskeyBootstrapIntegrationTest {
     @Test
     void anUnprivilegedAccountIsUnaffected() throws Exception {
         User member = passwordAccount();
-        int org = newOrganization();
-        int workspace = newWorkspace(org);
+        int orgId = newOrganization();
+        int workspace = newWorkspace(orgId);
         workspaceMapper.addMember(workspace, member.getId(), "member");
         workspaceMapper.addMember(workspace, passwordAccount().getId(), "admin");
 
@@ -175,8 +176,8 @@ class PrivilegedPasskeyBootstrapIntegrationTest {
     @Test
     void anOperatorRecoveryUnlocksANeverEnrolledAdministrator() throws Exception {
         User admin = passwordAccount();
-        int org = newOrganization();
-        int workspace = newWorkspace(org);
+        int orgId = newOrganization();
+        int workspace = newWorkspace(orgId);
         workspaceMapper.addMember(workspace, admin.getId(), "admin");
         workspaceMapper.addMember(workspace, passwordAccount().getId(), "member");
         MockHttpServletRequest ceremony = ceremonyRequest(admin);
@@ -205,8 +206,8 @@ class PrivilegedPasskeyBootstrapIntegrationTest {
     @Test
     void aRecoveryGrantDoesNotAuthorizeAnotherSession() throws Exception {
         User admin = passwordAccount();
-        int org = newOrganization();
-        int workspace = newWorkspace(org);
+        int orgId = newOrganization();
+        int workspace = newWorkspace(orgId);
         workspaceMapper.addMember(workspace, admin.getId(), "admin");
         workspaceMapper.addMember(workspace, passwordAccount().getId(), "member");
         MockHttpServletRequest ceremony = ceremonyRequest(admin);
@@ -221,7 +222,7 @@ class PrivilegedPasskeyBootstrapIntegrationTest {
 
         User refreshed = userMapper.getUserById(admin.getId());
         assertNotNull(refreshed);
-        assertEquals(epoch, refreshed.getSessionEpoch());
+        assertEquals(Integer.valueOf(epoch), refreshed.getSessionEpoch());
         MockHttpSession other = authenticatedSession(refreshed);
 
         mockMvc.perform(post("/api/auth/webauthn/register/options")
