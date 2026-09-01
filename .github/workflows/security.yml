@@ -199,7 +199,7 @@ jobs:
           compileJava
           compileTestJava
       - name: Analyze backend with CodeQL
-        uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938
         with:
           category: /language:java-kotlin
           wait-for-processing: true
@@ -252,7 +252,7 @@ jobs:
           config-file: ./.github/codeql/codeql-config.yml
           source-root: frontend
       - name: Analyze frontend with CodeQL
-        uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938
         with:
           category: /language:javascript-typescript
           wait-for-processing: true
