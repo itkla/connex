@@ -137,6 +137,9 @@ When runtime behaviour or structure changes, update all of these together:
 
 - `backend/docker-compose.yml` (local `clamav` profile);
 - `deploy/docker-compose.yml` and `deploy/docker-compose.build.yml`;
+- `deploy/docker-compose.signatures.yml`, the overlay that mounts an operator-managed
+  signature database read-only at `/var/lib/clamav`. It is the only escape from the 30-day
+  hard block for a site that cannot pull a fresh image, so it must keep working;
 - `deploy/onprem.env.example` and `deploy/silo.env.example` (both enable it);
   `deploy/eval.env.example` deliberately disables it and must say why;
 - `.github/workflows/ci.yml`, `release.yml`, `deploy-smoke.yml`, `.github/dependabot.yml`,
