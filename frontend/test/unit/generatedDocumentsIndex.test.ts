@@ -10,7 +10,7 @@ const INDEX = "app/components/library/documents/GeneratedDocumentsBrowser.tsx";
 const TEMPLATES = "app/components/library/documents/DocumentTemplatesBrowser.tsx";
 const DEAL_LINKS = "app/components/records/deals/dealLinks.ts";
 const DEAL_DOCUMENTS = "app/components/records/deals/DealDocuments.tsx";
-const APPROVAL_INBOX = "app/components/me/ApprovalInbox.tsx";
+const MY_WORK_QUEUE = "app/components/me/MyWorkQueue.tsx";
 
 function source(relativePath: string): string {
     return readFileSync(path.resolve(process.cwd(), relativePath), "utf8");
@@ -32,7 +32,7 @@ describe("the library holds generated documents beside the templates that produc
         expect(DEAL_DOCUMENTS_ANCHOR).toBe("deal-documents");
         expect(dealDocumentsHref(42).endsWith(`#${DEAL_DOCUMENTS_ANCHOR}`)).toBe(true);
         expect(source(DEAL_DOCUMENTS)).toContain("<section id={DEAL_DOCUMENTS_ANCHOR}");
-        expect(source(APPROVAL_INBOX)).toContain("dealDocumentsHref(item.dealId)");
+        expect(source(MY_WORK_QUEUE)).toContain("dealDocumentsHref(item.context.id)");
     });
 
     it("holds exactly one spelling of the anchor, so no producer can drift off it", () => {
