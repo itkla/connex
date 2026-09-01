@@ -203,6 +203,15 @@ public class GlobalExceptionHandler {
             .body(codedError(ex.getCode(), ex.getMessage()));
     }
 
+    @ExceptionHandler(MailTransportUnavailableException.class)
+    public ResponseEntity<Map<String, String>> mailTransportUnavailable(
+            MailTransportUnavailableException ex) {
+        log.warn("Refusing an email-dependent operation with no usable transport: detail={}",
+                stackDetail(ex));
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+            .body(codedError(MailTransportUnavailableException.CODE, ex.getMessage()));
+    }
+
     @ExceptionHandler(SecretUnavailableException.class)
     public ResponseEntity<String> secretUnavailable(SecretUnavailableException ex) {
         log.warn("Encrypted secret unavailable: exception={} detail={}",

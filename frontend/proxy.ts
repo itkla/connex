@@ -17,6 +17,7 @@ const ALWAYS_ACCESSIBLE_AUTH_PATHS = new Set([
     '/auth/reset-password',
     '/auth/confirm-email',
     '/auth/verify-email',
+    '/auth/confirm-passkey',
 ]);
 
 function createNonce(): string {

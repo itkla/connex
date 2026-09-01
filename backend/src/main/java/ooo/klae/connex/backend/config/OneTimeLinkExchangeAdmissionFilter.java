@@ -21,6 +21,7 @@ public class OneTimeLinkExchangeAdmissionFilter extends OncePerRequestFilter {
         "/api/auth/reset-password/exchange",
         "/api/auth/verify-email/exchange",
         "/api/auth/email-change/exchange",
+        "/api/auth/webauthn/register/confirmation/exchange",
         "/api/invites/exchange",
         "/api/invite-links/exchange",
         "/api/account/connections/native/prepare",
