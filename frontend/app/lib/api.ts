@@ -3972,6 +3972,46 @@ export function getDocumentApprovalDelegateCandidates(
     );
 }
 
+export function getMyWork(init: RequestInit = {}) {
+    return getJson<Types.WorkItemPage>(`/api/my-work`, { cache: 'no-store', ...init });
+}
+
+export function getMyWorkResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.WorkItemPage>((init) => getMyWork(init), cookie);
+}
+
+export function getMyWorkSummary(init: RequestInit = {}) {
+    return getJson<Types.WorkItemSummary>(`/api/my-work/summary`, { cache: 'no-store', ...init });
+}
+
+export function getMyWorkSummaryResultFromCookie(cookie: string | null) {
+    return resultWithCookie<Types.WorkItemSummary>((init) => getMyWorkSummary(init), cookie);
+}
+
+export function completeMyWorkTask(id: number, etag: string) {
+    return postJson<Types.WorkItemActionResponse>(
+        `/api/my-work/tasks/${id}/complete`, {}, { headers: { 'If-Match': etag } });
+}
+
+export function snoozeMyWorkNotification(id: number, etag: string, body: Types.SnoozeRequest) {
+    return postJson<Types.WorkItemActionResponse>(
+        `/api/my-work/notifications/${id}/snooze`, body, { headers: { 'If-Match': etag } });
+}
+
+export function dismissMyWorkNotification(id: number, etag: string) {
+    return postJson<Types.WorkItemActionResponse>(
+        `/api/my-work/notifications/${id}/dismiss`, {}, { headers: { 'If-Match': etag } });
+}
+
+export function decideMyWorkApproval(
+    id: number,
+    etag: string,
+    body: { stepId: number; decision: 'approved' | 'rejected'; comment?: string },
+) {
+    return postJson<Types.WorkItemActionResponse>(
+        `/api/my-work/document-approvals/${id}/decision`, body, { headers: { 'If-Match': etag } });
+}
+
 export function getApprovalInbox(init: RequestInit = {}) {
     return getJson<Types.ApprovalInboxItem[]>(`/api/approvals/inbox`, {
         cache: 'no-store',

@@ -1913,6 +1913,131 @@ export type ApprovalInboxItem = {
     requestedAt: string;
 };
 
+/** Authoritative source family behind one My Work item. */
+export type WorkItemSource = "task" | "notification" | "document_approval";
+
+/** Deterministic urgency band computed by the backend ranking contract. */
+export type WorkItemUrgency = "critical" | "high" | "normal" | "low";
+
+/** Aggregate availability of the My Work projection. */
+export type WorkItemAvailability = "available" | "partial" | "unavailable";
+
+/** Per-source availability inside one My Work response. */
+export type WorkItemSourceAvailability = "available" | "unavailable" | "forbidden";
+
+/** Action verbs the current actor may safely execute on a work item right now. */
+export type WorkItemAction =
+    | "complete"
+    | "snooze"
+    | "dismiss"
+    | "approve"
+    | "reject"
+    | "open_context";
+
+/** Machine reason code explaining why an item is in the queue. */
+export type WorkItemReasonCode =
+    | "task_overdue"
+    | "task_due_today"
+    | "task_due_soon"
+    | "task_open"
+    | "deal_close_overdue"
+    | "deal_closing_soon"
+    | "document_approval_pending";
+
+/** Structured, prose-free reason payload for one work item. */
+export type WorkItemReason = {
+    code: WorkItemReasonCode;
+    date?: string | null;
+    days?: number | null;
+    requestedByLabel?: string | null;
+};
+
+/** One evidence row backing a work item, always sourced from authoritative state. */
+export type WorkItemEvidence = {
+    code: "task_due" | "task_open" | "deal_close_date" | "approval_requested";
+    sourceType: WorkItemSource;
+    sourceId: number;
+    occurredAt: string;
+    date?: string | null;
+    label?: string | null;
+};
+
+/** Record context a work item links to, including approval-step metadata when relevant. */
+export type WorkItemContext = {
+    type: string;
+    id: number;
+    label: string;
+    href: string;
+    stepId?: number | null;
+    stepOrder?: number | null;
+    stepName?: string | null;
+    requiredCount?: number | null;
+    escalated?: boolean | null;
+};
+
+/** One ranked My Work item projected over an authoritative source record. */
+export type WorkItem = {
+    id: string;
+    source: WorkItemSource;
+    sourceId: number;
+    title: string;
+    reason: WorkItemReason;
+    dueDate?: string | null;
+    urgency: WorkItemUrgency;
+    evidence: WorkItemEvidence[];
+    freshnessAt: string;
+    asOf: string;
+    currentVersion: string;
+    etag: string;
+    context: WorkItemContext;
+    permittedActions: WorkItemAction[];
+};
+
+/** Truthful per-source status: a failed provider reports null totals, never zero. */
+export type WorkItemSourceStatus = {
+    source: WorkItemSource;
+    status: WorkItemSourceAvailability;
+    matchingTotal?: number | null;
+    overallTotal?: number | null;
+    asOf?: string | null;
+    errorCode?: "provider_unavailable" | "invalid_source_rows" | null;
+};
+
+/** One page of the merged, deterministically ranked My Work queue. */
+export type WorkItemPage = {
+    items: WorkItem[];
+    page: number;
+    size: number;
+    knownMatchingTotal: number;
+    knownOverallTotal: number;
+    totalsComplete: boolean;
+    hasNext: boolean;
+    hasNextKnown: boolean;
+    availability: WorkItemAvailability;
+    sourceStatuses: WorkItemSourceStatus[];
+    asOf: string;
+};
+
+/** Count-only My Work summary with the same per-source honesty rules. */
+export type WorkItemSummary = {
+    knownTotal: number;
+    knownCritical: number;
+    totalsComplete: boolean;
+    availability: WorkItemAvailability;
+    sourceStatuses: WorkItemSourceStatus[];
+    asOf: string;
+};
+
+/** Outcome of one version-guarded My Work action. */
+export type WorkItemActionResponse = {
+    source: WorkItemSource;
+    sourceId: number;
+    outcome: "applied" | "already_applied";
+    removedFromQueue: boolean;
+    notificationStateVersion?: number | null;
+    reconciledAt: string;
+};
+
 /** Declares when a generated document requires internal approval before finalization. */
 export type ApprovalPolicy = {
     id: number;
