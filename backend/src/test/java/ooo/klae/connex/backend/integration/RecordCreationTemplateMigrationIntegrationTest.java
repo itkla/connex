@@ -58,6 +58,7 @@ class RecordCreationTemplateMigrationIntegrationTest {
             .target(MigrationVersion.fromVersion("195"))
             .outOfOrder(false)
             .load();
+        flyway.baseline();
         flyway.migrate();
         flyway.validate();
     }
