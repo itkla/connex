@@ -91,6 +91,9 @@ public class WebAuthnService {
      * here, not at options time, because an account can be promoted between the two phases: a
      * ceremony started while unprivileged would otherwise finish as a privileged enrollment and
      * stamp the session as stepped-up without the out-of-band proof ever being required.
+     * Privilege can also arrive through a custom role the account already holds, which no
+     * account-row lock serialises, so the assigned role rows are locked here too and the
+     * transaction reads committed state rather than a snapshot taken before the promotion.
      *
      * @param expectedSessionEpoch the epoch stamped into the request's authenticated session
      * @param bootstrapConfirmationSatisfied whether the session carries a redeemed out-of-band
@@ -100,7 +103,7 @@ public class WebAuthnService {
      * @param label the user-supplied nickname
      * @return the stored credential record
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public CredentialRecord finishRegistration(
             int expectedUserId,
             Integer expectedSessionEpoch,
@@ -117,6 +120,7 @@ public class WebAuthnService {
                 || !expectedSessionEpoch.equals(currentSessionEpoch)) {
             throw new ForbiddenException("Authenticated session is no longer current");
         }
+        userMapper.lockAssignedCustomRoleIds(expectedUserId);
         if (!hasPasskey(expectedUserId)
                 && !bootstrapConfirmationSatisfied
                 && bootstrapConfirmationPolicy.requiresConfirmation(expectedUserId)) {

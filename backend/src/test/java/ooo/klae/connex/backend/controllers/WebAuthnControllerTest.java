@@ -583,8 +583,7 @@ class WebAuthnControllerTest {
         when(authService.getCurrentUser()).thenReturn(user);
         when(webAuthnService.hasPasskey(7)).thenReturn(false);
         when(bootstrapConfirmationService.isRequiredFor(7)).thenReturn(true);
-        when(sessionSecurityService.hasFreshPasskeyBootstrapConfirmation(request, 7))
-            .thenReturn(false);
+        when(bootstrapConfirmationService.isSatisfiedFor(user, request)).thenReturn(false);
 
         assertThrows(ForbiddenException.class,
             () -> controller.registerOptions(body, request, response));
@@ -608,8 +607,7 @@ class WebAuthnControllerTest {
         when(authService.getCurrentUser()).thenReturn(user);
         when(webAuthnService.hasPasskey(7)).thenReturn(false);
         when(bootstrapConfirmationService.isRequiredFor(7)).thenReturn(true);
-        when(sessionSecurityService.hasFreshPasskeyBootstrapConfirmation(request, 7))
-            .thenReturn(true);
+        when(bootstrapConfirmationService.isSatisfiedFor(user, request)).thenReturn(true);
         when(webAuthnService.createRegistrationOptions(any())).thenReturn(options);
         when(mapper.write(options)).thenReturn("{}");
 
@@ -630,8 +628,7 @@ class WebAuthnControllerTest {
         when(webAuthnService.hasPasskey(7)).thenReturn(false);
         when(sessionSecurityService.hasFreshFirstPasskeyBootstrap(request, 7)).thenReturn(true);
         when(bootstrapConfirmationService.isRequiredFor(7)).thenReturn(true);
-        when(sessionSecurityService.hasFreshPasskeyBootstrapConfirmation(request, 7))
-            .thenReturn(false);
+        when(bootstrapConfirmationService.isSatisfiedFor(user, request)).thenReturn(false);
 
         assertThrows(ForbiddenException.class,
             () -> controller.registerVerify("work key", "{}", request, response));
@@ -656,8 +653,7 @@ class WebAuthnControllerTest {
         when(webAuthnService.hasPasskey(7)).thenReturn(false);
         when(sessionSecurityService.hasFreshFirstPasskeyBootstrap(request, 7)).thenReturn(true);
         when(bootstrapConfirmationService.isRequiredFor(7)).thenReturn(true);
-        when(sessionSecurityService.hasFreshPasskeyBootstrapConfirmation(request, 7))
-            .thenReturn(true);
+        when(bootstrapConfirmationService.isSatisfiedFor(user, request)).thenReturn(true);
         when(mapper.read(eq("{}"), org.mockito.ArgumentMatchers
                 .<TypeReference<PublicKeyCredential<AuthenticatorAttestationResponse>>>any()))
                 .thenReturn(credential);

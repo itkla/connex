@@ -171,6 +171,7 @@ public class WebAuthnController {
                     user.getId(), expectedSessionEpoch, bootstrapConfirmationSatisfied,
                     options, credential, label);
             sessionSecurityService.markStepUp(req, user.getId());
+            sessionSecurityService.clearPasskeyBootstrapConfirmation(req);
             return Map.of("credentialId", record.getCredentialId().toBase64UrlString());
         } catch (RequestBodyTooLargeException ex) {
             throw ex;
@@ -185,7 +186,6 @@ public class WebAuthnController {
         } finally {
             creationOptions.save(req, res, null);
             sessionSecurityService.clearFirstPasskeyBootstrap(req);
-            sessionSecurityService.clearPasskeyBootstrapConfirmation(req);
         }
     }
 

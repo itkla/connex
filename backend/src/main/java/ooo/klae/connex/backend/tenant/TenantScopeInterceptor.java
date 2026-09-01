@@ -167,6 +167,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "OrgMemberMapper",
         MAPPERS + "OrgPlacementMapper",
         MAPPERS + "ObjectStorageBackendIdentityMapper",
+        MAPPERS + "PasskeyBootstrapConfirmationTokenMapper",
         MAPPERS + "PasswordResetTokenMapper",
         MAPPERS + "NotificationQuietHoursMapper",
         MAPPERS + "NativeConnectSessionMapper",

@@ -103,14 +103,19 @@ local development has no SMTP; never enable `dev` in production.
   alone, and can be re-promoted afterwards. This needs no restart. Note that `isPrivilegedAccount`
   is an OR across organization membership, built-in workspace admin/owner roles, and custom roles
   carrying administrative permissions — every source must be removed.
-- **Sole organization owner, with mail unusable** — the last owner cannot be demoted, so there is
-  no in-application route. Restore mail delivery, or use break-glass recovery below. This is the
-  one state that still requires operator intervention, and it is the reason mail must be
-  configured before enabling the flag on a single-administrator instance.
+- **Sole organization or workspace owner, with mail unusable** — the last owner cannot be demoted,
+  so there is no in-application route. **Break-glass recovery does not help here**: it refuses an
+  account that has no credential to remove, and this account has never enrolled one. The only
+  remedies are restoring mail delivery or setting
+  `CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_ENABLED=false`, both of which are configuration
+  changes requiring a restart. This is the reason a working instance sender must be configured
+  before this policy is enabled on a single-administrator instance.
 
 A session that has just completed operator-authorized break-glass recovery is treated as already
-confirmed. The recovery token is itself an out-of-band operator factor, so replacement enrollment
-after recovery is never blocked on email.
+confirmed, through the durable epoch-restamp grant that names that session and survives until the
+replacement credential commits. The recovery token is itself an out-of-band operator factor, so
+replacement enrollment after recovery is never blocked on email. This applies only to an account
+that *had* a credential to recover; recovery cannot bootstrap a never-enrolled account.
 
 ### Known residual
 

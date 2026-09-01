@@ -216,9 +216,13 @@ export default function SecurityPanel() {
             } else if (handlePasskeyStepUpError(err)) {
                 return;
             } else if (err instanceof ApiError && err.status === 403 && passkeys.length === 0) {
-                toastError(t("freshSignInRequired"));
+                toastError(emailConfirmationRequired ? t("confirmationRequired") : t("freshSignInRequired"));
+                setReloadKey((key) => key + 1);
             } else {
                 toastError(t("addFailed"));
+                if (passkeys.length === 0) {
+                    setReloadKey((key) => key + 1);
+                }
             }
         } finally {
             setAdding(false);

@@ -5,6 +5,8 @@ import java.util.Map;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -130,7 +132,7 @@ public class PasskeyBootstrapConfirmationService {
         String rawToken = OneTimeTokenDigest.generate();
         tokenMapper.insert(user.getId(), OneTimeTokenDigest.sha256(rawToken), sessionPrimaryId,
                 requestIp, tokenExpiryMinutes);
-        emailService.sendConfirmationEmail(user, rawToken);
+        afterCommit(() -> emailService.sendConfirmationEmail(user, rawToken));
 
         auditService.recordStrictScoped(
                 "auth.passkey.bootstrap_confirmation.requested",
@@ -171,7 +173,8 @@ public class PasskeyBootstrapConfirmationService {
         if (tokenMapper.markConsumed(tokenHash, user.getId(), sessionPrimaryId) != 1) {
             throw invalidLink(user);
         }
-        sessionSecurityService.markPasskeyBootstrapConfirmation(httpRequest, user.getId());
+        afterCommit(() -> sessionSecurityService.markPasskeyBootstrapConfirmation(
+                httpRequest, user.getId()));
         auditService.recordStrictScoped(
                 "auth.passkey.bootstrap_confirmation.redeemed",
                 "user",
@@ -191,6 +194,29 @@ public class PasskeyBootstrapConfirmationService {
     @Transactional
     public void invalidateForUser(int userId) {
         tokenMapper.invalidateForUser(userId);
+    }
+
+    /**
+     * Defers an effect until the surrounding transaction commits.
+     *
+     * <p>Both the emailed bearer and the session stamp must describe committed state. Dispatching
+     * mail inside the transaction can hand out a link for a row a later rollback removes, and
+     * stamping the session before commit can leave a session that looks confirmed while the
+     * consumption was rolled back, which would leave the token replayable.
+     *
+     * @param effect work to run only once the transaction has committed
+     */
+    private static void afterCommit(Runnable effect) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            effect.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                effect.run();
+            }
+        });
     }
 
     private String requireSessionPrimaryId(HttpServletRequest httpRequest) {
