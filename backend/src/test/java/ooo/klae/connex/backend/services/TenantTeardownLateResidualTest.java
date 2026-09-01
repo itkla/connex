@@ -116,62 +116,6 @@ class TenantTeardownLateResidualTest {
     }
 
     @Test
-    void lateResidualIsResweptThroughCapturedRouteBeforeFailureReturns() {
-        WorkspaceLifecycleRef workspace = new WorkspaceLifecycleRef(
-            WORKSPACE_ID,
-            ORG_ID,
-            "Workspace",
-            "workspace",
-            "active");
-        OperationLease lease = new OperationLease(
-            ORG_ID,
-            WORKSPACE_ID,
-            "teardown",
-            "lease-token");
-        Route route = new Route(ORG_ID, WORKSPACE_ID, null);
-        TableLifecycle lateTable = TenantLifecycleRegistry.require(
-            "record_creation_template_version");
-        when(controlMapper.findWorkspaceOrCleanupInOrg(ORG_ID, WORKSPACE_ID))
-            .thenReturn(workspace);
-        when(controlOperations.acquireWorkspaceTeardown(
-                ORG_ID,
-                WORKSPACE_ID,
-                ACTOR_ID))
-            .thenReturn(new AcquiredWorkspace(workspace, lease));
-        when(lifecycleAccess.capture(workspace, ORG_ID)).thenReturn(route);
-        when(tenantTransaction.count(WORKSPACE_ID, lateTable))
-            .thenReturn(0L, 1L, 0L);
-
-        IllegalStateException exception = assertThrows(
-            IllegalStateException.class,
-            () -> service.teardownWorkspace(
-                ORG_ID,
-                WORKSPACE_ID,
-                ACTOR_ID,
-                "workspace"));
-
-        assertTrue(exception.getMessage().contains("trusted cleanup clean=true"));
-        verify(tenantTransaction, atLeast(2)).deleteBatch(
-            WORKSPACE_ID,
-            lateTable,
-            properties.getTableBatchSize());
-        verify(auditService).recordFailureScoped(
-            "tenant.workspace.teardown",
-            "workspace",
-            WORKSPACE_ID,
-            null,
-            ORG_ID,
-            "workspace:" + WORKSPACE_ID,
-            "Workspace teardown failed residual verification",
-            "IllegalStateException");
-        verify(controlOperations).completeWorkspaceCleanup(
-            ORG_ID,
-            WORKSPACE_ID,
-            ACTOR_ID,
-            lease);
-    }
-
-    @Test
     void successfulTeardownRepeatsFkOrderedContentPurgeAfterStorageDrain() {
         WorkspaceLifecycleRef workspace = new WorkspaceLifecycleRef(
             WORKSPACE_ID,

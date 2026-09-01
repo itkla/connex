@@ -765,20 +765,20 @@ public class RecordCreationTemplateService {
             .forEach(id -> customFieldMapper.getByIdForUpdate(workspaceId, id));
         dependencies.tags().stream().sorted()
             .forEach(id -> tagMapper.getTagByIdForUpdate(workspaceId, id));
+        dependencies.stages().stream().sorted()
+            .forEach(id -> pipelineMapper.getVisibleStageByIdForUpdate(workspaceId, id));
         dependencies.pipelines().stream().sorted()
             .forEach(id -> pipelineMapper.getVisiblePipelineByIdForUpdate(workspaceId, id));
         dependencies.pipelines().stream().sorted()
             .forEach(id -> shareMapper.lockPipelineShareForWorkspace(id, workspaceId));
-        dependencies.stages().stream().sorted()
-            .forEach(id -> pipelineMapper.getVisibleStageByIdForUpdate(workspaceId, id));
-        dependencies.companies().stream().sorted()
-            .forEach(id -> companyMapper.getVisibleCompanyByIdForUpdate(workspaceId, id));
-        dependencies.companies().stream().sorted()
-            .forEach(id -> shareMapper.lockCompanyShareForWorkspace(id, workspaceId));
         dependencies.persons().stream().sorted()
             .forEach(id -> personMapper.getVisiblePersonByIdForUpdate(workspaceId, id));
         dependencies.persons().stream().sorted()
             .forEach(id -> shareMapper.lockPersonShareForWorkspace(id, workspaceId));
+        dependencies.companies().stream().sorted()
+            .forEach(id -> companyMapper.getVisibleCompanyByIdForUpdate(workspaceId, id));
+        dependencies.companies().stream().sorted()
+            .forEach(id -> shareMapper.lockCompanyShareForWorkspace(id, workspaceId));
     }
 
     private static DependencyIds dependencyIds(ResolvedCreationTemplateDto template) {
@@ -888,8 +888,12 @@ public class RecordCreationTemplateService {
         }
         ResolvedCreationTemplateDto system = resolver.resolveSystem(recordType, null);
         templates.add(system);
-        if (selected == null) {
+        if (selected == null
+                && system.availability() == RecordCreationTemplateAvailability.available) {
             selected = system.id();
+        }
+        if (selected == null) {
+            throw catalogUnavailable();
         }
         boolean partial = !warnings.isEmpty() || templates.stream()
             .anyMatch(template -> template.availability() != RecordCreationTemplateAvailability.available);
@@ -1366,5 +1370,12 @@ public class RecordCreationTemplateService {
                 "TEMPLATE_FIELD_UNAVAILABLE",
                 "The preview references an unavailable field");
         }
+    }
+
+    private static RecordCreationTemplateException catalogUnavailable() {
+        return RecordCreationTemplateException.of(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "TEMPLATE_CATALOG_UNAVAILABLE",
+            "The template catalog could not be loaded safely");
     }
 }

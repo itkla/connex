@@ -32,10 +32,13 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.http.HttpStatus;
 
+import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.RecordCreationTemplate;
 import ooo.klae.connex.backend.beans.RecordCreationTemplateSet;
 import ooo.klae.connex.backend.beans.RecordCreationTemplateVersion;
+import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.dto.recordcreation.LocalizedTextDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateCreateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateDefaultRequestDto;
@@ -43,6 +46,7 @@ import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateDefiniti
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateDuplicateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateFieldDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateGroupDto;
+import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplatePreviewRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateReorderRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateResetRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateStateRequestDto;
@@ -189,6 +193,29 @@ class RecordCreationTemplateServiceTest {
             permissionRevoked.countDown();
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    void zeroPipelinesFailCatalogAndSystemPreviewClosed() {
+        when(pipelineMapper.getAllPipelines(7)).thenReturn(List.of());
+        when(pipelineMapper.getAllStages(7)).thenReturn(List.of());
+        RecordCreationTemplateService liveService = serviceWithLiveResolver();
+
+        assertCatalogUnavailable(() -> liveService.catalog(RecordCreationRecordType.deal));
+        assertCatalogUnavailable(() -> liveService.preview(systemDealPreview()));
+    }
+
+    @Test
+    void emptyFirstPipelineFailsCatalogAndSystemPreviewClosed() {
+        Pipeline first = pipeline(3, "Empty");
+        Pipeline later = pipeline(9, "Material");
+        Stage laterStage = stage(12, later, 0, "Material stage");
+        when(pipelineMapper.getAllPipelines(7)).thenReturn(List.of(first, later));
+        when(pipelineMapper.getAllStages(7)).thenReturn(List.of(laterStage));
+        RecordCreationTemplateService liveService = serviceWithLiveResolver();
+
+        assertCatalogUnavailable(() -> liveService.catalog(RecordCreationRecordType.deal));
+        assertCatalogUnavailable(() -> liveService.preview(systemDealPreview()));
     }
 
     @Test
@@ -479,13 +506,13 @@ class RecordCreationTemplateServiceTest {
         order.verify(customFieldMapper).getByIdForUpdate(7, 8);
         order.verify(tagMapper).getTagByIdForUpdate(7, 4);
         order.verify(tagMapper).getTagByIdForUpdate(7, 9);
+        order.verify(pipelineMapper).getVisibleStageByIdForUpdate(7, 6);
         order.verify(pipelineMapper).getVisiblePipelineByIdForUpdate(7, 7);
         order.verify(shareMapper).lockPipelineShareForWorkspace(7, 7);
-        order.verify(pipelineMapper).getVisibleStageByIdForUpdate(7, 6);
-        order.verify(companyMapper).getVisibleCompanyByIdForUpdate(7, 5);
-        order.verify(shareMapper).lockCompanyShareForWorkspace(5, 7);
         order.verify(personMapper).getVisiblePersonByIdForUpdate(7, 2);
         order.verify(shareMapper).lockPersonShareForWorkspace(2, 7);
+        order.verify(companyMapper).getVisibleCompanyByIdForUpdate(7, 5);
+        order.verify(shareMapper).lockCompanyShareForWorkspace(5, 7);
         order.verify(resolver).resolveWorkspace(root, version, null);
         order.verify(mapper).setDefault(7, "person", 42, 5);
     }
@@ -592,6 +619,57 @@ class RecordCreationTemplateServiceTest {
             names(), null, definition, json, hash(json));
     }
 
+    private RecordCreationTemplateService serviceWithLiveResolver() {
+        when(customFieldMapper.getByEntityType(7, "deal")).thenReturn(List.of());
+        when(tagMapper.getAllTags(7)).thenReturn(List.of());
+        RecordCreationTemplateResolver liveResolver = new RecordCreationTemplateResolver(
+            registry,
+            validator,
+            customFieldMapper,
+            companyMapper,
+            personMapper,
+            pipelineMapper,
+            tagMapper,
+            workspaceService,
+            JsonMapper.builder().findAndAddModules().build(),
+            Clock.fixed(Instant.parse("2026-08-31T10:00:00Z"), ZoneOffset.UTC));
+        return new RecordCreationTemplateService(
+            mapper,
+            customFieldMapper,
+            tagMapper,
+            pipelineMapper,
+            companyMapper,
+            personMapper,
+            shareMapper,
+            validator,
+            liveResolver,
+            registry,
+            workspaceService,
+            auditService,
+            Clock.fixed(Instant.parse("2026-08-31T10:00:00Z"), ZoneOffset.UTC));
+    }
+
+    private static RecordCreationTemplatePreviewRequestDto systemDealPreview() {
+        return new RecordCreationTemplatePreviewRequestDto(
+            "system:deal:standard",
+            RecordCreationRecordType.deal,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+    }
+
+    private static void assertCatalogUnavailable(org.junit.jupiter.api.function.Executable executable) {
+        RecordCreationTemplateException exception = assertThrows(
+            RecordCreationTemplateException.class,
+            executable);
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, exception.status());
+        assertEquals("TEMPLATE_CATALOG_UNAVAILABLE", exception.error().code());
+        assertEquals("The template catalog could not be loaded safely", exception.getMessage());
+    }
+
     private static RecordCreationTemplateDefinitionDto definition(String field) {
         return new RecordCreationTemplateDefinitionDto(1, List.of(
             new RecordCreationTemplateGroupDto(
@@ -659,6 +737,22 @@ class RecordCreationTemplateServiceTest {
         return new ResolvedCreationTemplateDto(
             id, RecordCreationRecordType.person, false, 1, names(), null,
             RecordCreationTemplateAvailability.unavailable, List.of(), List.of());
+    }
+
+    private static Pipeline pipeline(int id, String name) {
+        Pipeline pipeline = new Pipeline();
+        pipeline.setId(id);
+        pipeline.setName(name);
+        return pipeline;
+    }
+
+    private static Stage stage(int id, Pipeline pipeline, int position, String name) {
+        Stage stage = new Stage();
+        stage.setId(id);
+        stage.setPipeline(pipeline);
+        stage.setPosition(position);
+        stage.setName(name);
+        return stage;
     }
 
     private static ResolvedCreationTemplateDto availableWithDependencies(int templateId) {
