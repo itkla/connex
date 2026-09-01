@@ -85,10 +85,13 @@ CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_BASE_URL=https://app.example.com
 ```
 
 The confirmation is fail-closed and requires a working instance sender (`connex.mail.*`). **An
-instance that leaves mail unconfigured cannot enroll a privileged, password-backed account at
-all.** The request endpoint refuses with `MAIL_TRANSPORT_UNAVAILABLE` rather than silently
-promising an email that will never arrive. The `dev` profile disables the requirement, because
-local development has no SMTP; never enable `dev` in production.
+instance that leaves mail unconfigured cannot complete the emailed confirmation**, so the request
+endpoint refuses with `MAIL_TRANSPORT_UNAVAILABLE` rather than silently promising an email that will
+never arrive. That is not a dead end: operator-authorized break-glass recovery enrolls a privileged,
+password-backed account without email, including one that has never enrolled, and the routes below
+say when to reach for it. Configure a sender anyway — break-glass costs an out-of-band operator
+token and a support round trip, so it is an incident path, not an onboarding one. The `dev` profile
+disables the requirement, because local development has no SMTP; never enable `dev` in production.
 
 ### If the confirmation cannot be completed
 
