@@ -208,7 +208,7 @@ jobs:
           CONNEX_MALWARE_SCANNING_ENABLED: "true"
           CONNEX_CLAMAV_BASE_URL: http://clamav:8091
           CONNEX_CLAMAV_PLAIN_HTTP_PRIVATE_HOST: clamav
-          CONNEX_CLAMAV_SERVICE_TOKEN: ci-${{ github.run_id }}-${{ github.run_attempt }}-clamav-token
+          CONNEX_CLAMAV_SERVICE_TOKEN: ci-${{ github.run_id }}-${{ github.run_attempt }}-clamav-service-token-padding
         run: |
           set -euo pipefail
           WAR=$(find build/libs -name '*.war' ! -name '*-plain.war' | head -1)
