@@ -839,6 +839,13 @@ export type RegisterPayload = {
     timezone?: string;
 };
 
+/** Proof requirements for beginning passkey registration in the current account. */
+export type PasskeyRegistrationRequirements = {
+    currentPasswordRequired: boolean;
+    emailConfirmationRequired: boolean;
+    emailConfirmationSatisfied: boolean;
+};
+
 export type AuthResponse = {
     message: string;
 };

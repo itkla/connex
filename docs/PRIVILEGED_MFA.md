@@ -51,6 +51,92 @@ to the integrity-chained system audit log as `auth.mfa.policy.configured`. The p
 Disabling this flag is a staged-rollout exception, not an MFA recovery mechanism. It does not make
 password proof satisfy the existing high-risk service gates.
 
+## First-passkey enrollment confirmation
+
+Confinement makes enrollment the only door an unenrolled privileged account can walk through, so
+the proof required to enroll is the proof protecting every privilege that account holds. A current
+password alone is not enough: an attacker who steals it could enroll their own passkey and receive
+the step-up stamp. Enrolling a **first** passkey on a password-backed account that currently holds
+privilege therefore also requires a single-use confirmation emailed to the account's own address.
+
+The bearer is 256-bit, hashed with SHA-256 at rest, single use, expires in 30 minutes by default,
+and travels in the link **fragment**, so it never reaches the server in a URL or a `Referer`
+header. Redemption is bound to the account **and** to the stable `SPRING_SESSION.PRIMARY_ID` of the
+session that requested it. That binding is the point: without it, an attacker holding the password
+could request a confirmation and have the legitimate owner's click authorize the attacker's waiting
+session. The owner must therefore open the link in the same browser they started enrolling in.
+
+The requirement is evaluated at both ceremony phases and again under the account lock inside
+`WebAuthnService.finishRegistration`, so an account promoted between issuing options and verifying
+the attestation cannot complete an unconfirmed privileged enrollment.
+
+It is independent of `CONNEX_PRIVILEGED_MFA_ENFORCED`. That flag governs confinement, but a first
+enrollment stamps the session as stepped-up either way.
+
+Passwordless accounts are excluded. They prove bootstrap with a freshly established, same-account
+federated session rather than a replayable secret, so a stolen password does not reach them.
+
+### Operator configuration
+
+```dotenv
+CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_ENABLED=true
+CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_EMAIL_ENABLED=true
+CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_BASE_URL=https://app.example.com
+```
+
+The confirmation is fail-closed and requires a working instance sender (`connex.mail.*`). **An
+instance that leaves mail unconfigured cannot enroll a privileged, password-backed account at
+all.** The request endpoint refuses with `MAIL_TRANSPORT_UNAVAILABLE` rather than silently
+promising an email that will never arrive. The `dev` profile disables the requirement, because
+local development has no SMTP; never enable `dev` in production.
+
+### If the confirmation cannot be completed
+
+- **Link expired, consumed, or opened in the wrong browser** — request another from the security
+  settings page and open it in the enrolling browser. Requests are throttled to five per fifteen
+  minutes per account.
+- **Mail transport down or misconfigured** — repair the transport and retry. No restart is needed
+  when an already-configured transport simply recovers.
+- **Mailbox unreachable, or mail never configured** — another organization or workspace
+  administrator removes every privileged role the stuck account holds. Policy is read from current
+  rows on every request, so the account stops being confined immediately, enrolls with its password
+  alone, and can be re-promoted afterwards. This needs no restart. Note that `isPrivilegedAccount`
+  is an OR across organization membership, built-in workspace admin/owner roles, and custom roles
+  carrying administrative permissions — every source must be removed.
+- **Sole organization or workspace owner, with mail unusable** — the last owner cannot be demoted,
+  so there is no in-application route. **Break-glass recovery does not help here**: it refuses an
+  account that has no credential to remove, and this account has never enrolled one. The only
+  remedies are restoring mail delivery or setting
+  `CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_ENABLED=false`, both of which are configuration
+  changes requiring a restart. This is the reason a working instance sender must be configured
+  before this policy is enabled on a single-administrator instance.
+
+A session that has just completed operator-authorized break-glass recovery is treated as already
+confirmed, through the durable epoch-restamp grant that names that session and survives until the
+replacement credential commits. The recovery token is itself an out-of-band operator factor, so
+replacement enrollment after recovery is never blocked on email. This applies only to an account
+that *had* a credential to recover; recovery cannot bootstrap a never-enrolled account.
+
+### Known residual
+
+**This control depends on `CONNEX_PRIVILEGED_MFA_ENFORCED=true` to hold.**
+
+The confirmation is delivered to the account's own email address, so the control is only as strong
+as that address. `POST /api/users/me/email-change` re-points the address behind the current
+password alone — no step-up, no notice to the old address — and sends its verification link to the
+*new* address. Confinement is what makes that endpoint unreachable for an unenrolled privileged
+account.
+
+With `CONNEX_PRIVILEGED_MFA_ENFORCED=false` the confinement filter short-circuits, so an attacker
+holding a stolen password can change the account email to one they control, request the enrollment
+confirmation, redeem it in their own session, and enrol their own passkey. In that configuration
+issue #1506 is **not** mitigated. Under the default enforced posture the pivot is closed.
+
+Fixing this properly means requiring a stronger proof for an email change on a privileged account,
+which is deliberately out of scope for this mitigation because it changes an unrelated user-facing
+flow. It is subsumed by the durable fix that makes privilege unobtainable until enrollment
+completes.
+
 ## Break-glass recovery
 
 Connex has no cross-account administrative MFA reset endpoint. An organization or workspace

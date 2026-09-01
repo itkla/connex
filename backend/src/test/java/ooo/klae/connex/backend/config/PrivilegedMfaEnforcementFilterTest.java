@@ -92,6 +92,16 @@ class PrivilegedMfaEnforcementFilterTest {
     }
 
     @Test
+    void unenrolledPrivilegedAccountMayReachTheEnrollmentConfirmationEndpoints() throws Exception {
+        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+
+        execute("POST", "/api/auth/webauthn/register/confirmation");
+        execute("POST", "/api/auth/webauthn/register/confirmation/exchange");
+
+        verify(filterChain, org.mockito.Mockito.times(2)).doFilter(any(), any());
+    }
+
+    @Test
     void nonPrivilegedAccountIsNotConfined() throws Exception {
         when(privilegedAccountService.isPrivileged(7)).thenReturn(false);
 

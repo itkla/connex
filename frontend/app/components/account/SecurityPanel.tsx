@@ -23,7 +23,9 @@ import {
     finishPasskeyRegistration,
     getPasskeyRegistrationRequirements,
     getPasskeys,
+    MAIL_TRANSPORT_UNAVAILABLE_CODE,
     renamePasskey,
+    requestPasskeyBootstrapConfirmation,
 } from "@/app/lib/api";
 import { usePasskeySupport } from "@/app/hooks/usePasskeySupport";
 import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
@@ -123,6 +125,9 @@ export default function SecurityPanel() {
     const [currentPassword, setCurrentPassword] = useState("");
     const [passwordError, setPasswordError] = useState<string | null>(null);
     const [confirmingPassword, setConfirmingPassword] = useState(false);
+    const [emailConfirmationRequired, setEmailConfirmationRequired] = useState(false);
+    const [emailConfirmationSatisfied, setEmailConfirmationSatisfied] = useState(false);
+    const [sendingConfirmation, setSendingConfirmation] = useState(false);
 
     const [renameTarget, setRenameTarget] = useState<Passkey | null>(null);
     const [renameValue, setRenameValue] = useState("");
@@ -143,6 +148,8 @@ export default function SecurityPanel() {
                 if (!cancelled) {
                     setPasskeys(loaded);
                     setCurrentPasswordRequired(requirements.currentPasswordRequired);
+                    setEmailConfirmationRequired(requirements.emailConfirmationRequired);
+                    setEmailConfirmationSatisfied(requirements.emailConfirmationSatisfied);
                 }
             } catch {
                 if (!cancelled) {
@@ -164,10 +171,33 @@ export default function SecurityPanel() {
         completePrivilegedMfaEnrollment();
         setPasskeys(await getPasskeys());
         setCurrentPasswordRequired(false);
+        setEmailConfirmationRequired(false);
+        setEmailConfirmationSatisfied(false);
         toastSuccess(t("added"));
     };
 
+    const sendConfirmation = async () => {
+        if (sendingConfirmation) return;
+        setSendingConfirmation(true);
+        try {
+            await requestPasskeyBootstrapConfirmation();
+            toastSuccess(t("confirmationSent"));
+        } catch (err) {
+            toastError(
+                err instanceof ApiError && err.code === MAIL_TRANSPORT_UNAVAILABLE_CODE
+                    ? t("confirmationUnavailable")
+                    : t("confirmationFailed"),
+            );
+        } finally {
+            setSendingConfirmation(false);
+        }
+    };
+
     const addPasskey = async () => {
+        if (passkeys.length === 0 && emailConfirmationRequired && !emailConfirmationSatisfied) {
+            toastError(t("confirmationRequired"));
+            return;
+        }
         if (passkeys.length === 0 && currentPasswordRequired) {
             setPasswordError(null);
             setPasswordOpen(true);
@@ -185,9 +215,13 @@ export default function SecurityPanel() {
             } else if (handlePasskeyStepUpError(err)) {
                 return;
             } else if (err instanceof ApiError && err.status === 403 && passkeys.length === 0) {
-                toastError(t("freshSignInRequired"));
+                toastError(emailConfirmationRequired ? t("confirmationRequired") : t("freshSignInRequired"));
+                setReloadKey((key) => key + 1);
             } else {
                 toastError(t("addFailed"));
+                if (passkeys.length === 0) {
+                    setReloadKey((key) => key + 1);
+                }
             }
         } finally {
             setAdding(false);
@@ -295,6 +329,35 @@ export default function SecurityPanel() {
                     <p className="rounded-2xl border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
                         {t("unsupported")}
                     </p>
+                )}
+
+                {supported && !loading && emailConfirmationRequired && (
+                    <div className="mx-6 rounded-2xl border border-border bg-card px-5 py-4">
+                        <h3 className="text-sm font-medium text-foreground">
+                            {t("confirmationTitle")}
+                        </h3>
+                        <p className="mt-1 max-w-prose text-sm text-muted-foreground">
+                            {emailConfirmationSatisfied
+                                ? t("confirmationSatisfied")
+                                : t("confirmationDescription")}
+                        </p>
+                        {!emailConfirmationSatisfied && (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="inline"
+                                onClick={() => void sendConfirmation()}
+                                disabled={sendingConfirmation}
+                                className="mt-3"
+                            >
+                                {sendingConfirmation ? (
+                                    <Loader2Icon className="size-4 animate-spin" />
+                                ) : (
+                                    t("confirmationSend")
+                                )}
+                            </Button>
+                        )}
+                    </div>
                 )}
 
                 {supported &&
