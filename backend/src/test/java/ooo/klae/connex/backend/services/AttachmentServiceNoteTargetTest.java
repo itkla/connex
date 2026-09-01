@@ -20,6 +20,9 @@ import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.ScannedUpload;
+import ooo.klae.connex.backend.storage.UploadContentInspector;
+import ooo.klae.connex.backend.storage.UploadMalwareScanner;
 import ooo.klae.connex.backend.storage.UploadSource;
 
 /** Verifies note attachments require visibility to the current workspace member. */
@@ -50,7 +53,9 @@ class AttachmentServiceNoteTargetTest {
             auditService,
             workspaceService,
             referenceService,
-            managedObjectService);
+            managedObjectService,
+            org.mockito.Mockito.mock(UploadContentInspector.class),
+            org.mockito.Mockito.mock(UploadMalwareScanner.class));
     }
 
     @Test
@@ -72,7 +77,12 @@ class AttachmentServiceNoteTargetTest {
         assertThrows(ResourceNotFoundException.class,
             () -> service.upload("note", 41, source, uploader));
 
-        verify(attachmentWriteOperations, never()).upload(5, "note", 41, source, uploader);
+        verify(attachmentWriteOperations, never()).upload(
+            org.mockito.ArgumentMatchers.eq(5),
+            org.mockito.ArgumentMatchers.eq("note"),
+            org.mockito.ArgumentMatchers.eq(41),
+            org.mockito.ArgumentMatchers.any(ScannedUpload.class),
+            org.mockito.ArgumentMatchers.eq(uploader));
     }
 
     @Test

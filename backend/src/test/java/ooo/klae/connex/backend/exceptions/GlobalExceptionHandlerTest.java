@@ -460,6 +460,23 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void malwareRejectionsMapToStableStructured422Responses() {
+        ResponseEntity<Map<String, String>> infected =
+                handler.malwareDetected(new MalwareDetectedException());
+        ResponseEntity<Map<String, String>> unscannable =
+                handler.unscannableUpload(new UnscannableUploadException());
+
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, infected.getStatusCode());
+        assertEquals(Map.of(
+                "code", MalwareDetectedException.CODE,
+                "message", MalwareDetectedException.MESSAGE), infected.getBody());
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, unscannable.getStatusCode());
+        assertEquals(Map.of(
+                "code", UnscannableUploadException.CODE,
+                "message", UnscannableUploadException.MESSAGE), unscannable.getBody());
+    }
+
+    @Test
     void internalErrorReturnsCorrelationIdAndReportsSanitizedServerMetadata() {
         MDC.put(CorrelationIds.MDC_KEY, "request_id_123");
         tenantContext.set(7, 8, 9, "member", null);

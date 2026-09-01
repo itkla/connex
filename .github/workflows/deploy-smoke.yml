@@ -79,6 +79,54 @@ jobs:
             ' "/tmp/${TEMPLATE}.json" >/dev/null
           done
 
+          # Malware scanning is a mandatory control, so unlike OCR it is asserted PRESENT and
+          # ENABLED in both real editions. The scan ceiling must equal the object-storage upload
+          # ceiling exactly: if the sidecar's limit were lower, a file the backend accepts could
+          # be one the scanner refuses to read, and a mismatch is the quiet way this control stops
+          # covering the largest uploads.
+          for TEMPLATE in silo.env.example onprem.env.example; do
+            jq -e '
+              .services.clamav != null
+              and (.services.clamav.profiles | index("clamav")) != null
+              and .services.backend.environment.CONNEX_MALWARE_SCANNING_ENABLED == "true"
+              and .services.clamav.environment.CONNEX_CLAMAV_SERVICE_TOKEN
+                == .services.backend.environment.CONNEX_CLAMAV_SERVICE_TOKEN
+              and .services.backend.environment.CONNEX_CLAMAV_SERVICE_TOKEN
+                == "REPLACE_AT_LEAST_32_CHARS"
+              and (.services.clamav.environment.CONNEX_CLAMAV_MAX_SCAN_BYTES | tonumber)
+                == 26214400
+              and .services.clamav.read_only == true
+              and (.services.clamav.cap_drop | index("ALL")) != null
+              and (.services.clamav.networks | keys) == ["clamav_internal"]
+              and (.services.backend.networks | keys | index("clamav_internal")) != null
+              and .networks.clamav_internal.internal == true
+            ' "/tmp/${TEMPLATE}.json" >/dev/null
+          done
+
+          # The evaluation template is the ONE place scanning is off, and it is off only because
+          # it declares no deployment profile and runs SPRING_PROFILES_ACTIVE=dev. Assert both
+          # halves: if eval ever gained a profile while keeping scanning disabled, the backend
+          # would refuse to start and this template would be silently broken.
+          jq -e '
+            .services.clamav == null
+            and .services.backend.environment.CONNEX_MALWARE_SCANNING_ENABLED == "false"
+            and .services.backend.environment.SPRING_PROFILES_ACTIVE == "dev"
+            and (.services.backend.environment.CONNEX_DEPLOYMENT_PROFILE // "") == ""
+          ' /tmp/eval.env.example.json >/dev/null
+
+          # A real edition must refuse a published-image install that has not pinned the
+          # sidecar's digest, exactly as it already does for the backend and frontend.
+          for TEMPLATE in silo.env.example onprem.env.example; do
+            cp "$TEMPLATE" .env
+            sed -i 's/^CONNEX_BACKEND_DIGEST=.*/CONNEX_BACKEND_DIGEST=0000000000000000000000000000000000000000000000000000000000000000/' .env
+            sed -i 's/^CONNEX_FRONTEND_DIGEST=.*/CONNEX_FRONTEND_DIGEST=0000000000000000000000000000000000000000000000000000000000000000/' .env
+            sed -i 's/^CONNEX_OCR_DIGEST=.*/CONNEX_OCR_DIGEST=0000000000000000000000000000000000000000000000000000000000000000/' .env
+            if docker compose --env-file .env -f docker-compose.yml config -q 2>/dev/null; then
+              echo "::error::${TEMPLATE} accepted an install without a verified ClamAV digest"
+              exit 1
+            fi
+          done
+
           # The published-image path must refuse to start when the operator has not filled in
           # verified digests. Silo and on-prem ship those blank on purpose; eval ships usable
           # placeholders because it is an explicitly non-production local trial.
@@ -153,6 +201,14 @@ jobs:
           CONNEX_DB_URL: jdbc:mysql://127.0.0.1:3306/connexdb?sslMode=DISABLED
           CONNEX_DB_USERNAME: root
           CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-root
+          # Malware scanning is a mandatory control: a configured deployment profile refuses to
+          # start without it. These boots are bare WARs with no sidecar, so the control must be
+          # configured even though nothing is ever scanned here -- readiness is probed lazily on
+          # the first upload, not at startup. The refusal itself is asserted at the end of the job.
+          CONNEX_MALWARE_SCANNING_ENABLED: "true"
+          CONNEX_CLAMAV_BASE_URL: http://clamav:8091
+          CONNEX_CLAMAV_PLAIN_HTTP_PRIVATE_HOST: clamav
+          CONNEX_CLAMAV_SERVICE_TOKEN: ci-${{ github.run_id }}-${{ github.run_attempt }}-clamav-service-token-padding
         run: |
           set -euo pipefail
           WAR=$(find build/libs -name '*.war' ! -name '*-plain.war' | head -1)
@@ -229,6 +285,35 @@ jobs:
             exit 1
           fi
           echo "on-prem correctly refused instance-managed mail at startup"
+
+          echo "=== every edition must REFUSE to run without malware scanning ==="
+          # This is the control CHK-062 exists for. DeploymentProfileValidator's posture keys are
+          # structurally one-directional -- they can forbid a key an operator sets true, but
+          # cannot require one to be true -- so a dedicated startup validator carries this. If
+          # this assertion ever stops failing, a deployment can silently accept unscanned uploads.
+          for PROFILE in saas silo on-prem; do
+            CONNEX_DEPLOYMENT_PROFILE="$PROFILE" CONNEX_MALWARE_SCANNING_ENABLED=false \
+              java -jar "$WAR" > "/tmp/boot-$PROFILE-unscanned.log" 2>&1 &
+            PID=$!
+            REFUSED=0
+            for _ in $(seq 1 90); do
+              if ! kill -0 "$PID" 2>/dev/null; then REFUSED=1; break; fi
+              sleep 2
+            done
+            if [ "$REFUSED" != 1 ]; then
+              echo "::error::$PROFILE booted with malware scanning disabled; it must fail startup"
+              tail -60 "/tmp/boot-$PROFILE-unscanned.log"
+              kill "$PID" 2>/dev/null || true
+              exit 1
+            fi
+            if ! grep -q "connex.deployment.profile=$PROFILE requires: connex.malware-scanning.enabled=true" \
+                "/tmp/boot-$PROFILE-unscanned.log"; then
+              echo "::error::$PROFILE refused to boot but not for the malware-scanning reason"
+              tail -60 "/tmp/boot-$PROFILE-unscanned.log"
+              exit 1
+            fi
+            echo "$PROFILE correctly refused to run without malware scanning"
+          done
 
   source-install:
     name: Build and boot the stack from source

@@ -14,6 +14,7 @@ def main() -> int:
     parser.add_argument("--backend-image-reference", required=True)
     parser.add_argument("--frontend-image-reference", required=True)
     parser.add_argument("--ocr-image-reference", required=True)
+    parser.add_argument("--clamav-image-reference", required=True)
     arguments = parser.parse_args()
     manifest_path = Path(__file__).with_name("manifest.json")
     manifest = canonical_manifest(manifest_path)
@@ -28,6 +29,7 @@ def main() -> int:
             "backend": arguments.backend_image_reference,
             "frontend": arguments.frontend_image_reference,
             "ocr": arguments.ocr_image_reference,
+            "clamav": arguments.clamav_image_reference,
         },
     )
     return 0

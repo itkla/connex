@@ -5,12 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.concurrent.atomic.AtomicReference;
-import java.security.MessageDigest;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,10 +30,7 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
-import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
-import ooo.klae.connex.backend.storage.UploadPolicy.UploadFormat;
-import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
-import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.storage.ScannedUpload;
 
 /** Verifies attachment writes remain tenant-validated and transaction-bounded. */
 @ExtendWith(MockitoExtension.class)
@@ -106,9 +103,9 @@ class AttachmentWriteOperationsTest {
     void uploadStoresOnlyAfterTenantTargetValidation() {
         User uploader = new User();
         uploader.setId(7);
-        UploadSource source = UploadSource.from("file.pdf", "application/pdf", new byte[] { 1, 2 });
+        ScannedUpload scanned = mock(ScannedUpload.class);
         when(dealMapper.exists(5, 43)).thenReturn(true);
-        when(managedObjectService.storeAttachment(5, UploadPurpose.ATTACHMENT, source)).thenReturn(
+        when(managedObjectService.storeInspectedAttachment(5, scanned)).thenReturn(
             new StoredBinary("/api/attachments/content/token.pdf", "file.pdf", "application/pdf", 2));
         AtomicReference<Attachment> insertedAttachment = new AtomicReference<>();
         doAnswer(invocation -> {
@@ -120,7 +117,7 @@ class AttachmentWriteOperationsTest {
         when(attachmentMapper.getCreatedById(5, 77))
             .thenAnswer(invocation -> insertedAttachment.get());
 
-        Attachment attachment = operations.upload(5, "deal", 43, source, uploader);
+        Attachment attachment = operations.upload(5, "deal", 43, scanned, uploader);
 
         assertEquals(5, attachment.getWorkspaceId());
         assertEquals("deal", attachment.getEntityType());
@@ -134,11 +131,11 @@ class AttachmentWriteOperationsTest {
         User uploader = new User();
         uploader.setId(7);
         byte[] content = {1, 2, 3};
-        InspectedUpload upload = inspected(content);
+        ScannedUpload scanned = mock(ScannedUpload.class);
         StoredBinary stored = new StoredBinary(
             "/api/attachments/content/token.jpg", "image.jpg", "image/jpeg", content.length);
         when(aiChatMapper.sessionExists(5, 43)).thenReturn(true);
-        when(managedObjectService.storeInspectedAttachment(5, upload)).thenReturn(stored);
+        when(managedObjectService.storeInspectedAttachment(5, scanned)).thenReturn(stored);
         AtomicReference<Attachment> insertedAttachment = new AtomicReference<>();
         doAnswer(invocation -> {
             Attachment inserted = invocation.getArgument(0);
@@ -149,14 +146,10 @@ class AttachmentWriteOperationsTest {
         when(attachmentMapper.getCreatedById(5, 77))
             .thenAnswer(invocation -> insertedAttachment.get());
 
-        Attachment attachment = operations.uploadAssistantSession(5, 43, upload, uploader);
+        Attachment attachment = operations.uploadAssistantSession(5, 43, scanned, uploader);
 
         assertEquals(content.length, attachment.getSize());
-        verify(managedObjectService).storeInspectedAttachment(5, upload);
-        verify(managedObjectService, never()).storeAttachment(
-            org.mockito.ArgumentMatchers.anyInt(),
-            any(UploadPurpose.class),
-            any(UploadSource.class));
+        verify(managedObjectService).storeInspectedAttachment(5, scanned);
     }
 
     @Test
@@ -182,34 +175,20 @@ class AttachmentWriteOperationsTest {
             .getAnnotation(Transactional.class));
         assertNotNull(AttachmentWriteOperations.class
             .getMethod(
-                "upload", int.class, String.class, int.class, UploadSource.class, User.class)
+                "upload", int.class, String.class, int.class, ScannedUpload.class, User.class)
             .getAnnotation(Transactional.class));
         assertNotNull(AttachmentWriteOperations.class
             .getMethod(
-                "uploadInlineImage", int.class, String.class, int.class, UploadSource.class, User.class)
+                "uploadInlineImage", int.class, String.class, int.class, ScannedUpload.class, User.class)
             .getAnnotation(Transactional.class));
         assertNotNull(AttachmentWriteOperations.class
             .getMethod(
                 "uploadAssistantSession",
                 int.class,
                 int.class,
-                InspectedUpload.class,
+                ScannedUpload.class,
                 User.class)
             .getAnnotation(Transactional.class));
-    }
-
-    private static InspectedUpload inspected(byte[] content) {
-        try {
-            return new InspectedUpload(
-                "image.jpg",
-                "image/jpeg",
-                "jpg",
-                UploadFormat.JPEG,
-                content,
-                MessageDigest.getInstance("SHA-256").digest(content));
-        } catch (java.security.NoSuchAlgorithmException exception) {
-            throw new IllegalStateException(exception);
-        }
     }
 
     private static Attachment attachment(String entityType, int entityId, String url) {

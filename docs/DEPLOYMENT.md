@@ -34,13 +34,15 @@ browser ──▶ caddy :80 ─┬─ /api/*, /saml2/*  ─▶ backend:8080 ─�
                                                     │
                                                     └──────▶ backend:8080 (SSR)
                                                                │
-                                                               └──────▶ ocr:8090 (default profile)
+                                                               ├──────▶ ocr:8090 (default profile)
+                                                               └──────▶ clamav:8091 (required)
 ```
 
-Compose enforces those paths with four purpose-scoped bridges. `edge` contains Caddy, frontend,
+Compose enforces those paths with five purpose-scoped bridges. `edge` contains Caddy, frontend,
 and backend; `app` contains only frontend and backend for SSR; the internal, gateway-isolated `db`
-network contains only backend and MySQL; and the internal, gateway-isolated `ocr_internal` network
-contains only backend and OCR. MySQL has no published host port. The multi-homed frontend and
+network contains only backend and MySQL; the internal, gateway-isolated `ocr_internal` network
+contains only backend and OCR; and the internal, gateway-isolated `clamav_internal` network
+contains only backend and the malware scanner. MySQL has no published host port. The multi-homed frontend and
 backend pin `app` as their default egress gateway, so attaching the internal DB and OCR networks
 cannot redirect outbound traffic. Backup tools normally execute inside the DB container; optional
 throwaway client containers discover and join only the running Compose project's physical `db`
@@ -78,8 +80,14 @@ read-only, and the Paddle runtime never downloads models or calls an external OC
   host-isolated internal bridges with no gateway addresses.
 - A Linux AMD64 host for the released image set. The OCR image additionally requires AVX on every
   assigned processor.
+- **Memory for the malware scanner: 3 GiB, plus a 512 MiB scan tmpfs.** Unlike OCR this has no
+  low-resource opt-out — malware scanning is a mandatory control, and a host that cannot supply
+  this cannot run Connex with attachments enabled. Running both sidecars costs roughly 5 GiB; on a
+  host that cannot fit both, drop OCR rather than the scanner. See
+  [MALWARE_SCANNING.md](MALWARE_SCANNING.md).
 - A signed release manifest verified with its exact tag-bound identity, with
-  `CONNEX_BACKEND_DIGEST`, `CONNEX_FRONTEND_DIGEST`, and `CONNEX_OCR_DIGEST` set to the
+  `CONNEX_BACKEND_DIGEST`, `CONNEX_FRONTEND_DIGEST`, `CONNEX_OCR_DIGEST`, and
+  `CONNEX_CLAMAV_DIGEST` set to the
   manifest's corresponding 64-character lowercase digests without the `sha256:` prefix (see
   [RELEASE.md](RELEASE.md)), or a local build through the `docker-compose.build.yml` overlay.
 - Generated secrets and — for production — a **verified-TLS database** (the app is fail-closed:
@@ -102,7 +110,19 @@ Fill every `REPLACE_*` value. Generate secrets, e.g.:
 openssl rand -base64 32   # CONNEX_SECRET_STORE_MASTER_KEY
 openssl rand -hex 32      # CONNEX_AUDIT_INTEGRITY_HMAC_SECRET
 openssl rand -hex 32      # CONNEX_OCR_SERVICE_TOKEN
+openssl rand -hex 32      # CONNEX_CLAMAV_SERVICE_TOKEN
 ```
+
+Uploaded files are scanned against the private ClamAV sidecar before they reach storage, and the
+scan is **fail-closed**: if the sidecar is unreachable, slow, erroring, or running signatures more
+than 30 days old, uploads are refused rather than admitted unscanned. Keep
+`COMPOSE_PROFILES=ocr,clamav`, `CONNEX_MALWARE_SCANNING_ENABLED=true`,
+`CONNEX_CLAMAV_BASE_URL=http://clamav:8091` and `CONNEX_CLAMAV_PLAIN_HTTP_PRIVATE_HOST=clamav`,
+and generate a unique 32+ character `CONNEX_CLAMAV_SERVICE_TOKEN`. A deployment profile refuses to
+start with scanning disabled, an absent base URL, or a token under 32 characters. **Start the
+sidecar before the backend that requires it** (see [UPGRADING.md](UPGRADING.md)) or uploads return
+503 for the duration of the window. Signature update procedures, including the air-gapped
+workflow, are in [MALWARE_SCANNING.md](MALWARE_SCANNING.md).
 
 Business-card scanning and the private OCR sidecar are enabled by default in every supported
 deployment template. Keep `CONNEX_OCR_BASE_URL=http://ocr:8090`, set
@@ -225,11 +245,12 @@ operator sets `CONNEX_SIGNATURE_ENABLED=true`; the deployment capability and the
 signature vendor or a server-side PDF renderer. Review the evidence, recovery, and support contract
 in [ESIGNATURE.md](ESIGNATURE.md) before opting in.
 Paddle's current CPU wheel requires AVX support, and the default sidecar reserves up to two CPUs and
-2 GiB of memory. A deployment that lacks AVX or cannot spare those resources must set both
-`COMPOSE_PROFILES=` and `CONNEX_BUSINESS_CARD_SCANNING_ENABLED=false`; the empty profile omits the
-sidecar, while the disabled feature flag prevents the backend from waiting for it. Keep the default
-profile in `.env` otherwise so ordinary `pull`, `up`, `stop`, and migration commands continue to
-include OCR. Using the explicit opt-out or losing OCR readiness moves eligible users to the
+2 GiB of memory. A deployment that lacks AVX or cannot spare those resources must set
+`COMPOSE_PROFILES=clamav` and `CONNEX_BUSINESS_CARD_SCANNING_ENABLED=false` — drop `ocr` from the
+profile list but **never** `clamav`, which is a mandatory control rather than an optional feature.
+Omitting `ocr` from the profile drops that sidecar, while the disabled feature flag prevents the
+backend from waiting for it. Keep the default profile list in `.env` otherwise so ordinary `pull`,
+`up`, `stop`, and migration commands continue to include both sidecars. Using the explicit opt-out or losing OCR readiness moves eligible users to the
 configured-provider fallback; without an enabled organization provider and `AI_USE`, automatic
 extraction remains unavailable while manual image retention and reviewed import remain available
 when private storage is ready. Losing

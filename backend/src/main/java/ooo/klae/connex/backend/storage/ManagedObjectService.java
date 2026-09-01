@@ -181,29 +181,17 @@ public class ManagedObjectService implements ApplicationRunner {
         });
     }
 
-    @Transactional(propagation = Propagation.MANDATORY)
-    public StoredBinary storeAttachment(int workspaceId, UploadSource source) {
-        return storeAttachment(workspaceId, UploadPurpose.ATTACHMENT, source);
-    }
-
-    @Transactional(propagation = Propagation.MANDATORY)
-    public StoredBinary storeAttachment(
-            int workspaceId,
-            UploadPurpose purpose,
-            UploadSource source) {
-        InspectedUpload upload = uploadContentInspector.inspect(purpose, source);
-        return storeInspectedAttachment(workspaceId, upload);
-    }
-
     /**
-     * Stores the exact immutable artifact returned by the upload inspector.
+     * Stores the exact immutable artifact carrying proof of a clean malware scan.
      *
      * @param workspaceId owning workspace
-     * @param upload authoritative inspected artifact
+     * @param scanned authoritative scanned artifact
      * @return managed attachment metadata derived from the same artifact
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public StoredBinary storeInspectedAttachment(int workspaceId, InspectedUpload upload) {
+    public StoredBinary storeInspectedAttachment(int workspaceId, ScannedUpload scanned) {
+        Objects.requireNonNull(scanned, "scanned");
+        InspectedUpload upload = scanned.upload();
         Objects.requireNonNull(upload, "upload");
         uploadPolicy.validateLength(upload.contentLength());
         byte[] content = upload.content();
@@ -221,7 +209,8 @@ public class ManagedObjectService implements ApplicationRunner {
     }
 
     /**
-     * Stores a business-card validator artifact byte-identically without generic re-encoding.
+     * Stores a business-card validator artifact after its decoded pixels were server-side
+     * re-encoded, making the stored artifact server-generated rather than attacker-supplied.
      *
      * @param workspaceId owning workspace
      * @param fileName safe display filename
@@ -246,31 +235,6 @@ public class ManagedObjectService implements ApplicationRunner {
         String url = ATTACHMENT_URL_PREFIX + token;
         storeTenant(workspaceId, key, source, metadata.contentType());
         return new StoredBinary(url, metadata.fileName(), metadata.contentType(), content.length);
-    }
-
-    @Transactional(propagation = Propagation.MANDATORY)
-    public StoredBinary storeAttachment(
-            int workspaceId,
-            String fileName,
-            String contentType,
-            byte[] bytes) {
-        return storeAttachment(
-            workspaceId,
-            UploadPurpose.ATTACHMENT,
-            UploadSource.from(fileName, contentType, bytes));
-    }
-
-    @Transactional(propagation = Propagation.MANDATORY)
-    public StoredBinary storeAttachment(
-            int workspaceId,
-            UploadPurpose purpose,
-            String fileName,
-            String contentType,
-            byte[] bytes) {
-        return storeAttachment(
-            workspaceId,
-            purpose,
-            UploadSource.from(fileName, contentType, bytes));
     }
 
     /**
@@ -308,6 +272,9 @@ public class ManagedObjectService implements ApplicationRunner {
             key, upload.contentType(), content.length, HexFormat.of().formatHex(checksum));
     }
 
+    /**
+     * Stores decoded and server-side re-encoded person-image pixels as a server-generated artifact.
+     */
     @Transactional(propagation = Propagation.MANDATORY)
     public StoredImage storePersonImage(int workspaceId, int personId, UploadSource source) {
         ValidatedImage image = imageUploadValidator.validate(source);
@@ -320,6 +287,9 @@ public class ManagedObjectService implements ApplicationRunner {
         return new StoredImage(url, content.length, image.contentType());
     }
 
+    /**
+     * Stores decoded and server-side re-encoded company-image pixels as a server-generated artifact.
+     */
     @Transactional(propagation = Propagation.MANDATORY)
     public StoredImage storeCompanyImage(int workspaceId, int companyId, UploadSource source) {
         ValidatedImage image = imageUploadValidator.validate(source);
@@ -332,6 +302,9 @@ public class ManagedObjectService implements ApplicationRunner {
         return new StoredImage(url, content.length, image.contentType());
     }
 
+    /**
+     * Stores decoded and server-side re-encoded user-image pixels as a server-generated artifact.
+     */
     @Transactional(propagation = Propagation.MANDATORY)
     public StoredImage storeUserImage(int userId, UploadSource source) {
         userImageAdmissionService.requireAllowed(userId);
@@ -345,6 +318,10 @@ public class ManagedObjectService implements ApplicationRunner {
         return new StoredImage(url, content.length, image.contentType());
     }
 
+    /**
+     * Stores one legacy attachment without malware scanning during the slice-1 migration window.
+     * Slice 2 backfills these bytes; this is the sole permitted unscanned attachment-byte writer.
+     */
     StoredBinary storeMigratedAttachment(
             int workspaceId,
             int attachmentId,

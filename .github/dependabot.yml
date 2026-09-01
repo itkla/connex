@@ -19,6 +19,12 @@ updates:
     labels:
       - dependencies
   - package-ecosystem: docker
+    directory: /clamav
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+  - package-ecosystem: docker
     directory: /deploy
     schedule:
       interval: weekly

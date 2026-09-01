@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.dto.AiChatAttachmentDto;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
@@ -23,7 +24,9 @@ import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.ScannedUpload;
 import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
+import ooo.klae.connex.backend.storage.UploadMalwareScanner;
 import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -41,6 +44,8 @@ public class AiChatAttachmentService {
     private final AttachmentMapper attachmentMapper;
     private final AttachmentWriteOperations attachmentWriteOperations;
     private final AiChatAttachmentPolicy attachmentPolicy;
+    private final UploadMalwareScanner uploadMalwareScanner;
+    private final AiChatAttachmentTransactions attachmentTransactions;
     private final ManagedObjectService managedObjectService;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
@@ -61,25 +66,48 @@ public class AiChatAttachmentService {
     }
 
     /** Stores one validated managed attachment under an authorized active session. */
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_USE)
     public AiChatAttachmentDto upload(int sessionId, UploadSource source) {
+        UploadSnapshot snapshot = attachmentTransactions.readOnly(
+                () -> precheckUpload(sessionId));
+        InspectedUpload inspected = attachmentPolicy.prepare(source);
+        ScannedUpload scanned = uploadMalwareScanner.scan(inspected);
+        return attachmentTransactions.readCommitted(
+                () -> persistUpload(snapshot, sessionId, scanned));
+    }
+
+    private UploadSnapshot precheckUpload(int sessionId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int userId = workspaceService.getCurrentUserId();
-        lockAndRequireAccessibleSession(workspaceId, userId, sessionId);
+        requireAccessibleSession(workspaceId, userId, sessionId);
         workspaceService.requirePermission(
                 workspaceId, userId, Permission.ATTACHMENT_CREATE);
+        int attachmentCount = attachmentMapper.countAssistantSessionAttachments(
+                workspaceId, sessionId);
+        if (attachmentCount >= AiChatAttachmentPolicy.MAX_ATTACHMENTS) {
+            throw new ConflictException("Assistant sessions accept at most ten attachments");
+        }
+        return new UploadSnapshot(workspaceId, userId);
+    }
+
+    private AiChatAttachmentDto persistUpload(
+            UploadSnapshot snapshot,
+            int sessionId,
+            ScannedUpload scanned) {
+        int workspaceId = snapshot.workspaceId();
+        int userId = snapshot.userId();
+        requireLockedUploadPermissions(workspaceId, userId);
+        lockAndRequireAccessibleSession(workspaceId, userId, sessionId);
         requireNoActiveTurn(workspaceId, sessionId);
         int attachmentCount = attachmentMapper.countAssistantSessionAttachments(
                 workspaceId, sessionId);
         if (attachmentCount >= AiChatAttachmentPolicy.MAX_ATTACHMENTS) {
             throw new ConflictException("Assistant sessions accept at most ten attachments");
         }
-        InspectedUpload prepared = attachmentPolicy.prepare(source);
         Attachment attachment = attachmentWriteOperations.uploadAssistantSession(
                 workspaceId,
                 sessionId,
-                prepared,
+                scanned,
                 authService.getCurrentUser());
         realtimeDispatcher.sessionAfterCommit(
                 workspaceId,
@@ -185,7 +213,27 @@ public class AiChatAttachmentService {
         }
     }
 
+    /**
+     * Re-asserts upload authority from exclusively locked authorization rows.
+     *
+     * <p>The pre-scan snapshot is only a snapshot, and the malware scan runs outside any
+     * transaction, so a concurrent role change or permission revocation can land in between.
+     * Reading from locked rows serializes against that; it is acquired before the session record
+     * lock to preserve the repository's membership-before-record lock order.
+     */
+    private void requireLockedUploadPermissions(int workspaceId, int userId) {
+        Set<Permission> permissions = workspaceService.lockedPermissionsFor(workspaceId, userId);
+        if (!permissions.contains(Permission.AI_USE)
+                || !permissions.contains(Permission.ATTACHMENT_CREATE)) {
+            throw new ForbiddenException(
+                    "Requires the AI_USE and ATTACHMENT_CREATE permissions in this workspace");
+        }
+    }
+
     private static ResourceNotFoundException inaccessible() {
         return new ResourceNotFoundException("Assistant session attachment is not accessible");
+    }
+
+    private record UploadSnapshot(int workspaceId, int userId) {
     }
 }

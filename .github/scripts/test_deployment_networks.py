@@ -20,6 +20,7 @@ LOCAL_DEV_COMPOSE_PATH = ROOT / "backend" / "docker-compose.yml"
 EVAL_ENV_PATH = ROOT / "deploy" / "eval.env.example"
 SILO_ENV_PATH = ROOT / "deploy" / "silo.env.example"
 ONPREM_ENV_PATH = ROOT / "deploy" / "onprem.env.example"
+SIGNATURES_COMPOSE_PATH = ROOT / "deploy" / "docker-compose.signatures.yml"
 DIGEST = "0" * 64
 
 
@@ -56,9 +57,11 @@ def resolve_compose_model(
             "CONNEX_BACKEND_DIGEST": DIGEST,
             "CONNEX_FRONTEND_DIGEST": DIGEST,
             "CONNEX_OCR_DIGEST": DIGEST,
+            "CONNEX_CLAMAV_DIGEST": DIGEST,
             "CONNEX_DB_PASSWORD": "network-test",
             "CONNEX_DB_ROOT_PASSWORD": "network-root-test",
             "CONNEX_OCR_SERVICE_TOKEN": "0" * 32,
+            "CONNEX_CLAMAV_SERVICE_TOKEN": "0" * 32,
             "CONNEX_DB_USERNAME": "network-test-user",
             "CONNEX_CADDY_ADDITIONAL_TRUSTED_PROXIES": "",
             "CONNEX_CADDY_HSTS_ENABLED": "false",
@@ -114,40 +117,95 @@ class DeploymentNetworkTest(unittest.TestCase):
             "source-build-ocr": resolve_compose_model(
                 COMPOSE_PATH, BUILD_COMPOSE_PATH, profiles=("ocr",)
             ),
+            "published-sidecars": resolve_compose_model(
+                COMPOSE_PATH, profiles=("ocr", "clamav")
+            ),
+            "source-build-sidecars": resolve_compose_model(
+                COMPOSE_PATH, BUILD_COMPOSE_PATH, profiles=("ocr", "clamav")
+            ),
         }
 
     def test_services_join_only_required_networks(self) -> None:
         expected_networks = {
             "caddy": {"edge"},
             "frontend": {"edge", "app"},
-            "backend": {"edge", "app", "db", "ocr_internal"},
+            "backend": {"edge", "app", "db", "ocr_internal", "clamav_internal"},
             "ocr": {"ocr_internal"},
+            "clamav": {"clamav_internal"},
             "db": {"db"},
         }
 
         for model_name, compose in self.compose_models.items():
             services = compose["services"]
             model_expected_networks = expected_networks.copy()
-            if not model_name.endswith("-ocr"):
+            if not model_name.endswith(("-ocr", "-sidecars")):
                 del model_expected_networks["ocr"]
+            if not model_name.endswith("-sidecars"):
+                del model_expected_networks["clamav"]
             with self.subTest(model=model_name):
                 self.assertEqual(set(model_expected_networks), set(services))
             for service_name, expected in model_expected_networks.items():
                 with self.subTest(model=model_name, service=service_name):
                     self.assertEqual(expected, set(services[service_name]["networks"]))
 
+    def test_the_scanner_has_no_database_mount_without_the_signature_overlay(self) -> None:
+        clamav = self.compose_models["published-sidecars"]["services"]["clamav"]
+
+        self.assertEqual([], clamav.get("volumes", []))
+        self.assertIs(clamav["read_only"], True)
+
+    def test_the_signature_overlay_mounts_an_operator_managed_database_read_only(self) -> None:
+        """Proves the air-gapped escape from the 30-day hard block actually exists.
+
+        Uploads block permanently once the baked signature set expires, with no override, so the
+        bundle must let an operator transfer a newer database in. Without a bind at the sidecar's
+        database path the read-only container keeps using the expired image contents no matter what
+        CONNEX_CLAMAV_SIGNATURE_SOURCE says.
+        """
+        compose = resolve_compose_model(
+            COMPOSE_PATH,
+            SIGNATURES_COMPOSE_PATH,
+            profiles=("ocr", "clamav"),
+            environment_overrides={
+                "CONNEX_CLAMAV_SIGNATURE_DIR": "/srv/connex/clamav-signatures",
+            },
+        )
+        clamav = compose["services"]["clamav"]
+        volumes = clamav["volumes"]
+
+        self.assertEqual(1, len(volumes))
+        mount = volumes[0]
+        self.assertEqual("bind", mount["type"])
+        self.assertEqual("/srv/connex/clamav-signatures", mount["source"])
+        self.assertEqual("/var/lib/clamav", mount["target"])
+        self.assertIs(mount["read_only"], True)
+        self.assertIs(clamav["read_only"], True)
+        self.assertEqual({"clamav_internal"}, set(clamav["networks"]))
+
+    def test_the_signature_overlay_refuses_an_unset_database_directory(self) -> None:
+        with self.assertRaises(AssertionError):
+            resolve_compose_model(
+                COMPOSE_PATH,
+                SIGNATURES_COMPOSE_PATH,
+                profiles=("ocr", "clamav"),
+                environment_overrides={"CONNEX_CLAMAV_SIGNATURE_DIR": ""},
+            )
+
     def test_profile_selection_ignores_ambient_compose_profiles(self) -> None:
-        with patch.dict(os.environ, {"COMPOSE_PROFILES": "ocr"}):
+        with patch.dict(os.environ, {"COMPOSE_PROFILES": "ocr,clamav"}):
             compose = resolve_compose_model(COMPOSE_PATH)
         self.assertNotIn("ocr", compose["services"])
+        self.assertNotIn("clamav", compose["services"])
 
     def test_internal_networks_are_gateway_isolated(self) -> None:
         for model_name, compose in self.compose_models.items():
             networks = compose["networks"]
             with self.subTest(model=model_name):
-                self.assertEqual({"edge", "app", "db", "ocr_internal"}, set(networks))
+                self.assertEqual(
+                    {"edge", "app", "db", "ocr_internal", "clamav_internal"}, set(networks)
+                )
                 self.assertFalse(networks["app"].get("internal", False))
-            for network_name in ("db", "ocr_internal"):
+            for network_name in ("db", "ocr_internal", "clamav_internal"):
                 with self.subTest(model=model_name, network=network_name):
                     network = networks[network_name]
                     self.assertIs(network["internal"], True)

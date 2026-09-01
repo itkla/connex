@@ -1,4 +1,6 @@
 connex:
+  malware-scanning:
+    enabled: false
   security:
     privileged-mfa:
       enforced: true

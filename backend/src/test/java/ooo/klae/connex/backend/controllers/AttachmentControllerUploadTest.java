@@ -20,12 +20,15 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
+import ooo.klae.connex.backend.exceptions.MalwareDetectedException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
+import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.exceptions.UnsupportedUploadMediaTypeException;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.AttachmentService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.storage.malware.EicarTestFixture;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 @ExtendWith(MockitoExtension.class)
@@ -85,5 +88,61 @@ class AttachmentControllerUploadTest {
                 .param("entityId", "42"))
             .andExpect(status().isPayloadTooLarge())
             .andExpect(content().string("Request body is too large"));
+    }
+
+    @Test
+    void malwareDetectionReturnsStableUnprocessableEntity() throws Exception {
+        User user = new User();
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(attachmentService.upload(
+                eq("person"), eq(42), any(UploadSource.class), same(user)))
+            .thenThrow(new MalwareDetectedException());
+        MockMultipartFile file = new MockMultipartFile(
+            "file", "eicar.txt", "text/plain", EicarTestFixture.bytes());
+
+        mockMvc.perform(multipart("/api/attachments/upload")
+                .file(file)
+                .param("entityType", "person")
+                .param("entityId", "42"))
+            .andExpect(status().isUnprocessableEntity())
+            .andExpect(content().json("{\"code\":\"MALWARE_DETECTED\","
+                    + "\"message\":\"This file was rejected by security scanning.\"}"));
+    }
+
+    @Test
+    void inlineImageMalwareDetectionReturnsStableUnprocessableEntity() throws Exception {
+        User user = new User();
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(attachmentService.uploadInlineImage(
+                eq("person"), eq(42), any(UploadSource.class), same(user)))
+            .thenThrow(new MalwareDetectedException());
+        MockMultipartFile file = new MockMultipartFile(
+            "file", "image.png", "image/png", new byte[] {1});
+
+        mockMvc.perform(multipart("/api/attachments/upload-image")
+                .file(file)
+                .param("entityType", "person")
+                .param("entityId", "42"))
+            .andExpect(status().isUnprocessableEntity())
+            .andExpect(content().json("{\"code\":\"MALWARE_DETECTED\","
+                    + "\"message\":\"This file was rejected by security scanning.\"}"));
+    }
+
+    @Test
+    void scannerUnavailabilityReturnsGenericServiceUnavailable() throws Exception {
+        User user = new User();
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(attachmentService.upload(
+                eq("person"), eq(42), any(UploadSource.class), same(user)))
+            .thenThrow(new ServiceUnavailableException("private scanner detail"));
+        MockMultipartFile file = new MockMultipartFile(
+            "file", "report.txt", "text/plain", new byte[] {1});
+
+        mockMvc.perform(multipart("/api/attachments/upload")
+                .file(file)
+                .param("entityType", "person")
+                .param("entityId", "42"))
+            .andExpect(status().isServiceUnavailable())
+            .andExpect(content().string("This deployment cannot serve the request"));
     }
 }

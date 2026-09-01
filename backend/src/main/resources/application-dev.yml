@@ -36,6 +36,13 @@ connex:
     audit:
         integrity:
             hmac-secret: ${CONNEX_AUDIT_INTEGRITY_HMAC_SECRET:dev-audit-integrity-hmac-secret-change-me}
+    malware-scanning:
+        # Local dev has no ClamAV sidecar, so scanning is off here. This is safe only because
+        # the dev profile declares no deployment edition: MalwareScanStartupValidator refuses
+        # to start any configured saas/silo/on-prem deployment with scanning disabled, and
+        # UploadMalwareScanner throws rather than admitting bytes if that ever gets past it.
+        # Never enable dev in prod.
+        enabled: ${CONNEX_MALWARE_SCANNING_ENABLED:false}
     security:
         privileged-mfa:
             bootstrap-confirmation:

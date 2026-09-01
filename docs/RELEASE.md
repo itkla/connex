@@ -9,6 +9,7 @@ This is **Release pipeline v0** (issue #496, epic #502). It builds Connex as thr
 | `ghcr.io/itkla/connex-backend:<version>` | Spring Boot executable WAR on a Temurin 26 JRE | `java -jar app.war`, serves `:8080` |
 | `ghcr.io/itkla/connex-frontend:<version>` | Next.js standalone server | `node server.js`, serves `:3000` |
 | `ghcr.io/itkla/connex-ocr:<version>` | CPU-only PaddleOCR with pre-fetched EN/JA card models | private Python service, serves `:8090` |
+| `ghcr.io/itkla/connex-clamav:<version>` | ClamAV with a build-time baked, signature-verified database | private Python service, serves `:8091` |
 
 All images receive the **same product version** (from the git tag) plus a `sha-<commit>` convenience
 tag. Tags are registry pointers, not an integrity boundary. The signed release manifest is the source
@@ -51,12 +52,16 @@ token is used only to fail closed on the immutable-release policy precondition.
    vulnerabilities, signed with cosign, and receives an SPDX SBOM attestation.
 3. It boots the exact three candidate digests together through the deployment Compose bundle with
    OCR enabled. The gate verifies `/api/version`, scanning/import capabilities, running image
-   identities, OCR health/isolation/resource limits, and the one-shot maintenance invocation. It
+   identities, OCR and ClamAV health/isolation/resource limits, and the one-shot maintenance
+   invocation. The ClamAV candidate is separately smoke-tested with no network at all, asserting
+   that the EICAR standard test file is detected and that a limit-exceeding archive is reported
+   unscannable rather than clean. It
    then generates the canonical fixtures with the pinned font inside the exact OCR image and runs
    the authenticated 40-case English/Japanese/mixed benchmark. Promotion is blocked unless every
    HTTP response and accuracy/latency gate passes.
 4. After those gates pass, it creates one signed, run-scoped release transaction containing the
-   three image digests, raw SBOM hashes, deterministic deployment bundle hash, benchmark report, and
+   backend, frontend, OCR and ClamAV image digests, raw SBOM hashes, deterministic deployment
+   bundle hash, benchmark report, and
    deterministic fixture archive. The transaction artifact is named for its originating run attempt.
    A retry discovers and reuses this committed transaction instead of mixing or rebuilding candidates,
    so partial tag promotion can safely resume the same digest set.
@@ -96,7 +101,7 @@ cosign verify-blob \
   release-manifest.json
 
 test "$(jq -r '.version' release-manifest.json)" = "$VERSION"
-for component in backend frontend ocr; do
+for component in backend frontend ocr clamav; do
   expected="ghcr.io/itkla/connex-${component}"
   test "$(jq -r --arg component "$component" \
     '.images[$component].image' release-manifest.json)" = "$expected"
@@ -126,7 +131,7 @@ for selector in qualification.report qualification.fixtures deploymentBundle; do
   test "$(sha256sum "$file" | cut -d ' ' -f1)" = \
     "$(jq -r ".${selector}.sha256" release-manifest.json)"
 done
-for component in backend frontend ocr; do
+for component in backend frontend ocr clamav; do
   variable="CONNEX_$(tr '[:lower:]' '[:upper:]' <<<"$component")_DIGEST"
   digest="$(jq -r --arg component "$component" '.images[$component].digest' release-manifest.json)"
   printf '%s=%s\n' "$variable" "${digest#sha256:}"
@@ -173,11 +178,12 @@ Staging currently checks out `main` and runs it via an out-of-repo systemd unit 
 
 1. Authenticate to GHCR (`docker login ghcr.io`).
 2. Replace the checkout-and-run unit with one that verifies the release manifest using the exact
-   tag-bound identity above, derives the three `image@sha256:...` references, and runs those digests
+   tag-bound identity above, derives the four `image@sha256:...` references, and runs those digests
    with the existing staging env (the fail-closed security env staging already requires — DB
-   `sslMode`, secret-store, audit secrets, and OCR token). The supported templates activate the
-   `ocr` Compose profile by default; use the documented low-resource opt-out only when the host lacks
-   AVX or cannot spare the sidecar resources.
+   `sslMode`, secret-store, audit secrets, OCR token, and ClamAV token). The supported templates
+   activate the `ocr,clamav` Compose profiles by default; the documented low-resource opt-out drops
+   only `ocr`, never `clamav` — malware scanning is a mandatory control, and a backend with a
+   deployment profile refuses to start without it.
 3. Verify and deploy a new signed manifest to roll forward.
 
 This step lives on the host because the systemd units and cloudflared config are not in the repository.

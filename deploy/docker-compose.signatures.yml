@@ -1,0 +1,30 @@
+# Operator-managed ClamAV signature database (air-gapped and connected alike).
+#
+# The shipped bundle bakes a verified signature set into the image, which is enough until it
+# reaches the 30-day ceiling. Past that, uploads hard-block with no override, so an operator MUST
+# be able to transfer a newer set in. That is what this overlay provides: without it the clamav
+# service has no bind at /var/lib/clamav and the read-only container keeps using the expired image
+# contents no matter what CONNEX_CLAMAV_SIGNATURE_SOURCE is set to.
+#
+# Enable it by setting BOTH of these in deploy/.env:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.signatures.yml
+#   CONNEX_CLAMAV_SIGNATURE_SOURCE=volume
+#   CONNEX_CLAMAV_SIGNATURE_DIR=/srv/connex/clamav-signatures
+#
+# Setting CONNEX_CLAMAV_SIGNATURE_SOURCE=volume without this overlay is refused at startup with
+# reason=signature_volume_not_mounted rather than silently scanning against the baked set.
+#
+# The mount is read-only: the sidecar never writes signatures and has no network egress, so the
+# container stays read_only and the transferred files cannot be modified from inside it. The
+# directory and the .cvd files must be world-readable, because the service runs as uid 10002.
+#
+# CONNEX_CLAMAV_SIGNATURE_DIR must be a host path, never a named volume. Docker seeds a fresh
+# named volume from the image's own baked database, which would pass the sidecar's mount check
+# while still serving the baked signatures the transfer was meant to replace.
+#
+# Full transfer and verification procedure: docs/MALWARE_SCANNING.md.
+services:
+  clamav:
+    volumes:
+      - ${CONNEX_CLAMAV_SIGNATURE_DIR:?set CONNEX_CLAMAV_SIGNATURE_DIR to the directory holding the transferred main.cvd, daily.cvd and bytecode.cvd}:/var/lib/clamav:ro

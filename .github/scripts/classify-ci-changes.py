@@ -13,6 +13,7 @@ CATEGORIES = (
     "frontend",
     "frontend_sast",
     "ocr",
+    "clamav",
     "migrations",
     "backup",
     "support_bundle",
@@ -168,6 +169,10 @@ def classify_paths(paths: list[str], event_name: str = "pull_request") -> tuple[
             categories["ocr"] = True
             if is_ocr_dependency_path(path):
                 categories["ocr_audit"] = True
+            continue
+
+        if path.startswith("clamav/"):
+            categories["clamav"] = True
             continue
 
         if path.startswith("deploy/backup/"):

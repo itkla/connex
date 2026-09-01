@@ -117,6 +117,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(ex.getMessage());
     }
 
+    @ExceptionHandler(MalwareDetectedException.class)
+    public ResponseEntity<Map<String, String>> malwareDetected(MalwareDetectedException ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+            .body(codedError(ex.getCode(), ex.getMessage()));
+    }
+
+    @ExceptionHandler(UnscannableUploadException.class)
+    public ResponseEntity<Map<String, String>> unscannableUpload(UnscannableUploadException ex) {
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+            .body(codedError(ex.getCode(), ex.getMessage()));
+    }
+
     @ExceptionHandler(PasskeyEnrollmentRequiredException.class)
     public ResponseEntity<Map<String, String>> passkeyEnrollmentRequired(
             PasskeyEnrollmentRequiredException ex) {

@@ -22,6 +22,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
@@ -32,6 +33,8 @@ class ManagedObjectRollbackIntegrationTest {
         .normalize();
 
     @Autowired private ManagedObjectService managedObjectService;
+    @Autowired private UploadContentInspector uploadContentInspector;
+    @Autowired private UploadMalwareScanner uploadMalwareScanner;
     @Autowired private ObjectStorage objectStorage;
     @Autowired private ObjectDeletionQueueMapper deletionQueueMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
@@ -57,16 +60,16 @@ class ManagedObjectRollbackIntegrationTest {
         int workspaceId = workspace.getId();
         AtomicReference<String> key = new AtomicReference<>();
         byte[] validPdf = fixture("chromium-hyperlink.pdf");
+        ScannedUpload scanned = uploadMalwareScanner.scan(uploadContentInspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("rollback.pdf", "application/pdf", validPdf)));
 
         try {
             assertThrows(IntentionalRollback.class, () -> tenantWorkScope.inWorkspace(
                 workspaceId,
                 () -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
-                    ManagedObjectService.StoredBinary stored = managedObjectService.storeAttachment(
-                        workspaceId,
-                        "rollback.pdf",
-                        "application/pdf",
-                        validPdf);
+                    ManagedObjectService.StoredBinary stored =
+                        managedObjectService.storeInspectedAttachment(workspaceId, scanned);
                     String token = stored.url().substring(stored.url().lastIndexOf('/') + 1);
                     key.set("workspaces/" + workspaceId + "/attachments/" + token);
                     throw new IntentionalRollback();

@@ -21,6 +21,8 @@ import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.UploadContentInspector;
+import ooo.klae.connex.backend.storage.UploadMalwareScanner;
 
 /** Pins active-member provenance before a user-target attachment can expose a label. */
 @ExtendWith(MockitoExtension.class)
@@ -49,7 +51,9 @@ class AttachmentServiceUserTargetTest {
             auditService,
             workspaceService,
             referenceService,
-            managedObjectService);
+            managedObjectService,
+            org.mockito.Mockito.mock(UploadContentInspector.class),
+            org.mockito.Mockito.mock(UploadMalwareScanner.class));
     }
 
     @Test

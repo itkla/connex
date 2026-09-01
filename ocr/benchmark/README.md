@@ -44,6 +44,7 @@ export CONNEX_BENCHMARK_WORKSPACE_ID='...'
 export CONNEX_BENCHMARK_BACKEND_CONTAINER="$(docker compose -f ../../deploy/docker-compose.yml ps -q backend)"
 export CONNEX_BENCHMARK_FRONTEND_CONTAINER="$(docker compose -f ../../deploy/docker-compose.yml ps -q frontend)"
 export CONNEX_BENCHMARK_OCR_CONTAINER="$(docker compose -f ../../deploy/docker-compose.yml ps -q ocr)"
+export CONNEX_BENCHMARK_CLAMAV_CONTAINER="$(docker compose -f ../../deploy/docker-compose.yml ps -q clamav)"
 python3 run_benchmark.py \
   --images /tmp/connex-benchmark-fixtures \
   --report /tmp/connex-business-card-benchmark.json
@@ -53,7 +54,8 @@ python3 verify_report.py \
   --requests-per-minute 3 \
   --backend-image-reference 'ghcr.io/itkla/connex-backend@sha256:...' \
   --frontend-image-reference 'ghcr.io/itkla/connex-frontend@sha256:...' \
-  --ocr-image-reference "$OCR_IMAGE"
+  --ocr-image-reference "$OCR_IMAGE" \
+  --clamav-image-reference 'ghcr.io/itkla/connex-clamav@sha256:...'
 ```
 
 The runner ignores environment proxy settings and never follows redirects, so session, CSRF, and
@@ -62,8 +64,9 @@ checked-out benchmark sources and derives all image identities and OCR resource 
 inspection; caller-supplied source or image labels are not accepted. The report binds the canonical
 manifest, exact fixture images and metadata, pinned font, generator, dependency lock, running image
 references and IDs, host/runtime metadata, and request rate.
-Independent verification requires the expected origin, request rate, and three immutable release
-image references so a report cannot self-assert its qualification inputs.
+Independent verification requires the expected origin, request rate, and an immutable release
+image reference for every signed container — backend, frontend, OCR and ClamAV — so a report
+cannot self-assert its qualification inputs.
 
 Requests are spaced at three per minute by default to respect production throttles. Increase the
 rate only for a disposable stack whose per-principal and global scan limits were raised to match.

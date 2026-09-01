@@ -68,6 +68,11 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
+import ooo.klae.connex.backend.storage.ScannedUpload;
+import ooo.klae.connex.backend.storage.UploadContentInspector;
+import ooo.klae.connex.backend.storage.UploadMalwareScanner;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
+import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.storage.ObjectStorageProperties;
 import ooo.klae.connex.backend.tenant.ControlWorkspaceLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
@@ -89,6 +94,8 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     @Autowired private TenantExportService exportService;
     @Autowired private TenantTeardownService teardownService;
     @Autowired private ManagedObjectService managedObjectService;
+    @Autowired private UploadContentInspector uploadContentInspector;
+    @Autowired private UploadMalwareScanner uploadMalwareScanner;
     @Autowired private ObjectStorageProperties objectStorageProperties;
     @Autowired private AttachmentMapper attachmentMapper;
     @Autowired private CustomFieldDefinitionMapper customFieldDefinitionMapper;
@@ -631,13 +638,13 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
 
     private StoredBinary storeAttachment(Company company) {
         AtomicReference<StoredBinary> stored = new AtomicReference<>();
+        ScannedUpload scanned = uploadMalwareScanner.scan(uploadContentInspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("lifecycle.txt", "text/plain", BINARY)));
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.executeWithoutResult(status -> {
-            StoredBinary binary = managedObjectService.storeAttachment(
-                drillWorkspace.getId(),
-                "lifecycle.txt",
-                "text/plain",
-                BINARY);
+            StoredBinary binary = managedObjectService.storeInspectedAttachment(
+                drillWorkspace.getId(), scanned);
             Attachment attachment = new Attachment();
             attachment.setWorkspaceId(drillWorkspace.getId());
             attachment.setEntityType("company");

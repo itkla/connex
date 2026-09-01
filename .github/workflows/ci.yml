@@ -25,6 +25,7 @@ jobs:
       backend: ${{ steps.classify.outputs.backend }}
       frontend: ${{ steps.classify.outputs.frontend }}
       ocr: ${{ steps.classify.outputs.ocr }}
+      clamav: ${{ steps.classify.outputs.clamav }}
       migrations: ${{ steps.classify.outputs.migrations }}
       backup: ${{ steps.classify.outputs.backup }}
       support_bundle: ${{ steps.classify.outputs.support_bundle }}
@@ -85,6 +86,37 @@ jobs:
         run: docker build --tag connex-ocr-ci ocr
       - name: Smoke-test deployable OCR service
         run: bash ocr/ci/smoke_image.sh connex-ocr-ci
+
+  clamav:
+    name: ClamAV — contract tests and image smoke
+    needs: classify
+    if: needs.classify.outputs.clamav == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Test scanner protocol, verdict mapping, and freshness arithmetic
+        working-directory: clamav
+        env:
+          PYTHONPATH: .
+        run: python -m unittest discover -s tests -v
+      - name: Lint the image smoke script
+        run: shellcheck -x clamav/ci/smoke_image.sh
+      # The image build bakes a verified signature set from database.clamav.net. That endpoint
+      # rate-limits shared CI egress, so prefetch.py retries with backoff and the build FAILS
+      # rather than producing an image without signatures. A 429 here is an infrastructure
+      # retry, not a code failure.
+      - name: Build deployable ClamAV image
+        run: docker build --tag connex-clamav-ci clamav
+      # This is the job that proves the control is not decorative: it boots the real image with
+      # no network at all and asserts the EICAR standard test file is detected, a limit-exceeding
+      # archive is reported unscannable rather than clean, an undersized scan mount fails
+      # startup, and clamd's own port is not exposed.
+      - name: Smoke-test deployable ClamAV service
+        run: bash clamav/ci/smoke_image.sh connex-clamav-ci
 
   migrations:
     name: Migrations — forward-only guard
@@ -399,7 +431,7 @@ jobs:
   required:
     name: CI — required
     if: always()
-    needs: [classify, ocr, migrations, backup, support-bundle, backend, frontend, frontend-tests]
+    needs: [classify, ocr, clamav, migrations, backup, support-bundle, backend, frontend, frontend-tests]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -407,6 +439,7 @@ jobs:
         env:
           CLASSIFY_RESULT: ${{ needs.classify.result }}
           OCR_RESULT: ${{ needs.ocr.result }}
+          CLAMAV_RESULT: ${{ needs.clamav.result }}
           MIGRATIONS_RESULT: ${{ needs.migrations.result }}
           BACKUP_RESULT: ${{ needs.backup.result }}
           SUPPORT_BUNDLE_RESULT: ${{ needs.support-bundle.result }}
@@ -418,6 +451,7 @@ jobs:
           for result in \
             "$CLASSIFY_RESULT" \
             "$OCR_RESULT" \
+            "$CLAMAV_RESULT" \
             "$MIGRATIONS_RESULT" \
             "$BACKUP_RESULT" \
             "$SUPPORT_BUNDLE_RESULT" \
