@@ -563,7 +563,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         activity.setPerson(person);
         activity.setDeal(deal);
         activity.setCreatedBy(current);
-        activity.setTimestamp("2026-07-01 10:00:00");
+        activity.setTimestamp(engagementWindowBound(-3) + " 10:00:00");
         activityMapper.insert(activity);
         Task task = new Task();
         task.setWorkspaceId(workspace.getId());
@@ -579,7 +579,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         visible.setAuthor(current);
         visible.setPerson(person);
         noteMapper.insert(visible);
-        setNoteCreatedAt(visible, "2026-07-01 10:00:00");
+        setNoteCreatedAt(visible, engagementWindowBound(-3) + " 10:00:00");
         Note ownPrivate = new Note();
         ownPrivate.setWorkspaceId(workspace.getId());
         ownPrivate.setContent("Own private");
@@ -602,7 +602,8 @@ class CompanyMapperTest extends AbstractMapperTest {
         List<CompanyEngagementUserDto> users = companyMapper.getCompanyEngagementUsers(
             workspace.getId(), company.getId(), 5);
         List<CompanyEngagementWeekBucketDto> weeks = companyMapper.getCompanyEngagementWeeks(
-            workspace.getId(), company.getId(), "2026-06-01 00:00:00", "2026-08-31 23:59:59");
+            workspace.getId(), company.getId(),
+            engagementWindowBound(-7) + " 00:00:00", engagementWindowBound(7) + " 00:00:00");
         List<CompanyEngagementPersonDto> people = personMapper.getCompanyEngagementPeople(
             workspace.getId(), company.getId(), 5);
 
@@ -760,6 +761,12 @@ class CompanyMapperTest extends AbstractMapperTest {
         ws.setSlug("ws_" + unique());
         workspaceMapper.insert(ws);
         return ws;
+    }
+
+    private static String engagementWindowBound(int dayOffset) {
+        return java.time.LocalDate.now(java.time.ZoneOffset.UTC)
+            .plusDays(dayOffset)
+            .format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE);
     }
 
     private Company newCompanyIn(Workspace ws) {
