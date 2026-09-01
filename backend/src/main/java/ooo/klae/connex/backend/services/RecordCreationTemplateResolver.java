@@ -2,8 +2,6 @@ package ooo.klae.connex.backend.services;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Clock;
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -91,6 +89,7 @@ public class RecordCreationTemplateResolver {
         "REFERRAL", "EVENT", "WEB", "OUTBOUND", "BUSINESS_CARD", "IMPORT", "PARTNER", "OTHER");
 
     private final RecordCreationFieldRegistry fieldRegistry;
+    private final UserCalendarService userCalendarService;
     private final RecordCreationTemplateValidator validator;
     private final CustomFieldDefinitionMapper customFieldMapper;
     private final CompanyMapper companyMapper;
@@ -99,7 +98,6 @@ public class RecordCreationTemplateResolver {
     private final TagMapper tagMapper;
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
-    private final Clock clock;
 
     public ResolvedCreationTemplateDto resolveSystem(
             RecordCreationRecordType recordType,
@@ -577,7 +575,7 @@ public class RecordCreationTemplateResolver {
             case literal_reference -> objectMapper.valueToTree(spec.referenceId());
             case literal_references -> objectMapper.valueToTree(spec.referenceIds());
             case current_user -> objectMapper.valueToTree(context.actorId());
-            case current_date -> objectMapper.valueToTree(LocalDate.now(clock).toString());
+            case current_date -> objectMapper.valueToTree(userCalendarService.today().toString());
             case related_company -> context.relatedCompanyId() == null
                 ? null
                 : objectMapper.valueToTree(context.relatedCompanyId());

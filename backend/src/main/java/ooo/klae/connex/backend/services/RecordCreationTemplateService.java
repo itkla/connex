@@ -44,6 +44,7 @@ import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplatePreviewR
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateReorderRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateResetRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateStateRequestDto;
+import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateListDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateSummaryDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateUpdateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationWarningDto;
@@ -107,7 +108,7 @@ public class RecordCreationTemplateService {
     private final Clock clock;
 
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
-    public List<RecordCreationTemplateSummaryDto> list(
+    public RecordCreationTemplateListDto list(
         RecordCreationRecordType recordType,
         boolean includeArchived) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -125,7 +126,9 @@ public class RecordCreationTemplateService {
             .max()
             .orElse(-1) + 1;
         result.add(systemSummary(recordType, systemPosition, selectedId));
-        return List.copyOf(result);
+        RecordCreationTemplateSet set = templateMapper.getSet(workspaceId, recordType.name());
+        return new RecordCreationTemplateListDto(
+            set == null ? 0 : set.getRevision(), selectedId, List.copyOf(result));
     }
 
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
@@ -336,7 +339,11 @@ public class RecordCreationTemplateService {
             : RecordCreationTemplateStatus.disabled.name();
         boolean statusChanged = !desiredStatus.equals(root.getStatus());
         if (!contentChanged && !statusChanged) {
-            return dto(root, current, Objects.equals(set.getDefaultTemplateId(), root.getId()));
+            String updatedSelectedId = selection(
+                workspaceId,
+                RecordCreationRecordType.valueOf(root.getRecordType()),
+                null).selectedTemplateId();
+            return dto(root, current, updatedSelectedId.equals(wireId(root)));
         }
         int expectedRootRevision = root.getRevision();
         RecordCreationTemplateVersion published = current;
@@ -472,7 +479,7 @@ public class RecordCreationTemplateService {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
-    public List<RecordCreationTemplateSummaryDto> reorder(
+    public RecordCreationTemplateListDto reorder(
             RecordCreationTemplateReorderRequestDto request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();

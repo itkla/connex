@@ -26,7 +26,7 @@ import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplatePreviewR
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateReorderRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateResetRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateStateRequestDto;
-import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateSummaryDto;
+import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateListDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateUpdateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationTemplateDto;
 import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
@@ -42,7 +42,7 @@ public class RecordCreationTemplateController {
     private final RecordCreationTemplateService templateService;
 
     @GetMapping
-    public List<RecordCreationTemplateSummaryDto> list(
+    public RecordCreationTemplateListDto list(
             @RequestParam RecordCreationRecordType recordType,
             @RequestParam(defaultValue = "false") boolean includeArchived) {
         return templateService.list(recordType, includeArchived);
@@ -86,7 +86,7 @@ public class RecordCreationTemplateController {
     }
 
     @PutMapping("/order")
-    public List<RecordCreationTemplateSummaryDto> reorder(
+    public RecordCreationTemplateListDto reorder(
             @Valid @RequestBody RecordCreationTemplateReorderRequestDto request) {
         return templateService.reorder(request);
     }

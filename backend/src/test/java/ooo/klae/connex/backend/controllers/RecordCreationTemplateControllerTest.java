@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateReorderR
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateResetRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateStateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateSummaryDto;
+import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateListDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateUpdateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationTemplateDto;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
@@ -64,7 +65,7 @@ class RecordCreationTemplateControllerTest {
 
     @Test
     void readPreviewAndImpactEndpointsBindAndDelegate() throws Exception {
-        when(service.list(RecordCreationRecordType.person, true)).thenReturn(List.of(summary()));
+        when(service.list(RecordCreationRecordType.person, true)).thenReturn(new RecordCreationTemplateListDto(3, "workspace:42", List.of(summary())));
         when(service.get("workspace:42")).thenReturn(template());
         when(service.preview(any())).thenReturn(resolved());
         when(service.impact(any())).thenReturn(impact());
@@ -73,7 +74,7 @@ class RecordCreationTemplateControllerTest {
                 .queryParam("recordType", "person")
                 .queryParam("includeArchived", "true"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$[0].id").value("workspace:42"));
+            .andExpect(jsonPath("$.templates[0].id").value("workspace:42"));
         mockMvc.perform(get("/api/record-creation/templates/workspace:42"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value("workspace:42"));
@@ -106,7 +107,7 @@ class RecordCreationTemplateControllerTest {
         when(service.create(any())).thenReturn(template());
         when(service.update(eq("workspace:42"), any())).thenReturn(template());
         when(service.duplicate(eq("workspace:42"), any())).thenReturn(template());
-        when(service.reorder(any())).thenReturn(List.of(summary()));
+        when(service.reorder(any())).thenReturn(new RecordCreationTemplateListDto(3, "workspace:42", List.of(summary())));
         when(service.setDefault(any())).thenReturn(catalog());
         when(service.archive(eq("workspace:42"), any())).thenReturn(template());
         when(service.restore(eq("workspace:42"), any())).thenReturn(template());

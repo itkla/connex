@@ -82,6 +82,7 @@ class RecordCreationTemplateServiceTest {
     private final PersonMapper personMapper = mock(PersonMapper.class);
     private final ShareMapper shareMapper = mock(ShareMapper.class);
     private final RecordCreationTemplateValidator validator = mock(RecordCreationTemplateValidator.class);
+    private final UserCalendarService userCalendarService = mock(UserCalendarService.class);
     private final RecordCreationTemplateResolver resolver = mock(RecordCreationTemplateResolver.class);
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
     private final AuditService auditService = mock(AuditService.class);
@@ -232,6 +233,10 @@ class RecordCreationTemplateServiceTest {
         when(validator.parseDefinition("same")).thenReturn(definition);
         when(resolver.resolveWorkspace(root, current, null)).thenReturn(
             available("workspace:42", RecordCreationRecordType.person, false));
+        when(mapper.listRoots(7, "person", false)).thenReturn(List.of(root));
+        when(mapper.getSet(7, "person")).thenReturn(set);
+        when(resolver.resolveSystem(RecordCreationRecordType.person, null)).thenReturn(
+            available("system:person:standard", RecordCreationRecordType.person, true));
 
         var result = service.update("workspace:42", new RecordCreationTemplateUpdateRequestDto(
             names(), null, definition, true, 3, 2, 8, false));
@@ -430,7 +435,7 @@ class RecordCreationTemplateServiceTest {
             RecordCreationRecordType.company, List.of("workspace:2", "workspace:1"), 3));
 
         assertEquals(List.of("workspace:2", "workspace:1", "system:company:standard"),
-            reordered.stream().map(summary -> summary.id()).toList());
+            reordered.templates().stream().map(summary -> summary.id()).toList());
         verify(mapper).updatePositions(7, 2, 0, 11);
         verify(mapper).updatePositions(7, 1, 1, 11);
         verify(mapper).advanceSetRevision(7, "company", 3);
@@ -624,6 +629,7 @@ class RecordCreationTemplateServiceTest {
         when(tagMapper.getAllTags(7)).thenReturn(List.of());
         RecordCreationTemplateResolver liveResolver = new RecordCreationTemplateResolver(
             registry,
+            userCalendarService,
             validator,
             customFieldMapper,
             companyMapper,
@@ -631,8 +637,8 @@ class RecordCreationTemplateServiceTest {
             pipelineMapper,
             tagMapper,
             workspaceService,
-            JsonMapper.builder().findAndAddModules().build(),
-            Clock.fixed(Instant.parse("2026-08-31T10:00:00Z"), ZoneOffset.UTC));
+            JsonMapper.builder().findAndAddModules().build());
+        when(userCalendarService.today()).thenReturn(java.time.LocalDate.parse("2026-08-31"));
         return new RecordCreationTemplateService(
             mapper,
             customFieldMapper,

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -43,6 +44,7 @@ class RecordCreationTemplateResolverTest {
 
     private final RecordCreationTemplateValidator validator = mock(RecordCreationTemplateValidator.class);
     private final CustomFieldDefinitionMapper customFieldMapper = mock(CustomFieldDefinitionMapper.class);
+    private final UserCalendarService userCalendarService = mock(UserCalendarService.class);
     private final CompanyMapper companyMapper = mock(CompanyMapper.class);
     private final PersonMapper personMapper = mock(PersonMapper.class);
     private final PipelineMapper pipelineMapper = mock(PipelineMapper.class);
@@ -63,6 +65,7 @@ class RecordCreationTemplateResolverTest {
         when(tagMapper.getAllTags(7)).thenReturn(List.of());
         resolver = new RecordCreationTemplateResolver(
             new RecordCreationFieldRegistry(),
+            userCalendarService,
             validator,
             customFieldMapper,
             companyMapper,
@@ -70,8 +73,8 @@ class RecordCreationTemplateResolverTest {
             pipelineMapper,
             tagMapper,
             workspaceService,
-            JsonMapper.builder().findAndAddModules().build(),
-            Clock.fixed(Instant.parse("2026-08-31T10:00:00Z"), ZoneOffset.UTC));
+            JsonMapper.builder().findAndAddModules().build());
+        when(userCalendarService.today()).thenReturn(LocalDate.parse("2026-08-31"));
     }
 
     @Test
