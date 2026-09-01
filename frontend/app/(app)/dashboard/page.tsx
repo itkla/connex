@@ -18,6 +18,7 @@ import {
     getAllStagesResultFromCookie,
     getCapabilitiesResultFromCookie,
     getCaptureOverviewResultFromCookie,
+    getMyWorkSummaryResultFromCookie,
     getAttachmentFacets,
     getAttachmentsPage,
     getCompanyById,
@@ -100,6 +101,7 @@ import ActivityVolume from '@/app/components/overview/analytics/ActivityVolume';
 import TeamLeaderboard from '@/app/components/overview/analytics/TeamLeaderboard';
 import type { RollingRangeKey } from '@/app/components/overview/analytics/metrics';
 import ActivationPanel from '@/app/components/dashboard/activation/ActivationPanel';
+import TodayPriorities from '@/app/components/dashboard/TodayPriorities';
 import {
     activationGaps,
     buildActivationSteps,
@@ -279,7 +281,7 @@ export default async function Dashboard() {
     const timezone = resolveWorkspaceTimezone(workspaceSnapshot, user.timezone);
 
     const init = { headers: { cookie: cookie ?? '' } } as const;
-    const [contactsResult, dealsResult, pipelinesResult, stagesResult, tasksResult, upcomingTasksResult, activitiesResult, notesResult, usersResult, recentFilesResult, fileFacetsResult, recentMovesResult, introSuggestionsResult, relationshipDashboardResult, layoutResponse, notificationsResult, dealMetricsResult, companiesPageResult, contactsPageResult, activityVolumeResult, leaderboardResult, taskSummaryResult, upcomingActivityCountResult, closingSoonCountResult, closingSoonDealsResult, captureOverviewResult] =
+    const [contactsResult, dealsResult, pipelinesResult, stagesResult, tasksResult, upcomingTasksResult, activitiesResult, notesResult, usersResult, recentFilesResult, fileFacetsResult, recentMovesResult, introSuggestionsResult, relationshipDashboardResult, layoutResponse, notificationsResult, dealMetricsResult, companiesPageResult, contactsPageResult, activityVolumeResult, leaderboardResult, taskSummaryResult, upcomingActivityCountResult, closingSoonCountResult, closingSoonDealsResult, captureOverviewResult, myWorkSummaryResult] =
         await Promise.all([
             getContactsPageResultFromCookie(cookie, { page: 1, size: 100 }),
             getDealsPageResultFromCookie(cookie, { page: 1, size: 100 }),
@@ -307,6 +309,7 @@ export default async function Dashboard() {
             toResult(getDealClosingSoonCountFromCookie(cookie, 7)),
             toResult(getDealClosingSoonFromCookie(cookie, 7, 6)),
             getCaptureOverviewResultFromCookie(cookie),
+            getMyWorkSummaryResultFromCookie(cookie),
         ]);
 
     const contacts = contactsResult.ok ? contactsResult.data.items : [];
@@ -626,6 +629,9 @@ export default async function Dashboard() {
                             || !upcomingActivityCountResult.ok
                         }
                     />
+                </Rise>
+                <Rise delay={0.05}>
+                    <TodayPriorities summary={myWorkSummaryResult} />
                 </Rise>
                 {activationCounts && activationVisible ? (
                     <Rise delay={0.09}>

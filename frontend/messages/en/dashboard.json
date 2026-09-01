@@ -1,252 +1,260 @@
 {
-  "DashboardPage": {
-    "companies": "Companies",
-    "contacts": "Contacts",
-    "deals": "Deals",
-    "overview": "Record counts",
-    "pipelines": "Pipelines",
-    "pipeline": "Pipeline",
-    "tasks": "Tasks",
-    "recentActivity": "Recent activity",
-    "viewAll": "View all",
-    "viewMap": "View map",
-    "coolingRelationships": "Cooling relationships",
-    "atRiskDeals": "At-risk deals",
-    "viewDeals": "View deals",
-    "viewAtRiskDeals": "View at-risk deals",
-    "viewInRadar": "Open in Radar",
-    "introductions": "Introductions",
-    "recentlyMoved": "Recently moved",
-    "files": "Files",
-    "storageUsed": "{count, plural, =1 {# file} other {# files}} · {size}",
-    "noFiles": "No files yet",
-    "companyWarmth": "Company warmth",
-    "warmthDistribution": "Warmth distribution",
-    "closingSoon": "Closing soon",
-    "recentNotes": "Recent notes",
-    "notifications": "Notifications",
-    "quickActions": "Quick actions",
-    "captureAttention": {
-      "title": "Connected capture needs attention",
-      "description": "Resolve high-priority identity reviews or provider interventions to keep relationship evidence current.",
-      "action": "{provider}: {reviews} reviews · {interventions} interventions"
+    "DashboardPage": {
+        "companies": "Companies",
+        "contacts": "Contacts",
+        "deals": "Deals",
+        "overview": "Record counts",
+        "pipelines": "Pipelines",
+        "pipeline": "Pipeline",
+        "tasks": "Tasks",
+        "recentActivity": "Recent activity",
+        "viewAll": "View all",
+        "viewMap": "View map",
+        "coolingRelationships": "Cooling relationships",
+        "atRiskDeals": "At-risk deals",
+        "viewDeals": "View deals",
+        "viewAtRiskDeals": "View at-risk deals",
+        "viewInRadar": "Open in Radar",
+        "introductions": "Introductions",
+        "recentlyMoved": "Recently moved",
+        "files": "Files",
+        "storageUsed": "{count, plural, =1 {# file} other {# files}} · {size}",
+        "noFiles": "No files yet",
+        "companyWarmth": "Company warmth",
+        "warmthDistribution": "Warmth distribution",
+        "closingSoon": "Closing soon",
+        "recentNotes": "Recent notes",
+        "notifications": "Notifications",
+        "quickActions": "Quick actions",
+        "captureAttention": {
+            "title": "Connected capture needs attention",
+            "description": "Resolve high-priority identity reviews or provider interventions to keep relationship evidence current.",
+            "action": "{provider}: {reviews} reviews · {interventions} interventions"
+        },
+        "analyticsKpis": "Key metrics",
+        "revenueTrend": "Revenue trend",
+        "winRate": "Win rate",
+        "pipelineValue": "Pipeline value",
+        "stageFunnel": "Stage funnel",
+        "activityVolume": "Activity volume",
+        "teamLeaderboard": "Team leaderboard"
     },
-    "analyticsKpis": "Key metrics",
-    "revenueTrend": "Revenue trend",
-    "winRate": "Win rate",
-    "pipelineValue": "Pipeline value",
-    "stageFunnel": "Stage funnel",
-    "activityVolume": "Activity volume",
-    "teamLeaderboard": "Team leaderboard"
-  },
-  "CompanyWarmth": {
-    "empty": "No cooling companies right now."
-  },
-  "WarmthDistribution": {
-    "empty": "No warmth data yet"
-  },
-  "ClosingSoonDeals": {
-    "empty": "No deals closing this week."
-  },
-  "AtRiskDeals": {
-    "empty": "No deals need attention right now.",
-    "truncated": "Partial results: risk was assessed for the 1,000 highest-priority open deals.",
-    "truncatedEmpty": "No risks found in the 1,000 deals assessed. Additional deals were not assessed."
-  },
-  "CoolingRelationships": {
-    "empty": "No cooling relationships right now.",
-    "quiet": "{days, plural, =1 {# day quiet} other {# days quiet}}",
-    "goesColdIn": "goes cold in {days, plural, =1 {# day} other {# days}}",
-    "noCompany": "No company",
-    "scheduleFollowUp": "Schedule a follow-up before it goes cold",
-    "followUpWith": "Follow up with {name}",
-    "scheduled": "Follow-up scheduled",
-    "scheduleFailed": "Couldn't schedule the follow-up"
-  },
-  "RecentMoves": {
-    "empty": "No recent job changes among workspace contacts.",
-    "unknown": "Unknown"
-  },
-  "DashboardActivation": {
-    "sectionTitle": "Getting started",
-    "checklistTitle": "Set up this workspace",
-    "checklistProgress": "{done} of {total}",
-    "optionalLabel": "Optional",
-    "doneLabel": "Done:",
-    "evidenceTitle": "The evidence",
-    "followUp": "Schedule a follow-up",
-    "steps": {
-      "contacts": {
-        "title": "Bring in your contacts",
-        "body": "Import a CSV from your old CRM, or add the first person by hand.",
-        "cta": "Import contacts",
-        "done": "{count, plural, =1 {# contact} other {# contacts}}",
-        "bodyScanning": "Import a CSV from your old CRM, or add the first person by hand. You can scan a business card while adding someone."
-      },
-      "companies": {
-        "title": "Add the companies they work for",
-        "body": "Shared-company introductions are built from these links.",
-        "cta": "Import companies",
-        "done": "{count, plural, =1 {# company} other {# companies}}"
-      },
-      "interactions": {
-        "title": "Log an interaction",
-        "body": "Activities, shared notes and linked tasks give Connex the evidence it uses to read relationship warmth.",
-        "cta": "Log an activity",
-        "done": "Interactions logged"
-      },
-      "pipeline": {
-        "title": "Create a pipeline",
-        "body": "A new workspace starts with no stages, so deals have nowhere to sit yet.",
-        "cta": "Set up a pipeline",
-        "done": "{count, plural, =1 {# pipeline} other {# pipelines}}"
-      },
-      "team": {
-        "title": "Bring a colleague in",
-        "body": "Intro paths get stronger with every colleague's network.",
-        "cta": "Invite a colleague",
-        "done": "{count, plural, =1 {# member} other {# members}}"
-      },
-      "connections": {
-        "title": "Connect your mailbox",
-        "body": "A connected mailbox keeps interactions current without logging each one by hand.",
-        "cta": "Connect an account",
-        "done": "Account connected"
-      }
+    "CompanyWarmth": {
+        "empty": "No cooling companies right now."
     },
-    "insight": {
-      "dealRisk": {
-        "headline": "This deal needs attention",
-        "open": "Open deal"
-      },
-      "coolingContact": {
-        "headline": "This relationship is cooling",
-        "open": "Open contact"
-      },
-      "introPath": {
-        "headline": "You can make a warm introduction",
-        "open": "See introductions"
-      }
+    "WarmthDistribution": {
+        "empty": "No warmth data yet"
     },
-    "evidence": {
-      "lastTouch": "Last contact on {date}",
-      "touchCount": "{count, plural, =1 {# interaction recorded} other {# interactions recorded}}",
-      "goesCold": "Predicted to go cold by {date}",
-      "mutualConnections": "{count, plural, =1 {# mutual connection} other {# mutual connections}}",
-      "sharedCompany": "Both connected to {company}"
+    "ClosingSoonDeals": {
+        "empty": "No deals closing this week."
     },
-    "missing": {
-      "title": "Not enough evidence yet",
-      "body": "Connex works relationship warmth out from the interactions you log. There is nothing here to work from, and a score without evidence would be a fabricated judgement, so there is no score.",
-      "noSignalTitle": "No relationship signal yet",
-      "noSignalBody": "Your relationship evidence is in, but nothing currently needs attention or supports a useful introduction.",
-      "unavailableTitle": "Relationship signals could not load",
-      "unavailableBody": "The checklist and insight are temporarily unavailable. Your workspace data is unchanged.",
-      "retry": "Try again",
-      "gapsTitle": "What is missing",
-      "gap": {
-        "contacts": "No contacts yet",
-        "interactions": "No interactions logged",
-        "noSignal": "Contacts and interactions are in, but none of them adds up to a signal worth claiming yet."
-      }
+    "AtRiskDeals": {
+        "empty": "No deals need attention right now.",
+        "truncated": "Partial results: risk was assessed for the 1,000 highest-priority open deals.",
+        "truncatedEmpty": "No risks found in the 1,000 deals assessed. Additional deals were not assessed."
+    },
+    "CoolingRelationships": {
+        "empty": "No cooling relationships right now.",
+        "quiet": "{days, plural, =1 {# day quiet} other {# days quiet}}",
+        "goesColdIn": "goes cold in {days, plural, =1 {# day} other {# days}}",
+        "noCompany": "No company",
+        "scheduleFollowUp": "Schedule a follow-up before it goes cold",
+        "followUpWith": "Follow up with {name}",
+        "scheduled": "Follow-up scheduled",
+        "scheduleFailed": "Couldn't schedule the follow-up"
+    },
+    "RecentMoves": {
+        "empty": "No recent job changes among workspace contacts.",
+        "unknown": "Unknown"
+    },
+    "DashboardActivation": {
+        "sectionTitle": "Getting started",
+        "checklistTitle": "Set up this workspace",
+        "checklistProgress": "{done} of {total}",
+        "optionalLabel": "Optional",
+        "doneLabel": "Done:",
+        "evidenceTitle": "The evidence",
+        "followUp": "Schedule a follow-up",
+        "steps": {
+            "contacts": {
+                "title": "Bring in your contacts",
+                "body": "Import a CSV from your old CRM, or add the first person by hand.",
+                "cta": "Import contacts",
+                "done": "{count, plural, =1 {# contact} other {# contacts}}",
+                "bodyScanning": "Import a CSV from your old CRM, or add the first person by hand. You can scan a business card while adding someone."
+            },
+            "companies": {
+                "title": "Add the companies they work for",
+                "body": "Shared-company introductions are built from these links.",
+                "cta": "Import companies",
+                "done": "{count, plural, =1 {# company} other {# companies}}"
+            },
+            "interactions": {
+                "title": "Log an interaction",
+                "body": "Activities, shared notes and linked tasks give Connex the evidence it uses to read relationship warmth.",
+                "cta": "Log an activity",
+                "done": "Interactions logged"
+            },
+            "pipeline": {
+                "title": "Create a pipeline",
+                "body": "A new workspace starts with no stages, so deals have nowhere to sit yet.",
+                "cta": "Set up a pipeline",
+                "done": "{count, plural, =1 {# pipeline} other {# pipelines}}"
+            },
+            "team": {
+                "title": "Bring a colleague in",
+                "body": "Intro paths get stronger with every colleague's network.",
+                "cta": "Invite a colleague",
+                "done": "{count, plural, =1 {# member} other {# members}}"
+            },
+            "connections": {
+                "title": "Connect your mailbox",
+                "body": "A connected mailbox keeps interactions current without logging each one by hand.",
+                "cta": "Connect an account",
+                "done": "Account connected"
+            }
+        },
+        "insight": {
+            "dealRisk": {
+                "headline": "This deal needs attention",
+                "open": "Open deal"
+            },
+            "coolingContact": {
+                "headline": "This relationship is cooling",
+                "open": "Open contact"
+            },
+            "introPath": {
+                "headline": "You can make a warm introduction",
+                "open": "See introductions"
+            }
+        },
+        "evidence": {
+            "lastTouch": "Last contact on {date}",
+            "touchCount": "{count, plural, =1 {# interaction recorded} other {# interactions recorded}}",
+            "goesCold": "Predicted to go cold by {date}",
+            "mutualConnections": "{count, plural, =1 {# mutual connection} other {# mutual connections}}",
+            "sharedCompany": "Both connected to {company}"
+        },
+        "missing": {
+            "title": "Not enough evidence yet",
+            "body": "Connex works relationship warmth out from the interactions you log. There is nothing here to work from, and a score without evidence would be a fabricated judgement, so there is no score.",
+            "noSignalTitle": "No relationship signal yet",
+            "noSignalBody": "Your relationship evidence is in, but nothing currently needs attention or supports a useful introduction.",
+            "unavailableTitle": "Relationship signals could not load",
+            "unavailableBody": "The checklist and insight are temporarily unavailable. Your workspace data is unchanged.",
+            "retry": "Try again",
+            "gapsTitle": "What is missing",
+            "gap": {
+                "contacts": "No contacts yet",
+                "interactions": "No interactions logged",
+                "noSignal": "Contacts and interactions are in, but none of them adds up to a signal worth claiming yet."
+            }
+        }
+    },
+    "FirstRunJourney": {
+        "newContact": "New contact",
+        "warmth": {
+            "title": "Your first warmth reading",
+            "body": "Connex read the interactions you logged. This is how warm your relationships are right now.",
+            "readings": "Read from the interactions you logged",
+            "bandCount": "{count, plural, =1 {# contact} other {# contacts}}",
+            "cta": "See warmth"
+        }
+    },
+    "DashboardGreeting": {
+        "workingLate": "Working late,",
+        "goodMorning": "Good morning,",
+        "goodAfternoon": "Good afternoon,",
+        "goodEvening": "Good evening,",
+        "nothingUrgent": "Nothing urgent today. Smooth sailing.",
+        "tasksOverdue": "{count, plural, one {# task overdue} other {# tasks overdue}}",
+        "upcomingTitle": "This week across the workspace",
+        "tasksDue": "{count, plural, one {# task due} other {# tasks due}}",
+        "dealsClosing": "{count, plural, one {# deadline} other {# deadlines}}",
+        "activitiesUpcoming": "{count, plural, one {# activity} other {# activities}}",
+        "dealsClosingSeparator": " · {count, plural, one {# deal} other {# deals}} closing this week",
+        "dealsCount": "{count, plural, one {# deal} other {# deals}}",
+        "closingThisWeek": " closing this week",
+        "summaryUnavailable": "We couldn't load your day's summary."
+    },
+    "DashboardToday": {
+        "myWorkCount": "{count, plural, one {# item is} other {# items are}} waiting in My Work",
+        "atLeast": "At least {count, plural, one {# item is} other {# items are}} waiting in My Work",
+        "myWorkCritical": "{count} critical",
+        "viewMyWork": "Open My Work",
+        "partial": "Some sources couldn't be counted right now.",
+        "unavailable": "Your My Work count couldn't be loaded — open it to check."
+    },
+    "DashboardPipelineChart": {
+        "pipelineLabel": "Pipeline",
+        "activePipeline": "Active pipeline",
+        "summary": "{openCount} open · {scheduled} scheduled in next {months} months",
+        "profit": "Profit",
+        "projections": "Projections",
+        "chartDescription": "Realized revenue vs forecast",
+        "currency": "Currency",
+        "profitTooltip": "Realized revenue from deals that have closed.",
+        "projectionsTooltip": "Forecasted value of open deals, by expected close date."
+    },
+    "DashboardTaskSummary": {
+        "openTasks": "Open tasks",
+        "viewAll": "View all",
+        "overdueCount": "{count} overdue",
+        "dueThisWeek": "{count} due this week",
+        "separator": " · ",
+        "noDate": "No date",
+        "allCaughtUp": "All caught up.",
+        "taskCompleted": "Task completed",
+        "undo": "Undo",
+        "taskCompleteFailed": "Couldn't update the task",
+        "completeAria": "Complete task: {description}"
+    },
+    "DashboardQuickCreate": {
+        "new": "New",
+        "newTask": "New task",
+        "newNote": "New note",
+        "taskTitle": "New task",
+        "taskDescription": "Create a task assigned to you.",
+        "noteTitle": "New note",
+        "noteDescription": "Jot down a quick note.",
+        "descriptionField": "Description",
+        "descriptionPlaceholder": "What needs doing?",
+        "dueDate": "Due date",
+        "contentField": "Note",
+        "contentPlaceholder": "Write a note…",
+        "cancel": "Cancel",
+        "create": "Create",
+        "view": "View",
+        "taskCreated": "Task created",
+        "noteCreated": "Note created",
+        "descriptionRequired": "Add a description first.",
+        "contentRequired": "Write something first.",
+        "failed": "Something went wrong."
+    },
+    "DashboardCustomize": {
+        "customize": "Customize",
+        "done": "Done",
+        "addWidget": "Add widget",
+        "add": "Add",
+        "reset": "Reset",
+        "remove": "Remove {name}",
+        "expand": "Make full width",
+        "collapse": "Make half width",
+        "emptyTitle": "Your dashboard is empty",
+        "emptyBody": "Add widgets to bring it back to life.",
+        "trayTitle": "Add a widget",
+        "trayDescription": "Choose a widget to add to your dashboard.",
+        "trayEmpty": "All widgets are already on your dashboard.",
+        "dragHandle": "Drag to reorder {name}",
+        "saveFailed": "Couldn't save your dashboard layout.",
+        "a11yLifted": "Picked up {name}.",
+        "a11yOver": "{name} is over {target}.",
+        "a11yDropped": "Dropped {name} onto {target}.",
+        "a11yCancelled": "Reordering {name} was cancelled.",
+        "a11yInstructions": "To reorder a widget, press space or enter to pick it up, use the arrow keys to move it, and press space or enter again to drop it."
+    },
+    "DashboardLayout": {
+        "title": "Dashboard",
+        "description": "Your workspace at a glance"
     }
-  },
-  "FirstRunJourney": {
-    "newContact": "New contact",
-    "warmth": {
-      "title": "Your first warmth reading",
-      "body": "Connex read the interactions you logged. This is how warm your relationships are right now.",
-      "readings": "Read from the interactions you logged",
-      "bandCount": "{count, plural, =1 {# contact} other {# contacts}}",
-      "cta": "See warmth"
-    }
-  },
-  "DashboardGreeting": {
-    "workingLate": "Working late,",
-    "goodMorning": "Good morning,",
-    "goodAfternoon": "Good afternoon,",
-    "goodEvening": "Good evening,",
-    "nothingUrgent": "Nothing urgent today. Smooth sailing.",
-    "tasksOverdue": "{count, plural, one {# task overdue} other {# tasks overdue}}",
-    "upcomingTitle": "This week across the workspace",
-    "tasksDue": "{count, plural, one {# task due} other {# tasks due}}",
-    "dealsClosing": "{count, plural, one {# deadline} other {# deadlines}}",
-    "activitiesUpcoming": "{count, plural, one {# activity} other {# activities}}",
-    "dealsClosingSeparator": " · {count, plural, one {# deal} other {# deals}} closing this week",
-    "dealsCount": "{count, plural, one {# deal} other {# deals}}",
-    "closingThisWeek": " closing this week",
-    "summaryUnavailable": "We couldn't load your day's summary."
-  },
-  "DashboardPipelineChart": {
-    "pipelineLabel": "Pipeline",
-    "activePipeline": "Active pipeline",
-    "summary": "{openCount} open · {scheduled} scheduled in next {months} months",
-    "profit": "Profit",
-    "projections": "Projections",
-    "chartDescription": "Realized revenue vs forecast",
-    "currency": "Currency",
-    "profitTooltip": "Realized revenue from deals that have closed.",
-    "projectionsTooltip": "Forecasted value of open deals, by expected close date."
-  },
-  "DashboardTaskSummary": {
-    "openTasks": "Open tasks",
-    "viewAll": "View all",
-    "overdueCount": "{count} overdue",
-    "dueThisWeek": "{count} due this week",
-    "separator": " · ",
-    "noDate": "No date",
-    "allCaughtUp": "All caught up.",
-    "taskCompleted": "Task completed",
-    "undo": "Undo",
-    "taskCompleteFailed": "Couldn't update the task",
-    "completeAria": "Complete task: {description}"
-  },
-  "DashboardQuickCreate": {
-    "new": "New",
-    "newTask": "New task",
-    "newNote": "New note",
-    "taskTitle": "New task",
-    "taskDescription": "Create a task assigned to you.",
-    "noteTitle": "New note",
-    "noteDescription": "Jot down a quick note.",
-    "descriptionField": "Description",
-    "descriptionPlaceholder": "What needs doing?",
-    "dueDate": "Due date",
-    "contentField": "Note",
-    "contentPlaceholder": "Write a note…",
-    "cancel": "Cancel",
-    "create": "Create",
-    "view": "View",
-    "taskCreated": "Task created",
-    "noteCreated": "Note created",
-    "descriptionRequired": "Add a description first.",
-    "contentRequired": "Write something first.",
-    "failed": "Something went wrong."
-  },
-  "DashboardCustomize": {
-    "customize": "Customize",
-    "done": "Done",
-    "addWidget": "Add widget",
-    "add": "Add",
-    "reset": "Reset",
-    "remove": "Remove {name}",
-    "expand": "Make full width",
-    "collapse": "Make half width",
-    "emptyTitle": "Your dashboard is empty",
-    "emptyBody": "Add widgets to bring it back to life.",
-    "trayTitle": "Add a widget",
-    "trayDescription": "Choose a widget to add to your dashboard.",
-    "trayEmpty": "All widgets are already on your dashboard.",
-    "dragHandle": "Drag to reorder {name}",
-    "saveFailed": "Couldn't save your dashboard layout.",
-    "a11yLifted": "Picked up {name}.",
-    "a11yOver": "{name} is over {target}.",
-    "a11yDropped": "Dropped {name} onto {target}.",
-    "a11yCancelled": "Reordering {name} was cancelled.",
-    "a11yInstructions": "To reorder a widget, press space or enter to pick it up, use the arrow keys to move it, and press space or enter again to drop it."
-  },
-  "DashboardLayout": {
-    "title": "Dashboard",
-    "description": "Your workspace at a glance"
-  }
 }
