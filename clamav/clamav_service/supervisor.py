@@ -100,15 +100,26 @@ def verify_signatures(config: ServiceConfig) -> None:
     boots happily and then answers 503 to every upload is far harder to diagnose than one that
     refuses to boot with an allowlisted reason code.
 
-    ``volume`` additionally requires the database path to be a real mount. Declaring the
-    operator-managed source without applying deploy/docker-compose.signatures.yml would otherwise
-    keep scanning against the baked image contents and hard-block every upload the moment they
-    reach the 30-day ceiling, with the transferred files sitting unused on the host.
+    ``volume`` additionally requires the database path to be a real mount and the transferred set
+    to be complete. Declaring the operator-managed source without applying
+    deploy/docker-compose.signatures.yml would otherwise keep scanning against the baked image
+    contents and hard-block every upload the moment they reach the 30-day ceiling, with the
+    transferred files sitting unused on the host; a partial copy would reach readiness with
+    silently reduced coverage.
+
+    ``os.path.ismount`` establishes that something is mounted at the database path, not that it is
+    the intended read-only host bind. It is a guard against the half-applied deployment, not a
+    proof of provenance: mount the operator directory as a bind, never as a named volume, because
+    Docker seeds a fresh named volume from the image's own baked database and that would satisfy
+    this check while still serving the baked set.
     """
     if not config.database_directory.is_dir():
         raise StartupFailure("signature_database_unavailable")
-    if config.signature_source == "volume" and not os.path.ismount(config.database_directory):
-        raise StartupFailure("signature_volume_not_mounted")
+    if config.signature_source == "volume":
+        if not os.path.ismount(config.database_directory):
+            raise StartupFailure("signature_volume_not_mounted")
+        if signatures.missing_containers(config.database_directory):
+            raise StartupFailure("signature_database_unreadable")
     state = signatures.inspect(config.database_directory, None)
     if state.age_seconds is None:
         raise StartupFailure("signature_database_unreadable")

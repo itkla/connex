@@ -19,6 +19,10 @@
 # container stays read_only and the transferred files cannot be modified from inside it. The
 # directory and the .cvd files must be world-readable, because the service runs as uid 10002.
 #
+# CONNEX_CLAMAV_SIGNATURE_DIR must be a host path, never a named volume. Docker seeds a fresh
+# named volume from the image's own baked database, which would pass the sidecar's mount check
+# while still serving the baked signatures the transfer was meant to replace.
+#
 # Full transfer and verification procedure: docs/MALWARE_SCANNING.md.
 services:
   clamav:

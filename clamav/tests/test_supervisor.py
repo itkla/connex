@@ -29,6 +29,7 @@ def fresh_database(directory: Path) -> None:
     now = int(time.time())
     write_container(directory, "daily.cvd", now - 60)
     write_container(directory, "main.cvd", now - 400 * 86_400)
+    write_container(directory, "bytecode.cvd", now - 400 * 86_400)
 
 
 class VerifySignaturesTest(unittest.TestCase):
@@ -59,6 +60,32 @@ class VerifySignaturesTest(unittest.TestCase):
 
             with patch("clamav_service.supervisor.os.path.ismount", return_value=True):
                 verify_signatures(config)
+
+    def test_the_volume_source_refuses_a_partial_transfer(self) -> None:
+        """A partial operator copy must not reach readiness with reduced coverage.
+
+        The mounted directory replaces the whole database rather than layering over the baked one,
+        so an interrupted or selective transfer is the one way an operator can end up scanning
+        against fewer signatures than the deployment claims. The baked path cannot express this,
+        because the image build fetches and verifies all three containers.
+        """
+        for omitted in ("bytecode.cvd", "daily.cvd", "main.cvd"):
+            with self.subTest(omitted=omitted):
+                with tempfile.TemporaryDirectory() as raw:
+                    directory = Path(raw)
+                    fresh_database(directory)
+                    (directory / omitted).unlink()
+                    config = service_config(directory, "volume")
+
+                    with patch(
+                        "clamav_service.supervisor.os.path.ismount", return_value=True
+                    ):
+                        with self.assertRaises(StartupFailure) as raised:
+                            verify_signatures(config)
+
+                    self.assertEqual(
+                        "signature_database_unreadable", raised.exception.reason
+                    )
 
     def test_the_baked_source_does_not_require_a_mount(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

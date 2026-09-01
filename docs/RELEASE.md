@@ -60,7 +60,8 @@ token is used only to fail closed on the immutable-release policy precondition.
    the authenticated 40-case English/Japanese/mixed benchmark. Promotion is blocked unless every
    HTTP response and accuracy/latency gate passes.
 4. After those gates pass, it creates one signed, run-scoped release transaction containing the
-   three image digests, raw SBOM hashes, deterministic deployment bundle hash, benchmark report, and
+   backend, frontend, OCR and ClamAV image digests, raw SBOM hashes, deterministic deployment
+   bundle hash, benchmark report, and
    deterministic fixture archive. The transaction artifact is named for its originating run attempt.
    A retry discovers and reuses this committed transaction instead of mixing or rebuilding candidates,
    so partial tag promotion can safely resume the same digest set.

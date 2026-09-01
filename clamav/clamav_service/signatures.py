@@ -9,6 +9,7 @@ _BUILD_EPOCH_FIELD = 8
 _VERSION_FIELD = 2
 _REQUIRED_STEMS = ("main", "daily")
 _FRESHNESS_STEM = "daily"
+COMPLETE_SET_STEMS = ("main", "daily", "bytecode")
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,22 @@ def inspect(database_directory: Path, daemon_version: str | None, now: float | N
     build_epoch, version = headers[_FRESHNESS_STEM]
     age = max(0, int(reference - build_epoch))
     return SignatureState(age, version, parse_daemon_version(daemon_version))
+
+
+def missing_containers(database_directory: Path) -> list[str]:
+    """Names the containers of a complete signature set that are absent or unreadable.
+
+    Freshness grading deliberately requires only ``main`` and ``daily``, because those are the two
+    the baked image is graded on. An operator-transferred set is different: it replaces the whole
+    database, so a partial copy is the one way the sidecar can reach readiness with silently
+    reduced coverage. ``bytecode`` is fetched and signature-verified by the image build and enabled
+    in ``clamd.conf``, so a transfer that omits it is an incomplete transfer, not a valid set.
+    """
+    return [
+        stem
+        for stem in COMPLETE_SET_STEMS
+        if _newest_container(database_directory, stem) is None
+    ]
 
 
 def _newest_container(database_directory: Path, stem: str) -> tuple[int, str] | None:
