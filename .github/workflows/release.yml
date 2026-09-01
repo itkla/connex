@@ -13,7 +13,7 @@ on:
 permissions:
   contents: read
 
-# Dry runs build three images and can occupy the group for the best part of an hour. They must
+# Dry runs build four images and can occupy the group for the best part of an hour. They must
 # never queue ahead of a real publication, so they get their own group; the publication group name
 # is left exactly as it was. The mode is derived from the event here because job outputs are not
 # available at workflow level — it must stay consistent with the metadata job's derivation.
@@ -181,7 +181,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        component: [backend, frontend, ocr]
+        component: [backend, frontend, ocr, clamav]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -246,6 +246,16 @@ jobs:
           IMAGE: ghcr.io/${{ github.repository_owner }}/connex-ocr
           DIGEST: ${{ steps.digest.outputs.digest }}
         run: bash ocr/ci/smoke_image.sh "${IMAGE}@${DIGEST}"
+
+      # Proves the exact release candidate detects the EICAR standard test file, reports a
+      # limit-exceeding archive as unscannable rather than clean, and reaches readiness with
+      # no network at all. A release that cannot do this ships a control that does nothing.
+      - name: Smoke exact ClamAV candidate
+        if: matrix.component == 'clamav'
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/connex-clamav
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: bash clamav/ci/smoke_image.sh "${IMAGE}@${DIGEST}"
 
       - name: Smoke exact frontend candidate
         if: matrix.component == 'frontend'
@@ -330,7 +340,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        component: [backend, frontend, ocr]
+        component: [backend, frontend, ocr, clamav]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
@@ -370,6 +380,12 @@ jobs:
         env:
           IMAGE_REF: connex-${{ matrix.component }}:dry-run-${{ github.run_id }}-${{ github.run_attempt }}
         run: bash ocr/ci/smoke_image.sh "$IMAGE_REF"
+
+      - name: Smoke dry-run ClamAV candidate
+        if: matrix.component == 'clamav'
+        env:
+          IMAGE_REF: connex-${{ matrix.component }}:dry-run-${{ github.run_id }}-${{ github.run_attempt }}
+        run: bash clamav/ci/smoke_image.sh "$IMAGE_REF"
 
       - name: Smoke dry-run frontend candidate
         if: matrix.component == 'frontend'
@@ -422,10 +438,10 @@ jobs:
               echo "  publication policy and the requested version being unpublished"
               echo "- Current main-head requirement"
               echo "- Required ci.yml, security.yml, and deploy-smoke.yml results"
-              echo "- Backend, frontend, and OCR image builds with release build arguments"
-              echo "- Frontend and OCR image smoke tests"
+              echo "- Backend, frontend, OCR, and ClamAV image builds with release build arguments"
+              echo "- Frontend, OCR, and ClamAV image smoke tests"
               echo "- High-severity Anchore scans with build failure enabled"
-              echo "- SPDX JSON SBOM generation for all three images"
+              echo "- SPDX JSON SBOM generation for all four images"
             else
               echo "### Attempted but incomplete"
               echo
@@ -472,7 +488,7 @@ jobs:
           artifacts="$(gh api \
             -H 'Accept: application/vnd.github+json' \
             "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100")"
-          for component in backend frontend ocr; do
+          for component in backend frontend ocr clamav; do
             name="release-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${component}"
             count="$(jq --arg name "$name" \
               '[.artifacts[] | select(.name == $name and .expired == false)] | length' \
@@ -503,8 +519,8 @@ jobs:
         env:
           VERSION: ${{ needs.metadata.outputs.version }}
         run: |
-          test "$(find .. -maxdepth 1 -name 'release-*.json' -type f | wc -l)" = 3
-          for component in backend frontend ocr; do
+          test "$(find .. -maxdepth 1 -name 'release-*.json' -type f | wc -l)" = 4
+          for component in backend frontend ocr clamav; do
             descriptor="../release-${component}.json"
             test "$(jq -r '.component' "$descriptor")" = "$component"
             test "$(jq -r '.version' "$descriptor")" = "$VERSION"
@@ -527,7 +543,17 @@ jobs:
           sed -i "s/^CONNEX_FRONTEND_DIGEST=.*/CONNEX_FRONTEND_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-frontend.json)/" .env
           sed -i "s/^CONNEX_OCR_DIGEST=.*/CONNEX_OCR_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-ocr.json)/" .env
           sed -i "s/^CONNEX_OCR_SERVICE_TOKEN=.*/CONNEX_OCR_SERVICE_TOKEN=${TOKEN}/" .env
+          sed -i "s/^CONNEX_CLAMAV_DIGEST=.*/CONNEX_CLAMAV_DIGEST=$(jq -r '.digest | sub(\"^sha256:\"; \"\")' ../release-clamav.json)/" .env
+          # eval.env.example ships with malware scanning OFF because it declares no edition.
+          # This step declares CONNEX_DEPLOYMENT_PROFILE=silo below, and a declared edition
+          # REFUSES TO BOOT with scanning disabled -- so the sidecar and its token must be turned
+          # on here or the release verification cannot start at all.
+          sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=ocr,clamav/' .env
+          sed -i 's/^CONNEX_MALWARE_SCANNING_ENABLED=.*/CONNEX_MALWARE_SCANNING_ENABLED=true/' .env
           printf '%s\n' \
+            "CONNEX_CLAMAV_SERVICE_TOKEN=${TOKEN}" \
+            'CONNEX_CLAMAV_BASE_URL=http://clamav:8091' \
+            'CONNEX_CLAMAV_PLAIN_HTTP_PRIVATE_HOST=clamav' \
             'CONNEX_DEPLOYMENT_PROFILE=silo' \
             'CONNEX_BOOTSTRAP_ENABLED=true' \
             'CONNEX_BOOTSTRAP_USERNAME=benchmark' \
@@ -558,9 +584,17 @@ jobs:
             and .services.ocr.environment.CONNEX_OCR_MAX_WIDTH == .services.backend.environment.CONNEX_BUSINESS_CARD_IMAGE_MAX_WIDTH
             and .services.ocr.environment.CONNEX_OCR_MAX_HEIGHT == .services.backend.environment.CONNEX_BUSINESS_CARD_IMAGE_MAX_HEIGHT
             and .services.ocr.environment.CONNEX_OCR_MAX_PIXELS == .services.backend.environment.CONNEX_BUSINESS_CARD_IMAGE_MAX_PIXELS
+            and .networks.clamav_internal.internal == true
+            and .networks.clamav_internal.driver_opts["com.docker.network.bridge.gateway_mode_ipv4"] == "isolated"
+            and .networks.clamav_internal.driver_opts["com.docker.network.bridge.gateway_mode_ipv6"] == "isolated"
+            and .services.backend.environment.CONNEX_MALWARE_SCANNING_ENABLED == "true"
+            and .services.clamav.environment.CONNEX_CLAMAV_SERVICE_TOKEN == .services.backend.environment.CONNEX_CLAMAV_SERVICE_TOKEN
+            and (.services.clamav.environment.CONNEX_CLAMAV_SERVICE_TOKEN | length) >= 32
+            and (.services.clamav.environment.CONNEX_CLAMAV_MAX_SCAN_BYTES | tonumber)
+              == ((.services.backend.environment.CONNEX_OBJECT_STORAGE_MAX_UPLOAD_BYTES // "26214400") | tonumber)
           '
           compose pull
-          compose up -d --wait --wait-timeout 300
+          compose up -d --wait --wait-timeout 420
           for attempt in $(seq 1 120); do
             if curl -fsS http://127.0.0.1:18088/api/version \
                 | jq -e --arg version "$VERSION" '.version == $version' >/dev/null \
@@ -574,7 +608,7 @@ jobs:
             fi
             sleep 2
           done
-          for component in backend frontend ocr; do
+          for component in backend frontend ocr clamav; do
             container="$(compose ps -q "$component")"
             expected="$(jq -r '.image + "@" + .digest' "../release-${component}.json")"
             test "$(docker inspect "$container" --format '{{.Config.Image}}')" = "$expected"
@@ -608,6 +642,37 @@ jobs:
             and (.HostConfig.NetworkMode | endswith("_ocr_internal"))
             and ((.NetworkSettings.Networks | keys) | length) == 1
             and ((.NetworkSettings.Networks | keys)[0] | endswith("_ocr_internal"))
+            and ([.NetworkSettings.Ports[]? | select(. != null)] | length == 0)
+          '
+          CLAMAV_CONTAINER="$(compose ps -q clamav)"
+          # The scan tmpfs is sized arithmetic, not preference: 2 concurrent scans x
+          # (StreamMaxLength 32 MiB + MaxScanSize 192 MiB) = 448 MiB, and clamd spools every
+          # INSTREAM body to it. The memory limit must additionally cover the resident signature
+          # database, because tmpfs pages are charged to the same cgroup.
+          docker inspect "$CLAMAV_CONTAINER" | jq -e '.[0] |
+            .Config.User == "10002"
+            and (.Config.ExposedPorts | keys) == ["8091/tcp"]
+            and .HostConfig.Memory == 3221225472
+            and .HostConfig.MemorySwap == 3221225472
+            and .HostConfig.NanoCpus == 2000000000
+            and .HostConfig.PidsLimit == 128
+            and .HostConfig.ReadonlyRootfs == true
+            and .HostConfig.Privileged == false
+            and (.HostConfig.CapDrop | index("ALL") != null)
+            and (.HostConfig.SecurityOpt | index("no-new-privileges:true") != null)
+            and .HostConfig.Devices == []
+            and (.HostConfig.Binds == null or .HostConfig.Binds == [])
+            and (.HostConfig.Mounts == null or .HostConfig.Mounts == [])
+            and .Mounts == []
+            and (.HostConfig.Tmpfs | keys) == ["/tmp"]
+            and (.HostConfig.Tmpfs["/tmp"] | contains("noexec"))
+            and (.HostConfig.Tmpfs["/tmp"] | contains("nosuid"))
+            and (.HostConfig.Tmpfs["/tmp"] | contains("nodev"))
+            and ((.HostConfig.Tmpfs["/tmp"] | contains("size=512m"))
+              or (.HostConfig.Tmpfs["/tmp"] | contains("size=536870912")))
+            and (.HostConfig.NetworkMode | endswith("_clamav_internal"))
+            and ((.NetworkSettings.Networks | keys) | length) == 1
+            and ((.NetworkSettings.Networks | keys)[0] | endswith("_clamav_internal"))
             and ([.NetworkSettings.Ports[]? | select(. != null)] | length == 0)
           '
 
@@ -693,7 +758,7 @@ jobs:
           compose() {
             docker compose "$@"
           }
-          compose stop caddy frontend backend ocr
+          compose stop caddy frontend backend ocr clamav
           test "$(compose ps --services --status running)" = "db"
           LEGACY_VOLUME="connex_legacy_uploads_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
           docker volume create "$LEGACY_VOLUME"
@@ -732,7 +797,7 @@ jobs:
             --backend-image-reference "$(jq -r '.image + "@" + .digest' release-backend.json)" \
             --frontend-image-reference "$(jq -r '.image + "@" + .digest' release-frontend.json)" \
             --ocr-image-reference "$(jq -r '.image + "@" + .digest' release-ocr.json)"
-          for component in backend frontend ocr; do
+          for component in backend frontend ocr clamav; do
             descriptor="release-${component}.json"
             expected="$(jq -r '.image + "@" + .digest' "$descriptor")"
             test "$(jq -r --arg component "$component" \
@@ -764,7 +829,7 @@ jobs:
               },
               deploymentBundle:{file:$deployFile,sha256:$deploySha256}
             }' \
-            release-backend.json release-frontend.json release-ocr.json \
+            release-backend.json release-frontend.json release-ocr.json release-clamav.json \
             > release-manifest.json
           cosign sign-blob --yes --bundle release-manifest.bundle.json release-manifest.json
 
@@ -884,7 +949,7 @@ jobs:
           test "$TRANSACTION_NAME" = "release-transaction-${GITHUB_RUN_ID}-${TRANSACTION_ATTEMPT}"
           test "$(jq -r '.qualification.protections.rotatingSecretHoldout' release-manifest.json)" = false
           test "$(jq -r '.qualification.protections.debianSnapshot' release-manifest.json)" = false
-          for component in backend frontend ocr; do
+          for component in backend frontend ocr clamav; do
             expected_image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/connex-${component}"
             test "$(jq -r --arg component "$component" '.images[$component].image' release-manifest.json)" = "$expected_image"
             digest="$(jq -r --arg component "$component" '.images[$component].digest' release-manifest.json)"
@@ -921,7 +986,7 @@ jobs:
             return 1
           }
           IDENTITY="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}"
-          for component in backend frontend ocr; do
+          for component in backend frontend ocr clamav; do
             image="$(jq -r --arg component "$component" '.images[$component].image' release-manifest.json)"
             digest="$(jq -r --arg component "$component" '.images[$component].digest' release-manifest.json)"
             test "$(remote_digest "${image}@${digest}")" = "$digest"
@@ -969,7 +1034,7 @@ jobs:
             docker buildx imagetools inspect "$1" --format '{{json .Manifest}}' \
               | jq -er '.digest'
           }
-          for component in backend frontend ocr; do
+          for component in backend frontend ocr clamav; do
             image="$(jq -r --arg component "$component" '.images[$component].image' release-manifest.json)"
             digest="$(jq -r --arg component "$component" '.images[$component].digest' release-manifest.json)"
             docker buildx imagetools create --prefer-index=false \
@@ -1023,6 +1088,7 @@ jobs:
             sbom-backend.spdx.json
             sbom-frontend.spdx.json
             sbom-ocr.spdx.json
+            sbom-clamav.spdx.json
             business-card-benchmark.json
             business-card-benchmark-fixtures.tar
             "connex-${VERSION}-deploy.tar"
@@ -1059,7 +1125,7 @@ jobs:
               --title "Connex ${VERSION}" \
               --generate-notes \
               "${prerelease_flags[@]}" \
-              --notes "One signed, benchmark-qualified frontend, backend, and OCR image set. Deploy only the immutable digests in release-manifest.json."
+              --notes "One signed, benchmark-qualified frontend, backend, OCR, and ClamAV image set. Deploy only the immutable digests in release-manifest.json."
           fi
           gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
           verify_asset_names

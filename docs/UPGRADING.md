@@ -9,10 +9,10 @@ migration-discipline part of #87 §9 / #102).
 
 ## Versioning
 
-- **SemVer**, one product version per release, stamped as a **version-locked backend + frontend + OCR
-  image set** (see [RELEASE.md](RELEASE.md)). The components are never upgraded independently, even
-  when a low-resource deployment explicitly opts out of OCR; the running backend version is at
-  `GET /api/version`.
+- **SemVer**, one product version per release, stamped as a **version-locked backend + frontend +
+  OCR + ClamAV image set** (see [RELEASE.md](RELEASE.md)). The components are never upgraded
+  independently, even when a low-resource deployment explicitly opts out of OCR; the running
+  backend version is at `GET /api/version`.
 - On-prem and air-gapped installs verify the tag-bound release manifest and pin its exact image
   digests. Registry version and SHA tags are convenience pointers and are never the deployment
   integrity boundary.
@@ -47,6 +47,33 @@ migration-discipline part of #87 §9 / #102).
   upgrade-drill measurements.
 - The control/tenant **plane split** (`db/migration/{control,tenant}`) and version monotonicity are
   additionally enforced by the migration arch tests.
+
+### Malware-scanning cutover — start the sidecar before the backend
+
+The release that introduces upload malware scanning (issue #1240) adds a required ClamAV sidecar.
+There is **no schema change**, but the backend hard-depends on the scanner: with a deployment
+profile configured it refuses to start unless scanning is enabled and configured, and while the
+sidecar is unavailable every upload returns 503. Order the rollout:
+
+1. Add to `deploy/.env`: `CONNEX_CLAMAV_DIGEST` from the release manifest, a freshly generated
+   32+ character `CONNEX_CLAMAV_SERVICE_TOKEN`, `CONNEX_MALWARE_SCANNING_ENABLED=true`,
+   `CONNEX_CLAMAV_BASE_URL=http://clamav:8091`,
+   `CONNEX_CLAMAV_PLAIN_HTTP_PRIVATE_HOST=clamav`, and `COMPOSE_PROFILES=ocr,clamav`.
+2. Confirm the host has **3 GiB of memory free for the sidecar plus a 512 MiB scan tmpfs**. The
+   sidecar refuses to start on an undersized scan mount, and an undersized memory limit presents
+   as an OOM-killed container that looks like a scanner outage.
+3. Start and wait for the sidecar **first**:
+
+   ```bash
+   docker compose --profile clamav up -d clamav
+   docker compose ps clamav          # wait for healthy; first start loads the signature database
+   ```
+
+4. Only then roll the backend. Rolling the backend first makes uploads 503 for the whole window.
+
+Rollback is clean because there is no migration: revert the backend image and the sidecar is simply
+unused. See [MALWARE_SCANNING.md](MALWARE_SCANNING.md) for the signature-update procedure, which is
+operator-driven and required at least every 30 days.
 
 ### V170 one-time-link security cutover
 

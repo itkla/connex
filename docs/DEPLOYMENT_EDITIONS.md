@@ -98,6 +98,25 @@ This row is enforced twice, on purpose: the registry refuses the capability, and
 validator refuses `connex.mail.managed=true` outright under `on-prem` (see above). An on-prem
 instance therefore cannot reach a state where the two disagree.
 
+### Malware scanning is deliberately not a capability
+
+Upload malware scanning does not appear in the table above, and adding it would be a mistake.
+`Capability` models **optional product features** that a client may legitimately find absent —
+which is exactly the wrong shape for a mandatory security control. Modelling it as a capability
+would advertise that it can be turned off, and `/api/capabilities` reporting
+`malwareScanning: false` would read as a supported configuration rather than a refusal to run.
+
+It is enforced through a different, stronger mechanism. `DeploymentProfileValidator`'s posture keys
+are structurally one-directional: they bind each key with `.orElse(false)` and only flag a key an
+operator explicitly sets *true*, so they can forbid something being enabled but cannot require it.
+Scanning therefore gets **both** halves: `connex.malware-scanning.allow-disabled` is a forbidden
+posture key in `saas`, `silo` and `on-prem` (blocking the escape hatch), and a dedicated startup
+validator refuses to create the application context when a deployment profile is configured and
+scanning is disabled, unconfigured, or holding a token under 32 characters (blocking the disable).
+
+The frontend's genuine need to predict a 503 is met through health and readiness, not by making the
+control look negotiable. See [MALWARE_SCANNING.md](MALWARE_SCANNING.md).
+
 **"Allowed" is not "enabled."** The profile gate is one of four. A capability is available only
 when the profile permits it *and* entitlement permits it *and* rollout permits it *and* the
 operator has configured it. `CAMPAIGN_DELIVERY` being allowed on every profile does not mean any

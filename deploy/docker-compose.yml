@@ -89,6 +89,7 @@ services:
         gw_priority: 1
       db: {}
       ocr_internal: {}
+      clamav_internal: {}
 
   ocr:
     image: ghcr.io/itkla/connex-ocr@sha256:${CONNEX_OCR_DIGEST:?set CONNEX_OCR_DIGEST to the verified 64-character digest in deploy/.env}
@@ -124,6 +125,54 @@ services:
       interval: 15s
       timeout: 3s
       start_period: 180s
+      retries: 4
+
+  clamav:
+    image: ghcr.io/itkla/connex-clamav@sha256:${CONNEX_CLAMAV_DIGEST:?set CONNEX_CLAMAV_DIGEST to the verified 64-character digest in deploy/.env}
+    # Unlike ocr, this profile is NOT optional in a real deployment. Malware scanning is a
+    # mandatory control: with the backend configured for a deployment profile and this service
+    # absent, every upload fails closed with 503. See docs/MALWARE_SCANNING.md.
+    profiles: ["clamav"]
+    restart: unless-stopped
+    environment:
+      CONNEX_CLAMAV_SERVICE_TOKEN: ${CONNEX_CLAMAV_SERVICE_TOKEN:-}
+      CONNEX_CLAMAV_MAX_SCAN_BYTES: ${CONNEX_OBJECT_STORAGE_MAX_UPLOAD_BYTES:-26214400}
+      CONNEX_CLAMAV_MAX_CONCURRENT_SCANS: ${CONNEX_CLAMAV_MAX_CONCURRENT_SCANS:-2}
+      CONNEX_CLAMAV_SCAN_TIMEOUT_SECONDS: ${CONNEX_CLAMAV_SCAN_TIMEOUT_SECONDS:-40}
+      CONNEX_CLAMAV_STARTUP_TIMEOUT_SECONDS: ${CONNEX_CLAMAV_STARTUP_TIMEOUT_SECONDS:-300}
+      CONNEX_CLAMAV_MAX_REQUEST_HANDLERS: ${CONNEX_CLAMAV_MAX_REQUEST_HANDLERS:-8}
+      CONNEX_CLAMAV_SIGNATURE_SOURCE: ${CONNEX_CLAMAV_SIGNATURE_SOURCE:-baked}
+      CONNEX_CLAMAV_SIGNATURE_WARN_AGE_SECONDS: ${CONNEX_CLAMAV_SIGNATURE_WARN_AGE_SECONDS:-604800}
+      CONNEX_CLAMAV_SIGNATURE_MAX_AGE_SECONDS: ${CONNEX_CLAMAV_SIGNATURE_MAX_AGE_SECONDS:-2592000}
+    expose:
+      - "8091"
+    read_only: true
+    # clamd does NOT scan an INSTREAM incrementally: it spools the submitted bytes to a temporary
+    # file and unpacks archive members beside it. 512 MiB is derived arithmetic, not a guess --
+    # max_concurrent_scans (2) x (clamd StreamMaxLength 32 MiB + MaxScanSize 192 MiB) = 448 MiB.
+    # The sidecar refuses to start if this mount is smaller than that. Raising
+    # CONNEX_CLAMAV_MAX_CONCURRENT_SCANS REQUIRES raising this size and mem_limit together.
+    # The ocr service's 64 MiB is not a usable reference here.
+    tmpfs:
+      - /tmp:size=512m,mode=1777,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpus: 2.0
+    # clamd holds the whole signature database resident (~2 GiB and growing), and tmpfs pages are
+    # charged to this same memory cgroup, so the limit must cover both. An undersized limit shows
+    # up as an OOM-killed container that looks exactly like a scanner outage.
+    mem_limit: 3g
+    memswap_limit: 3g
+    pids_limit: 128
+    networks:
+      - clamav_internal
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8091/health',timeout=3)); raise SystemExit(0 if data.get('ready') is True else 1)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 300s
       retries: 4
 
   db:
@@ -163,6 +212,14 @@ networks:
       com.docker.network.bridge.gateway_mode_ipv4: isolated
       com.docker.network.bridge.gateway_mode_ipv6: isolated
   ocr_internal:
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+      com.docker.network.bridge.gateway_mode_ipv6: isolated
+  # The scanning path has no route off the host. Signature updates never traverse this network;
+  # they are a build-time bake or an operator-mounted directory (docs/MALWARE_SCANNING.md).
+  clamav_internal:
     driver: bridge
     internal: true
     driver_opts:

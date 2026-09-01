@@ -75,6 +75,19 @@ class CiChangeClassificationTest(unittest.TestCase):
         self.assertFalse(categories["frontend_sast"])
         self.assertFalse(categories["cross_stack"])
 
+    def test_clamav_change_selects_only_the_clamav_surface(self) -> None:
+        categories = self.classify(
+            "clamav/Dockerfile",
+            "clamav/clamav_service/clamd.py",
+            "clamav/ci/smoke_image.sh",
+        )
+        self.assertTrue(categories["clamav"])
+        self.assertFalse(categories["full"])
+        self.assertFalse(categories["ocr"])
+        self.assertFalse(categories["backend"])
+        self.assertFalse(categories["frontend"])
+        self.assertFalse(categories["compose"])
+
     def test_backup_change_does_not_boot_the_application(self) -> None:
         categories = self.classify("deploy/backup/backup.sh")
         self.assertTrue(categories["backup"])

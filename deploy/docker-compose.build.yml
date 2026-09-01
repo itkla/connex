@@ -6,6 +6,13 @@ services:
         VERSION: ${CONNEX_VERSION:-dev}
     image: ghcr.io/itkla/connex-ocr:${CONNEX_VERSION:-dev}
 
+  clamav:
+    build:
+      context: ../clamav
+      args:
+        VERSION: ${CONNEX_VERSION:-dev}
+    image: ghcr.io/itkla/connex-clamav:${CONNEX_VERSION:-dev}
+
   backend:
     build:
       context: ../backend

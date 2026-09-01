@@ -56,9 +56,11 @@ def resolve_compose_model(
             "CONNEX_BACKEND_DIGEST": DIGEST,
             "CONNEX_FRONTEND_DIGEST": DIGEST,
             "CONNEX_OCR_DIGEST": DIGEST,
+            "CONNEX_CLAMAV_DIGEST": DIGEST,
             "CONNEX_DB_PASSWORD": "network-test",
             "CONNEX_DB_ROOT_PASSWORD": "network-root-test",
             "CONNEX_OCR_SERVICE_TOKEN": "0" * 32,
+            "CONNEX_CLAMAV_SERVICE_TOKEN": "0" * 32,
             "CONNEX_DB_USERNAME": "network-test-user",
             "CONNEX_CADDY_ADDITIONAL_TRUSTED_PROXIES": "",
             "CONNEX_CADDY_HSTS_ENABLED": "false",
@@ -114,22 +116,31 @@ class DeploymentNetworkTest(unittest.TestCase):
             "source-build-ocr": resolve_compose_model(
                 COMPOSE_PATH, BUILD_COMPOSE_PATH, profiles=("ocr",)
             ),
+            "published-sidecars": resolve_compose_model(
+                COMPOSE_PATH, profiles=("ocr", "clamav")
+            ),
+            "source-build-sidecars": resolve_compose_model(
+                COMPOSE_PATH, BUILD_COMPOSE_PATH, profiles=("ocr", "clamav")
+            ),
         }
 
     def test_services_join_only_required_networks(self) -> None:
         expected_networks = {
             "caddy": {"edge"},
             "frontend": {"edge", "app"},
-            "backend": {"edge", "app", "db", "ocr_internal"},
+            "backend": {"edge", "app", "db", "ocr_internal", "clamav_internal"},
             "ocr": {"ocr_internal"},
+            "clamav": {"clamav_internal"},
             "db": {"db"},
         }
 
         for model_name, compose in self.compose_models.items():
             services = compose["services"]
             model_expected_networks = expected_networks.copy()
-            if not model_name.endswith("-ocr"):
+            if not model_name.endswith(("-ocr", "-sidecars")):
                 del model_expected_networks["ocr"]
+            if not model_name.endswith("-sidecars"):
+                del model_expected_networks["clamav"]
             with self.subTest(model=model_name):
                 self.assertEqual(set(model_expected_networks), set(services))
             for service_name, expected in model_expected_networks.items():
@@ -137,17 +148,20 @@ class DeploymentNetworkTest(unittest.TestCase):
                     self.assertEqual(expected, set(services[service_name]["networks"]))
 
     def test_profile_selection_ignores_ambient_compose_profiles(self) -> None:
-        with patch.dict(os.environ, {"COMPOSE_PROFILES": "ocr"}):
+        with patch.dict(os.environ, {"COMPOSE_PROFILES": "ocr,clamav"}):
             compose = resolve_compose_model(COMPOSE_PATH)
         self.assertNotIn("ocr", compose["services"])
+        self.assertNotIn("clamav", compose["services"])
 
     def test_internal_networks_are_gateway_isolated(self) -> None:
         for model_name, compose in self.compose_models.items():
             networks = compose["networks"]
             with self.subTest(model=model_name):
-                self.assertEqual({"edge", "app", "db", "ocr_internal"}, set(networks))
+                self.assertEqual(
+                    {"edge", "app", "db", "ocr_internal", "clamav_internal"}, set(networks)
+                )
                 self.assertFalse(networks["app"].get("internal", False))
-            for network_name in ("db", "ocr_internal"):
+            for network_name in ("db", "ocr_internal", "clamav_internal"):
                 with self.subTest(model=model_name, network=network_name):
                     network = networks[network_name]
                     self.assertIs(network["internal"], True)

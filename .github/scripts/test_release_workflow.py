@@ -900,7 +900,10 @@ class ReleaseWorkflowTest(unittest.TestCase):
             self.assertIn(name, metadata_names)
 
         candidate = self.workflow["jobs"]["candidate-images-dry-run"]
-        self.assertEqual(["backend", "frontend", "ocr"], candidate["strategy"]["matrix"]["component"])
+        self.assertEqual(
+            ["backend", "frontend", "ocr", "clamav"],
+            candidate["strategy"]["matrix"]["component"],
+        )
         build = self.named_step("candidate-images-dry-run", "Build dry-run candidate")
         self.assertEqual(
             "VERSION=${{ needs.metadata.outputs.version }}\n"
@@ -967,7 +970,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
             "Current main-head requirement",
             "ci.yml, security.yml, and deploy-smoke.yml",
             "image builds with release build arguments",
-            "Frontend and OCR image smoke tests",
+            "Frontend, OCR, and ClamAV image smoke tests",
             "High-severity Anchore scans",
             "SBOM generation",
         ):

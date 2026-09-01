@@ -32,6 +32,41 @@ services:
     networks:
       - ocr_internal
 
+  # Local development profile. Bring it up with:
+  #   docker compose --profile clamav up -d clamav
+  # then export CONNEX_MALWARE_SCANNING_ENABLED=true, CONNEX_CLAMAV_BASE_URL=http://127.0.0.1:8091
+  # and the same token before ./gradlew bootRun. Without it, the dev profile runs unscanned.
+  clamav:
+    build:
+      context: ../clamav
+    profiles: ["clamav"]
+    restart: unless-stopped
+    environment:
+      CONNEX_CLAMAV_SERVICE_TOKEN: ${CONNEX_CLAMAV_SERVICE_TOKEN:-}
+      CONNEX_CLAMAV_MAX_SCAN_BYTES: ${CONNEX_OBJECT_STORAGE_MAX_UPLOAD_BYTES:-26214400}
+      CONNEX_CLAMAV_MAX_CONCURRENT_SCANS: ${CONNEX_CLAMAV_MAX_CONCURRENT_SCANS:-2}
+      CONNEX_CLAMAV_SCAN_TIMEOUT_SECONDS: ${CONNEX_CLAMAV_SCAN_TIMEOUT_SECONDS:-40}
+      CONNEX_CLAMAV_STARTUP_TIMEOUT_SECONDS: ${CONNEX_CLAMAV_STARTUP_TIMEOUT_SECONDS:-300}
+    ports:
+      - "127.0.0.1:8091:8091"
+    read_only: true
+    # Derived: max_concurrent_scans (2) x (StreamMaxLength 32 MiB + MaxScanSize 192 MiB).
+    # The sidecar refuses to start below this. Do not copy the ocr service's 64 MiB.
+    tmpfs:
+      - /tmp:size=512m,mode=1777,noexec,nosuid,nodev
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpus: 2.0
+    mem_limit: 3g
+    memswap_limit: 3g
+    pids_limit: 128
+    dns:
+      - 127.0.0.1
+    networks:
+      - clamav_internal
+
   db:
     image: mysql:8.4.10@sha256:c831a0f11348d402b43d77453e17d770be2eef356615a2823fe0f5a0d6c8b9af
     restart: always
@@ -54,6 +89,11 @@ services:
 
 networks:
   ocr_internal:
+    driver: bridge
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+  clamav_internal:
     driver: bridge
     internal: true
     driver_opts:
