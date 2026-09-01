@@ -78,6 +78,8 @@ class TenantScopeInterceptorTest {
         assertTrue(interceptor.requiresResolvedContext(NS + "NotificationMapper.findPage"));
         assertTrue(interceptor.requiresResolvedContext(NS + "AuditLogMapper.findRecent"));
         assertTrue(interceptor.requiresResolvedContext(NS + "DataSubjectDisclosureMapper.findPerson"));
+        assertTrue(interceptor.requiresResolvedContext(
+            NS + "RecordCreationTemplateMapper.getCurrentVersion"));
     }
 
     @Test
@@ -113,6 +115,8 @@ class TenantScopeInterceptorTest {
             NS + "WorkflowVersionMapper.findLockCandidatesByUserAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "RuleMapper.findLockCandidatesByUserAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "SuppressionMapper.clearCreatorsAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(
+            NS + "RecordCreationTemplateMapper.clearUserReferencesAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "SavedViewPreferenceMapper.deletePinsForUserAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "SavedViewPreferenceMapper.deleteDefaultsForUserAnywhere"));
         assertTrue(interceptor.requiresResolvedContext(NS + "CompanyMapper.clearMemberOwnership"));

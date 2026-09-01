@@ -172,6 +172,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.ReportMapper.clearDefinitionCreatorsAnywhere",
         "ooo.klae.connex.backend.mappers.ReportMapper.clearSnapshotGeneratorsAnywhere",
         "ooo.klae.connex.backend.mappers.SuppressionMapper.clearCreatorsAnywhere",
+        "ooo.klae.connex.backend.mappers.RecordCreationTemplateMapper.clearUserReferencesAnywhere",
         "ooo.klae.connex.backend.mappers.NotificationMapper.bumpStateVersions",
         "ooo.klae.connex.backend.mappers.ProviderCaptureMapper.clearWorkspacePolicyUpdaterAnywhere",
         "ooo.klae.connex.backend.mappers.ProviderCaptureMapper.deleteProviderActivitiesAnywhere",

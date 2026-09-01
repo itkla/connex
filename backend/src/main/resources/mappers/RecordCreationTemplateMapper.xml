@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.RecordCreationTemplateMapper">
+
+  <resultMap id="TemplateSetResult" type="RecordCreationTemplateSet">
+    <id property="workspaceId" column="workspace_id"/>
+    <id property="recordType" column="record_type"/>
+    <result property="revision" column="revision"/>
+    <result property="defaultTemplateId" column="default_template_id"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="TemplateRootResult" type="RecordCreationTemplate">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="recordType" column="record_type"/>
+    <result property="status" column="status"/>
+    <result property="position" column="position"/>
+    <result property="revision" column="revision"/>
+    <result property="currentVersionId" column="current_version_id"/>
+    <result property="createdById" column="created_by_id"/>
+    <result property="updatedById" column="updated_by_id"/>
+    <result property="archivedAt" column="archived_at"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="TemplateVersionResult" type="RecordCreationTemplateVersion">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="templateId" column="template_id"/>
+    <result property="versionNumber" column="version_number"/>
+    <result property="nameEn" column="name_en"/>
+    <result property="nameJa" column="name_ja"/>
+    <result property="descriptionEn" column="description_en"/>
+    <result property="descriptionJa" column="description_ja"/>
+    <result property="definitionJson" column="definition_json"/>
+    <result property="definitionHash" column="definition_hash"/>
+    <result property="createdById" column="created_by_id"/>
+    <result property="createdAt" column="created_at"/>
+  </resultMap>
+
+  <sql id="setColumns">
+    workspace_id, record_type, revision, default_template_id, created_at, updated_at
+  </sql>
+
+  <sql id="rootColumns">
+    id, workspace_id, record_type, status, position, revision, current_version_id,
+    created_by_id, updated_by_id, archived_at, created_at, updated_at
+  </sql>
+
+  <sql id="versionColumns">
+    id, workspace_id, template_id, version_number, name_en, name_ja,
+    description_en, description_ja, definition_json, definition_hash,
+    created_by_id, created_at
+  </sql>
+
+  <insert id="insertSetIfAbsent">
+    INSERT IGNORE INTO record_creation_template_set (workspace_id, record_type)
+    VALUES (#{workspaceId}, #{recordType})
+  </insert>
+
+  <select id="getSet" resultMap="TemplateSetResult">
+    SELECT <include refid="setColumns"/>
+    FROM record_creation_template_set
+    WHERE workspace_id = #{workspaceId} AND record_type = #{recordType}
+  </select>
+
+  <select id="getSetForUpdate" resultMap="TemplateSetResult">
+    SELECT <include refid="setColumns"/>
+    FROM record_creation_template_set
+    WHERE workspace_id = #{workspaceId} AND record_type = #{recordType}
+    FOR UPDATE
+  </select>
+
+  <select id="listRoots" resultMap="TemplateRootResult">
+    SELECT <include refid="rootColumns"/>
+    FROM record_creation_template
+    WHERE workspace_id = #{workspaceId} AND record_type = #{recordType}
+    <if test="!includeArchived">
+      AND status &lt;&gt; 'archived'
+    </if>
+    ORDER BY position, id
+  </select>
+
+  <select id="listRootsForUpdate" resultMap="TemplateRootResult">
+    SELECT <include refid="rootColumns"/>
+    FROM record_creation_template
+    WHERE workspace_id = #{workspaceId} AND record_type = #{recordType}
+    ORDER BY id
+    FOR UPDATE
+  </select>
+
+  <select id="getRoot" resultMap="TemplateRootResult">
+    SELECT <include refid="rootColumns"/>
+    FROM record_creation_template
+    WHERE workspace_id = #{workspaceId} AND id = #{templateId}
+  </select>
+
+  <select id="getRootForUpdate" resultMap="TemplateRootResult">
+    SELECT <include refid="rootColumns"/>
+    FROM record_creation_template
+    WHERE workspace_id = #{workspaceId} AND id = #{templateId}
+    FOR UPDATE
+  </select>
+
+  <select id="getCurrentVersion" resultMap="TemplateVersionResult">
+    SELECT v.id, v.workspace_id, v.template_id, v.version_number, v.name_en, v.name_ja,
+           v.description_en, v.description_ja, v.definition_json, v.definition_hash,
+           v.created_by_id, v.created_at
+    FROM record_creation_template t
+    JOIN record_creation_template_version v
+      ON v.workspace_id = t.workspace_id
+     AND v.template_id = t.id
+     AND v.id = t.current_version_id
+    WHERE t.workspace_id = #{workspaceId} AND t.id = #{templateId}
+  </select>
+
+  <select id="getVersion" resultMap="TemplateVersionResult">
+    SELECT <include refid="versionColumns"/>
+    FROM record_creation_template_version
+    WHERE workspace_id = #{workspaceId}
+      AND template_id = #{templateId}
+      AND version_number = #{versionNumber}
+  </select>
+
+  <select id="nextVersionNumber" resultType="int">
+    SELECT COALESCE(MAX(version_number), 0) + 1
+    FROM record_creation_template_version
+    WHERE workspace_id = #{workspaceId} AND template_id = #{templateId}
+  </select>
+
+  <insert id="insertRoot" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO record_creation_template
+      (workspace_id, record_type, status, position, revision, current_version_id,
+       created_by_id, updated_by_id, archived_at)
+    VALUES
+      (#{workspaceId}, #{recordType}, #{status}, #{position}, #{revision}, #{currentVersionId},
+       #{createdById}, #{updatedById}, #{archivedAt})
+  </insert>
+
+  <insert id="insertVersion" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO record_creation_template_version
+      (workspace_id, template_id, version_number, name_en, name_ja,
+       description_en, description_ja, definition_json, definition_hash, created_by_id)
+    VALUES
+      (#{workspaceId}, #{templateId}, #{versionNumber}, #{nameEn}, #{nameJa},
+       #{descriptionEn}, #{descriptionJa}, #{definitionJson}, #{definitionHash}, #{createdById})
+  </insert>
+
+  <update id="installCurrentVersion">
+    UPDATE record_creation_template
+    SET current_version_id = #{versionId},
+        revision = revision + 1,
+        updated_by_id = #{actorId},
+        updated_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{templateId}
+      AND revision = #{expectedRevision}
+  </update>
+
+  <update id="updateStatus">
+    UPDATE record_creation_template
+    SET status = #{status},
+        archived_at = #{archivedAt,jdbcType=TIMESTAMP},
+        revision = revision + 1,
+        updated_by_id = #{actorId},
+        updated_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{templateId}
+      AND revision = #{expectedRevision}
+  </update>
+
+  <update id="updatePositions">
+    UPDATE record_creation_template
+    SET position = #{position},
+        updated_by_id = #{actorId},
+        updated_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{templateId}
+      AND position &lt;&gt; #{position}
+  </update>
+
+  <update id="setDefault">
+    UPDATE record_creation_template_set
+    SET default_template_id = #{templateId,jdbcType=INTEGER},
+        revision = revision + 1,
+        updated_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND record_type = #{recordType}
+      AND revision = #{expectedRevision}
+  </update>
+
+  <update id="advanceSetRevision">
+    UPDATE record_creation_template_set
+    SET revision = revision + 1,
+        updated_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND record_type = #{recordType}
+      AND revision = #{expectedRevision}
+  </update>
+
+  <update id="clearUserReferencesAnywhere">
+    UPDATE record_creation_template t
+    LEFT JOIN record_creation_template_version v
+      ON v.workspace_id = t.workspace_id AND v.template_id = t.id
+    SET t.created_by_id = CASE WHEN t.created_by_id = #{userId} THEN NULL ELSE t.created_by_id END,
+        t.updated_by_id = CASE WHEN t.updated_by_id = #{userId} THEN NULL ELSE t.updated_by_id END,
+        v.created_by_id = CASE WHEN v.created_by_id = #{userId} THEN NULL ELSE v.created_by_id END
+    WHERE t.created_by_id = #{userId}
+       OR t.updated_by_id = #{userId}
+       OR v.created_by_id = #{userId}
+  </update>
+
+</mapper>
