@@ -7,6 +7,7 @@ StartupReason = Literal[
     "scan_scratch_unavailable",
     "scan_scratch_undersized",
     "signature_database_unavailable",
+    "signature_volume_not_mounted",
     "signature_database_unreadable",
     "signature_database_expired",
     "daemon_binary_unavailable",

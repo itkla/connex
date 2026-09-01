@@ -875,6 +875,32 @@ class ReleaseWorkflowTest(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, serialized)
 
+    def test_release_transaction_receives_provenance_for_every_signed_container(self) -> None:
+        """Derives the requirement from the signing loop so a new component cannot skip it.
+
+        The transaction requires .provenance.runtime.containers.<component>.imageReference for
+        each component it iterates. A component that ships in the bundle but is never exported to
+        the benchmark, or never passed to the report verifier, compares against null and fails
+        every real release after the candidate images have already been published. Nothing in the
+        pull-request pipeline exercises that path.
+        """
+        scripts = "\n".join(
+            str(step.get("run", ""))
+            for job in self.workflow["jobs"].values()
+            for step in job.get("steps", [])
+        )
+        signed: set[str] = set()
+        for listed in re.findall(r"for component in ([a-z0-9 ]+); do", scripts):
+            signed.update(listed.split())
+
+        self.assertIn("clamav", signed)
+        for component in sorted(signed):
+            with self.subTest(component=component):
+                self.assertIn(
+                    f'CONNEX_BENCHMARK_{component.upper()}_CONTAINER="$', scripts
+                )
+                self.assertIn(f"--{component}-image-reference ", scripts)
+
     def test_publish_only_jobs_do_not_depend_on_the_dry_run_build(self) -> None:
         jobs = self.workflow["jobs"]
 

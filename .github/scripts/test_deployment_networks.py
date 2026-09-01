@@ -20,6 +20,7 @@ LOCAL_DEV_COMPOSE_PATH = ROOT / "backend" / "docker-compose.yml"
 EVAL_ENV_PATH = ROOT / "deploy" / "eval.env.example"
 SILO_ENV_PATH = ROOT / "deploy" / "silo.env.example"
 ONPREM_ENV_PATH = ROOT / "deploy" / "onprem.env.example"
+SIGNATURES_COMPOSE_PATH = ROOT / "deploy" / "docker-compose.signatures.yml"
 DIGEST = "0" * 64
 
 
@@ -146,6 +147,49 @@ class DeploymentNetworkTest(unittest.TestCase):
             for service_name, expected in model_expected_networks.items():
                 with self.subTest(model=model_name, service=service_name):
                     self.assertEqual(expected, set(services[service_name]["networks"]))
+
+    def test_the_scanner_has_no_database_mount_without_the_signature_overlay(self) -> None:
+        clamav = self.compose_models["published-sidecars"]["services"]["clamav"]
+
+        self.assertEqual([], clamav.get("volumes", []))
+        self.assertIs(clamav["read_only"], True)
+
+    def test_the_signature_overlay_mounts_an_operator_managed_database_read_only(self) -> None:
+        """Proves the air-gapped escape from the 30-day hard block actually exists.
+
+        Uploads block permanently once the baked signature set expires, with no override, so the
+        bundle must let an operator transfer a newer database in. Without a bind at the sidecar's
+        database path the read-only container keeps using the expired image contents no matter what
+        CONNEX_CLAMAV_SIGNATURE_SOURCE says.
+        """
+        compose = resolve_compose_model(
+            COMPOSE_PATH,
+            SIGNATURES_COMPOSE_PATH,
+            profiles=("ocr", "clamav"),
+            environment_overrides={
+                "CONNEX_CLAMAV_SIGNATURE_DIR": "/srv/connex/clamav-signatures",
+            },
+        )
+        clamav = compose["services"]["clamav"]
+        volumes = clamav["volumes"]
+
+        self.assertEqual(1, len(volumes))
+        mount = volumes[0]
+        self.assertEqual("bind", mount["type"])
+        self.assertEqual("/srv/connex/clamav-signatures", mount["source"])
+        self.assertEqual("/var/lib/clamav", mount["target"])
+        self.assertIs(mount["read_only"], True)
+        self.assertIs(clamav["read_only"], True)
+        self.assertEqual({"clamav_internal"}, set(clamav["networks"]))
+
+    def test_the_signature_overlay_refuses_an_unset_database_directory(self) -> None:
+        with self.assertRaises(AssertionError):
+            resolve_compose_model(
+                COMPOSE_PATH,
+                SIGNATURES_COMPOSE_PATH,
+                profiles=("ocr", "clamav"),
+                environment_overrides={"CONNEX_CLAMAV_SIGNATURE_DIR": ""},
+            )
 
     def test_profile_selection_ignores_ambient_compose_profiles(self) -> None:
         with patch.dict(os.environ, {"COMPOSE_PROFILES": "ocr,clamav"}):

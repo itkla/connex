@@ -11,6 +11,7 @@ from urllib.request import ProxyHandler, Request
 from unittest.mock import Mock, patch
 
 from benchmark.run_benchmark import (
+    CANONICAL_IMAGE_NAMES,
     RejectRedirects,
     benchmark_opener,
     canonical_manifest,
@@ -19,6 +20,7 @@ from benchmark.run_benchmark import (
     provenance,
     require_host_avx,
     repository_revision,
+    runtime_provenance,
     summarize,
     validated_base_url,
     validated_image_reference,
@@ -32,7 +34,9 @@ class BenchmarkManifestTest(unittest.TestCase):
     REQUESTS_PER_MINUTE = 120
     IMAGE_REFERENCES = {
         component: f"ghcr.io/itkla/connex-{component}@sha256:" + digest * 64
-        for component, digest in (("backend", "b"), ("frontend", "c"), ("ocr", "d"))
+        for component, digest in (
+            ("backend", "b"), ("frontend", "c"), ("ocr", "d"), ("clamav", "e")
+        )
     }
 
     def qualification_provenance(self) -> dict[str, object]:
@@ -48,7 +52,7 @@ class BenchmarkManifestTest(unittest.TestCase):
                         "imageId": "sha256:" + digest * 64,
                     }
                     for (component, reference), digest in zip(
-                        self.IMAGE_REFERENCES.items(), ("b", "c", "d"), strict=True
+                        self.IMAGE_REFERENCES.items(), ("b", "c", "d", "e"), strict=True
                     )
                 },
                 "host": {
@@ -105,6 +109,37 @@ class BenchmarkManifestTest(unittest.TestCase):
             for case in manifest["cases"]
         ]
         return manifest, outcomes
+
+    def test_canonical_image_names_cover_every_signed_release_container(self) -> None:
+        self.assertEqual(
+            {"backend", "frontend", "ocr", "clamav"}, set(CANONICAL_IMAGE_NAMES)
+        )
+
+    @patch("benchmark.run_benchmark.inspect_runtime_container")
+    def test_runtime_provenance_refuses_to_omit_the_scanner_container(
+        self, inspect: Mock
+    ) -> None:
+        """Fails the benchmark, not the signing step, when a signed container is unrecorded.
+
+        The release transaction requires an imageReference for every component it signs. A report
+        produced without the ClamAV container id compares against null and fails the release after
+        the candidate images have already been published.
+        """
+        inspect.return_value = {
+            "containerId": "a" * 12,
+            "imageReference": "ghcr.io/itkla/connex-backend@sha256:" + "a" * 64,
+            "imageId": "sha256:" + "a" * 64,
+        }
+        environment = {
+            f"CONNEX_BENCHMARK_{component.upper()}_CONTAINER": "a" * 12
+            for component in ("backend", "frontend", "ocr")
+        }
+
+        with patch.dict(os.environ, environment, clear=True):
+            with self.assertRaises(ValueError) as raised:
+                runtime_provenance()
+
+        self.assertIn("CONNEX_BENCHMARK_CLAMAV_CONTAINER", str(raised.exception))
 
     def test_manifest_has_required_coverage_and_synthetic_contacts(self) -> None:
         manifest = json.loads(

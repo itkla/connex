@@ -31,10 +31,15 @@ CANONICAL_MANIFEST_SHA256 = "a641d9af0c946a03753606b88924fc9ac5ed0c58a2678ee9e96
 CANONICAL_FONT_SHA256 = "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5"
 CANONICAL_FIXTURES_SHA256 = "bfff98a022ded013b42d2313f75c2ec6e5fc7632c1926adea6274ca0172899e5"
 CANONICAL_FIXTURE_METADATA_SHA256 = "6aa9f38d733d8f510824b6872638b20387864d239386a6eb4a26de532ac74e29"
+# Every container the release transaction signs must appear here. The transaction requires
+# .provenance.runtime.containers.<component>.imageReference for each of these components, so a
+# component that ships in the deployment bundle but is missing from this map makes the release
+# compare against null and fail after the images have already been published.
 CANONICAL_IMAGE_NAMES = {
     "backend": "ghcr.io/itkla/connex-backend",
     "frontend": "ghcr.io/itkla/connex-frontend",
     "ocr": "ghcr.io/itkla/connex-ocr",
+    "clamav": "ghcr.io/itkla/connex-clamav",
 }
 SCORED_FIELDS = ("name", "email", "phone", "title", "company")
 
@@ -187,7 +192,7 @@ def repository_revision() -> str:
 
 def runtime_provenance() -> dict[str, object]:
     containers: dict[str, object] = {}
-    for component in ("backend", "frontend", "ocr"):
+    for component in CANONICAL_IMAGE_NAMES:
         variable = f"CONNEX_BENCHMARK_{component.upper()}_CONTAINER"
         container_id = os.environ.get(variable, "").strip()
         if re.fullmatch(r"[0-9a-fA-F]{12,64}", container_id) is None:
@@ -248,8 +253,14 @@ def inspect_runtime_container(component: str, container_id: str) -> dict[str, ob
     if state.get("Running") is not True:
         raise ValueError(f"The {component} benchmark container is not running")
     health = state.get("Health")
-    if component == "ocr" and (not isinstance(health, dict) or health.get("Status") != "healthy"):
-        raise ValueError("The OCR benchmark container is not healthy")
+    # Both sidecars gate the release on their own readiness probe: an unhealthy OCR container
+    # invalidates the accuracy figures, and an unhealthy ClamAV container means the qualified set
+    # was running without a loaded signature database. The full ClamAV resource and isolation
+    # profile is asserted by the release-set smoke job rather than duplicated here.
+    if component in {"ocr", "clamav"} and (
+        not isinstance(health, dict) or health.get("Status") != "healthy"
+    ):
+        raise ValueError(f"The {component} benchmark container is not healthy")
     if component == "ocr":
         ports = network_settings.get("Ports")
         if ports is not None and not isinstance(ports, dict):

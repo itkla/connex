@@ -99,9 +99,16 @@ def verify_signatures(config: ServiceConfig) -> None:
     Startup is the one moment where an operator is guaranteed to be looking. A deployment that
     boots happily and then answers 503 to every upload is far harder to diagnose than one that
     refuses to boot with an allowlisted reason code.
+
+    ``volume`` additionally requires the database path to be a real mount. Declaring the
+    operator-managed source without applying deploy/docker-compose.signatures.yml would otherwise
+    keep scanning against the baked image contents and hard-block every upload the moment they
+    reach the 30-day ceiling, with the transferred files sitting unused on the host.
     """
     if not config.database_directory.is_dir():
         raise StartupFailure("signature_database_unavailable")
+    if config.signature_source == "volume" and not os.path.ismount(config.database_directory):
+        raise StartupFailure("signature_volume_not_mounted")
     state = signatures.inspect(config.database_directory, None)
     if state.age_seconds is None:
         raise StartupFailure("signature_database_unreadable")

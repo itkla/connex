@@ -729,6 +729,10 @@ jobs:
           BACKEND_CONTAINER="$(compose ps -q backend)"
           FRONTEND_CONTAINER="$(compose ps -q frontend)"
           OCR_CONTAINER="$(compose ps -q ocr)"
+          # The release transaction requires provenance for every container it signs, ClamAV
+          # included. Without this export the report carries no clamav entry and the transaction
+          # fails after the candidate images have already been published.
+          CLAMAV_CONTAINER="$(compose ps -q clamav)"
           CONNEX_BENCHMARK_BASE_URL=http://127.0.0.1:18088 \
           CONNEX_BENCHMARK_SESSION_COOKIE="$SESSION_COOKIE" \
           CONNEX_BENCHMARK_CSRF_TOKEN="$CSRF_TOKEN" \
@@ -737,6 +741,7 @@ jobs:
           CONNEX_BENCHMARK_BACKEND_CONTAINER="$BACKEND_CONTAINER" \
           CONNEX_BENCHMARK_FRONTEND_CONTAINER="$FRONTEND_CONTAINER" \
           CONNEX_BENCHMARK_OCR_CONTAINER="$OCR_CONTAINER" \
+          CONNEX_BENCHMARK_CLAMAV_CONTAINER="$CLAMAV_CONTAINER" \
             python ../ocr/benchmark/run_benchmark.py \
               --images /tmp/connex-benchmark-fixtures \
               --report ../business-card-benchmark.json \
@@ -747,7 +752,8 @@ jobs:
             --requests-per-minute 120 \
             --backend-image-reference "$(jq -r '.image + "@" + .digest' ../release-backend.json)" \
             --frontend-image-reference "$(jq -r '.image + "@" + .digest' ../release-frontend.json)" \
-            --ocr-image-reference "$(jq -r '.image + "@" + .digest' ../release-ocr.json)"
+            --ocr-image-reference "$(jq -r '.image + "@" + .digest' ../release-ocr.json)" \
+            --clamav-image-reference "$(jq -r '.image + "@" + .digest' ../release-clamav.json)"
           tar --sort=name --mtime="@${BUILD_EPOCH}" --owner=0 --group=0 --numeric-owner \
             -cf ../business-card-benchmark-fixtures.tar \
             -C /tmp/connex-benchmark-fixtures .
@@ -796,7 +802,8 @@ jobs:
             --requests-per-minute 120 \
             --backend-image-reference "$(jq -r '.image + "@" + .digest' release-backend.json)" \
             --frontend-image-reference "$(jq -r '.image + "@" + .digest' release-frontend.json)" \
-            --ocr-image-reference "$(jq -r '.image + "@" + .digest' release-ocr.json)"
+            --ocr-image-reference "$(jq -r '.image + "@" + .digest' release-ocr.json)" \
+            --clamav-image-reference "$(jq -r '.image + "@" + .digest' release-clamav.json)"
           for component in backend frontend ocr clamav; do
             descriptor="release-${component}.json"
             expected="$(jq -r '.image + "@" + .digest' "$descriptor")"
