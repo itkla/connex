@@ -58,11 +58,13 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
+import ooo.klae.connex.backend.exceptions.MalwareDetectedException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.AiAssistantService;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.storage.malware.EicarTestFixture;
 import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -293,6 +295,22 @@ class AiAssistantControllerTest {
         verify(attachmentService).upload(
                 org.mockito.ArgumentMatchers.eq(42), any(UploadSource.class));
         verify(attachmentService).delete(42, 91);
+    }
+
+    @Test
+    void infectedAssistantAttachmentReturnsStableUnprocessableEntity() throws Exception {
+        when(attachmentService.upload(
+                org.mockito.ArgumentMatchers.eq(42), any(UploadSource.class)))
+                .thenThrow(new MalwareDetectedException());
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "eicar.txt", "text/plain", EicarTestFixture.bytes());
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .multipart("/api/ai/assistant/sessions/42/attachments")
+                .file(file))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(content().json("{\"code\":\"MALWARE_DETECTED\","
+                        + "\"message\":\"This file was rejected by security scanning.\"}"));
     }
 
     @Test

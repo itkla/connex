@@ -17,6 +17,11 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
+import ooo.klae.connex.backend.storage.ScannedUpload;
+import ooo.klae.connex.backend.storage.UploadContentInspector;
+import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
+import ooo.klae.connex.backend.storage.UploadMalwareScanner;
+import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
@@ -45,6 +50,8 @@ public class AttachmentService {
     private final WorkspaceService workspaceService;
     private final ReferenceService referenceService;
     private final ManagedObjectService managedObjectService;
+    private final UploadContentInspector uploadContentInspector;
+    private final UploadMalwareScanner uploadMalwareScanner;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("fileName", "entityType", "entityId", "url", "contentType", "size");
@@ -274,11 +281,16 @@ public class AttachmentService {
         requireGenericAttachmentType(normalizedType);
         UserDisplayNameDto targetLabel = requireVisibleUserTarget(
             workspaceId, normalizedType, entityId);
+        UploadPurpose purpose = inlineImage
+            ? UploadPurpose.INLINE_IMAGE
+            : UploadPurpose.ATTACHMENT;
+        InspectedUpload inspected = uploadContentInspector.inspect(purpose, source);
+        ScannedUpload scanned = uploadMalwareScanner.scan(inspected);
         Attachment attachment = inlineImage
             ? attachmentWriteOperations.uploadInlineImage(
-                workspaceId, normalizedType, entityId, source, uploader)
+                workspaceId, normalizedType, entityId, scanned, uploader)
             : attachmentWriteOperations.upload(
-                workspaceId, normalizedType, entityId, source, uploader);
+                workspaceId, normalizedType, entityId, scanned, uploader);
         return attachmentReadService.hydrateKnown(
             workspaceId, attachment, uploader, targetLabel);
     }

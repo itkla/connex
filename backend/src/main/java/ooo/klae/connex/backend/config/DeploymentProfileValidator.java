@@ -63,23 +63,27 @@ public class DeploymentProfileValidator implements ApplicationRunner {
     private static final String AI_ALLOW_INTERNAL_ENDPOINTS = "connex.ai.allow-internal-endpoints";
     private static final String MAIL_ALLOW_INTERNAL_HOSTS = "connex.mail.allow-internal-hosts";
     private static final String MAIL_MANAGED = "connex.mail.managed";
-    private static final List<String> INTERNAL_ACCESS_KEYS = List.of(
+    private static final String MALWARE_SCANNING_ALLOW_DISABLED =
+        "connex.malware-scanning.allow-disabled";
+    private static final List<String> SAAS_FORBIDDEN_KEYS = List.of(
         BOOTSTRAP_ENABLED,
         SSO_ALLOW_PRIVATE_ISSUER_HOSTS,
         AI_ALLOW_INTERNAL_ENDPOINTS,
-        MAIL_ALLOW_INTERNAL_HOSTS
+        MAIL_ALLOW_INTERNAL_HOSTS,
+        MALWARE_SCANNING_ALLOW_DISABLED
     );
     private static final List<String> POSTURE_KEYS = List.of(
         BOOTSTRAP_ENABLED,
         SSO_ALLOW_PRIVATE_ISSUER_HOSTS,
         AI_ALLOW_INTERNAL_ENDPOINTS,
         MAIL_ALLOW_INTERNAL_HOSTS,
-        MAIL_MANAGED
+        MAIL_MANAGED,
+        MALWARE_SCANNING_ALLOW_DISABLED
     );
     private static final Map<String, List<String>> FORBIDDEN_KEYS_BY_PROFILE = Map.of(
-        DeploymentProperties.PROFILE_SAAS, INTERNAL_ACCESS_KEYS,
-        DeploymentProperties.PROFILE_SILO, List.of(),
-        DeploymentProperties.PROFILE_ON_PREM, List.of()
+        DeploymentProperties.PROFILE_SAAS, SAAS_FORBIDDEN_KEYS,
+        DeploymentProperties.PROFILE_SILO, List.of(MALWARE_SCANNING_ALLOW_DISABLED),
+        DeploymentProperties.PROFILE_ON_PREM, List.of(MALWARE_SCANNING_ALLOW_DISABLED)
     );
     private static final Map<String, Capability> CAPABILITY_BY_POSTURE_KEY = Map.of(
         MAIL_MANAGED, Capability.MANAGED_MAIL

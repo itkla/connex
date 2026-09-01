@@ -222,6 +222,21 @@ connex:
         max-outstanding-reservations: ${CONNEX_BUSINESS_CARD_MAX_OUTSTANDING_RESERVATIONS:4}
         idempotency-cleanup-delay: ${CONNEX_BUSINESS_CARD_IDEMPOTENCY_CLEANUP_DELAY:1m}
         idempotency-cleanup-per-workspace-batch-size: ${CONNEX_BUSINESS_CARD_IDEMPOTENCY_CLEANUP_PER_WORKSPACE_BATCH_SIZE:100}
+    malware-scanning:
+        enabled: ${CONNEX_MALWARE_SCANNING_ENABLED:true}
+        allow-disabled: ${CONNEX_MALWARE_SCANNING_ALLOW_DISABLED:false}
+        base-url: ${CONNEX_CLAMAV_BASE_URL:}
+        plain-http-private-host: ${CONNEX_CLAMAV_PLAIN_HTTP_PRIVATE_HOST:}
+        service-token: ${CONNEX_CLAMAV_SERVICE_TOKEN:}
+        connect-timeout: ${CONNEX_CLAMAV_CONNECT_TIMEOUT:2s}
+        request-timeout: ${CONNEX_CLAMAV_REQUEST_TIMEOUT:45s}
+        readiness-cache: ${CONNEX_CLAMAV_READINESS_CACHE:5s}
+        max-response-bytes: ${CONNEX_CLAMAV_MAX_RESPONSE_BYTES:8192}
+        max-scan-bytes: ${CONNEX_CLAMAV_MAX_SCAN_BYTES:26214400}
+        max-concurrent-scans: ${CONNEX_CLAMAV_MAX_CONCURRENT_SCANS:2}
+        signature-warn-age: ${CONNEX_CLAMAV_SIGNATURE_WARN_AGE:7d}
+        signature-max-age: ${CONNEX_CLAMAV_SIGNATURE_MAX_AGE:30d}
+        stale-audit-interval: ${CONNEX_CLAMAV_STALE_AUDIT_INTERVAL:24h}
     login:
         # Fixed-window failed-attempt throttle for password, passkey, and SSO link authentication.
         # Once either the per-IP or per-username failure cap is hit within the window, further

@@ -121,6 +121,8 @@ public class AuditService {
             "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}");
     private static final Pattern SAFE_ERROR_TOKEN = Pattern.compile(
             "[A-Za-z][A-Za-z0-9.$_]{0,119}(?:Exception|Error)");
+    private static final Pattern SAFE_SIGNATURE = Pattern.compile(
+            "[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
 
     private final AuditLogMapper auditLogMapper;
     private final AuditIntegrityService auditIntegrityService;
@@ -128,6 +130,16 @@ public class AuditService {
     private final TenantContext tenantContext;
     private final ClientIpResolver clientIpResolver;
     private final ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
+
+    /**
+     * Collapses an attacker-influenced scanner signature to a fixed safe token.
+     *
+     * @param value scanner-provided signature name
+     * @return the allowlisted value or {@code unnamed}
+     */
+    public static String safeSignatureName(String value) {
+        return value != null && SAFE_SIGNATURE.matcher(value).matches() ? value : "unnamed";
+    }
 
     /**
      * Records a single successful audit event. Never throws.

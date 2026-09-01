@@ -60,6 +60,8 @@ import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadFormat;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 import ooo.klae.connex.backend.storage.UploadPolicy.ValidatedUpload;
+import ooo.klae.connex.backend.storage.malware.MalwareScanReport;
+import ooo.klae.connex.backend.storage.malware.MalwareScanVerdict;
 import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -182,17 +184,26 @@ class ManagedObjectServiceTest {
             sha256(content));
     }
 
+    private static ScannedUpload scanned(byte[] content) {
+        return scanned(inspected(content));
+    }
+
+    private static ScannedUpload scanned(InspectedUpload upload) {
+        return new ScannedUpload(
+            upload,
+            new MalwareScanReport(MalwareScanVerdict.CLEAN, null, null, "test", false));
+    }
+
     @Test
     void storesOpaqueAttachmentReferenceAndTenantDerivedPrivateKey() throws Exception {
         byte[] bytes = "business card".getBytes(StandardCharsets.UTF_8);
         ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<byte[]> checksum = ArgumentCaptor.forClass(byte[].class);
 
-        StoredBinary stored = inTransaction(() -> service.storeAttachment(
-            17,
-            "card.pdf",
-            "application/pdf",
-            bytes));
+        InspectedUpload upload = new InspectedUpload(
+            "card.pdf", "application/pdf", "pdf", UploadFormat.PDF, bytes, sha256(bytes));
+        StoredBinary stored = inTransaction(
+            () -> service.storeInspectedAttachment(17, scanned(upload)));
 
         verify(objectStorage).put(key.capture(), any(UploadSource.class),
             org.mockito.ArgumentMatchers.eq("application/pdf"), checksum.capture());
@@ -214,7 +225,7 @@ class ManagedObjectServiceTest {
         ArgumentCaptor<byte[]> checksum = ArgumentCaptor.forClass(byte[].class);
 
         StoredBinary stored = inTransaction(
-            () -> service.storeInspectedAttachment(17, upload));
+            () -> service.storeInspectedAttachment(17, scanned(upload)));
 
         verify(objectStorage).put(
             anyString(),
@@ -303,7 +314,8 @@ class ManagedObjectServiceTest {
         assertThrows(
             RequestBodyTooLargeException.class,
             () -> inTransaction(
-                () -> limitedService.storeInspectedAttachment(17, inspected(new byte[] {1, 2, 3, 4}))));
+                () -> limitedService.storeInspectedAttachment(
+                    17, scanned(new byte[] {1, 2, 3, 4}))));
 
         verify(objectStorage, never()).put(
             anyString(), any(UploadSource.class), anyString(), any(byte[].class));
@@ -420,8 +432,8 @@ class ManagedObjectServiceTest {
 
     @Test
     void rejectsObjectWritesWithoutMetadataTransactionSynchronization() {
-        assertThrows(IllegalStateException.class, () -> service.storeAttachment(
-            17, "card.pdf", "application/pdf", new byte[] {1, 2, 3}));
+        assertThrows(IllegalStateException.class, () -> service.storeInspectedAttachment(
+            17, scanned(new byte[] {1, 2, 3})));
 
         verify(objectStorage, never()).put(
             anyString(), any(UploadSource.class), anyString(), any(byte[].class));
@@ -535,8 +547,8 @@ class ManagedObjectServiceTest {
     void storePersistsCleanupBeforeProviderWriteAndCancelsItInMetadataTransaction() {
         TransactionSynchronizationManager.initSynchronization();
         try {
-            StoredBinary stored = service.storeAttachment(
-                12, "card.pdf", "application/pdf", new byte[] {1, 2, 3});
+            StoredBinary stored = service.storeInspectedAttachment(
+                12, scanned(new byte[] {1, 2, 3}));
             String token = stored.url().substring(stored.url().lastIndexOf('/') + 1);
             String key = "workspaces/12/attachments/" + token;
             InOrder order = inOrder(deletionRetryQueue, quotaService, objectStorage);
@@ -561,8 +573,8 @@ class ManagedObjectServiceTest {
     void storeCleanupDoesNotDependOnAnAfterCompletionStatus() {
         TransactionSynchronizationManager.initSynchronization();
         try {
-            StoredBinary stored = service.storeAttachment(
-                12, "card.pdf", "application/pdf", new byte[] {1, 2, 3});
+            StoredBinary stored = service.storeInspectedAttachment(
+                12, scanned(new byte[] {1, 2, 3}));
             String token = stored.url().substring(stored.url().lastIndexOf('/') + 1);
             verify(deletionRetryQueue).prepareTenantWrite(12,
                 "workspaces/12/attachments/" + token);
@@ -610,8 +622,8 @@ class ManagedObjectServiceTest {
                 org.mockito.ArgumentMatchers.eq(12), any(ObjectDeletionTombstone.class));
         TransactionSynchronizationManager.initSynchronization();
         try {
-            assertThrows(ServiceUnavailableException.class, () -> service.storeAttachment(
-                12, "card.pdf", "application/pdf", new byte[] {1, 2, 3}));
+            assertThrows(ServiceUnavailableException.class, () -> service.storeInspectedAttachment(
+                12, scanned(new byte[] {1, 2, 3})));
 
             verify(quotaService, never()).reserve(
                 org.mockito.ArgumentMatchers.anyInt(), anyString(),
@@ -636,8 +648,8 @@ class ManagedObjectServiceTest {
             anyString(), any(UploadSource.class), anyString(), any(byte[].class));
         TransactionSynchronizationManager.initSynchronization();
         try {
-            assertThrows(ServiceUnavailableException.class, () -> service.storeAttachment(
-                12, "card.pdf", "application/pdf", new byte[] {1, 2, 3}));
+            assertThrows(ServiceUnavailableException.class, () -> service.storeInspectedAttachment(
+                12, scanned(new byte[] {1, 2, 3})));
 
             verify(deletionRetryQueue).prepareTenantWrite(12, persistedKey.get());
             verify(deletionRetryQueue, never()).cancelTenantInCurrentTransaction(
@@ -782,8 +794,8 @@ class ManagedObjectServiceTest {
         Thread storageFailure = startTask(
             () -> assertThrows(
                 ServiceUnavailableException.class,
-                () -> inTransaction(() -> service.storeAttachment(
-                    12, "card.pdf", "application/pdf", new byte[] {1, 2, 3}))),
+                () -> inTransaction(() -> service.storeInspectedAttachment(
+                    12, scanned(new byte[] {1, 2, 3})))),
             storageFailureCompleted);
         waitUntilReadinessInvalidationIsBlockedOrCompleted(storageFailure);
         publicationReleased.complete(null);

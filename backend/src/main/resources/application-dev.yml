@@ -36,3 +36,5 @@ connex:
     audit:
         integrity:
             hmac-secret: ${CONNEX_AUDIT_INTEGRITY_HMAC_SECRET:dev-audit-integrity-hmac-secret-change-me}
+    malware-scanning:
+        enabled: ${CONNEX_MALWARE_SCANNING_ENABLED:false}
