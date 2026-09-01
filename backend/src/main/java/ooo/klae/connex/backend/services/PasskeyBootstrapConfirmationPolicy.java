@@ -21,8 +21,13 @@ import ooo.klae.connex.backend.mappers.UserMapper;
  * not the population a stolen password endangers; requiring mail from it would add lockout risk
  * for no gain.
  *
- * <p>The requirement is independent of {@code privileged-mfa.enforced}. That flag governs
- * confinement, but a first enrollment stamps the session as stepped-up either way.
+ * <p>The requirement itself is evaluated independently of {@code privileged-mfa.enforced}, because
+ * a first enrollment stamps the session as stepped-up whether or not confinement is on. Its
+ * <em>strength</em>, however, is not independent of that flag: the confirmation is delivered to
+ * the account address, and {@code EmailChangeService.requestChange} re-points that address behind
+ * the current password alone. Confinement is what refuses email-change for an unenrolled
+ * privileged account, so with {@code enforced=false} a stolen password can redirect the delivery
+ * address and reduce this control back to one factor. See docs/PRIVILEGED_MFA.md.
  */
 @Service
 @RequiredArgsConstructor

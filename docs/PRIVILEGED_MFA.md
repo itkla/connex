@@ -119,12 +119,23 @@ that *had* a credential to recover; recovery cannot bootstrap a never-enrolled a
 
 ### Known residual
 
-When `CONNEX_PRIVILEGED_MFA_ENFORCED=false`, confinement is off and `POST /api/users/me/email-change`
-is reachable. That endpoint is guarded only by the current password, so an attacker holding the
-password could redirect the account address and then redeem the confirmation themselves. Under the
-default enforced posture the email-change endpoint is refused for an unenrolled privileged account
-and this path is closed. Tracked for the durable fix that makes privilege unobtainable until
-enrollment completes.
+**This control depends on `CONNEX_PRIVILEGED_MFA_ENFORCED=true` to hold.**
+
+The confirmation is delivered to the account's own email address, so the control is only as strong
+as that address. `POST /api/users/me/email-change` re-points the address behind the current
+password alone — no step-up, no notice to the old address — and sends its verification link to the
+*new* address. Confinement is what makes that endpoint unreachable for an unenrolled privileged
+account.
+
+With `CONNEX_PRIVILEGED_MFA_ENFORCED=false` the confinement filter short-circuits, so an attacker
+holding a stolen password can change the account email to one they control, request the enrollment
+confirmation, redeem it in their own session, and enrol their own passkey. In that configuration
+issue #1506 is **not** mitigated. Under the default enforced posture the pivot is closed.
+
+Fixing this properly means requiring a stronger proof for an email change on a privileged account,
+which is deliberately out of scope for this mitigation because it changes an unrelated user-facing
+flow. It is subsumed by the durable fix that makes privilege unobtainable until enrollment
+completes.
 
 ## Break-glass recovery
 
