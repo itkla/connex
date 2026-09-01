@@ -1,14 +1,16 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
 import {
+    AdjustmentsHorizontalIcon,
     ArrowRightIcon,
     CheckIcon,
     ClipboardDocumentCheckIcon,
     CurrencyYenIcon,
+    LockClosedIcon,
     ShieldCheckIcon,
     XMarkIcon,
 } from "@heroicons/react/24/outline";
@@ -34,9 +36,11 @@ import { cn } from "@/lib/utils";
 import { toastError, toastSuccess, toastWarn } from "@/app/lib/toast";
 import { emitNotificationStateChanged } from "@/app/components/notifications/notificationEvents";
 import { dealDocumentsHref } from "@/app/components/records/deals/dealLinks";
+import { useMediaQuery } from "@/app/components/calendar/useMediaQuery";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -95,7 +99,29 @@ const SOURCE_ICON: Record<WorkItemSource, React.ComponentType<{ className?: stri
 const SOURCES: WorkItemSource[] = ["task", "notification", "document_approval"];
 const URGENCIES: WorkItemUrgency[] = ["critical", "high", "normal", "low"];
 
-type RejectTarget = { item: WorkItem; comment: string };
+type Query = {
+    page: number;
+    sources: ReadonlySet<string>;
+    urgencies: ReadonlySet<string>;
+};
+
+const DEFAULT_QUERY: Query = { page: 1, sources: new Set(), urgencies: new Set() };
+
+function setEquals(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+    return a.size === b.size && [...a].every((value) => b.has(value));
+}
+
+function sameQuery(a: Query, b: Query): boolean {
+    return a.page === b.page && setEquals(a.sources, b.sources) && setEquals(a.urgencies, b.urgencies);
+}
+
+function isDefaultQuery(query: Query): boolean {
+    return query.page === 1 && query.sources.size === 0 && query.urgencies.size === 0;
+}
+
+type Loaded = { page: WorkItemPage; query: Query };
+type LoadFailure = "failed" | "forbidden" | null;
+type RejectDraft = { id: string; comment: string };
 
 type Props = {
     userId: number;
@@ -105,46 +131,54 @@ type Props = {
 /**
  * The actionable, deterministically ranked queue at the heart of My Work: tasks,
  * deal-close notifications, and approval steps from the merged projection, each with
- * its reason, urgency, and version-guarded in-place actions. Renders only claims the
- * projection can currently back: a failed or partial load never reads as caught-up,
- * and counts turn into at-least language whenever reconciliation is incomplete.
+ * its reason, urgency, and version-guarded in-place actions.
+ *
+ * <p>Every rendered claim is bound to the query that produced it: a result commits only
+ * while it still answers the user's current page/filter selection, the server-rendered
+ * default projection is adopted only while the default query is active, and a later
+ * failed refresh demotes retained rows to an explicitly stale presentation with no
+ * exact-count or caught-up claims. A forbidden filter renders a permission state, never
+ * another query's rows.
  */
 export default function MyWorkQueue({ userId, initial }: Props) {
     const t = useTranslations("MePage");
     const format = useFormatter();
     const router = useRouter();
-    const [page, setPage] = useState<WorkItemPage | null>(initial.ok ? initial.data : null);
-    const [stale, setStale] = useState(!initial.ok);
+    const wide = useMediaQuery("(min-width: 768px)");
+    const [query, setQuery] = useState<Query>(DEFAULT_QUERY);
+    const [loaded, setLoaded] = useState<Loaded | null>(
+        initial.ok ? { page: initial.data, query: DEFAULT_QUERY } : null,
+    );
+    const [loadFailure, setLoadFailure] = useState<LoadFailure>(initial.ok ? null : "failed");
+    const [inFlight, setInFlight] = useState(false);
     const [pendingIds, setPendingIds] = useState<ReadonlySet<string>>(new Set());
-    const [rejecting, setRejecting] = useState<RejectTarget | null>(null);
+    const [rejecting, setRejecting] = useState<RejectDraft | null>(null);
     const [rejectBusy, setRejectBusy] = useState(false);
     const [detailId, setDetailId] = useState<string | null>(null);
-    const [pageNumber, setPageNumber] = useState(1);
-    const [sourceFilter, setSourceFilter] = useState<ReadonlySet<string>>(new Set());
-    const [urgencyFilter, setUrgencyFilter] = useState<ReadonlySet<string>>(new Set());
+    const [filterSheetOpen, setFilterSheetOpen] = useState(false);
+    const [clientLoaded, setClientLoaded] = useState(false);
+    const queryRef = useRef(query);
+    useEffect(() => {
+        queryRef.current = query;
+    }, [query]);
     const fetchGeneration = useRef(0);
     const [adopted, setAdopted] = useState(initial);
     if (adopted !== initial) {
         setAdopted(initial);
-        if (initial.ok) {
-            setPage(initial.data);
-            setStale(false);
-        } else {
-            setStale(true);
+        if (isDefaultQuery(query) && !clientLoaded) {
+            if (initial.ok) {
+                setLoaded({ page: initial.data, query: DEFAULT_QUERY });
+                setLoadFailure(null);
+            } else if (loaded == null) {
+                setLoadFailure("failed");
+            }
         }
     }
 
-    const detail = detailId != null
-        ? page?.items.find((row) => row.id === detailId) ?? null
-        : null;
-    if (detailId != null && detail == null) {
-        setDetailId(null);
-    }
-
-    const load = useCallback(async (
-        target: { page: number; sources: ReadonlySet<string>; urgencies: ReadonlySet<string> },
-    ) => {
+    const load = useCallback(async (target: Query) => {
         const generation = ++fetchGeneration.current;
+        setClientLoaded(true);
+        setInFlight(true);
         try {
             const next = await getMyWork({
                 page: target.page,
@@ -152,58 +186,53 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                 urgencies: [...target.urgencies] as WorkItemUrgency[],
             });
             if (generation !== fetchGeneration.current) return;
-            setPage(next);
-            setStale(false);
-        } catch {
+            if (sameQuery(target, queryRef.current)) {
+                setLoaded({ page: next, query: target });
+                setLoadFailure(null);
+            }
+        } catch (error) {
             if (generation !== fetchGeneration.current) return;
-            setStale(true);
+            if (sameQuery(target, queryRef.current)) {
+                setLoadFailure(error instanceof ApiError && error.status === 403
+                    ? "forbidden"
+                    : "failed");
+            }
+        } finally {
+            if (generation === fetchGeneration.current) setInFlight(false);
         }
+    }, []);
+
+    const applyQuery = useCallback((next: Query) => {
+        setQuery(next);
+        queryRef.current = next;
+        setLoadFailure(null);
+        void load(next);
+    }, [load]);
+
+    const reconcile = useCallback(() => {
+        void load(queryRef.current);
         router.refresh();
-    }, [router]);
-
-    const reload = useCallback(
-        () => load({ page: pageNumber, sources: sourceFilter, urgencies: urgencyFilter }),
-        [load, pageNumber, sourceFilter, urgencyFilter],
-    );
-
-    const changePage = useCallback((next: number) => {
-        setPageNumber(next);
-        void load({ page: next, sources: sourceFilter, urgencies: urgencyFilter });
-    }, [load, sourceFilter, urgencyFilter]);
+    }, [load, router]);
 
     const toggleFilter = useCallback((kind: "source" | "urgency", value: string) => {
-        const [current, apply] = kind === "source"
-            ? [sourceFilter, setSourceFilter] as const
-            : [urgencyFilter, setUrgencyFilter] as const;
-        const next = new Set(current);
-        if (next.has(value)) next.delete(value); else next.add(value);
-        apply(next);
-        setPageNumber(1);
-        void load({
+        const current = queryRef.current;
+        const set = new Set(kind === "source" ? current.sources : current.urgencies);
+        if (set.has(value)) set.delete(value); else set.add(value);
+        applyQuery({
             page: 1,
-            sources: kind === "source" ? next : sourceFilter,
-            urgencies: kind === "urgency" ? next : urgencyFilter,
+            sources: kind === "source" ? set : current.sources,
+            urgencies: kind === "urgency" ? set : current.urgencies,
         });
-    }, [load, sourceFilter, urgencyFilter]);
+    }, [applyQuery]);
 
     const clearFilter = useCallback((kind: "source" | "urgency") => {
-        const empty = new Set<string>();
-        if (kind === "source") setSourceFilter(empty); else setUrgencyFilter(empty);
-        setPageNumber(1);
-        void load({
+        const current = queryRef.current;
+        applyQuery({
             page: 1,
-            sources: kind === "source" ? empty : sourceFilter,
-            urgencies: kind === "urgency" ? empty : urgencyFilter,
+            sources: kind === "source" ? new Set() : current.sources,
+            urgencies: kind === "urgency" ? new Set() : current.urgencies,
         });
-    }, [load, sourceFilter, urgencyFilter]);
-
-    const clearAllFilters = useCallback(() => {
-        const empty = new Set<string>();
-        setSourceFilter(empty);
-        setUrgencyFilter(empty);
-        setPageNumber(1);
-        void load({ page: 1, sources: empty, urgencies: empty });
-    }, [load]);
+    }, [applyQuery]);
 
     const act = useCallback(
         async (
@@ -215,18 +244,21 @@ export default function MyWorkQueue({ userId, initial }: Props) {
             setPendingIds((current) => new Set(current).add(item.id));
             try {
                 const response = await run();
-                setPage((current) => current == null ? current : {
+                setLoaded((current) => current == null ? current : {
                     ...current,
-                    items: current.items.filter((row) => row.id !== item.id),
-                    knownMatchingTotal: Math.max(0, current.knownMatchingTotal - 1),
-                    knownOverallTotal: Math.max(0, current.knownOverallTotal - 1),
+                    page: {
+                        ...current.page,
+                        items: current.page.items.filter((row) => row.id !== item.id),
+                        knownMatchingTotal: Math.max(0, current.page.knownMatchingTotal - 1),
+                        knownOverallTotal: Math.max(0, current.page.knownOverallTotal - 1),
+                    },
                 });
                 setDetailId((current) => (current === item.id ? null : current));
                 if (response.notificationStateVersion != null) {
                     emitNotificationStateChanged(userId, response.notificationStateVersion);
                 }
                 toastSuccess(done);
-                await reload();
+                reconcile();
                 return true;
             } catch (error) {
                 if (error instanceof ApiError && error.status === 409) {
@@ -239,7 +271,7 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                         : "";
                     toastError(`${t("queueActionUnconfirmed")}${reference}`);
                 }
-                await reload();
+                reconcile();
                 return false;
             } finally {
                 setPendingIds((current) => {
@@ -249,7 +281,7 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                 });
             }
         },
-        [pendingIds, reload, t, userId],
+        [pendingIds, reconcile, t, userId],
     );
 
     const complete = useCallback((item: WorkItem) =>
@@ -268,6 +300,21 @@ export default function MyWorkQueue({ userId, initial }: Props) {
             ...(comment.trim().length > 0 ? { comment: comment.trim() } : {}),
         }), t("queueRejected")), [act, t]);
 
+    const current = loaded != null && sameQuery(loaded.query, query) ? loaded.page : null;
+    const detail = detailId != null
+        ? current?.items.find((row) => row.id === detailId) ?? null
+        : null;
+    if (detailId != null && detail == null) {
+        setDetailId(null);
+    }
+    const rejectItem = rejecting != null
+        ? loaded?.page.items.find((row) => row.id === rejecting.id) ?? null
+        : null;
+    if (rejecting != null && rejectItem == null) {
+        setRejecting(null);
+        if (rejectBusy) setRejectBusy(false);
+    }
+
     const rejectDirty = (rejecting?.comment.trim().length ?? 0) > 0;
     const rejectGuard = useUnsavedChangesGuard({
         isDirty: rejectDirty,
@@ -275,30 +322,70 @@ export default function MyWorkQueue({ userId, initial }: Props) {
         enabled: rejecting != null && !rejectBusy,
     });
 
-    if (page == null) {
-        return (
-            <section>
-                <SectionHeader title={t("queueTitle")} />
-                <SectionUnavailable
-                    title={t("queueUnavailableTitle")}
-                    body={t("queueUnavailableBody")}
-                    onReset={() => { void reload(); }}
-                />
-            </section>
-        );
-    }
-
-    const unavailableSources = page.sourceStatuses
+    const filtered = query.sources.size > 0 || query.urgencies.size > 0;
+    const stale = current != null && loadFailure === "failed";
+    const incomplete = current != null
+        && (!current.totalsComplete || current.availability !== "available");
+    const unavailableSources = current?.sourceStatuses
         .filter((status) => status.status !== "available")
-        .map((status) => t(`queueSource_${status.source}`));
-    const partial = page.availability === "partial" || page.availability === "unavailable";
-    const filtered = sourceFilter.size > 0 || urgencyFilter.size > 0;
-    const exact = page.totalsComplete && !stale && !partial;
-    const countLabel = exact
-        ? format.number(page.knownMatchingTotal)
-        : t("queueAtLeast", { count: page.knownMatchingTotal });
-    const showPagination = pageNumber > 1
-        || (page.hasNextKnown ? page.hasNext : page.items.length >= page.size);
+        .map((status) => t(`queueSource_${status.source}`)) ?? [];
+    const countLabel = current == null || stale
+        ? null
+        : incomplete
+            ? t("queueAtLeast", { count: current.knownMatchingTotal })
+            : format.number(current.knownMatchingTotal);
+    const pageIsFull = current != null && current.items.length >= current.size;
+    const nextEnabled = current != null
+        && (current.hasNextKnown ? current.hasNext : pageIsFull);
+    const showPagination = query.page > 1 || nextEnabled;
+
+    const filterControls = (variant: "menus" | "rows") => (
+        variant === "menus" ? (
+            <>
+                <MultiSelectFilter
+                    label={t("queueFilterSource")}
+                    ariaLabel={t("queueFilterSource")}
+                    options={SOURCES.map((value) => ({ value, label: t(`queueSource_${value}`) }))}
+                    selected={new Set(query.sources)}
+                    onToggle={(value) => toggleFilter("source", value)}
+                    onClear={() => clearFilter("source")}
+                    clearLabel={t("queueFilterClear")}
+                />
+                <MultiSelectFilter
+                    label={t("queueFilterUrgency")}
+                    ariaLabel={t("queueFilterUrgency")}
+                    options={URGENCIES.map((value) => ({ value, label: t(`queueUrgency_${value}`) }))}
+                    selected={new Set(query.urgencies)}
+                    onToggle={(value) => toggleFilter("urgency", value)}
+                    onClear={() => clearFilter("urgency")}
+                    clearLabel={t("queueFilterClear")}
+                />
+            </>
+        ) : (
+            <div className="flex flex-col gap-4 px-4 pb-4">
+                {([
+                    ["source", t("queueFilterSource"), SOURCES.map((value) => [value, t(`queueSource_${value}`)] as const), query.sources],
+                    ["urgency", t("queueFilterUrgency"), URGENCIES.map((value) => [value, t(`queueUrgency_${value}`)] as const), query.urgencies],
+                ] as const).map(([kind, heading, options, selected]) => (
+                    <div key={kind}>
+                        <p className="mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">{heading}</p>
+                        <div className="flex flex-wrap gap-2">
+                            {options.map(([value, label]) => (
+                                <Button
+                                    key={value}
+                                    size="inline"
+                                    variant={selected.has(value) ? "default" : "outline"}
+                                    onClick={() => toggleFilter(kind, value)}
+                                >
+                                    {label}
+                                </Button>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        )
+    );
 
     return (
         <section>
@@ -306,129 +393,191 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                 title={t("queueTitle")}
                 action={(
                     <span className="flex items-center gap-2 px-1">
-                        {page.items.length > 0 && (
+                        {countLabel != null && current != null && current.items.length > 0 && (
                             <span className="px-1 text-xs tabular-nums text-muted-foreground">{countLabel}</span>
                         )}
-                        <MultiSelectFilter
-                            label={t("queueFilterSource")}
-                            ariaLabel={t("queueFilterSource")}
-                            options={SOURCES.map((value) => ({ value, label: t(`queueSource_${value}`) }))}
-                            selected={new Set(sourceFilter)}
-                            onToggle={(value) => toggleFilter("source", value)}
-                            onClear={() => clearFilter("source")}
-                            clearLabel={t("queueFilterClear")}
-                        />
-                        <MultiSelectFilter
-                            label={t("queueFilterUrgency")}
-                            ariaLabel={t("queueFilterUrgency")}
-                            options={URGENCIES.map((value) => ({ value, label: t(`queueUrgency_${value}`) }))}
-                            selected={new Set(urgencyFilter)}
-                            onToggle={(value) => toggleFilter("urgency", value)}
-                            onClear={() => clearFilter("urgency")}
-                            clearLabel={t("queueFilterClear")}
-                        />
+                        <span className="hidden items-center gap-2 md:flex">
+                            {filterControls("menus")}
+                        </span>
+                        <span className="md:hidden">
+                            <IconButton label={t("queueFilterTitle")} onClick={() => setFilterSheetOpen(true)}>
+                                <AdjustmentsHorizontalIcon />
+                            </IconButton>
+                        </span>
                     </span>
                 )}
             />
-            {stale && page.items.length > 0 && (
-                <p className="mb-3 rounded-xl border border-border bg-muted/40 px-4 py-2.5 text-xs text-muted-foreground">
-                    {t("queueStaleBanner")}
-                </p>
-            )}
-            {partial && !stale && page.items.length > 0 && (
-                <p className="mb-3 rounded-xl border border-border bg-muted/40 px-4 py-2.5 text-xs text-muted-foreground">
-                    {t("queuePartialNamed", { sources: unavailableSources.join(t("queueSourceJoin")) })}
-                </p>
-            )}
-            {page.items.length === 0 ? (
-                partial || stale ? (
-                    <SectionUnavailable
-                        title={t("queuePartialEmptyTitle")}
-                        body={unavailableSources.length > 0
-                            ? t("queuePartialNamed", { sources: unavailableSources.join(t("queueSourceJoin")) })
-                            : t("queueUnavailableBody")}
-                        onReset={() => { void reload(); }}
-                    />
-                ) : filtered ? (
+            {current == null ? (
+                loadFailure === "forbidden" ? (
                     <EmptyState
-                        icon={CheckIcon}
-                        title={t("queueNoResultsTitle")}
-                        body={t("queueNoResultsBody")}
+                        icon={LockClosedIcon}
+                        title={t("queueForbiddenTitle")}
+                        body={t("queueForbiddenBody")}
                         tone="muted"
                         className="py-12"
                         action={(
-                            <Button variant="outline" onClick={clearAllFilters}>
+                            <Button variant="outline" onClick={() => applyQuery(DEFAULT_QUERY)}>
                                 {t("queueFilterClearAll")}
                             </Button>
                         )}
                     />
+                ) : inFlight ? (
+                    <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                        {Array.from({ length: 3 }).map((_, index) => (
+                            <div key={index} className="flex items-center gap-4 border-b border-border px-5 py-3.5 last:border-b-0">
+                                <Skeleton className="size-9 rounded-lg" />
+                                <div className="min-w-0 flex-1 space-y-1.5">
+                                    <Skeleton className="h-4 w-2/5" />
+                                    <Skeleton className="h-3 w-3/5" />
+                                </div>
+                                <Skeleton className="h-8 w-24 rounded-full" />
+                            </div>
+                        ))}
+                    </div>
                 ) : (
-                    <EmptyState
-                        icon={CheckIcon}
-                        title={t("queueEmptyTitle")}
-                        body={t("queueEmptyBody")}
-                        tone="brand"
-                        className="py-12"
-                        action={(
-                            <Button asChild variant="outline">
-                                <Link href="/activity/tasks">{t("queueEmptyAction")}</Link>
-                            </Button>
-                        )}
+                    <SectionUnavailable
+                        title={t("queueUnavailableTitle")}
+                        body={t("queueUnavailableBody")}
+                        onReset={() => { void load(queryRef.current); }}
                     />
                 )
             ) : (
-                <div className="overflow-hidden rounded-2xl border border-border bg-card">
-                    <ul className="divide-y divide-border">
-                        {page.items.map((item) => (
-                            <QueueRow
-                                key={item.id}
-                                item={item}
-                                pending={pendingIds.has(item.id)}
-                                onComplete={complete}
-                                onDismiss={dismiss}
-                                onSnooze={snooze}
-                                onApprove={approve}
-                                onReject={(target) => setRejecting({ item: target, comment: "" })}
-                                onDetail={(target) => setDetailId(target.id)}
+                <>
+                    {stale && current.items.length > 0 && (
+                        <p className="mb-3 rounded-xl border border-border bg-muted/40 px-4 py-2.5 text-xs text-muted-foreground">
+                            {t("queueStaleBanner")}
+                        </p>
+                    )}
+                    {incomplete && unavailableSources.length > 0 && current.items.length > 0 && (
+                        <p className="mb-3 rounded-xl border border-border bg-muted/40 px-4 py-2.5 text-xs text-muted-foreground">
+                            {t("queuePartialNamed", { sources: unavailableSources.join(t("queueSourceJoin")) })}
+                        </p>
+                    )}
+                    {current.items.length === 0 ? (
+                        stale || incomplete ? (
+                            <SectionUnavailable
+                                title={t("queuePartialEmptyTitle")}
+                                body={unavailableSources.length > 0
+                                    ? t("queuePartialNamed", { sources: unavailableSources.join(t("queueSourceJoin")) })
+                                    : t("queueUnavailableBody")}
+                                onReset={() => { void load(queryRef.current); }}
                             />
-                        ))}
-                    </ul>
-                </div>
+                        ) : query.page > 1 ? (
+                            <EmptyState
+                                icon={CheckIcon}
+                                title={t("queuePageEmptyTitle")}
+                                body={t("queuePageEmptyBody")}
+                                tone="muted"
+                                className="py-12"
+                                action={(
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => applyQuery({ ...queryRef.current, page: 1 })}
+                                    >
+                                        {t("queueBackToFirstPage")}
+                                    </Button>
+                                )}
+                            />
+                        ) : filtered ? (
+                            <EmptyState
+                                icon={CheckIcon}
+                                title={t("queueNoResultsTitle")}
+                                body={t("queueNoResultsBody")}
+                                tone="muted"
+                                className="py-12"
+                                action={(
+                                    <Button variant="outline" onClick={() => applyQuery(DEFAULT_QUERY)}>
+                                        {t("queueFilterClearAll")}
+                                    </Button>
+                                )}
+                            />
+                        ) : (
+                            <EmptyState
+                                icon={CheckIcon}
+                                title={t("queueEmptyTitle")}
+                                body={t("queueEmptyBody")}
+                                tone="brand"
+                                className="py-12"
+                                action={(
+                                    <Button asChild variant="outline">
+                                        <Link href="/activity/tasks">{t("queueEmptyAction")}</Link>
+                                    </Button>
+                                )}
+                            />
+                        )
+                    ) : (
+                        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                            <ul className="divide-y divide-border">
+                                {current.items.map((item) => (
+                                    <QueueRow
+                                        key={item.id}
+                                        item={item}
+                                        pending={pendingIds.has(item.id)}
+                                        onComplete={complete}
+                                        onDismiss={dismiss}
+                                        onSnooze={snooze}
+                                        onApprove={approve}
+                                        onReject={(target) => setRejecting({ id: target.id, comment: "" })}
+                                        onDetail={(target) => setDetailId(target.id)}
+                                    />
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                    {showPagination && (
+                        <Pagination className="mt-3">
+                            <PaginationContent>
+                                <PaginationItem>
+                                    <PaginationPrevious
+                                        disabled={query.page <= 1 || inFlight}
+                                        aria-label={t("queuePrevious")}
+                                        onClick={() => applyQuery({ ...queryRef.current, page: Math.max(1, query.page - 1) })}
+                                    />
+                                </PaginationItem>
+                                <PaginationItem>
+                                    <span className="px-3 text-sm tabular-nums text-muted-foreground">
+                                        {t("queuePage", { page: query.page })}
+                                    </span>
+                                </PaginationItem>
+                                <PaginationItem>
+                                    <PaginationNext
+                                        disabled={!nextEnabled || inFlight}
+                                        aria-label={t("queueNext")}
+                                        onClick={() => applyQuery({ ...queryRef.current, page: query.page + 1 })}
+                                    />
+                                </PaginationItem>
+                            </PaginationContent>
+                        </Pagination>
+                    )}
+                </>
             )}
-            {showPagination && (
-                <Pagination className="mt-3">
-                    <PaginationContent>
-                        <PaginationItem>
-                            <PaginationPrevious
-                                disabled={pageNumber <= 1}
-                                aria-label={t("queuePrevious")}
-                                onClick={() => changePage(Math.max(1, pageNumber - 1))}
-                            />
-                        </PaginationItem>
-                        <PaginationItem>
-                            <span className="px-3 text-sm tabular-nums text-muted-foreground">
-                                {t("queuePage", { page: pageNumber })}
-                            </span>
-                        </PaginationItem>
-                        <PaginationItem>
-                            <PaginationNext
-                                disabled={page.hasNextKnown && !page.hasNext}
-                                aria-label={t("queueNext")}
-                                onClick={() => changePage(pageNumber + 1)}
-                            />
-                        </PaginationItem>
-                    </PaginationContent>
-                </Pagination>
-            )}
+
+            <Drawer
+                open={filterSheetOpen}
+                onOpenChange={setFilterSheetOpen}
+                swipeDirection="down"
+                showSwipeHandle
+            >
+                <DrawerContent className="mx-auto flex max-h-[70vh] w-full flex-col gap-0 rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))]">
+                    <DrawerHeader>
+                        <DrawerTitle>{t("queueFilterTitle")}</DrawerTitle>
+                    </DrawerHeader>
+                    <div className="min-h-0 flex-1 overflow-y-auto">
+                        {filterControls("rows")}
+                    </div>
+                </DrawerContent>
+            </Drawer>
 
             <ResponsiveDialog
                 open={rejecting != null}
-                onOpenChange={(open) => { if (!open) rejectGuard.requestClose(); }}
+                onOpenChange={(open) => {
+                    if (!open && !rejectBusy) rejectGuard.requestClose();
+                }}
             >
                 <ResponsiveDialogContent className="space-y-3 p-5 sm:max-w-md sm:p-6">
                     <ResponsiveDialogTitle>{t("queueRejectTitle")}</ResponsiveDialogTitle>
                     <ResponsiveDialogDescription>
-                        {rejecting != null ? t("queueRejectBody", { title: rejecting.item.title }) : ""}
+                        {rejectItem != null ? t("queueRejectBody", { title: rejectItem.title }) : ""}
                     </ResponsiveDialogDescription>
                     <Textarea
                         value={rejecting?.comment ?? ""}
@@ -445,11 +594,12 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                         </Button>
                         <Button
                             variant="destructive"
-                            disabled={rejectBusy || rejecting == null}
+                            disabled={rejectBusy || rejectItem == null}
                             onClick={() => {
-                                if (rejecting == null) return;
+                                if (rejecting == null || rejectItem == null) return;
+                                const comment = rejecting.comment;
                                 setRejectBusy(true);
-                                void reject(rejecting.item, rejecting.comment).then((succeeded) => {
+                                void reject(rejectItem, comment).then((succeeded) => {
                                     setRejectBusy(false);
                                     if (succeeded) setRejecting(null);
                                 });
@@ -469,6 +619,8 @@ export default function MyWorkQueue({ userId, initial }: Props) {
             <Drawer
                 open={detail != null}
                 onOpenChange={(open) => { if (!open) setDetailId(null); }}
+                swipeDirection={wide ? "right" : "down"}
+                showSwipeHandle={!wide}
             >
                 <DrawerContent className="mx-auto flex max-h-[85vh] w-full flex-col gap-0 rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))] md:mx-0 md:h-full md:max-h-none md:max-w-md md:rounded-2xl md:pb-4">
                     {detail != null && (
@@ -483,24 +635,26 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                                 <DrawerTitle className="text-lg leading-snug">{detail.title}</DrawerTitle>
                                 <DrawerDescription>{reasonLabel(t, format, detail)}</DrawerDescription>
                             </DrawerHeader>
-                            <div className="flex flex-col gap-3 px-4 pb-2">
+                            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-2">
                                 <ul className="space-y-1.5 text-sm text-muted-foreground">
                                     {detail.evidence.map((row, index) => (
                                         <li key={`${row.code}:${index}`} className="flex items-center gap-2">
                                             <span className={cn("size-1.5 shrink-0 rounded-full", URGENCY_DOT[detail.urgency])} />
                                             <span>
+                                                {row.label != null && row.label.length > 0 && row.label !== detail.title
+                                                    ? `${row.label} · `
+                                                    : ""}
                                                 {t(`queueEvidence_${row.code}`)}
-                                                {row.date != null && ` · ${formatDay(format, row.date)}`}
+                                                {" · "}
+                                                {formatInstant(format, row.date != null ? `${row.date}T00:00:00` : row.occurredAt)}
                                             </span>
                                         </li>
                                     ))}
                                 </ul>
                                 <p className="text-xs text-muted-foreground">
-                                    {t("queueFreshness", {
-                                        at: format.dateTime(new Date(detail.freshnessAt), {
-                                            month: "short", day: "numeric", hour: "numeric", minute: "numeric",
-                                        }),
-                                    })}
+                                    {t("queueFreshness", { at: formatInstant(format, detail.freshnessAt) })}
+                                    {" · "}
+                                    {t("queueAsOf", { at: formatInstant(format, detail.asOf) })}
                                 </p>
                                 <div className="flex flex-wrap justify-end gap-2">
                                     <Button asChild variant="outline">
@@ -521,7 +675,7 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                                         onComplete={complete}
                                         onApprove={approve}
                                         onDismiss={dismiss}
-                                        onReject={(target) => setRejecting({ item: target, comment: "" })}
+                                        onReject={(target) => setRejecting({ id: target.id, comment: "" })}
                                         labels={t}
                                     />
                                 </div>
@@ -551,6 +705,12 @@ type Format = ReturnType<typeof useFormatter>;
 
 function formatDay(format: Format, isoDate: string): string {
     return format.dateTime(new Date(`${isoDate}T00:00:00`), { month: "short", day: "numeric" });
+}
+
+function formatInstant(format: Format, iso: string): string {
+    return format.dateTime(new Date(iso), {
+        month: "short", day: "numeric", hour: "numeric", minute: "numeric",
+    });
 }
 
 function reasonLabel(t: Translate, format: Format, item: WorkItem): string {
@@ -732,6 +892,13 @@ function RowText({
             <span className="mt-0.5 block truncate text-xs text-muted-foreground">
                 {reasonLabel(t, format, item)}
                 {item.context.label !== item.title && ` · ${item.context.label}`}
+            </span>
+            <span className="mt-0.5 hidden truncate text-[11px] text-muted-foreground/80 sm:block">
+                {t(`queueSource_${item.source}`)}
+                {" · "}
+                {t(`queueUrgency_${item.urgency}`)}
+                {" · "}
+                {t("queueFreshness", { at: formatInstant(format, item.freshnessAt) })}
             </span>
         </>
     );

@@ -270,11 +270,12 @@ describe("My Work queue contracts pinned at source level", () => {
         expect(QUEUE_SOURCE).toContain('toastWarn(t("queueStale"))');
         expect(QUEUE_SOURCE).toContain("error.status === 403");
         expect(QUEUE_SOURCE).toContain("queueActionUnconfirmed");
-        const catchBlock = QUEUE_SOURCE.slice(
-            QUEUE_SOURCE.indexOf("catch (error)"),
-            QUEUE_SOURCE.indexOf("finally {"),
+        const actBlock = QUEUE_SOURCE.slice(QUEUE_SOURCE.indexOf("const act = useCallback"));
+        const catchBlock = actBlock.slice(
+            actBlock.indexOf("catch (error)"),
+            actBlock.indexOf("finally {"),
         );
-        expect(catchBlock).toContain("await reload()");
+        expect(catchBlock).toContain("reconcile()");
     });
 
     it("tracks pending actions per item and gates refetch generations", () => {
@@ -284,11 +285,11 @@ describe("My Work queue contracts pinned at source level", () => {
     });
 
     it("decrements totals on optimistic removal", () => {
-        expect(QUEUE_SOURCE).toContain("knownMatchingTotal: Math.max(0, current.knownMatchingTotal - 1)");
+        expect(QUEUE_SOURCE).toContain("knownMatchingTotal: Math.max(0, current.page.knownMatchingTotal - 1)");
     });
 
     it("derives the open detail from current items so a refetch can close or update it", () => {
-        expect(QUEUE_SOURCE).toContain("page?.items.find((row) => row.id === detailId)");
+        expect(QUEUE_SOURCE).toContain("current?.items.find((row) => row.id === detailId)");
         expect(QUEUE_SOURCE).toContain("if (detailId != null && detail == null)");
     });
 

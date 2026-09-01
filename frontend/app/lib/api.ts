@@ -3980,7 +3980,12 @@ export type MyWorkQuery = {
 
 export function getMyWork(query: MyWorkQuery = {}, init: RequestInit = {}) {
     const params = new URLSearchParams();
-    if (query.page != null && query.page > 1) params.set('page', String(query.page));
+    if (query.page != null) {
+        if (!Number.isInteger(query.page) || query.page < 1) {
+            throw new Error(`My Work page must be a positive integer, got ${query.page}`);
+        }
+        if (query.page > 1) params.set('page', String(query.page));
+    }
     for (const source of query.sources ?? []) params.append('source', source);
     for (const urgency of query.urgencies ?? []) params.append('urgency', urgency);
     const suffix = params.size > 0 ? `?${params.toString()}` : '';
