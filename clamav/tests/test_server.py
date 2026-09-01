@@ -14,7 +14,7 @@ from clamav_service.config import ServiceConfig
 from clamav_service.server import create_server
 
 
-VALID_TOKEN = "0123456789abcdef0123456789abcdef"
+VALID_TOKEN = "connex-clamav-test-token-not-a-secret"
 
 
 def free_port() -> int:

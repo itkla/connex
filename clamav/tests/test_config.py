@@ -14,7 +14,7 @@ from clamav_service.config import (
 from clamav_service.startup import StartupFailure
 
 
-VALID_TOKEN = "0123456789abcdef0123456789abcdef"
+VALID_TOKEN = "connex-clamav-test-token-not-a-secret"
 
 
 def environment(**overrides: str) -> dict[str, str]:
