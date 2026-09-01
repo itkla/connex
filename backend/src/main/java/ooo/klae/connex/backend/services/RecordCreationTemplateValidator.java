@@ -13,12 +13,14 @@ import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
+import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.ObjectMapper;
-
-import lombok.RequiredArgsConstructor;
+import tools.jackson.databind.ObjectWriter;
 
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Stage;
@@ -41,7 +43,6 @@ import ooo.klae.connex.backend.recordcreation.RecordCreationFieldRegistry.FieldD
 import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 
 @Service
-@RequiredArgsConstructor
 public class RecordCreationTemplateValidator {
 
     public record ValidatedTemplate(
@@ -75,6 +76,35 @@ public class RecordCreationTemplateValidator {
     private final PipelineMapper pipelineMapper;
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
+    private final ObjectWriter canonicalWriter;
+
+    public RecordCreationTemplateValidator(
+            RecordCreationFieldRegistry fieldRegistry,
+            CustomFieldDefinitionMapper customFieldMapper,
+            TagMapper tagMapper,
+            CompanyMapper companyMapper,
+            PersonMapper personMapper,
+            PipelineMapper pipelineMapper,
+            WorkspaceService workspaceService,
+            ObjectMapper objectMapper) {
+        this.fieldRegistry = fieldRegistry;
+        this.customFieldMapper = customFieldMapper;
+        this.tagMapper = tagMapper;
+        this.companyMapper = companyMapper;
+        this.personMapper = personMapper;
+        this.pipelineMapper = pipelineMapper;
+        this.workspaceService = workspaceService;
+        this.objectMapper = objectMapper;
+        this.canonicalWriter = objectMapper.rebuild()
+            .changeDefaultPropertyInclusion(ignored -> JsonInclude.Value.construct(
+                JsonInclude.Include.ALWAYS,
+                JsonInclude.Include.ALWAYS))
+            .disable(
+                MapperFeature.SORT_PROPERTIES_ALPHABETICALLY,
+                MapperFeature.SORT_CREATOR_PROPERTIES_FIRST)
+            .build()
+            .writerFor(RecordCreationTemplateDefinitionDto.class);
+    }
 
     public ValidatedTemplate validateAndCanonicalize(
             RecordCreationRecordType recordType,
@@ -90,7 +120,7 @@ public class RecordCreationTemplateValidator {
             canonicalDefinition(recordType, definition);
         String json;
         try {
-            json = objectMapper.writeValueAsString(canonicalDefinition);
+            json = canonicalWriter.writeValueAsString(canonicalDefinition);
         } catch (Exception exception) {
             throw invalid("The template definition could not be serialized");
         }
@@ -257,8 +287,11 @@ public class RecordCreationTemplateValidator {
                 yield spec;
             }
             case literal_references -> {
+                if (spec.referenceIds().stream().anyMatch(id -> id == null || id <= 0)) {
+                    throw defaultForbidden("Tag defaults must contain 1 through 20 positive IDs");
+                }
                 List<Integer> ids = spec.referenceIds().stream().sorted().distinct().toList();
-                if (ids.isEmpty() || ids.size() > 20 || ids.stream().anyMatch(id -> id == null || id <= 0)) {
+                if (ids.isEmpty() || ids.size() > 20) {
                     throw defaultForbidden("Tag defaults must contain 1 through 20 positive IDs");
                 }
                 for (Integer id : ids) {
@@ -337,8 +370,12 @@ public class RecordCreationTemplateValidator {
     }
 
     private void validateNumberDefault(String fieldKey, BigDecimal value) {
-        if (value.scale() > 4 || value.precision() > 20
-                || "value".equals(fieldKey) && value.signum() < 0) {
+        int fractionalDigits = Math.max(value.scale(), 0);
+        int integerDigits = Math.max(value.precision() - value.scale(), 0);
+        boolean invalid = "value".equals(fieldKey)
+            ? value.signum() < 0 || fractionalDigits > 2 || integerDigits > 13
+            : fractionalDigits > 4 || integerDigits > 16;
+        if (invalid) {
             throw defaultForbidden("The numeric default is out of range");
         }
     }

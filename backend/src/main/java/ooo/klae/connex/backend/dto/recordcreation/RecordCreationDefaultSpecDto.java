@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 import ooo.klae.connex.backend.recordcreation.RecordCreationDefaultKind;
@@ -16,6 +17,6 @@ public record RecordCreationDefaultSpecDto(
     Boolean booleanValue,
     LocalDate dateValue,
     Integer referenceId,
-    @Size(max = 20) List<Integer> referenceIds
+    @Size(max = 20) List<@NotNull @Positive Integer> referenceIds
 ) {
 }

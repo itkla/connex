@@ -22,14 +22,17 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.dto.recordcreation.LocalizedTextDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationContextDto;
+import ooo.klae.connex.backend.dto.recordcreation.RecordCreationDefaultSpecDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateDefinitionDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateFieldDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateGroupDto;
 import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationFieldDto;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.recordcreation.RecordCreationDefaultKind;
 import ooo.klae.connex.backend.recordcreation.RecordCreationDefaultOrigin;
 import ooo.klae.connex.backend.recordcreation.RecordCreationFieldRegistry;
 import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
@@ -41,6 +44,7 @@ class RecordCreationTemplateResolverTest {
     private final RecordCreationTemplateValidator validator = mock(RecordCreationTemplateValidator.class);
     private final CustomFieldDefinitionMapper customFieldMapper = mock(CustomFieldDefinitionMapper.class);
     private final CompanyMapper companyMapper = mock(CompanyMapper.class);
+    private final PersonMapper personMapper = mock(PersonMapper.class);
     private final PipelineMapper pipelineMapper = mock(PipelineMapper.class);
     private final TagMapper tagMapper = mock(TagMapper.class);
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
@@ -62,6 +66,7 @@ class RecordCreationTemplateResolverTest {
             validator,
             customFieldMapper,
             companyMapper,
+            personMapper,
             pipelineMapper,
             tagMapper,
             workspaceService,
@@ -141,6 +146,156 @@ class RecordCreationTemplateResolverTest {
     }
 
     @Test
+    void omittedPersonAndCompanyOwnersResolveToTheCurrentActorPolicy() {
+        var person = resolver.resolvePreview(
+            "workspace:person",
+            RecordCreationRecordType.person,
+            names(),
+            null,
+            definition("basics", "name"),
+            null);
+        var company = resolver.resolvePreview(
+            "workspace:company",
+            RecordCreationRecordType.company,
+            names(),
+            null,
+            definition("basics", "name"),
+            null);
+
+        assertEquals(11, field(person, "owner").defaultValue().intValue());
+        assertEquals(RecordCreationDefaultOrigin.policy, field(person, "owner").defaultOrigin());
+        assertEquals(11, field(company, "owner").defaultValue().intValue());
+        assertEquals(RecordCreationDefaultOrigin.policy, field(company, "owner").defaultOrigin());
+    }
+
+    @Test
+    void pipelineOnlyDefaultDerivesAStageFromThatPipeline() {
+        Pipeline first = pipeline(3, "First");
+        Pipeline configured = pipeline(9, "Configured");
+        Stage firstStage = stage(7, first, 0, "First stage");
+        Stage configuredStage = stage(12, configured, 0, "Configured stage");
+        when(pipelineMapper.getAllPipelines(7)).thenReturn(List.of(first, configured));
+        when(pipelineMapper.getAllStages(7)).thenReturn(List.of(firstStage, configuredStage));
+
+        var resolved = resolver.resolvePreview(
+            "workspace:pipeline-only",
+            RecordCreationRecordType.deal,
+            names(),
+            null,
+            definitionWithFields(field("pipeline", reference(9))),
+            null);
+
+        assertEquals(RecordCreationTemplateAvailability.available, resolved.availability());
+        assertEquals(9, field(resolved, "pipeline").defaultValue().intValue());
+        assertEquals(12, field(resolved, "stage").defaultValue().intValue());
+        assertEquals(RecordCreationDefaultOrigin.policy, field(resolved, "stage").defaultOrigin());
+    }
+
+    @Test
+    void stageOnlyDefaultDerivesItsCurrentPipeline() {
+        Pipeline first = pipeline(3, "First");
+        Pipeline configured = pipeline(9, "Configured");
+        Stage firstStage = stage(7, first, 0, "First stage");
+        Stage configuredStage = stage(12, configured, 0, "Configured stage");
+        when(pipelineMapper.getAllPipelines(7)).thenReturn(List.of(first, configured));
+        when(pipelineMapper.getAllStages(7)).thenReturn(List.of(firstStage, configuredStage));
+
+        var resolved = resolver.resolvePreview(
+            "workspace:stage-only",
+            RecordCreationRecordType.deal,
+            names(),
+            null,
+            definitionWithFields(field("stage", reference(12))),
+            null);
+
+        assertEquals(RecordCreationTemplateAvailability.available, resolved.availability());
+        assertEquals(9, field(resolved, "pipeline").defaultValue().intValue());
+        assertEquals(12, field(resolved, "stage").defaultValue().intValue());
+        assertEquals(RecordCreationDefaultOrigin.policy, field(resolved, "pipeline").defaultOrigin());
+    }
+
+    @Test
+    void mismatchedOrMissingCurrentDealPairFailsClosed() {
+        Pipeline first = pipeline(3, "First");
+        Pipeline other = pipeline(9, "Other");
+        Stage stage = stage(12, other, 0, "Other stage");
+        when(pipelineMapper.getAllPipelines(7)).thenReturn(List.of(first, other));
+        when(pipelineMapper.getAllStages(7)).thenReturn(List.of(stage));
+
+        var mismatched = resolver.resolvePreview(
+            "workspace:mismatch",
+            RecordCreationRecordType.deal,
+            names(),
+            null,
+            definitionWithFields(
+                field("pipeline", reference(3)),
+                field("stage", reference(12))),
+            null);
+        var missing = resolver.resolvePreview(
+            "workspace:missing",
+            RecordCreationRecordType.deal,
+            names(),
+            null,
+            definitionWithFields(field("pipeline", reference(99))),
+            null);
+
+        assertEquals(RecordCreationTemplateAvailability.unavailable, mismatched.availability());
+        assertEquals(RecordCreationTemplateAvailability.unavailable, missing.availability());
+        assertTrue(mismatched.warnings().stream()
+            .allMatch(warning -> warning.code().equals("TEMPLATE_FIELD_UNAVAILABLE")));
+    }
+
+    @Test
+    void staleTagAndCustomSelectDefaultsFailClosed() {
+        CustomFieldDefinition custom = custom(9, "person", "select", false, false);
+        custom.setOptionsJson("[{\"key\":\"current\",\"label\":\"Current\"}]");
+        when(customFieldMapper.getByEntityType(7, "person")).thenReturn(List.of(custom));
+
+        var tagDefault = resolver.resolvePreview(
+            "workspace:tag",
+            RecordCreationRecordType.person,
+            names(),
+            null,
+            definitionWithFields(field("tags", references(4))),
+            null);
+        var selectDefault = resolver.resolvePreview(
+            "workspace:select",
+            RecordCreationRecordType.person,
+            names(),
+            null,
+            definitionWithFields(field("custom:9", stringDefault("removed"))),
+            null);
+
+        assertEquals(RecordCreationTemplateAvailability.unavailable, tagDefault.availability());
+        assertEquals(RecordCreationTemplateAvailability.unavailable, selectDefault.availability());
+        assertEquals("tags", tagDefault.warnings().getFirst().fieldKey());
+        assertEquals("custom:9", selectDefault.warnings().getFirst().fieldKey());
+    }
+
+    @Test
+    void staleCompanyAndPersonReferencesFailClosed() {
+        var company = resolver.resolvePreview(
+            "workspace:company-reference",
+            RecordCreationRecordType.person,
+            names(),
+            null,
+            definitionWithFields(field("company", reference(55))),
+            null);
+        var person = resolver.resolvePreview(
+            "workspace:person-reference",
+            RecordCreationRecordType.person,
+            names(),
+            null,
+            definitionWithFields(field("referrerPerson", reference(66))),
+            null);
+
+        assertEquals(RecordCreationTemplateAvailability.unavailable, company.availability());
+        assertEquals(RecordCreationTemplateAvailability.unavailable, person.availability());
+        assertEquals("company", company.warnings().getFirst().fieldKey());
+        assertEquals("referrerPerson", person.warnings().getFirst().fieldKey());
+    }
+
+    @Test
     void staleCustomFieldFailsClosedWithoutDroppingTheFieldSilently() {
         RecordCreationTemplateDefinitionDto definition = definition("custom", "custom:99");
         when(validator.parseDefinition("stale")).thenReturn(definition);
@@ -204,6 +359,44 @@ class RecordCreationTemplateResolverTest {
                 new LocalizedTextDto("Group", "グループ"),
                 null,
                 List.of(new RecordCreationTemplateFieldDto(field, false, null, null, null)))));
+    }
+
+    private static RecordCreationTemplateDefinitionDto definitionWithFields(
+            RecordCreationTemplateFieldDto... fields) {
+        return new RecordCreationTemplateDefinitionDto(1, List.of(
+            new RecordCreationTemplateGroupDto(
+                "basics",
+                new LocalizedTextDto("Basics", "基本情報"),
+                null,
+                List.of(fields))));
+    }
+
+    private static RecordCreationTemplateFieldDto field(
+            String key,
+            RecordCreationDefaultSpecDto defaultSpec) {
+        return new RecordCreationTemplateFieldDto(key, false, null, null, defaultSpec);
+    }
+
+    private static RecordCreationDefaultSpecDto reference(int id) {
+        return new RecordCreationDefaultSpecDto(
+            RecordCreationDefaultKind.literal_reference,
+            null, null, null, null, id, null);
+    }
+
+    private static RecordCreationDefaultSpecDto references(int... ids) {
+        return new RecordCreationDefaultSpecDto(
+            RecordCreationDefaultKind.literal_references,
+            null, null, null, null, null, java.util.Arrays.stream(ids).boxed().toList());
+    }
+
+    private static RecordCreationDefaultSpecDto stringDefault(String value) {
+        return new RecordCreationDefaultSpecDto(
+            RecordCreationDefaultKind.literal_string,
+            value, null, null, null, null, null);
+    }
+
+    private static LocalizedTextDto names() {
+        return new LocalizedTextDto("Template", "テンプレート");
     }
 
     private static CustomFieldDefinition custom(

@@ -13,12 +13,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+
+import tools.jackson.databind.JsonNode;
 
 import lombok.RequiredArgsConstructor;
 
@@ -44,10 +47,16 @@ import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateStateReq
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateSummaryDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateUpdateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationWarningDto;
+import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationFieldDto;
 import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationTemplateDto;
 import ooo.klae.connex.backend.exceptions.RecordCreationTemplateException;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.RecordCreationTemplateMapper;
+import ooo.klae.connex.backend.mappers.ShareMapper;
+import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.recordcreation.RecordCreationEntryPoint;
 import ooo.klae.connex.backend.recordcreation.RecordCreationFieldRegistry;
 import ooo.klae.connex.backend.recordcreation.RecordCreationFieldRegistry.FieldDefinition;
@@ -71,10 +80,25 @@ public class RecordCreationTemplateService {
     ) {
     }
 
+    private record DependencyIds(
+        Set<Integer> customFields,
+        Set<Integer> tags,
+        Set<Integer> pipelines,
+        Set<Integer> stages,
+        Set<Integer> companies,
+        Set<Integer> persons
+    ) {
+    }
+
     private static final Pattern WORKSPACE_ID = Pattern.compile("^workspace:([1-9][0-9]{0,9})$");
 
     private final RecordCreationTemplateMapper templateMapper;
     private final CustomFieldDefinitionMapper customFieldMapper;
+    private final TagMapper tagMapper;
+    private final PipelineMapper pipelineMapper;
+    private final CompanyMapper companyMapper;
+    private final PersonMapper personMapper;
+    private final ShareMapper shareMapper;
     private final RecordCreationTemplateValidator validator;
     private final RecordCreationTemplateResolver resolver;
     private final RecordCreationFieldRegistry fieldRegistry;
@@ -186,6 +210,10 @@ public class RecordCreationTemplateService {
                 && request.expectedTemplateVersion() != version.getVersionNumber()) {
             throw staleVersion(set, root, version);
         }
+        if (request.removedFieldKeys().stream().anyMatch(
+                fieldKey -> fieldKey == null || fieldKey.isBlank())) {
+            throw definitionInvalid("Removed field keys must not contain blank values");
+        }
         List<String> removed = request.removedFieldKeys().stream().distinct().sorted().toList();
         List<String> blocked = blockedRequiredFields(
             workspaceId, request.recordType(), removed);
@@ -216,6 +244,7 @@ public class RecordCreationTemplateService {
     public RecordCreationTemplateDto create(RecordCreationTemplateCreateRequestDto request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
+        lockMutationPermissions(workspaceId, actorId);
         RecordCreationTemplateSet set = lockSet(workspaceId, request.recordType());
         requireSetRevision(set, request.expectedSetRevision());
         RecordCreationTemplateValidator.ValidatedTemplate validated =
@@ -269,6 +298,7 @@ public class RecordCreationTemplateService {
         rejectSystemMutation(templateId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
+        lockMutationPermissions(workspaceId, actorId);
         int id = workspaceId(templateId);
         RecordCreationTemplate preliminary = requireRootById(workspaceId, id);
         RecordCreationRecordType recordType = RecordCreationRecordType.valueOf(preliminary.getRecordType());
@@ -371,6 +401,7 @@ public class RecordCreationTemplateService {
             RecordCreationTemplateDuplicateRequestDto request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
+        lockMutationPermissions(workspaceId, actorId);
         RecordCreationRecordType recordType;
         RecordCreationTemplateDefinitionDto sourceDefinition;
         RecordCreationTemplateVersion sourceVersion = null;
@@ -445,6 +476,7 @@ public class RecordCreationTemplateService {
             RecordCreationTemplateReorderRequestDto request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
+        lockMutationPermissions(workspaceId, actorId);
         RecordCreationTemplateSet set = lockSet(workspaceId, request.recordType());
         requireSetRevision(set, request.expectedSetRevision());
         List<RecordCreationTemplate> locked =
@@ -498,6 +530,8 @@ public class RecordCreationTemplateService {
     public RecordCreationPresetCatalogDto setDefault(RecordCreationTemplateDefaultRequestDto request) {
         rejectSystemMutation(request.templateId());
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        lockMutationPermissions(workspaceId, actorId);
         RecordCreationTemplateSet set = lockSet(workspaceId, request.recordType());
         requireSetRevision(set, request.expectedSetRevision());
         RecordCreationTemplate root = requireRootForUpdate(workspaceId, workspaceId(request.templateId()));
@@ -508,8 +542,15 @@ public class RecordCreationTemplateService {
             throw RecordCreationTemplateException.of(
                 HttpStatus.CONFLICT, "TEMPLATE_NOT_ENABLED", "Only an enabled template can be the default");
         }
-        ResolvedCreationTemplateDto resolved =
-            resolver.resolveWorkspace(root, requireCurrentVersion(workspaceId, root), null);
+        RecordCreationTemplateVersion version = requireCurrentVersion(workspaceId, root);
+        ResolvedCreationTemplateDto preliminary = resolver.resolveWorkspace(root, version, null);
+        requireAvailableForDefault(preliminary);
+        DependencyIds dependencies = dependencyIds(preliminary);
+        lockDependencies(workspaceId, dependencies);
+        ResolvedCreationTemplateDto resolved = resolver.resolveWorkspace(root, version, null);
+        if (!dependencies.equals(dependencyIds(resolved))) {
+            throw templateUnavailable();
+        }
         if (resolved.availability() != RecordCreationTemplateAvailability.available) {
             throw RecordCreationTemplateException.of(
                 HttpStatus.CONFLICT, "TEMPLATE_UNAVAILABLE", "The template is unavailable");
@@ -521,7 +562,7 @@ public class RecordCreationTemplateService {
             set.getRevision()),
             set,
             root,
-            requireCurrentVersion(workspaceId, root));
+            version);
         Map<String, Object> changes = new LinkedHashMap<>();
         changes.put("recordType", request.recordType().name());
         changes.put("oldDefaultId", set.getDefaultTemplateId() == null
@@ -560,6 +601,7 @@ public class RecordCreationTemplateService {
     public RecordCreationPresetCatalogDto reset(RecordCreationTemplateResetRequestDto request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
+        lockMutationPermissions(workspaceId, actorId);
         RecordCreationTemplateSet set = lockSet(workspaceId, request.recordType());
         requireSetRevision(set, request.expectedSetRevision());
         List<RecordCreationTemplate> roots =
@@ -637,6 +679,7 @@ public class RecordCreationTemplateService {
             RecordCreationTemplateStatus target) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
+        lockMutationPermissions(workspaceId, actorId);
         int id = workspaceId(templateId);
         RecordCreationTemplate preliminary = requireRootById(workspaceId, id);
         RecordCreationRecordType recordType = RecordCreationRecordType.valueOf(preliminary.getRecordType());
@@ -709,6 +752,93 @@ public class RecordCreationTemplateService {
                 List.of()));
         RecordCreationTemplate stored = requireRootById(workspaceId, root.getId());
         return dto(stored, requireCurrentVersion(workspaceId, stored), false);
+    }
+
+    private void lockMutationPermissions(int workspaceId, int actorId) {
+        workspaceService.lockAndRequirePermissions(
+            workspaceId,
+            Map.of(actorId, Set.of(Permission.CUSTOM_FIELD_MANAGE)));
+    }
+
+    private void lockDependencies(int workspaceId, DependencyIds dependencies) {
+        dependencies.customFields().stream().sorted()
+            .forEach(id -> customFieldMapper.getByIdForUpdate(workspaceId, id));
+        dependencies.tags().stream().sorted()
+            .forEach(id -> tagMapper.getTagByIdForUpdate(workspaceId, id));
+        dependencies.pipelines().stream().sorted()
+            .forEach(id -> pipelineMapper.getVisiblePipelineByIdForUpdate(workspaceId, id));
+        dependencies.pipelines().stream().sorted()
+            .forEach(id -> shareMapper.lockPipelineShareForWorkspace(id, workspaceId));
+        dependencies.stages().stream().sorted()
+            .forEach(id -> pipelineMapper.getVisibleStageByIdForUpdate(workspaceId, id));
+        dependencies.companies().stream().sorted()
+            .forEach(id -> companyMapper.getVisibleCompanyByIdForUpdate(workspaceId, id));
+        dependencies.companies().stream().sorted()
+            .forEach(id -> shareMapper.lockCompanyShareForWorkspace(id, workspaceId));
+        dependencies.persons().stream().sorted()
+            .forEach(id -> personMapper.getVisiblePersonByIdForUpdate(workspaceId, id));
+        dependencies.persons().stream().sorted()
+            .forEach(id -> shareMapper.lockPersonShareForWorkspace(id, workspaceId));
+    }
+
+    private static DependencyIds dependencyIds(ResolvedCreationTemplateDto template) {
+        Set<Integer> customFields = new TreeSet<>();
+        Set<Integer> tags = new TreeSet<>();
+        Set<Integer> pipelines = new TreeSet<>();
+        Set<Integer> stages = new TreeSet<>();
+        Set<Integer> companies = new TreeSet<>();
+        Set<Integer> persons = new TreeSet<>();
+        for (ResolvedCreationFieldDto field : template.groups().stream()
+                .flatMap(group -> group.fields().stream()).toList()) {
+            if (field.customFieldId() != null) {
+                customFields.add(field.customFieldId());
+            }
+            JsonNode value = field.defaultValue();
+            if (value == null) {
+                continue;
+            }
+            switch (field.key()) {
+                case "tags" -> {
+                    if (value.isArray()) {
+                        for (JsonNode tag : value) {
+                            if (tag.isInt()) {
+                                tags.add(tag.intValue());
+                            }
+                        }
+                    }
+                }
+                case "pipeline" -> addIntegerValue(pipelines, value);
+                case "stage" -> addIntegerValue(stages, value);
+                case "company" -> addIntegerValue(companies, value);
+                case "referrerPerson" -> addIntegerValue(persons, value);
+                default -> {
+                }
+            }
+        }
+        return new DependencyIds(
+            Set.copyOf(customFields),
+            Set.copyOf(tags),
+            Set.copyOf(pipelines),
+            Set.copyOf(stages),
+            Set.copyOf(companies),
+            Set.copyOf(persons));
+    }
+
+    private static void addIntegerValue(Set<Integer> values, JsonNode value) {
+        if (value.isInt()) {
+            values.add(value.intValue());
+        }
+    }
+
+    private static void requireAvailableForDefault(ResolvedCreationTemplateDto resolved) {
+        if (resolved.availability() != RecordCreationTemplateAvailability.available) {
+            throw templateUnavailable();
+        }
+    }
+
+    private static RecordCreationTemplateException templateUnavailable() {
+        return RecordCreationTemplateException.of(
+            HttpStatus.CONFLICT, "TEMPLATE_UNAVAILABLE", "The template is unavailable");
     }
 
     private Selection selection(

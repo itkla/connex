@@ -2,7 +2,9 @@ package ooo.klae.connex.backend.controllers;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -184,6 +186,33 @@ class RecordCreationTemplateControllerTest {
                     {"recordType":"person","templateId":"","expectedSetRevision":0}
                     """))
             .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void beanValidationRejectsNullListElementsBeforeService() throws Exception {
+        clearInvocations(service);
+
+        mockMvc.perform(post("/api/record-creation/templates/preview")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"recordType":"person","name":{"en":"Template","ja":"テンプレート"},
+                     "definition":{"schemaVersion":1,"groups":[
+                       {"key":"basics","label":{"en":"Basics","ja":"基本情報"},
+                        "fields":[{"key":"tags","required":false,
+                          "defaultSpec":{"kind":"literal_references","referenceIds":[4,null]}}]}]}}
+                    """))
+            .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/record-creation/templates/impact")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {"operation":"remove_fields","recordType":"person",
+                     "templateId":"workspace:42","removedFieldKeys":[null,"owner"],
+                     "expectedTemplateVersion":2,"expectedSetRevision":7}
+                    """))
+            .andExpect(status().isBadRequest());
+
+        verify(service, never()).preview(any());
+        verify(service, never()).impact(any());
     }
 
     @Test

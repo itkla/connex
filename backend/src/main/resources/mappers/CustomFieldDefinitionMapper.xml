@@ -31,6 +31,12 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
+  <select id="getByIdForUpdate" resultType="CustomFieldDefinition">
+    SELECT <include refid="columns"/> FROM custom_field_definition
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="getByKey" resultType="CustomFieldDefinition">
     SELECT <include refid="columns"/> FROM custom_field_definition
     WHERE workspace_id = #{workspaceId} AND entity_type = #{entityType} AND field_key = #{fieldKey}

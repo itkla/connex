@@ -45,6 +45,7 @@ import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationTemplateDto;
 import ooo.klae.connex.backend.exceptions.RecordCreationTemplateException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.recordcreation.RecordCreationDefaultKind;
@@ -78,6 +79,13 @@ public class RecordCreationTemplateResolver {
     private record DefaultValue(JsonNode value, RecordCreationDefaultOrigin origin) {
     }
 
+    private record DealDefaults(
+        DefaultValue pipeline,
+        DefaultValue stage,
+        boolean available
+    ) {
+    }
+
     private static final Pattern CUSTOM_KEY = Pattern.compile("^custom:([1-9][0-9]{0,9})$");
     private static final List<String> LEAD_SOURCES = List.of(
         "REFERRAL", "EVENT", "WEB", "OUTBOUND", "BUSINESS_CARD", "IMPORT", "PARTNER", "OTHER");
@@ -86,6 +94,7 @@ public class RecordCreationTemplateResolver {
     private final RecordCreationTemplateValidator validator;
     private final CustomFieldDefinitionMapper customFieldMapper;
     private final CompanyMapper companyMapper;
+    private final PersonMapper personMapper;
     private final PipelineMapper pipelineMapper;
     private final TagMapper tagMapper;
     private final WorkspaceService workspaceService;
@@ -144,14 +153,16 @@ public class RecordCreationTemplateResolver {
             RecordCreationContextDto requestedContext) {
         ResolutionContext context = resolutionContext(recordType, requestedContext);
         List<RecordCreationWarningDto> warnings = new ArrayList<>();
+        DealDefaults dealDefaults = resolveDealDefaults(id, definition, context, warnings);
         List<ResolvedCreationGroupDto> groups = new ArrayList<>();
         Set<String> configuredKeys = new HashSet<>();
-        boolean unavailable = false;
+        boolean unavailable = !dealDefaults.available();
         for (RecordCreationTemplateGroupDto group : definition.groups()) {
             List<ResolvedCreationFieldDto> fields = new ArrayList<>();
             for (RecordCreationTemplateFieldDto field : group.fields()) {
                 configuredKeys.add(field.key());
-                ResolvedCreationFieldDto resolved = resolveField(id, field, context, warnings);
+                ResolvedCreationFieldDto resolved = resolveField(
+                    id, field, context, dealDefaults, warnings);
                 if (resolved == null) {
                     unavailable = true;
                 } else {
@@ -161,7 +172,8 @@ public class RecordCreationTemplateResolver {
             groups.add(new ResolvedCreationGroupDto(
                 group.key(), group.label(), group.description(), List.copyOf(fields)));
         }
-        List<ResolvedCreationFieldDto> required = missingRequired(id, configuredKeys, context, warnings);
+        List<ResolvedCreationFieldDto> required = missingRequired(
+            id, configuredKeys, context, dealDefaults, warnings);
         if (required.stream().anyMatch(java.util.Objects::isNull)) {
             unavailable = true;
             required = required.stream().filter(java.util.Objects::nonNull).toList();
@@ -177,11 +189,18 @@ public class RecordCreationTemplateResolver {
         List<ResolvedCreationFieldDto> trust = new ArrayList<>();
         for (FieldDefinition field : fieldRegistry.fields(recordType).values()) {
             if (field.protectedField() && !configuredKeys.contains(field.key())) {
-                trust.add(resolveCoreField(
+                ResolvedCreationFieldDto resolved = resolveCoreField(
                     id,
                     new RecordCreationTemplateFieldDto(field.key(), false, null, null, null),
                     field,
-                    context));
+                    context,
+                    dealDefaults,
+                    warnings);
+                if (resolved == null) {
+                    unavailable = true;
+                } else {
+                    trust.add(resolved);
+                }
             }
         }
         if (!trust.isEmpty()) {
@@ -267,10 +286,11 @@ public class RecordCreationTemplateResolver {
             String templateId,
             RecordCreationTemplateFieldDto field,
             ResolutionContext context,
+            DealDefaults dealDefaults,
             List<RecordCreationWarningDto> warnings) {
         FieldDefinition core = fieldRegistry.field(context.recordType(), field.key());
         if (core != null) {
-            return resolveCoreField(templateId, field, core, context);
+            return resolveCoreField(templateId, field, core, context, dealDefaults, warnings);
         }
         java.util.regex.Matcher matcher = CUSTOM_KEY.matcher(field.key());
         if (!matcher.matches()) {
@@ -299,6 +319,17 @@ public class RecordCreationTemplateResolver {
                 "CUSTOM_FIELD_UNAVAILABLE", templateId, field.key(), customFieldId));
             return null;
         }
+        if (!currentDefaultAvailable(
+                field.key(),
+                field.defaultSpec(),
+                type.defaultKinds(),
+                "select".equals(custom.getFieldType()),
+                options,
+                context)) {
+            warnings.add(new RecordCreationWarningDto(
+                "TEMPLATE_FIELD_UNAVAILABLE", templateId, field.key(), customFieldId));
+            return null;
+        }
         DefaultValue defaultValue = resolveDefault(field.key(), field.defaultSpec(), context);
         return new ResolvedCreationFieldDto(
             field.key(),
@@ -321,27 +352,30 @@ public class RecordCreationTemplateResolver {
             String templateId,
             RecordCreationTemplateFieldDto field,
             FieldDefinition core,
-            ResolutionContext context) {
-        DefaultValue defaultValue = resolveDefault(field.key(), field.defaultSpec(), context);
+            ResolutionContext context,
+            DealDefaults dealDefaults,
+            List<RecordCreationWarningDto> warnings) {
+        if (!currentDefaultAvailable(
+                field.key(), field.defaultSpec(), core.defaultKinds(), false, List.of(), context)) {
+            warnings.add(new RecordCreationWarningDto(
+                "TEMPLATE_FIELD_UNAVAILABLE", templateId, field.key(), null));
+            return null;
+        }
+        DefaultValue defaultValue = context.recordType() == RecordCreationRecordType.deal
+                && "pipeline".equals(field.key())
+            ? dealDefaults.pipeline()
+            : context.recordType() == RecordCreationRecordType.deal && "stage".equals(field.key())
+                ? dealDefaults.stage()
+                : resolveDefault(field.key(), field.defaultSpec(), context);
         if ("company".equals(field.key()) && context.relatedCompanyId() != null) {
             defaultValue = new DefaultValue(
                 objectMapper.valueToTree(context.relatedCompanyId()),
                 RecordCreationDefaultOrigin.context);
         }
-        if (context.recordType() == RecordCreationRecordType.deal && defaultValue == null) {
-            if ("pipeline".equals(field.key()) && context.policyPipeline() != null) {
-                defaultValue = new DefaultValue(
-                    objectMapper.valueToTree(context.policyPipeline().getId()),
-                    RecordCreationDefaultOrigin.policy);
-            } else if ("stage".equals(field.key()) && context.policyStage() != null) {
-                defaultValue = new DefaultValue(
-                    objectMapper.valueToTree(context.policyStage().getId()),
-                    RecordCreationDefaultOrigin.policy);
-            } else if ("owner".equals(field.key())) {
-                defaultValue = new DefaultValue(
-                    objectMapper.valueToTree(context.actorId()),
-                    RecordCreationDefaultOrigin.policy);
-            }
+        if ("owner".equals(field.key()) && defaultValue == null) {
+            defaultValue = new DefaultValue(
+                objectMapper.valueToTree(context.actorId()),
+                RecordCreationDefaultOrigin.policy);
         }
         return new ResolvedCreationFieldDto(
             field.key(),
@@ -364,6 +398,7 @@ public class RecordCreationTemplateResolver {
             String templateId,
             Set<String> configured,
             ResolutionContext context,
+            DealDefaults dealDefaults,
             List<RecordCreationWarningDto> warnings) {
         List<ResolvedCreationFieldDto> result = new ArrayList<>();
         for (FieldDefinition field : fieldRegistry.fields(context.recordType()).values()) {
@@ -372,7 +407,9 @@ public class RecordCreationTemplateResolver {
                     templateId,
                     new RecordCreationTemplateFieldDto(field.key(), false, null, null, null),
                     field,
-                    context));
+                    context,
+                    dealDefaults,
+                    warnings));
             }
         }
         for (CustomFieldDefinition custom : context.customFields().values()) {
@@ -382,11 +419,147 @@ public class RecordCreationTemplateResolver {
                     templateId,
                     new RecordCreationTemplateFieldDto(key, false, null, null, null),
                     context,
+                    dealDefaults,
                     warnings);
                 result.add(field);
             }
         }
         return result;
+    }
+
+    private DealDefaults resolveDealDefaults(
+            String templateId,
+            RecordCreationTemplateDefinitionDto definition,
+            ResolutionContext context,
+            List<RecordCreationWarningDto> warnings) {
+        if (context.recordType() != RecordCreationRecordType.deal) {
+            return new DealDefaults(null, null, true);
+        }
+        Integer configuredPipelineId = configuredReference(definition, "pipeline");
+        Integer configuredStageId = configuredReference(definition, "stage");
+        Pipeline pipeline = configuredPipelineId == null
+            ? null
+            : findPipeline(context, configuredPipelineId);
+        Stage stage = configuredStageId == null
+            ? null
+            : findStage(context, configuredStageId);
+        boolean templatePair = configuredPipelineId != null || configuredStageId != null;
+        if (!templatePair) {
+            pipeline = context.policyPipeline();
+            stage = context.policyStage();
+        } else if (configuredPipelineId == null && stage != null && stage.getPipeline() != null) {
+            pipeline = findPipeline(context, stage.getPipeline().getId());
+        } else if (configuredStageId == null && pipeline != null) {
+            int pipelineId = pipeline.getId();
+            stage = context.stages().stream()
+                .filter(candidate -> candidate.getPipeline() != null
+                    && candidate.getPipeline().getId() == pipelineId)
+                .findFirst()
+                .orElse(null);
+        }
+        if (pipeline == null || stage == null || stage.getPipeline() == null
+                || stage.getPipeline().getId() != pipeline.getId()) {
+            warnings.add(new RecordCreationWarningDto(
+                "TEMPLATE_FIELD_UNAVAILABLE", templateId, "stage", null));
+            return new DealDefaults(null, null, false);
+        }
+        RecordCreationDefaultOrigin pipelineOrigin = configuredPipelineId != null
+            ? RecordCreationDefaultOrigin.template
+            : RecordCreationDefaultOrigin.policy;
+        RecordCreationDefaultOrigin stageOrigin = configuredStageId != null
+            ? RecordCreationDefaultOrigin.template
+            : RecordCreationDefaultOrigin.policy;
+        return new DealDefaults(
+            new DefaultValue(objectMapper.valueToTree(pipeline.getId()), pipelineOrigin),
+            new DefaultValue(objectMapper.valueToTree(stage.getId()), stageOrigin),
+            true);
+    }
+
+    private static Integer configuredReference(
+            RecordCreationTemplateDefinitionDto definition,
+            String fieldKey) {
+        return definition.groups().stream()
+            .flatMap(group -> group.fields().stream())
+            .filter(field -> fieldKey.equals(field.key()))
+            .map(RecordCreationTemplateFieldDto::defaultSpec)
+            .filter(java.util.Objects::nonNull)
+            .filter(spec -> spec.kind() == RecordCreationDefaultKind.literal_reference)
+            .map(RecordCreationDefaultSpecDto::referenceId)
+            .findFirst()
+            .orElse(null);
+    }
+
+    private static Pipeline findPipeline(ResolutionContext context, int id) {
+        return context.pipelines().stream()
+            .filter(pipeline -> pipeline.getId() == id)
+            .findFirst()
+            .orElse(null);
+    }
+
+    private static Stage findStage(ResolutionContext context, int id) {
+        return context.stages().stream()
+            .filter(stage -> stage.getId() == id)
+            .findFirst()
+            .orElse(null);
+    }
+
+    private boolean currentDefaultAvailable(
+            String fieldKey,
+            RecordCreationDefaultSpecDto spec,
+            Set<RecordCreationDefaultKind> allowedKinds,
+            boolean optionBound,
+            List<CreationFieldOptionDto> options,
+            ResolutionContext context) {
+        if (spec == null) {
+            return true;
+        }
+        if (spec.kind() == null || !allowedKinds.contains(spec.kind()) || !validPayload(spec)) {
+            return false;
+        }
+        return switch (spec.kind()) {
+            case literal_string -> !optionBound
+                || options.stream().anyMatch(option -> spec.stringValue().equals(option.value()));
+            case literal_reference -> referenceAvailable(fieldKey, spec.referenceId(), context);
+            case literal_references -> spec.referenceIds().stream().allMatch(id ->
+                id != null && id > 0 && context.tags().stream().anyMatch(tag -> tag.getId() == id));
+            default -> true;
+        };
+    }
+
+    private boolean referenceAvailable(
+            String fieldKey,
+            Integer id,
+            ResolutionContext context) {
+        if (id == null || id <= 0) {
+            return false;
+        }
+        return switch (fieldKey) {
+            case "company" -> companyMapper.exists(context.workspaceId(), id);
+            case "referrerPerson" -> personMapper.exists(context.workspaceId(), id);
+            case "pipeline" -> findPipeline(context, id) != null;
+            case "stage" -> findStage(context, id) != null;
+            default -> false;
+        };
+    }
+
+    private static boolean validPayload(RecordCreationDefaultSpecDto spec) {
+        int payloads = 0;
+        if (spec.stringValue() != null) payloads++;
+        if (spec.numberValue() != null) payloads++;
+        if (spec.booleanValue() != null) payloads++;
+        if (spec.dateValue() != null) payloads++;
+        if (spec.referenceId() != null) payloads++;
+        if (spec.referenceIds() != null) payloads++;
+        return switch (spec.kind()) {
+            case literal_string -> payloads == 1 && spec.stringValue() != null;
+            case literal_number -> payloads == 1 && spec.numberValue() != null;
+            case literal_boolean -> payloads == 1 && spec.booleanValue() != null;
+            case literal_date -> payloads == 1 && spec.dateValue() != null;
+            case literal_reference -> payloads == 1 && spec.referenceId() != null;
+            case literal_references -> payloads == 1 && spec.referenceIds() != null
+                && !spec.referenceIds().isEmpty();
+            default -> payloads == 0;
+        };
     }
 
     private DefaultValue resolveDefault(

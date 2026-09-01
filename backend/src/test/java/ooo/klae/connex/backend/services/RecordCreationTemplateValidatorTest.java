@@ -10,7 +10,10 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.util.HexFormat;
 import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,7 +45,10 @@ class RecordCreationTemplateValidatorTest {
     private final PersonMapper personMapper = mock(PersonMapper.class);
     private final PipelineMapper pipelineMapper = mock(PipelineMapper.class);
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
-    private final JsonMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
+    private final JsonMapper objectMapper = JsonMapper.builder()
+        .findAndAddModules()
+        .changeDefaultPropertyInclusion(ignored -> JsonInclude.Value.ALL_NON_NULL)
+        .build();
 
     private RecordCreationTemplateValidator validator;
 
@@ -75,6 +81,12 @@ class RecordCreationTemplateValidatorTest {
 
         assertEquals("Café", first.name().en());
         assertNull(first.description());
+        assertEquals(
+            "{\"schemaVersion\":1,\"groups\":[{\"key\":\"basics\",\"label\":{\"en\":\"Basics\",\"ja\":\"基本情報\"},\"description\":null,\"fields\":[{\"key\":\"name\",\"required\":false,\"helpText\":null,\"placeholder\":null,\"defaultSpec\":null}]}]}",
+            first.definitionJson());
+        assertEquals(
+            "e370d6937dfe9dd6468568433568279ff922f61109bd0c8aba65e940255b00ee",
+            HexFormat.of().formatHex(first.definitionHash()));
         assertEquals(first.definitionJson(), second.definitionJson());
         assertTrue(java.util.Arrays.equals(first.definitionHash(), second.definitionHash()));
     }
@@ -255,6 +267,13 @@ class RecordCreationTemplateValidatorTest {
             field("tags", false, new RecordCreationDefaultSpecDto(
                 RecordCreationDefaultKind.literal_references,
                 null, null, null, null, null, List.of(4))))));
+
+        List<Integer> malformed = new java.util.ArrayList<>(List.of(4));
+        malformed.add(null);
+        assertCode("TEMPLATE_DEFAULT_FORBIDDEN", () -> validate(definition(
+            field("tags", false, new RecordCreationDefaultSpecDto(
+                RecordCreationDefaultKind.literal_references,
+                null, null, null, null, null, malformed)))));
     }
 
     @Test
@@ -300,6 +319,28 @@ class RecordCreationTemplateValidatorTest {
             names(),
             null,
             definition(field("value", false, negativeValue))));
+
+        assertCode("TEMPLATE_DEFAULT_FORBIDDEN", () -> validateDealNumber("9999999999999.999"));
+        assertCode("TEMPLATE_DEFAULT_FORBIDDEN", () -> validateDealNumber("1E+13"));
+        validator.validateAndCanonicalize(
+            RecordCreationRecordType.deal,
+            names(),
+            null,
+            definition(field("value", false, number("9999999999999.99"))));
+
+        when(customFieldMapper.getById(7, 42)).thenReturn(
+            custom(42, "person", "number", false));
+        validate(definition(field("custom:42", false, number("9999999999999999.9999"))));
+        assertCode("TEMPLATE_DEFAULT_FORBIDDEN", () -> validate(definition(
+            field("custom:42", false, number("1E+16")))));
+    }
+
+    private void validateDealNumber(String value) {
+        validator.validateAndCanonicalize(
+            RecordCreationRecordType.deal,
+            names(),
+            null,
+            definition(field("value", false, number(value))));
     }
 
     private void validate(RecordCreationTemplateDefinitionDto definition) {
@@ -344,6 +385,12 @@ class RecordCreationTemplateValidatorTest {
         return new RecordCreationDefaultSpecDto(
             RecordCreationDefaultKind.literal_reference,
             null, null, null, null, id, null);
+    }
+
+    private static RecordCreationDefaultSpecDto number(String value) {
+        return new RecordCreationDefaultSpecDto(
+            RecordCreationDefaultKind.literal_number,
+            null, new BigDecimal(value), null, null, null, null);
     }
 
     private static LocalizedTextDto names() {

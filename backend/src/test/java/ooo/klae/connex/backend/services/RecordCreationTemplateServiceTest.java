@@ -8,10 +8,12 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
@@ -20,9 +22,16 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import ooo.klae.connex.backend.beans.RecordCreationTemplate;
 import ooo.klae.connex.backend.beans.RecordCreationTemplateSet;
@@ -38,18 +47,36 @@ import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateReorderR
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateResetRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateStateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationTemplateUpdateRequestDto;
+import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationFieldDto;
+import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationGroupDto;
 import ooo.klae.connex.backend.dto.recordcreation.ResolvedCreationTemplateDto;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecordCreationTemplateException;
+import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.RecordCreationTemplateMapper;
+import ooo.klae.connex.backend.mappers.ShareMapper;
+import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.recordcreation.RecordCreationDefaultOrigin;
 import ooo.klae.connex.backend.recordcreation.RecordCreationFieldRegistry;
+import ooo.klae.connex.backend.recordcreation.RecordCreationFieldSource;
+import ooo.klae.connex.backend.recordcreation.RecordCreationFieldValueType;
 import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 import ooo.klae.connex.backend.recordcreation.RecordCreationTemplateAvailability;
+import ooo.klae.connex.backend.tenant.Permission;
+import tools.jackson.databind.json.JsonMapper;
 
 class RecordCreationTemplateServiceTest {
 
     private final RecordCreationTemplateMapper mapper = mock(RecordCreationTemplateMapper.class);
     private final CustomFieldDefinitionMapper customFieldMapper = mock(CustomFieldDefinitionMapper.class);
+    private final TagMapper tagMapper = mock(TagMapper.class);
+    private final PipelineMapper pipelineMapper = mock(PipelineMapper.class);
+    private final CompanyMapper companyMapper = mock(CompanyMapper.class);
+    private final PersonMapper personMapper = mock(PersonMapper.class);
+    private final ShareMapper shareMapper = mock(ShareMapper.class);
     private final RecordCreationTemplateValidator validator = mock(RecordCreationTemplateValidator.class);
     private final RecordCreationTemplateResolver resolver = mock(RecordCreationTemplateResolver.class);
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
@@ -67,6 +94,11 @@ class RecordCreationTemplateServiceTest {
         service = new RecordCreationTemplateService(
             mapper,
             customFieldMapper,
+            tagMapper,
+            pipelineMapper,
+            companyMapper,
+            personMapper,
+            shareMapper,
             validator,
             resolver,
             registry,
@@ -113,9 +145,50 @@ class RecordCreationTemplateServiceTest {
         verify(mapper).insertSetIfAbsent(7, "person");
         verify(mapper).insertVersion(any());
         verify(mapper).advanceSetRevision(7, "person", 4);
+        verify(workspaceService).lockAndRequirePermissions(
+            7, Map.of(11, Set.of(Permission.CUSTOM_FIELD_MANAGE)));
         verify(auditService).record(
             org.mockito.ArgumentMatchers.eq("record_creation_template.create"),
             anyString(), anyInt(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void concurrentPermissionRevocationPreventsMutationBeforeTemplateLocks() throws Exception {
+        CountDownLatch permissionCheckStarted = new CountDownLatch(1);
+        CountDownLatch permissionRevoked = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            permissionCheckStarted.countDown();
+            if (!permissionRevoked.await(2, TimeUnit.SECONDS)) {
+                throw new AssertionError("Permission revocation was not released");
+            }
+            throw new ForbiddenException("Permission was revoked");
+        }).when(workspaceService).lockAndRequirePermissions(
+            7, Map.of(11, Set.of(Permission.CUSTOM_FIELD_MANAGE)));
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            var mutation = executor.submit(() -> service.create(
+                new RecordCreationTemplateCreateRequestDto(
+                    RecordCreationRecordType.person,
+                    names(),
+                    null,
+                    definition,
+                    true,
+                    0)));
+
+            assertTrue(permissionCheckStarted.await(2, TimeUnit.SECONDS));
+            permissionRevoked.countDown();
+            ExecutionException failure = assertThrows(
+                ExecutionException.class,
+                () -> mutation.get(2, TimeUnit.SECONDS));
+
+            assertTrue(failure.getCause() instanceof ForbiddenException);
+            verify(mapper, never()).insertSetIfAbsent(anyInt(), anyString());
+            verify(mapper, never()).getSetForUpdate(anyInt(), anyString());
+            verify(mapper, never()).insertRoot(any());
+        } finally {
+            permissionRevoked.countDown();
+            executor.shutdownNow();
+        }
     }
 
     @Test
@@ -236,6 +309,13 @@ class RecordCreationTemplateServiceTest {
             org.mockito.ArgumentMatchers.eq(3),
             org.mockito.ArgumentMatchers.eq(11));
         verify(mapper).setDefault(7, "person", null, 8);
+        verifyNoInteractions(
+            customFieldMapper,
+            tagMapper,
+            pipelineMapper,
+            companyMapper,
+            personMapper,
+            shareMapper);
     }
 
     @Test
@@ -358,6 +438,56 @@ class RecordCreationTemplateServiceTest {
         verify(auditService).record(
             org.mockito.ArgumentMatchers.eq("record_creation_template.default_set"),
             anyString(), anyInt(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void defaultLocksDependenciesInOrderAndReresolvesBeforeCas() throws Exception {
+        RecordCreationTemplate root = root(42, "person", "enabled", 0, 2);
+        RecordCreationTemplateVersion version = version(42, 1, "person");
+        ResolvedCreationTemplateDto resolved = availableWithDependencies(root.getId());
+        when(mapper.getSetForUpdate(7, "person")).thenReturn(set(5, null));
+        when(mapper.getRootForUpdate(7, 42)).thenReturn(root);
+        when(mapper.getCurrentVersion(7, 42)).thenReturn(version);
+        when(resolver.resolveWorkspace(root, version, null)).thenReturn(resolved);
+        when(mapper.setDefault(7, "person", 42, 5)).thenReturn(1);
+        when(mapper.getSet(7, "person")).thenReturn(set(6, 42));
+        when(mapper.listRoots(7, "person", false)).thenReturn(List.of());
+        when(resolver.resolveSystem(RecordCreationRecordType.person, null)).thenReturn(
+            available("system:person:standard", RecordCreationRecordType.person, true));
+
+        service.setDefault(new RecordCreationTemplateDefaultRequestDto(
+            RecordCreationRecordType.person, "workspace:42", 5));
+
+        InOrder order = inOrder(
+            workspaceService,
+            mapper,
+            resolver,
+            customFieldMapper,
+            tagMapper,
+            pipelineMapper,
+            companyMapper,
+            personMapper,
+            shareMapper);
+        order.verify(workspaceService).lockAndRequirePermissions(
+            7, Map.of(11, Set.of(Permission.CUSTOM_FIELD_MANAGE)));
+        order.verify(mapper).insertSetIfAbsent(7, "person");
+        order.verify(mapper).getSetForUpdate(7, "person");
+        order.verify(mapper).getRootForUpdate(7, 42);
+        order.verify(mapper).getCurrentVersion(7, 42);
+        order.verify(resolver).resolveWorkspace(root, version, null);
+        order.verify(customFieldMapper).getByIdForUpdate(7, 3);
+        order.verify(customFieldMapper).getByIdForUpdate(7, 8);
+        order.verify(tagMapper).getTagByIdForUpdate(7, 4);
+        order.verify(tagMapper).getTagByIdForUpdate(7, 9);
+        order.verify(pipelineMapper).getVisiblePipelineByIdForUpdate(7, 7);
+        order.verify(shareMapper).lockPipelineShareForWorkspace(7, 7);
+        order.verify(pipelineMapper).getVisibleStageByIdForUpdate(7, 6);
+        order.verify(companyMapper).getVisibleCompanyByIdForUpdate(7, 5);
+        order.verify(shareMapper).lockCompanyShareForWorkspace(5, 7);
+        order.verify(personMapper).getVisiblePersonByIdForUpdate(7, 2);
+        order.verify(shareMapper).lockPersonShareForWorkspace(2, 7);
+        order.verify(resolver).resolveWorkspace(root, version, null);
+        order.verify(mapper).setDefault(7, "person", 42, 5);
     }
 
     @Test
@@ -529,6 +659,51 @@ class RecordCreationTemplateServiceTest {
         return new ResolvedCreationTemplateDto(
             id, RecordCreationRecordType.person, false, 1, names(), null,
             RecordCreationTemplateAvailability.unavailable, List.of(), List.of());
+    }
+
+    private static ResolvedCreationTemplateDto availableWithDependencies(int templateId) {
+        JsonMapper objectMapper = JsonMapper.builder().build();
+        List<ResolvedCreationFieldDto> fields = List.of(
+            resolvedField("custom:8", 8, null),
+            resolvedField("custom:3", 3, null),
+            resolvedField("tags", null, objectMapper.valueToTree(List.of(9, 4))),
+            resolvedField("pipeline", null, objectMapper.valueToTree(7)),
+            resolvedField("stage", null, objectMapper.valueToTree(6)),
+            resolvedField("company", null, objectMapper.valueToTree(5)),
+            resolvedField("referrerPerson", null, objectMapper.valueToTree(2)));
+        return new ResolvedCreationTemplateDto(
+            "workspace:" + templateId,
+            RecordCreationRecordType.person,
+            false,
+            1,
+            names(),
+            null,
+            RecordCreationTemplateAvailability.available,
+            List.of(new ResolvedCreationGroupDto("basics", names(), null, fields)),
+            List.of());
+    }
+
+    private static ResolvedCreationFieldDto resolvedField(
+            String key,
+            Integer customFieldId,
+            tools.jackson.databind.JsonNode defaultValue) {
+        return new ResolvedCreationFieldDto(
+            key,
+            customFieldId == null
+                ? RecordCreationFieldSource.system
+                : RecordCreationFieldSource.custom,
+            customFieldId,
+            RecordCreationFieldValueType.text,
+            "fingerprint",
+            names(),
+            null,
+            null,
+            false,
+            false,
+            false,
+            defaultValue,
+            defaultValue == null ? null : RecordCreationDefaultOrigin.template,
+            List.of());
     }
 
     private static byte[] hash(String value) throws Exception {

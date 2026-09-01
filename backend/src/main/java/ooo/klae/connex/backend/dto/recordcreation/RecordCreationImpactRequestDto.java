@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.dto.recordcreation;
 
 import java.util.List;
 
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.PositiveOrZero;
 
@@ -12,7 +13,7 @@ public record RecordCreationImpactRequestDto(
     @NotNull RecordCreationImpactOperation operation,
     @NotNull RecordCreationRecordType recordType,
     String templateId,
-    @NotNull List<String> removedFieldKeys,
+    @NotNull List<@NotBlank String> removedFieldKeys,
     Integer expectedTemplateVersion,
     @PositiveOrZero int expectedSetRevision
 ) {

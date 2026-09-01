@@ -129,7 +129,8 @@ class TenantTeardownLateResidualTest {
             "teardown",
             "lease-token");
         Route route = new Route(ORG_ID, WORKSPACE_ID, null);
-        TableLifecycle lateTable = TenantLifecycleRegistry.require("ai_output_cache");
+        TableLifecycle lateTable = TenantLifecycleRegistry.require(
+            "record_creation_template_version");
         when(controlMapper.findWorkspaceOrCleanupInOrg(ORG_ID, WORKSPACE_ID))
             .thenReturn(workspace);
         when(controlOperations.acquireWorkspaceTeardown(

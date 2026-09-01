@@ -15,6 +15,7 @@ import jakarta.validation.Validator;
 
 import ooo.klae.connex.backend.recordcreation.RecordCreationDefaultKind;
 import ooo.klae.connex.backend.recordcreation.RecordCreationFieldValueType;
+import ooo.klae.connex.backend.recordcreation.RecordCreationImpactOperation;
 import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -101,5 +102,30 @@ class RecordCreationDtoValidationTest {
             java.util.stream.IntStream.rangeClosed(1, 21).boxed().toList());
 
         assertFalse(validator.validate(tooMany).isEmpty());
+    }
+
+    @Test
+    void referenceAndImpactListsRejectInvalidElements() {
+        List<Integer> referenceIds = new java.util.ArrayList<>(List.of(4));
+        referenceIds.add(null);
+        RecordCreationDefaultSpecDto defaults = new RecordCreationDefaultSpecDto(
+            RecordCreationDefaultKind.literal_references,
+            null, null, null, null, null, referenceIds);
+        List<String> removedFieldKeys = new java.util.ArrayList<>(List.of("owner"));
+        removedFieldKeys.add(null);
+        RecordCreationImpactRequestDto impact = new RecordCreationImpactRequestDto(
+            RecordCreationImpactOperation.remove_fields,
+            RecordCreationRecordType.person,
+            "workspace:42",
+            removedFieldKeys,
+            2,
+            7);
+
+        assertTrue(validator.validate(defaults).stream()
+            .anyMatch(violation -> violation.getPropertyPath().toString()
+                .equals("referenceIds[1].<list element>")));
+        assertTrue(validator.validate(impact).stream()
+            .anyMatch(violation -> violation.getPropertyPath().toString()
+                .equals("removedFieldKeys[1].<list element>")));
     }
 }

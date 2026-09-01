@@ -38,6 +38,16 @@ public interface ShareMapper {
     boolean pipelineShareExists(@Param("id") int id, @Param("workspaceId") int workspaceId,
             @Param("targetWorkspaceId") int targetWorkspaceId);
 
+    Integer lockCompanyShareForWorkspace(
+        @Param("id") int id,
+        @Param("workspaceId") int workspaceId);
+    Integer lockPersonShareForWorkspace(
+        @Param("id") int id,
+        @Param("workspaceId") int workspaceId);
+    Integer lockPipelineShareForWorkspace(
+        @Param("id") int id,
+        @Param("workspaceId") int workspaceId);
+
     int unshareCompany(@Param("id") int id, @Param("workspaceId") int workspaceId,
             @Param("targetWorkspaceId") int targetWorkspaceId);
     int unsharePerson(@Param("id") int id, @Param("workspaceId") int workspaceId,

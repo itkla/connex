@@ -15,6 +15,7 @@ public interface CustomFieldDefinitionMapper {
     List<CustomFieldDefinition> getByEntityType(@Param("workspaceId") int workspaceId, @Param("entityType") String entityType);
     List<CustomFieldDefinition> getActiveByEntityType(@Param("workspaceId") int workspaceId, @Param("entityType") String entityType);
     CustomFieldDefinition getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    CustomFieldDefinition getByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     CustomFieldDefinition getByKey(@Param("workspaceId") int workspaceId, @Param("entityType") String entityType, @Param("fieldKey") String fieldKey);
     boolean exists(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int insert(CustomFieldDefinition definition);
