@@ -57,6 +57,12 @@ public interface UserMapper {
     User getUserByEmail(String email);
     /** Current account-wide administrative privilege from active control-plane memberships. */
     boolean isPrivilegedAccount(int id);
+    /**
+     * Whether the account holds privilege in at least one scope that contains another principal.
+     * A strict subset of {@link #isPrivilegedAccount(int)}: a false result means the account
+     * currently administers nobody but itself.
+     */
+    boolean holdsPrivilegeOverOtherAccounts(int id);
     /** Count of real accounts, excluding the reserved {@code __connex_system__} actor; gates bootstrap provisioning. */
     int countUsers();
     List<User> search(@Param("workspaceId") int workspaceId, @Param("query") String query);

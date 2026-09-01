@@ -26,7 +26,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.PasskeyDto;
-import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.PasskeyEnrollmentRequiredException;
@@ -267,8 +266,14 @@ public class WebAuthnService {
      * proofs. The account row and credential rows serialize recovery with concurrent promotion,
      * enrollment, and removal.
      *
+     * <p>Removing nothing is a legitimate outcome. Recovery is an operator-authorized
+     * authorization ceremony, not only a deletion: an account that holds privilege over other
+     * principals but has never enrolled is refused password-only first enrollment, and the
+     * session-bound grant this ceremony writes is its escape path. Refusing a zero-credential
+     * account here would make that refusal unrecoverable.
+     *
      * @param callerUserId recovering account
-     * @return number of credentials removed
+     * @return number of credentials removed, zero when none were enrolled
      */
     @Transactional
     public int recover(int callerUserId) {
@@ -277,12 +282,12 @@ public class WebAuthnService {
         }
         WebauthnUserEntityRow entity = userEntityMapper.findByUserId(callerUserId);
         if (entity == null) {
-            throw new BadRequestException("No passkey is enrolled");
+            return 0;
         }
         List<WebauthnCredentialRow> credentials =
                 credentialMapper.findByUserEntityUserIdForUpdate(entity.getId());
         if (credentials.isEmpty()) {
-            throw new BadRequestException("No passkey is enrolled");
+            return 0;
         }
         for (WebauthnCredentialRow credential : credentials) {
             userCredentials.delete(new Bytes(credential.getCredentialId()));

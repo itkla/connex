@@ -203,6 +203,79 @@
     )
   </select>
 
+  <select id="holdsPrivilegeOverOtherAccounts" resultType="boolean">
+    <!-- Strict subset of isPrivilegedAccount: true only when the account holds privilege in a
+         scope that contains at least one other principal. An account that administers nobody but
+         itself (the self-serve founder, the bootstrap owner, a single-member workspace) is
+         excluded, so first-passkey enrollment stays self-service for them.
+         Refusal is EXISTS over scopes, so acquiring an additional sole-member scope can only ever
+         lose the exclusion, never earn it: a thief holding an admin password cannot manufacture
+         the carve-out by creating a personal workspace.
+         The co-principal is deliberately not filtered by membership status; counting a pending
+         member as another principal fails toward refusal. -->
+    SELECT EXISTS (
+      SELECT 1
+      FROM org_member om
+      JOIN organization o ON o.id = om.org_id AND o.lifecycle_state = 'active'
+      WHERE om.user_id = #{id}
+        AND (
+          EXISTS (
+            SELECT 1 FROM org_member peer
+            WHERE peer.org_id = om.org_id AND peer.user_id &lt;&gt; #{id}
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM workspace_member peer
+            JOIN workspace pw ON pw.id = peer.workspace_id AND pw.lifecycle_state = 'active'
+            WHERE pw.org_id = om.org_id AND peer.user_id &lt;&gt; #{id}
+          )
+        )
+      UNION ALL
+      SELECT 1
+      FROM workspace_member wm
+      JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+      JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+      WHERE wm.user_id = #{id}
+        AND wm.status = 'active'
+        AND wm.role_id IS NULL
+        AND wm.role IN ('admin', 'owner')
+        AND (
+          EXISTS (
+            SELECT 1 FROM workspace_member peer
+            WHERE peer.workspace_id = wm.workspace_id AND peer.user_id &lt;&gt; #{id}
+          )
+          OR EXISTS (
+            SELECT 1 FROM org_member peer
+            WHERE peer.org_id = w.org_id AND peer.user_id &lt;&gt; #{id}
+          )
+        )
+      UNION ALL
+      SELECT 1
+      FROM workspace_member wm
+      JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
+      JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
+      JOIN workspace_role_permission wrp ON wrp.workspace_role_id = wm.role_id
+      WHERE wm.user_id = #{id}
+        AND wm.status = 'active'
+        AND wrp.permission IN (
+          'AUDIT_READ', 'CAMPAIGN_MANAGE', 'CAMPAIGN_SEND', 'CONSENT_MANAGE',
+          'CUSTOM_FIELD_MANAGE', 'DOCUMENT_MANAGE', 'MEMBER_MANAGE', 'PIPELINE_MANAGE',
+          'PRODUCT_MANAGE', 'ROLE_MANAGE', 'RULE_MANAGE', 'SHARE_MANAGE',
+          'TAG_MANAGE', 'WORKSPACE_SETTINGS'
+        )
+        AND (
+          EXISTS (
+            SELECT 1 FROM workspace_member peer
+            WHERE peer.workspace_id = wm.workspace_id AND peer.user_id &lt;&gt; #{id}
+          )
+          OR EXISTS (
+            SELECT 1 FROM org_member peer
+            WHERE peer.org_id = w.org_id AND peer.user_id &lt;&gt; #{id}
+          )
+        )
+    )
+  </select>
+
   <select id="countUsers" resultType="int">
     SELECT COUNT(*) FROM app_user WHERE username != '__connex_system__'
   </select>

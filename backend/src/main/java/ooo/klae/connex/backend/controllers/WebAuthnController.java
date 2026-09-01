@@ -42,6 +42,7 @@ import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.services.MfaRecoveryService;
+import ooo.klae.connex.backend.services.PasskeyBootstrapAuthorizationService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.SsoConnectionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
@@ -85,16 +86,21 @@ public class WebAuthnController {
     private final SessionSecurityService sessionSecurityService;
     private final AuditService auditService;
     private final MfaRecoveryService mfaRecoveryService;
+    private final PasskeyBootstrapAuthorizationService passkeyBootstrapAuthorizationService;
 
     /**
-     * Reports whether the current account must confirm its password for first-passkey enrollment.
+     * Reports the proofs the current account must present for first-passkey enrollment.
      */
     @GetMapping("/register/requirements")
-    public PasskeyRegistrationRequirementsDto registrationRequirements() {
+    public PasskeyRegistrationRequirementsDto registrationRequirements(HttpServletRequest httpRequest) {
         User user = authService.getCurrentUser();
-        boolean currentPasswordRequired = !webAuthnService.hasPasskey(user.getId())
+        boolean firstEnrollment = !webAuthnService.hasPasskey(user.getId());
+        boolean currentPasswordRequired = firstEnrollment
                 && authService.hasPasswordCredential(user.getId());
-        return new PasskeyRegistrationRequirementsDto(currentPasswordRequired);
+        boolean operatorAuthorizationRequired = firstEnrollment
+                && passkeyBootstrapAuthorizationService.operatorAuthorizationRequired(user, httpRequest);
+        return new PasskeyRegistrationRequirementsDto(
+                currentPasswordRequired, operatorAuthorizationRequired);
     }
 
     /**
@@ -359,6 +365,7 @@ public class WebAuthnController {
         }
         String password = request == null ? null : request.getCurrentPassword();
         authService.requireFirstPasskeyBootstrapAuthentication(user.getId(), password, httpRequest);
+        passkeyBootstrapAuthorizationService.requireFirstPasskeyBootstrapAuthorization(user, httpRequest);
         return true;
     }
 

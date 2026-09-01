@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
+import ooo.klae.connex.backend.session.SessionEpochRestampGrant;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
@@ -113,6 +114,38 @@ public class MfaRecoveryService {
      * @param user the recovering account
      * @param ceremonySessionPrimaryId the store row completing the ceremony
      */
+    /**
+     * Whether an operator-authorized recovery grant is outstanding for this account and belongs to
+     * the current ceremony session.
+     *
+     * <p>The grant is written only by {@link #recover}, cleared when the account's session epoch is
+     * advanced again, and cleared once a replacement passkey is enrolled. Its lifetime is therefore
+     * exactly the interval between an operator-authorized recovery and the replacement enrollment,
+     * which is what makes it usable as the authorization for that enrollment. Unlike the configured
+     * recovery token it is bound to both the account and the ceremony session, so it cannot be
+     * redeemed from another session or by another account. Every unresolved value fails closed.
+     *
+     * @param userId the account being enrolled
+     * @param httpRequest the authenticated servlet request carrying the ceremony session
+     * @return whether this session holds an outstanding recovery grant for the account
+     */
+    public boolean hasOutstandingRecoveryGrant(int userId, HttpServletRequest httpRequest) {
+        HttpSession session = httpRequest.getSession(false);
+        if (session == null) {
+            return false;
+        }
+        SessionEpochRestampGrant grant = userMapper.epochRestampGrant(userId);
+        if (grant == null) {
+            return false;
+        }
+        Integer currentEpoch = userMapper.currentSessionEpoch(userId);
+        if (currentEpoch == null || grant.epoch() != currentEpoch) {
+            return false;
+        }
+        String primaryId = springSessionMapper.primaryIdBySessionId(session.getId());
+        return primaryId != null && primaryId.equals(grant.sessionPrimaryId());
+    }
+
     private void expireOtherSessions(User user, String ceremonySessionPrimaryId) {
         accountSessionRevocationService.expireAllExceptSessionRow(
                 user.getId(), ceremonySessionPrimaryId);
