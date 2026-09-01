@@ -52,6 +52,8 @@ import { EmptyState } from "@/app/components/EmptyState";
 import SectionUnavailable from "@/app/components/SectionUnavailable";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 import { EllipsisHorizontalIcon } from "@heroicons/react/20/solid";
+import { IconButton } from "@/components/ui/icon-button";
+import { dealDocumentsHref } from "@/app/components/records/deals/dealLinks";
 
 const URGENCY_TONE: Record<WorkItemUrgency, string> = {
     critical: "bg-risk-high/12 text-foreground ring-risk-high/40",
@@ -293,7 +295,7 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                             </ul>
                             <div className="flex flex-wrap justify-end gap-2">
                                 <Button asChild variant="outline">
-                                    <Link href={detail.context.href}>
+                                    <Link href={contextHref(detail)}>
                                         {t("queueOpenContext")}
                                         <ArrowRightIcon className="size-3.5" />
                                     </Link>
@@ -314,6 +316,12 @@ export default function MyWorkQueue({ userId, initial }: Props) {
             </ResponsiveDialog>
         </section>
     );
+}
+
+function contextHref(item: WorkItem): string {
+    return item.source === "document_approval"
+        ? dealDocumentsHref(item.context.id)
+        : item.context.href;
 }
 
 function requireStepId(item: WorkItem): number {
@@ -374,7 +382,7 @@ function PrimaryAction({
 }) {
     if (item.permittedActions.includes("complete")) {
         return (
-            <Button size="sm" disabled={pending} onClick={() => onComplete(item)}>
+            <Button size="inline" disabled={pending} onClick={() => onComplete(item)}>
                 <CheckIcon className="size-3.5" />
                 {t("queueComplete")}
             </Button>
@@ -383,11 +391,11 @@ function PrimaryAction({
     if (item.permittedActions.includes("approve")) {
         return (
             <span className="flex gap-1.5">
-                <Button size="sm" disabled={pending} onClick={() => onApprove(item)}>
+                <Button size="inline" disabled={pending} onClick={() => onApprove(item)}>
                     <CheckIcon className="size-3.5" />
                     {t("queueApprove")}
                 </Button>
-                <Button size="sm" variant="outline" disabled={pending} onClick={() => onReject(item)}>
+                <Button size="inline" variant="outline" disabled={pending} onClick={() => onReject(item)}>
                     <XMarkIcon className="size-3.5" />
                     {t("queueReject")}
                 </Button>
@@ -396,7 +404,7 @@ function PrimaryAction({
     }
     if (item.permittedActions.includes("dismiss")) {
         return (
-            <Button size="sm" variant="outline" disabled={pending} onClick={() => onDismiss(item)}>
+            <Button size="inline" variant="outline" disabled={pending} onClick={() => onDismiss(item)}>
                 {t("queueDismiss")}
             </Button>
         );
@@ -444,7 +452,7 @@ function QueueRow({
             >
                 <RowText item={item} t={t} format={format} locale={locale} />
             </button>
-            <Link href={item.context.href} className="group hidden min-w-0 flex-1 sm:block">
+            <Link href={contextHref(item)} className="group hidden min-w-0 flex-1 sm:block">
                 <RowText item={item} t={t} format={format} locale={locale} />
             </Link>
             {(item.urgency === "critical" || item.urgency === "high") && (
@@ -468,13 +476,13 @@ function QueueRow({
                 )}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon-sm" aria-label={t("queueMore")} disabled={pending}>
+                        <IconButton label={t("queueMore")} disabled={pending}>
                             <EllipsisHorizontalIcon />
-                        </Button>
+                        </IconButton>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                         <DropdownMenuItem asChild>
-                            <Link href={item.context.href}>{t("queueOpenContext")}</Link>
+                            <Link href={contextHref(item)}>{t("queueOpenContext")}</Link>
                         </DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => onDetail(item)}>
                             {t("queueDetails")}
