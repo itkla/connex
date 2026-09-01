@@ -201,6 +201,14 @@ jobs:
           CONNEX_DB_URL: jdbc:mysql://127.0.0.1:3306/connexdb?sslMode=DISABLED
           CONNEX_DB_USERNAME: root
           CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-root
+          # Malware scanning is a mandatory control: a configured deployment profile refuses to
+          # start without it. These boots are bare WARs with no sidecar, so the control must be
+          # configured even though nothing is ever scanned here -- readiness is probed lazily on
+          # the first upload, not at startup. The refusal itself is asserted at the end of the job.
+          CONNEX_MALWARE_SCANNING_ENABLED: "true"
+          CONNEX_CLAMAV_BASE_URL: http://clamav:8091
+          CONNEX_CLAMAV_PLAIN_HTTP_PRIVATE_HOST: clamav
+          CONNEX_CLAMAV_SERVICE_TOKEN: ci-${{ github.run_id }}-${{ github.run_attempt }}-clamav-token
         run: |
           set -euo pipefail
           WAR=$(find build/libs -name '*.war' ! -name '*-plain.war' | head -1)
@@ -277,6 +285,35 @@ jobs:
             exit 1
           fi
           echo "on-prem correctly refused instance-managed mail at startup"
+
+          echo "=== every edition must REFUSE to run without malware scanning ==="
+          # This is the control CHK-062 exists for. DeploymentProfileValidator's posture keys are
+          # structurally one-directional -- they can forbid a key an operator sets true, but
+          # cannot require one to be true -- so a dedicated startup validator carries this. If
+          # this assertion ever stops failing, a deployment can silently accept unscanned uploads.
+          for PROFILE in saas silo on-prem; do
+            CONNEX_DEPLOYMENT_PROFILE="$PROFILE" CONNEX_MALWARE_SCANNING_ENABLED=false \
+              java -jar "$WAR" > "/tmp/boot-$PROFILE-unscanned.log" 2>&1 &
+            PID=$!
+            REFUSED=0
+            for _ in $(seq 1 90); do
+              if ! kill -0 "$PID" 2>/dev/null; then REFUSED=1; break; fi
+              sleep 2
+            done
+            if [ "$REFUSED" != 1 ]; then
+              echo "::error::$PROFILE booted with malware scanning disabled; it must fail startup"
+              tail -60 "/tmp/boot-$PROFILE-unscanned.log"
+              kill "$PID" 2>/dev/null || true
+              exit 1
+            fi
+            if ! grep -q "connex.deployment.profile=$PROFILE requires: connex.malware-scanning.enabled=true" \
+                "/tmp/boot-$PROFILE-unscanned.log"; then
+              echo "::error::$PROFILE refused to boot but not for the malware-scanning reason"
+              tail -60 "/tmp/boot-$PROFILE-unscanned.log"
+              exit 1
+            fi
+            echo "$PROFILE correctly refused to run without malware scanning"
+          done
 
   source-install:
     name: Build and boot the stack from source
