@@ -30,7 +30,7 @@ class RecordCreationTemplateMigrationIntegrationTest {
     private static boolean created;
 
     @BeforeAll
-    static void migrateOnlyTheTenantV194Lineage() throws SQLException {
+    static void migrateOnlyTheTenantV195Lineage() throws SQLException {
         String configuredUrl = System.getenv().getOrDefault(
             "CONNEX_DB_URL",
             "jdbc:mysql://localhost:3306/connexdb?createDatabaseIfNotExist=true&sslMode=DISABLED");
