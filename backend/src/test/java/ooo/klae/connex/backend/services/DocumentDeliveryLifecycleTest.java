@@ -6,10 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -130,8 +132,7 @@ class DocumentDeliveryLifecycleTest extends AbstractDocumentDeliveryServiceTest 
             delivery.id());
 
         scheduler.expire();
-        byte[] signedPdf = "%PDF-1.7 occurred-before-expiry"
-            .getBytes(StandardCharsets.US_ASCII);
+        byte[] signedPdf = signedPdf("occurred-before-expiry");
         assertTrue(webhookService.ingest("test_signature", Map.of(
             "x-workspace", Integer.toString(workspace.getId()),
             "x-envelope", delivery.providerEnvelopeId(),
@@ -174,7 +175,7 @@ class DocumentDeliveryLifecycleTest extends AbstractDocumentDeliveryServiceTest 
             "x-event-type", "completed",
             "x-occurred-at", expiresAt.toString(),
             "x-artifact-content-type", "application/pdf"),
-            "%PDF-1.7 too-late".getBytes(StandardCharsets.US_ASCII)));
+            signedPdf("too-late")));
 
         assertEquals("expired", jdbcTemplate.queryForObject(
             "SELECT status FROM document_delivery WHERE workspace_id = ? AND id = ?",
@@ -308,8 +309,7 @@ class DocumentDeliveryLifecycleTest extends AbstractDocumentDeliveryServiceTest 
         DocumentFixture fixture = finalDocument();
         DocumentDeliveryDto delivery = sendWithProvider(fixture, "test_signature");
         int recipientId = delivery.recipients().getFirst().id();
-        byte[] signedPdf = "%PDF-1.7 authenticated-provider-artifact"
-            .getBytes(StandardCharsets.US_ASCII);
+        byte[] signedPdf = signedPdf("authenticated-provider-artifact");
         Map<String, String> completed = Map.of(
             "x-workspace", Integer.toString(workspace.getId()),
             "x-envelope", delivery.providerEnvelopeId(),
@@ -344,8 +344,7 @@ class DocumentDeliveryLifecycleTest extends AbstractDocumentDeliveryServiceTest 
             "test_signature",
             signer("first-provider@example.test", 1),
             signer("second-provider@example.test", 2));
-        byte[] signedPdf = "%PDF-1.7 staged-before-final-signer"
-            .getBytes(StandardCharsets.US_ASCII);
+        byte[] signedPdf = signedPdf("staged-before-final-signer");
 
         assertTrue(webhookService.ingest("test_signature", Map.of(
             "x-workspace", Integer.toString(workspace.getId()),
@@ -415,8 +414,7 @@ class DocumentDeliveryLifecycleTest extends AbstractDocumentDeliveryServiceTest 
             workspace.getId(),
             delivery.id()));
 
-        byte[] signedPdf = "%PDF-1.7 artifact-after-recipient-completion"
-            .getBytes(StandardCharsets.US_ASCII);
+        byte[] signedPdf = signedPdf("artifact-after-recipient-completion");
         assertTrue(webhookService.ingest("test_signature", Map.of(
             "x-workspace", Integer.toString(workspace.getId()),
             "x-envelope", delivery.providerEnvelopeId(),
@@ -447,8 +445,7 @@ class DocumentDeliveryLifecycleTest extends AbstractDocumentDeliveryServiceTest 
             signer("second-order@example.test", 2));
         LocalDateTime earlier = LocalDateTime.now().minusMinutes(2).withNano(0);
         LocalDateTime later = earlier.plusMinutes(1);
-        byte[] signedPdf = "%PDF-1.7 deterministic-completion"
-            .getBytes(StandardCharsets.US_ASCII);
+        byte[] signedPdf = signedPdf("deterministic-completion");
 
         byte[] canonical = certificateForCallbackOrder(
             fixture,
@@ -645,6 +642,43 @@ class DocumentDeliveryLifecycleTest extends AbstractDocumentDeliveryServiceTest 
             .filter(candidate -> candidate.id() == delivery.id())
             .findFirst()
             .orElseThrow();
+    }
+
+    /**
+     * Builds a structurally valid inert PDF carrying a per-test label.
+     *
+     * <p>Provider artifacts are inspected against
+     * {@code UploadPurpose.DOCUMENT_DELIVERY_ARTIFACT} before storage, so a bare {@code %PDF}
+     * header prefix is no longer accepted here.
+     *
+     * @param label distinguishing text so each test stores byte-distinct content
+     * @return inert single-page PDF bytes
+     */
+    private static byte[] signedPdf(String label) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        writeAscii(output, "%PDF-1.7\n");
+        int catalogOffset = output.size();
+        writeAscii(output, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Title (" + label
+            + ") >>\nendobj\n");
+        int pagesOffset = output.size();
+        writeAscii(output, "2 0 obj\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\nendobj\n");
+        int pageOffset = output.size();
+        writeAscii(output,
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>\nendobj\n");
+        int xrefOffset = output.size();
+        writeAscii(output, "xref\n0 4\n0000000000 65535 f \n");
+        writeAscii(output, String.format(Locale.ROOT, "%010d 00000 n \n", catalogOffset));
+        writeAscii(output, String.format(Locale.ROOT, "%010d 00000 n \n", pagesOffset));
+        writeAscii(output, String.format(Locale.ROOT, "%010d 00000 n \n", pageOffset));
+        writeAscii(output, "trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n");
+        writeAscii(output, Integer.toString(xrefOffset));
+        writeAscii(output, "\n%%EOF\n");
+        return output.toByteArray();
+    }
+
+    /** Appends ASCII fixture syntax to an in-memory PDF. */
+    private static void writeAscii(ByteArrayOutputStream output, String value) {
+        output.writeBytes(value.getBytes(StandardCharsets.US_ASCII));
     }
 
     private int countExternalOrSystemEvents(int deliveryId, String type) {

@@ -211,6 +211,150 @@ class UploadContentInspectorTest {
             UploadSource.from("fields.docx", docxContentType(), simpleFields)).format());
     }
 
+    @ParameterizedTest
+    @MethodSource("odfDdeDocuments")
+    void rejectsOdfDdeElements(UploadFormat format, String mainXml) throws Exception {
+        byte[] document = odfPackage(format, mainXml, null);
+
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "document." + format.canonicalExtension(),
+                    format.canonicalContentType(),
+                    document)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("odfExcludedNamespaceDocuments")
+    void rejectsOdfElementsOutsideTheNamespaceAllowlist(String mainXml) throws Exception {
+        byte[] document = odfPackage(UploadFormat.ODT, mainXml, null);
+
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "document.odt",
+                    "application/vnd.oasis.opendocument.text",
+                    document)));
+    }
+
+    @Test
+    void rejectsNonEmptyOdfScriptsElement() throws Exception {
+        String mainXml = "<office:document-content xmlns:office=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:office:1.0\">"
+            + "<office:scripts><office:text/></office:scripts>"
+            + "</office:document-content>";
+        byte[] document = odfPackage(UploadFormat.ODT, mainXml, null);
+
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "document.odt",
+                    "application/vnd.oasis.opendocument.text",
+                    document)));
+    }
+
+    @Test
+    void acceptsUnusedActiveOdfNamespaceDeclarationsAndEmptyOfficeContainers()
+            throws Exception {
+        String mainXml = "<office:document-content xmlns:office=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:office:1.0\" "
+            + "xmlns:script=\"urn:oasis:names:tc:opendocument:xmlns:script:1.0\" "
+            + "xmlns:form=\"urn:oasis:names:tc:opendocument:xmlns:form:1.0\">"
+            + "<office:scripts/><office:body><office:text><office:forms/>"
+            + "</office:text></office:body></office:document-content>";
+        byte[] document = odfPackage(UploadFormat.ODT, mainXml, null);
+
+        assertEquals(UploadFormat.ODT, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from(
+                "document.odt",
+                "application/vnd.oasis.opendocument.text",
+                document)).format());
+    }
+
+    @Test
+    void acceptsLegitimateOdfNamesThatContainTheLettersDde() throws Exception {
+        String mainXml = "<office:document-content xmlns:office=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:office:1.0\" "
+            + "xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\">"
+            + "<office:body><office:text><text:p>"
+            + "<text:hidden-paragraph text:condition=\"ooow:false\" text:is-hidden=\"true\"/>"
+            + "<text:hidden-text text:condition=\"ooow:false\" text:is-hidden=\"false\" "
+            + "text:string-value=\"visible\"/>"
+            + "</text:p></office:text></office:body></office:document-content>";
+        byte[] document = odfPackage(UploadFormat.ODT, mainXml, null);
+
+        assertEquals(UploadFormat.ODT, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from(
+                "document.odt",
+                "application/vnd.oasis.opendocument.text",
+                document)).format());
+    }
+
+    @Test
+    void acceptsDigitallySignedOdfDocuments() throws Exception {
+        byte[] document = odfPackageWithExtraPart(
+            "META-INF/documentsignatures.xml", documentSignatureXml());
+
+        assertEquals(UploadFormat.ODT, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from(
+                "signed.odt",
+                "application/vnd.oasis.opendocument.text",
+                document)).format());
+    }
+
+    @Test
+    void rejectsOdfMacroSignaturesEvenWhenDocumentSignaturesAreAdmitted() throws Exception {
+        byte[] document = odfPackageWithExtraPart(
+            "META-INF/macrosignatures.xml", documentSignatureXml());
+
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "macro-signed.odt",
+                    "application/vnd.oasis.opendocument.text",
+                    document)));
+    }
+
+    @Test
+    void rejectsActiveContentSmuggledIntoTheOdfSignaturePart() throws Exception {
+        String smuggled = "<dsig:document-signatures xmlns:dsig=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:digitalsignature:1.0\" "
+            + "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\">"
+            + "<office:dde-source office:dde-application=\"cmd\"/>"
+            + "</dsig:document-signatures>";
+        byte[] document = odfPackageWithExtraPart(
+            "META-INF/documentsignatures.xml", smuggled);
+
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "smuggled.odt",
+                    "application/vnd.oasis.opendocument.text",
+                    document)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("odfUninspectableActiveDocuments")
+    void rejectsOdfInlineBinaryDataAndAnimationCommands(String mainXml) throws Exception {
+        byte[] document = odfPackage(UploadFormat.ODT, mainXml, null);
+
+        assertThrows(UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "document.odt",
+                    "application/vnd.oasis.opendocument.text",
+                    document)));
+    }
+
     @Test
     void stripsImageMetadataBeforeReturningStorageEligibleBytes() throws Exception {
         byte[] script = "<script>alert(1)</script>".getBytes(StandardCharsets.US_ASCII);
@@ -731,6 +875,70 @@ class UploadContentInspectorTest {
             Arguments.of(UploadPurpose.ASSISTANT_CONTEXT, "data.json", "application/json", UploadFormat.JSON, "{\"safe\":true}".getBytes(StandardCharsets.UTF_8)));
     }
 
+    /** Supplies inert ODF package roots containing each refused DDE element family. */
+    private static Stream<Arguments> odfDdeDocuments() {
+        String officeNamespace = "urn:oasis:names:tc:opendocument:xmlns:office:1.0";
+        String textNamespace = "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
+        String tableNamespace = "urn:oasis:names:tc:opendocument:xmlns:table:1.0";
+        return Stream.of(
+            Arguments.of(
+                UploadFormat.ODT,
+                "<office:document-content xmlns:office=\"" + officeNamespace + "\">"
+                    + "<office:body><office:text><office:dde-source "
+                    + "office:dde-application=\"cmd\" office:dde-topic=\"system\" "
+                    + "office:dde-item=\"calc.exe\" office:automatic-update=\"true\"/>"
+                    + "</office:text></office:body></office:document-content>"),
+            Arguments.of(
+                UploadFormat.ODT,
+                "<office:document-content xmlns:office=\"" + officeNamespace + "\" "
+                    + "xmlns:text=\"" + textNamespace + "\"><office:body><office:text>"
+                    + "<text:dde-connection-decls><text:dde-connection-decl/>"
+                    + "</text:dde-connection-decls></office:text></office:body>"
+                    + "</office:document-content>"),
+            Arguments.of(
+                UploadFormat.ODT,
+                "<office:document-content xmlns:office=\"" + officeNamespace + "\" "
+                    + "xmlns:text=\"" + textNamespace + "\"><office:body><office:text>"
+                    + "<text:dde-connection/></office:text></office:body>"
+                    + "</office:document-content>"),
+            Arguments.of(
+                UploadFormat.ODS,
+                "<office:document-content xmlns:office=\"" + officeNamespace + "\" "
+                    + "xmlns:table=\"" + tableNamespace + "\"><office:body>"
+                    + "<office:spreadsheet><table:dde-links><table:dde-link/>"
+                    + "</table:dde-links></office:spreadsheet></office:body>"
+                    + "</office:document-content>"));
+    }
+
+    /** Supplies inert ODF roots whose payloads cannot be inspected or invoke application verbs. */
+    private static Stream<String> odfUninspectableActiveDocuments() {
+        String root = "<office:document-content xmlns:office=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:office:1.0\" ";
+        return Stream.of(
+            root + "xmlns:draw=\"urn:oasis:names:tc:opendocument:xmlns:drawing:1.0\">"
+                + "<office:body><office:text><draw:frame><draw:image "
+                + "draw:mime-type=\"image/svg+xml\"><office:binary-data>PHN2Zz48c2NyaXB0"
+                + "Lz48L3N2Zz4=</office:binary-data></draw:image></draw:frame>"
+                + "</office:text></office:body></office:document-content>",
+            root + "xmlns:anim=\"urn:oasis:names:tc:opendocument:xmlns:animation:1.0\">"
+                + "<office:body><office:text><anim:par><anim:command "
+                + "anim:command=\"custom\"/></anim:par></office:text></office:body>"
+                + "</office:document-content>");
+    }
+
+    /** Supplies inert ODF package roots using excluded or unknown element namespaces. */
+    private static Stream<String> odfExcludedNamespaceDocuments() {
+        String root = "<office:document-content xmlns:office=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:office:1.0\" ";
+        return Stream.of(
+            root + "xmlns:script=\"urn:oasis:names:tc:opendocument:xmlns:script:1.0\">"
+                + "<script:event-listener/></office:document-content>",
+            root + "xmlns:form=\"urn:oasis:names:tc:opendocument:xmlns:form:1.0\">"
+                + "<form:form/></office:document-content>",
+            root + "xmlns:evil=\"http://example.invalid/evil\">"
+                + "<evil:payload/></office:document-content>");
+    }
+
     private static Stream<Arguments> invalidFormats() {
         byte[] invalidBinary = "not the declared format".getBytes(StandardCharsets.UTF_8);
         byte[] invalidUtf8 = {(byte) 0xc3, 0x28};
@@ -996,6 +1204,53 @@ class UploadContentInspectorTest {
             }
         }
         return output.toByteArray();
+    }
+
+    /** Builds an ODT package carrying one additional named XML part. */
+    private static byte[] odfPackageWithExtraPart(String partName, String partXml)
+            throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
+            byte[] mimeType = UploadFormat.ODT.contentTypes().iterator().next()
+                .getBytes(StandardCharsets.US_ASCII);
+            ZipEntry mimeTypeEntry = new ZipEntry("mimetype");
+            CRC32 crc = new CRC32();
+            crc.update(mimeType);
+            mimeTypeEntry.setMethod(ZipEntry.STORED);
+            mimeTypeEntry.setSize(mimeType.length);
+            mimeTypeEntry.setCompressedSize(mimeType.length);
+            mimeTypeEntry.setCrc(crc.getValue());
+            zip.putNextEntry(mimeTypeEntry);
+            zip.write(mimeType);
+            zip.closeEntry();
+            put(zip, "content.xml",
+                defaultMainXml(UploadFormat.ODT).getBytes(StandardCharsets.UTF_8));
+            put(zip, "META-INF/manifest.xml", ("<manifest:manifest xmlns:manifest=\""
+                + "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\"/>")
+                .getBytes(StandardCharsets.UTF_8));
+            put(zip, partName, partXml.getBytes(StandardCharsets.UTF_8));
+        }
+        return output.toByteArray();
+    }
+
+    /** Builds a LibreOffice-shaped XMLDSig document signature including its {@code Object} block. */
+    private static String documentSignatureXml() {
+        return "<dsig:document-signatures xmlns:dsig=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:digitalsignature:1.0\">"
+            + "<Signature xmlns=\"http://www.w3.org/2000/09/xmldsig#\" Id=\"s1\">"
+            + "<SignedInfo><CanonicalizationMethod Algorithm=\""
+            + "http://www.w3.org/TR/2001/REC-xml-c14n-20010315\"/>"
+            + "<SignatureMethod Algorithm=\""
+            + "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256\"/>"
+            + "<Reference URI=\"content.xml\"><DigestMethod Algorithm=\""
+            + "http://www.w3.org/2001/04/xmlenc#sha256\"/>"
+            + "<DigestValue>aGFzaA==</DigestValue></Reference></SignedInfo>"
+            + "<SignatureValue>c2ln</SignatureValue><KeyInfo><X509Data>"
+            + "<X509Certificate>Y2VydA==</X509Certificate></X509Data></KeyInfo>"
+            + "<Object><SignatureProperties><SignatureProperty Id=\"p1\" Target=\"#s1\">"
+            + "<dc:date xmlns:dc=\"http://purl.org/dc/elements/1.1/\">2026-08-31T00:00:00"
+            + "</dc:date></SignatureProperty></SignatureProperties></Object>"
+            + "</Signature></dsig:document-signatures>";
     }
 
     private static String contentTypesXml(UploadFormat format) {

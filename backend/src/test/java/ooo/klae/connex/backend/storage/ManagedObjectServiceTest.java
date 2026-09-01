@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayDeque;
+import java.util.Locale;
 import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -50,13 +51,16 @@ import ooo.klae.connex.backend.dto.ActiveObjectReference;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
+import ooo.klae.connex.backend.exceptions.UnsupportedUploadMediaTypeException;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
+import ooo.klae.connex.backend.storage.ManagedObjectService.StoredArtifact;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ObjectStorageProperties.LegacyMigrationMode;
 import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadFormat;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
 import ooo.klae.connex.backend.storage.UploadPolicy.ValidatedUpload;
+import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
 class ManagedObjectServiceTest {
@@ -96,6 +100,14 @@ class ManagedObjectServiceTest {
     private ManagedObjectService service(ObjectStorageProperties configuredProperties) {
         UploadPolicy uploadPolicy = new UploadPolicy(configuredProperties);
         UploadContentInspector uploadContentInspector = passthroughInspector(uploadPolicy);
+        return service(configuredProperties, uploadPolicy, uploadContentInspector);
+    }
+
+    /** Builds a service around the supplied upload boundary for focused storage tests. */
+    private ManagedObjectService service(
+            ObjectStorageProperties configuredProperties,
+            UploadPolicy uploadPolicy,
+            UploadContentInspector uploadContentInspector) {
         ImageUploadValidator imageValidator = new ImageUploadValidator(
             configuredProperties,
             uploadPolicy,
@@ -115,6 +127,16 @@ class ManagedObjectServiceTest {
             readinessNanoTime,
             task -> readinessTasks.add(task),
             () -> readinessSnapshotPublicationHook.run());
+    }
+
+    /** Builds the real upload inspector used by document-artifact boundary tests. */
+    private UploadContentInspector realInspector(UploadPolicy uploadPolicy) {
+        ImageUploadValidator imageValidator = new ImageUploadValidator(
+            properties,
+            uploadPolicy,
+            new ImageDecodeAdmissionService(properties),
+            imageValidationExecutor);
+        return new UploadContentInspector(uploadPolicy, imageValidator, new ObjectMapper());
     }
 
     private static UploadContentInspector passthroughInspector(UploadPolicy uploadPolicy) {
@@ -204,6 +226,72 @@ class ManagedObjectServiceTest {
         }
         assertArrayEquals(upload.sha256(), checksum.getValue());
         assertEquals(bytes.length, stored.size());
+    }
+
+    @Test
+    void rejectsDocumentArtifactDeclaredAsPdfWithoutPdfContent() {
+        UploadPolicy uploadPolicy = new UploadPolicy(properties);
+        try (UploadContentInspector uploadContentInspector = realInspector(uploadPolicy)) {
+            ManagedObjectService inspectedService = service(
+                properties, uploadPolicy, uploadContentInspector);
+
+            assertThrows(
+                UnsupportedUploadMediaTypeException.class,
+                () -> inTransaction(() -> inspectedService.storeDocumentArtifact(
+                    17,
+                    23,
+                    "signed_document",
+                    "application/pdf",
+                    "not a PDF".getBytes(StandardCharsets.UTF_8))));
+        }
+
+        verify(objectStorage, never()).put(
+            anyString(), any(UploadSource.class), anyString(), any(byte[].class));
+    }
+
+    @Test
+    void rejectsDocumentArtifactPdfWithActiveCatalogEntry() {
+        UploadPolicy uploadPolicy = new UploadPolicy(properties);
+        byte[] activePdf = validPdf("/OpenAction << /S /JavaScript /JS (alert) >>");
+        try (UploadContentInspector uploadContentInspector = realInspector(uploadPolicy)) {
+            ManagedObjectService inspectedService = service(
+                properties, uploadPolicy, uploadContentInspector);
+
+            assertThrows(
+                UnsupportedUploadMediaTypeException.class,
+                () -> inTransaction(() -> inspectedService.storeDocumentArtifact(
+                    17,
+                    23,
+                    "signed_document",
+                    "application/pdf",
+                    activePdf)));
+        }
+
+        verify(objectStorage, never()).put(
+            anyString(), any(UploadSource.class), anyString(), any(byte[].class));
+    }
+
+    @Test
+    void storesCleanDocumentArtifactPdfAndJson() {
+        UploadPolicy uploadPolicy = new UploadPolicy(properties);
+        byte[] pdf = validPdf("");
+        byte[] json = "{\"safe\":true}".getBytes(StandardCharsets.UTF_8);
+        try (UploadContentInspector uploadContentInspector = realInspector(uploadPolicy)) {
+            ManagedObjectService inspectedService = service(
+                properties, uploadPolicy, uploadContentInspector);
+
+            StoredArtifact pdfArtifact = inTransaction(
+                () -> inspectedService.storeDocumentArtifact(
+                    17, 23, "signed_document", "application/pdf", pdf));
+            StoredArtifact jsonArtifact = inTransaction(
+                () -> inspectedService.storeDocumentArtifact(
+                    17, 23, "certificate", "application/json", json));
+
+            assertEquals("application/pdf", pdfArtifact.contentType());
+            assertEquals(pdf.length, pdfArtifact.byteLength());
+            assertEquals("application/json", jsonArtifact.contentType());
+            assertEquals(json.length, jsonArtifact.byteLength());
+        }
     }
 
     @Test
@@ -784,6 +872,34 @@ class ManagedObjectServiceTest {
         attachment.setFileName("report.pdf");
         attachment.setContentType("application/pdf");
         return attachment;
+    }
+
+    /** Builds a structurally valid inert PDF with optional synthetic catalog syntax. */
+    private static byte[] validPdf(String catalogAddition) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        writeAscii(output, "%PDF-1.4\n");
+        int catalogOffset = output.size();
+        writeAscii(output, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R "
+            + catalogAddition + " >>\nendobj\n");
+        int pagesOffset = output.size();
+        writeAscii(output, "2 0 obj\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\nendobj\n");
+        int pageOffset = output.size();
+        writeAscii(output,
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>\nendobj\n");
+        int xrefOffset = output.size();
+        writeAscii(output, "xref\n0 4\n0000000000 65535 f \n");
+        writeAscii(output, String.format(Locale.ROOT, "%010d 00000 n \n", catalogOffset));
+        writeAscii(output, String.format(Locale.ROOT, "%010d 00000 n \n", pagesOffset));
+        writeAscii(output, String.format(Locale.ROOT, "%010d 00000 n \n", pageOffset));
+        writeAscii(output, "trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n");
+        writeAscii(output, Integer.toString(xrefOffset));
+        writeAscii(output, "\n%%EOF\n");
+        return output.toByteArray();
+    }
+
+    /** Appends ASCII fixture syntax to an in-memory PDF. */
+    private static void writeAscii(ByteArrayOutputStream output, String value) {
+        output.writeBytes(value.getBytes(StandardCharsets.US_ASCII));
     }
 
     private static byte[] png(int width, int height) throws Exception {

@@ -76,7 +76,19 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <p>Inspection runs in a bounded executor with a five-second deadline. ZIP document packages are
  * limited to 512 entries, 64 MiB expanded content, a 100:1 compression ratio, and 4 MiB per XML
- * part. XML DTDs and external entities are disabled. Parser error, timeout, ambiguous structure,
+ * part. XML DTDs and external entities are disabled. OOXML is bound by exact main-part,
+ * content-type, and relationship evidence with a Word field-command allowlist. ODF is bound by an
+ * element-namespace allowlist plus closed office- and animation-namespace element allowlists, with
+ * script and form vocabularies excluded entirely. {@code office:binary-data} is excluded because
+ * inline base64 payloads are never decoded, so an inline image cannot be inspected the way a real
+ * raster upload is; documents must reference package parts instead.
+ *
+ * <p>The single ODF part {@code META-INF/documentsignatures.xml} is instead admitted through its
+ * own closed signature vocabulary so that digitally signed documents remain uploadable. That
+ * exemption is deliberately keyed on the exact part name and must not be widened to every
+ * signature-shaped part: an ODF package may also carry {@code META-INF/macrosignatures.xml}, and a
+ * signed macro is still a macro. Macro signature parts carry no exemption, so they fall to the
+ * ordinary ODF namespace allowlist and are refused. Parser error, timeout, ambiguous structure,
  * active content, and any exceeded bound all fail closed.
  *
  * <p>The returned {@link InspectedUpload} is authoritative: stored bytes, length, digest, response
@@ -128,9 +140,81 @@ public class UploadContentInspector implements AutoCloseable {
         "oleobject", "package", "querytable", "vbaproject");
     private static final String ODF_TEXT_NAMESPACE =
         "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
+    private static final String ODF_OFFICE_NAMESPACE =
+        "urn:oasis:names:tc:opendocument:xmlns:office:1.0";
+    private static final Set<String> ODF_ELEMENT_NAMESPACES = Set.of(
+        ODF_OFFICE_NAMESPACE,
+        ODF_TEXT_NAMESPACE,
+        "urn:oasis:names:tc:opendocument:xmlns:style:1.0",
+        "urn:oasis:names:tc:opendocument:xmlns:table:1.0",
+        "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0",
+        "urn:oasis:names:tc:opendocument:xmlns:dr3d:1.0",
+        "urn:oasis:names:tc:opendocument:xmlns:chart:1.0",
+        "urn:oasis:names:tc:opendocument:xmlns:config:1.0",
+        "urn:oasis:names:tc:opendocument:xmlns:meta:1.0",
+        "urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0",
+        "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0",
+        "urn:oasis:names:tc:opendocument:xmlns:presentation:1.0",
+        "urn:oasis:names:tc:opendocument:xmlns:animation:1.0",
+        "urn:oasis:names:tc:opendocument:xmlns:smil-compatible:1.0",
+        "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0",
+        "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0",
+        "urn:oasis:names:tc:opendocument:xmlns:of:1.2",
+        "urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0",
+        "urn:org:documentfoundation:names:experimental:calc:xmlns:calcext:1.0",
+        "urn:openoffice:names:experimental:ooo-ms-interop:xmlns:field:1.0",
+        "http://openoffice.org/2004/office",
+        "http://openoffice.org/2004/writer",
+        "http://openoffice.org/2004/calc",
+        "http://openoffice.org/2005/report",
+        "http://openoffice.org/2009/office",
+        "http://openoffice.org/2009/table",
+        "http://openoffice.org/2010/draw",
+        "http://purl.org/dc/elements/1.1/",
+        "http://www.w3.org/1999/xlink",
+        "http://www.w3.org/XML/1998/namespace",
+        "http://www.w3.org/2003/g/data-view#",
+        "http://www.w3.org/TR/css3-text/");
+    private static final Set<String> ODF_OFFICE_ELEMENTS = Set.of(
+        "annotation", "annotation-end", "automatic-styles", "body",
+        "change-info", "chart", "document", "document-content", "document-meta",
+        "document-settings", "document-styles", "drawing", "font-face-decls", "forms",
+        "image", "master-styles", "meta", "presentation", "scripts", "settings",
+        "spreadsheet", "styles", "text");
+    private static final Set<String> ODF_EMPTY_ONLY_OFFICE_ELEMENTS = Set.of(
+        "forms", "scripts");
+    private static final String ODF_ANIMATION_NAMESPACE =
+        "urn:oasis:names:tc:opendocument:xmlns:animation:1.0";
+    private static final Set<String> ODF_ANIMATION_ELEMENTS = Set.of(
+        "animate", "animatecolor", "animatemotion", "animatetransform", "audio",
+        "iterate", "par", "param", "seq", "set", "transitionfilter");
+    private static final String ODF_SIGNATURE_PART = "META-INF/documentsignatures.xml";
+    private static final Set<String> ODF_SIGNATURE_NAMESPACES = Set.of(
+        "urn:oasis:names:tc:opendocument:xmlns:digitalsignature:1.0",
+        "http://www.w3.org/2000/09/xmldsig#",
+        "http://uri.etsi.org/01903/v1.1.1#",
+        "http://uri.etsi.org/01903/v1.3.2#",
+        "http://purl.org/dc/elements/1.1/");
+    private static final Set<String> ODF_SIGNATURE_ELEMENTS = Set.of(
+        "document-signatures", "signature", "signedinfo", "canonicalizationmethod",
+        "signaturemethod", "reference", "transforms", "transform", "digestmethod",
+        "digestvalue", "signaturevalue", "keyinfo", "keyname", "keyvalue", "rsakeyvalue",
+        "modulus", "exponent", "dsakeyvalue", "eckeyvalue", "namedcurve", "publickey",
+        "x509data", "x509certificate", "x509issuerserial", "x509issuername",
+        "x509serialnumber", "x509subjectname", "x509ski", "x509crl", "retrievalmethod",
+        "object", "manifest", "signatureproperties", "signatureproperty",
+        "hmacoutputlength", "xpath", "date", "qualifyingproperties", "signedproperties",
+        "signedsignatureproperties", "signingtime", "signingcertificate", "cert",
+        "certdigest", "issuerserial", "signeddataobjectproperties", "unsignedproperties",
+        "unsignedsignatureproperties", "signaturepolicyidentifier",
+        "signaturepolicyimplied", "claimedroles", "claimedrole",
+        "signatureproductionplace", "city", "stateorprovince", "postalcode",
+        "countryname");
     private static final Set<String> ACTIVE_XML_ELEMENTS = Set.of(
         "script", "event-listener", "event-listeners", "altchunk", "object",
-        "oleobject", "control");
+        "oleobject", "control", "dde-source", "dde-connection", "dde-connection-decl",
+        "dde-connection-decls", "dde-link", "dde-links", "object-ole", "applet",
+        "plugin", "floating-frame", "execute-macro");
     private static final Set<String> SAFE_WORD_FIELD_COMMANDS = Set.of(
         "ADVANCE", "AUTHOR", "AUTONUM", "AUTONUMLGL", "AUTONUMOUT", "BIBLIOGRAPHY",
         "CITATION", "COMMENTS", "CREATEDATE", "DATE", "DOCPROPERTY", "DOCVARIABLE", "EDITTIME",
@@ -807,7 +891,11 @@ public class UploadContentInspector implements AutoCloseable {
             byte[] content,
             Deadline deadline) {
         ArchiveDirectory directory = readArchiveDirectory(content, deadline);
-        PackageEvidence evidence = inflateAndInspectPackage(content, directory, deadline);
+        boolean odfPackage = format == UploadFormat.ODT
+            || format == UploadFormat.ODS
+            || format == UploadFormat.ODP;
+        PackageEvidence evidence = inflateAndInspectPackage(
+            content, directory, deadline, odfPackage);
         switch (format) {
             case DOCX -> requireOoxml(
                 evidence,
@@ -913,7 +1001,8 @@ public class UploadContentInspector implements AutoCloseable {
     private PackageEvidence inflateAndInspectPackage(
             byte[] content,
             ArchiveDirectory directory,
-            Deadline deadline) {
+            Deadline deadline,
+            boolean odfPackage) {
         Set<String> seen = new HashSet<>();
         Map<String, String> contentTypeOverrides = new HashMap<>();
         Map<String, XmlRoot> xmlRoots = new HashMap<>();
@@ -940,7 +1029,7 @@ public class UploadContentInspector implements AutoCloseable {
                 }
                 if (xmlEntry(zipEntry.getName())) {
                     XmlEvidence xml = inspectXml(
-                        zipEntry.getName(), entry.content(), deadline);
+                        zipEntry.getName(), entry.content(), deadline, odfPackage);
                     xmlRoots.put(zipEntry.getName(), xml.root());
                     officeDocumentTargets.addAll(xml.officeDocumentTargets());
                     relationshipTargets.addAll(xml.relationshipTargets());
@@ -1009,7 +1098,8 @@ public class UploadContentInspector implements AutoCloseable {
     private static XmlEvidence inspectXml(
             String entryName,
             byte[] content,
-            Deadline deadline) {
+            Deadline deadline,
+            boolean odfPackage) {
         try {
             SAXParserFactory factory = SAXParserFactory.newInstance();
             factory.setNamespaceAware(true);
@@ -1021,7 +1111,7 @@ public class UploadContentInspector implements AutoCloseable {
             XMLReader reader = factory.newSAXParser().getXMLReader();
             reader.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
             reader.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
-            SafeXmlHandler handler = new SafeXmlHandler(deadline, entryName);
+            SafeXmlHandler handler = new SafeXmlHandler(deadline, entryName, odfPackage);
             reader.setContentHandler(handler);
             reader.setErrorHandler(handler);
             reader.parse(new InputSource(new ByteArrayInputStream(content)));
@@ -1233,7 +1323,7 @@ public class UploadContentInspector implements AutoCloseable {
                 || !evidence.names().contains("content.xml")
                 || !evidence.names().contains("META-INF/manifest.xml")
                 || !new XmlRoot(
-                    "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
+                    ODF_OFFICE_NAMESPACE,
                     "document-content").equals(contentRoot)
                 || !new XmlRoot(
                     "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0",
@@ -1622,6 +1712,8 @@ public class UploadContentInspector implements AutoCloseable {
     private static final class SafeXmlHandler extends DefaultHandler {
         private final Deadline deadline;
         private final String entryName;
+        private final boolean odfPackage;
+        private final boolean odfSignaturePart;
         private final boolean contentTypesDocument;
         private final boolean rootRelationshipsDocument;
         private final boolean relationshipsDocument;
@@ -1632,11 +1724,17 @@ public class UploadContentInspector implements AutoCloseable {
         private final List<WordFieldState> wordFields = new ArrayList<>();
         private int depth;
         private int instructionTextDepth;
+        private int emptyOnlyOfficeElementDepth;
         private XmlRoot root;
 
-        private SafeXmlHandler(Deadline deadline, String entryName) {
+        private SafeXmlHandler(
+                Deadline deadline,
+                String entryName,
+                boolean odfPackage) {
             this.deadline = deadline;
             this.entryName = entryName;
+            this.odfPackage = odfPackage;
+            odfSignaturePart = odfPackage && ODF_SIGNATURE_PART.equals(entryName);
             contentTypesDocument = "[Content_Types].xml".equals(entryName);
             rootRelationshipsDocument = "_rels/.rels".equals(entryName);
             relationshipsDocument = entryName.toLowerCase(Locale.ROOT).endsWith(".rels");
@@ -1658,7 +1756,35 @@ public class UploadContentInspector implements AutoCloseable {
                 root = new XmlRoot(uri, element);
             }
             String normalizedElement = element.toLowerCase(Locale.ROOT);
-            if (ACTIVE_XML_ELEMENTS.contains(normalizedElement)) {
+            if (odfSignaturePart) {
+                if (!ODF_SIGNATURE_NAMESPACES.contains(uri)
+                        || !ODF_SIGNATURE_ELEMENTS.contains(normalizedElement)) {
+                    throw new SAXException("ODF signature content is not allowed");
+                }
+            } else if (odfPackage) {
+                if (emptyOnlyOfficeElementDepth > 0) {
+                    throw new SAXException("ODF office element must be empty");
+                }
+                if (!ODF_ELEMENT_NAMESPACES.contains(uri)) {
+                    throw new SAXException("ODF element namespace is not allowed");
+                }
+                if (ODF_OFFICE_NAMESPACE.equals(uri)
+                        && !ODF_OFFICE_ELEMENTS.contains(normalizedElement)) {
+                    throw new SAXException("ODF office element is not allowed");
+                }
+                if (ODF_ANIMATION_NAMESPACE.equals(uri)
+                        && !ODF_ANIMATION_ELEMENTS.contains(normalizedElement)) {
+                    throw new SAXException("ODF animation element is not allowed");
+                }
+                if (ddeName(normalizedElement)) {
+                    throw new SAXException("ODF DDE content is not allowed");
+                }
+                if (ODF_OFFICE_NAMESPACE.equals(uri)
+                        && ODF_EMPTY_ONLY_OFFICE_ELEMENTS.contains(normalizedElement)) {
+                    emptyOnlyOfficeElementDepth = depth;
+                }
+            }
+            if (!odfSignaturePart && ACTIVE_XML_ELEMENTS.contains(normalizedElement)) {
                 throw new SAXException("Active XML content is not allowed");
             }
             inspectWordFieldStart(uri, normalizedElement, attributes);
@@ -1693,6 +1819,11 @@ public class UploadContentInspector implements AutoCloseable {
                     }
                 }
                 String normalizedName = name.toLowerCase(Locale.ROOT);
+                if (odfPackage
+                        && (ddeName(normalizedName)
+                            || "automatic-update".equals(normalizedName))) {
+                    throw new SAXException("ODF active attribute is not allowed");
+                }
                 if (("instr".equals(normalizedName)
                             && !(WORDPROCESSING_NAMESPACES.contains(uri)
                                 && "fldsimple".equals(normalizedElement)))
@@ -1721,6 +1852,9 @@ public class UploadContentInspector implements AutoCloseable {
             if (WORDPROCESSING_NAMESPACES.contains(uri)
                     && "instrtext".equals(element.toLowerCase(Locale.ROOT))) {
                 instructionTextDepth = 0;
+            }
+            if (depth == emptyOnlyOfficeElementDepth) {
+                emptyOnlyOfficeElementDepth = 0;
             }
             depth--;
         }
@@ -1812,6 +1946,21 @@ public class UploadContentInspector implements AutoCloseable {
                     && !officeDocumentTargets.add(normalizedTarget)) {
                 throw new SAXException("Package office document relationship is ambiguous");
             }
+        }
+
+        /**
+         * Identifies the ODF dynamic-data-exchange element and attribute family by name token.
+         *
+         * <p>Matching requires the hyphenated {@code dde-} token rather than a bare {@code dde}
+         * substring: legitimate ODF names such as {@code hidden-text}, {@code hidden-paragraph},
+         * {@code is-hidden}, and {@code embedded} contain those three letters and must keep
+         * uploading.
+         *
+         * @param normalizedName lower-case local element or attribute name
+         * @return whether the name belongs to the DDE family
+         */
+        private static boolean ddeName(String normalizedName) {
+            return "dde".equals(normalizedName) || normalizedName.contains("dde-");
         }
 
         /**

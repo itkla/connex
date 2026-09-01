@@ -200,6 +200,9 @@ public class UploadPolicy {
         result.put(UploadPurpose.PROFILE_IMAGE, Set.copyOf(strictRasterImages));
         result.put(UploadPurpose.BUSINESS_CARD_IMAGE, Set.copyOf(strictRasterImages));
         result.put(UploadPurpose.CSV_IMPORT_SOURCE, Set.of(UploadFormat.CSV));
+        result.put(
+            UploadPurpose.DOCUMENT_DELIVERY_ARTIFACT,
+            Set.of(UploadFormat.PDF, UploadFormat.JSON));
         return Map.copyOf(result);
     }
 
@@ -210,7 +213,8 @@ public class UploadPolicy {
         ASSISTANT_CONTEXT,
         PROFILE_IMAGE,
         BUSINESS_CARD_IMAGE,
-        CSV_IMPORT_SOURCE
+        CSV_IMPORT_SOURCE,
+        DOCUMENT_DELIVERY_ARTIFACT
     }
 
     /** Closed set of inert business formats admitted by at least one upload purpose. */
