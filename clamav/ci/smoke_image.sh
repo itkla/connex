@@ -49,9 +49,12 @@ test "$(docker inspect "$NAME" --format '{{.HostConfig.NetworkMode}}')" = "none"
 # clamd's own SCAN/MULTISCAN commands take filesystem paths, so a published 3310 would be both an
 # unauthenticated scanning surface and an arbitrary-file-read primitive. The image must expose the
 # authenticated HTTP front and nothing else.
-EXPOSED="$(docker inspect "$IMAGE" --format '{{range $port, $_ := .Config.ExposedPorts}}{{println $port}}{{end}}' | sort | tr -d ' ')"
+EXPOSED="$(docker image inspect "$IMAGE" --format '{{json .Config.ExposedPorts}}' \
+    | jq -r 'if . == null then "" else (keys | sort | join(",")) end')"
 if [ "$EXPOSED" != "8091/tcp" ]; then
-    echo "::error::the clamav image exposes an unexpected port set: ${EXPOSED}"
+    echo "::error::the clamav image exposes an unexpected port set: '${EXPOSED}'"
+    echo "raw image config for diagnosis:"
+    docker image inspect "$IMAGE" --format '{{json .Config}}' | jq .
     exit 1
 fi
 
