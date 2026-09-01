@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.EnumSet;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +38,7 @@ import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
 import ooo.klae.connex.backend.storage.UploadMalwareScanner;
 import ooo.klae.connex.backend.storage.UploadPolicy.UploadFormat;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.tenant.Permission;
 
 class AiChatAttachmentServiceTest {
     private static final int WORKSPACE_ID = 7;
@@ -78,6 +80,8 @@ class AiChatAttachmentServiceTest {
                 realtimeDispatcher);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(WORKSPACE_ID);
         when(workspaceService.getCurrentUserId()).thenReturn(USER_ID);
+        when(workspaceService.lockedPermissionsFor(WORKSPACE_ID, USER_ID))
+                .thenReturn(EnumSet.of(Permission.AI_USE, Permission.ATTACHMENT_CREATE));
     }
 
     @Test
