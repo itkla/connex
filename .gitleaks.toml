@@ -20,6 +20,7 @@ regexes = [
   '''spring\.datasource\.password=\$\{CONNEX_DB_PASSWORD\}''',
   '''spring\.datasource\.password", "x"''',
   '''TOKEN="(0123456789abcdef){4}"''',
+  '''VALID_TOKEN = "(0123456789abcdef){2}"''',
   '''IDEMPOTENCY_KEY = "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}"''',
   '''String secondKey = "12a25a23-70af-4f8e-a64a-6cfc5f8c69be";''',
   '''String token = "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}\.[a-z]{3,4}";''',
