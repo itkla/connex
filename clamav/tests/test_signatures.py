@@ -17,15 +17,23 @@ def write_container(directory: Path, name: str, build_epoch: int, version: str =
 
 
 class InspectTest(unittest.TestCase):
-    def test_reports_the_oldest_age_sensitive_container(self) -> None:
+    def test_freshness_comes_from_daily_not_from_the_base_set(self) -> None:
+        """A rarely-republished main.cvd must not expire an otherwise current install.
+
+        Upstream ships main.cvd as a consolidated base set that is routinely months or years old
+        while daily.cvd is hours old. Measuring age from the oldest container made a freshly built
+        image start life past the 30-day ceiling and refuse every upload.
+        """
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)
-            write_container(directory, "daily.cvd", 1_000_000)
-            write_container(directory, "main.cvd", 900_000)
-            state = signatures.inspect(directory, None, now=1_000_500)
-            self.assertEqual(state.age_seconds, 100_500)
+            now = 1_788_000_000
+            write_container(directory, "daily.cvd", now - 500)
+            write_container(directory, "main.cvd", now - 400 * 86_400)
+            state = signatures.inspect(directory, None, now=now)
+            self.assertEqual(state.age_seconds, 500)
+            self.assertFalse(state.expired(2_592_000))
 
-    def test_a_missing_container_is_reported_as_unknown_not_fresh(self) -> None:
+    def test_a_missing_required_container_is_reported_as_unknown_not_fresh(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)
             write_container(directory, "daily.cvd", 1_000_000)
@@ -48,14 +56,14 @@ class InspectTest(unittest.TestCase):
             write_container(directory, "daily.cld", 1_000_400)
             write_container(directory, "main.cvd", 1_000_000)
             state = signatures.inspect(directory, None, now=1_000_600)
-            self.assertEqual(state.age_seconds, 600)
+            self.assertEqual(state.age_seconds, 200)
 
     def test_the_newest_container_wins_within_one_stem(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             directory = Path(raw)
             write_container(directory, "daily.cvd", 1_000_000)
             write_container(directory, "daily.cld", 1_000_500)
-            write_container(directory, "main.cvd", 1_000_500)
+            write_container(directory, "main.cvd", 900_000)
             state = signatures.inspect(directory, None, now=1_000_600)
             self.assertEqual(state.age_seconds, 100)
 

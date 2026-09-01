@@ -73,6 +73,9 @@ OOM-killed container that looks exactly like a scanner outage.
   shipping an image without signatures.
 - **No runtime downloads. Ever.** `clamav_internal` is `internal: true`. The container reaches
   readiness with `--network none`, which is what makes the air-gapped on-prem story true.
+- Freshness is measured from `daily.cvd` only. `main.cvd` is a rarely-republished base set that
+  is legitimately months or years old; aging on the oldest container makes a freshly built image
+  start life past the ceiling and refuse every upload. Both must be present; only daily is aged.
 - Freshness is graded: warn at 7 days, **hard-block uploads at 30**, and the ceiling cannot be
   raised. `/health` reports `signature_age_seconds` and `seconds_until_block` so operators see the
   countdown well before the cliff. Definition *failure* is different from *age*: a database that

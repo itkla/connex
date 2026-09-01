@@ -7,7 +7,8 @@ _HEADER_BYTES = 512
 _HEADER_PREFIX = "ClamAV-VDB:"
 _BUILD_EPOCH_FIELD = 8
 _VERSION_FIELD = 2
-_AGE_SENSITIVE_STEMS = ("daily", "main")
+_REQUIRED_STEMS = ("main", "daily")
+_FRESHNESS_STEM = "daily"
 
 
 @dataclass(frozen=True)
@@ -69,25 +70,24 @@ def parse_daemon_version(raw: str | None) -> str | None:
 
 
 def inspect(database_directory: Path, daemon_version: str | None, now: float | None = None) -> SignatureState:
-    """Reports the age of the oldest age-sensitive signature container on disk.
+    """Reports how far behind the signature set is, measured from the daily container.
 
-    The OLDEST is deliberate. A fresh ``daily`` sitting next to a ``main`` from two years ago
-    still leaves the deployment behind on the base signature set, and reporting the newest file
-    would let one recently-touched container mask that.
+    Every required container must be present, but only ``daily`` carries freshness. ``main`` is a
+    consolidated base set that upstream republishes rarely -- it is routinely months or years old
+    on a perfectly current install, and ``bytecode`` likewise. Treating the oldest container as the
+    freshness signal would put a freshly built image instantly past the 30-day ceiling and refuse
+    every upload, so age comes from ``daily`` alone while the others are checked for presence.
     """
     reference = time.time() if now is None else now
-    oldest_age: int | None = None
-    newest_version: str | None = None
-    for stem in _AGE_SENSITIVE_STEMS:
+    headers: dict[str, tuple[int, str]] = {}
+    for stem in _REQUIRED_STEMS:
         header = _newest_container(database_directory, stem)
         if header is None:
             return SignatureState(None, None, parse_daemon_version(daemon_version))
-        build_epoch, version = header
-        age = max(0, int(reference - build_epoch))
-        oldest_age = age if oldest_age is None else max(oldest_age, age)
-        if stem == "daily":
-            newest_version = version
-    return SignatureState(oldest_age, newest_version, parse_daemon_version(daemon_version))
+        headers[stem] = header
+    build_epoch, version = headers[_FRESHNESS_STEM]
+    age = max(0, int(reference - build_epoch))
+    return SignatureState(age, version, parse_daemon_version(daemon_version))
 
 
 def _newest_container(database_directory: Path, stem: str) -> tuple[int, str] | None:
