@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.dto.AiChatAttachmentDto;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
@@ -95,9 +96,8 @@ public class AiChatAttachmentService {
             ScannedUpload scanned) {
         int workspaceId = snapshot.workspaceId();
         int userId = snapshot.userId();
+        requireLockedUploadPermissions(workspaceId, userId);
         lockAndRequireAccessibleSession(workspaceId, userId, sessionId);
-        workspaceService.requirePermission(
-                workspaceId, userId, Permission.ATTACHMENT_CREATE);
         requireNoActiveTurn(workspaceId, sessionId);
         int attachmentCount = attachmentMapper.countAssistantSessionAttachments(
                 workspaceId, sessionId);
@@ -210,6 +210,23 @@ public class AiChatAttachmentService {
         if (chatMapper.countActiveTurns(workspaceId, sessionId) != 0) {
             throw new ConflictException(
                     "Assistant attachments cannot change while a turn is active");
+        }
+    }
+
+    /**
+     * Re-asserts upload authority from exclusively locked authorization rows.
+     *
+     * <p>The pre-scan snapshot is only a snapshot, and the malware scan runs outside any
+     * transaction, so a concurrent role change or permission revocation can land in between.
+     * Reading from locked rows serializes against that; it is acquired before the session record
+     * lock to preserve the repository's membership-before-record lock order.
+     */
+    private void requireLockedUploadPermissions(int workspaceId, int userId) {
+        Set<Permission> permissions = workspaceService.lockedPermissionsFor(workspaceId, userId);
+        if (!permissions.contains(Permission.AI_USE)
+                || !permissions.contains(Permission.ATTACHMENT_CREATE)) {
+            throw new ForbiddenException(
+                    "Requires the AI_USE and ATTACHMENT_CREATE permissions in this workspace");
         }
     }
 

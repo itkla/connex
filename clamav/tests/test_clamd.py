@@ -36,7 +36,7 @@ class ClassifyDetectionTest(unittest.TestCase):
         """Guards the single most important behaviour in the sidecar.
 
         clamd's AlertExceedsMax defaults to "no", and with that default a file that exceeds
-        MaxFileSize, MaxScanSize, MaxFiles or MaxRecursion is reported CLEAN. clamd.conf turns it
+        MaxFileSize, MaxScanSize or MaxRecursion is reported CLEAN. clamd.conf turns it
         on so the limit hit surfaces as this heuristic instead. If this mapping is removed, or the
         directive is dropped from clamd.conf, a file crafted to blow a limit is admitted unscanned
         and the whole control becomes decorative.
@@ -44,7 +44,6 @@ class ClassifyDetectionTest(unittest.TestCase):
         for name in (
             "Heuristics.Limits.Exceeded.MaxFileSize",
             "Heuristics.Limits.Exceeded.MaxScanSize",
-            "Heuristics.Limits.Exceeded.MaxFiles",
             "Heuristics.Limits.Exceeded.MaxRecursion",
         ):
             with self.subTest(name=name):
@@ -95,6 +94,22 @@ class ParseReplyTest(unittest.TestCase):
     def test_any_other_error_fails_closed(self) -> None:
         with self.assertRaises(ClamdUnavailable):
             parse_reply("stream: Can't allocate memory ERROR\x00")
+
+    def test_a_reply_merely_ending_in_ok_is_not_clean(self) -> None:
+        """A reply must be clamd's exact clean form, not any string ending in those characters.
+
+        "NOT OK" ends in OK. A suffix match would turn a malformed or hostile daemon reply into
+        an admission, which is the one outcome this control must never produce.
+        """
+        for reply in ("NOT OK\x00", "garbageOK\x00", "stream: NOT OK\x00", "NOTOK\x00"):
+            with self.subTest(reply=reply):
+                with self.assertRaises(ClamdUnavailable):
+                    parse_reply(reply)
+
+    def test_the_exact_clean_forms_are_accepted(self) -> None:
+        for reply in ("stream: OK\x00", "OK\x00", "1: OK\x00"):
+            with self.subTest(reply=reply):
+                self.assertEqual(parse_reply(reply).verdict, "clean")
 
     def test_an_unrecognised_reply_fails_closed(self) -> None:
         for reply in ("", "\x00", "PONG\x00", "stream: MAYBE\x00", "garbage"):

@@ -9,6 +9,7 @@ from .startup import ScanReason
 
 
 SAFE_SIGNATURE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+CLEAN_REPLY = re.compile(r"^(?:[^:]*: )?OK$")
 UNNAMED_SIGNATURE = "unnamed"
 
 LIMITS_EXCEEDED_PREFIX = "Heuristics.Limits.Exceeded"
@@ -57,9 +58,11 @@ def classify_detection(signature: str) -> ScanResult:
 def parse_reply(reply: str) -> ScanResult:
     """Turns one clamd INSTREAM reply line into a verdict, failing closed on anything unknown.
 
-    There is no branch here that answers "clean" for a reply clamd did not explicitly terminate
-    with OK. An unrecognised reply raises, which the HTTP front turns into a 503 and the backend
-    turns into a refused upload.
+    The clean branch matches clamd's exact protocol form -- an optional "<id>: " prefix followed
+    by the bare token OK -- rather than any string merely ending in those two characters, so a
+    malformed or hostile reply such as "NOT OK" is a protocol violation and not an admission.
+    An unrecognised reply raises, which the HTTP front turns into a 503 and the backend turns
+    into a refused upload.
     """
     line = reply.strip().rstrip("\x00").strip()
     if not line:
@@ -72,7 +75,7 @@ def parse_reply(reply: str) -> ScanResult:
         body = line[: -len("FOUND")].strip()
         _, separator, signature = body.partition(":")
         return classify_detection(signature if separator else body)
-    if line.endswith("OK"):
+    if CLEAN_REPLY.match(line):
         return ScanResult("clean", None, None)
     raise ClamdUnavailable("daemon_protocol_violation")
 
