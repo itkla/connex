@@ -10,12 +10,15 @@ import EmailChange from "./templates/EmailChange.js";
 import Test from "./templates/Test.js";
 import NotificationEmail from "./templates/NotificationEmail.js";
 import ReportDelivery from "./templates/ReportDelivery.js";
+import VerifyEmail from "./templates/VerifyEmail.js";
+import DocumentSignature from "./templates/DocumentSignature.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const outDir = join(here, "..", "..", "backend", "src", "main", "resources", "templates", "emails");
 
 const templates: Array<{ name: string; element: React.ReactElement }> = [
     { name: "invite.en.html", element: <Invite /> },
+    { name: "verify-email.en.html", element: <VerifyEmail /> },
     { name: "password-reset.en.html", element: <PasswordReset locale="en" /> },
     { name: "password-reset.ja.html", element: <PasswordReset locale="ja" /> },
     { name: "email-change.en.html", element: <EmailChange locale="en" /> },
@@ -25,6 +28,8 @@ const templates: Array<{ name: string; element: React.ReactElement }> = [
     { name: "notification.en.html", element: <NotificationEmail /> },
     { name: "report-delivery.en.html", element: <ReportDelivery locale="en" /> },
     { name: "report-delivery.ja.html", element: <ReportDelivery locale="ja" /> },
+    { name: "document-signature.en.html", element: <DocumentSignature locale="en" /> },
+    { name: "document-signature.ja.html", element: <DocumentSignature locale="ja" /> },
 ];
 
 const requestedNames = new Set(process.argv.slice(2).filter((name) => name !== "--"));

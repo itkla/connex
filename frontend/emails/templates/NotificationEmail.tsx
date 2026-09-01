@@ -1,6 +1,5 @@
 import * as React from "react";
-import { Button, Heading, Text } from "@react-email/components";
-import { Layout, content } from "./Layout.js";
+import { Cta, Heading, Layout, Lead, Subline } from "./Layout.js";
 
 type NotificationProps = {
     title?: string;
@@ -22,14 +21,13 @@ export default function NotificationEmail({
     return (
         <Layout
             preview={title}
-            eyebrow={workspaceName}
-            footer="You're receiving this because you enabled email for this notification type. Manage it in Settings → Notifications."
+            category="Notification"
+            footnote="You're receiving this because you enabled email for this notification type. Manage it in Settings → Notifications."
         >
-            <Heading style={content.heading}>{title}</Heading>
-            <Text style={content.paragraph}>{body}</Text>
-            <Button href={actionUrl} style={content.button}>
-                View in Connex
-            </Button>
+            <Heading>{title}</Heading>
+            <Subline>{workspaceName}</Subline>
+            <Lead>{body}</Lead>
+            <Cta href={actionUrl}>View in Connex</Cta>
         </Layout>
     );
 }

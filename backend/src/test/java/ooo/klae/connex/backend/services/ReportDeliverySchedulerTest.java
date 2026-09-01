@@ -135,7 +135,7 @@ class ReportDeliverySchedulerTest {
         order.verify(mailService).sendForWorkspace(eq(WORKSPACE_ID), message.capture());
         assertEquals("recipient@example.com", message.getValue().to());
         assertEquals("Scheduled report: Quota-safe report", message.getValue().subject());
-        String body = message.getValue().htmlBody();
+        String body = markup(message.getValue().htmlBody());
         assertTrue(body.contains("Quota-safe report"));
         assertTrue(body.contains("Jul 7, 2026 - Jul 13, 2026"));
         assertTrue(body.contains("Revenue held above target."));
@@ -174,7 +174,7 @@ class ReportDeliverySchedulerTest {
 
         ArgumentCaptor<MailMessage> message = ArgumentCaptor.forClass(MailMessage.class);
         verify(mailService).sendForWorkspace(eq(WORKSPACE_ID), message.capture());
-        String body = message.getValue().htmlBody();
+        String body = markup(message.getValue().htmlBody());
         assertTrue(body.contains("Your scheduled report is ready to review in Connex."));
         assertTrue(body.contains(">Report</p>"));
         assertTrue(body.contains(">Ready</p>"));
@@ -197,8 +197,8 @@ class ReportDeliverySchedulerTest {
         ArgumentCaptor<MailMessage> message = ArgumentCaptor.forClass(MailMessage.class);
         verify(mailService).sendForWorkspace(eq(WORKSPACE_ID), message.capture());
         assertEquals("定期レポート: Quota-safe report", message.getValue().subject());
-        String body = message.getValue().htmlBody();
-        assertTrue(body.contains("<html lang=\"ja\">"));
+        String body = markup(message.getValue().htmlBody());
+        assertTrue(body.contains("lang=\"ja\""));
         assertTrue(body.contains("2026/07/07 - 2026/07/13"));
         assertTrue(body.contains("定期レポートを Connex で確認できます。"));
         assertTrue(body.contains(">レポート</p>"));
@@ -231,12 +231,12 @@ class ReportDeliverySchedulerTest {
         MailMessage japaneseMessage = byRecipient.get("japanese@example.com");
         assertEquals("Scheduled report: Quota-safe report", englishMessage.subject());
         assertEquals("定期レポート: Quota-safe report", japaneseMessage.subject());
-        assertTrue(englishMessage.htmlBody().contains("Jul 7, 2026 - Jul 13, 2026"));
-        assertTrue(japaneseMessage.htmlBody().contains("2026/07/07 - 2026/07/13"));
-        assertTrue(englishMessage.htmlBody().contains("$125,000"));
-        assertTrue(japaneseMessage.htmlBody().contains("$125,000"));
-        assertTrue(englishMessage.htmlBody().contains("Revenue held above target."));
-        assertTrue(japaneseMessage.htmlBody().contains("Revenue held above target."));
+        assertTrue(markup(englishMessage.htmlBody()).contains("Jul 7, 2026 - Jul 13, 2026"));
+        assertTrue(markup(japaneseMessage.htmlBody()).contains("2026/07/07 - 2026/07/13"));
+        assertTrue(markup(englishMessage.htmlBody()).contains("$125,000"));
+        assertTrue(markup(japaneseMessage.htmlBody()).contains("$125,000"));
+        assertTrue(markup(englishMessage.htmlBody()).contains("Revenue held above target."));
+        assertTrue(markup(japaneseMessage.htmlBody()).contains("Revenue held above target."));
         verify(reportService).createDeliverySnapshot(REPORT_ID, SCHEDULE_ID);
         verify(auditService).recordScoped(
                 "report.schedule.delivery", "report_schedule", SCHEDULE_ID,
@@ -261,7 +261,8 @@ class ReportDeliverySchedulerTest {
         ArgumentCaptor<MailMessage> message = ArgumentCaptor.forClass(MailMessage.class);
         verify(mailService).sendForWorkspace(eq(WORKSPACE_ID), message.capture());
         assertEquals("Scheduled report: Quota-safe report", message.getValue().subject());
-        assertTrue(message.getValue().htmlBody().contains("<html lang=\"en\">"));
+        assertTrue(message.getValue().htmlBody().contains("lang=\"en\""));
+        assertFalse(message.getValue().htmlBody().contains("lang=\"ja\""));
     }
 
     @Test
@@ -629,5 +630,13 @@ class ReportDeliverySchedulerTest {
                 "scheduled",
                 USER_ID,
                 "2026-07-14 09:00:00");
+    }
+
+    /**
+     * Collapses the formatting whitespace the build-time email renderer emits so
+     * assertions pin element content rather than line wrapping.
+     */
+    private static String markup(String html) {
+        return html.replaceAll("\\s+", " ").replace("> ", ">").replace(" >", ">").replace(" <", "<");
     }
 }
