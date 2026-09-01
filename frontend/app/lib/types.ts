@@ -1894,25 +1894,6 @@ export type ApprovalPolicyStep = {
     approvers: ApprovalStepApprover[];
 };
 
-/** One workspace-scoped approval step the caller can still decide. */
-export type ApprovalInboxItem = {
-    approvalId: number;
-    dealId: number;
-    dealName: string;
-    documentId: number;
-    documentTitle: string;
-    documentType: DocumentType;
-    version: number;
-    stepId: number;
-    stepOrder: number;
-    stepName?: string | null;
-    requiredCount: number;
-    dueAt?: string | null;
-    escalated: boolean;
-    requestedBy?: number | null;
-    requestedAt: string;
-};
-
 /** Authoritative source family behind one My Work item. */
 export type WorkItemSource = "task" | "notification" | "document_approval";
 

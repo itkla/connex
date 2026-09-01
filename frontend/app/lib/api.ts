@@ -3972,12 +3972,23 @@ export function getDocumentApprovalDelegateCandidates(
     );
 }
 
-export function getMyWork(init: RequestInit = {}) {
-    return getJson<Types.WorkItemPage>(`/api/my-work`, { cache: 'no-store', ...init });
+export type MyWorkQuery = {
+    page?: number;
+    sources?: Types.WorkItemSource[];
+    urgencies?: Types.WorkItemUrgency[];
+};
+
+export function getMyWork(query: MyWorkQuery = {}, init: RequestInit = {}) {
+    const params = new URLSearchParams();
+    if (query.page != null && query.page > 1) params.set('page', String(query.page));
+    for (const source of query.sources ?? []) params.append('source', source);
+    for (const urgency of query.urgencies ?? []) params.append('urgency', urgency);
+    const suffix = params.size > 0 ? `?${params.toString()}` : '';
+    return getJson<Types.WorkItemPage>(`/api/my-work${suffix}`, { cache: 'no-store', ...init });
 }
 
 export function getMyWorkResultFromCookie(cookie: string | null) {
-    return resultWithCookie<Types.WorkItemPage>((init) => getMyWork(init), cookie);
+    return resultWithCookie<Types.WorkItemPage>((init) => getMyWork({}, init), cookie);
 }
 
 export function getMyWorkSummary(init: RequestInit = {}) {
@@ -4010,17 +4021,6 @@ export function decideMyWorkApproval(
 ) {
     return postJson<Types.WorkItemActionResponse>(
         `/api/my-work/document-approvals/${id}/decision`, body, { headers: { 'If-Match': etag } });
-}
-
-export function getApprovalInbox(init: RequestInit = {}) {
-    return getJson<Types.ApprovalInboxItem[]>(`/api/approvals/inbox`, {
-        cache: 'no-store',
-        ...init,
-    });
-}
-
-export function getApprovalInboxResultFromCookie(cookie: string | null) {
-    return resultWithCookie<Types.ApprovalInboxItem[]>((init) => getApprovalInbox(init), cookie);
 }
 
 export function getDealLineItems(dealId: number, init: RequestInit = {}) {

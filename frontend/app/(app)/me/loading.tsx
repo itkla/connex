@@ -25,7 +25,12 @@ export default function MeLoading() {
                     ))}
                 </div>
 
-                <div className="overflow-hidden rounded-2xl border border-border bg-card">
+                <div>
+                    <div className="mb-3 flex h-8 items-center justify-between px-6">
+                        <Skeleton className="h-3.5 w-20" />
+                        <Skeleton className="h-3.5 w-8" />
+                    </div>
+                    <div className="overflow-hidden rounded-2xl border border-border bg-card">
                     {Array.from({ length: 4 }).map((_, i) => (
                         <div key={i} className="flex items-center gap-4 border-b border-border px-5 py-3.5 last:border-b-0">
                             <Skeleton className="size-9 rounded-lg" />
@@ -36,6 +41,7 @@ export default function MeLoading() {
                             <Skeleton className="h-8 w-24 rounded-full" />
                         </div>
                     ))}
+                    </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
