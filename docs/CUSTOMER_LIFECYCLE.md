@@ -25,11 +25,13 @@ implementation issues or reserve schema.
 |---|---|---|
 | One `Company` record; contact/customer lifecycle separation; nullable non-customer state | SETTLED | Existing Company and person-lifecycle architecture cited below |
 | Account stages and transition matrix | PROPOSED | #563 product owner |
-| Durable, idempotent, explicit handoff invariants | SETTLED | `DealOutcomeWriter` containment and existing workflow recipe cited below |
+| Durable, idempotent, explicit handoff invariants | PROPOSED | #563 product owner and backend domain owner |
 | Success-owner placement | PROPOSED | #563 product owner and #40 `MemberScope` owner |
-| Explainable component schema and unknown-data behavior | SETTLED | Existing scoring/evidence architecture and honesty invariant cited below |
+| Batched deterministic warmth scoring and evidence-free cold output | SETTLED | Existing `ScoringService` contract cited below |
+| Health component schema, unknown-data weighting, and configuration version | PROPOSED | #563 product owner and backend domain owner |
 | Health recomputation cadence and card/Radar split | PROPOSED | #563 product owner and backend operations owner |
-| Renewal-date precedence and no-stale-pricing rule | SETTLED | V103 line-item and deal-value contracts cited below |
+| Contract-end derivation and fallback precedence | PROPOSED | #563 product owner and commercial domain owner |
+| No-stale-pricing, rounding, currency, and snapshot rules | SETTLED | V103 line-item and deal-value contracts cited below |
 | Retention measures | PROPOSED | Commercial reporting owner and #563 product owner |
 | Radar as the alert store; My Work as a projection | SETTLED | Existing Radar and My Work contracts cited below |
 | Exact My Work source routing | PROPOSED | #563 product owner and My Work contract owner |
@@ -164,24 +166,33 @@ sales relationship.
 
 ## Account health
 
-### SETTLED — explainable deterministic components
+### SETTLED — batched deterministic warmth scoring
 
-Health is a composition of deterministic components, never a replacement signal or an opaque AI score. Every
-response and snapshot carries the composite and all components in this shape:
+`ScoringService` deterministically computes contact and company warmth from workspace-batched aggregates. Its
+versioned warmth model uses timestamped, intent-weighted interaction evidence, and its output exposes the
+resulting score, band, trend, and evidence timestamp. Contacts with no recorded evidence are included in the
+warmth output as cold
+([`ScoringService.java:63-76`](../backend/src/main/java/ooo/klae/connex/backend/services/ScoringService.java#L63-L76),
+[`121-138`](../backend/src/main/java/ooo/klae/connex/backend/services/ScoringService.java#L121-L138)). That
+evidence-free cold output does not by itself establish how a future cross-component account-health composite
+must interpret missing evidence.
+
+### PROPOSED — health composition contract
+
+Required sign-off: the #563 product owner and backend domain owner. Health is proposed as a composition of
+deterministic components, never a replacement signal or an opaque AI score. Every response and snapshot would
+carry the composite and all components in this shape:
 
 ```text
 { component_key, value, weight, source, as_of, state: ok | stale | unknown }
 ```
 
-An absent component is `unknown`, includes its last known freshness when one exists, is excluded from the
-weighted composite, and never lowers the score. In particular, the health composition must not translate
-"there are no recorded interactions" into negative health merely because the warmth service currently includes
-evidence-free contacts in its score output as cold
-([`ScoringService.java:63-76`](../backend/src/main/java/ooo/klae/connex/backend/services/ScoringService.java#L63-L76),
-[`121-138`](../backend/src/main/java/ooo/klae/connex/backend/services/ScoringService.java#L121-L138)). A composite
-with no known components is itself unknown, not zero. Workspace configuration owns weights and thresholds; a
-code-owned versioned default applies when no configuration exists. The composite always exposes the effective
-configuration version.
+An absent component would be `unknown`, include its last known freshness when one exists, be excluded from the
+weighted composite, and never lower the score. In particular, the health composition would not translate
+"there are no recorded interactions" into negative health merely because the warmth service emits an
+evidence-free contact as cold. A composite with no known components would itself be unknown, not zero.
+Workspace configuration would own weights and thresholds; a code-owned versioned default would apply when no
+configuration exists. The composite would always expose the effective configuration version.
 
 | Component | Existing or planned source | Source contract |
 |---|---|---|
@@ -193,8 +204,9 @@ configuration version.
 | Support and business signals | Integrations | Use only signals supplied through an available integration. When no integration supplies this component, report it as `unknown`, never healthy or complete. |
 | Lifecycle context | Proposed nullable `company.lifecycle_stage` | Lifecycle may explain the score but must not manufacture health; `AT_RISK` remains a derived band. |
 
-AI may phrase, translate, rank, or summarize these server-computed components. It may not replace a component,
-hide an unknown or stale state, change a value or weight, or assert a cause absent from the evidence.
+AI could phrase, translate, rank, or summarize these server-computed components. It would not replace a
+component, hide an unknown or stale state, change a value or weight, or assert a cause absent from the
+evidence.
 
 ### PROPOSED — recomputation and surfaces
 
@@ -210,9 +222,25 @@ task-creation state. The card may link to a Radar signal but must not duplicate 
 
 ## Renewals and expansion
 
-### SETTLED — contract date and pricing integrity
+### SETTLED — pricing integrity
 
-The primary contract end is:
+Renewal and expansion generation creates a draft. Prior line items are only starting evidence: each line is
+re-resolved against the current `Product` catalog, and SKU, availability, unit price, tax-rate, frequency, or
+currency drift is shown for explicit confirmation. **Generated commercial records never silently copy stale
+pricing or apply live pricing without confirmation.** All values stay server-computed `BigDecimal` with
+`HALF_UP` rounding through `DealLineItemService` and `DealOutcomeWriter`, under
+[`DEAL_VALUE_CONTRACT.md`](DEAL_VALUE_CONTRACT.md). The line-item schema snapshots catalog values and keeps one
+currency per deal
+([`V103__deal_line_item.sql:1-32`](../backend/src/main/resources/db/migration/tenant/V103__deal_line_item.sql#L1-L32)).
+The product table is the current catalog while deal lines retain pricing snapshots rather than being mutated
+by later catalog edits
+([`V102__product.sql:1-19`](../backend/src/main/resources/db/migration/tenant/V102__product.sql#L1-L19)).
+This money-writing increment is Tier 3 from the start and requires separate security and
+commercial-correctness reviewers.
+
+### PROPOSED — contract-end derivation and fallback precedence
+
+Required sign-off: the #563 product owner and commercial domain owner. The proposed primary contract end is:
 
 ```text
 MAX(deal_line_item.service_period_end)
@@ -220,23 +248,12 @@ over won deals for the company
 where deal_line_item.billing_frequency = 'recurring'
 ```
 
-The line-item schema supplies `billing_frequency`, `service_period_start`, and `service_period_end`, constrains
-frequency to `one_time | recurring`, snapshots catalog values, and keeps one currency per deal
+The line-item schema makes this derivation possible by supplying `billing_frequency`, `service_period_start`,
+and `service_period_end` and constraining frequency to `one_time | recurring`
 ([`V103__deal_line_item.sql:1-32`](../backend/src/main/resources/db/migration/tenant/V103__deal_line_item.sql#L1-L32)).
-The fallback is a workspace-designated company custom field containing a manually maintained contract end.
-Every response states `recurring_line_item`, `company_custom_field`, or `unknown` as its source and carries
-`as_of`; the fallback never overrides a recurring-line-item date.
-
-Renewal and expansion generation creates a draft. Prior line items are only starting evidence: each line is
-re-resolved against the current `Product` catalog, and SKU, availability, unit price, tax-rate, frequency, or
-currency drift is shown for explicit confirmation. **Generated commercial records never silently copy stale
-pricing or apply live pricing without confirmation.** All values stay server-computed `BigDecimal` with
-`HALF_UP` rounding through `DealLineItemService` and `DealOutcomeWriter`, under
-[`DEAL_VALUE_CONTRACT.md`](DEAL_VALUE_CONTRACT.md). The product table is the current catalog while deal lines
-are snapshots
-([`V102__product.sql:1-19`](../backend/src/main/resources/db/migration/tenant/V102__product.sql#L1-L19)).
-This money-writing increment is Tier 3 from the start and
-requires separate security and commercial-correctness reviewers.
+The proposed fallback is a workspace-designated company custom field containing a manually maintained contract
+end. Every response would state `recurring_line_item`, `company_custom_field`, or `unknown` as its source and
+carry `as_of`; the fallback would never override a recurring-line-item date.
 
 ### PROPOSED — retention definitions
 
@@ -342,8 +359,9 @@ Before **any increment after 0** starts, the #563 product owner must comment on 
 5. The product decision: build breadth now or defer it until core sales adoption is stronger, answering #568's
    open question directly.
 6. Sign-off or explicit deferral for every PROPOSED decision in this document: lifecycle vocabulary and
-   transitions, durable handoff invariants, success-owner placement, health recomputation and surfaces, My
-   Work routing, retention definitions, and edition capability posture.
+   transitions, durable handoff invariants, success-owner placement, health composition, health recomputation
+   and surfaces, contract-end derivation and fallback precedence, My Work routing, retention definitions, and
+   edition capability posture.
 
 If this evidence is absent or says demand is not established, the outcome is increment 0 only and the domain
 is parked. The increment-0 issue is created by the orchestrator when this document merges and is the only issue
