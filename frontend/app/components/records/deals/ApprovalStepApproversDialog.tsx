@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Loader2Icon } from 'lucide-react';
 
@@ -46,6 +47,8 @@ import {
 
 type ApproverMode = 'members' | 'any_approver';
 
+const displayName = (member: WorkspaceMember) => member.displayName.trim() || member.username;
+
 type Props = {
     open: boolean;
     action: ApprovalStepManagementAction;
@@ -90,6 +93,10 @@ export default function ApprovalStepApproversDialog({
 }: Props) {
     const t = useTranslations('DealsDocuments');
     const locale = useLocale();
+    const listFormatter = useMemo(
+        () => new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }),
+        [locale],
+    );
     const memberAnchor = useComboboxAnchor();
     const selectedStep = steps.find((step) => step.id === selectedStepId) ?? null;
     const invalidStepSelection = steps.length === 0 || (selectedStepId !== null && selectedStep === null);
@@ -100,7 +107,6 @@ export default function ApprovalStepApproversDialog({
         && comment.length <= 500
         && (mode === 'any_approver' || memberDirectoryStatus === 'ready')
         && !busy;
-    const displayName = (member: WorkspaceMember) => member.displayName.trim() || member.username;
     const stepName = (step: DocumentApprovalStep) =>
         step.name?.trim() || t('chainStep', { number: step.stepOrder });
     const currentApprovers = () => {
@@ -113,7 +119,7 @@ export default function ApprovalStepApproversDialog({
             const member = members.find((candidate) => candidate.id === id);
             return member ? displayName(member) : t('chainFormerMember', { id });
         });
-        return new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(names);
+        return listFormatter.format(names);
     };
     const guard = useUnsavedChangesGuard({
         isDirty: mode === 'any_approver' || selectedMembers.length > 0 || comment.length > 0,
@@ -207,7 +213,7 @@ export default function ApprovalStepApproversDialog({
                                         {memberDirectoryStatus === 'unavailable' ? (
                                             <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
                                                 <span>{t('approvalMembersUnavailable')}</span>
-                                                <Button type="button" variant="outline" size="sm" onClick={onRetryMembers}>
+                                                <Button type="button" variant="outline" size="inline" onClick={onRetryMembers}>
                                                     {t('approvalMembersRetry')}
                                                 </Button>
                                             </div>

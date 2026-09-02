@@ -72,7 +72,6 @@ import type {
     ApprovalDelegate,
     DealDocument,
     DocumentApprovalStep,
-    DocumentApproval,
     DocumentClientStatus,
     DocumentStatus,
     DocumentTemplate,
@@ -113,6 +112,15 @@ type Props = {
 };
 
 type ApprovalAction = 'request' | 'approve' | 'reject' | 'delegate';
+
+type StepManagementState = {
+    documentId: number;
+    action: ApprovalStepManagementAction;
+    stepId: number | null;
+    mode: 'members' | 'any_approver';
+    members: WorkspaceMember[];
+    comment: string;
+};
 
 const APPROVAL_DIALOG_KEYS: Record<
     ApprovalAction,
@@ -193,14 +201,7 @@ export default function DealDocuments({
         canManageApprovals ? 'loading' : 'hidden',
     );
     const [approvalMemberLoadAttempt, setApprovalMemberLoadAttempt] = useState(0);
-    const [stepManagementDialog, setStepManagementDialog] = useState<{
-        documentId: number;
-        action: ApprovalStepManagementAction;
-    } | null>(null);
-    const [managedStepId, setManagedStepId] = useState<number | null>(null);
-    const [managedApproverMode, setManagedApproverMode] = useState<'members' | 'any_approver'>('members');
-    const [managedApproverMembers, setManagedApproverMembers] = useState<WorkspaceMember[]>([]);
-    const [managedApproverComment, setManagedApproverComment] = useState('');
+    const [stepManagement, setStepManagement] = useState<StepManagementState | null>(null);
 
     useEffect(() => {
         getDocumentTemplates()
@@ -281,12 +282,6 @@ export default function DealDocuments({
         setDocuments((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
     };
 
-    const applyDocumentApproval = (documentId: number, approval: DocumentApproval) => {
-        setDocuments((previous) => previous.map((document) => (
-            document.id === documentId ? { ...document, latestApproval: approval } : document
-        )));
-    };
-
     const generate = (template: DocumentTemplate) => run(async () => {
         const created = await generateDealDocument(dealId, template.id);
         setDocuments((prev) => [created, ...prev]);
@@ -365,33 +360,38 @@ export default function DealDocuments({
     const openStepManagementDialog = (doc: DealDocument, action: ApprovalStepManagementAction) => {
         const steps = manageableApprovalSteps(doc, canManageApprovals);
         if (steps.length === 0) return;
-        setManagedStepId(steps.length === 1 ? steps[0].id : null);
-        setManagedApproverMode('members');
-        setManagedApproverMembers([]);
-        setManagedApproverComment('');
-        setStepManagementDialog({ documentId: doc.id, action });
+        setStepManagement({
+            documentId: doc.id,
+            action,
+            stepId: steps.length === 1 ? steps[0].id : null,
+            mode: 'members',
+            members: [],
+            comment: '',
+        });
     };
 
     const submitStepManagement = () => {
-        if (!stepManagementDialog || managedStepId == null) return;
-        const doc = documents.find((candidate) => candidate.id === stepManagementDialog.documentId);
-        if (!doc || !manageableApprovalSteps(doc, canManageApprovals).some((step) => step.id === managedStepId)) {
+        if (!stepManagement || stepManagement.stepId == null) return;
+        const { action, stepId, mode, members, comment: managementComment } = stepManagement;
+        const doc = documents.find((candidate) => candidate.id === stepManagement.documentId);
+        if (!doc || !manageableApprovalSteps(doc, canManageApprovals).some((step) => step.id === stepId)) {
             return;
         }
         const payload = approvalStepApproverChangePayload(
-            managedApproverMode === 'any_approver'
+            mode === 'any_approver'
                 ? { mode: 'any_approver' }
-                : { mode: 'members', memberIds: managedApproverMembers.map((member) => member.id) },
-            managedApproverComment,
+                : { mode: 'members', memberIds: members.map((member) => member.id) },
+            managementComment,
         );
         if (payload.approvers.length === 0) return;
-        const action = stepManagementDialog.action;
         return run(async () => {
             const updatedApproval = action === 'escalate'
-                ? await widenDocumentApprovalStepApprovers(dealId, doc.id, managedStepId, payload)
-                : await reassignDocumentApprovalStepApprovers(dealId, doc.id, managedStepId, payload);
-            applyDocumentApproval(doc.id, updatedApproval);
-            setStepManagementDialog(null);
+                ? await widenDocumentApprovalStepApprovers(dealId, doc.id, stepId, payload)
+                : await reassignDocumentApprovalStepApprovers(dealId, doc.id, stepId, payload);
+            setDocuments((previous) => previous.map((document) => (
+                document.id === doc.id ? { ...document, latestApproval: updatedApproval } : document
+            )));
+            setStepManagement(null);
             toastSuccess(t(action === 'escalate' ? 'approversWidened' : 'approversReassigned'));
             try {
                 await refreshDocument(doc.id);
@@ -454,8 +454,8 @@ export default function DealDocuments({
 
     const dialogKeys = approvalDialog ? APPROVAL_DIALOG_KEYS[approvalDialog.action] : null;
     const eligibleDelegates = approvalDialog?.action === 'delegate' ? delegateCandidates : [];
-    const managedDocument = stepManagementDialog
-        ? documents.find((document) => document.id === stepManagementDialog.documentId) ?? null
+    const managedDocument = stepManagement
+        ? documents.find((document) => document.id === stepManagement.documentId) ?? null
         : null;
     const managedSteps = managedDocument
         ? manageableApprovalSteps(managedDocument, canManageApprovals)
@@ -708,36 +708,42 @@ export default function DealDocuments({
                 </DialogContent>
             </Dialog>
 
-            {stepManagementDialog && (
+            {stepManagement && (
                 <ApprovalStepApproversDialog
                     open
-                    action={stepManagementDialog.action}
+                    action={stepManagement.action}
                     documentTitle={managedDocument?.title?.trim() || t('untitled')}
                     steps={managedSteps}
-                    selectedStepId={managedStepId}
+                    selectedStepId={stepManagement.stepId}
                     memberDirectoryStatus={approvalMemberDirectoryStatus}
                     members={approvalMembers}
-                    mode={managedApproverMode}
-                    selectedMembers={managedApproverMembers}
-                    comment={managedApproverComment}
+                    mode={stepManagement.mode}
+                    selectedMembers={stepManagement.members}
+                    comment={stepManagement.comment}
                     busy={busy}
                     onOpenChange={(open) => {
-                        if (!open && !busy) setStepManagementDialog(null);
+                        if (!open && !busy) setStepManagement(null);
                     }}
                     onStepChange={(stepId) => {
-                        setManagedStepId(stepId);
-                        setManagedApproverMembers([]);
+                        setStepManagement((current) => current
+                            ? { ...current, stepId, members: [] }
+                            : current);
                     }}
                     onRetryMembers={() => {
                         setApprovalMemberDirectoryStatus('loading');
                         setApprovalMemberLoadAttempt((attempt) => attempt + 1);
                     }}
                     onModeChange={(mode) => {
-                        setManagedApproverMode(mode);
-                        setManagedApproverMembers([]);
+                        setStepManagement((current) => current
+                            ? { ...current, mode, members: [] }
+                            : current);
                     }}
-                    onSelectedMembersChange={setManagedApproverMembers}
-                    onCommentChange={setManagedApproverComment}
+                    onSelectedMembersChange={(members) => {
+                        setStepManagement((current) => current ? { ...current, members } : current);
+                    }}
+                    onCommentChange={(comment) => {
+                        setStepManagement((current) => current ? { ...current, comment } : current);
+                    }}
                     onSubmit={submitStepManagement}
                 />
             )}

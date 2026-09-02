@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { act, createElement, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { NextIntlClientProvider } from 'next-intl';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import commonMessages from '@/messages/en/common.json';
+import dealsMessages from '@/messages/en/deals.json';
 
 declare global {
     var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -28,14 +32,6 @@ const api = vi.hoisted(() => ({
 }));
 const errors = vi.hoisted(() => ({ show: vi.fn() }));
 const toasts = vi.hoisted(() => ({ success: vi.fn() }));
-
-vi.mock('next-intl', () => ({
-    useLocale: () => 'en',
-    useTranslations: () => (key: string, values?: Record<string, unknown>) => {
-        if (key === 'chainStep') return `Step ${String(values?.number)}`;
-        return key;
-    },
-}));
 
 vi.mock('next/navigation', () => ({
     useRouter: () => ({ push: vi.fn() }),
@@ -67,6 +63,25 @@ vi.mock('@/app/lib/api', () => ({
 
 import ApprovalStepApproversDialog from '@/app/components/records/deals/ApprovalStepApproversDialog';
 import DealDocuments from '@/app/components/records/deals/DealDocuments';
+
+const TEST_MESSAGES = {
+    DealsDocuments: Object.fromEntries(
+        Object.keys(dealsMessages.DealsDocuments).map((key) => [key, key]),
+    ),
+    ConfirmDiscard: Object.fromEntries(
+        Object.keys(commonMessages.ConfirmDiscard).map((key) => [key, `ConfirmDiscard.${key}`]),
+    ),
+};
+
+function TestIntlProvider({ children }: { children?: ReactNode }) {
+    const providerProps = {
+        locale: 'en',
+        timeZone: 'UTC',
+        messages: TEST_MESSAGES,
+        children,
+    };
+    return createElement(NextIntlClientProvider, providerProps);
+}
 
 function step(id: number, stepOrder: number, status: DocumentApprovalStep['status']): DocumentApprovalStep {
     return {
@@ -343,7 +358,11 @@ afterEach(async () => {
 
 async function render(node: ReactNode) {
     await act(async () => {
-        root.render(node);
+        root.render(createElement(
+            TestIntlProvider,
+            null,
+            node,
+        ));
         await Promise.resolve();
     });
 }
@@ -538,17 +557,32 @@ describe('ApprovalStepApproversDialog interactions', () => {
         expect(button('approvalAnyApprover').getAttribute('aria-pressed')).toBe('true');
         await keyDown(document.body, 'Escape');
         expect(onClose).not.toHaveBeenCalled();
-        expect(document.body.textContent).toContain('title');
+        expect([...document.querySelectorAll<HTMLElement>('[role="dialog"]')].some(
+            (dialog) => dialog.textContent?.includes('ConfirmDiscard.title'),
+        )).toBe(true);
 
-        await click(button('keepEditing'));
-        const overlay = document.querySelector<HTMLElement>(
-            '[data-slot="dialog-overlay"][data-state="open"]',
+        await click(button('ConfirmDiscard.keepEditing'));
+        await act(async () => root.unmount());
+        root = createRoot(container);
+        await render(createElement(DialogHarness, {
+            steps: [namedStep(1, 1)],
+            initialStepId: 1,
+            initialComment: 'draft',
+            onClose,
+        }));
+        const approvalDialog = [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].find(
+            (dialog) => dialog.textContent?.includes('reassignDialogTitle'),
         );
-        if (!overlay) throw new Error('Dialog overlay not found');
+        const overlay = approvalDialog?.previousElementSibling;
+        if (!(overlay instanceof HTMLElement) || overlay.dataset.slot !== 'dialog-overlay') {
+            throw new Error('Approval dialog overlay not found');
+        }
         await pointerClick(overlay);
         expect(onClose).not.toHaveBeenCalled();
-        expect(document.body.textContent).toContain('discard');
-        await click(button('discard'));
+        expect([...document.querySelectorAll<HTMLElement>('[role="dialog"]')].some(
+            (dialog) => dialog.textContent?.includes('ConfirmDiscard.title'),
+        )).toBe(true);
+        await click(button('ConfirmDiscard.discard'));
         expect(onClose).toHaveBeenCalledOnce();
     });
 });

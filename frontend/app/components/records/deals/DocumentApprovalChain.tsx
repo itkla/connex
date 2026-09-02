@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
@@ -64,6 +64,10 @@ export default function DocumentApprovalChain({
 }: Props) {
     const t = useTranslations('DealsDocuments');
     const locale = useLocale();
+    const listFormatter = useMemo(
+        () => new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }),
+        [locale],
+    );
     const reduceMotion = useReducedMotion();
     const [expanded, setExpanded] = useState(false);
 
@@ -117,7 +121,7 @@ export default function DocumentApprovalChain({
             const member = members.find((candidate) => candidate.id === id);
             return member?.displayName.trim() || member?.username || t('chainFormerMember', { id });
         });
-        return new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(labels);
+        return listFormatter.format(labels);
     };
     const blocked = approval.status === 'pending' && !approval.satisfiable;
 
