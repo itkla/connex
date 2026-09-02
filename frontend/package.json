@@ -25,7 +25,7 @@
     "@heroicons/react": "^2.2.0",
     "@simplewebauthn/browser": "^13.3.0",
     "@stomp/stompjs": "^7.3.0",
-    "@tiptap/core": "3.29.2",
+    "@tiptap/core": "3.30.4",
     "@tiptap/extension-drag-handle-react": "3.29.2",
     "@tiptap/extension-image": "3.29.2",
     "@tiptap/extension-placeholder": "3.29.2",
