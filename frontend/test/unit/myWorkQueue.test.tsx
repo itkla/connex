@@ -249,6 +249,17 @@ describe("My Work queue contracts pinned at source level", () => {
         expect(EN.MePage.queueUrgency_critical).not.toBe("Overdue");
     });
 
+    it("keeps item stepping distinct from page navigation in both catalogs", () => {
+        for (const catalog of [EN.MePage, JA.MePage]) {
+            expect(catalog.queueStepPrevious).toBeTruthy();
+            expect(catalog.queueStepNext).toBeTruthy();
+            expect(catalog.queueStepPosition).toBeTruthy();
+            expect(catalog.queueStepAnnouncement).toBeTruthy();
+            expect(catalog.queueStepPrevious).not.toBe(catalog.queuePrevious);
+            expect(catalog.queueStepNext).not.toBe(catalog.queueNext);
+        }
+    });
+
     it("guards every mutation with the item's strong version", () => {
         for (const call of [
             "completeMyWorkTask(item.sourceId, item.etag)",
@@ -291,6 +302,19 @@ describe("My Work queue contracts pinned at source level", () => {
     it("derives the open detail from current items so a refetch can close or update it", () => {
         expect(QUEUE_SOURCE).toContain("current?.items.find((row) => row.id === detailId)");
         expect(QUEUE_SOURCE).toContain("if (detailId != null && detail == null)");
+    });
+
+    it("scopes focused position and stepping to the loaded page", () => {
+        expect(QUEUE_SOURCE).toContain("current.items[index + offset]");
+        expect(QUEUE_SOURCE).toContain("count: current?.items.length ?? 0");
+        expect(QUEUE_SOURCE).toContain("detailIdAfterRemoval(current?.items ?? [], item.id)");
+    });
+
+    it("pins auto-advance by id and guards the newly focused action", () => {
+        expect(QUEUE_SOURCE).toContain("detailIdRef.current === item.id");
+        expect(QUEUE_SOURCE).toContain("setActionGuardId(nextDetailId)");
+        expect(QUEUE_SOURCE).toContain("actionGuardId !== detailId");
+        expect(QUEUE_SOURCE).not.toContain("pendingIds.has(detail.id) || actionGuardId");
     });
 
     it("offers snooze inside the focused detail surface", () => {
