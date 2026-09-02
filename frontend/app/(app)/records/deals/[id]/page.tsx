@@ -544,6 +544,7 @@ export default async function DealPage({ params }: DealPageProps) {
                             dealId={deal.id}
                             initial={documents}
                             canApprove={effectivePermissions.includes('DOCUMENT_APPROVE')}
+                            canManageApprovals={effectivePermissions.includes('DOCUMENT_MANAGE')}
                             canDeleteDocuments={effectivePermissions.includes('DEAL_UPDATE')}
                             currentUserId={currentUser.id}
                         />

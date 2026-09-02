@@ -10,17 +10,24 @@ import { toastApiError } from "@/app/lib/errorMessages";
  * qualifies fallback title keys with the caller's own namespace so they stay as short as the
  * `useTranslations` calls beside them.
  * @param namespace the caller's message namespace, when its fallback keys are written relative to it
- * @returns a reporter taking a rejected request's reason and, optionally, the caller's title key
+ * @returns a reporter taking a rejection and optional caller-owned title and description keys
  */
-export function useApiErrorToast(namespace?: string): (error: unknown, fallbackKey?: string) => void {
+export function useApiErrorToast(namespace?: string): (
+    error: unknown,
+    fallbackKey?: string,
+    fallbackDescriptionKey?: string,
+) => void {
     const t = useTranslations();
 
     return useCallback(
-        (error: unknown, fallbackKey?: string) => {
+        (error: unknown, fallbackKey?: string, fallbackDescriptionKey?: string) => {
             const qualified = fallbackKey === undefined || namespace === undefined
                 ? fallbackKey
                 : `${namespace}.${fallbackKey}`;
-            toastApiError(error, t, qualified);
+            const qualifiedDescription = fallbackDescriptionKey === undefined || namespace === undefined
+                ? fallbackDescriptionKey
+                : `${namespace}.${fallbackDescriptionKey}`;
+            toastApiError(error, t, qualified, qualifiedDescription);
         },
         [namespace, t],
     );

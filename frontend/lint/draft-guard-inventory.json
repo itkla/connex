@@ -1,5 +1,5 @@
 {
-    "minimumCount": 20,
+    "minimumCount": 21,
     "surfaces": [
         {
             "file": "app/components/activity/activities/ActivityDialog.tsx",
@@ -60,6 +60,11 @@
             "file": "app/components/records/contacts/QuickEditSheet.tsx",
             "surface": "Contact quick-edit drawer",
             "guard": "app/components/records/quick-edit/QuickEditSheetShell.tsx"
+        },
+        {
+            "file": "app/components/records/deals/ApprovalStepApproversDialog.tsx",
+            "surface": "Approval-step approver management dialog",
+            "guard": "own"
         },
         {
             "file": "app/components/records/deals/EditDealSheet.tsx",

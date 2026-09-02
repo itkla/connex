@@ -187,6 +187,23 @@ vi.mock("@/components/ui/responsive-dialog", async () => {
     };
 });
 
+vi.mock("@/components/ui/dialog", async () => {
+    const React = await import("react");
+    const Passthrough = ({ children }: { children?: ReactNode }) => React.createElement(React.Fragment, null, children);
+    return {
+        Dialog: ({ children, onOpenChange }: { children?: ReactNode; onOpenChange?: (open: boolean) => void }) => {
+            if (onOpenChange) rendered.dismiss = onOpenChange;
+            return React.createElement(React.Fragment, null, children);
+        },
+        DialogClose: Passthrough,
+        DialogContent: Passthrough,
+        DialogDescription: Passthrough,
+        DialogFooter: Passthrough,
+        DialogHeader: Passthrough,
+        DialogTitle: Passthrough,
+    };
+});
+
 vi.mock("@/components/ui/drawer", async () => {
     const React = await import("react");
     const Passthrough = ({ children }: { children?: ReactNode }) => React.createElement(React.Fragment, null, children);
@@ -669,6 +686,65 @@ const ownerScenarios: Record<string, OwnerScenario> = {
             }),
             (rerender) => {
                 isDirty = true;
+                rerender();
+            },
+        );
+    },
+    "app/components/records/deals/ApprovalStepApproversDialog.tsx": async () => {
+        const { default: ApprovalStepApproversDialog } = await import(
+            "@/app/components/records/deals/ApprovalStepApproversDialog"
+        );
+        const approvalStep = {
+            id: 41,
+            stepOrder: 1,
+            name: "Finance",
+            requiredCount: 1,
+            approvedCount: 0,
+            status: "active" as const,
+            onExpiry: "expire" as const,
+            satisfiable: true,
+            effectiveAnyApprover: false,
+            effectiveApproverIds: [7],
+            approvers: [],
+            assignments: [],
+            decisions: [],
+        };
+        const selectedMember = {
+            id: 7,
+            username: "member-7",
+            displayName: "Member Seven",
+            email: "member-7@example.test",
+            role: "Member",
+            builtInRole: "member" as const,
+            status: "active",
+        };
+        let selectedMembers: typeof selectedMember[] = [];
+        return mountOwner(
+            (onClose) => createElement(ApprovalStepApproversDialog, {
+                open: true,
+                action: "reassign",
+                documentTitle: "Renewal quote",
+                steps: [approvalStep],
+                selectedStepId: approvalStep.id,
+                memberDirectoryStatus: "ready",
+                members: [selectedMember],
+                verifiedApproverIds: [selectedMember.id],
+                memberLabelStatus: "ready",
+                memberLabels: [selectedMember],
+                mode: "members",
+                selectedMembers,
+                comment: "",
+                busy: false,
+                onOpenChange: onClose,
+                onStepChange: vi.fn(),
+                onRetryMembers: vi.fn(),
+                onModeChange: vi.fn(),
+                onSelectedMembersChange: vi.fn(),
+                onCommentChange: vi.fn(),
+                onSubmit: vi.fn(),
+            }),
+            (rerender) => {
+                selectedMembers = [selectedMember];
                 rerender();
             },
         );

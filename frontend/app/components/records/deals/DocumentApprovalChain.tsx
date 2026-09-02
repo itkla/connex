@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
@@ -19,12 +19,16 @@ import type {
     ApprovalStepStatus,
     DocumentApproval,
     DocumentApprovalStep,
+    WorkspaceMember,
 } from '@/app/lib/types';
 import { formatUtcDateTime } from '@/app/lib/utils';
+import type { ApprovalMemberDirectoryStatus } from './approvalStepActions';
 
 type Props = {
     approval: DocumentApproval;
     activeStepId?: number | null;
+    memberDirectoryStatus?: ApprovalMemberDirectoryStatus;
+    members?: WorkspaceMember[];
 };
 
 const STEP_ICON = {
@@ -52,9 +56,18 @@ const STEP_TONE: Record<ApprovalStepStatus, string> = {
  * summary line so a ten-step chain cannot turn a table row into a paragraph, and expands in place on
  * demand. Status is carried by an icon plus assistive text, never by colour alone.
  */
-export default function DocumentApprovalChain({ approval, activeStepId }: Props) {
+export default function DocumentApprovalChain({
+    approval,
+    activeStepId,
+    memberDirectoryStatus = 'hidden',
+    members = [],
+}: Props) {
     const t = useTranslations('DealsDocuments');
     const locale = useLocale();
+    const listFormatter = useMemo(
+        () => new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }),
+        [locale],
+    );
     const reduceMotion = useReducedMotion();
     const [expanded, setExpanded] = useState(false);
 
@@ -98,6 +111,17 @@ export default function DocumentApprovalChain({ approval, activeStepId }: Props)
             actor: actor ?? t('chainAutomatedActor'),
             user: memberLabel(assignment.userId, assignment.userDisplayName),
         });
+    };
+    const effectiveApproverDescription = (step: DocumentApprovalStep) => {
+        if (step.effectiveAnyApprover) return t('approvalAnyApprover');
+        if (memberDirectoryStatus === 'loading') return t('approvalMembersLoading');
+        if (memberDirectoryStatus !== 'ready') return t('approvalMembersUnavailable');
+        if (step.effectiveApproverIds.length === 0) return t('approvalNoCurrentApprovers');
+        const labels = step.effectiveApproverIds.map((id) => {
+            const member = members.find((candidate) => candidate.id === id);
+            return member?.displayName.trim() || member?.username || t('chainFormerMember', { id });
+        });
+        return listFormatter.format(labels);
     };
     const blocked = approval.status === 'pending' && !approval.satisfiable;
 
@@ -196,6 +220,14 @@ export default function DocumentApprovalChain({ approval, activeStepId }: Props)
                                             {t('chainDueAt', {
                                                 date: formatUtcDateTime(step.dueAt, locale),
                                             })}
+                                        </p>
+                                    )}
+                                    {step.status === 'active' && memberDirectoryStatus !== 'hidden' && (
+                                        <p className="ml-5">
+                                            <span className="font-medium text-foreground">
+                                                {t('approvalCurrentApprovers')}
+                                            </span>{' '}
+                                            {effectiveApproverDescription(step)}
                                         </p>
                                     )}
                                     {step.assignments.length > 0 && (
