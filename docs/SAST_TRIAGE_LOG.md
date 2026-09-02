@@ -422,3 +422,53 @@ than silently ignored, per the last item of the disposition order in #1296.
    relevant query is materially updated.
 4. [#1296](https://github.com/itkla/connex/issues/1296) closes once steps 1–2 are complete; the
    remediated entries closed with the pull request that introduced this document.
+
+## Independent re-review of 2026-08-30 — record and canonical time-box
+
+The independent review required by "Review and closure" step 1 was performed on 2026-08-30 by a
+reviewer independent of the original triage, against `origin/main` `e5a8d3ee0`. Every open alert
+was re-derived from source rather than inherited from this log. Outcome: 56 false positives
+confirmed; **7 findings refuted as real** (GET handlers inserting `audit_log` rows — remediated in
+PR #1509); 2 reclassified from false positive to accepted-by-design; 2 initially uncertain,
+settled accepted-by-design after execution-path verification. The reviewer's full per-alert
+re-derivation is preserved on
+[#1296](https://github.com/itkla/connex/issues/1296) (comment of 2026-09-02).
+
+**This document is the canonical time-box for every dismissal in that batch.** The code-scanning
+API caps dismissal comments at 280 characters, and the shortened comments that fit lost the
+expiry text step 2 requires. For all alerts dismissed on 2026-08-30–31 under this review:
+disposition owner Hunter Nakagawa; approver Security Owner role (#1230); **expiry 2027-02-14;
+re-review 2027-01-14**; reassess earlier if a cited data flow changes or the relevant query is
+materially updated.
+
+### Risk acceptances (`won't fix`) — genuine mutations, accepted with compensating controls
+
+| Alert | Site | Compensating control | Owner | Expiry / re-review |
+| --- | --- | --- | --- | --- |
+| #134 | OAuth callback | OAuth `state` parameter is the CSRF defence for this flow | Hunter Nakagawa | 2027-02-14 / 2027-01-14 |
+| #147 | Tenant export | `SameSite=Strict` single-use export-grant cookie | Hunter Nakagawa | 2027-02-14 / 2027-01-14 |
+
+### Accepted residual — audited administrative assistant-session reads (#111, #114, #151, #152)
+
+`java/csrf-unprotected-request-type` on `AiAssistantController` `get` (:101), `listAttachments`
+(:203), `listToolCalls` (:275), `getToolCall` (:294). These four GET handlers reach
+`sessionReadAudit.recordAccessible(...)`, which `AiSessionReadAuditArchTest` makes mandatory:
+PR #1516 requires every route that disclosures another user's session content to write an
+accountability record, while PR #1509 removed forgeable audit writes from GET handlers. The two
+requirements meet in these handlers and the conflict is resolved by acceptance, not code:
+
+- The recording rule is the deliberate product decision (APPI entrustee posture; decided on
+  PR #1516 with this exact alert outcome predicted in its description).
+- Forgery is bounded: `AiAssistantNavigationAdmissionFilter` refuses browser navigation and
+  cross-site subresource shapes via a Fetch-Metadata allowlist (`Sec-Fetch-Dest: empty` only,
+  `no-cors` refused, cross-site origins refused outside the CORS allowlist); a forged row can
+  only ever name a session the caller already had access to, carries no caller-supplied text,
+  and the write is rate-limited per workspace.
+- Residual: clients that omit Fetch Metadata (documented in the filter's Javadoc) and
+  `SameSite=None` SAML deployments retain a narrowed forgery vector for these metadata-only rows.
+
+Disposition: **accepted risk (`won't fix`)**. Owner Hunter Nakagawa; approver Security Owner
+role; expiry **2027-02-14**, re-review **2027-01-14**; reassess immediately if the navigation
+filter, the session-cookie `SameSite` posture, or the audited route set changes (the
+architecture test forces any new route to be classified, which re-opens this question by
+construction).
