@@ -8,10 +8,12 @@ import {
     clearDraft,
     DRAFT_VERSIONS,
     getDraftKeyGeneration,
+    isDealDraft,
     listFreshDrafts,
     readDraft,
     subscribeDraftChanges,
     type StoredDraft,
+    type DealDraft,
 } from '@/app/lib/formDrafts';
 import { useActions } from '@/app/hooks/useActions';
 import { DRAFT_DEBOUNCE_MS } from '@/app/hooks/useFormDraft';
@@ -102,8 +104,21 @@ function isNoteDraftData(value: unknown): value is NoteDraftData {
 
 type ResumeDraft =
     | { kind: 'activity'; keyGeneration: number; stored: StoredDraft<ActivityDraftData> }
+    | { kind: 'deal'; keyGeneration: number; stored: StoredDraft<DealDraft> }
     | { kind: 'note'; keyGeneration: number; stored: StoredDraft<NoteDraftData> }
     | { kind: 'task'; keyGeneration: number; stored: StoredDraft<TaskDraftData> };
+
+function hasMeaningfulDealDraft(draft: DealDraft): boolean {
+    return Boolean(
+        draft.name.trim() ||
+        draft.value !== 0 ||
+        draft.currency !== 'USD' ||
+        draft.pipeline !== null ||
+        draft.stage !== null ||
+        draft.company !== null ||
+        draft.expectedCloseDate,
+    );
+}
 
 function readCurrentActivityDraft(
     stored: StoredDraft<ActivityDraftData>,
@@ -130,6 +145,19 @@ function readCurrentTaskDraft(
         { version: DRAFT_VERSIONS.task },
     );
     if (!current || !isTaskDraftData(current.data) || !current.data.description.trim()) return null;
+    return { ...current, data: current.data };
+}
+
+function readCurrentDealDraft(
+    stored: StoredDraft<DealDraft>,
+    userId: number | null,
+    workspaceId: number | null,
+): StoredDraft<DealDraft> | null {
+    const current = readDraft(
+        { userId, workspaceId, formType: 'deal', scope: stored.scope },
+        { version: DRAFT_VERSIONS.deal },
+    );
+    if (!current || !isDealDraft(current.data) || !hasMeaningfulDealDraft(current.data)) return null;
     return { ...current, data: current.data };
 }
 
@@ -165,6 +193,19 @@ function sameTaskDraft(left: StoredDraft<TaskDraftData>, right: StoredDraft<Task
         left.data.assigneeId === right.data.assigneeId &&
         left.data.personId === right.data.personId &&
         left.data.dealId === right.data.dealId
+    );
+}
+
+function sameDealDraft(left: StoredDraft<DealDraft>, right: StoredDraft<DealDraft>): boolean {
+    return (
+        left.savedAt === right.savedAt &&
+        left.data.name === right.data.name &&
+        left.data.value === right.data.value &&
+        left.data.currency === right.data.currency &&
+        left.data.pipeline === right.data.pipeline &&
+        left.data.stage === right.data.stage &&
+        left.data.company === right.data.company &&
+        left.data.expectedCloseDate === right.data.expectedCloseDate
     );
 }
 
@@ -206,6 +247,16 @@ export default function DraftResumeBridge() {
                 }
                 drafts.push({
                     kind: 'activity',
+                    keyGeneration: getDraftKeyGeneration(stored.key),
+                    stored: { ...stored, data: stored.data },
+                });
+            } else if (stored.formType === 'deal') {
+                if (stored.scope !== 'global' || !isDealDraft(stored.data) || !hasMeaningfulDealDraft(stored.data)) {
+                    clearDraft(stored.key);
+                    continue;
+                }
+                drafts.push({
+                    kind: 'deal',
                     keyGeneration: getDraftKeyGeneration(stored.key),
                     stored: { ...stored, data: stored.data },
                 });
@@ -449,6 +500,66 @@ export default function DraftResumeBridge() {
             });
         }
 
+        function refreshDealToast(stored: StoredDraft<DealDraft>) {
+            const keyGeneration = getDraftKeyGeneration(stored.key);
+            const current = readCurrentDealDraft(stored, userId, activeWorkspaceId);
+            const delay = current && !sameDealDraft(current, stored) ? DRAFT_TOAST_DELAY_MS : DRAFT_DEBOUNCE_MS;
+            deferRefresh(() => {
+                if (changedKeys.has(stored.key)) return;
+                const latestGeneration = getDraftKeyGeneration(stored.key);
+                if (latestGeneration !== keyGeneration) {
+                    refreshDealToast(stored);
+                    return;
+                }
+                const latest = readCurrentDealDraft(stored, userId, activeWorkspaceId);
+                if (latest && !sameDealDraft(latest, stored)) {
+                    showDealToast(latest, latestGeneration);
+                }
+            }, delay);
+        }
+
+        function showDealToast(stored: StoredDraft<DealDraft>, keyGeneration: number) {
+            const name = shorten(stored.data.name);
+            toastInfo(name ? t('dealMessageNamed', { label: name }) : t('dealMessage'), {
+                id: stored.key,
+                duration: Infinity,
+                action: {
+                    label: t('resumeDeal'),
+                    onClick: () => {
+                        if (!active) return;
+                        if (keyGeneration !== getDraftKeyGeneration(stored.key)) {
+                            refreshDealToast(stored);
+                            return;
+                        }
+                        const current = readCurrentDealDraft(stored, userId, activeWorkspaceId);
+                        if (!current) {
+                            toastDismiss(stored.key);
+                            return;
+                        }
+                        openOverlay({
+                            kind: 'create-deal',
+                            draft: current.data,
+                            restoredDraftGeneration: keyGeneration,
+                        });
+                        toastDismiss(stored.key);
+                    },
+                },
+                cancel: {
+                    label: t('discardDeal'),
+                    onClick: () => {
+                        if (!active) return;
+                        if (keyGeneration !== getDraftKeyGeneration(stored.key)) {
+                            refreshDealToast(stored);
+                            return;
+                        }
+                        const current = readCurrentDealDraft(stored, userId, activeWorkspaceId);
+                        if (current && sameDealDraft(current, stored)) clearDraft(stored.key);
+                        toastDismiss(stored.key);
+                    },
+                },
+            });
+        }
+
         const timer = window.setTimeout(() => {
             for (const draft of drafts) {
                 if (
@@ -461,6 +572,11 @@ export default function DraftResumeBridge() {
                     const current = readCurrentActivityDraft(draft.stored, userId, activeWorkspaceId);
                     if (current && sameActivityDraft(current, draft.stored)) {
                         showActivityToast(current, draft.keyGeneration);
+                    }
+                } else if (draft.kind === 'deal') {
+                    const current = readCurrentDealDraft(draft.stored, userId, activeWorkspaceId);
+                    if (current && sameDealDraft(current, draft.stored)) {
+                        showDealToast(current, draft.keyGeneration);
                     }
                 } else if (draft.kind === 'note') {
                     const current = readCurrentNoteDraft(draft.stored, userId, activeWorkspaceId);

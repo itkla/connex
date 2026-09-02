@@ -300,6 +300,7 @@
         "companySearchFailed": "Couldn't search companies. Try again.",
         "title": "New deal",
         "description": "Add a deal to your pipeline. Deals are shared with everyone in this workspace.",
+        "restoringDraft": "Restoring your saved deal…",
         "name": "Name",
         "namePlaceholder": "Acme renewal Q4",
         "value": "Value",

@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 
 type GuardOptions = {
-    /** Whether the form currently holds unsaved edits. */
-    isDirty: boolean;
+    /** Whether the form currently holds unsaved edits, or a synchronous reader for imperative owners. */
+    isDirty: boolean | (() => boolean);
     /** Performs the real close (e.g. `() => onOpenChange(false)`). */
     onClose: () => void;
     /** When false the guard is inert and dismissals close immediately (e.g. while submitting). */
@@ -30,25 +30,31 @@ type Guard = {
  */
 export function useUnsavedChangesGuard({ isDirty, onClose, enabled = true }: GuardOptions): Guard {
     const [confirmOpen, setConfirmOpen] = useState(false);
-    const active = isDirty && enabled;
+    const readsDirtyState = typeof isDirty === 'function';
+    const active = enabled && (readsDirtyState || isDirty);
+    const hasUnsavedChanges = useCallback(
+        () => enabled && (typeof isDirty === 'function' ? isDirty() : isDirty),
+        [enabled, isDirty],
+    );
 
     useEffect(() => {
         if (!active) return;
         const onBeforeUnload = (event: BeforeUnloadEvent) => {
+            if (!hasUnsavedChanges()) return;
             event.preventDefault();
             event.returnValue = '';
         };
         window.addEventListener('beforeunload', onBeforeUnload);
         return () => window.removeEventListener('beforeunload', onBeforeUnload);
-    }, [active]);
+    }, [active, hasUnsavedChanges]);
 
     const requestClose = useCallback(() => {
-        if (active) {
+        if (hasUnsavedChanges()) {
             setConfirmOpen(true);
         } else {
             onClose();
         }
-    }, [active, onClose]);
+    }, [hasUnsavedChanges, onClose]);
 
     const onOpenChange = useCallback(
         (open: boolean) => {

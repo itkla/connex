@@ -300,6 +300,7 @@
         "companySearchFailed": "会社を検索できませんでした。もう一度お試しください。",
         "title": "新規案件",
         "description": "パイプラインに案件を追加します。案件はこのワークスペースのメンバー全員と共有されます。",
+        "restoringDraft": "保存した案件を復元しています…",
         "name": "名前",
         "namePlaceholder": "Acme 第4四半期更新",
         "value": "金額",

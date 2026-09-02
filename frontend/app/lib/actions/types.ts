@@ -10,6 +10,7 @@ import type {
     WorkflowManualSourceSurface,
     Workspace,
 } from "@/app/lib/types";
+import type { DealDraft } from "@/app/lib/formDrafts";
 import type { SelectionId } from "@/app/components/records/types";
 import type { RadarTaskSignalStore } from "@/app/lib/radar";
 
@@ -154,7 +155,12 @@ export type OverlayRequest =
     }
     | { kind: "create-company"; defaults?: CreateDefaults }
     | { kind: "create-person"; defaults?: CreateDefaults }
-    | { kind: "create-deal"; defaults?: CreateDefaults }
+    | {
+        kind: "create-deal";
+        defaults?: CreateDefaults;
+        draft?: DealDraft;
+        restoredDraftGeneration?: number;
+    }
     | { kind: "import-companies" }
     | { kind: "import-contacts" }
     | { kind: "import-deals" }

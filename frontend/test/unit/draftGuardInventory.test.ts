@@ -5,6 +5,7 @@ import ts from "typescript";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { installInteractiveDocument } from "@/test/unit/helpers/interactiveDocument";
+import type { MobileDealDiscardControls } from "@/app/components/actions/MobileDealDiscardGuard";
 
 type ConfirmCapture = {
     open: boolean;
@@ -548,6 +549,31 @@ function requiredConfirm(): ConfirmCapture {
 }
 
 const ownerScenarios: Record<string, OwnerScenario> = {
+    "app/components/actions/MobileDealDiscardGuard.tsx": async () => {
+        const { default: MobileDealDiscardGuard } = await import("@/app/components/actions/MobileDealDiscardGuard");
+        const { Drawer } = await import("@/components/ui/drawer");
+        let isDirty = false;
+        return mountOwner(
+            (onClose) => {
+                const props: Parameters<typeof MobileDealDiscardGuard>[0] = {
+                    active: true,
+                    hasUnsavedChanges: () => isDirty,
+                    disabled: false,
+                    onBack: vi.fn(),
+                    onClose: () => onClose(false),
+                    children: ({ handleOpenChange }: MobileDealDiscardControls) => createElement(
+                        Drawer,
+                        { open: true, onOpenChange: handleOpenChange },
+                    ),
+                };
+                return createElement(MobileDealDiscardGuard, props);
+            },
+            (rerender) => {
+                isDirty = true;
+                rerender();
+            },
+        );
+    },
     "app/components/activity/activities/ActivityDialog.tsx": async () => {
         const { default: ActivityDialog } = await import("@/app/components/activity/activities/ActivityDialog");
         return mountOwner(
@@ -846,7 +872,13 @@ describe("draft-guard inventory", () => {
                 const source = readSource(entry.file);
                 const gaps: string[] = [];
                 const overlayRoutesDismissal = source.includes("onOpenChange={guard.onOpenChange}")
-                    || (source.includes("onOpenChange={handleOpenChange}") && source.includes("guard.onOpenChange("));
+                    || (
+                        (
+                            source.includes("onOpenChange={handleOpenChange}")
+                            || source.includes("children?.({ handleOpenChange")
+                        )
+                        && source.includes("guard.onOpenChange(")
+                    );
                 if (!overlayRoutesDismissal) gaps.push(`${entry.file} does not route outside dismissal through the guard`);
                 if (!source.includes("open={guard.confirm.open}")) gaps.push(`${entry.file} does not expose guard confirm state`);
                 if (!source.includes("onKeepEditing={guard.confirm.onKeepEditing}")) {
