@@ -1813,6 +1813,15 @@ export type ApprovalStepApprover = {
     userId?: number | null;
 };
 
+/** Request body for widening or replacing one active approval step's effective approvers. */
+export type ApprovalStepApproverChangePayload = {
+    approvers: Array<
+        | { approverKind: 'user'; userId: number }
+        | { approverKind: 'any_approver' }
+    >;
+    comment?: string | null;
+};
+
 /** One approver's decision within an approval chain. */
 export type DocumentApprovalDecision = {
     id: number;

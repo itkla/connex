@@ -16,6 +16,7 @@ import {
     UserPlusIcon,
     XCircleIcon,
     ArrowUturnLeftIcon,
+    ArrowPathIcon,
 } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
 
@@ -63,17 +64,29 @@ import {
     delegateDocumentApproval,
     cancelDocumentApproval,
     getDocumentApprovalDelegateCandidates,
+    getActiveWorkspaceMembers,
+    reassignDocumentApprovalStepApprovers,
+    widenDocumentApprovalStepApprovers,
 } from '@/app/lib/api';
 import type {
     ApprovalDelegate,
     DealDocument,
     DocumentApprovalStep,
+    DocumentApproval,
     DocumentClientStatus,
     DocumentStatus,
     DocumentTemplate,
     DocumentType,
+    WorkspaceMember,
 } from '@/app/lib/types';
+import ApprovalStepApproversDialog from './ApprovalStepApproversDialog';
 import DocumentApprovalChain from './DocumentApprovalChain';
+import {
+    approvalStepApproverChangePayload,
+    manageableApprovalSteps,
+    type ApprovalMemberDirectoryStatus,
+    type ApprovalStepManagementAction,
+} from './approvalStepActions';
 import { DEAL_DOCUMENTS_ANCHOR } from './dealLinks';
 
 /**
@@ -94,6 +107,7 @@ type Props = {
     dealId: number;
     initial: DealDocument[];
     canApprove: boolean;
+    canManageApprovals: boolean;
     canDeleteDocuments: boolean;
     currentUserId: number;
 };
@@ -143,12 +157,13 @@ function terminatedApproval(doc: DealDocument) {
  * generates a draft from a template, transitions its status, runs the approval flow (request /
  * approve / reject / cancel), or opens a print view (browser print-to-PDF) — it never edits a
  * document's content or computes money. The server owns the approval gate; this UI only reflects
- * `requiresApproval` and the caller's `DOCUMENT_APPROVE` permission.
+ * `requiresApproval` and the caller's document approval permissions.
  */
 export default function DealDocuments({
     dealId,
     initial,
     canApprove,
+    canManageApprovals,
     canDeleteDocuments,
     currentUserId,
 }: Props) {
@@ -173,12 +188,42 @@ export default function DealDocuments({
     const [delegateCandidatesError, setDelegateCandidatesError] = useState(false);
     const [delegateQuery, setDelegateQuery] = useState('');
     const [delegateUserId, setDelegateUserId] = useState<number | null>(null);
+    const [approvalMembers, setApprovalMembers] = useState<WorkspaceMember[]>([]);
+    const [approvalMemberDirectoryStatus, setApprovalMemberDirectoryStatus] = useState<ApprovalMemberDirectoryStatus>(
+        canManageApprovals ? 'loading' : 'hidden',
+    );
+    const [approvalMemberLoadAttempt, setApprovalMemberLoadAttempt] = useState(0);
+    const [stepManagementDialog, setStepManagementDialog] = useState<{
+        documentId: number;
+        action: ApprovalStepManagementAction;
+    } | null>(null);
+    const [managedStepId, setManagedStepId] = useState<number | null>(null);
+    const [managedApproverMode, setManagedApproverMode] = useState<'members' | 'any_approver'>('members');
+    const [managedApproverMembers, setManagedApproverMembers] = useState<WorkspaceMember[]>([]);
+    const [managedApproverComment, setManagedApproverComment] = useState('');
 
     useEffect(() => {
         getDocumentTemplates()
             .then((all) => setTemplates(all.filter((tpl) => tpl.active)))
             .catch(() => setTemplates([]));
     }, []);
+
+    useEffect(() => {
+        if (!canManageApprovals) return;
+        const controller = new AbortController();
+        getActiveWorkspaceMembers({ signal: controller.signal })
+            .then((members) => {
+                if (controller.signal.aborted) return;
+                setApprovalMembers(members.filter((member) => member.status !== 'pending'));
+                setApprovalMemberDirectoryStatus('ready');
+            })
+            .catch(() => {
+                if (controller.signal.aborted) return;
+                setApprovalMembers([]);
+                setApprovalMemberDirectoryStatus('unavailable');
+            });
+        return () => controller.abort();
+    }, [approvalMemberLoadAttempt, canManageApprovals]);
 
     useEffect(() => {
         if (hash !== `#${DEAL_DOCUMENTS_ANCHOR}`) scrolledForHash.current = null;
@@ -234,6 +279,12 @@ export default function DealDocuments({
     const refreshDocument = async (documentId: number) => {
         const updated = await getDealDocumentById(dealId, documentId);
         setDocuments((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+    };
+
+    const applyDocumentApproval = (documentId: number, approval: DocumentApproval) => {
+        setDocuments((previous) => previous.map((document) => (
+            document.id === documentId ? { ...document, latestApproval: approval } : document
+        )));
     };
 
     const generate = (template: DocumentTemplate) => run(async () => {
@@ -311,6 +362,45 @@ export default function DealDocuments({
         setApprovalDialogOpen(true);
     };
 
+    const openStepManagementDialog = (doc: DealDocument, action: ApprovalStepManagementAction) => {
+        const steps = manageableApprovalSteps(doc, canManageApprovals);
+        if (steps.length === 0) return;
+        setManagedStepId(steps.length === 1 ? steps[0].id : null);
+        setManagedApproverMode('members');
+        setManagedApproverMembers([]);
+        setManagedApproverComment('');
+        setStepManagementDialog({ documentId: doc.id, action });
+    };
+
+    const submitStepManagement = () => {
+        if (!stepManagementDialog || managedStepId == null) return;
+        const doc = documents.find((candidate) => candidate.id === stepManagementDialog.documentId);
+        if (!doc || !manageableApprovalSteps(doc, canManageApprovals).some((step) => step.id === managedStepId)) {
+            return;
+        }
+        const payload = approvalStepApproverChangePayload(
+            managedApproverMode === 'any_approver'
+                ? { mode: 'any_approver' }
+                : { mode: 'members', memberIds: managedApproverMembers.map((member) => member.id) },
+            managedApproverComment,
+        );
+        if (payload.approvers.length === 0) return;
+        const action = stepManagementDialog.action;
+        return run(async () => {
+            const updatedApproval = action === 'escalate'
+                ? await widenDocumentApprovalStepApprovers(dealId, doc.id, managedStepId, payload)
+                : await reassignDocumentApprovalStepApprovers(dealId, doc.id, managedStepId, payload);
+            applyDocumentApproval(doc.id, updatedApproval);
+            setStepManagementDialog(null);
+            toastSuccess(t(action === 'escalate' ? 'approversWidened' : 'approversReassigned'));
+            try {
+                await refreshDocument(doc.id);
+            } catch (error) {
+                showApiError(error, 'refreshFailed');
+            }
+        }, action === 'escalate' ? 'escalateFailed' : 'reassignFailed');
+    };
+
     const openPdf = (doc: DealDocument) => {
         window.open(`/records/deals/${dealId}/documents/${doc.id}/print`, '_blank', 'noopener,noreferrer');
     };
@@ -364,6 +454,12 @@ export default function DealDocuments({
 
     const dialogKeys = approvalDialog ? APPROVAL_DIALOG_KEYS[approvalDialog.action] : null;
     const eligibleDelegates = approvalDialog?.action === 'delegate' ? delegateCandidates : [];
+    const managedDocument = stepManagementDialog
+        ? documents.find((document) => document.id === stepManagementDialog.documentId) ?? null
+        : null;
+    const managedSteps = managedDocument
+        ? manageableApprovalSteps(managedDocument, canManageApprovals)
+        : [];
 
     return (
         <section id={DEAL_DOCUMENTS_ANCHOR} ref={sectionRef}>
@@ -407,6 +503,10 @@ export default function DealDocuments({
                                             <DocumentApprovalChain
                                                 approval={doc.latestApproval}
                                                 activeStepId={actionableStep(doc)?.id ?? null}
+                                                memberDirectoryStatus={canManageApprovals
+                                                    ? approvalMemberDirectoryStatus
+                                                    : 'hidden'}
+                                                members={approvalMembers}
                                             />
                                         )}
                                         {doc.status === 'draft' && doc.latestApproval?.status === 'rejected' && (
@@ -473,6 +573,21 @@ export default function DealDocuments({
                                                                 onSelect={() => openApprovalDialog(doc, 'delegate', actionableStep(doc)?.id ?? null)}
                                                             >
                                                                 <UserPlusIcon className="size-4" />{t('delegate')}
+                                                            </DropdownMenuItem>
+                                                        </>
+                                                    )}
+                                                    {manageableApprovalSteps(doc, canManageApprovals).length > 0 && (
+                                                        <>
+                                                            {actionableStep(doc) && <DropdownMenuSeparator />}
+                                                            <DropdownMenuItem
+                                                                onSelect={() => openStepManagementDialog(doc, 'escalate')}
+                                                            >
+                                                                <UserPlusIcon className="size-4" />{t('widenApprovers')}
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuItem
+                                                                onSelect={() => openStepManagementDialog(doc, 'reassign')}
+                                                            >
+                                                                <ArrowPathIcon className="size-4" />{t('reassignApprovers')}
                                                             </DropdownMenuItem>
                                                         </>
                                                     )}
@@ -592,6 +707,40 @@ export default function DealDocuments({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {stepManagementDialog && (
+                <ApprovalStepApproversDialog
+                    open
+                    action={stepManagementDialog.action}
+                    documentTitle={managedDocument?.title?.trim() || t('untitled')}
+                    steps={managedSteps}
+                    selectedStepId={managedStepId}
+                    memberDirectoryStatus={approvalMemberDirectoryStatus}
+                    members={approvalMembers}
+                    mode={managedApproverMode}
+                    selectedMembers={managedApproverMembers}
+                    comment={managedApproverComment}
+                    busy={busy}
+                    onOpenChange={(open) => {
+                        if (!open && !busy) setStepManagementDialog(null);
+                    }}
+                    onStepChange={(stepId) => {
+                        setManagedStepId(stepId);
+                        setManagedApproverMembers([]);
+                    }}
+                    onRetryMembers={() => {
+                        setApprovalMemberDirectoryStatus('loading');
+                        setApprovalMemberLoadAttempt((attempt) => attempt + 1);
+                    }}
+                    onModeChange={(mode) => {
+                        setManagedApproverMode(mode);
+                        setManagedApproverMembers([]);
+                    }}
+                    onSelectedMembersChange={setManagedApproverMembers}
+                    onCommentChange={setManagedApproverComment}
+                    onSubmit={submitStepManagement}
+                />
+            )}
         </section>
     );
 }

@@ -3994,6 +3994,30 @@ export function getDocumentApprovalDelegateCandidates(
     );
 }
 
+export function widenDocumentApprovalStepApprovers(
+    dealId: number,
+    documentId: number,
+    stepId: number,
+    payload: Types.ApprovalStepApproverChangePayload,
+) {
+    return postJson<Types.DocumentApproval>(
+        `/api/deals/${dealId}/documents/${documentId}/approval/steps/${stepId}/approvers`,
+        payload,
+    );
+}
+
+export function reassignDocumentApprovalStepApprovers(
+    dealId: number,
+    documentId: number,
+    stepId: number,
+    payload: Types.ApprovalStepApproverChangePayload,
+) {
+    return putJson<Types.DocumentApproval>(
+        `/api/deals/${dealId}/documents/${documentId}/approval/steps/${stepId}/approvers`,
+        payload,
+    );
+}
+
 export type MyWorkQuery = {
     page?: number;
     sources?: Types.WorkItemSource[];
