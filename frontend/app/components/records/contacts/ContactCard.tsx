@@ -1,16 +1,9 @@
 'use client';
 
-import { ArchiveBoxArrowDownIcon, ArchiveBoxIcon, EllipsisHorizontalIcon, EyeIcon, PencilIcon, EnvelopeIcon, PhoneIcon } from '@heroicons/react/24/outline';
+import { EnvelopeIcon, PhoneIcon } from '@heroicons/react/24/outline';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
-import {
-    DropdownMenu,
-    DropdownMenuTrigger,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu';
 import { copyToClipboard, readableTextColor } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -20,7 +13,7 @@ import ProtectedMediaImage from '@/app/components/ProtectedMediaImage';
 import ChangeCompanyDialog from '@/app/components/records/contacts/ChangeCompanyDialog';
 import { updateContact, uploadContactPicture } from '@/app/lib/api';
 import type { Contact, UpdateContactPayload } from '@/app/lib/types';
-import type { RecordRemoveIntent } from '@/app/components/records/types';
+import type { RecordMenuModel, RecordRemoveIntent } from '@/app/components/records/types';
 import { BuildingOffice2Icon, UserCircleIcon } from '@heroicons/react/24/outline';
 import type { Tag } from '@/app/lib/types';
 import {
@@ -28,6 +21,8 @@ import {
     type RecordReturnSelectionSnapshot,
 } from '@/app/lib/recordReturnPath';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { RecordActionMenuTrigger, RecordContextMenu } from '@/app/components/records/RecordActionMenu';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 
 function initialsOf(name: string): string {
     const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -55,6 +50,7 @@ function tintFor(seed: string): string {
 
 interface ContactCardProps {
     id: number;
+    workspaceId?: number;
     name?: string;
     title?: string;
     company?: string;
@@ -66,7 +62,11 @@ interface ContactCardProps {
     tags?: Tag[];
     onQuickEdit?: () => void;
     onDelete?: () => void;
+    menu?: RecordMenuModel;
     readOnly?: boolean;
+    onSendEmail?: () => void;
+    onCopyPhone?: () => void;
+    onChangeCompany?: () => void;
     /** What `onDelete` really does; contacts are archived rather than deleted (#854). */
     removeIntent?: RecordRemoveIntent;
     returnSelection?: RecordReturnSelectionSnapshot;
@@ -74,6 +74,7 @@ interface ContactCardProps {
 
 export default function ContactCard({
     id,
+    workspaceId,
     name = 'Tahm Kench',
     title = 'CTO',
     company = '',
@@ -85,11 +86,16 @@ export default function ContactCard({
     tags = [],
     onQuickEdit,
     onDelete,
+    menu,
     readOnly = false,
+    onSendEmail,
+    onCopyPhone,
+    onChangeCompany,
     removeIntent = 'archive',
     returnSelection,
 }: ContactCardProps) {
     const router = useRouter();
+    const { activeWorkspaceId } = useWorkspace();
     const t = useTranslations('ContactsCard');
     const reportApiError = useApiErrorToast('ContactsCard');
     const [editSheetOpen, setEditSheetOpen] = useState(false);
@@ -97,6 +103,10 @@ export default function ContactCard({
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [isSaving, setIsSaving] = useState(false);
     const [changeCompanyOpen, setChangeCompanyOpen] = useState(false);
+    const ownedByActiveWorkspace = activeWorkspaceId !== null
+        && Number.isFinite(activeWorkspaceId)
+        && workspaceId === activeWorkspaceId;
+    const canMutate = ownedByActiveWorkspace && !readOnly;
 
     function openContactPage() {
         router.push(recordDetailNavigationPath('contacts', id, returnSelection));
@@ -151,6 +161,7 @@ export default function ContactCard({
 
     const syntheticContact: Contact = {
         id,
+        workspaceId,
         name: name ?? '',
         email: email ?? '',
         phone: phone ?? '',
@@ -160,10 +171,48 @@ export default function ContactCard({
         updatedAt: '',
     };
 
+    const baseMenu: RecordMenuModel = menu ?? {
+        record: { type: 'person', id, label: name },
+        includeRecordActions: !readOnly,
+        onQuickEdit: canMutate ? onQuickEdit ?? openInternalQuickEdit : undefined,
+        onRemove: onDelete,
+        removeIntent,
+    };
+    const menuModel: RecordMenuModel = {
+        ...baseMenu,
+        allowRecordMutation: canMutate && (baseMenu.allowRecordMutation ?? true),
+        onQuickEdit: canMutate ? baseMenu.onQuickEdit : undefined,
+        onRemove: ownedByActiveWorkspace ? baseMenu.onRemove : undefined,
+        extraItems: !readOnly
+            ? [
+                ...(canMutate ? baseMenu.extraItems ?? [] : []),
+                ...(email ? [{
+                    key: 'send-email',
+                    label: t('sendEmail'),
+                    icon: <EnvelopeIcon className="size-4 text-muted-foreground" />,
+                    onSelect: onSendEmail ?? (() => { window.location.href = `mailto:${email}`; }),
+                }] : []),
+                ...(phone ? [{
+                    key: 'copy-phone',
+                    label: t('copyPhone'),
+                    icon: <PhoneIcon className="size-4 text-muted-foreground" />,
+                    onSelect: onCopyPhone ?? (() => {
+                        if (copyToClipboard(phone, 'Phone')) toastSuccess(t('toastPhoneCopied'));
+                        else toastError(t('toastFailedCopyPhone'));
+                    }),
+                }] : []),
+                ...(canMutate ? [{
+                    key: 'change-company',
+                    label: t('changeCompany'),
+                    icon: <BuildingOffice2Icon className="size-4 text-muted-foreground" />,
+                    onSelect: onChangeCompany ?? openChangeCompanyDialog,
+                }] : []),
+            ]
+            : [],
+    };
+    const hasMenuActions = !readOnly || menuModel.onRemove !== undefined;
 
-
-    return (
-        <>
+    const card = (
         <div
             className={cn(
                 'group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card transition duration-200',
@@ -183,73 +232,14 @@ export default function ContactCard({
                     )}
                 />
 
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                        <button
-                            type="button"
-                            aria-label={t('actionsAria')}
-                            onClick={(e) => e.stopPropagation()}
-                            className="absolute top-2 right-2 flex size-8 items-center justify-center rounded-full bg-card/85 text-foreground opacity-100 ring-1 ring-border backdrop-blur transition hover:bg-card sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
-                        >
-                            <EllipsisHorizontalIcon className="size-5" />
-                        </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" side="bottom" className="w-48" onClick={(e) => e.stopPropagation()}>
-                        {!readOnly && (
-                            <>
-                                <DropdownMenuItem onSelect={openContactPage}>
-                                    <EyeIcon className="size-4 text-muted-foreground" />
-                                    {t('view')}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    onSelect={(event) => {
-                                        event.preventDefault();
-                                        if (onQuickEdit) onQuickEdit();
-                                        else openInternalQuickEdit();
-                                    }}
-                                >
-                                    <PencilIcon className="size-4 text-muted-foreground" />
-                                    {t('quickEdit')}
-                                </DropdownMenuItem>
-                                {email && (
-                                    <DropdownMenuItem onSelect={() => { window.location.href = `mailto:${email}`; }}>
-                                        <EnvelopeIcon className="size-4 text-muted-foreground" />
-                                        {t('sendEmail')}
-                                    </DropdownMenuItem>
-                                )}
-                                {phone && (
-                                    <DropdownMenuItem onSelect={() =>
-                                        copyToClipboard(phone, 'Phone')
-                                            ? toastSuccess(t('toastPhoneCopied'))
-                                            : toastError(t('toastFailedCopyPhone'))
-                                    }>
-                                        <PhoneIcon className="size-4 text-muted-foreground" />
-                                        {t('copyPhone')}
-                                    </DropdownMenuItem>
-                                )}
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => openChangeCompanyDialog()}>
-                                    <BuildingOffice2Icon className="size-4 text-muted-foreground" />
-                                    {t('changeCompany')}
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                            </>
-                        )}
-                        {onDelete && (
-                            <DropdownMenuItem
-                                onSelect={(e) => {
-                                    e.preventDefault();
-                                    onDelete();
-                                }}
-                            >
-                                {removeIntent === 'restore'
-                                    ? <ArchiveBoxIcon className="size-4 text-muted-foreground" />
-                                    : <ArchiveBoxArrowDownIcon className="size-4 text-muted-foreground" />}
-                                {t(removeIntent === 'restore' ? 'restore' : 'archive')}
-                            </DropdownMenuItem>
-                        )}
-                    </DropdownMenuContent>
-                </DropdownMenu>
+                {hasMenuActions && (
+                    <div onClick={(event) => event.stopPropagation()}>
+                        <RecordActionMenuTrigger
+                            model={menuModel}
+                            triggerClassName="absolute top-2 right-2 size-8 bg-card/85 text-foreground ring-1 ring-border backdrop-blur hover:bg-card"
+                        />
+                    </div>
+                )}
             </div>
 
             <div className="flex flex-col gap-2.5 p-4">
@@ -287,30 +277,37 @@ export default function ContactCard({
                 )}
             </div>
         </div>
-        {!onQuickEdit && (
-            <QuickEditSheet
-                editSheetOpen={editSheetOpen}
-                setEditSheetOpen={setEditSheetOpen}
-                selectedIds={new Set([id])}
-                selectedContacts={[syntheticContact]}
-                drafts={{ [id]: draft }}
-                updateDraft={(_id, patch) => setDraft((d) => ({ ...d, ...patch }))}
-                imageFiles={{ [id]: imageFile }}
-                updateImageFile={(_id, file) => setImageFile(file)}
-                isSaving={isSaving}
-                saveEdits={saveInternalEdits}
-            />
-        )}
+    );
 
-        <ChangeCompanyDialog
-            open={changeCompanyOpen}
-            onOpenChange={setChangeCompanyOpen}
-            contacts={[syntheticContact]}
-            onSuccess={() => {
-                toastSuccess(t('toastCompanyChanged'));
-                router.refresh();
-            }}
-        />
+    return (
+        <>
+            {hasMenuActions ? <RecordContextMenu model={menuModel}>{card}</RecordContextMenu> : card}
+            {canMutate && !onQuickEdit && (
+                <QuickEditSheet
+                    editSheetOpen={editSheetOpen}
+                    setEditSheetOpen={setEditSheetOpen}
+                    selectedIds={new Set([id])}
+                    selectedContacts={[syntheticContact]}
+                    drafts={{ [id]: draft }}
+                    updateDraft={(_id, patch) => setDraft((d) => ({ ...d, ...patch }))}
+                    imageFiles={{ [id]: imageFile }}
+                    updateImageFile={(_id, file) => setImageFile(file)}
+                    isSaving={isSaving}
+                    saveEdits={saveInternalEdits}
+                />
+            )}
+
+            {canMutate && (
+                <ChangeCompanyDialog
+                    open={changeCompanyOpen}
+                    onOpenChange={setChangeCompanyOpen}
+                    contacts={[syntheticContact]}
+                    onSuccess={() => {
+                        toastSuccess(t('toastCompanyChanged'));
+                        router.refresh();
+                    }}
+                />
+            )}
         </>
     );
 }

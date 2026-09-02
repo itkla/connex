@@ -133,9 +133,6 @@
         "entityLabelPlural": "連絡先"
     },
     "ContactsCard": {
-        "actionsAria": "連絡先の操作",
-        "view": "表示",
-        "quickEdit": "クイック編集",
         "copyEmail": "メールをコピー",
         "sendEmail": "メール送信",
         "copyPhone": "電話番号をコピー",
@@ -150,9 +147,7 @@
         "toastPhoneCopied": "電話番号をコピーしました",
         "toastFailedCopyPhone": "電話番号をコピーできませんでした",
         "toastCompanyChanged": "会社を変更しました",
-        "ownerLabel": "担当者: {name}",
-        "archive": "アーカイブ",
-        "restore": "復元"
+        "ownerLabel": "担当者: {name}"
     },
     "ContactsActionsMenu": {
         "edit": "編集",

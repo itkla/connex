@@ -95,6 +95,7 @@ export default function ContactsGrid({ contacts, company, allTags }: { contacts:
                         <ContactCard
                             key={contact.id}
                             id={contact.id}
+                            workspaceId={contact.workspaceId}
                             name={contact.name}
                             title={contact.title}
                             imageUrl={contact.imageUrl}

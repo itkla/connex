@@ -133,9 +133,6 @@
         "entityLabelPlural": "contacts"
     },
     "ContactsCard": {
-        "actionsAria": "Contact actions",
-        "view": "View",
-        "quickEdit": "Quick edit",
         "copyEmail": "Copy email",
         "sendEmail": "Send email",
         "copyPhone": "Copy phone",
@@ -150,9 +147,7 @@
         "toastPhoneCopied": "Phone copied",
         "toastFailedCopyPhone": "Couldn't copy the phone number",
         "toastCompanyChanged": "Company changed",
-        "ownerLabel": "Owner: {name}",
-        "archive": "Archive",
-        "restore": "Restore"
+        "ownerLabel": "Owner: {name}"
     },
     "ContactsActionsMenu": {
         "edit": "Edit",

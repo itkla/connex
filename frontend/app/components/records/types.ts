@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { ActiveRecordRef } from '@/app/lib/actions/types';
 
 // test code - move to lib/types.ts or elsewhere later
 
@@ -10,6 +11,33 @@ export type SelectionId = string | number;
  * icon are chosen from this rather than always saying delete.
  */
 export type RecordRemoveIntent = 'delete' | 'archive' | 'restore';
+
+/** A card-local action that joins both registry-backed record menu surfaces. */
+export type RecordMenuExtraItem = {
+    key: string;
+    label: string;
+    icon?: ReactNode;
+    destructive?: boolean;
+    onSelect: () => void;
+};
+
+/**
+ * The record and actions consumed by both menu surfaces. Quick edit and card-local extras occupy one
+ * shared group, while `removeIntent` keeps archive, restore, and destructive deletion distinct.
+ */
+export type RecordMenuModel = {
+    record: ActiveRecordRef;
+    includeCreateActions?: boolean;
+    includeRecordActions?: boolean;
+    /** Whether actions that can mutate this record belong on this surface. */
+    allowRecordMutation?: boolean;
+    extraItems?: readonly RecordMenuExtraItem[];
+    onPeek?: () => void;
+    onQuickEdit?: () => void;
+    onRemove?: () => void;
+    removeIntent?: RecordRemoveIntent;
+};
+
 /** A display mode the user can pick and that is safe to persist or share in the `view` query param. */
 export type SelectableDisplayMode = 'grid' | 'table' | 'kanban';
 
@@ -181,6 +209,8 @@ export function toggleFilterValue(state: FilterState, columnKey: string, optionK
 export interface CardCallbacks<T> {
     onQuickEdit?: (item: T) => void;
     onDelete?: (item: T) => void;
+    /** The exact browser-built model a card uses for both its kebab and context menu. */
+    menu?: RecordMenuModel;
 }
 
 /**
