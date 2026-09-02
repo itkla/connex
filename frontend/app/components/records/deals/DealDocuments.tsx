@@ -371,14 +371,14 @@ export default function DealDocuments({
         };
     }, [approvalDialog, approvalDialogOpen, dealId]);
 
-    const run = async (
-        op: () => Promise<void>,
+    const run = async <T,>(
+        op: () => Promise<T>,
         fallbackKey: string,
         refusalCopy?: { title: string; description: string },
-    ) => {
+    ): Promise<T | undefined> => {
         setBusy(true);
         try {
-            await op();
+            return await op();
         } catch (err) {
             const isForbiddenRefusal = err instanceof Error
                 && 'status' in err
@@ -399,66 +399,91 @@ export default function DealDocuments({
         setDocuments((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
     };
 
-    const generate = (template: DocumentTemplate) => run(async () => {
-        const created = await generateDealDocument(dealId, template.id);
+    const generate = async (template: DocumentTemplate) => {
+        const created = await run(
+            () => generateDealDocument(dealId, template.id),
+            'generateFailed',
+        );
+        if (!created) return;
         setDocuments((prev) => [created, ...prev]);
         toastSuccess(t('generated'));
-    }, 'generateFailed');
+    };
 
-    const changeStatus = (doc: DealDocument, status: DocumentClientStatus) => run(async () => {
-        const updated = await updateDealDocumentStatus(dealId, doc.id, status);
+    const changeStatus = async (doc: DealDocument, status: DocumentClientStatus) => {
+        const updated = await run(
+            () => updateDealDocumentStatus(dealId, doc.id, status),
+            'statusFailed',
+        );
+        if (!updated) return;
         setDocuments((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
-    }, 'statusFailed');
+    };
 
-    const remove = (doc: DealDocument) => run(async () => {
-        await deleteDealDocument(dealId, doc.id);
+    const remove = async (doc: DealDocument) => {
+        const deleted = await run(async () => {
+            await deleteDealDocument(dealId, doc.id);
+            return true;
+        }, 'deleteFailed');
+        if (!deleted) return;
         setDocuments((prev) => prev.filter((d) => d.id !== doc.id));
         toastSuccess(t('deleted'));
-    }, 'deleteFailed');
+    };
 
-    const cancelRequest = (doc: DealDocument) => run(async () => {
-        try {
+    const cancelRequest = async (doc: DealDocument) => {
+        const cancelled = await run(async () => {
             await cancelDocumentApproval(dealId, doc.id);
-            toastSuccess(t('approvalCancelled'));
-        } finally {
-            await refreshDocument(doc.id).catch(() => undefined);
-        }
-    }, 'cancelRequestFailed');
+            return true;
+        }, 'cancelRequestFailed');
+        if (!cancelled) return;
+        toastSuccess(t('approvalCancelled'));
+        await refreshDocument(doc.id).catch(() => undefined);
+    };
 
-    const submitApprovalAction = () => {
+    const submitApprovalAction = async () => {
         if (!approvalDialog) return;
         const { doc, action } = approvalDialog;
         const trimmed = comment.trim();
-        return run(async () => {
-            try {
-                if (action === 'request') {
-                    await requestDocumentApproval(dealId, doc.id, trimmed || null);
-                    toastSuccess(t('approvalRequested'));
-                } else if (action === 'delegate') {
-                    if (delegateUserId == null || approvalDialog.stepId == null) return;
-                    await delegateDocumentApproval(
-                        dealId,
-                        doc.id,
-                        approvalDialog.stepId,
-                        delegateUserId,
-                        trimmed || null,
-                    );
-                    toastSuccess(t('approvalDelegated'));
-                } else {
-                    await decideDocumentApproval(
-                        dealId,
-                        doc.id,
-                        action === 'approve' ? 'approved' : 'rejected',
-                        trimmed || null,
-                        approvalDialog.stepId,
-                    );
-                    toastSuccess(action === 'approve' ? t('approvalApproved') : t('approvalRejected'));
-                }
-            } finally {
-                await refreshDocument(doc.id).catch(() => undefined);
-            }
-            dispatchApprovalDialog({ type: 'set-open', open: false });
-        }, APPROVAL_DIALOG_KEYS[action].failure);
+        const approvalStepId = approvalDialog.stepId;
+        const selectedDelegateUserId = delegateUserId;
+        let completed: true | undefined;
+        if (action === 'request') {
+            completed = await run(async () => {
+                await requestDocumentApproval(dealId, doc.id, trimmed || null);
+                return true as const;
+            }, APPROVAL_DIALOG_KEYS[action].failure);
+        } else if (action === 'delegate') {
+            if (selectedDelegateUserId == null || approvalStepId == null) return;
+            completed = await run(async () => {
+                await delegateDocumentApproval(
+                    dealId,
+                    doc.id,
+                    approvalStepId,
+                    selectedDelegateUserId,
+                    trimmed || null,
+                );
+                return true as const;
+            }, APPROVAL_DIALOG_KEYS[action].failure);
+        } else {
+            completed = await run(async () => {
+                await decideDocumentApproval(
+                    dealId,
+                    doc.id,
+                    action === 'approve' ? 'approved' : 'rejected',
+                    trimmed || null,
+                    approvalStepId,
+                );
+                return true as const;
+            }, APPROVAL_DIALOG_KEYS[action].failure);
+        }
+        if (!completed) return;
+        toastSuccess(t(action === 'request'
+            ? 'approvalRequested'
+            : action === 'delegate'
+                ? 'approvalDelegated'
+                : action === 'approve'
+                    ? 'approvalApproved'
+                    : 'approvalRejected'));
+        await refreshDocument(doc.id).catch(() => undefined);
+        dispatchApprovalDialog({ type: 'set-open', open: false });
     };
 
     const openApprovalDialog = (doc: DealDocument, action: ApprovalAction, stepId: number | null = null) => {
@@ -481,7 +506,7 @@ export default function DealDocuments({
         });
     };
 
-    const submitStepManagement = () => {
+    const submitStepManagement = async () => {
         if (!stepManagement || stepManagement.stepId == null) return;
         const { action, stepId, mode, members, comment: managementComment } = stepManagement;
         const doc = documents.find((candidate) => candidate.id === stepManagement.documentId);
@@ -505,24 +530,25 @@ export default function DealDocuments({
             managementComment,
         );
         if (payload.approvers.length === 0) return;
-        return run(async () => {
-            const updatedApproval = action === 'escalate'
+        const updatedApproval = await run(async () => (
+            action === 'escalate'
                 ? await widenDocumentApprovalStepApprovers(dealId, doc.id, stepId, payload)
-                : await reassignDocumentApprovalStepApprovers(dealId, doc.id, stepId, payload);
-            setDocuments((current) => current.map((document) => (
-                document.id === doc.id ? { ...document, latestApproval: updatedApproval } : document
-            )));
-            setStepManagement(null);
-            toastSuccess(t(action === 'escalate' ? 'approversWidened' : 'approversReassigned'));
-            try {
-                await refreshDocument(doc.id);
-            } catch (error) {
-                showApiError(error, 'refreshFailed');
-            }
-        }, action === 'escalate' ? 'escalateFailed' : 'reassignFailed', {
+                : await reassignDocumentApprovalStepApprovers(dealId, doc.id, stepId, payload)
+        ), action === 'escalate' ? 'escalateFailed' : 'reassignFailed', {
             title: 'approverChangeRefused',
             description: 'approverChangeRefusedDescription',
         });
+        if (!updatedApproval) return;
+        setDocuments((current) => current.map((document) => (
+            document.id === doc.id ? { ...document, latestApproval: updatedApproval } : document
+        )));
+        setStepManagement(null);
+        toastSuccess(t(action === 'escalate' ? 'approversWidened' : 'approversReassigned'));
+        try {
+            await refreshDocument(doc.id);
+        } catch (error) {
+            showApiError(error, 'refreshFailed');
+        }
     };
 
     const openPdf = (doc: DealDocument) => {
