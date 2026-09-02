@@ -4,6 +4,10 @@ Tracking issue: [#559](https://github.com/itkla/connex/issues/559). This documen
 acceptance criterion — *the separate-Lead versus contact-lifecycle decision is documented before schema work
 begins* — and is the reference for every increment that follows.
 
+Customer lifecycle is a separate company-level concern. Its proposed model and validation gate are recorded in
+[`CUSTOMER_LIFECYCLE.md`](CUSTOMER_LIFECYCLE.md); in particular, a contact's `CONVERTED` stage must never be
+read as customer status.
+
 ## Decision
 
 **Connex models the lead lifecycle as state on the existing contact record. It does not introduce a separate
