@@ -1,9 +1,109 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
 import { activeWorkspaceId, csrfBootstrap, registerUser } from "./support/api";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
+}
+
+const RELEASE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$/;
+const DEVELOPMENT_VERSIONS = new Set(["0.0.0-dev", "0.0.1-snapshot"]);
+
+const BUILD_IDENTITY_COPY = {
+    matched: {
+        status: "Release versions match",
+        body: "The frontend and backend carry matching verified release provenance.",
+        tone: "bg-emerald-500/10",
+    },
+    unverified: {
+        status: "Versions agree — artifact provenance not verified",
+        body: "The frontend and backend report the same version, but they do not expose the release evidence needed to confirm a matched release set.",
+        tone: "bg-muted",
+    },
+    mismatched: {
+        status: "Release builds do not match",
+        body: "The frontend and backend report different release versions or release evidence. Deploy them together from one release set.",
+        tone: "bg-amber-500/10",
+    },
+    unavailable: {
+        status: "Backend version unavailable",
+        body: "Couldn't check the backend version, so a release match cannot be confirmed. No settings changed — try again.",
+        tone: "bg-amber-500/10",
+    },
+    unversioned: {
+        status: "Development or source build",
+        body: "At least one component has no stamped release version, so a release match cannot be confirmed.",
+        tone: "bg-muted",
+    },
+} as const;
+
+function isReleaseVersion(version: string | null): version is string {
+    return version !== null
+        && !DEVELOPMENT_VERSIONS.has(version.toLowerCase())
+        && RELEASE_VERSION.test(version);
+}
+
+async function buildValue(section: Locator, label: string): Promise<string> {
+    const value = section.getByText(label, { exact: true }).locator("..").locator("dd");
+    await expect(value).toHaveCount(1);
+    return (await value.innerText()).trim();
+}
+
+/** Verifies the live endpoint, component state, rendered values, tone, and environment-honest copy. */
+async function expectRunningBuildIdentity(page: Page, request: APIRequestContext) {
+    const heading = page.getByRole("heading", { name: "Build identity" });
+    const section = page.locator("section").filter({ has: heading });
+    await expect(section).toBeVisible();
+
+    const response = await request.get("/api/version");
+    const frontendDisplay = await buildValue(section, "Frontend version");
+    const backendDisplay = await buildValue(section, "Backend version");
+    const buildTimeDisplay = await buildValue(section, "Build time");
+    const gitShaDisplay = await buildValue(section, "Source commit");
+    const frontendVersion = frontendDisplay === "Not stamped" ? null : frontendDisplay;
+
+    let expected: keyof typeof BUILD_IDENTITY_COPY;
+    if (!response.ok()) {
+        expected = "unavailable";
+        expect(backendDisplay).toBe("Unavailable");
+        expect(buildTimeDisplay).toBe("Unavailable");
+        expect(gitShaDisplay).toBe("Unavailable");
+    } else {
+        const payload: unknown = await response.json();
+        if (!isRecord(payload) || typeof payload.version !== "string") {
+            throw new Error("Version response is missing its version");
+        }
+        const backendVersion = payload.version.trim();
+        expect(backendDisplay).toBe(backendVersion || "Not stamped");
+        for (const [value, rendered] of [
+            [payload.buildTime, buildTimeDisplay],
+            [payload.gitSha, gitShaDisplay],
+        ] as const) {
+            const metadata = typeof value === "string" ? value.trim() : "";
+            expect(rendered).toBe(
+                metadata.length > 0 && metadata.toLowerCase() !== "unknown"
+                    ? metadata
+                    : "Unavailable",
+            );
+        }
+        expected = !isReleaseVersion(frontendVersion) || !isReleaseVersion(backendVersion)
+            ? "unversioned"
+            : frontendVersion === backendVersion
+              ? "unverified"
+              : "mismatched";
+    }
+
+    const expectedCopy = BUILD_IDENTITY_COPY[expected];
+    const status = section.getByText(expectedCopy.status, { exact: true });
+    await expect(status).toBeVisible();
+    await expect(status).toHaveClass(new RegExp(expectedCopy.tone.replace("/", "\\/")));
+    await expect(section.getByText(expectedCopy.body, { exact: true })).toBeVisible();
+    const allStatuses = section.getByText(
+        new RegExp(`^(${Object.values(BUILD_IDENTITY_COPY)
+            .map(({ status: candidate }) => candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+            .join("|")})$`),
+    );
+    await expect(allStatuses).toHaveCount(1);
 }
 
 async function installVirtualAuthenticator(page: Page): Promise<() => Promise<void>> {
@@ -129,6 +229,9 @@ test.describe("workspace and organization identity", () => {
             await passwordDialog.getByRole("button", { name: "Continue", exact: true }).click();
             await expect(page.getByText("Passkey added", { exact: true })).toBeVisible();
 
+            await page.goto("/settings/workspace/audit-diagnostics");
+            await expectRunningBuildIdentity(page, context.request);
+
             await page.goto("/settings/workspace/general");
             await expect(page.getByRole("heading", { name: "Workspace identity" })).toBeVisible();
             await page.getByLabel("Workspace name").fill(workspaceName);
@@ -160,6 +263,9 @@ test.describe("workspace and organization identity", () => {
             await expect(userBreadcrumb).toContainText("E2E Harness");
             await expect(userBreadcrumb).toContainText("Users");
             await expect(userBreadcrumb).not.toContainText(organizationName);
+
+            await page.goto("/settings/organization/audit-diagnostics");
+            await expectRunningBuildIdentity(page, context.request);
 
             const workspacesResponse = await context.request.get("/api/workspaces");
             expect(workspacesResponse.status()).toBe(200);

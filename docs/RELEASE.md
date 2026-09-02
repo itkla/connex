@@ -163,6 +163,19 @@ Smoke-check a running backend:
 curl -s http://<backend>/api/version   # {"version":"1.4.0","buildTime":"..."}
 ```
 
+### Reading build identity in the product
+
+An authorized administrator can open **Settings → Workspace → Audit & diagnostics** or
+**Settings → Organization → Audit & diagnostics** and read **Build identity**. The section compares
+the frontend version baked into the image with `GET /api/version`, and also shows the backend build
+time and source commit when they are available. The running surfaces currently expose no shared
+release-provenance field: equal release-looking versions therefore appear as agreeing but
+unverified, including a from-source install stamped with a SemVer value. Development labels remain
+explicitly unversioned. A positive release match requires a future release workflow to stamp an
+authenticated provenance value into both artifacts, expose both values at runtime, and have the
+diagnostics comparison confirm that they are equal. If both values are present but differ, the
+section reports a release-build mismatch even when the displayed versions agree.
+
 ## Release channels
 
 Three, no more:

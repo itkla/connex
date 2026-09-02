@@ -5684,6 +5684,13 @@ export type DiagnosticsSectionFault = {
     reason: string;
 };
 
+/** Public product build information returned by the backend version endpoint. */
+export type ProductVersion = {
+    version: string;
+    buildTime: string | null;
+    gitSha: string | null;
+};
+
 export type TenantDiagnostics = {
     scope: DiagnosticsScope;
     deployment: DiagnosticsDeployment;

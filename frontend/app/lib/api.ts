@@ -6410,3 +6410,12 @@ export function setAiWatchActive(id: number, active: boolean) {
 export function deleteAiWatch(id: number) {
     return deleteJson<void>(`/api/ai/assistant/watches/${id}`);
 }
+
+/*
+ * == Build identity
+ */
+
+/** Fetches the public backend product version without reusing a cached artifact identity. */
+export function getVersion(init: RequestInit = {}) {
+    return getJson<Types.ProductVersion>("/api/version", { cache: "no-store", ...init });
+}
