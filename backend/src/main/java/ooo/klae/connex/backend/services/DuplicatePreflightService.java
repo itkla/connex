@@ -259,6 +259,9 @@ public class DuplicatePreflightService {
             throw duplicateReviewConflict(duplicateReviewToken, true);
         }
         if (match.candidates().isEmpty()) {
+            if (duplicateReviewToken != null && !duplicateReviewToken.isBlank()) {
+                dealReviewProofService.invalidateSubmitted(duplicateReviewToken, workflowFingerprint);
+            }
             return;
         }
         boolean reviewed = dealReviewProofService.consume(

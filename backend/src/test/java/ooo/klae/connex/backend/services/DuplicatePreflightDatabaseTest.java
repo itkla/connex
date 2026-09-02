@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -314,6 +315,38 @@ class DuplicatePreflightDatabaseTest extends AbstractServiceTest {
                 + "WHERE workspace_id = ?",
             workspace.getId());
         assertFalse(consumer.consume(expiringProof, workflow, result));
+    }
+
+    @Test
+    void emptyDealCandidateCreationInvalidatesItsOwnSubmittedProof() {
+        String name = "No candidate " + unique();
+        DuplicatePreflightResponse issued = duplicatePreflightService.preflightDeal(
+            new DealDuplicatePreflightRequest(name, null, null));
+        assertTrue(issued.candidates().isEmpty());
+        String proof = issued.reviewToken();
+
+        duplicatePreflightService.requireReviewedDealCreation(
+            new DealDuplicatePreflightRequest(name, null, null), proof);
+
+        DuplicatePreflightResponse afterInvalidation = duplicatePreflightService.preflightDeal(
+            new DealDuplicatePreflightRequest(name, null, proof));
+        assertNotEquals(proof, afterInvalidation.reviewToken());
+    }
+
+    @Test
+    void submittedDealProofInvalidationDeletesOnlyTheMatchingWorkflow() {
+        DealDuplicateReviewProofService proofService = new DealDuplicateReviewProofService(
+            dealDuplicateReviewProofMapper,
+            workspaceService,
+            duplicatePreflightProperties);
+
+        String survivingProof = proofService.issue("a".repeat(64), "b".repeat(64));
+        assertFalse(proofService.invalidateSubmitted(survivingProof, "c".repeat(64)));
+        assertTrue(proofService.consume(survivingProof, "a".repeat(64), "b".repeat(64)));
+
+        String matchingProof = proofService.issue("d".repeat(64), "e".repeat(64));
+        assertTrue(proofService.invalidateSubmitted(matchingProof, "d".repeat(64)));
+        assertFalse(proofService.consume(matchingProof, "d".repeat(64), "e".repeat(64)));
     }
 
     @Test

@@ -123,13 +123,28 @@ For interactive person/company/deal mutation, sharing, imports, OCR, and identit
 4. Lock required active memberships.
 5. Lock the active organization shared.
 6. Lock the organization duplicate-decision mutex exclusively.
-7. Lock writable record targets ascending by record id.
-8. Lock canonical identity groups in deterministic kind/value order.
-9. Requery/revalidate current identities while locks are held.
+7. For a CSV import that uses an auto-create custom-field mapping, lock the affected
+   record-creation template set before writable record targets. Lock and revalidate
+   `CUSTOM_FIELD_MANAGE` first when the definition is absent. This set row is a schema
+   synchronization root, not dependency creation. After the set lock is held, recompute the
+   set of absent definition keys and fail closed with a review conflict if it differs in
+   either direction from the pre-lock reading, so a definition created or removed concurrently
+   under `READ_COMMITTED` cannot be silently adopted or created twice.
+8. Lock writable record targets ascending by record id.
+9. Lock canonical identity groups in deterministic kind/value order.
+10. Requery/revalidate current identities while locks are held.
+
+CSV commits claim their one-use review proof first, then lock and revalidate the actor's create
+permission before entering the duplicate-decision hierarchy. This retains the actor's custom-role
+root and permission rows before the organization mutex, so later dependency permission checks are
+reentrant and never acquire role locks after tenant record locks.
 
 Person/company sharing retains source and target workspace roots before the mutex. Principal-free backfill begins at its active workspace.
 
 Do not introduce dependency-first locking for CSV imports; ordinary record mutation is duplicate-mutex then target-first, and reversing it creates an interactive/import deadlock cycle.
+The template-set synchronization root above is the narrow exception: actual custom-field
+definitions, tags, and referenced companies are still created only after writable targets and
+canonical identities have been locked and revalidated.
 
 One-use duplicate review proofs are claimed before database lock acquisition according to the owning import contract. Candidate results/acknowledgements are bound to the exact workspace/request snapshot and cannot be reused across changed inputs.
 

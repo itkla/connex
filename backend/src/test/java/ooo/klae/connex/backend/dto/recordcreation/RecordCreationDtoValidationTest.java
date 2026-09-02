@@ -194,6 +194,29 @@ class RecordCreationDtoValidationTest {
     }
 
     @Test
+    void guidedDealAcceptsClientSubmittedVisibleSystemPresetDefaults() {
+        GuidedDealCreateRequestDto request = new GuidedDealCreateRequestDto(
+            new GuidedDealRecordDto(
+                "Resolved preset deal",
+                new BigDecimal("0.00"),
+                "USD",
+                3,
+                7,
+                null,
+                null,
+                null),
+            templateUse(RecordCreationRecordType.deal),
+            Map.of(),
+            List.of());
+
+        assertTrue(validator.validate(request).isEmpty());
+        assertEquals(new BigDecimal("0.00"), request.record().value());
+        assertEquals("USD", request.record().currency());
+        assertEquals(3, request.record().pipeline());
+        assertEquals(7, request.record().stage());
+    }
+
+    @Test
     void duplicateReviewTokensAreAcceptedOnlyAsWriteOnlyInput() throws Exception {
         String proof = "a".repeat(64);
         GuidedPersonRecordDto person = objectMapper.readValue(

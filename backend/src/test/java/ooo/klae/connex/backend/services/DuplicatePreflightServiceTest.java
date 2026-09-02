@@ -490,6 +490,27 @@ class DuplicatePreflightServiceTest {
     }
 
     @Test
+    void reviewedDealCreationInvalidatesSubmittedProofWhenCandidatesBecomeEmpty() {
+        DealDuplicatePreflightRequest request = new DealDuplicatePreflightRequest(
+            "Unique renewal",
+            null,
+            null);
+        String reviewToken = "e".repeat(64);
+        when(matchingService.normalizeName("Unique renewal"))
+            .thenReturn(Optional.of("unique renewal"));
+        when(dealMapper.findDuplicatePreflightCandidates(
+                7, "unique renewal", null, 51)).thenReturn(List.of());
+
+        service.requireReviewedDealCreation(request, reviewToken);
+
+        verify(dealReviewProofService).invalidateSubmitted(eq(reviewToken), anyString());
+        verify(dealReviewProofService, never()).consume(
+            any(),
+            anyString(),
+            anyString());
+    }
+
+    @Test
     void reviewedDealCreationRejectsMissingReusedOrChangedReview() {
         DealDuplicatePreflightRequest request = new DealDuplicatePreflightRequest(
             "Renewal",
