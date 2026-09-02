@@ -1,262 +1,262 @@
 {
-    "DashboardPage": {
-        "companies": "会社",
-        "contacts": "連絡先",
-        "deals": "案件",
-        "overview": "レコード数",
-        "pipelines": "パイプライン",
-        "pipeline": "パイプライン",
-        "tasks": "タスク",
-        "recentActivity": "最近のアクティビティ",
-        "viewAll": "すべて表示",
-        "viewMap": "マップを表示",
-        "coolingRelationships": "冷め込んでいる関係",
-        "atRiskDeals": "リスクのある案件",
-        "viewDeals": "案件を表示",
-        "viewAtRiskDeals": "リスクのある案件を表示",
-        "viewInRadar": "レーダーで開く",
-        "introductions": "紹介",
-        "recentlyMoved": "最近の転職",
-        "files": "ファイル",
-        "storageUsed": "{count}件のファイル · {size}",
-        "noFiles": "ファイルはまだありません",
-        "companyWarmth": "会社の温度感",
-        "warmthDistribution": "温度感の分布",
-        "closingSoon": "まもなくクローズ",
-        "recentNotes": "最近のメモ",
-        "notifications": "通知",
-        "quickActions": "クイックアクション",
-        "captureAttention": {
-            "title": "連携データの取り込みに対応が必要です",
-            "description": "優先度の高い人物確認またはプロバイダーの問題を解決し、関係性の根拠を最新に保ちます。",
-            "action": "{provider}: 確認 {reviews}件 · 対応 {interventions}件"
-        },
-        "analyticsKpis": "主要指標",
-        "revenueTrend": "売上トレンド",
-        "winRate": "受注率",
-        "pipelineValue": "パイプライン価値",
-        "stageFunnel": "ステージファネル",
-        "activityVolume": "活動量",
-        "teamLeaderboard": "チームランキング"
+  "DashboardPage": {
+    "companies": "会社",
+    "contacts": "連絡先",
+    "deals": "案件",
+    "overview": "レコード数",
+    "pipelines": "パイプライン",
+    "pipeline": "パイプライン",
+    "tasks": "タスク",
+    "recentActivity": "最近のアクティビティ",
+    "viewAll": "すべて表示",
+    "viewMap": "マップを表示",
+    "coolingRelationships": "冷め込んでいる関係",
+    "atRiskDeals": "リスクのある案件",
+    "viewDeals": "案件を表示",
+    "viewAtRiskDeals": "リスクのある案件を表示",
+    "viewInRadar": "レーダーで開く",
+    "introductions": "紹介",
+    "recentlyMoved": "最近の転職",
+    "files": "ファイル",
+    "storageUsed": "{count}件のファイル · {size}",
+    "noFiles": "ファイルはまだありません",
+    "companyWarmth": "会社の温度感",
+    "warmthDistribution": "温度感の分布",
+    "closingSoon": "まもなくクローズ",
+    "recentNotes": "最近のメモ",
+    "notifications": "通知",
+    "quickActions": "クイックアクション",
+    "captureAttention": {
+      "title": "連携データの取り込みに対応が必要です",
+      "description": "優先度の高い人物確認またはプロバイダーの問題を解決し、関係性の根拠を最新に保ちます。",
+      "action": "{provider}: 確認 {reviews}件 · 対応 {interventions}件"
     },
-    "CompanyWarmth": {
-        "empty": "現在、冷え込みつつある会社はありません。"
+    "analyticsKpis": "主要指標",
+    "revenueTrend": "売上トレンド",
+    "winRate": "受注率",
+    "pipelineValue": "パイプライン価値",
+    "stageFunnel": "ステージファネル",
+    "activityVolume": "活動量",
+    "teamLeaderboard": "チームランキング"
+  },
+  "CompanyWarmth": {
+    "empty": "現在、冷え込みつつある会社はありません。"
+  },
+  "WarmthDistribution": {
+    "empty": "温度感のデータはまだありません"
+  },
+  "ClosingSoonDeals": {
+    "empty": "今週クローズ予定の案件はありません。"
+  },
+  "AtRiskDeals": {
+    "empty": "現在、対応が必要な案件はありません。",
+    "truncated": "一部の結果のみ表示しています。優先度の高い進行中案件 1,000 件をリスク評価しました。",
+    "truncatedEmpty": "評価した 1,000 件にはリスクが見つかりませんでした。未評価の案件が残っています。"
+  },
+  "CoolingRelationships": {
+    "empty": "現在、冷え込みつつある関係はありません。",
+    "quiet": "{days}日間接触なし",
+    "goesColdIn": "あと{days}日で冷め込み",
+    "noCompany": "会社なし",
+    "scheduleFollowUp": "冷め込む前にフォローアップを予約",
+    "followUpWith": "{name} にフォローアップ",
+    "scheduled": "フォローアップを予約しました",
+    "scheduleFailed": "フォローアップタスクを作成できませんでした"
+  },
+  "RecentMoves": {
+    "empty": "ワークスペースの連絡先に最近の転職はありません。",
+    "unknown": "不明"
+  },
+  "DashboardActivation": {
+    "sectionTitle": "はじめに",
+    "checklistTitle": "このワークスペースの設定",
+    "checklistProgress": "{done} / {total}",
+    "optionalLabel": "任意",
+    "doneLabel": "完了:",
+    "evidenceTitle": "根拠",
+    "followUp": "フォローアップを予約",
+    "steps": {
+      "contacts": {
+        "title": "連絡先を取り込む",
+        "body": "以前の CRM から CSV をインポートするか、最初の 1 名を手入力してください。",
+        "cta": "連絡先をインポート",
+        "done": "{count}件の連絡先",
+        "bodyScanning": "以前の CRM から CSV をインポートするか、最初の 1 名を手入力してください。追加時に名刺をスキャンすることもできます。"
+      },
+      "companies": {
+        "title": "所属する会社を追加する",
+        "body": "同じ会社を介した紹介は、このつながりから導き出されます。",
+        "cta": "会社をインポート",
+        "done": "{count}社"
+      },
+      "interactions": {
+        "title": "接点を記録する",
+        "body": "アクティビティ、共有メモ、紐づけたタスクを根拠として、Connex が関係の温度感を読み取ります。",
+        "cta": "アクティビティを記録",
+        "done": "接点を記録済み"
+      },
+      "pipeline": {
+        "title": "パイプラインを作成する",
+        "body": "新しいワークスペースにはステージがないため、案件を置く場所がまだありません。",
+        "cta": "パイプラインを設定",
+        "done": "{count}件のパイプライン"
+      },
+      "team": {
+        "title": "同僚を招待する",
+        "body": "同僚のネットワークが加わるほど、紹介ルートは強くなります。",
+        "cta": "同僚を招待",
+        "done": "{count}人のメンバー"
+      },
+      "connections": {
+        "title": "メールボックスを連携する",
+        "body": "メールボックスを連携すると、手作業で記録しなくても接点が最新に保たれます。",
+        "cta": "アカウントを連携",
+        "done": "アカウント連携済み"
+      }
     },
-    "WarmthDistribution": {
-        "empty": "温度感のデータはまだありません"
+    "insight": {
+      "dealRisk": {
+        "headline": "対応が必要な案件があります",
+        "open": "案件を開く"
+      },
+      "coolingContact": {
+        "headline": "この関係は冷え込みつつあります",
+        "open": "連絡先を開く"
+      },
+      "introPath": {
+        "headline": "温かい紹介ができます",
+        "open": "紹介を表示"
+      }
     },
-    "ClosingSoonDeals": {
-        "empty": "今週クローズ予定の案件はありません。"
+    "evidence": {
+      "lastTouch": "最終接触 {date}",
+      "touchCount": "接点の記録 {count}件",
+      "goesCold": "{date}頃に冷め込む見込み",
+      "mutualConnections": "共通のつながり {count}件",
+      "sharedCompany": "どちらも {company} とつながりがあります"
     },
-    "AtRiskDeals": {
-        "empty": "現在、対応が必要な案件はありません。",
-        "truncated": "一部の結果のみ表示しています。優先度の高い進行中案件 1,000 件をリスク評価しました。",
-        "truncatedEmpty": "評価した 1,000 件にはリスクが見つかりませんでした。未評価の案件が残っています。"
-    },
-    "CoolingRelationships": {
-        "empty": "現在、冷え込みつつある関係はありません。",
-        "quiet": "{days}日間接触なし",
-        "goesColdIn": "あと{days}日で冷め込み",
-        "noCompany": "会社なし",
-        "scheduleFollowUp": "冷め込む前にフォローアップを予約",
-        "followUpWith": "{name} にフォローアップ",
-        "scheduled": "フォローアップを予約しました",
-        "scheduleFailed": "フォローアップタスクを作成できませんでした"
-    },
-    "RecentMoves": {
-        "empty": "ワークスペースの連絡先に最近の転職はありません。",
-        "unknown": "不明"
-    },
-    "DashboardActivation": {
-        "sectionTitle": "はじめに",
-        "checklistTitle": "このワークスペースの設定",
-        "checklistProgress": "{done} / {total}",
-        "optionalLabel": "任意",
-        "doneLabel": "完了:",
-        "evidenceTitle": "根拠",
-        "followUp": "フォローアップを予約",
-        "steps": {
-            "contacts": {
-                "title": "連絡先を取り込む",
-                "body": "以前の CRM から CSV をインポートするか、最初の 1 名を手入力してください。",
-                "cta": "連絡先をインポート",
-                "done": "{count}件の連絡先",
-                "bodyScanning": "以前の CRM から CSV をインポートするか、最初の 1 名を手入力してください。追加時に名刺をスキャンすることもできます。"
-            },
-            "companies": {
-                "title": "所属する会社を追加する",
-                "body": "同じ会社を介した紹介は、このつながりから導き出されます。",
-                "cta": "会社をインポート",
-                "done": "{count}社"
-            },
-            "interactions": {
-                "title": "接点を記録する",
-                "body": "アクティビティ、共有メモ、紐づけたタスクを根拠として、Connex が関係の温度感を読み取ります。",
-                "cta": "アクティビティを記録",
-                "done": "接点を記録済み"
-            },
-            "pipeline": {
-                "title": "パイプラインを作成する",
-                "body": "新しいワークスペースにはステージがないため、案件を置く場所がまだありません。",
-                "cta": "パイプラインを設定",
-                "done": "{count}件のパイプライン"
-            },
-            "team": {
-                "title": "同僚を招待する",
-                "body": "同僚のネットワークが加わるほど、紹介ルートは強くなります。",
-                "cta": "同僚を招待",
-                "done": "{count}人のメンバー"
-            },
-            "connections": {
-                "title": "メールボックスを連携する",
-                "body": "メールボックスを連携すると、手作業で記録しなくても接点が最新に保たれます。",
-                "cta": "アカウントを連携",
-                "done": "アカウント連携済み"
-            }
-        },
-        "insight": {
-            "dealRisk": {
-                "headline": "対応が必要な案件があります",
-                "open": "案件を開く"
-            },
-            "coolingContact": {
-                "headline": "この関係は冷え込みつつあります",
-                "open": "連絡先を開く"
-            },
-            "introPath": {
-                "headline": "温かい紹介ができます",
-                "open": "紹介を表示"
-            }
-        },
-        "evidence": {
-            "lastTouch": "最終接触 {date}",
-            "touchCount": "接点の記録 {count}件",
-            "goesCold": "{date}頃に冷め込む見込み",
-            "mutualConnections": "共通のつながり {count}件",
-            "sharedCompany": "どちらも {company} とつながりがあります"
-        },
-        "missing": {
-            "title": "まだ根拠が足りません",
-            "body": "Connex は記録された接点から関係の温度感を算出します。今はその材料がなく、根拠のないスコアは作られた判断でしかないため、ここにはスコアを表示しません。",
-            "noSignalTitle": "関係のシグナルはまだありません",
-            "noSignalBody": "関係の根拠は記録されていますが、今すぐ対応が必要な兆候や、有用な紹介につながる材料はありません。",
-            "unavailableTitle": "関係のシグナルを読み込めませんでした",
-            "unavailableBody": "チェックリストとインサイトは一時的に利用できません。ワークスペースのデータは変更されていません。",
-            "retry": "もう一度試す",
-            "gapsTitle": "足りないもの",
-            "gap": {
-                "contacts": "連絡先がまだありません",
-                "interactions": "接点が記録されていません",
-                "noSignal": "連絡先と接点はありますが、示すに足るシグナルにはまだ達していません。"
-            }
-        }
-    },
-    "FirstRunJourney": {
-        "newContact": "新規連絡先",
-        "warmth": {
-            "title": "最初の温度感",
-            "body": "記録された接点をもとに、Connex が読み取った現在の関係の温度感です。",
-            "readings": "記録された接点から読み取っています",
-            "bandCount": "{count}件の連絡先",
-            "cta": "温度感を見る"
-        }
-    },
-    "DashboardGreeting": {
-        "workingLate": "遅くまでお疲れさまです、",
-        "goodMorning": "おはようございます、",
-        "goodAfternoon": "こんにちは、",
-        "goodEvening": "こんばんは、",
-        "nothingUrgent": "本日緊急の用件はありません。順調です。",
-        "tasksOverdue": "{count, plural, one {# 件の期限切れタスク} other {# 件の期限切れタスク}}",
-        "upcomingTitle": "今週のワークスペース全体の予定",
-        "tasksDue": "{count, plural, one {タスク # 件} other {タスク # 件}}",
-        "dealsClosing": "{count, plural, one {締切 # 件} other {締切 # 件}}",
-        "activitiesUpcoming": "{count, plural, one {予定 # 件} other {予定 # 件}}",
-        "dealsClosingSeparator": " · {count, plural, one {今週成約予定 # 件の案件} other {今週成約予定 # 件の案件}}",
-        "dealsCount": "{count, plural, one {# 件の案件} other {# 件の案件}}",
-        "closingThisWeek": " が今週成約予定です",
-        "summaryUnavailable": "本日の予定を読み込めませんでした。"
-    },
-    "DashboardToday": {
-        "myWorkCount": "マイワークに{count}件の対応待ちがあります",
-        "atLeast": "マイワークに{count}件以上の対応待ちがあります",
-        "myWorkCritical": "緊急{count}件",
-        "viewMyWork": "マイワークを開く",
-        "partial": "この件数には含まれていない項目がある可能性があります。",
-        "unavailable": "マイワークの件数を読み込めませんでした。開いてご確認ください。",
-        "myWorkCriticalAtLeast": "緊急{count}件以上",
-        "allClear": "マイワークに対応待ちはありません。"
-    },
-    "DashboardPipelineChart": {
-        "pipelineLabel": "パイプライン",
-        "activePipeline": "アクティブなパイプライン",
-        "summary": "オープン {openCount} 件 · 今後 {months} か月で {scheduled} 件予定",
-        "profit": "実績",
-        "projections": "予測",
-        "chartDescription": "実績と予測の比較",
-        "currency": "通貨",
-        "profitTooltip": "成約した案件から得られた実績売上。",
-        "projectionsTooltip": "オープン案件の予測値（予定成約日ベース）。"
-    },
-    "DashboardTaskSummary": {
-        "openTasks": "オープンなタスク",
-        "viewAll": "すべて表示",
-        "overdueCount": "期限切れ {count} 件",
-        "dueThisWeek": "今週期限 {count} 件",
-        "separator": " · ",
-        "noDate": "期日なし",
-        "allCaughtUp": "すべて完了しています。",
-        "taskCompleted": "タスクを完了しました",
-        "undo": "元に戻す",
-        "taskCompleteFailed": "タスクを更新できませんでした",
-        "completeAria": "タスクを完了: {description}"
-    },
-    "DashboardQuickCreate": {
-        "new": "新規",
-        "newTask": "新しいタスク",
-        "newNote": "新しいメモ",
-        "taskTitle": "新しいタスク",
-        "taskDescription": "自分に割り当てるタスクを作成します。",
-        "noteTitle": "新しいメモ",
-        "noteDescription": "メモを残しましょう。",
-        "descriptionField": "説明",
-        "descriptionPlaceholder": "何をしますか？",
-        "dueDate": "期日",
-        "contentField": "メモ",
-        "contentPlaceholder": "メモを入力…",
-        "cancel": "キャンセル",
-        "create": "作成",
-        "view": "表示",
-        "taskCreated": "タスクを作成しました",
-        "noteCreated": "メモを作成しました",
-        "descriptionRequired": "説明を入力してください。",
-        "contentRequired": "内容を入力してください。",
-        "failed": "問題が発生しました。"
-    },
-    "DashboardCustomize": {
-        "customize": "カスタマイズ",
-        "done": "完了",
-        "addWidget": "ウィジェットを追加",
-        "add": "追加",
-        "reset": "リセット",
-        "remove": "{name}を削除",
-        "expand": "全幅にする",
-        "collapse": "半幅にする",
-        "emptyTitle": "ダッシュボードが空です",
-        "emptyBody": "ウィジェットを追加して再構成しましょう。",
-        "trayTitle": "ウィジェットを追加",
-        "trayDescription": "ダッシュボードに追加するウィジェットを選択してください。",
-        "trayEmpty": "すべてのウィジェットがすでにダッシュボードにあります。",
-        "dragHandle": "{name}をドラッグして並べ替え",
-        "saveFailed": "ダッシュボードのレイアウトを保存できませんでした。",
-        "a11yLifted": "{name}を持ち上げました。",
-        "a11yOver": "{name}は{target}の上にあります。",
-        "a11yDropped": "{name}を{target}にドロップしました。",
-        "a11yCancelled": "{name}の並べ替えをキャンセルしました。",
-        "a11yInstructions": "ウィジェットを並べ替えるには、スペースまたはEnterキーで持ち上げ、矢印キーで移動し、もう一度スペースまたはEnterキーでドロップします。"
-    },
-    "DashboardLayout": {
-        "title": "ダッシュボード",
-        "description": "ワークスペースの状況をひと目で確認"
+    "missing": {
+      "title": "まだ根拠が足りません",
+      "body": "Connex は記録された接点から関係の温度感を算出します。今はその材料がなく、根拠のないスコアは作られた判断でしかないため、ここにはスコアを表示しません。",
+      "noSignalTitle": "関係のシグナルはまだありません",
+      "noSignalBody": "関係の根拠は記録されていますが、今すぐ対応が必要な兆候や、有用な紹介につながる材料はありません。",
+      "unavailableTitle": "関係のシグナルを読み込めませんでした",
+      "unavailableBody": "チェックリストとインサイトは一時的に利用できません。ワークスペースのデータは変更されていません。",
+      "retry": "もう一度試す",
+      "gapsTitle": "足りないもの",
+      "gap": {
+        "contacts": "連絡先がまだありません",
+        "interactions": "接点が記録されていません",
+        "noSignal": "連絡先と接点はありますが、示すに足るシグナルにはまだ達していません。"
+      }
     }
+  },
+  "FirstRunJourney": {
+    "newContact": "新規連絡先",
+    "warmth": {
+      "title": "最初の温度感",
+      "body": "記録された接点をもとに、Connex が読み取った現在の関係の温度感です。",
+      "readings": "記録された接点から読み取っています",
+      "bandCount": "{count}件の連絡先",
+      "cta": "温度感を見る"
+    }
+  },
+  "DashboardToday": {
+    "myWorkCount": "マイワークに{count}件の対応待ちがあります",
+    "atLeast": "マイワークに{count}件以上の対応待ちがあります",
+    "myWorkCritical": "緊急{count}件",
+    "myWorkCriticalAtLeast": "緊急{count}件以上",
+    "viewMyWork": "マイワークを開く",
+    "partial": "この件数には含まれていない項目がある可能性があります。",
+    "unavailable": "マイワークの件数を読み込めませんでした。開いてご確認ください。",
+    "allClear": "マイワークに対応待ちはありません。"
+  },
+  "DashboardGreeting": {
+    "workingLate": "遅くまでお疲れさまです、",
+    "goodMorning": "おはようございます、",
+    "goodAfternoon": "こんにちは、",
+    "goodEvening": "こんばんは、",
+    "nothingUrgent": "本日緊急の用件はありません。順調です。",
+    "tasksOverdue": "{count, plural, one {# 件の期限切れタスク} other {# 件の期限切れタスク}}",
+    "upcomingTitle": "今週のワークスペース全体の予定",
+    "tasksDue": "{count, plural, one {タスク # 件} other {タスク # 件}}",
+    "dealsClosing": "{count, plural, one {締切 # 件} other {締切 # 件}}",
+    "activitiesUpcoming": "{count, plural, one {予定 # 件} other {予定 # 件}}",
+    "dealsClosingSeparator": " · {count, plural, one {今週成約予定 # 件の案件} other {今週成約予定 # 件の案件}}",
+    "dealsCount": "{count, plural, one {# 件の案件} other {# 件の案件}}",
+    "closingThisWeek": " が今週成約予定です",
+    "summaryUnavailable": "本日の予定を読み込めませんでした。"
+  },
+  "DashboardPipelineChart": {
+    "pipelineLabel": "パイプライン",
+    "activePipeline": "アクティブなパイプライン",
+    "summary": "オープン {openCount} 件 · 今後 {months} か月で {scheduled} 件予定",
+    "profit": "実績",
+    "projections": "予測",
+    "chartDescription": "実績と予測の比較",
+    "currency": "通貨",
+    "profitTooltip": "成約した案件から得られた実績売上。",
+    "projectionsTooltip": "オープン案件の予測値（予定成約日ベース）。"
+  },
+  "DashboardTaskSummary": {
+    "openTasks": "オープンなタスク",
+    "viewAll": "すべて表示",
+    "overdueCount": "期限切れ {count} 件",
+    "dueThisWeek": "今週期限 {count} 件",
+    "separator": " · ",
+    "noDate": "期日なし",
+    "allCaughtUp": "すべて完了しています。",
+    "taskCompleted": "タスクを完了しました",
+    "undo": "元に戻す",
+    "taskCompleteFailed": "タスクを更新できませんでした",
+    "completeAria": "タスクを完了: {description}"
+  },
+  "DashboardQuickCreate": {
+    "new": "新規",
+    "newTask": "新しいタスク",
+    "newNote": "新しいメモ",
+    "taskTitle": "新しいタスク",
+    "taskDescription": "自分に割り当てるタスクを作成します。",
+    "noteTitle": "新しいメモ",
+    "noteDescription": "メモを残しましょう。",
+    "descriptionField": "説明",
+    "descriptionPlaceholder": "何をしますか？",
+    "dueDate": "期日",
+    "contentField": "メモ",
+    "contentPlaceholder": "メモを入力…",
+    "cancel": "キャンセル",
+    "create": "作成",
+    "view": "表示",
+    "taskCreated": "タスクを作成しました",
+    "noteCreated": "メモを作成しました",
+    "descriptionRequired": "説明を入力してください。",
+    "contentRequired": "内容を入力してください。",
+    "failed": "問題が発生しました。"
+  },
+  "DashboardCustomize": {
+    "customize": "カスタマイズ",
+    "done": "完了",
+    "addWidget": "ウィジェットを追加",
+    "add": "追加",
+    "reset": "リセット",
+    "remove": "{name}を削除",
+    "expand": "全幅にする",
+    "collapse": "半幅にする",
+    "emptyTitle": "ダッシュボードが空です",
+    "emptyBody": "ウィジェットを追加して再構成しましょう。",
+    "trayTitle": "ウィジェットを追加",
+    "trayDescription": "ダッシュボードに追加するウィジェットを選択してください。",
+    "trayEmpty": "すべてのウィジェットがすでにダッシュボードにあります。",
+    "dragHandle": "{name}をドラッグして並べ替え",
+    "saveFailed": "ダッシュボードのレイアウトを保存できませんでした。",
+    "a11yLifted": "{name}を持ち上げました。",
+    "a11yOver": "{name}は{target}の上にあります。",
+    "a11yDropped": "{name}を{target}にドロップしました。",
+    "a11yCancelled": "{name}の並べ替えをキャンセルしました。",
+    "a11yInstructions": "ウィジェットを並べ替えるには、スペースまたはEnterキーで持ち上げ、矢印キーで移動し、もう一度スペースまたはEnterキーでドロップします。"
+  },
+  "DashboardLayout": {
+    "title": "ダッシュボード",
+    "description": "ワークスペースの状況をひと目で確認"
+  }
 }
