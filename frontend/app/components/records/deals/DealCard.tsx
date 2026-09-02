@@ -3,17 +3,6 @@
 import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import {
-    DropdownMenu,
-    DropdownMenuTrigger,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu';
-import {
-    EllipsisVerticalIcon,
-    EyeIcon,
-    PencilIcon,
-    TrashIcon,
     CalendarIcon,
     BuildingOffice2Icon,
 } from '@heroicons/react/24/outline';
@@ -24,11 +13,14 @@ import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import { type Company, type Deal, type DealRisk, type Pipeline, type Stage } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
 import DealRiskPill from './DealRiskPill';
-import { Suspense } from 'react';
+import { Suspense, type KeyboardEvent } from 'react';
 import {
     recordDetailNavigationPath,
     type RecordReturnSelectionSnapshot,
 } from '@/app/lib/recordReturnPath';
+import { RecordActionMenuTrigger, RecordContextMenu } from '@/app/components/records/RecordActionMenu';
+import type { RecordMenuModel } from '@/app/components/records/types';
+import { usePermission } from '@/app/hooks/usePermissions';
 
 interface DealCardProps {
     deal: Deal;
@@ -38,6 +30,7 @@ interface DealCardProps {
     risk?: DealRisk | null;
     onQuickEdit?: () => void;
     onDelete?: () => void;
+    menu?: RecordMenuModel;
     returnSelection?: RecordReturnSelectionSnapshot;
 }
 
@@ -53,20 +46,45 @@ export default function DealCard({
     risk,
     onQuickEdit,
     onDelete,
+    menu,
     returnSelection,
 }: DealCardProps) {
     const router = useRouter();
+    const canUpdate = usePermission('DEAL_UPDATE');
+    const canDelete = usePermission('DEAL_DELETE');
     const t = useTranslations('DealsCard');
     const locale = useLocale();
     const open = () => router.push(recordDetailNavigationPath('deals', deal.id, returnSelection));
+    const handleCardKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (event.target !== event.currentTarget || event.key !== 'Enter') return;
+        event.preventDefault();
+        open();
+    };
     const status = dealStatus(deal);
     const statusLabel = status === 'closed' ? t('statusClosed') : t('statusOpen');
+    const baseMenu: RecordMenuModel = menu ?? {
+        record: { type: 'deal', id: deal.id, label: deal.name },
+        includeRecordActions: true,
+        onQuickEdit,
+        onRemove: onDelete,
+        removeIntent: 'delete',
+    };
+    const menuModel: RecordMenuModel = {
+        ...baseMenu,
+        onOpen: open,
+        onQuickEdit: canUpdate ? baseMenu.onQuickEdit : undefined,
+        onRemove: canDelete ? baseMenu.onRemove : undefined,
+    };
 
     return (
-        <div
-            className="group flex cursor-pointer items-center gap-4 rounded-2xl border border-border bg-card p-4 transition duration-200 hover:bg-muted hover:shadow-lg"
-            onClick={open}
-        >
+        <RecordContextMenu model={menuModel}>
+            <div
+                className="group flex cursor-pointer items-center gap-4 rounded-2xl border border-border bg-card p-4 outline-hidden transition duration-200 hover:bg-muted hover:shadow-lg focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-brand"
+                role="link"
+                tabIndex={0}
+                onClick={open}
+                onKeyDown={handleCardKeyDown}
+            >
             <Suspense fallback={<span className="size-16 shrink-0 rounded-2xl bg-muted ring-1 ring-border" />}>
             {company ? (
                 <CompanyAvatar company={company} type="large" />
@@ -129,50 +147,12 @@ export default function DealCard({
                 )}
             </div>
 
-            <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                    <button
-                        type="button"
-                        aria-label={t('dealActions')}
-                        onClick={(e) => e.stopPropagation()}
-                        className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition hover:bg-muted hover:text-foreground group-hover:opacity-100 focus:opacity-100 data-[state=open]:opacity-100"
-                    >
-                        <EllipsisVerticalIcon className="size-4" />
-                    </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                    <DropdownMenuItem onSelect={open}>
-                        <EyeIcon className="size-4 text-muted-foreground" />
-                        {t('view')}
-                    </DropdownMenuItem>
-                    {onQuickEdit && (
-                        <DropdownMenuItem
-                            onSelect={(e) => {
-                                e.preventDefault();
-                                onQuickEdit();
-                            }}
-                        >
-                            <PencilIcon className="size-4 text-muted-foreground" />
-                            {t('quickEdit')}
-                        </DropdownMenuItem>
-                    )}
-                    {onDelete && (
-                        <>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                                variant="destructive"
-                                onSelect={(e) => {
-                                    e.preventDefault();
-                                    onDelete();
-                                }}
-                            >
-                                <TrashIcon className="size-4" />
-                                {t('delete')}
-                            </DropdownMenuItem>
-                        </>
-                    )}
-                </DropdownMenuContent>
-            </DropdownMenu>
+            <div onClick={(event) => event.stopPropagation()}>
+                <RecordActionMenuTrigger
+                    model={menuModel}
+                    triggerClassName="size-8 shrink-0 opacity-0 group-hover:opacity-100"
+                />
+            </div>
 
             <Button
                 variant="outline"
@@ -186,6 +166,7 @@ export default function DealCard({
             >
                 <ChevronRightIcon className="size-4" />
             </Button>
-        </div>
+            </div>
+        </RecordContextMenu>
     );
 }

@@ -50,6 +50,7 @@ import { useSavedViewScope } from '@/app/hooks/useSavedViewScope';
 import { useInlineEdit } from '@/app/hooks/useInlineEdit';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { usePermission } from '@/app/hooks/usePermissions';
 import { MAX_URL_PAGE_SIZE, parseListInt, writeListStateToUrl } from '@/app/hooks/listStateUrl';
 import { FILTER_EMPTY, type ColumnDef, type ColumnFilterFacet, type FilterState, type SelectionId, facetChips, countActiveFilters } from '@/app/components/records/types';
 import DealCard from '@/app/components/records/deals/DealCard';
@@ -370,6 +371,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
     const searchParams = useSearchParams();
     const pathname = usePathname();
     const { activeWorkspaceId } = useWorkspace();
+    const canUpdateDeals = usePermission('DEAL_UPDATE');
+    const canDeleteDeals = usePermission('DEAL_DELETE');
     const [viewState, dispatchViewState] = useReducer(dealsViewReducer, {
         definition: EMPTY_DEFINITION,
         segmentEvaluationRevision: 0,
@@ -1695,8 +1698,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             pipelineById={pipelineById}
                             stageById={stageById}
                             riskByDealId={riskByDealId}
-                            onQuickEdit={quickEditOne}
-                            onDelete={deleteOne}
+                            onQuickEdit={canUpdateDeals ? quickEditOne : undefined}
+                            onDelete={canDeleteDeals ? deleteOne : undefined}
                             onMoved={refreshRecords}
                             query={deferredQuery}
                             currency={activeCurrency ?? undefined}
@@ -1717,7 +1720,7 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             columns={visibleColumns}
                             sortState={{ key: sortKey, direction: sortDir, onSortChange: handleSortChange }}
                             addColumnSlot={addColumnSlot}
-                            renderCard={(item, { onQuickEdit, onDelete }) => (
+                            renderCard={(item, { onQuickEdit, onDelete, menu }) => (
                                 <DealCard
                                     deal={item}
                                     company={item.company != null ? companyById.get(item.company) : undefined}
@@ -1726,9 +1729,11 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                                     risk={riskByDealId.get(item.id)}
                                     onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
                                     onDelete={onDelete ? () => onDelete(item) : undefined}
+                                    menu={menu}
                                     returnSelection={returnSelection}
                                 />
                             )}
+                            cardOwnsRecordMenu
                             renderListRow={(item) => (
                                 <DealListRow
                                     deal={item}
@@ -1757,8 +1762,8 @@ export default function DealsBrowser({ deals: initialDeals, total: initialTotal,
                             density={density}
                             selectedIds={selectedIds}
                             onSelectedIdsChange={handleSelectedIdsChange}
-                            onQuickEdit={quickEditOne}
-                            onDelete={deleteOne}
+                            onQuickEdit={canUpdateDeals ? quickEditOne : undefined}
+                            onDelete={canDeleteDeals ? deleteOne : undefined}
                             gridClassName="grid grid-cols-1 gap-3"
                             entityLabel={t('entityLabel')}
                             selectionActions={selectionActions}

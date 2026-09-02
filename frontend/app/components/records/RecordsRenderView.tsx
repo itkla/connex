@@ -80,6 +80,8 @@ interface Props<T extends { id: SelectionId; name?: string }> {
     data: T[];
     columns: ColumnDef<T>[];
     renderCard: (item: T, callbacks: CardCallbacks<T>) => ReactNode;
+    /** The card renders both menu surfaces itself from the supplied callback model. */
+    cardOwnsRecordMenu?: boolean;
     /**
      * Row body for the viewport-forced `list` mode. Receives only the record because a list row is a
      * summary that opens the record rather than an editing surface. When omitted the row falls back to
@@ -129,6 +131,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
     data,
     columns,
     renderCard,
+    cardOwnsRecordMenu = false,
     renderListRow,
     renderAvatar,
     detailPath,
@@ -646,6 +649,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                             const card = renderCard(item, {
                                 onQuickEdit: readOnly ? undefined : onQuickEdit,
                                 onDelete,
+                                menu: menuModel ?? undefined,
                             });
                             return (
                                 <motion.div
@@ -657,7 +661,7 @@ export default function RecordsRenderView<T extends { id: SelectionId; name?: st
                                         selectedIds.has(item.id) && 'outline-2 outline-offset-2 outline-brand',
                                     )}
                                 >
-                                    {menuModel ? (
+                                    {menuModel && !cardOwnsRecordMenu ? (
                                         <RecordContextMenu model={menuModel}>
                                             <div className="contents">{card}</div>
                                         </RecordContextMenu>

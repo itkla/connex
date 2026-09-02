@@ -1074,9 +1074,10 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                         data={contacts}
                         columns={visibleColumns}
                         addColumnSlot={addColumnSlot}
-                        renderCard={(item, { onQuickEdit, onDelete }) => (
+                        renderCard={(item, { onQuickEdit, onDelete, menu }) => (
                             <ContactCard
                                 id={item.id}
+                                workspaceId={item.workspaceId}
                                 name={item.name}
                                 title={item.title}
                                 company={item.company?.name}
@@ -1086,11 +1087,13 @@ export default function ContactsBrowser({ savedViews, defaultView, savedViewsUna
                                 ownerName={item.ownerId != null ? memberById.get(item.ownerId)?.displayName : undefined}
                                 onQuickEdit={onQuickEdit ? () => onQuickEdit(item) : undefined}
                                 onDelete={onDelete ? () => onDelete(item) : undefined}
+                                menu={menu}
                                 readOnly={showArchived}
                                 removeIntent={showArchived ? 'restore' : 'archive'}
                                 returnSelection={returnSelection}
                             />
                         )}
+                        cardOwnsRecordMenu
                         renderListRow={(item) => (
                             <ContactListRow
                                 contact={item}

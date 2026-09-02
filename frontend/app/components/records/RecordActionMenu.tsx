@@ -28,28 +28,15 @@ import {
 import { cn } from '@/lib/utils';
 import { useActions } from '@/app/hooks/useActions';
 import { actionLabel } from '@/app/lib/actions/actionLabels';
-import type { ActionId, ActiveRecordRef } from '@/app/lib/actions/types';
-import type { RecordRemoveIntent } from '@/app/components/records/types';
+import type { ActionId } from '@/app/lib/actions/types';
+import type { RecordMenuModel, RecordRemoveIntent } from '@/app/components/records/types';
 
-/**
- * The record a row/card menu acts on, whether related-create actions fit that surface, and the
- * browser-local actions the shell owns (peek, quick edit, remove). `removeIntent` says what
- * `onRemove` really does so the menu never offers to delete a record type that is archived instead.
- */
-export type RecordMenuModel = {
-    record: ActiveRecordRef;
-    includeCreateActions?: boolean;
-    includeRecordActions?: boolean;
-    onPeek?: () => void;
-    onQuickEdit?: () => void;
-    onRemove?: () => void;
-    removeIntent?: RecordRemoveIntent;
-};
+export type { RecordMenuExtraItem, RecordMenuModel } from '@/app/components/records/types';
 
 type MenuItemDescriptor = {
     key: string;
     label: string;
-    icon: ReactNode;
+    icon?: ReactNode;
     destructive?: boolean;
     onSelect: () => void;
 };
@@ -57,6 +44,46 @@ type MenuItemDescriptor = {
 /** Registry action ids surfaced in a record menu, grouped so separators fall between groups. */
 const REGISTRY_VIEW = ['record.open', 'record.open-new-tab'] as const;
 const REGISTRY_CREATE = ['create.task', 'create.note', 'create.activity'] as const;
+
+type ResolvedGroupItems<T> = {
+    peek: T | null;
+    registryView: readonly (T | null)[];
+    registryCreate: readonly (T | null)[];
+    extraItems: readonly T[];
+    quickEdit: T | null;
+    runWorkflow: T | null;
+    copyLink: T | null;
+    remove: T | null;
+};
+
+/** Resolves the shared group structure independently of either menu primitive. */
+function resolveRecordMenuGroups<T>(model: RecordMenuModel, items: ResolvedGroupItems<T>): T[][] {
+    const {
+        includeCreateActions = true,
+        includeRecordActions = true,
+        allowRecordMutation = true,
+    } = model;
+    const groups: (T | null)[][] = [
+        includeRecordActions ? [items.peek, ...items.registryView] : [],
+        includeRecordActions && includeCreateActions ? [...items.registryCreate] : [],
+        includeRecordActions
+            ? [allowRecordMutation ? items.quickEdit : null, ...items.extraItems]
+            : [],
+        includeRecordActions
+            ? [allowRecordMutation ? items.runWorkflow : null, items.copyLink]
+            : [],
+        [items.remove],
+    ];
+    const resolvedGroups: T[][] = [];
+    for (const group of groups) {
+        const resolvedGroup: T[] = [];
+        for (const item of group) {
+            if (item !== null) resolvedGroup.push(item);
+        }
+        if (resolvedGroup.length > 0) resolvedGroups.push(resolvedGroup);
+    }
+    return resolvedGroups;
+}
 
 /**
  * The removal item per intent. Archiving and restoring are reversible, so they are ordinary items
@@ -70,7 +97,7 @@ const REMOVE_ITEM: Record<RecordRemoveIntent, Omit<MenuItemDescriptor, 'label' |
 
 /**
  * Resolves the record menu into ordered groups of items — browser-local peek/open at the top, the
- * create actions, then quick-edit/copy-link, then the removal item the surface asked for. Registry items are resolved
+ * create actions, contact-local actions, shared record actions, then removal. Registry items resolve
  * against the row's record via {@link useActions}'s per-record override so availability reflects the
  * row, not the page. Returns empty until `enabled` (the row's menu has been opened at least once),
  * so rows never interacted with — nearly all of them — pay nothing on a parent re-render; once opened
@@ -88,8 +115,7 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
         if (!enabled) return [];
         const {
             record,
-            includeCreateActions = true,
-            includeRecordActions = true,
+            onOpen,
             onPeek,
             onQuickEdit,
             onRemove,
@@ -105,7 +131,9 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
                 key: id,
                 label: actionLabel(action, t, tMessage),
                 icon: Icon ? <Icon className="size-4 text-muted-foreground" /> : null,
-                onSelect: () => void run(id, { source: 'menu', record }),
+                onSelect: id === 'record.open' && onOpen
+                    ? onOpen
+                    : () => void run(id, { source: 'menu', record }),
             };
         };
         const peek: MenuItemDescriptor | null = onPeek
@@ -118,13 +146,16 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
             ? { ...REMOVE_ITEM[removeIntent], label: tr(removeIntent), onSelect: onRemove }
             : null;
 
-        const groups: (MenuItemDescriptor | null)[][] = [
-            includeRecordActions ? [peek, ...REGISTRY_VIEW.map(registry)] : [],
-            includeRecordActions && includeCreateActions ? REGISTRY_CREATE.map(registry) : [],
-            includeRecordActions ? [quickEdit, registry('record.run-workflow'), registry('record.copy-link')] : [],
-            [remove],
-        ];
-        return groups.map((group) => group.filter((item): item is MenuItemDescriptor => item !== null)).filter((group) => group.length > 0);
+        return resolveRecordMenuGroups(model, {
+            peek,
+            registryView: REGISTRY_VIEW.map(registry),
+            registryCreate: REGISTRY_CREATE.map(registry),
+            extraItems: model.extraItems ?? [],
+            quickEdit,
+            runWorkflow: registry('record.run-workflow'),
+            copyLink: registry('record.copy-link'),
+            remove,
+        });
     }, [enabled, actions, model, getAction, isAvailableForRecord, run, t, tMessage, tr]);
 }
 

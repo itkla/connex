@@ -48,7 +48,7 @@ export interface KanbanBoardProps<T> {
     getPosition: (item: T) => number;
     renderCard: (item: T) => ReactNode;
     /** Persist a move; the board reverts its optimistic state if this rejects. */
-    onMove: (itemId: number, toColumnId: string, index: number) => Promise<void>;
+    onMove?: (itemId: number, toColumnId: string, index: number) => Promise<void>;
     reduce: boolean;
     emptyHint?: string;
     countLabel: (count: number) => string;
@@ -121,12 +121,14 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
     const commit = (next: ColumnItems) => setColumnItems(next);
 
     const onDragStart = (event: DragStartEvent) => {
+        if (!onMove) return;
         snapshotRef.current = columnItems;
         snapshotColumnByItemIdRef.current = columnByItemId;
         setActiveId(Number(event.active.id));
     };
 
     const onDragOver = (event: DragOverEvent) => {
+        if (!onMove) return;
         const { active, over } = event;
         if (!over) return;
         const activeId = Number(active.id);
@@ -148,6 +150,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
     };
 
     const onDragEnd = (event: DragEndEvent) => {
+        if (!onMove) return;
         const { active, over } = event;
         setActiveId(null);
         const activeId = Number(active.id);
@@ -225,6 +228,7 @@ export default function KanbanBoard<T>(props: KanbanBoardProps<T>) {
                             itemsById={itemsById}
                             renderCard={renderCard}
                             reduce={reduce}
+                            draggable={onMove !== undefined}
                             emptyHint={emptyHint}
                             countLabel={countLabel}
                         />
@@ -256,6 +260,7 @@ function KanbanColumn<T>({
     itemsById,
     renderCard,
     reduce,
+    draggable,
     emptyHint,
     countLabel,
 }: {
@@ -264,6 +269,7 @@ function KanbanColumn<T>({
     itemsById: Map<number, T>;
     renderCard: (item: T) => ReactNode;
     reduce: boolean;
+    draggable: boolean;
     emptyHint?: string;
     countLabel: (count: number) => string;
 }) {
@@ -285,7 +291,7 @@ function KanbanColumn<T>({
                             const item = itemsById.get(id);
                             if (!item) return null;
                             return (
-                                <SortableCard key={id} id={id} reduce={reduce}>
+                                <SortableCard key={id} id={id} reduce={reduce} draggable={draggable}>
                                     {renderCard(item)}
                                 </SortableCard>
                             );
@@ -303,8 +309,8 @@ function KanbanColumn<T>({
     );
 }
 
-function SortableCard({ id, reduce, children }: { id: number; reduce: boolean; children: ReactNode }) {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+function SortableCard({ id, reduce, draggable, children }: { id: number; reduce: boolean; draggable: boolean; children: ReactNode }) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: !draggable });
     const style = {
         transform: CSS.Transform.toString(transform),
         transition: reduce ? undefined : transition,
@@ -314,9 +320,9 @@ function SortableCard({ id, reduce, children }: { id: number; reduce: boolean; c
             ref={setNodeRef}
             style={style}
             data-kanban-card
-            {...attributes}
-            {...listeners}
-            className={`list-none touch-none outline-none ${isDragging ? 'opacity-40' : ''}`}
+            {...(draggable ? attributes : {})}
+            {...(draggable ? listeners : {})}
+            className={`list-none outline-none ${draggable ? 'touch-none' : ''} ${isDragging ? 'opacity-40' : ''}`}
         >
             {children}
         </li>

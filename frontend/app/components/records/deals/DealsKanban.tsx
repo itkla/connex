@@ -10,6 +10,7 @@ import { kanbanAccessibility } from '@/app/components/kanban/kanbanAccessibility
 import DealKanbanCard from '@/app/components/records/deals/DealKanbanCard';
 import { classifyStage } from './dealOutcome';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { usePermission } from '@/app/hooks/usePermissions';
 import { getCompaniesByIds, getDealBoard, getDealRisks, moveDeal } from '@/app/lib/api';
 import { withDealMoved } from '@/app/lib/dealBoard';
 import { toastError } from '@/app/lib/toast';
@@ -24,8 +25,8 @@ interface DealsKanbanProps {
     pipelineById: Map<number, Pipeline>;
     stageById: Map<number, Stage>;
     riskByDealId: Map<number, DealRisk>;
-    onQuickEdit: (deal: Deal) => void;
-    onDelete: (deal: Deal) => void;
+    onQuickEdit?: (deal: Deal) => void;
+    onDelete?: (deal: Deal) => void;
     onMoved: () => void;
     query: string;
     currency?: string;
@@ -92,6 +93,7 @@ export default function DealsKanban({
 }: DealsKanbanProps) {
     const t = useTranslations('DealsKanban');
     const showApiError = useApiErrorToast('DealsKanban');
+    const canUpdateDeals = usePermission('DEAL_UPDATE');
 
     const pipelineOptions = useMemo(
         () => pipelines.filter((pipeline) =>
@@ -288,8 +290,8 @@ export default function DealsKanban({
                 deal={deal}
                 company={deal.company != null ? resolvedCompanyById.get(deal.company) : undefined}
                 risk={boardRisks.get(deal.id)}
-                onQuickEdit={() => onQuickEdit(deal)}
-                onDelete={() => onDelete(deal)}
+                onQuickEdit={onQuickEdit ? () => onQuickEdit(deal) : undefined}
+                onDelete={onDelete ? () => onDelete(deal) : undefined}
                 returnSelection={returnSelection}
             />
         ),
@@ -364,7 +366,7 @@ export default function DealsKanban({
             getColumnId={dealColumnId}
             getPosition={dealPosition}
             renderCard={renderCard}
-            onMove={onMove}
+            onMove={canUpdateDeals ? onMove : undefined}
             reduce={reduce}
             emptyHint={t('emptyColumn')}
             countLabel={(count) => t('count', { count })}
