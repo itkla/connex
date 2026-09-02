@@ -40,7 +40,7 @@ public class ReportPermissionPolicy {
 
     private final ObjectMapper objectMapper;
 
-    /** Returns the permissions required to read a persisted report definition. */
+    /** Returns the permissions required by every widget in a persisted report definition. */
     public Set<Permission> requiredFor(ReportDefinition definition) {
         if (definition == null || definition.getConfigJson() == null || definition.getConfigJson().isBlank()) {
             throw corruptConfiguration();

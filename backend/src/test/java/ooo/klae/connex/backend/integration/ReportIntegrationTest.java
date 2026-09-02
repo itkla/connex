@@ -16,6 +16,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -71,6 +72,7 @@ import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.beans.ApprovalPolicy;
 import ooo.klae.connex.backend.beans.DealDocument;
 import ooo.klae.connex.backend.beans.Organization;
+import ooo.klae.connex.backend.beans.ReportDefinition;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
@@ -84,17 +86,21 @@ import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mail.MailService;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonEdgeMapper;
+import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.ApprovalPolicyService;
+import ooo.klae.connex.backend.services.DealRiskService;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlAccess;
 import ooo.klae.connex.backend.services.OrganizationWorkspaceScopeControlOperations;
 import ooo.klae.connex.backend.services.ReportDeliveryScheduler;
+import ooo.klae.connex.backend.services.ReportNetworkService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Full-stack HTTP coverage for workspace-shared reports, RBAC, deterministic generation, and
@@ -510,6 +516,7 @@ class ReportIntegrationTest {
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private RoleMapper roleMapper;
     @Autowired private ShareMapper shareMapper;
+    @Autowired private ReportMapper reportMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
@@ -523,7 +530,9 @@ class ReportIntegrationTest {
     @MockitoBean private AiRestrictionEpoch aiRestrictionEpoch;
     @MockitoBean private MailService mailService;
     @MockitoBean private OrganizationWorkspaceScopeControlAccess workspaceScopeControlAccess;
+    @MockitoSpyBean private DealRiskService dealRiskService;
     @MockitoSpyBean private PersonEdgeMapper personEdgeMapper;
+    @MockitoSpyBean private ReportNetworkService reportNetworkService;
 
     private MockMvc mockMvc;
 
@@ -669,6 +678,414 @@ class ReportIntegrationTest {
                 .session(session)
                 .with(csrf().asHeader()))
             .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void widgetKpiMatchesGeneratedWidgetForTheSamePeriodWithoutUsingAi() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "KPI parity");
+        int stage = insertStage(workspace.getId(), pipeline, "Won");
+        insertWonRevenue(workspace.getId(), pipeline, stage, member.getId(),
+                "Current revenue", "125.50", "USD", "2026-01-15 09:00:00");
+        insertWonRevenue(workspace.getId(), pipeline, stage, member.getId(),
+                "Prior revenue", "100.00", "USD", "2025-12-15 09:00:00");
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("revenue", "deals", "won_revenue", "none", "kpi"))));
+
+        MvcResult kpiResult = mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "revenue")
+                .param("start", "2026-01-01")
+                .param("end", "2026-01-31")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.reportId").value(reportId))
+            .andExpect(jsonPath("$.reportName").value("Commercial documents"))
+            .andExpect(jsonPath("$.widgetId").value("revenue"))
+            .andExpect(jsonPath("$.available").value(true))
+            .andExpect(jsonPath("$.reason").doesNotExist())
+            .andExpect(jsonPath("$.periodStart").value("2026-01-01"))
+            .andExpect(jsonPath("$.periodEnd").value("2026-01-31"))
+            .andReturn();
+
+        verify(aiReportNarrativeService, never()).cachedNarrative(
+                anyInt(), anyString(), any(LocalDate.class), any(LocalDate.class), anyList());
+        verify(aiReportNarrativeService, never()).generate(
+                anyInt(), anyString(), any(LocalDate.class), any(LocalDate.class), anyList(), anyLong());
+        verify(aiGenerationService, never()).startAtRestrictionEpoch(
+                any(), any(), anySet(), any(), any(), anyLong());
+        verify(aiRestrictionEpoch, never()).current(anyInt());
+        assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ai_output_cache WHERE workspace_id = ?",
+                Integer.class,
+                workspace.getId()));
+
+        MvcResult generatedResult = mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"start\":\"2026-01-01\",\"end\":\"2026-01-31\"}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andReturn();
+        JsonNode kpi = objectMapper.readTree(kpiResult.getResponse().getContentAsString());
+        JsonNode generatedWidget = objectMapper.readTree(generatedResult.getResponse().getContentAsString())
+                .get("widgets").get(0);
+        for (String field : List.of("total", "priorTotal", "changePercent", "unit")) {
+            assertEquals(generatedWidget.get(field), kpi.get(field), field);
+        }
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "revenue")
+                .param("start", "2020-01-01")
+                .param("end", "2026-01-01")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isBadRequest());
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "revenue")
+                .param("start", "2026-01-01")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void widgetKpiExplainsUnavailableScalarsWithoutChangingGeneratedFigures() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "KPI availability");
+        int stage = insertStage(workspace.getId(), pipeline, "Won");
+        insertWonRevenue(workspace.getId(), pipeline, stage, member.getId(),
+                "Dollar revenue", "50.00", "USD", "2026-01-10 09:00:00");
+        insertWonRevenue(workspace.getId(), pipeline, stage, member.getId(),
+                "Yen revenue", "5000.00", "JPY", "2026-01-11 09:00:00");
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("revenue", "deals", "won_revenue", "none", "kpi"),
+                new CommercialWidget("win-rate", "deals", "win_rate", "owner", "bar"),
+                new CommercialWidget("issue-rate", "documents", "quote_issue_rate", "none", "kpi"))));
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "revenue")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").doesNotExist())
+            .andExpect(jsonPath("$.available").value(false))
+            .andExpect(jsonPath("$.reason").value("mixed_currency"));
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "win-rate")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").doesNotExist())
+            .andExpect(jsonPath("$.available").value(false))
+            .andExpect(jsonPath("$.reason").value("non_additive"));
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "issue-rate")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").doesNotExist())
+            .andExpect(jsonPath("$.available").value(false))
+            .andExpect(jsonPath("$.reason").value("undefined"));
+
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.widgets[0].total").doesNotExist())
+            .andExpect(jsonPath("$.widgets[1].total").doesNotExist())
+            .andExpect(jsonPath("$.widgets[2].total").doesNotExist());
+    }
+
+    @Test
+    void widgetKpiRejectsDistinctNonIsoCurrenciesWithoutBlendingGeneratedFigure() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "Non-ISO currencies");
+        int stage = insertStage(workspace.getId(), pipeline, "Won");
+        insertWonRevenue(workspace.getId(), pipeline, stage, member.getId(),
+                "Dollar-symbol revenue", "50.00", "US$", "2026-01-10 09:00:00");
+        insertWonRevenue(workspace.getId(), pipeline, stage, member.getId(),
+                "Yen-symbol revenue", "5000.00", "JP$", "2026-01-11 09:00:00");
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("revenue", "deals", "won_revenue", "none", "kpi"))));
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "revenue")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").doesNotExist())
+            .andExpect(jsonPath("$.unit").value("mixed"))
+            .andExpect(jsonPath("$.available").value(false))
+            .andExpect(jsonPath("$.reason").value("mixed_currency"));
+
+        JsonNode generatedWidget = findWidget(
+                generateDocument(session, workspace, reportId).get("widgets"), "revenue");
+        assertNoScalarTotal(generatedWidget, "revenue");
+        assertEquals("mixed", generatedWidget.get("unit").asText());
+        assertEquals(Set.of("US$:total", "JP$:total"), pointValues(generatedWidget).keySet());
+    }
+
+    @Test
+    void widgetKpiRejectsDelimiterContainingAtRiskCurrenciesWithoutBlendingGeneratedFigure() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "At-risk currencies");
+        int stage = insertStage(workspace.getId(), pipeline, "Open");
+        insertOpenDeal(workspace.getId(), pipeline, stage,
+                "Colon dollar risk", "50.00", "A:USD", LocalDate.of(2026, 1, 10));
+        insertOpenDeal(workspace.getId(), pipeline, stage,
+                "Colon yen risk", "5000.00", "A:JPY", LocalDate.of(2026, 1, 11));
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget(
+                        "risk-revenue", "deals", "at_risk_revenue", "risk", "table"))));
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "risk-revenue")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").doesNotExist())
+            .andExpect(jsonPath("$.unit").value("mixed"))
+            .andExpect(jsonPath("$.available").value(false))
+            .andExpect(jsonPath("$.reason").value("mixed_currency"));
+
+        JsonNode generatedWidget = findWidget(
+                generateDocument(session, workspace, reportId).get("widgets"), "risk-revenue");
+        assertNoScalarTotal(generatedWidget, "risk-revenue");
+        assertEquals("mixed", generatedWidget.get("unit").asText());
+        Map<String, BigDecimal> values = pointValues(generatedWidget);
+        assertEquals(Set.of("A:USD:high", "A:JPY:high"), values.keySet());
+        assertDecimal("50", values.get("A:USD:high"));
+        assertDecimal("5000", values.get("A:JPY:high"));
+    }
+
+    @Test
+    void widgetKpiSkipsDealRiskInputsForUnrequestedSiblingAndMatchesGeneratedWidget() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "KPI input scope");
+        int stage = insertStage(workspace.getId(), pipeline, "Open");
+        int company = insertCompany(workspace.getId(), "KPI input company");
+        insertDeal(workspace.getId(), pipeline, stage, company, "Counted deal", "100.00", false);
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("deal-count", "deals", "count", "none", "kpi"),
+                new CommercialWidget(
+                        "risk-revenue", "deals", "at_risk_revenue", "risk", "table"))));
+
+        MvcResult kpiResult = mockMvc.perform(get(
+                "/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "deal-count")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.widgetId").value("deal-count"))
+            .andExpect(jsonPath("$.measure").value("count"))
+            .andExpect(jsonPath("$.total").value(1))
+            .andReturn();
+
+        verify(dealRiskService, never()).assessWorkspace(workspace.getId());
+
+        JsonNode generatedWidget = findWidget(
+                generateDocument(session, workspace, reportId).get("widgets"), "deal-count");
+        JsonNode kpi = objectMapper.readTree(kpiResult.getResponse().getContentAsString());
+        assertNotNull(generatedWidget);
+        for (String field : List.of("total", "priorTotal", "changePercent", "unit")) {
+            assertEquals(generatedWidget.get(field), kpi.get(field), field);
+        }
+        verify(dealRiskService).assessWorkspace(workspace.getId());
+    }
+
+    @Test
+    void ordinaryWidgetKpiSkipsNetworkInputsForUnrequestedSibling() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "KPI network input scope");
+        int stage = insertStage(workspace.getId(), pipeline, "Open");
+        int company = insertCompany(workspace.getId(), "KPI network input company");
+        insertDeal(workspace.getId(), pipeline, stage, company, "Counted network deal", "100.00", false);
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("deal-count", "deals", "count", "none", "kpi"),
+                new CommercialWidget(
+                        "reachable-pipeline", "companies", "warm_intro_opportunity_value", "none", "kpi"),
+                new CommercialWidget(
+                        "reverse-intro", "relationships", "reverse_intro_weighted_opportunities", "none", "kpi"))));
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "deal-count")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.total").value(1));
+
+        verifyNoInteractions(reportNetworkService);
+        verify(personEdgeMapper, never()).getEdgesForNetworkReport(
+                eq(workspace.getId()), anyString(), anyInt());
+        verify(personEdgeMapper, never()).getEdgesForReverseIntroReport(
+                eq(workspace.getId()), anyString(), anyList(), anyInt());
+    }
+
+    @Test
+    void warmIntroKpiUsesFullReportInputsAndMatchesGeneratedWidget() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int reportId = createReport(session, workspace, NETWORK_REPORT_BODY);
+
+        MvcResult kpiResult = mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi",
+                reportId, "reachable-pipeline")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.widgetId").value("reachable-pipeline"))
+            .andReturn();
+
+        verify(personEdgeMapper).getEdgesForNetworkReport(
+                eq(workspace.getId()), anyString(), anyInt());
+        JsonNode generated = generateDocument(session, workspace, reportId);
+        JsonNode kpi = objectMapper.readTree(kpiResult.getResponse().getContentAsString());
+        JsonNode generatedWidget = findWidget(generated.get("widgets"), "reachable-pipeline");
+        assertNotNull(generatedWidget);
+        for (String field : List.of("total", "priorTotal", "changePercent", "unit")) {
+            assertEquals(generatedWidget.get(field), kpi.get(field), field);
+        }
+    }
+
+    @Test
+    void reverseIntroKpiUsesFullReportInputsAndMatchesGeneratedWidget() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int reportId = createReport(session, workspace, NETWORK_REPORT_BODY);
+
+        MvcResult kpiResult = mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi",
+                reportId, "reverse-intro-value")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.widgetId").value("reverse-intro-value"))
+            .andReturn();
+
+        verify(personEdgeMapper).getEdgesForNetworkReport(
+                eq(workspace.getId()), anyString(), anyInt());
+        verify(personEdgeMapper, never()).getEdgesForReverseIntroReport(
+                eq(workspace.getId()), anyString(), anyList(), anyInt());
+
+        JsonNode generated = generateDocument(session, workspace, reportId);
+        JsonNode kpi = objectMapper.readTree(kpiResult.getResponse().getContentAsString());
+        JsonNode generatedWidget = findWidget(generated.get("widgets"), "reverse-intro-value");
+        assertNotNull(generatedWidget);
+        for (String field : List.of("total", "priorTotal", "changePercent", "unit")) {
+            assertEquals(generatedWidget.get(field), kpi.get(field), field);
+        }
+    }
+
+    @Test
+    void widgetKpiAppliesFullDefinitionPermissionsAndValidation() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        String mixedBody = ATTAINMENT_BODY.replaceFirst(
+                "\"measure\": \"attainment\"", "\"measure\": \"count\"");
+        int reportId = createReport(session, workspace, mixedBody);
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "owner-attainment")
+                .param("start", "2026-07-15")
+                .param("end", "2026-08-14")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isBadRequest());
+
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(workspace.getId());
+        role.setName("KPI Report Only " + UUID.randomUUID().toString().substring(0, 8));
+        roleMapper.insertRole(role);
+        roleMapper.insertPermissions(workspace.getId(), role.getId(), List.of("REPORT_READ"));
+        workspaceMapper.setMemberCustomRole(workspace.getId(), member.getId(), role.getId());
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "owner-attainment")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void widgetKpiRejectsUnknownForeignAndCorruptSiblingWidgets() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User member = newMember(workspace, "member");
+        MockHttpSession session = login(member.getUsername());
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("deal-count", "deals", "count", "none", "kpi"),
+                new CommercialWidget(
+                        "open-pipeline", "deals", "open_pipeline_value", "none", "kpi"))));
+        int otherReportId = createReport(session, workspace, REPORT_BODY.replace(
+                "activity-total", "other-widget"));
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "unknown-widget")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "other-widget")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isNotFound());
+
+        ReportDefinition definition = reportMapper.getDefinition(workspace.getId(), reportId);
+        assertNotNull(definition);
+        JsonNode config = objectMapper.readTree(definition.getConfigJson());
+        JsonNode sibling = findConfigWidget(config.get("widgets"), "open-pipeline");
+        assertTrue(sibling instanceof ObjectNode);
+        ((ObjectNode) sibling).put("measure", "future_sensitive");
+        String corruptConfig = objectMapper.writeValueAsString(config);
+        definition.setConfigJson(corruptConfig);
+        assertEquals(1, reportMapper.updateDefinition(definition));
+
+        String persistedConfig = jdbcTemplate.queryForObject(
+                "SELECT config_json FROM report_definition WHERE workspace_id = ? AND id = ?",
+                String.class,
+                workspace.getId(),
+                reportId);
+        assertNotNull(persistedConfig);
+        JsonNode persistedConfigJson = objectMapper.readTree(persistedConfig);
+        assertEquals(config, persistedConfigJson);
+        assertEquals(
+                "future_sensitive",
+                findConfigWidget(
+                        persistedConfigJson.get("widgets"),
+                        "open-pipeline").get("measure").asText());
+
+        mockMvc.perform(post("/api/reports/{id}/generate", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}")
+                .session(session)
+                .with(csrf().asHeader()))
+            .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "deal-count")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isBadRequest());
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", otherReportId, "other-widget")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk());
     }
 
     @Test
@@ -2008,6 +2425,11 @@ class ReportIntegrationTest {
                 .header("X-Workspace-Id", workspace.getId())
                 .session(session))
             .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "activity-total")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isForbidden());
     }
 
     @Test
@@ -2064,6 +2486,12 @@ class ReportIntegrationTest {
                 .session(session)
                 .with(csrf().asHeader()))
             .andExpect(status().isNotFound());
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "activity-total")
+                .header("X-Workspace-Id", unauthorized.getId())
+                .session(session))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.total").doesNotExist());
 
         mockMvc.perform(get("/api/reports/{id}/snapshots", reportId)
                 .header("X-Workspace-Id", unauthorized.getId())
@@ -2950,6 +3378,15 @@ class ReportIntegrationTest {
     private static JsonNode findWidget(JsonNode widgets, String id) {
         for (JsonNode widget : widgets) {
             if (id.equals(widget.get("widgetId").asText())) {
+                return widget;
+            }
+        }
+        return null;
+    }
+
+    private static JsonNode findConfigWidget(JsonNode widgets, String id) {
+        for (JsonNode widget : widgets) {
+            if (id.equals(widget.get("id").asText())) {
                 return widget;
             }
         }
