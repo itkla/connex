@@ -161,6 +161,16 @@
       "cta": "温度感を見る"
     }
   },
+  "DashboardToday": {
+    "myWorkCount": "マイワークに{count}件の対応待ちがあります",
+    "atLeast": "マイワークに{count}件以上の対応待ちがあります",
+    "myWorkCritical": "緊急{count}件",
+    "myWorkCriticalAtLeast": "緊急{count}件以上",
+    "viewMyWork": "マイワークを開く",
+    "partial": "この件数には含まれていない項目がある可能性があります。",
+    "unavailable": "マイワークの件数を読み込めませんでした。開いてご確認ください。",
+    "allClear": "マイワークに対応待ちはありません。"
+  },
   "DashboardGreeting": {
     "workingLate": "遅くまでお疲れさまです、",
     "goodMorning": "おはようございます、",

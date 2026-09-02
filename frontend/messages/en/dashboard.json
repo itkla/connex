@@ -161,6 +161,16 @@
       "cta": "See warmth"
     }
   },
+  "DashboardToday": {
+    "myWorkCount": "{count, plural, one {# item is} other {# items are}} waiting in My Work",
+    "atLeast": "At least {count, plural, one {# item is} other {# items are}} waiting in My Work",
+    "myWorkCritical": "{count} critical",
+    "myWorkCriticalAtLeast": "At least {count} critical",
+    "viewMyWork": "Open My Work",
+    "partial": "This count may be missing items.",
+    "unavailable": "Your My Work count couldn't be loaded — open it to check.",
+    "allClear": "Nothing is waiting in My Work."
+  },
   "DashboardGreeting": {
     "workingLate": "Working late,",
     "goodMorning": "Good morning,",
