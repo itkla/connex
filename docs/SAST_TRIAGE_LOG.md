@@ -425,7 +425,11 @@ than silently ignored, per the last item of the disposition order in #1296.
 
 1. An independent reviewer reproduces the evidence for each false-positive section above.
 2. That reviewer dismisses the corresponding CodeQL alerts as `false positive`, with a comment
-   linking this document and stating the 2027-02-14 expiry.
+   linking [#1296](https://github.com/itkla/connex/issues/1296) and stating the 2027-02-14 expiry,
+   as [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md) binds the record to the tracking issue in the
+   comment itself. (This step originally said to link this document; the round-3 independent
+   confirmation of 2026-09-02 found that by-reference form non-compliant, and the live dismissal
+   comments already carry the issue link.)
 3. The alerts are reopened and reassessed at expiry, when a cited data flow changes, or when the
    relevant query is materially updated.
 4. [#1296](https://github.com/itkla/connex/issues/1296) closes once steps 1–2 are complete; the
