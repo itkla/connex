@@ -103,11 +103,12 @@ class EncryptionGuardrailArchTest {
             + "(?:Enc|Hash|Pem|Base64|Value)?\\s*\\(",
         Pattern.CASE_INSENSITIVE);
     private static final Pattern SECRET_VALUE_ACCESSOR = Pattern.compile(
-        "\\.(?:(?:get|is)[A-Za-z0-9_$]*(?:Password|Passphrase|Token|ClientSecret|PrivateKey|"
+        "\\.(?:(?:(?:get|is)[A-Za-z0-9_$]*(?:Password|Passphrase|Token|ClientSecret|PrivateKey|"
             + "SecretAccessKey|ApiKey|HmacSecret|ServiceAccountJson|Plaintext|SecretValue|Ciphertext|"
-            + "EncryptedDataKey)|(?:RawToken|Token|CurrentPassword|NewPassword|Password|Passphrase|ClientSecret|"
+            + "EncryptedDataKey)|(?:CurrentPassword|NewPassword|Password|Passphrase|ClientSecret|"
             + "PrivateKey|SecretAccessKey|ApiKey|HmacSecret|ServiceAccountJson|Plaintext|SecretValue|Ciphertext|"
-            + "EncryptedDataKey))(?:Enc|Hash|Pem|Base64|Value)?\\s*\\(",
+            + "EncryptedDataKey))(?:Enc|Hash|Pem|Base64|Value)?\\s*\\(|"
+            + "[A-Za-z0-9_$]*Token\\s*\\(\\s*\\))",
         Pattern.CASE_INSENSITIVE);
     private static final Pattern PLAINTEXT_SECRET_CALL = Pattern.compile(
         "\\.\\s*(?:decrypt|decryptForWorkspace|decryptOidcClientSecret|decryptSamlSpPrivateKey|"
@@ -718,6 +719,25 @@ class EncryptionGuardrailArchTest {
         assertTrue(sinkViolations.stream().anyMatch(value -> value.contains("LoggingEmailChangeEmailService")));
         assertTrue(sinkViolations.stream()
             .anyMatch(value -> value.contains("LoggingRegistrationVerificationEmailService")));
+    }
+
+    @Test
+    void nested_token_accessor_taints_an_assigned_variable_before_a_sink(@TempDir Path fixtureRoot)
+            throws Exception {
+        Path sink = writeFixture(fixtureRoot, "services/GuidedFixtureService.java", """
+            class GuidedFixtureService {
+                void unsafe(GuidedRequest request) {
+                    var record = request.record();
+                    String duplicateReviewToken = record.duplicateReviewToken();
+                    logger.debug("token={}", duplicateReviewToken);
+                }
+            }
+            """);
+
+        List<String> violations = secretAccessorSinkViolations(fixtureRoot, List.of(sink));
+
+        assertEquals(1, violations.size());
+        assertTrue(violations.getFirst().contains("duplicateReviewToken"));
     }
 
     @Test

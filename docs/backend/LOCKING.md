@@ -135,6 +135,20 @@ One-use duplicate review proofs are claimed before database lock acquisition acc
 
 Interaction-history imports use the same proof/hierarchy, lock resolved people ascending, and write bounded direct mapper batches. They must remain inert: no per-row service/rule/mention/audit/notification publishing. Notification baseline/counterfactual logic must preserve the existing concurrency checks and lifecycle cleanup.
 
+Guided person/company/deal creation retains that duplicate hierarchy. It resolves the submitted
+template without locks for preliminary validation and performs canonical duplicate review. Before
+inserting the core record, it locks the record-creation template set and workspace-template root,
+then referenced custom fields, tags, and relationships. Relationship locks remain
+child-before-parent: stage before pipeline and person before company, with each id set acquired
+ascending. The locked set revision and template version are revalidated before the core insert;
+custom values, tags, and audit follow that insert in the same transaction.
+
+Custom-field definition create/update/delete locks the actor membership, then the affected
+record-creation template set, then the exact definition where one exists. The schema write and the
+single affected set-revision advance commit together. Business-card imports lock their complete
+create/attachment permission set before entering the duplicate hierarchy so their nested canonical
+creates compose with the same membership-first order.
+
 ## Object storage lock interaction
 
 Detailed storage behavior lives in `docs/backend/OBJECT_STORAGE.md`. Lock-order highlights:

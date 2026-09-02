@@ -23,7 +23,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
-import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -219,9 +218,8 @@ class LegacyRecordCreationControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(personBody(reviewToken)))
             .andExpect(status().isConflict())
-            .andExpect(content().json(
-                "{\"message\":\"" + LEGACY_STALE_MESSAGE + "\"}",
-                JsonCompareMode.STRICT))
+            .andExpect(content().string(
+                "{\"message\":\"" + LEGACY_STALE_MESSAGE + "\"}"))
             .andExpect(jsonPath("$.message").value(LEGACY_STALE_MESSAGE))
             .andExpect(jsonPath("$.code").doesNotExist())
             .andExpect(jsonPath("$.fieldErrors").doesNotExist());
@@ -238,9 +236,8 @@ class LegacyRecordCreationControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(companyBody(reviewToken)))
             .andExpect(status().isConflict())
-            .andExpect(content().json(
-                "{\"message\":\"" + LEGACY_STALE_MESSAGE + "\"}",
-                JsonCompareMode.STRICT))
+            .andExpect(content().string(
+                "{\"message\":\"" + LEGACY_STALE_MESSAGE + "\"}"))
             .andExpect(jsonPath("$.message").value(LEGACY_STALE_MESSAGE))
             .andExpect(jsonPath("$.code").doesNotExist())
             .andExpect(jsonPath("$.fieldErrors").doesNotExist());

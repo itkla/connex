@@ -58,6 +58,8 @@ class LegacyRecordCreationConflictIntegrationTest {
     private static final String PASSWORD = "Legacy-Conflict-Pw1!";
     private static final String REQUIRED_MESSAGE =
         "Possible duplicates must be reviewed before creation";
+    private static final String STALE_MESSAGE =
+        "Duplicate candidates changed before creation; review them again";
 
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
@@ -168,6 +170,24 @@ class LegacyRecordCreationConflictIntegrationTest {
             .andExpect(jsonPath("$.fieldErrors").doesNotExist());
 
         assertEquals(1, count("company"));
+    }
+
+    @Test
+    void stalePersonDuplicateTokenRetainsExactLegacyBodyWhileCutoverIsOff() throws Exception {
+        Person existing = new Person();
+        existing.setWorkspaceId(workspace.getId());
+        existing.setName("Legacy stale duplicate person");
+        personMapper.insert(existing);
+
+        perform("/api/persons", """
+            {"name":" legacy stale duplicate person ","duplicateReviewToken":"%s"}
+            """.formatted("f".repeat(64)))
+            .andExpect(status().isConflict())
+            .andExpect(content().string("{\"message\":\"" + STALE_MESSAGE + "\"}"))
+            .andExpect(jsonPath("$.code").doesNotExist())
+            .andExpect(jsonPath("$.fieldErrors").doesNotExist());
+
+        assertEquals(1, count("person"));
     }
 
     private org.springframework.test.web.servlet.ResultActions perform(String path, String body)
