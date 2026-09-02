@@ -50,9 +50,15 @@ ext['tomcat.version'] = '11.0.23'
 ext['jackson-2-bom.version'] = '2.21.5'
 ext['jackson-bom.version'] = '3.1.5'
 ext['logback.version'] = '1.5.35'
-ext['netty.version'] = '4.2.16.Final'
 
+// Spring Boot 4.1.0 manages these below their patched versions (netty 4.2.15.Final,
+// log4j2 2.25.4, httpcore5 5.4.2, httpclient5 5.6.1) and pins httpclient5 downward from
+// what the AWS SDK requests. These overrides raise them past the advisories tracked in #1379;
+// removing one silently reintroduces a known CVE.
+ext['netty.version'] = '4.2.17.Final'
+ext['log4j2.version'] = '2.25.5'
 ext['httpcore5.version'] = '5.4.3'
+ext['httpclient5.version'] = '5.6.4'
 
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
