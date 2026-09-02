@@ -52,6 +52,57 @@ class WebAuthnServiceTest {
         verify(credentialMapper, never()).findByUserEntityUserId(any());
     }
 
+    /**
+     * The operator break-glass ceremony is the documented route back for a privileged account that
+     * cannot satisfy the first-enrollment confirmation, and such an account has never enrolled.
+     * Refusing it here would leave that route unexecutable.
+     */
+    @Test
+    void recoverRemovesNothingWhenTheAccountHasNoCredentialEntity() {
+        WebauthnUserEntityMapper userEntities = mock(WebauthnUserEntityMapper.class);
+        UserMapper userMapper = mock(UserMapper.class);
+        WebAuthnService service = new WebAuthnService(
+                mock(WebAuthnRelyingPartyOperations.class),
+                mock(UserCredentialRepository.class),
+                userEntities,
+                mock(WebauthnCredentialMapper.class),
+                userMapper,
+                mock(PrivilegedAccountService.class),
+                mock(PasskeyBootstrapConfirmationPolicy.class),
+                mock(AuditService.class));
+        when(userMapper.lockById(7)).thenReturn(7);
+        when(userEntities.findByUserId(7)).thenReturn(null);
+
+        org.junit.jupiter.api.Assertions.assertEquals(0, service.recover(7));
+    }
+
+    @Test
+    void recoverRemovesNothingWhenTheEntityHoldsNoCredential() {
+        WebauthnUserEntityMapper userEntities = mock(WebauthnUserEntityMapper.class);
+        WebauthnCredentialMapper credentialMapper = mock(WebauthnCredentialMapper.class);
+        UserCredentialRepository credentials = mock(UserCredentialRepository.class);
+        UserMapper userMapper = mock(UserMapper.class);
+        WebAuthnService service = new WebAuthnService(
+                mock(WebAuthnRelyingPartyOperations.class),
+                credentials,
+                userEntities,
+                credentialMapper,
+                userMapper,
+                mock(PrivilegedAccountService.class),
+                mock(PasskeyBootstrapConfirmationPolicy.class),
+                mock(AuditService.class));
+        WebauthnUserEntityRow entity = new WebauthnUserEntityRow();
+        entity.setId("handle");
+        entity.setUserId(7);
+        when(userMapper.lockById(7)).thenReturn(7);
+        when(userEntities.findByUserId(7)).thenReturn(entity);
+        when(credentialMapper.findByUserEntityUserIdForUpdate("handle")).thenReturn(List.of());
+
+        org.junit.jupiter.api.Assertions.assertEquals(0, service.recover(7));
+
+        verify(credentials, never()).delete(any());
+    }
+
     @Test
     void finishRegistrationRejectsOptionsIssuedForAnotherAccount() {
         WebAuthnRelyingPartyOperations relyingParty = mock(WebAuthnRelyingPartyOperations.class);

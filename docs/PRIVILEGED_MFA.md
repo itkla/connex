@@ -85,10 +85,13 @@ CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_BASE_URL=https://app.example.com
 ```
 
 The confirmation is fail-closed and requires a working instance sender (`connex.mail.*`). **An
-instance that leaves mail unconfigured cannot enroll a privileged, password-backed account at
-all.** The request endpoint refuses with `MAIL_TRANSPORT_UNAVAILABLE` rather than silently
-promising an email that will never arrive. The `dev` profile disables the requirement, because
-local development has no SMTP; never enable `dev` in production.
+instance that leaves mail unconfigured cannot complete the emailed confirmation**, so the request
+endpoint refuses with `MAIL_TRANSPORT_UNAVAILABLE` rather than silently promising an email that will
+never arrive. That is not a dead end: operator-authorized break-glass recovery enrolls a privileged,
+password-backed account without email, including one that has never enrolled, and the routes below
+say when to reach for it. Configure a sender anyway — break-glass costs an out-of-band operator
+token and a support round trip, so it is an incident path, not an onboarding one. The `dev` profile
+disables the requirement, because local development has no SMTP; never enable `dev` in production.
 
 ### If the confirmation cannot be completed
 
@@ -104,18 +107,20 @@ local development has no SMTP; never enable `dev` in production.
   is an OR across organization membership, built-in workspace admin/owner roles, and custom roles
   carrying administrative permissions — every source must be removed.
 - **Sole organization or workspace owner, with mail unusable** — the last owner cannot be demoted,
-  so there is no in-application route. **Break-glass recovery does not help here**: it refuses an
-  account that has no credential to remove, and this account has never enrolled one. The only
-  remedies are restoring mail delivery or setting
-  `CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_ENABLED=false`, both of which are configuration
-  changes requiring a restart. This is the reason a working instance sender must be configured
-  before this policy is enabled on a single-administrator instance.
+  so no other administrator can clear the confinement. **Break-glass recovery is the route here.**
+  The ceremony accepts an account with nothing to remove: it advances the session epoch and writes
+  the durable epoch-restamp grant, and that grant authorizes the replacement enrollment without
+  email. The operator supplies the recovery token out of band, which is the second factor. Restoring
+  mail delivery and setting `CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_ENABLED=false` remain
+  available, but neither is required, and both are configuration changes needing a restart where
+  break-glass is not.
 
 A session that has just completed operator-authorized break-glass recovery is treated as already
 confirmed, through the durable epoch-restamp grant that names that session and survives until the
 replacement credential commits. The recovery token is itself an out-of-band operator factor, so
-replacement enrollment after recovery is never blocked on email. This applies only to an account
-that *had* a credential to recover; recovery cannot bootstrap a never-enrolled account.
+replacement enrollment after recovery is never blocked on email. This holds whether or not the
+account had a credential to recover: removing nothing is a legitimate outcome of the ceremony, so it
+also bootstraps an account that has never enrolled.
 
 ### Known residual
 

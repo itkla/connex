@@ -79,8 +79,9 @@ public class PasskeyBootstrapConfirmationService {
      * recovery epoch-restamp grant is also accepted: operator-authorized break-glass recovery
      * already supplied an out-of-band factor, and the grant survives until the replacement
      * credential commits. Without that second route, an account whose credentials recovery just
-     * removed could be left unable to re-enroll at all once a short-lived stamp lapsed, because
-     * recovery refuses an account that has no credential to remove.
+     * removed could be left unable to re-enroll at all once a short-lived stamp lapsed. The
+     * ceremony accepts an account with nothing to remove, so this route also carries an account
+     * that has never enrolled and cannot receive the emailed confirmation.
      *
      * @param user the authenticated account
      * @param httpRequest the current request
