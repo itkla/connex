@@ -26,9 +26,9 @@ implementation issues or reserve schema.
 | One `Company` record; contact/customer lifecycle separation; nullable non-customer state | SETTLED | Existing Company and person-lifecycle architecture cited below |
 | Account stages and transition matrix | PROPOSED | #563 product owner |
 | Durable, idempotent, explicit handoff invariants | PROPOSED | #563 product owner and backend domain owner |
-| Success-owner placement | PROPOSED | #563 product owner and #40 `MemberScope` owner |
+| Canonical success-owner placement | PROPOSED | #563 product owner and #40 `MemberScope` owner |
 | Batched deterministic warmth scoring and evidence-free cold output | SETTLED | Existing `ScoringService` contract cited below |
-| Health component schema, unknown-data weighting, and configuration version | PROPOSED | #563 product owner and backend domain owner |
+| Health component schema, unknown-data comparability, and configuration version | PROPOSED | #563 product owner and backend domain owner |
 | Health recomputation cadence and card/Radar split | PROPOSED | #563 product owner and backend operations owner |
 | Contract-end derivation and fallback precedence | PROPOSED | #563 product owner and commercial domain owner |
 | No-stale-pricing, rounding, currency, and snapshot rules | SETTLED | V103 line-item and deal-value contracts cited below |
@@ -76,8 +76,16 @@ This follows the shape of the lead decision without pretending that the two doma
   APPI disclosure, restriction, retention, and erasure surface rather than creating another place a sweep can
   miss. The same risk is documented for the contact model in
   [`LEAD_LIFECYCLE.md`](LEAD_LIFECYCLE.md#why-not-a-separate-lead-entity).
-- A lifecycle change is state plus append-only history, not copy-on-conversion. Existing company ownership and
-  `MemberScope` behavior therefore remain the default authorization path.
+- A lifecycle change is state plus append-only history, not copy-on-conversion. Lifecycle writes therefore use
+  the established company mutation boundary: `COMPANY_UPDATE` against an active record owned by the current
+  workspace
+  ([`CompanyService.java:512-527`](../backend/src/main/java/ooo/klae/connex/backend/services/CompanyService.java#L512-L527),
+  [`CompanyMapper.xml:900-903`](../backend/src/main/resources/mappers/CompanyMapper.xml#L900-L903)). Company
+  visibility includes active records owned by the workspace and eligible same-organization shares
+  ([`CompanyMapper.xml:16-26`](../backend/src/main/resources/mappers/CompanyMapper.xml#L16-L26)); it does not
+  make a visible shared record writable. `MemberScope` is only a request-level presentation filter for
+  member-scoped reads, defaults to unfiltered `ALL_TEAM`, and is not an authorization predicate
+  ([`MemberScope.java:57-79`](../backend/src/main/java/ooo/klae/connex/backend/dto/MemberScope.java#L57-L79)).
 - Handoff obligations differ per won deal, so a deal-specific handoff row is additive state, not a replacement
   company record.
 
@@ -156,13 +164,18 @@ mandatory completion fields, lifecycle transition boundary, and relationship to 
 
 ### PROPOSED — success-owner placement
 
-Required sign-off: the #563 product owner and the owner of the #40 `MemberScope` authorization contract.
-The conservative proposal stores the success owner on the durable handoff, not in a new
-`company.success_owner_id`, because company list/read scoping currently follows `company.owner_id`. The
-alternative is a company-level success owner, but it requires an explicit decision about list visibility,
-portfolio filters, reassignment, offboarding, export, and every owner-scoped query. Reusing
-`company.owner_id` is rejected because it would overwrite the existing account owner rather than preserve the
-sales relationship.
+Required sign-off: the #563 product owner and the owner of the #40 member-scoped presentation contract.
+The conservative proposal adds nullable `company.success_owner_id` as the one canonical current success owner.
+It is independent of durable handoff rows: a company entered directly at `ACTIVE` may be explicitly assigned
+there, and multiple won deals cannot create competing current owners. Assignment, reassignment, and clearing
+go only through a permissioned company-level action; initiating or editing a handoff never implicitly
+overwrites the field. A handoff may snapshot its deal-specific assignee and may suggest an initial owner when
+the company field is null, but that value is historical or a proposal, never a fallback source of truth.
+Therefore precedence is unconditional: `company.success_owner_id` is current when non-null, and null means the
+customer is unowned even if a handoff has an assignee. Portfolio filters, offboarding, export, and the unowned
+signal read this field. Its effect on presentation filters and reassignment remains gated by the required
+sign-off. Reusing `company.owner_id` is rejected because it would overwrite the existing account owner rather
+than preserve the sales relationship.
 
 ## Account health
 
@@ -187,12 +200,18 @@ carry the composite and all components in this shape:
 { component_key, value, weight, source, as_of, state: ok | stale | unknown }
 ```
 
-An absent component would be `unknown`, include its last known freshness when one exists, be excluded from the
-weighted composite, and never lower the score. In particular, the health composition would not translate
-"there are no recorded interactions" into negative health merely because the warmth service emits an
-evidence-free contact as cold. A composite with no known components would itself be unknown, not zero.
-Workspace configuration would own weights and thresholds; a code-owned versioned default would apply when no
-configuration exists. The composite would always expose the effective configuration version.
+An absent component would be `unknown` and include its last known freshness when one exists. The effective
+component keys and weights are fixed by the configuration version; an unknown configured component makes the
+composite itself `unknown` and non-comparable rather than removing that component and re-weighting the known
+values upward. The last fully known composite may be displayed separately with its original `as_of`, but it
+is not a current score. Two snapshots are comparable only when they use the same configuration version and
+the same component set is known in both. Deterioration and recovery signals require that complete
+previously-known set; losing a component suppresses comparison and cannot emit a recovery. In particular, the
+health composition would not translate "there are no recorded interactions" into negative health merely
+because the warmth service emits an evidence-free contact as cold. A composite with no known components would
+itself be unknown, not zero. Workspace configuration would own weights and thresholds; a code-owned versioned
+default would apply when no configuration exists. The composite would always expose the effective
+configuration version.
 
 | Component | Existing or planned source | Source contract |
 |---|---|---|
@@ -224,10 +243,17 @@ task-creation state. The card may link to a Radar signal but must not duplicate 
 
 ### SETTLED — pricing integrity
 
-Renewal and expansion generation creates a draft. Prior line items are only starting evidence: each line is
-re-resolved against the current `Product` catalog, and SKU, availability, unit price, tax-rate, frequency, or
-currency drift is shown for explicit confirmation. **Generated commercial records never silently copy stale
-pricing or apply live pricing without confirmation.** All values stay server-computed `BigDecimal` with
+Renewal and expansion generation creates a draft. Prior line items are only starting evidence. A
+catalog-backed line is re-resolved against the current `Product` catalog, and SKU, availability, unit price,
+tax-rate, frequency, or currency drift is shown for explicit confirmation. When `product_id` is null because
+the line was ad hoc or its product was deleted, generation retains the full snapshot line as
+unresolved from the catalog for explicit manual confirmation; it never drops the line, invents a catalog
+match, or silently re-prices it. The existing service accepts ad-hoc lines without a product
+([`DealLineItemService.java:130-168`](../backend/src/main/java/ooo/klae/connex/backend/services/DealLineItemService.java#L130-L168)),
+and product deletion deliberately sets the reference to null while preserving the snapshot
+([`V103__deal_line_item.sql:8-29`](../backend/src/main/resources/db/migration/tenant/V103__deal_line_item.sql#L8-L29)).
+**Generated commercial records never silently copy stale pricing or apply live pricing without
+confirmation.** All values stay server-computed `BigDecimal` with
 `HALF_UP` rounding through `DealLineItemService` and `DealOutcomeWriter`, under
 [`DEAL_VALUE_CONTRACT.md`](DEAL_VALUE_CONTRACT.md). The line-item schema snapshots catalog values and keeps one
 currency per deal
@@ -240,7 +266,12 @@ commercial-correctness reviewers.
 
 ### PROPOSED — contract-end derivation and fallback precedence
 
-Required sign-off: the #563 product owner and commercial domain owner. The proposed primary contract end is:
+Required sign-off: the #563 product owner and commercial domain owner. The proposed renewal source of truth is
+the set of dated recurring line items on won deals for the company. Each expiring line produces a separately
+keyed renewal candidate from its own `service_period_end`; an approved future contract grouping may combine
+lines only when it preserves every distinct service-period end. Reminders, renewal motions, and delayed-renewal
+signals reconcile per candidate, so a later expiration cannot hide an earlier one. A company-wide end may be
+reported as the following summary:
 
 ```text
 MAX(deal_line_item.service_period_end)
@@ -248,12 +279,15 @@ over won deals for the company
 where deal_line_item.billing_frequency = 'recurring'
 ```
 
+That maximum is never the sole input to renewal candidate generation or alert reconciliation.
+
 The line-item schema makes this derivation possible by supplying `billing_frequency`, `service_period_start`,
 and `service_period_end` and constraining frequency to `one_time | recurring`
 ([`V103__deal_line_item.sql:1-32`](../backend/src/main/resources/db/migration/tenant/V103__deal_line_item.sql#L1-L32)).
 The proposed fallback is a workspace-designated company custom field containing a manually maintained contract
-end. Every response would state `recurring_line_item`, `company_custom_field`, or `unknown` as its source and
-carry `as_of`; the fallback would never override a recurring-line-item date.
+end. It yields a company-level candidate only when no dated recurring line candidate exists; it never overrides
+or collapses recurring-line-item dates. Every candidate and summary would state `recurring_line_item`,
+`company_custom_field`, or `unknown` as its source and carry `as_of`.
 
 ### PROPOSED — retention definitions
 
@@ -294,8 +328,9 @@ all three frozen V155 constraints:
 ### SETTLED — no second task or queue store
 
 Actionable customer-success work is projected into My Work from source-owned state. Completing, dismissing, or
-resolving work delegates to that source; My Work does not copy authoritative state. Generated work is an
-ordinary task or notification unless a source genuinely has no task/notification owner.
+resolving work delegates to that source; My Work does not copy authoritative state. Work whose authoritative
+state is an ordinary task or notification uses that provider. A domain source that owns its own obligation
+uses a source-specific provider rather than copying state into a task or notification.
 
 `WorkItemSource` currently contains only `task`, `notification`, and `document_approval`
 ([`WorkItemSource.java:1-8`](../backend/src/main/java/ooo/klae/connex/backend/dto/WorkItemSource.java#L1-L8)). A new
@@ -304,9 +339,15 @@ unavailable source is reported as unavailable with a reason, never as an unexpla
 
 ### PROPOSED — My Work routing
 
-Required sign-off: the #563 product owner and the My Work contract owner. Prefer existing task and notification
-sources for onboarding and renewal. Add a new `WorkItemSource` only if an unresolved handoff obligation cannot
-truthfully be owned by either. This is deliberately unresolved until the durable handoff shape exists.
+Required sign-off: the #563 product owner and the My Work contract owner. Onboarding work is projected through
+an availability-aware `onboarding` provider backed by authoritative `customer_onboarding_item` rows. The
+provider's complete, dismiss, or resolve actions delegate to the onboarding service and disappear only when
+the source item resolves. A nullable linked `task_id` may support coordination, but the task and notification
+providers cannot stand in for the onboarding provider, and task completion does not implicitly resolve the
+item. This preserves the health contract's source-owned blocked and overdue state without requiring every item
+to create a task. Renewal may use an existing task or notification only when that row truthfully owns the
+obligation; otherwise its source-owned state requires its own availability-aware provider. Exact handoff
+routing remains unresolved until the durable handoff shape exists.
 
 ## Product boundary and reversal criteria
 
@@ -347,8 +388,12 @@ Preference for a familiar customer-success suite is not reversal evidence.
 
 Before **any increment after 0** starts, the #563 product owner must comment on #563 with all of:
 
-1. At least one named customer organization and the role of the participant who owns post-sale relationships
-   in its CRM. Do not place customer PII, confidential data, or interview transcripts in the issue.
+1. At least one customer organization and the role of the participant who owns post-sale relationships in its
+   CRM. The public comment may use the organization's name only with authorization; otherwise it uses a stable,
+   product-owner-approved redacted alias, identifies a restricted evidence location outside the tracker, and
+   names the internal evidence owner who attests that they reviewed the identity and supporting details. Do not
+   place customer PII, confidential data, customer identity behind an alias, or interview transcripts in the
+   issue.
 2. The participant's current post-sale workflow and tools, the concrete failure or cost Connex would address,
    and the frequency or volume that makes the problem material.
 3. Which #563 outcomes the customer asked for: handoff, onboarding, health explanation, renewals, retention,
@@ -387,8 +432,9 @@ For every new table or mapper, the implementing increment must explicitly review
   ([`ProcessingRestrictionRegistry.java:6-17`](../backend/src/main/java/ooo/klae/connex/backend/tenant/ProcessingRestrictionRegistry.java#L6-L17));
 - `Permission`, grantable catalogs, role presets, endpoint annotations, and post-lock permission revalidation
   only when the slice adds or reuses a permissioned action;
-- `WorkItemSource` and its provider registry only if source-owned state cannot honestly project through an
-  existing task or notification;
+- `WorkItemSource` and its provider registry whenever source-owned state cannot honestly project through an
+  existing task or notification; increment 7 requires the onboarding provider because
+  `customer_onboarding_item.task_id` remains nullable;
 - `RelationshipSignalDetectorService`, reconciliation, `RadarService` families, and all three V155 checks when
   adding `account_health`; and
 - the tenant, RBAC, migration-lineage, deal-value, processing-restriction, archive-visibility, and other
@@ -408,10 +454,10 @@ the gate is open.
 | 1 | Nullable company lifecycle plus append-only history and company UI | Tier 2 | Product owner first approves the proposed vocabulary. The company facet DTO remains in `frontend/app/lib/types.ts`/`api.ts` and renders in `CompaniesBrowser.tsx`; there is no `CompanyFacets` component. |
 | 2 | Idempotent, permissioned durable won-deal handoff | Tier 2 | Integrate or deliberately distinguish the shipped `deal-won-handoff` recipe; re-assert permission after locks. |
 | 3 | Immutable onboarding templates and per-customer plan instances | Tier 2 | Mirror V195's set/template/version pattern. Persist the company/task association on `customer_onboarding_item`; do not use prose-derived `EntityReference` as a structural link. |
-| 4 | Explainable deterministic account-health components and snapshots | Tier 2 | Unknown never lowers health; use batched source reads and the approved freshness contract. |
+| 4 | Explainable deterministic account-health components and snapshots | Tier 2 | Unknown makes the composite non-comparable; use batched source reads and the approved freshness contract. |
 | 5 | New account-health Radar family | Tier 2 | Add only genuinely new health signals; extend and dedupe against shipped `deal_risk`, `relationship_decay`, and job-change behavior. Relax all three V155 checks. |
-| 6 | Renewal derivation, candidates, reminders, and confirmed draft generation | **Tier 3** | Money is load-bearing. Re-resolve catalog pricing, surface drift, preserve currency/rounding, and require separate security and commercial-correctness reviews. |
-| 7 | Customer-success projection in My Work and recovery playbooks | Tier 2 | Prefer task/notification sources, preserve honest availability, and coordinate guided playbook/action-macro scope with #401. |
+| 6 | Renewal derivation, candidates, reminders, and confirmed draft generation | **Tier 3** | Money is load-bearing. Derive per-line candidates; re-resolve catalog pricing or retain unresolved snapshots for confirmation; preserve currency/rounding; require separate security and commercial-correctness reviews. |
+| 7 | Customer-success projection in My Work and recovery playbooks | Tier 2 | Add the source-owned onboarding provider, preserve honest availability, and coordinate guided playbook/action-macro scope with #401. |
 | 8 | Retention, renewal, health, onboarding, and expansion reporting | Tier 2 | Commercial owner approves exact measure definitions before implementation; extend Reports and figure reconciliation rather than adding a dashboard silo. |
 
 **Increment 5 — Owner boundary:** Platform epic #847 owns Radar signal families and the shared detector engine.
