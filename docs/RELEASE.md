@@ -163,18 +163,15 @@ Smoke-check a running backend:
 curl -s http://<backend>/api/version   # {"version":"1.4.0","buildTime":"..."}
 ```
 
-### Reading build identity in the product
+### Checking versions in the product
 
 An authorized administrator can open **Settings → Workspace → Audit & diagnostics** or
-**Settings → Organization → Audit & diagnostics** and read **Build identity**. The section compares
-the frontend version baked into the image with `GET /api/version`, and also shows the backend build
-time and source commit when they are available. The running surfaces currently expose no shared
-release-provenance field: equal release-looking versions therefore appear as agreeing but
-unverified, including a from-source install stamped with a SemVer value. Development labels remain
-explicitly unversioned. A positive release match requires a future release workflow to stamp an
-authenticated provenance value into both artifacts, expose both values at runtime, and have the
-diagnostics comparison confirm that they are equal. If both values are present but differ, the
-section reports a release-build mismatch even when the displayed versions agree.
+**Settings → Organization → Audit & diagnostics** and read **Version check**. The section compares
+the version of the app shown in the browser with the server version. It also shows when the server
+version was created and its version reference when those details are available. Matching version
+numbers alone are reported as unconfirmed. Connex reports a confirmed match only when it can also
+verify that the browser app and server were released together. If that check says they were not
+released together, the section reports a mismatch even when the displayed version numbers agree.
 
 ## Release channels
 

@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
 import { activeWorkspaceId, csrfBootstrap, registerUser } from "./support/api";
+import { message } from "./support/messages";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
@@ -11,28 +12,28 @@ const DEVELOPMENT_VERSIONS = new Set(["0.0.0-dev", "0.0.1-snapshot"]);
 
 const BUILD_IDENTITY_COPY = {
     matched: {
-        status: "Release versions match",
-        body: "The frontend and backend carry matching verified release provenance.",
+        status: message("en", "workspace", "TenantDiagnostics.buildIdentityMatched"),
+        body: message("en", "workspace", "TenantDiagnostics.buildIdentityMatchedBody"),
         tone: "bg-emerald-500/10",
     },
     unverified: {
-        status: "Versions agree — artifact provenance not verified",
-        body: "The frontend and backend report the same version, but they do not expose the release evidence needed to confirm a matched release set.",
+        status: message("en", "workspace", "TenantDiagnostics.buildIdentityVersionAgreementUnverified"),
+        body: message("en", "workspace", "TenantDiagnostics.buildIdentityVersionAgreementUnverifiedBody"),
         tone: "bg-muted",
     },
     mismatched: {
-        status: "Release builds do not match",
-        body: "The frontend and backend report different release versions or release evidence. Deploy them together from one release set.",
+        status: message("en", "workspace", "TenantDiagnostics.buildIdentityMismatched"),
+        body: message("en", "workspace", "TenantDiagnostics.buildIdentityMismatchedBody"),
         tone: "bg-amber-500/10",
     },
     unavailable: {
-        status: "Backend version unavailable",
-        body: "Couldn't check the backend version, so a release match cannot be confirmed. No settings changed — try again.",
+        status: message("en", "workspace", "TenantDiagnostics.buildIdentityBackendUnavailable"),
+        body: message("en", "workspace", "TenantDiagnostics.buildIdentityBackendUnavailableBody"),
         tone: "bg-amber-500/10",
     },
     unversioned: {
-        status: "Development or source build",
-        body: "At least one component has no stamped release version, so a release match cannot be confirmed.",
+        status: message("en", "workspace", "TenantDiagnostics.buildIdentityUnversioned"),
+        body: message("en", "workspace", "TenantDiagnostics.buildIdentityUnversionedBody"),
         tone: "bg-muted",
     },
 } as const;
@@ -51,30 +52,46 @@ async function buildValue(section: Locator, label: string): Promise<string> {
 
 /** Verifies the live endpoint, component state, rendered values, tone, and environment-honest copy. */
 async function expectRunningBuildIdentity(page: Page, request: APIRequestContext) {
-    const heading = page.getByRole("heading", { name: "Build identity" });
-    const section = page.locator("section").filter({ has: heading });
+    const heading = page.getByRole("heading", {
+        name: message("en", "workspace", "TenantDiagnostics.buildIdentityTitle"),
+    });
+    const section = heading.locator("xpath=ancestor::section[1]");
     await expect(section).toBeVisible();
 
     const response = await request.get("/api/version");
-    const frontendDisplay = await buildValue(section, "Frontend version");
-    const backendDisplay = await buildValue(section, "Backend version");
-    const buildTimeDisplay = await buildValue(section, "Build time");
-    const gitShaDisplay = await buildValue(section, "Source commit");
-    const frontendVersion = frontendDisplay === "Not stamped" ? null : frontendDisplay;
+    const frontendDisplay = await buildValue(
+        section,
+        message("en", "workspace", "TenantDiagnostics.buildIdentityFrontendVersion"),
+    );
+    const backendDisplay = await buildValue(
+        section,
+        message("en", "workspace", "TenantDiagnostics.buildIdentityBackendVersion"),
+    );
+    const buildTimeDisplay = await buildValue(
+        section,
+        message("en", "workspace", "TenantDiagnostics.buildIdentityBuildTime"),
+    );
+    const gitShaDisplay = await buildValue(
+        section,
+        message("en", "workspace", "TenantDiagnostics.buildIdentityGitSha"),
+    );
+    const unavailable = message("en", "workspace", "TenantDiagnostics.buildIdentityUnavailable");
+    const notRecorded = message("en", "workspace", "TenantDiagnostics.buildIdentityNotStamped");
+    const frontendVersion = frontendDisplay === notRecorded ? null : frontendDisplay;
 
     let expected: keyof typeof BUILD_IDENTITY_COPY;
     if (!response.ok()) {
         expected = "unavailable";
-        expect(backendDisplay).toBe("Unavailable");
-        expect(buildTimeDisplay).toBe("Unavailable");
-        expect(gitShaDisplay).toBe("Unavailable");
+        expect(backendDisplay).toBe(unavailable);
+        expect(buildTimeDisplay).toBe(unavailable);
+        expect(gitShaDisplay).toBe(unavailable);
     } else {
         const payload: unknown = await response.json();
         if (!isRecord(payload) || typeof payload.version !== "string") {
             throw new Error("Version response is missing its version");
         }
         const backendVersion = payload.version.trim();
-        expect(backendDisplay).toBe(backendVersion || "Not stamped");
+        expect(backendDisplay).toBe(backendVersion || notRecorded);
         for (const [value, rendered] of [
             [payload.buildTime, buildTimeDisplay],
             [payload.gitSha, gitShaDisplay],
@@ -83,7 +100,7 @@ async function expectRunningBuildIdentity(page: Page, request: APIRequestContext
             expect(rendered).toBe(
                 metadata.length > 0 && metadata.toLowerCase() !== "unknown"
                     ? metadata
-                    : "Unavailable",
+                    : unavailable,
             );
         }
         expected = !isReleaseVersion(frontendVersion) || !isReleaseVersion(backendVersion)

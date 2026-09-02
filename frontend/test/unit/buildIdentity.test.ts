@@ -22,7 +22,31 @@ const TestIntlProvider = NextIntlClientProvider as ComponentType<{
     children?: ReactNode;
     locale: "en" | "ja";
     messages: typeof englishMessages | typeof japaneseMessages;
+    timeZone: string;
 }>;
+
+const BUILD_IDENTITY_COPY_KEYS = [
+    "buildIdentityTitle",
+    "buildIdentityDescription",
+    "buildIdentityRefresh",
+    "buildIdentityRefreshing",
+    "buildIdentityMatched",
+    "buildIdentityMatchedBody",
+    "buildIdentityVersionAgreementUnverified",
+    "buildIdentityVersionAgreementUnverifiedBody",
+    "buildIdentityMismatched",
+    "buildIdentityMismatchedBody",
+    "buildIdentityBackendUnavailable",
+    "buildIdentityBackendUnavailableBody",
+    "buildIdentityUnversioned",
+    "buildIdentityUnversionedBody",
+    "buildIdentityFrontendVersion",
+    "buildIdentityBackendVersion",
+    "buildIdentityBuildTime",
+    "buildIdentityGitSha",
+    "buildIdentityUnavailable",
+    "buildIdentityNotStamped",
+] as const;
 
 const {
     aggregateDiagnosticsMock,
@@ -101,7 +125,7 @@ async function renderBuildIdentity(
     await act(async () => {
         root.render(createElement(
             TestIntlProvider,
-            { locale, messages: locale === "en" ? englishMessages : japaneseMessages },
+            { locale, messages: locale === "en" ? englishMessages : japaneseMessages, timeZone: "UTC" },
             createElement(BuildIdentitySection, { releaseProvenance }),
         ));
     });
@@ -237,13 +261,32 @@ describe("build identity section", () => {
     it.each([
         {
             locale: "en",
-            heading: "Release versions match",
-            body: "The frontend and backend carry matching verified release provenance.",
+            messages: englishMessages,
+            implementationWords: /\b(?:frontend|backend|artifact provenance|release evidence|release set|build|component|deploy|source commit|stamped)\b/i,
         },
         {
             locale: "ja",
-            heading: "リリースバージョンが一致しています",
-            body: "フロントエンドとバックエンドで、検証済みリリースの出所が一致しています。",
+            messages: japaneseMessages,
+            implementationWords: /フロントエンド|バックエンド|成果物の出所|リリースエビデンス|リリースセット|ビルド|構成要素|デプロイ|ソースコミット/,
+        },
+    ] as const)("keeps the full Build identity copy register plain in $locale", ({ messages, implementationWords }) => {
+        const copy = BUILD_IDENTITY_COPY_KEYS
+            .map((key) => messages.TenantDiagnostics[key])
+            .join("\n");
+
+        expect(copy).not.toMatch(implementationWords);
+    });
+
+    it.each([
+        {
+            locale: "en",
+            heading: "Release confirmed",
+            body: "The app you see in your browser and the server show the same version, and we confirmed that they were released together.",
+        },
+        {
+            locale: "ja",
+            heading: "リリースを確認できました",
+            body: "ブラウザーに表示されているアプリとサーバーには同じバージョンが表示されており、一緒にリリースされたものであることを確認できました。",
         },
     ] as const)("renders matched heading and body copy in $locale", async ({ locale, heading, body }) => {
         getVersionMock.mockResolvedValueOnce(backendVersion("1.4.0"));
@@ -257,7 +300,7 @@ describe("build identity section", () => {
         expect(rendered.container.textContent).toContain(heading);
         expect(rendered.container.textContent).toContain(body);
         expect(rendered.container.textContent).not.toContain(
-            "Versions agree — artifact provenance not verified",
+            "Versions match, but the release could not be confirmed",
         );
         await rendered.unmount();
     });
@@ -267,8 +310,8 @@ describe("build identity section", () => {
 
         const rendered = await renderBuildIdentity("source-ci");
 
-        expect(rendered.container.textContent).toContain("Development or source build");
-        expect(rendered.container.textContent).not.toContain("Release versions match");
+        expect(rendered.container.textContent).toContain("Release version not recorded");
+        expect(rendered.container.textContent).not.toContain("Release confirmed");
         expect(rendered.container.textContent).toContain("source-ci");
         expect(rendered.container.textContent).toContain("2026-09-02T12:00:00Z");
         expect(rendered.container.textContent).toContain("0123456789abcdef");
@@ -278,13 +321,13 @@ describe("build identity section", () => {
     it.each([
         {
             locale: "en",
-            heading: "Versions agree — artifact provenance not verified",
-            body: "The frontend and backend report the same version, but they do not expose the release evidence needed to confirm a matched release set.",
+            heading: "Versions match, but the release could not be confirmed",
+            body: "The app you see in your browser and the server show the same version, but we could not confirm that they were released together.",
         },
         {
             locale: "ja",
-            heading: "バージョンは一致していますが、成果物の出所を確認できません",
-            body: "フロントエンドとバックエンドは同じバージョンを示していますが、同じリリースセットだと確認するための情報は公開されていません。",
+            heading: "バージョンは一致していますが、リリースを確認できません",
+            body: "ブラウザーに表示されているアプリとサーバーには同じバージョンが表示されていますが、一緒にリリースされたものか確認できませんでした。",
         },
     ] as const)("renders version-agreement-unverified heading and body copy in $locale", async ({ locale, heading, body }) => {
         getVersionMock.mockResolvedValueOnce(backendVersion("1.4.0"));
@@ -300,7 +343,7 @@ describe("build identity section", () => {
         expect(status.getAttribute("class")).toContain("bg-muted");
         expect(rendered.container.textContent).toContain(heading);
         expect(rendered.container.textContent).toContain(body);
-        expect(rendered.container.textContent).not.toContain("Release versions match");
+        expect(rendered.container.textContent).not.toContain("Release confirmed");
         expect(rendered.container.textContent.match(/1\.4\.0/g)).toHaveLength(2);
         expect(rendered.container.textContent).toContain("2026-09-02T12:00:00Z");
         expect(rendered.container.textContent).toContain("0123456789abcdef");
@@ -314,13 +357,13 @@ describe("build identity section", () => {
         const status = requiredElement(
             rendered.elements,
             (element) => element.tagName === "SPAN"
-                && element.textContent.includes("Release builds do not match"),
+                && element.textContent.includes("The app and server do not match"),
             "Mismatched release status",
         );
 
         expect(status.getAttribute("class")).toContain("bg-amber-500/10");
         expect(rendered.container.textContent).toContain(
-            "The frontend and backend report different release versions or release evidence. Deploy them together from one release set.",
+            "The app you see in your browser and the server show different versions, or we confirmed that they were not released together. Ask the person who manages this installation to update them together.",
         );
         expect(rendered.container.textContent).toContain("1.4.0");
         expect(rendered.container.textContent).toContain("1.4.1");
@@ -345,7 +388,7 @@ describe("build identity section", () => {
             "Build identity retry",
         );
 
-        expect(rendered.container.textContent).toContain("Backend version unavailable");
+        expect(rendered.container.textContent).toContain("The server did not answer");
         expect(rendered.container.textContent).toContain("Reference ID request-857");
         expect(rendered.container.textContent).toContain("Unavailable");
         await act(async () => {
@@ -353,15 +396,15 @@ describe("build identity section", () => {
         });
         expect(getVersionMock).toHaveBeenCalledTimes(2);
         expect(rendered.container.textContent).toContain(
-            "Versions agree — artifact provenance not verified",
+            "Versions match, but the release could not be confirmed",
         );
-        expect(rendered.container.textContent).not.toContain("Backend version unavailable");
+        expect(rendered.container.textContent).not.toContain("The server did not answer");
         await rendered.unmount();
     });
 
     it.each([
         ["en", "Unavailable"],
-        ["ja", "取得不可"],
+        ["ja", "取得できません"],
     ] as const)("renders unknown metadata as unavailable in %s", async (locale, unavailable) => {
         getVersionMock.mockResolvedValueOnce({
             version: "1.4.0",
@@ -387,7 +430,7 @@ describe("build identity section", () => {
         await act(async () => {
             root.render(createElement(
                 TestIntlProvider,
-                { locale: "en", messages: englishMessages },
+                { locale: "en", messages: englishMessages, timeZone: "UTC" },
                 createElement(DiagnosticsPanel, { scope: "workspace" }),
             ));
         });
@@ -396,7 +439,7 @@ describe("build identity section", () => {
             "The diagnostics report didn't load.",
         );
         expect(interactive.container.textContent).toContain(
-            "Versions agree — artifact provenance not verified",
+            "Versions match, but the release could not be confirmed",
         );
         expect(interactive.container.textContent).toContain("1.4.0");
         await act(async () => root.unmount());
