@@ -1,10 +1,14 @@
 'use client';
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
-import NewDealDialog, { NewDealForm, isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
+import NewDealDialog, {
+    NewDealForm,
+    NewDealRestoreLoading,
+    isDealPayloadDirty,
+} from '@/app/components/records/deals/NewDealDialog';
 import { createDeal, getCompaniesByIds, getPipelines, getStagesByPipelineId, isFieldError } from '@/app/lib/api';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { useFormDraft } from '@/app/hooks/useFormDraft';
@@ -61,6 +65,8 @@ type DealCreateContainerProps = {
     currentUserId?: number | null;
     initialDraft?: DealDraft;
     initialDraftGeneration?: number;
+    /** Signals that reference revalidation finished and the restored form has committed. */
+    onDraftMounted?: () => void;
     /** Reserved for the shell overlay; embedded and routed composers remain persistence-free. */
     draftPersistence?: boolean;
     requestInit?: RequestInit;
@@ -85,6 +91,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
         currentUserId = null,
         initialDraft,
         initialDraftGeneration,
+        onDraftMounted,
         draftPersistence = false,
         requestInit,
     },
@@ -103,6 +110,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
     });
     const router = useRouter();
     const t = useTranslations('Actions');
+    const tDeal = useTranslations('DealsNewDialog');
     const showApiError = useApiErrorToast('Actions');
     const restoring = initialDraft !== undefined && initialDraftGeneration !== undefined;
 
@@ -120,6 +128,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
     const [creating, setCreating] = useState(false);
     const [succeeded, setSucceeded] = useState(false);
     const [restorationReady, setRestorationReady] = useState(!restoring);
+    const restoredDraftMountedRef = useRef(false);
     const closeTimerRef = useRef<number | null>(null);
 
     const clearPendingClose = useCallback(() => {
@@ -145,7 +154,7 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
                     async (p) => [
                         p.id,
                         await getStagesByPipelineId(p.id, requestInit).catch((error: unknown): Stage[] => {
-                            if (restoring) throw error;
+                            if (requestInit?.signal?.aborted) throw error;
                             return [];
                         }),
                     ] as const,
@@ -229,6 +238,12 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
     const persistDraft = draftPersistence ? draft.persist : undefined;
     const clearDraft = draftPersistence ? draft.clear : undefined;
 
+    useLayoutEffect(() => {
+        if (!open || !restoring || !formReady || restoredDraftMountedRef.current) return;
+        restoredDraftMountedRef.current = true;
+        onDraftMounted?.();
+    }, [formReady, onDraftMounted, open, restoring]);
+
     useEffect(() => {
         if (!persistDraft || !clearDraft || !open || !formReady || creating || succeeded) return;
         if (
@@ -290,7 +305,20 @@ const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateCont
         }
     };
 
-    if (!formReady) return null;
+    if (!formReady) {
+        return embedded ? (
+            <div
+                role="status"
+                aria-busy="true"
+                aria-live="polite"
+                className="grid min-h-[28rem] place-items-center text-sm text-muted-foreground"
+            >
+                {tDeal('restoringDraft')}
+            </div>
+        ) : (
+            <NewDealRestoreLoading open={open} />
+        );
+    }
 
     if (embedded) {
         return (

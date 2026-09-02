@@ -9,6 +9,12 @@ import {
     releaseActiveRadarTask,
     type RadarTaskSignalStore,
 } from '@/app/lib/radar';
+import {
+    advanceDraftKeyGeneration,
+    draftKey,
+    getDraftKeyGeneration,
+    type DealDraft,
+} from '@/app/lib/formDrafts';
 import type { CreateTaskPayload, RadarPayload, RadarSignal, User } from '@/app/lib/types';
 import {
     createCloseCompletionGate,
@@ -1188,6 +1194,53 @@ describe('Radar action integration', () => {
         expect(task.draftPersistence).toBe(false);
         expect(task.preserveDraftOnClose).toBe(true);
         expect(onCreated).toHaveBeenCalledWith(createdSignal);
+        await host.unmount();
+    });
+
+    it('gates restored deal mounting on the current draft generation and watches it through revalidation', async () => {
+        const key = draftKey({
+            userId: 7,
+            workspaceId: 17,
+            formType: 'deal',
+            scope: 'global',
+        });
+        const draft: DealDraft = {
+            name: 'Renewal',
+            value: 12500,
+            currency: 'USD',
+            pipeline: 4,
+            stage: 9,
+            company: 22,
+            expectedCloseDate: '2026-10-01',
+        };
+        const host = await renderOverlayHost();
+        const currentGeneration = getDraftKeyGeneration(key);
+
+        await host.show({
+            kind: 'create-deal',
+            draft,
+            restoredDraftGeneration: currentGeneration,
+        }, 2);
+        expect(requiredProps(captures.dynamicProps.get(5), 'Deal create container')).toMatchObject({
+            initialDraft: draft,
+            initialDraftGeneration: currentGeneration,
+        });
+
+        await act(async () => {
+            advanceDraftKeyGeneration(key);
+        });
+        await flushUpdates();
+        expect(host.onClose).toHaveBeenCalledOnce();
+
+        const staleGeneration = getDraftKeyGeneration(key);
+        advanceDraftKeyGeneration(key);
+        await host.show({
+            kind: 'create-deal',
+            draft: { ...draft, name: 'Stale renewal' },
+            restoredDraftGeneration: staleGeneration,
+        }, 3);
+        expect(host.onClose).toHaveBeenCalledTimes(2);
+        expect(captures.dynamicUnmounts.get(5)).toBe(1);
         await host.unmount();
     });
 

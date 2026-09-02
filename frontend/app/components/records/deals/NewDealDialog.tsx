@@ -128,6 +128,30 @@ export default function NewDealDialog({
     );
 }
 
+/** Keeps the create-deal modal present and inert while a saved draft's references are revalidated. */
+export function NewDealRestoreLoading({ open }: { open: boolean }) {
+    const t = useTranslations('DealsNewDialog');
+
+    return (
+        <ResponsiveDialog open={open} onOpenChange={() => undefined}>
+            <ResponsiveDialogContent showCloseButton={false} className="gap-0 overflow-hidden p-0 sm:max-w-lg">
+                <ResponsiveDialogTitle className="sr-only">{t('title')}</ResponsiveDialogTitle>
+                <ResponsiveDialogDescription className="sr-only">{t('restoringDraft')}</ResponsiveDialogDescription>
+                <DialogStatusCover status="idle" />
+                <div
+                    role="status"
+                    aria-busy="true"
+                    aria-live="polite"
+                    className="-mt-8 flex min-h-32 flex-col items-center justify-center gap-3 px-6 pb-8 text-center text-sm text-muted-foreground"
+                >
+                    <Loader2Icon className="size-5 animate-spin motion-reduce:animate-none" aria-hidden />
+                    <span>{t('restoringDraft')}</span>
+                </div>
+            </ResponsiveDialogContent>
+        </ResponsiveDialog>
+    );
+}
+
 type NewDealFormProps = {
     /** Whether the surface is active; gates the company search the way `open` did in the dialog. */
     active: boolean;

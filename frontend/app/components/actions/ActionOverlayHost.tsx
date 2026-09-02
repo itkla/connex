@@ -249,7 +249,12 @@ export default function ActionOverlayHost({
     const defaults = rendered && "defaults" in rendered.request ? rendered.request.defaults : undefined;
     const defaultPersonId = defaults?.personId;
     const defaultDealId = defaults?.dealId;
-    const rosterOnly = (kind === "create-task" || kind === "create-note" || kind === "create-activity") &&
+    const rosterOnly = (
+        kind === "create-task" ||
+        kind === "create-note" ||
+        kind === "create-activity" ||
+        kind === "create-deal"
+    ) &&
         rendered !== null &&
         "restoredDraftGeneration" in rendered.request &&
         rendered.request.restoredDraftGeneration !== undefined;
@@ -275,7 +280,9 @@ export default function ActionOverlayHost({
             ? "note"
             : kind === "create-activity"
                 ? "activity"
-                : null;
+                : kind === "create-deal"
+                    ? "deal"
+                    : null;
     const restoredDraftKey = restoredDraftGeneration !== undefined && restoredDraftFormType !== null
         ? draftKey({
             userId: user?.id ?? null,
@@ -441,6 +448,7 @@ export default function ActionOverlayHost({
         }
     }, [
         onClose,
+        observedRestoredDraftGeneration,
         referencesReady,
         rendered,
         restoredDraftGeneration,
@@ -611,7 +619,7 @@ export default function ActionOverlayHost({
                 {rendered?.request.kind === "create-person" ? (
                     <ContactCreateContainer open={visible} onOpenChange={handleOpenChange} defaults={rendered.request.defaults} requestInit={requestInit} />
                 ) : null}
-                {rendered?.request.kind === "create-deal" ? (
+                {rendered?.request.kind === "create-deal" && restoredDraftCanMount ? (
                     <DealCreateContainer
                         open={visible}
                         onOpenChange={handleOpenChange}
@@ -620,6 +628,7 @@ export default function ActionOverlayHost({
                         draftPersistence
                         initialDraft={dealDraft}
                         initialDraftGeneration={rendered.request.restoredDraftGeneration}
+                        onDraftMounted={rosterOnly ? handleRestoredDraftMounted : undefined}
                         requestInit={requestInit}
                     />
                 ) : null}

@@ -57,6 +57,8 @@ const toasts = vi.hoisted(() => ({
 const dialog = vi.hoisted(() => ({
     confirms: [] as ConfirmCapture[],
     dismissals: [] as Array<(open: boolean) => void>,
+    shells: [] as Array<{ open?: boolean }>,
+    contents: [] as Array<{ showCloseButton?: boolean }>,
 }));
 const duplicatePreflight = vi.hoisted(() => ({
     acknowledged: false,
@@ -80,7 +82,7 @@ const api = vi.hoisted(() => ({
         total: 0,
     })),
     getPipelines: vi.fn(async () => [] as Pipeline[]),
-    getStagesByPipelineId: vi.fn(async () => [] as Stage[]),
+    getStagesByPipelineId: vi.fn<(pipelineId: number) => Promise<Stage[]>>(),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -182,14 +184,26 @@ vi.mock('@/components/ui/responsive-dialog', async () => {
         ResponsiveDialog: ({
             children,
             onOpenChange,
+            open,
         }: {
             children?: ReactNode;
             onOpenChange?: (open: boolean) => void;
+            open?: boolean;
         }) => {
             if (onOpenChange) dialog.dismissals.push(onOpenChange);
+            dialog.shells.push({ open });
             return React.createElement(Fragment, null, children);
         },
-        ResponsiveDialogContent: Passthrough,
+        ResponsiveDialogContent: ({
+            children,
+            showCloseButton,
+        }: {
+            children?: ReactNode;
+            showCloseButton?: boolean;
+        }) => {
+            dialog.contents.push({ showCloseButton });
+            return React.createElement(Fragment, null, children);
+        },
         ResponsiveDialogDescription: Passthrough,
         ResponsiveDialogTitle: Passthrough,
     };
@@ -350,6 +364,12 @@ const VALID_DEAL_DRAFT: DealDraft = {
 const PIPELINE: Pipeline = {
     id: 4,
     name: 'Sales',
+    createdAt: '2026-08-01T00:00:00Z',
+    updatedAt: '2026-08-01T00:00:00Z',
+};
+const OTHER_PIPELINE: Pipeline = {
+    id: 5,
+    name: 'Expansion',
     createdAt: '2026-08-01T00:00:00Z',
     updatedAt: '2026-08-01T00:00:00Z',
 };
@@ -861,20 +881,97 @@ describe('deal draft persistence', () => {
         }));
         api.getStagesByPipelineId.mockResolvedValueOnce([STAGE]);
         api.getCompaniesByIds.mockResolvedValueOnce([COMPANY]);
+        const onDraftMounted = vi.fn();
         const mounted = await render(dealContainer({
             initialDraft: VALID_DEAL_DRAFT,
             initialDraftGeneration: 0,
+            onDraftMounted,
         }));
 
         expect(dealNameInputs(mounted)).toHaveLength(0);
+        expect(onDraftMounted).not.toHaveBeenCalled();
+        const restoreStatus = connectedElements(mounted).find((element) => (
+            element.getAttribute('role') === 'status'
+        ));
+        expect(restoreStatus?.getAttribute('aria-busy')).toBe('true');
+        expect(restoreStatus?.textContent).toBe('restoringDraft');
+        expect(dialog.shells.at(-1)).toEqual({ open: true });
+        expect(dialog.contents.at(-1)).toEqual({ showCloseButton: false });
         await act(async () => {
             resolvePipelines?.([PIPELINE]);
             await settle();
         });
+        expect(connectedElements(mounted).some((element) => element.getAttribute('role') === 'status')).toBe(false);
+        expect(onDraftMounted).toHaveBeenCalledOnce();
         expect(requiredElement(mounted, 'deal-name').value).toBe(VALID_DEAL_DRAFT.name);
         expect(connectedElements(mounted).some((element) => (
             element.getAttribute('data-selected-label') === COMPANY.name
         ))).toBe(true);
+        await mounted.unmount();
+    });
+
+    it('keeps the restored composer open when an unrelated pipeline stage request fails', async () => {
+        api.getPipelines.mockResolvedValueOnce([PIPELINE, OTHER_PIPELINE]);
+        api.getStagesByPipelineId.mockImplementationOnce(async (pipelineId) => {
+            if (pipelineId === PIPELINE.id) return [STAGE];
+            throw new Error('unrelated pipeline unavailable');
+        }).mockImplementationOnce(async (pipelineId) => {
+            if (pipelineId === PIPELINE.id) return [STAGE];
+            throw new Error('unrelated pipeline unavailable');
+        });
+        api.getCompaniesByIds.mockResolvedValueOnce([COMPANY]);
+        const onOpenChange = vi.fn();
+        const mounted = await render(dealContainer({
+            initialDraft: VALID_DEAL_DRAFT,
+            initialDraftGeneration: 0,
+            onOpenChange,
+        }));
+
+        expect(requiredElement(mounted, 'deal-name').value).toBe(VALID_DEAL_DRAFT.name);
+        expect(onOpenChange).not.toHaveBeenCalled();
+        expect(toasts.error).not.toHaveBeenCalled();
+        expect(toasts.warn).not.toHaveBeenCalled();
+
+        const form = connectedElements(mounted, 'FORM').at(-1);
+        if (!form) throw new Error('Expected the restored deal form');
+        await act(async () => {
+            mounted.dispatch('submit', form);
+            await settle();
+        });
+        expect(api.createDeal).toHaveBeenCalledWith(expect.objectContaining({
+            pipeline: PIPELINE.id,
+            stage: STAGE.id,
+            company: COMPANY.id,
+        }), undefined);
+        await mounted.unmount();
+    });
+
+    it('drops a saved stage with a localized warning when its selected pipeline stages cannot load', async () => {
+        api.getPipelines.mockResolvedValueOnce([PIPELINE]);
+        api.getStagesByPipelineId.mockRejectedValueOnce(new Error('selected pipeline unavailable'));
+        api.getCompaniesByIds.mockResolvedValueOnce([COMPANY]);
+        const onOpenChange = vi.fn();
+        const mounted = await render(dealContainer({
+            initialDraft: VALID_DEAL_DRAFT,
+            initialDraftGeneration: 0,
+            onOpenChange,
+        }));
+
+        expect(requiredElement(mounted, 'deal-name').value).toBe(VALID_DEAL_DRAFT.name);
+        expect(onOpenChange).not.toHaveBeenCalled();
+        expect(toasts.warn).toHaveBeenCalledWith('feedback.restoredDealReferenceUnavailable');
+
+        const form = connectedElements(mounted, 'FORM').at(-1);
+        if (!form) throw new Error('Expected the degraded restored deal form');
+        await act(async () => {
+            mounted.dispatch('submit', form);
+            await settle();
+        });
+        expect(api.createDeal).toHaveBeenCalledWith(expect.objectContaining({
+            pipeline: PIPELINE.id,
+            stage: null,
+            company: COMPANY.id,
+        }), undefined);
         await mounted.unmount();
     });
 
@@ -1051,6 +1148,8 @@ beforeEach(() => {
     state.reducedMotion = true;
     dialog.confirms.length = 0;
     dialog.dismissals.length = 0;
+    dialog.shells.length = 0;
+    dialog.contents.length = 0;
     api.createDeal.mockResolvedValue(undefined);
     api.getCompaniesByIds.mockResolvedValue([]);
     api.getCompaniesPage.mockResolvedValue({ items: [], total: 0 });
