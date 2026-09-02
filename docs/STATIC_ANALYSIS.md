@@ -67,10 +67,31 @@ or timed-out `Backend SAST (CodeQL)` or `Frontend SAST (CodeQL)` check, followed
 `Security — required` check. Documentation-only changes may legitimately skip both jobs because the
 classifier did not select either code surface.
 
-The workflow's red result does not currently prevent a merge. As measured on 2026-08-13, neither
-`Security — required` nor the language CodeQL jobs are required by `main` branch protection, and
-administrators are not subject to enforcement. Until repository settings require `Security —
-required`, this control provides visible failure and recorded analysis but is not a merge gate.
+The workflow's red result prevents a merge. As measured on 2026-09-01, `main` branch protection
+requires nine status checks, every one bound to GitHub Actions (`app_id` 15368), and three of them
+are this control: `Security — required`, `Backend SAST (CodeQL)` and `Frontend SAST (CodeQL)`. This
+supersedes the 2026-08-13 measurement previously recorded here, which found none of them required.
+This paragraph's own rule — update only after the setting is independently verified — is satisfied
+by the CHK-089 independent re-test recorded on
+[#1244](https://github.com/itkla/connex/issues/1244#issuecomment-5506662478), which measured the
+same required contexts against the live API.
+
+Three limits qualify that gate. None is closed by branch protection, and none is a reason to
+describe the gate as absent:
+
+- **Pull-request attribution scoping — documented product decision.** The check queries code
+  scanning with the pull request number, and as recorded above GitHub shows only alerts whose
+  complete result location is in the pull request diff. A Critical or High finding that a pull
+  request introduces indirectly, whose result location falls outside that diff, does not appear in
+  the response, so the checker passes. This is the accepted scope of the control, not a defect in
+  it.
+- **Administrator bypass — open hardening item.** `enforce_admins` is `false`, so an administrator
+  can merge past a failed required check.
+- **No required review of the gate itself — open hardening item.** `required_approving_review_count`
+  is `0`, the repository defines no rulesets, and there is no `CODEOWNERS`. The workflow and
+  classifier still execute from the pull request's checkout, so the self-modification limitation
+  below remains unmitigated.
+
 Branch protection is administered outside this change; this document must be updated only after the
 setting is independently verified.
 
@@ -84,9 +105,11 @@ additional writer from whom the mechanism could protect itself.
 
 Any additional person or automation identity gaining repository write access is the mandatory
 trigger to revisit this acceptance before that access is used. At that point, add code-owner review
-for `.github/**`, require more than zero approving reviews in branch protection or a ruleset, and
-make `Security — required` a required check. Until those settings are active and verified, do not
-describe CodeQL as an independently tamper-resistant or repository-enforced merge gate.
+for `.github/**` and require more than zero approving reviews in branch protection or a ruleset.
+`Security — required` is already a required check, as recorded above. Until the remaining settings
+are active and verified, do not describe CodeQL as an independently *tamper-resistant* merge gate:
+the required checks are repository-enforced, but an administrator can both bypass them and change
+the mechanism that produces them.
 
 ## Finding ownership and deadlines
 
