@@ -40,7 +40,10 @@ function flattenKeys(tree: { [key: string]: MessageValue }, prefix = ""): string
 function translator(locale: string): MessageTranslator {
     const messages: { [key: string]: MessageValue } = {
         ...errorMessages(locale),
-        Contacts: { toastFailedSave: "Couldn't save the contact" },
+        Contacts: {
+            toastFailedSave: "Couldn't save the contact",
+            refusalDescription: "The requested change was refused. Nothing changed. Review it and try again.",
+        },
     };
     return createTranslator({ locale, messages });
 }
@@ -96,6 +99,20 @@ describe("userMessageFor status mapping", () => {
 
     it("fails safe to generic copy on something that is not an error at all", () => {
         expect(describedBy("boom")).toBe("Something went wrong. Nothing was lost — try again.");
+    });
+
+    it("uses caller-owned refusal detail without exposing backend text", () => {
+        const message = userMessageFor(
+            new ApiError(POISONED_MESSAGE, 403),
+            t,
+            "Contacts.toastFailedSave",
+            "Contacts.refusalDescription",
+        );
+
+        expect(message?.description).toBe(
+            "The requested change was refused. Nothing changed. Review it and try again.",
+        );
+        expect(message?.description).not.toContain(POISONED_MESSAGE);
     });
 });
 

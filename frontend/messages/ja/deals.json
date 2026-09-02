@@ -453,6 +453,11 @@
         "approvalMembersRetry": "もう一度試す",
         "approvalMembersNoMatches": "該当するメンバーがいません。",
         "approvalMembersLimit": "{maximum}人中{selected}人を選択",
+        "approvalCandidatesPlaceholder": "承認者候補を検索",
+        "approvalCandidatesLoading": "承認者候補を読み込み中…",
+        "approvalCandidatesUnavailable": "承認者候補を読み込めません。承認者を選ぶ前に、もう一度お試しください。",
+        "approvalCandidatesNoMatches": "メンバー一覧に承認者候補がいません。",
+        "approvalQuorumShortfall": "確認済みの承認者をあと{count}人選択してください。確定時にサーバーが承認要件を確認します。",
         "approvalRemoveMember": "{name}さんを外す",
         "approvalNoCurrentApprovers": "現在の承認者はいません",
         "approvalStepChanged": "承認の状態が変わりました。この画面を閉じて、もう一度開いてください。",
@@ -537,6 +542,8 @@
         "rejectFailed": "ドキュメントを却下できませんでした",
         "requestFailed": "承認を依頼できませんでした",
         "reassignFailed": "承認者を再割り当てできませんでした",
+        "approverChangeRefused": "承認者の変更が拒否されました",
+        "approverChangeRefusedDescription": "選択したメンバーの中に、ドキュメントを承認できない方が含まれている可能性があります。承認者は変更されていません。選択内容を確認して、もう一度お試しください。",
         "refreshFailed": "ドキュメントを更新できませんでした",
         "statusFailed": "ドキュメントのステータスを更新できませんでした"
     }

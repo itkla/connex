@@ -453,6 +453,11 @@
         "approvalMembersRetry": "Try again",
         "approvalMembersNoMatches": "No members found.",
         "approvalMembersLimit": "{selected} of {maximum} members selected",
+        "approvalCandidatesPlaceholder": "Search possible approvers",
+        "approvalCandidatesLoading": "Loading possible approvers…",
+        "approvalCandidatesUnavailable": "Possible approvers are unavailable. Try again before choosing approvers.",
+        "approvalCandidatesNoMatches": "No possible approvers found in the member directory.",
+        "approvalQuorumShortfall": "Select {count, plural, one {# more verified approver} other {# more verified approvers}}. The server checks the approval requirement when you confirm.",
         "approvalRemoveMember": "Remove {name}",
         "approvalNoCurrentApprovers": "No current approvers",
         "approvalStepChanged": "This approval changed. Close this dialog and open it again.",
@@ -537,6 +542,8 @@
         "rejectFailed": "Couldn't reject the document",
         "requestFailed": "Couldn't request approval",
         "reassignFailed": "Couldn't reassign the approvers",
+        "approverChangeRefused": "Approver change refused",
+        "approverChangeRefusedDescription": "One or more selected members may not be allowed to approve documents. No approvers were changed. Review the selection and try again.",
         "refreshFailed": "Couldn't refresh the document",
         "statusFailed": "Couldn't update the document status"
     }

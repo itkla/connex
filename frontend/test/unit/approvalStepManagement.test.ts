@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import commonMessages from '@/messages/en/common.json';
 import dealsMessages from '@/messages/en/deals.json';
+import japaneseDealsMessages from '@/messages/ja/deals.json';
 
 declare global {
     var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -13,10 +14,14 @@ declare global {
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 import {
+    approvalCandidateDirectory,
     approvalStepApproverChangePayload,
+    approvalStepQuorumShortfall,
     manageableApprovalSteps,
+    widenableApprovalSteps,
 } from '@/app/components/records/deals/approvalStepActions';
 import type {
+    CustomRole,
     DealDocument,
     DocumentApproval,
     DocumentApprovalStep,
@@ -27,6 +32,8 @@ const api = vi.hoisted(() => ({
     getDocumentTemplates: vi.fn(),
     getDealDocumentById: vi.fn(),
     getActiveWorkspaceMembers: vi.fn(),
+    getBuiltInRoles: vi.fn(),
+    getWorkspaceRoles: vi.fn(),
     reassignDocumentApprovalStepApprovers: vi.fn(),
     widenDocumentApprovalStepApprovers: vi.fn(),
 }));
@@ -42,7 +49,7 @@ vi.mock('@/app/hooks/useApiErrorToast', () => ({
 }));
 
 vi.mock('@/app/hooks/useWorkspace', () => ({
-    useWorkspace: () => ({ activeWorkspace: { role: 'OWNER' } }),
+    useWorkspace: () => ({ activeWorkspace: { id: 42, role: 'owner' }, activeWorkspaceId: 42 }),
 }));
 
 vi.mock('@/app/lib/toast', () => ({
@@ -187,6 +194,15 @@ describe('approval step management availability', () => {
 
         expect(manageableApprovalSteps(document, true).map((candidate) => candidate.id)).toEqual([2]);
     });
+
+    it('omits already-open steps from widening without removing them from reassignment', () => {
+        const openStep = { ...step(1, 1, 'active'), effectiveAnyApprover: true };
+        const named = step(2, 2, 'active');
+        const document = documentWith(approval([openStep, named], { mode: 'parallel' }));
+
+        expect(widenableApprovalSteps(document, true).map((candidate) => candidate.id)).toEqual([2]);
+        expect(manageableApprovalSteps(document, true).map((candidate) => candidate.id)).toEqual([1, 2]);
+    });
 });
 
 describe('approval step management payloads', () => {
@@ -220,17 +236,105 @@ describe('approval step management payloads', () => {
     });
 });
 
-function member(id: number): WorkspaceMember {
+describe('approval step quorum validation', () => {
+    const quorumStep = {
+        ...step(1, 1, 'active'),
+        requiredCount: 3,
+        approvedCount: 1,
+        effectiveApproverIds: [1, 2],
+        decisions: [{
+            id: 1,
+            stepId: 1,
+            decision: 'approved' as const,
+            decidedBy: 1,
+            decidedAt: '2026-09-02T10:30:00Z',
+        }],
+    };
+
+    it('counts current undecided approvers for widening but not reassignment', () => {
+        expect(approvalStepQuorumShortfall(
+            quorumStep,
+            'escalate',
+            { mode: 'members', memberIds: [3] },
+            [1, 2, 3],
+        )).toBe(0);
+        expect(approvalStepQuorumShortfall(
+            quorumStep,
+            'reassign',
+            { mode: 'members', memberIds: [3] },
+            [1, 2, 3],
+        )).toBe(1);
+    });
+
+    it('uses only verified undecided candidates when every approver is allowed', () => {
+        expect(approvalStepQuorumShortfall(
+            quorumStep,
+            'reassign',
+            { mode: 'any_approver' },
+            [1, 2],
+        )).toBe(1);
+        expect(approvalStepQuorumShortfall(
+            quorumStep,
+            'reassign',
+            { mode: 'any_approver' },
+            [1, 2, 3],
+        )).toBe(0);
+    });
+
+    it('ships the shortfall hint in English and Japanese', () => {
+        expect(dealsMessages.DealsDocuments.approvalQuorumShortfall).toContain('server checks');
+        expect(japaneseDealsMessages.DealsDocuments.approvalQuorumShortfall).toContain('サーバー');
+    });
+});
+
+function member(
+    id: number,
+    options: Partial<Pick<WorkspaceMember, 'builtInRole' | 'role' | 'roleId' | 'status'>> = {},
+): WorkspaceMember {
     return {
         id,
         username: `member-${id}`,
         displayName: `Member ${id}`,
         email: `member-${id}@example.test`,
-        role: 'Member',
-        builtInRole: 'member',
-        status: 'active',
+        role: options.role ?? 'admin',
+        builtInRole: options.builtInRole ?? 'admin',
+        roleId: options.roleId ?? null,
+        status: options.status ?? 'active',
     };
 }
+
+function role(id: number, name: string, permissions: string[]): CustomRole {
+    return { id, name, permissions };
+}
+
+describe('approval candidate directory', () => {
+    it('never creates candidates beyond the active member directory and excludes known ineligible roles', () => {
+        const directory = approvalCandidateDirectory(
+            [
+                member(1),
+                member(2, { builtInRole: 'member', role: 'member' }),
+                member(3, { roleId: 9, role: 'Reviewer' }),
+                member(4, { status: 'pending' }),
+            ],
+            [role(0, 'admin', ['DOCUMENT_APPROVE']), role(0, 'member', [])],
+            [role(9, 'Reviewer', [])],
+        );
+
+        expect(directory.members.map((candidate) => candidate.id)).toEqual([1]);
+        expect(directory.verifiedApproverIds).toEqual([1]);
+    });
+
+    it('keeps an unresolved custom-role member selectable without counting them as verified', () => {
+        const directory = approvalCandidateDirectory(
+            [member(3, { roleId: 9, role: 'Reviewer' })],
+            [],
+            [],
+        );
+
+        expect(directory.members.map((candidate) => candidate.id)).toEqual([3]);
+        expect(directory.verifiedApproverIds).toEqual([]);
+    });
+});
 
 function namedStep(
     id: number,
@@ -255,6 +359,8 @@ type DialogHarnessProps = {
     steps: DocumentApprovalStep[];
     initialStepId: number | null;
     members?: WorkspaceMember[];
+    verifiedApproverIds?: number[];
+    action?: 'escalate' | 'reassign';
     initialComment?: string;
     onSubmit?: () => void;
     onClose?: () => void;
@@ -264,6 +370,8 @@ function DialogHarness({
     steps,
     initialStepId,
     members = [member(1), member(2)],
+    verifiedApproverIds = members.map((candidate) => candidate.id),
+    action = 'reassign',
     initialComment = '',
     onSubmit = () => undefined,
     onClose = () => undefined,
@@ -274,12 +382,15 @@ function DialogHarness({
     const [comment, setComment] = useState(initialComment);
     return createElement(ApprovalStepApproversDialog, {
         open: true,
-        action: 'reassign',
+        action,
         documentTitle: 'Renewal quote',
         steps,
         selectedStepId,
         memberDirectoryStatus: 'ready',
         members,
+        verifiedApproverIds,
+        memberLabelStatus: 'ready',
+        memberLabels: members,
         mode,
         selectedMembers,
         comment,
@@ -302,13 +413,15 @@ function DialogHarness({
 
 let container: HTMLDivElement;
 let root: Root;
+let mobileViewport = false;
 
 beforeEach(() => {
     Object.defineProperty(window, 'matchMedia', {
         configurable: true,
         writable: true,
         value: (query: string) => ({
-            matches: query === '(prefers-reduced-motion)',
+            matches: query === '(prefers-reduced-motion)'
+                || (query === '(max-width: 767px)' && mobileViewport),
             media: query,
             onchange: null,
             addEventListener: () => undefined,
@@ -346,8 +459,15 @@ beforeEach(() => {
     document.body.appendChild(container);
     root = createRoot(container);
     vi.clearAllMocks();
+    mobileViewport = false;
     api.getDocumentTemplates.mockResolvedValue([]);
     api.getActiveWorkspaceMembers.mockResolvedValue(Array.from({ length: 21 }, (_, index) => member(index + 1)));
+    api.getBuiltInRoles.mockResolvedValue([
+        role(0, 'owner', ['DOCUMENT_APPROVE']),
+        role(0, 'admin', ['DOCUMENT_APPROVE']),
+        role(0, 'member', []),
+    ]);
+    api.getWorkspaceRoles.mockResolvedValue([]);
 });
 
 afterEach(async () => {
@@ -524,6 +644,70 @@ describe('ApprovalStepApproversDialog interactions', () => {
         expect(document.body.textContent).toContain('approvalMembersLimit');
     });
 
+    it('keeps confirmation disabled and explains a named-approver quorum shortfall', async () => {
+        const quorumStep = {
+            ...namedStep(1, 1, [1, 2]),
+            requiredCount: 3,
+            approvedCount: 1,
+            decisions: [{
+                id: 1,
+                stepId: 1,
+                decision: 'approved' as const,
+                decidedBy: 1,
+                decidedAt: '2026-09-02T10:30:00Z',
+            }],
+        };
+        await render(createElement(DialogHarness, {
+            steps: [quorumStep],
+            initialStepId: 1,
+            members: [member(1), member(2), member(3)],
+        }));
+
+        await chooseMember(2);
+        expect(button('reassignConfirm').disabled).toBe(true);
+        expect(document.body.textContent).toContain('approvalQuorumShortfall');
+
+        await chooseMember(3);
+        expect(button('reassignConfirm').disabled).toBe(false);
+        expect(document.body.textContent).not.toContain('approvalQuorumShortfall');
+    });
+
+    it('requires the any-approver pool to contain enough undecided candidates', async () => {
+        const quorumStep = {
+            ...namedStep(1, 1, [1]),
+            requiredCount: 3,
+            approvedCount: 1,
+            decisions: [{
+                id: 1,
+                stepId: 1,
+                decision: 'approved' as const,
+                decidedBy: 1,
+                decidedAt: '2026-09-02T10:30:00Z',
+            }],
+        };
+        await render(createElement(DialogHarness, {
+            steps: [quorumStep],
+            initialStepId: 1,
+            members: [member(1), member(2)],
+        }));
+
+        await click(button('approvalAnyApprover'));
+        expect(button('reassignConfirm').disabled).toBe(true);
+        expect(document.body.textContent).toContain('approvalQuorumShortfall');
+    });
+
+    it('renders as a scrollable bottom sheet on mobile', async () => {
+        mobileViewport = true;
+        await render(createElement(DialogHarness, {
+            steps: [namedStep(1, 1)],
+            initialStepId: 1,
+        }));
+
+        expect(document.querySelector('[data-slot="drawer-content"]')).not.toBeNull();
+        expect(document.querySelector('[data-slot="dialog-content"]')).toBeNull();
+        expect(document.querySelector('[data-slot="drawer-inner"] > .overflow-y-auto')).not.toBeNull();
+    });
+
     it('provides labelled focus, keyboard selections, and guarded Escape and outside dismissal', async () => {
         const onClose = vi.fn();
         await render(createElement(DialogHarness, {
@@ -645,6 +829,39 @@ describe('DealDocuments approval-step management', () => {
         expect(document.querySelector('[data-slot="combobox-item"]')).toBeNull();
     });
 
+    it('populates the picker only from the active member directory and filters known ineligible roles', async () => {
+        api.getActiveWorkspaceMembers.mockResolvedValue([
+            member(1, { builtInRole: 'member', role: 'member' }),
+            member(2),
+            member(3, { roleId: 9, role: 'Observer' }),
+        ]);
+        api.getWorkspaceRoles.mockResolvedValue([role(9, 'Observer', [])]);
+        await renderDocuments({ canManageApprovals: true });
+
+        await chooseMenuAction('reassignApprovers');
+        const input = document.querySelector<HTMLInputElement>('#approval-management-members');
+        if (!input) throw new Error('Member picker input not found');
+        await pointerClick(input);
+        await keyDown(input, 'ArrowDown');
+
+        expect(api.getActiveWorkspaceMembers).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
+        const options = [...document.querySelectorAll<HTMLElement>('[data-slot="combobox-item"]')]
+            .map((candidate) => candidate.textContent);
+        expect(options).toEqual([expect.stringContaining('Member 2')]);
+    });
+
+    it('keeps reassignment but omits widening when every approver is already eligible', async () => {
+        const openStep = { ...namedStep(1, 1), effectiveAnyApprover: true };
+        await renderDocuments({
+            canManageApprovals: true,
+            document: pendingDocument([openStep]),
+        });
+
+        await openActionsMenu();
+        expect(document.body.textContent).not.toContain('widenApprovers');
+        expect(document.body.textContent).toContain('reassignApprovers');
+    });
+
     it('applies the returned approval before reconciliation removes the current user affordances', async () => {
         let rejectRefresh!: (reason: unknown) => void;
         const refresh = new Promise<DealDocument>((_resolve, reject) => { rejectRefresh = reject; });
@@ -674,7 +891,7 @@ describe('DealDocuments approval-step management', () => {
         expect(container.textContent).not.toContain('approve');
     });
 
-    it.each([400, 403, 404])(
+    it.each([400, 404])(
         'routes a %s reassignment failure through the API error toast without changing the view',
         async (status) => {
             const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -694,4 +911,23 @@ describe('DealDocuments approval-step management', () => {
             consoleError.mockRestore();
         },
     );
+
+    it('surfaces a 403 approver refusal through the API error toast with dedicated copy', async () => {
+        const requestError = Object.assign(new Error('request failed: 403'), { status: 403 });
+        api.reassignDocumentApprovalStepApprovers.mockRejectedValue(requestError);
+        await renderDocuments({ canManageApprovals: true });
+        await chooseMenuAction('reassignApprovers');
+        await chooseMember(2);
+
+        await click(button('reassignConfirm'));
+
+        expect(errors.show).toHaveBeenCalledWith(
+            requestError,
+            'approverChangeRefused',
+            'approverChangeRefusedDescription',
+        );
+        expect(dealsMessages.DealsDocuments.approverChangeRefused).toContain('refused');
+        expect(japaneseDealsMessages.DealsDocuments.approverChangeRefused).toContain('拒否');
+        expect(api.getDealDocumentById).not.toHaveBeenCalled();
+    });
 });

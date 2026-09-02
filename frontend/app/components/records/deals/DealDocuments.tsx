@@ -65,6 +65,8 @@ import {
     cancelDocumentApproval,
     getDocumentApprovalDelegateCandidates,
     getActiveWorkspaceMembers,
+    getBuiltInRoles,
+    getWorkspaceRoles,
     reassignDocumentApprovalStepApprovers,
     widenDocumentApprovalStepApprovers,
 } from '@/app/lib/api';
@@ -81,8 +83,11 @@ import type {
 import ApprovalStepApproversDialog from './ApprovalStepApproversDialog';
 import DocumentApprovalChain from './DocumentApprovalChain';
 import {
+    approvalCandidateDirectory,
     approvalStepApproverChangePayload,
+    approvalStepQuorumShortfall,
     manageableApprovalSteps,
+    widenableApprovalSteps,
     type ApprovalMemberDirectoryStatus,
     type ApprovalStepManagementAction,
 } from './approvalStepActions';
@@ -113,6 +118,10 @@ type Props = {
 
 type ApprovalAction = 'request' | 'approve' | 'reject' | 'delegate';
 
+/**
+ * This small draft only needs atomic field replacement, so a reducer would add indirection without
+ * enforcing more invariants.
+ */
 type StepManagementState = {
     documentId: number;
     action: ApprovalStepManagementAction;
@@ -183,7 +192,7 @@ export default function DealDocuments({
     const sectionRef = useRef<HTMLElement>(null);
     const scrolledForHash = useRef<string | null>(null);
     const hash = useSyncExternalStore(subscribeToHash, hashSnapshot, () => '');
-    const { activeWorkspace } = useWorkspace();
+    const { activeWorkspace, activeWorkspaceId } = useWorkspace();
     const [documents, setDocuments] = useState<DealDocument[]>(initial);
     const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
     const [busy, setBusy] = useState(false);
@@ -202,6 +211,8 @@ export default function DealDocuments({
     );
     const [approvalMemberLoadAttempt, setApprovalMemberLoadAttempt] = useState(0);
     const [stepManagement, setStepManagement] = useState<StepManagementState | null>(null);
+    const [approvalCandidates, setApprovalCandidates] = useState<WorkspaceMember[]>([]);
+    const [verifiedApprovalMemberIds, setVerifiedApprovalMemberIds] = useState<number[]>([]);
 
     useEffect(() => {
         getDocumentTemplates()
@@ -212,19 +223,38 @@ export default function DealDocuments({
     useEffect(() => {
         if (!canManageApprovals) return;
         const controller = new AbortController();
-        getActiveWorkspaceMembers({ signal: controller.signal })
-            .then((members) => {
+        const unavailableRoles = Promise.resolve([]);
+        Promise.allSettled([
+            getActiveWorkspaceMembers({ signal: controller.signal }),
+            activeWorkspaceId === null
+                ? unavailableRoles
+                : getBuiltInRoles(activeWorkspaceId, { signal: controller.signal }),
+            activeWorkspaceId === null
+                ? unavailableRoles
+                : getWorkspaceRoles(activeWorkspaceId, { signal: controller.signal }),
+        ])
+            .then(([membersResult, builtInRolesResult, customRolesResult]) => {
                 if (controller.signal.aborted) return;
-                setApprovalMembers(members.filter((member) => member.status !== 'pending'));
+                if (membersResult.status === 'rejected') {
+                    setApprovalMembers([]);
+                    setApprovalCandidates([]);
+                    setVerifiedApprovalMemberIds([]);
+                    setApprovalMemberDirectoryStatus('unavailable');
+                    return;
+                }
+                const activeMembers = membersResult.value.filter((member) => member.status !== 'pending');
+                const directory = approvalCandidateDirectory(
+                    activeMembers,
+                    builtInRolesResult.status === 'fulfilled' ? builtInRolesResult.value : [],
+                    customRolesResult.status === 'fulfilled' ? customRolesResult.value : [],
+                );
+                setApprovalMembers(activeMembers);
+                setApprovalCandidates(directory.members);
+                setVerifiedApprovalMemberIds(directory.verifiedApproverIds);
                 setApprovalMemberDirectoryStatus('ready');
-            })
-            .catch(() => {
-                if (controller.signal.aborted) return;
-                setApprovalMembers([]);
-                setApprovalMemberDirectoryStatus('unavailable');
             });
         return () => controller.abort();
-    }, [approvalMemberLoadAttempt, canManageApprovals]);
+    }, [activeWorkspaceId, approvalMemberLoadAttempt, canManageApprovals]);
 
     useEffect(() => {
         if (hash !== `#${DEAL_DOCUMENTS_ANCHOR}`) scrolledForHash.current = null;
@@ -266,12 +296,24 @@ export default function DealDocuments({
         };
     }, [approvalDialog, approvalDialogOpen, dealId]);
 
-    const run = async (op: () => Promise<void>, fallbackKey: string) => {
+    const run = async (
+        op: () => Promise<void>,
+        fallbackKey: string,
+        refusalCopy?: { title: string; description: string },
+    ) => {
         setBusy(true);
         try {
             await op();
         } catch (err) {
-            showApiError(err, fallbackKey);
+            const isForbiddenRefusal = err instanceof Error
+                && 'status' in err
+                && err.status === 403
+                && (!('emptyBody' in err) || err.emptyBody !== true);
+            if (isForbiddenRefusal && refusalCopy) {
+                showApiError(err, refusalCopy.title, refusalCopy.description);
+            } else {
+                showApiError(err, fallbackKey);
+            }
         } finally {
             setBusy(false);
         }
@@ -358,12 +400,15 @@ export default function DealDocuments({
     };
 
     const openStepManagementDialog = (doc: DealDocument, action: ApprovalStepManagementAction) => {
-        const steps = manageableApprovalSteps(doc, canManageApprovals);
+        const steps = action === 'escalate'
+            ? widenableApprovalSteps(doc, canManageApprovals)
+            : manageableApprovalSteps(doc, canManageApprovals);
         if (steps.length === 0) return;
+        const stepId = steps.length === 1 ? steps[0].id : null;
         setStepManagement({
             documentId: doc.id,
             action,
-            stepId: steps.length === 1 ? steps[0].id : null,
+            stepId,
             mode: 'members',
             members: [],
             comment: '',
@@ -374,13 +419,23 @@ export default function DealDocuments({
         if (!stepManagement || stepManagement.stepId == null) return;
         const { action, stepId, mode, members, comment: managementComment } = stepManagement;
         const doc = documents.find((candidate) => candidate.id === stepManagement.documentId);
-        if (!doc || !manageableApprovalSteps(doc, canManageApprovals).some((step) => step.id === stepId)) {
-            return;
-        }
+        if (!doc) return;
+        const currentSteps = action === 'escalate'
+            ? widenableApprovalSteps(doc, canManageApprovals)
+            : manageableApprovalSteps(doc, canManageApprovals);
+        const selectedStep = currentSteps.find((step) => step.id === stepId);
+        if (!selectedStep || approvalMemberDirectoryStatus !== 'ready') return;
+        const selection = mode === 'any_approver'
+            ? { mode: 'any_approver' as const }
+            : { mode: 'members' as const, memberIds: members.map((member) => member.id) };
+        if (approvalStepQuorumShortfall(
+            selectedStep,
+            action,
+            selection,
+            verifiedApprovalMemberIds,
+        ) > 0) return;
         const payload = approvalStepApproverChangePayload(
-            mode === 'any_approver'
-                ? { mode: 'any_approver' }
-                : { mode: 'members', memberIds: members.map((member) => member.id) },
+            selection,
             managementComment,
         );
         if (payload.approvers.length === 0) return;
@@ -388,9 +443,10 @@ export default function DealDocuments({
             const updatedApproval = action === 'escalate'
                 ? await widenDocumentApprovalStepApprovers(dealId, doc.id, stepId, payload)
                 : await reassignDocumentApprovalStepApprovers(dealId, doc.id, stepId, payload);
-            setDocuments((previous) => previous.map((document) => (
+            const nextDocuments = documents.map((document) => (
                 document.id === doc.id ? { ...document, latestApproval: updatedApproval } : document
-            )));
+            ));
+            setDocuments(nextDocuments);
             setStepManagement(null);
             toastSuccess(t(action === 'escalate' ? 'approversWidened' : 'approversReassigned'));
             try {
@@ -398,7 +454,10 @@ export default function DealDocuments({
             } catch (error) {
                 showApiError(error, 'refreshFailed');
             }
-        }, action === 'escalate' ? 'escalateFailed' : 'reassignFailed');
+        }, action === 'escalate' ? 'escalateFailed' : 'reassignFailed', {
+            title: 'approverChangeRefused',
+            description: 'approverChangeRefusedDescription',
+        });
     };
 
     const openPdf = (doc: DealDocument) => {
@@ -458,7 +517,9 @@ export default function DealDocuments({
         ? documents.find((document) => document.id === stepManagement.documentId) ?? null
         : null;
     const managedSteps = managedDocument
-        ? manageableApprovalSteps(managedDocument, canManageApprovals)
+        ? stepManagement?.action === 'escalate'
+            ? widenableApprovalSteps(managedDocument, canManageApprovals)
+            : manageableApprovalSteps(managedDocument, canManageApprovals)
         : [];
 
     return (
@@ -579,11 +640,13 @@ export default function DealDocuments({
                                                     {manageableApprovalSteps(doc, canManageApprovals).length > 0 && (
                                                         <>
                                                             {actionableStep(doc) && <DropdownMenuSeparator />}
-                                                            <DropdownMenuItem
-                                                                onSelect={() => openStepManagementDialog(doc, 'escalate')}
-                                                            >
-                                                                <UserPlusIcon className="size-4" />{t('widenApprovers')}
-                                                            </DropdownMenuItem>
+                                                            {widenableApprovalSteps(doc, canManageApprovals).length > 0 && (
+                                                                <DropdownMenuItem
+                                                                    onSelect={() => openStepManagementDialog(doc, 'escalate')}
+                                                                >
+                                                                    <UserPlusIcon className="size-4" />{t('widenApprovers')}
+                                                                </DropdownMenuItem>
+                                                            )}
                                                             <DropdownMenuItem
                                                                 onSelect={() => openStepManagementDialog(doc, 'reassign')}
                                                             >
@@ -716,7 +779,10 @@ export default function DealDocuments({
                     steps={managedSteps}
                     selectedStepId={stepManagement.stepId}
                     memberDirectoryStatus={approvalMemberDirectoryStatus}
-                    members={approvalMembers}
+                    members={approvalCandidates}
+                    verifiedApproverIds={verifiedApprovalMemberIds}
+                    memberLabelStatus={approvalMemberDirectoryStatus}
+                    memberLabels={approvalMembers}
                     mode={stepManagement.mode}
                     selectedMembers={stepManagement.members}
                     comment={stepManagement.comment}

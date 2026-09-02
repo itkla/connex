@@ -53,22 +53,35 @@ function statusMessageKey(status: number): string {
     return GENERIC_KEY;
 }
 
-function descriptionFor(error: unknown, t: MessageTranslator): string {
+function descriptionFor(error: unknown, t: MessageTranslator, fallbackDescriptionKey?: string): string {
     if (error instanceof TypeError) return t(OFFLINE_KEY);
     if (!(error instanceof ApiError)) return t(GENERIC_KEY);
 
     const codeKey = error.code === undefined ? undefined : CODE_MESSAGE_KEYS.get(error.code);
+    const requestedFallback = codeKey === undefined
+        && fallbackDescriptionKey !== undefined
+        && fallbackDescriptionKey !== ''
+        && t.has(fallbackDescriptionKey)
+        ? t(fallbackDescriptionKey)
+        : undefined;
+    const usableFallback = requestedFallback !== undefined
+        && requestedFallback !== fallbackDescriptionKey
+        && !requestedFallback.includes('{')
+        ? requestedFallback
+        : undefined;
     const description = t(codeKey ?? statusMessageKey(error.status));
-    if (!error.correlationId) return description;
+    const resolvedDescription = usableFallback ?? description;
+    if (!error.correlationId) return resolvedDescription;
 
-    return `${description} ${t(REFERENCE_KEY, { id: error.correlationId })}`;
+    return `${resolvedDescription} ${t(REFERENCE_KEY, { id: error.correlationId })}`;
 }
 
 /**
  * Translates any rejected request into the copy the user should read. The error's own text is never
  * consulted: backend prose, browser-engine prose, and status codes are engineering artefacts, so the
- * message is selected from the error's *meaning* — its stable code first, then its status, then a
- * fail-safe generic — and an unrecognized failure still yields sound copy.
+ * message is selected from the error's *meaning* — its stable code first, then caller-owned detail
+ * for a locally understood refusal, then its status, then a fail-safe generic — and an unrecognized
+ * failure still yields sound copy.
  *
  * A lost session is not a failure to report: it sends the user to sign in, remembering where they
  * were, and reports nothing. Where that navigation cannot happen — an authentication page is already
@@ -77,12 +90,14 @@ function descriptionFor(error: unknown, t: MessageTranslator): string {
  * @param error a rejected request's reason
  * @param t a translator bound to the message root
  * @param fallbackKey the caller's own title key naming the operation, resolved from the message root
+ * @param fallbackDescriptionKey caller-owned detail for a refusal whose meaning is known locally
  * @returns the copy to render, or null when the user is on their way to sign in
  */
 export function userMessageFor(
     error: unknown,
     t: MessageTranslator,
     fallbackKey?: string,
+    fallbackDescriptionKey?: string,
 ): UserFacingMessage | null {
     const expired = isSessionExpired(error);
     if (expired && redirectToSignIn()) return null;
@@ -97,7 +112,7 @@ export function userMessageFor(
         : undefined;
     return {
         title: usableFallback ?? t(GENERIC_TITLE_KEY),
-        description: expired ? t(SESSION_EXPIRED_KEY) : descriptionFor(error, t),
+        description: expired ? t(SESSION_EXPIRED_KEY) : descriptionFor(error, t, fallbackDescriptionKey),
     };
 }
 
@@ -108,9 +123,15 @@ export function userMessageFor(
  * @param error a rejected request's reason
  * @param t a translator bound to the message root
  * @param fallbackKey the caller's own title key naming the operation, resolved from the message root
+ * @param fallbackDescriptionKey caller-owned detail for a refusal whose meaning is known locally
  */
-export function toastApiError(error: unknown, t: MessageTranslator, fallbackKey?: string): void {
-    const message = userMessageFor(error, t, fallbackKey);
+export function toastApiError(
+    error: unknown,
+    t: MessageTranslator,
+    fallbackKey?: string,
+    fallbackDescriptionKey?: string,
+): void {
+    const message = userMessageFor(error, t, fallbackKey, fallbackDescriptionKey);
     if (message === null) return;
 
     toastError(message.title, { description: message.description });
