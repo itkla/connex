@@ -45,17 +45,17 @@ These are descriptions of shipped behavior, not proposed channel-sales behavior.
 
 | Current behavior | Evidence on `main` |
 | --- | --- |
-| Contact provenance supports `PARTNER` and `REFERRAL`; a referrer is allowed only for those sources. | [`PersonLeadSource.java`](../backend/src/main/java/ooo/klae/connex/backend/beans/PersonLeadSource.java), [`V179__person_lead_provenance.sql`](../backend/src/main/resources/db/migration/tenant/V179__person_lead_provenance.sql), and [`PersonService.validateProvenance`](../backend/src/main/java/ooo/klae/connex/backend/services/PersonService.java) |
-| Guided record creation repeats those lead-source values but does not add a channel-sales domain. | [`RecordCreationTemplateResolver.java`](../backend/src/main/java/ooo/klae/connex/backend/services/RecordCreationTemplateResolver.java), [`RecordCreationTemplateValidator.java`](../backend/src/main/java/ooo/klae/connex/backend/services/RecordCreationTemplateValidator.java), and [`RecordCreationTenantIsolationIntegrationTest.java`](../backend/src/test/java/ooo/klae/connex/backend/integration/RecordCreationTenantIsolationIntegrationTest.java) |
-| The frontend exposes partner/referral only as contact lead-source provenance. | [`contactProvenance.ts`](../frontend/app/lib/contactProvenance.ts), [`contacts.json` (EN)](../frontend/messages/en/contacts.json), and [`contacts.json` (JA)](../frontend/messages/ja/contacts.json) |
-| Introduction lineage and warm-path computation already exist. | [`V23__introduction.sql`](../backend/src/main/resources/db/migration/V23__introduction.sql), [`IntroductionService.java`](../backend/src/main/java/ooo/klae/connex/backend/services/IntroductionService.java), and [`WarmPathService.java`](../backend/src/main/java/ooo/klae/connex/backend/services/WarmPathService.java) |
-| `deal_person.role` is free text, while `deal_collaborator` is restricted by a foreign key to an internal `workspace_member`. | [`V1__baseline.sql`](../backend/src/main/resources/db/migration/V1__baseline.sql) |
-| Duplicate candidate review and serialized duplicate decisions already exist for records and deals. | [`DuplicatePreflightService.java`](../backend/src/main/java/ooo/klae/connex/backend/services/DuplicatePreflightService.java), [`DuplicateDecisionLockService.java`](../backend/src/main/java/ooo/klae/connex/backend/services/DuplicateDecisionLockService.java), and [`DealDuplicateReviewProofService.java`](../backend/src/main/java/ooo/klae/connex/backend/services/DealDuplicateReviewProofService.java) |
-| Approval policy and decision machinery is bound to document subjects and `DOCUMENT_APPROVE`. | [`ApprovalPolicyService.java`](../backend/src/main/java/ooo/klae/connex/backend/services/ApprovalPolicyService.java), [`DocumentApprovalService.java`](../backend/src/main/java/ooo/klae/connex/backend/services/DocumentApprovalService.java), and [`Permission.java`](../backend/src/main/java/ooo/klae/connex/backend/tenant/Permission.java) |
-| My Work currently projects tasks, notifications, and document approvals only. | [`WorkItemSource.java`](../backend/src/main/java/ooo/klae/connex/backend/dto/WorkItemSource.java) and [`DocumentApprovalWorkItemProvider.java`](../backend/src/main/java/ooo/klae/connex/backend/work/DocumentApprovalWorkItemProvider.java) |
-| Radar has an existing relationship-signal model and detector to extend. | [`RelationshipSignal.java`](../backend/src/main/java/ooo/klae/connex/backend/beans/RelationshipSignal.java) and [`RelationshipSignalDetectorService.java`](../backend/src/main/java/ooo/klae/connex/backend/services/RelationshipSignalDetectorService.java) |
-| Company and person records are workspace-owned but may be shared; private-to-shareable references use a plain foreign key plus a service-level visibility check. | [`MULTITENANCY_PLAN.md`](MULTITENANCY_PLAN.md#01-sharing-model--companies-contacts-pipelines-answers-2-6) |
-| `MemberScope` is a presentational owner filter, not an authorization boundary. | [`DEAL_VALUE_CONTRACT.md`](DEAL_VALUE_CONTRACT.md#owner-scope-is-not-an-authorization-boundary) and [`MemberScope.java`](../backend/src/main/java/ooo/klae/connex/backend/dto/MemberScope.java) |
+| Contact provenance supports `PARTNER` and `REFERRAL`; a referrer is allowed only for those sources. | [`PersonLeadSource.java:11-32`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/beans/PersonLeadSource.java#L11-L32), [`V179__person_lead_provenance.sql:12-27`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/resources/db/migration/tenant/V179__person_lead_provenance.sql#L12-L27), and [`PersonService.java:579-599`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/services/PersonService.java#L579-L599) |
+| Guided record creation repeats those lead-source values but does not add a channel-sales domain. | [`RecordCreationTemplateResolver.java:87-89`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/services/RecordCreationTemplateResolver.java#L87-L89) and [`RecordCreationTemplateValidator.java:65-69`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/services/RecordCreationTemplateValidator.java#L65-L69) |
+| The frontend exposes partner/referral only as contact lead-source provenance. | [`contactProvenance.ts:3-22`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/frontend/app/lib/contactProvenance.ts#L3-L22), [`messages/en/contacts.json:450-453`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/frontend/messages/en/contacts.json#L450-L453), and [`messages/ja/contacts.json:450-453`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/frontend/messages/ja/contacts.json#L450-L453) |
+| Introduction lineage and warm-path computation already exist. | [`V23__introduction.sql:2-30`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/resources/db/migration/V23__introduction.sql#L2-L30), [`IntroductionService.java:54-66`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/services/IntroductionService.java#L54-L66), and [`WarmPathService.java:39-54`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/services/WarmPathService.java#L39-L54) |
+| `deal_person.role` is free text, while `deal_collaborator` is restricted by a foreign key to an internal `workspace_member`. | [`V1__baseline.sql:264-283`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/resources/db/migration/V1__baseline.sql#L264-L283) |
+| Duplicate candidate review and serialized duplicate decisions already exist for records and deals. | [`DuplicatePreflightService.java:87-129`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/services/DuplicatePreflightService.java#L87-L129), [`DuplicateDecisionLockService.java:16-33`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/services/DuplicateDecisionLockService.java#L16-L33), and [`DealDuplicateReviewProofService.java:16-50`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/services/DealDuplicateReviewProofService.java#L16-L50) |
+| Approval policy and decision machinery is bound to document subjects and `DOCUMENT_APPROVE`. | [`ApprovalPolicyService.java:47-57`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/services/ApprovalPolicyService.java#L47-L57), [`DocumentApprovalService.java:62-79`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/services/DocumentApprovalService.java#L62-L79), and [`Permission.java:49-54`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/tenant/Permission.java#L49-L54) |
+| My Work currently projects tasks, notifications, and document approvals only. | [`WorkItemSource.java:3-8`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/dto/WorkItemSource.java#L3-L8) and [`DocumentApprovalWorkItemProvider.java:35-45`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/work/DocumentApprovalWorkItemProvider.java#L35-L45) |
+| Radar has an existing relationship-signal model and detector to extend. | [`RelationshipSignal.java:8-34`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/beans/RelationshipSignal.java#L8-L34) and [`RelationshipSignalDetectorService.java:41-69`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/services/RelationshipSignalDetectorService.java#L41-L69) |
+| Company and person records are workspace-owned but may be shared; private-to-shareable references use a plain foreign key plus a service-level visibility check. | [`MULTITENANCY_PLAN.md:41-56`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/docs/MULTITENANCY_PLAN.md#L41-L56) |
+| `MemberScope` is a presentational owner filter, not an authorization boundary. | [`DEAL_VALUE_CONTRACT.md:185-192`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/docs/DEAL_VALUE_CONTRACT.md#L185-L192) and [`MemberScope.java:9-24`](https://github.com/itkla/connex/blob/894b08efcbf8bf44eb0fc13fc9c31691a45d34e6/backend/src/main/java/ooo/klae/connex/backend/dto/MemberScope.java#L9-L24) |
 
 The decisions below deliberately reuse the adjacent behavior in this table rather than treating it
 as a partial implementation of #566.
@@ -380,35 +380,37 @@ cross-surface sharing classification already exists.
 - **Product decision — commercial scope.** Commission and rebate fields on a program are optional
   display-only metadata. They cannot accrue, become payable, record settlement, or drive accounting
   entries; accounting and payments remain integrations.
-- **PROPOSED — product-owner ratification required.** #566 retains the sharing-classification tag
-  workstream item for tasks, notes, activities, files, and milestones. Its
+- **PROPOSED — product-owner ratification required.** #566 delivers the sharing-classification tag
+  workstream item for tasks, notes, activities, files, and milestones as gated Increment 8. Its
   `sharing_classification` is `internal_only` or
   `approved_for_future_external_sharing`. `internal_only` is the default. The proposed
   `approved_for_future_external_sharing` value is eligibility metadata only: it never grants access
-  or causes disclosure by itself. Its schema, UI, and behavior are parked behind the external-access
-  demand gate and require product-owner glossary/scope ratification plus the Increment 8 threat
-  model before implementation. Removing this item from #566 is a product-owner scope decision, not
-  a decision made by this document.
+  or causes disclosure by itself. Its schema, UI, and behavior remain parked behind the
+  external-access demand gate and require product-owner glossary/scope ratification plus the
+  Increment 8 threat model before implementation.
 - **Product decision — assignment scope.** Named-account and territory inputs are inert until #564
   supplies canonical models; channel sales does not create substitutes.
 - **Product decision — information architecture.** The Partners directory remains a Companies
   filter; no sidebar section is added.
 - **Product decision — delivery gate.** Increments 1–7 remain parked until named demand is recorded.
 
-Increment 8 begins with a demand-validation spec and threat model, not code. It must define external
-identity without granting `app_user` or `workspace_member`, field-level least privilege,
-non-enumerability across search/deep links/notifications/exports/errors, revocation, tenant scope,
-audit, and adversarial tests. Only a following Tier 3 implementation may introduce the capability
-and its production configuration.
+Increment 8 begins with a demand-validation spec and threat model, not code, and then delivers the
+classification after its gates pass. The threat model must define external identity without granting
+`app_user` or `workspace_member`, field-level least privilege, non-enumerability across
+search/deep links/notifications/exports/errors, revocation, tenant scope, audit, and adversarial
+tests. Only a separately reviewed external-access implementation may introduce that capability and
+its production configuration.
 
-No dormant external-access capability or sharing-classification field ships in advance. A
-fail-closed flag without a real deployment setting, operator decision, and tested unavailable state
-is not protection; it is an unexercised code path. Parking the proposed classification preserves
-the product scope without pretending that its presence would safely enable external sharing.
+No dormant external-access capability ships with the classification. No read, search, export,
+notification, deep-link, or authorization path may interpret
+`approved_for_future_external_sharing` as access; no external principal or production configuration
+is introduced. The classification is inert eligibility metadata until a separately reviewed
+external-access implementation consumes it.
 
 **Rejected alternative — build portal seams or a disabled capability now.** Demand is unvalidated,
 and external identity and sharing would enlarge the tenancy and privacy boundary before its access
-contract exists. Deferring all code is the only option that is both fail-closed and reversible.
+contract exists. Deferring all external-access code is the only option that is both fail-closed and
+reversible.
 
 ## Delivery increments and epic coverage
 
@@ -425,11 +427,26 @@ criteria AC 1–9 retain their original order.
 | 5 | Registration projection in My Work plus internal partner-manager alerts | AC 4, AC 9 | Tier 2; no copied authority |
 | 6 | Evidence-backed split attribution and currency-partitioned partner reporting | AC 5, AC 6, AC 9 | Tier 2; **Tier 3 if exports change**; next available migration, floor V196 |
 | 7 | Evidence-grounded partner relationship signals through Radar | AC 7, AC 9 | Tier 2 |
-| 8 | Named-demand validation, sharing-classification ratification, and external-access threat model; implementation is a later issue | AC 8 design half, AC 9 plan | Spec is docs-only; any implementation is **Tier 3** |
+| 8 | After named external-access demand, product-owner ratification and threat modeling, ship the inert sharing-classification tag for tasks, notes, activities, files, and milestones; do not ship external access | AC 8, AC 9 plan | **Tier 3**: cross-surface privacy classification; external access remains out of scope |
 
 Tier 3 work receives security review plus a second non-overlapping review focused on
 correctness/concurrency/migration behavior. Increment 0 also receives independent adversarial review
 because it constrains those later changes.
+
+Increment 8 implementation may begin only after the external-access demand gate is met, the product
+owner ratifies the two-value glossary and five-surface scope, and the threat model is approved. Its
+acceptance criteria are:
+
+1. tasks, notes, activities, files, and milestones persist and expose exactly `internal_only` and
+   `approved_for_future_external_sharing`, with `internal_only` as the default for existing and new
+   records;
+2. authorized internal users can view and update the tag consistently across the five surfaces,
+   with EN/JA copy and audit coverage;
+3. workspace isolation, existing visibility rules, archive/privacy behavior, exports, search,
+   notifications, and deep links remain fail-closed and have negative tests proving the tag grants
+   no access; and
+4. no external identity, principal, route, token, permission, feature flag, deployment setting, or
+   portal seam ships with the classification.
 
 ## Increment acceptance checklist
 
