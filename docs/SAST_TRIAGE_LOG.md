@@ -442,12 +442,15 @@ settled accepted-by-design after execution-path verification. The reviewer's ful
 re-derivation is preserved on
 [#1296](https://github.com/itkla/connex/issues/1296) (comment of 2026-09-02).
 
-**This document is the canonical time-box for every dismissal in that batch.** The code-scanning
-API caps dismissal comments at 280 characters, and the shortened comments that fit lost the
-expiry text step 2 requires. For all alerts dismissed on 2026-08-30–31 under this review:
-disposition owner Hunter Nakagawa; approver Security Owner role (#1230); **expiry 2027-02-14;
-re-review 2027-01-14**; reassess earlier if a cited data flow changes or the relevant query is
-materially updated.
+**Historical note — this document was briefly the time-box carrier for that batch, and is not any
+longer.** The code-scanning API caps dismissal comments at 280 characters, and the shortened
+comments written on 2026-08-31 lost the expiry text step 2 requires; for a period this document
+carried it on their behalf. **That arrangement was remediated on 2026-09-02**: all 60 affected
+alerts were re-dismissed with the expiry and the `#1296` link stated inline in each comment, so the
+per-alert comments are now the record and this paragraph describes history only. See *Inline
+re-record of the 2026-08-31 batch* below. The governing values are unchanged: disposition owner
+Hunter Nakagawa; approver Security Owner role (#1230); **expiry 2027-02-14; re-review 2027-01-14**;
+reassess earlier if a cited data flow changes or the relevant query is materially updated.
 
 ### Risk acceptances (`won't fix`) — genuine mutations, accepted with compensating controls
 
@@ -517,16 +520,22 @@ through the code-scanning API. GitHub recomputed every one of the 30 directly to
 `open`, because the old-root path it points at does not exist in the current analysis — the platform
 independently confirming these are stale records with no live finding. A `fixed` alert carries no
 suppression and therefore needs no expiry, owner or re-review date, so this is a strictly better
-outcome than a compliant dismissal comment would have been. **None of the 30 ever entered the `open`
-state, so the baseline did not leave 0 open at any point during the operation.**
+outcome than a compliant dismissal comment would have been. What was observed at the time is that
+each reopen call returned `fixed` in its own API response, so no alert was seen in the `open` state
+during the operation; that is a record of the responses received, not a continuously sampled proof
+that no `open` state existed at any instant.
 
 **#76 alone remains dismissed, deliberately.** The CHK-089 re-test on
 [#1244](https://github.com/itkla/connex/issues/1244#issuecomment-5506662478) set its minimum
 remediation as: reopen, re-triage independently, add a log entry carrying disposition, evidence,
 owner, approver, expiry and re-review date, and only then dismiss again. That is what was done — see
 *Re-derivation of #76 / #130* below — so #76 keeps a genuine dismissal record rather than being
-converted to `fixed`. Its code-scanning comment states the expiry inline (265 characters, within the
-API's 280-character cap), satisfying step 3 directly rather than by reference. Owner
+converted to `fixed`. An earlier revision claimed its comment satisfied step 3 "directly rather than
+by reference"; that was **half true at best**, and round-2 review was right to say so. The comment
+carried the expiry but linked no issue, ending `See docs/SAST_TRIAGE_LOG.md.` — carrying the
+issue-link half by exactly the kind of document reference this section had rejected six lines
+earlier. Corrected on 2026-09-02: the comment now states both halves inline (269 characters), citing
+`#1296` alongside the expiry. Owner
 **Hunter Nakagawa**; approver **Security Owner** role
 ([#1230](https://github.com/itkla/connex/issues/1230)); **expiry 2027-02-14; re-review 2027-01-14**.
 
@@ -632,3 +641,70 @@ Disposition: **false positive**, on the same time-box as the rest of this batch 
 Hunter Nakagawa; approver Security Owner role; expiry **2027-02-14**, re-review **2027-01-14**.
 Reassess if `poll` gains a write, if `@Transactional` is added to it, or if the route's
 authentication posture changes. #76's code-scanning comment was updated to carry this expiry inline.
+
+## Inline re-record of the 2026-08-31 batch
+
+Round-2 independent confirmation of [#1296](https://github.com/itkla/connex/issues/1296) returned
+**NOT CONFIRMED** and rejected the arrangement the historical note above describes. Its reasoning is
+adopted here rather than argued with:
+
+> The API character cap does not change the policy; it merely requires shorter comments. Nor is
+> dismissal date a principled distinction. The 60 alerts are in precisely the by-reference state
+> that the repair rejected for the 2026-08-15 batch.
+
+The decisive point was internal inconsistency. *Disposition of the 31 records* rejects by-reference
+time-boxing in terms that apply verbatim to this batch — *"Inheritance in a document does not
+satisfy a clause that binds the comment"* — while the historical note asked this same document to
+carry 60 others. Both could not be right.
+
+**A steelman was considered and rejected.** [VULNERABILITY_MANAGEMENT.md](VULNERABILITY_MANAGEMENT.md)
+binds an exception's record to the *tracking issue* rather than to any particular artifact, which
+reads as licensing a document-level carrier; it is superseded here by the CodeQL-specific control in
+*False positives and suppressions* step 3 of [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md), which is the
+narrower and more specific rule and binds the dismissal comment itself.
+
+### What was done, 2026-09-02
+
+All **60** alerts dismissed 2026-08-31 without an inline expiry — #83–#109, #112–#113, #115–#140,
+#145–#149 — were re-recorded. The code-scanning API rejects a comment edit on an alert that is
+already dismissed, so each was reopened and immediately re-dismissed carrying a comment that states
+**both** halves step 3 requires: the expiry and the `#1296` link. Each alert's original
+`dismissed_reason` was preserved exactly; none was homogenised.
+
+| Property | Value |
+| --- | --- |
+| Alerts re-recorded | 60 |
+| Left open / failed | 0 |
+| `dismissed_reason` preserved | 60 of 60 |
+| `false positive` / `used in tests` / `won't fix` | 50 / 6 / 4 |
+| Longest new comment | 279 characters (cap 280) |
+| Reasoning compressed to fit | 22 of 60 |
+
+Unlike the 2026-08-15 batch, these paths **do** exist in the current analysis, so each alert
+recomputed to `open` on reopen rather than to `fixed`. The baseline was therefore transiently
+non-zero, one alert at a time, for the interval between the paired calls. This was accepted
+deliberately: the SAST merge gate is pull-request-scoped, so a transient default-branch state does
+not gate any merge, and the window was kept to a single immediate re-dismissal per alert with
+retries. Where reasoning had to be compressed to fit the cap, the full evidence remains in this log
+and on #1296 — step 1 of the procedure puts the evidence in the tracking issue, and step 3 asks the
+comment only for the link and the expiry.
+
+**#76 was corrected in the same pass.** Round-2 found it failing the *other* half of step 3: its
+comment stated the expiry but linked no issue, closing with a document reference. Its comment now
+cites `#1296` alongside the expiry (269 characters). It remains `dismissed` rather than converted to
+`fixed`, for the reason given in *Disposition of the 31 records*.
+
+### End state
+
+Recaptured from the code-scanning API after the operation: **145 alerts = 79 `fixed` + 66
+`dismissed` + 0 `open`**, and zero open alerts on `refs/heads/main`. Dismissal reasons across the 66
+are 51 `false positive`, 9 `won't fix`, 6 `used in tests` — identical to the pre-operation
+breakdown. Every one of the 66 now states an expiry inline, and every one links its governing issue
+(`#1296`, or `#1295` for #150, which was already compliant and left untouched). Reproduce with:
+
+```bash
+gh api --paginate "/repos/itkla/connex/code-scanning/alerts?tool_name=CodeQL&per_page=100" > /tmp/alerts.json
+jq '[.[]|select(.state=="dismissed")|select((.dismissed_comment//"")|test("[Ee]xpiry +20[0-9][0-9]-")|not)]|length' /tmp/alerts.json   # -> 0
+jq '[.[]|select(.state=="dismissed")|select((.dismissed_comment//"")|test("#12(96|95)")|not)]|length' /tmp/alerts.json                # -> 0
+jq '[.[]|select(.state=="open")]|length' /tmp/alerts.json                                                                             # -> 0
+```
