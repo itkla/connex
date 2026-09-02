@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -900,6 +901,11 @@ class DealServiceTest extends AbstractServiceTest {
         Stage stage = newStage(pipeline, 0);
         Company company = newCompany();
         Deal missingTokenDraft = dealDraft(pipeline, stage, company);
+        Deal duplicate = dealDraft(pipeline, stage, company);
+        duplicate.setWorkspaceId(workspace.getId());
+        duplicate.setOwnerId(currentUser.getId());
+        duplicate.setName(missingTokenDraft.getName());
+        dealMapper.insert(duplicate);
         MutationFootprint beforeMissing = mutationFootprint();
         clearDealCreationInvocations();
 
@@ -910,12 +916,16 @@ class DealServiceTest extends AbstractServiceTest {
         assertRejectedDealCreation(beforeMissing);
 
         Deal reviewedDraft = dealDraft(pipeline, stage, company);
+        reviewedDraft.setName(missingTokenDraft.getName());
         DuplicatePreflightResponse reviewed = duplicatePreflightService.preflightDeal(
             new DealDuplicatePreflightRequest(
                 reviewedDraft.getName(),
                 reviewedDraft.getCompanyId(),
                 null));
-        reviewedDraft.setName(reviewedDraft.getName() + " changed");
+        assertEquals(
+            List.of(duplicate.getId()),
+            reviewed.candidates().stream().map(candidate -> candidate.recordId()).toList());
+        reviewedDraft.setName(reviewedDraft.getName().toUpperCase(Locale.ROOT));
         MutationFootprint beforeMismatch = mutationFootprint();
         clearDealCreationInvocations();
 

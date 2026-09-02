@@ -5,7 +5,6 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -73,14 +72,6 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 @RequiredArgsConstructor
 public class RecordCreationTemplateService {
 
-    private record Selection(
-        String selectedTemplateId,
-        List<ResolvedCreationTemplateDto> templates,
-        List<RecordCreationWarningDto> warnings,
-        boolean partial
-    ) {
-    }
-
     private record DependencyIds(
         Set<Integer> customFields,
         Set<Integer> tags,
@@ -102,6 +93,7 @@ public class RecordCreationTemplateService {
     private final ShareMapper shareMapper;
     private final RecordCreationTemplateValidator validator;
     private final RecordCreationTemplateResolver resolver;
+    private final RecordCreationPresetService presetService;
     private final RecordCreationFieldRegistry fieldRegistry;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
@@ -111,24 +103,25 @@ public class RecordCreationTemplateService {
     public RecordCreationTemplateListDto list(
         RecordCreationRecordType recordType,
         boolean includeArchived) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        List<RecordCreationTemplate> roots =
-            templateMapper.listRoots(workspaceId, recordType.name(), includeArchived);
-        String selectedId = selection(workspaceId, recordType, null).selectedTemplateId();
+        RecordCreationPresetService.ResolutionSnapshot snapshot =
+            presetService.snapshot(recordType, null, includeArchived, null);
+        List<RecordCreationTemplate> roots = snapshot.roots();
+        String selectedId = snapshot.selectedTemplateId();
         List<RecordCreationTemplateSummaryDto> result = new ArrayList<>();
         for (RecordCreationTemplate root : roots) {
-            RecordCreationTemplateVersion version =
-                templateMapper.getCurrentVersion(workspaceId, root.getId());
-            result.add(summary(root, version, selectedId));
+            result.add(summary(
+                root,
+                snapshot.versions().get(root.getId()),
+                snapshot.resolved().get(root.getId()),
+                selectedId));
         }
         int systemPosition = roots.stream()
             .mapToInt(RecordCreationTemplate::getPosition)
             .max()
             .orElse(-1) + 1;
-        result.add(systemSummary(recordType, systemPosition, selectedId));
-        RecordCreationTemplateSet set = templateMapper.getSet(workspaceId, recordType.name());
+        result.add(systemSummary(recordType, systemPosition, selectedId, snapshot.system()));
         return new RecordCreationTemplateListDto(
-            set == null ? 0 : set.getRevision(), selectedId, List.copyOf(result));
+            snapshot.setRevision(), selectedId, List.copyOf(result));
     }
 
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
@@ -136,15 +129,15 @@ public class RecordCreationTemplateService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (fieldRegistry.isSystemId(templateId)) {
             RecordCreationRecordType recordType = systemRecordType(templateId);
-            String selectedId = selection(workspaceId, recordType, null).selectedTemplateId();
+            String selectedId = presetService.selectedTemplateId(recordType, null, null);
             return systemDto(recordType, selectedId.equals(templateId));
         }
         RecordCreationTemplate root = requireRoot(workspaceId, templateId, false);
         RecordCreationTemplateVersion version = requireCurrentVersion(workspaceId, root);
-        String selectedId = selection(
-            workspaceId,
+        String selectedId = presetService.selectedTemplateId(
             RecordCreationRecordType.valueOf(root.getRecordType()),
-            null).selectedTemplateId();
+            null,
+            null);
         return dto(root, version, selectedId.equals(templateId));
     }
 
@@ -220,7 +213,8 @@ public class RecordCreationTemplateService {
         List<String> removed = request.removedFieldKeys().stream().distinct().sorted().toList();
         List<String> blocked = blockedRequiredFields(
             workspaceId, request.recordType(), removed);
-        String currentSelected = selection(workspaceId, request.recordType(), null).selectedTemplateId();
+        String currentSelected = presetService.selectedTemplateId(
+            request.recordType(), null, null);
         String nextSelected = request.operation() == RecordCreationImpactOperation.archive
             ? selectedExcluding(workspaceId, request.recordType(), root.getId())
             : currentSelected;
@@ -325,11 +319,11 @@ public class RecordCreationTemplateService {
                 RecordCreationImpactOperation.remove_fields,
                 recordType,
                 templateId,
-                templateId.equals(selection(workspaceId, recordType, null).selectedTemplateId()),
+                templateId.equals(presetService.selectedTemplateId(recordType, null, null)),
                 RecordCreationTemplateStatus.enabled.name().equals(root.getStatus()),
                 removed,
                 blockedRequiredFields(workspaceId, recordType, removed),
-                selection(workspaceId, recordType, null).selectedTemplateId(),
+                presetService.selectedTemplateId(recordType, null, null),
                 0,
                 true));
         }
@@ -339,10 +333,10 @@ public class RecordCreationTemplateService {
             : RecordCreationTemplateStatus.disabled.name();
         boolean statusChanged = !desiredStatus.equals(root.getStatus());
         if (!contentChanged && !statusChanged) {
-            String updatedSelectedId = selection(
-                workspaceId,
+            String updatedSelectedId = presetService.selectedTemplateId(
                 RecordCreationRecordType.valueOf(root.getRecordType()),
-                null).selectedTemplateId();
+                null,
+                null);
             return dto(root, current, updatedSelectedId.equals(wireId(root)));
         }
         int expectedRootRevision = root.getRevision();
@@ -667,17 +661,10 @@ public class RecordCreationTemplateService {
 
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
     public RecordCreationPresetCatalogDto catalog(RecordCreationRecordType recordType) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        RecordCreationTemplateSet set = readSet(workspaceId, recordType);
-        Selection selection = selection(workspaceId, recordType, null);
-        return new RecordCreationPresetCatalogDto(
+        return presetService.catalog(
             recordType,
             RecordCreationEntryPoint.quick_create,
-            set.getRevision(),
-            selection.selectedTemplateId(),
-            selection.templates(),
-            selection.partial(),
-            selection.warnings());
+            null);
     }
 
     private RecordCreationTemplateDto changeState(
@@ -709,7 +696,7 @@ public class RecordCreationTemplateService {
                     RecordCreationImpactOperation.archive,
                     recordType,
                     templateId,
-                    templateId.equals(selection(workspaceId, recordType, null).selectedTemplateId()),
+                    templateId.equals(presetService.selectedTemplateId(recordType, null, null)),
                     RecordCreationTemplateStatus.enabled.name().equals(root.getStatus()),
                     List.of(),
                     List.of(),
@@ -848,80 +835,22 @@ public class RecordCreationTemplateService {
             HttpStatus.CONFLICT, "TEMPLATE_UNAVAILABLE", "The template is unavailable");
     }
 
-    private Selection selection(
-            int workspaceId,
-            RecordCreationRecordType recordType,
-            Integer excludedRootId) {
-        RecordCreationTemplateSet set = readSet(workspaceId, recordType);
-        List<RecordCreationTemplate> roots = templateMapper.listRoots(
-            workspaceId, recordType.name(), false).stream()
-            .filter(root -> !Objects.equals(excludedRootId, root.getId()))
-            .sorted(Comparator.comparingInt(RecordCreationTemplate::getPosition)
-                .thenComparingInt(RecordCreationTemplate::getId))
-            .toList();
-        List<ResolvedCreationTemplateDto> templates = new ArrayList<>();
-        List<RecordCreationWarningDto> warnings = new ArrayList<>();
-        String selected = null;
-        Map<Integer, ResolvedCreationTemplateDto> resolvedById = new LinkedHashMap<>();
-        for (RecordCreationTemplate root : roots) {
-            if (!RecordCreationTemplateStatus.enabled.name().equals(root.getStatus())) {
-                continue;
-            }
-            RecordCreationTemplateVersion version = templateMapper.getCurrentVersion(workspaceId, root.getId());
-            if (version == null) {
-                RecordCreationWarningDto warning = new RecordCreationWarningDto(
-                    "TEMPLATE_UNAVAILABLE", wireId(root), null, null);
-                warnings.add(warning);
-                continue;
-            }
-            ResolvedCreationTemplateDto resolved = resolver.resolveWorkspace(root, version, null);
-            templates.add(resolved);
-            warnings.addAll(resolved.warnings());
-            resolvedById.put(root.getId(), resolved);
-        }
-        if (set.getDefaultTemplateId() != null) {
-            ResolvedCreationTemplateDto explicit = resolvedById.get(set.getDefaultTemplateId());
-            if (explicit != null
-                    && explicit.availability() == RecordCreationTemplateAvailability.available) {
-                selected = explicit.id();
-            }
-        }
-        if (selected == null) {
-            selected = templates.stream()
-                .filter(template -> template.availability() == RecordCreationTemplateAvailability.available)
-                .map(ResolvedCreationTemplateDto::id)
-                .findFirst()
-                .orElse(null);
-        }
-        ResolvedCreationTemplateDto system = resolver.resolveSystem(recordType, null);
-        templates.add(system);
-        if (selected == null
-                && system.availability() == RecordCreationTemplateAvailability.available) {
-            selected = system.id();
-        }
-        if (selected == null) {
-            throw catalogUnavailable();
-        }
-        boolean partial = !warnings.isEmpty() || templates.stream()
-            .anyMatch(template -> template.availability() != RecordCreationTemplateAvailability.available);
-        return new Selection(selected, List.copyOf(templates), List.copyOf(warnings), partial);
-    }
-
     private String selectedExcluding(
             int workspaceId,
             RecordCreationRecordType recordType,
             int excludedRootId) {
-        return selection(workspaceId, recordType, excludedRootId).selectedTemplateId();
+        return presetService.selectedTemplateId(recordType, null, excludedRootId);
     }
 
     private RecordCreationTemplateSummaryDto summary(
             RecordCreationTemplate root,
             RecordCreationTemplateVersion version,
+            ResolvedCreationTemplateDto snapshotResolution,
             String selectedId) {
         RecordCreationRecordType recordType = RecordCreationRecordType.valueOf(root.getRecordType());
         ResolvedCreationTemplateDto resolved = version == null
             ? unavailable(wireId(root), recordType, false, 0, null, null)
-            : resolver.resolveWorkspace(root, version, null);
+            : snapshotResolution;
         return new RecordCreationTemplateSummaryDto(
             wireId(root),
             recordType,
@@ -945,9 +874,9 @@ public class RecordCreationTemplateService {
     private RecordCreationTemplateSummaryDto systemSummary(
             RecordCreationRecordType recordType,
             int position,
-            String selectedId) {
+            String selectedId,
+            ResolvedCreationTemplateDto resolved) {
         SystemPreset preset = fieldRegistry.systemPreset(recordType);
-        ResolvedCreationTemplateDto resolved = resolver.resolveSystem(recordType, null);
         return new RecordCreationTemplateSummaryDto(
             preset.id(),
             recordType,
@@ -1379,10 +1308,4 @@ public class RecordCreationTemplateService {
         }
     }
 
-    private static RecordCreationTemplateException catalogUnavailable() {
-        return RecordCreationTemplateException.of(
-            HttpStatus.SERVICE_UNAVAILABLE,
-            "TEMPLATE_CATALOG_UNAVAILABLE",
-            "The template catalog could not be loaded safely");
-    }
 }

@@ -136,6 +136,11 @@ docker compose up -d
 ```
 
 The same token is supplied to the backend through `.env` and to the OCR container by Compose.
+`CONNEX_RECORD_CREATION_GUIDED_CUTOVER_ENABLED` defaults to `false`, keeping the legacy interactive
+create bodies active. Set it to `true` only in the coupled release whose frontend sends guided,
+nested person, company, and deal create bodies; the enabled backend rejects legacy flat bodies and
+has no compatibility fallback. Values other than the exact literals `true` and `false` fail backend
+startup.
 AI remains instance-disabled unless `CONNEX_AI_ENABLED=true`. When the master switch is enabled,
 operators may independently disable deal briefs, deal-risk rationales, introduction rationales,
 report narratives, or provider-backed business-card extraction with

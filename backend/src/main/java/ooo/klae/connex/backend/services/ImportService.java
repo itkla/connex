@@ -51,6 +51,7 @@ import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.dto.RowAnalysis;
 import ooo.klae.connex.backend.dto.RowError;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
 import ooo.klae.connex.backend.mappers.DealLineItemMapper;
@@ -58,7 +59,9 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.IdentityMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
+import ooo.klae.connex.backend.mappers.RecordCreationTemplateMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
+import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -72,8 +75,10 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
  * <p>For throughput and to keep the audit log readable, imports use the batch-insert mappers and
  * write a single {@code import.*} audit summary for the imported records rather than auditing each
  * row, and do not fire per-row rule/notification triggers for them. Writable matched targets are
- * locked in ascending record-id order before any dependency is created. Tags, referenced
- * companies, and auto-created custom-field definitions are resolved in stable key order through
+ * locked in ascending record-id order before any dependency is created. Imports that may create a
+ * custom-field definition first lock its template-set synchronization root, matching guided and
+ * template-administration writers, while definition creation remains after target revalidation.
+ * Tags, referenced companies, and auto-created definitions are resolved in stable key order through
  * their permission-checked services.
  *
  * <p>Identity provenance uses {@code csv-row:N}, where {@code N} is the one-based ordinal in the
@@ -102,6 +107,7 @@ public class ImportService {
     private final DealStageHistoryService dealStageHistoryService;
     private final CustomFieldDefinitionMapper customFieldDefinitionMapper;
     private final CustomFieldDefinitionService customFieldDefinitionService;
+    private final RecordCreationTemplateMapper recordCreationTemplateMapper;
     private final CustomFieldValueService customFieldValueService;
     private final AuditService auditService;
     private final IdentityIntakeService identityIntakeService;
@@ -229,6 +235,7 @@ public class ImportService {
         DuplicatePreflightService.ImportCommitAdmission admission =
             duplicatePreflightService.claimImportCommit(
                 request.getDuplicateReviewProof(), reviewContext);
+        lockImportPermission(workspaceId, Permission.PERSON_CREATE);
         duplicateDecisionLockService.lockCurrentOrganization();
         int actorId = authService.getCurrentUser().getId();
         ImportAnalysis analysis = analyzePersons(
@@ -236,6 +243,8 @@ public class ImportService {
         List<PlanRow> plan = analysis.plan();
         List<PlanRow> mutations = analysis.mutations();
         requireUpdatePermission(mutations, action, Permission.PERSON_UPDATE);
+        lockCustomFieldTemplateSetBeforeTargets(
+            "person", request.getMapping(), mutations, action);
 
         Map<Integer, Person> lockedTargets = lockMatchedTargets(
             mutations,
@@ -584,6 +593,7 @@ public class ImportService {
         DuplicatePreflightService.ImportCommitAdmission admission =
             duplicatePreflightService.claimImportCommit(
                 request.getDuplicateReviewProof(), reviewContext);
+        lockImportPermission(workspaceId, Permission.COMPANY_CREATE);
         duplicateDecisionLockService.lockCurrentOrganization();
         int actorId = authService.getCurrentUser().getId();
         ImportAnalysis analysis = analyzeCompanies(
@@ -591,6 +601,8 @@ public class ImportService {
         List<PlanRow> plan = analysis.plan();
         List<PlanRow> mutations = analysis.mutations();
         requireUpdatePermission(mutations, action, Permission.COMPANY_UPDATE);
+        lockCustomFieldTemplateSetBeforeTargets(
+            "company", request.getMapping(), mutations, action);
 
         Map<Integer, Company> lockedTargets = lockMatchedTargets(
             mutations,
@@ -1030,6 +1042,7 @@ public class ImportService {
         DuplicatePreflightService.ImportCommitAdmission admission =
             duplicatePreflightService.claimImportCommit(
                 request.getDuplicateReviewProof(), reviewContext);
+        lockImportPermission(workspaceId, Permission.DEAL_CREATE);
         duplicateDecisionLockService.lockCurrentOrganization();
         int actorId = authService.getCurrentUser().getId();
         ImportAnalysis analysis = analyzeDeals(
@@ -1041,6 +1054,8 @@ public class ImportService {
         List<PlanRow> plan = analysis.plan();
         List<PlanRow> mutations = analysis.mutations();
         requireUpdatePermission(mutations, action, Permission.DEAL_UPDATE);
+        lockCustomFieldTemplateSetBeforeTargets(
+            "deal", request.getMapping(), mutations, action);
 
         Map<Integer, Deal> lockedTargets = lockMatchedTargets(
             mutations,
@@ -1742,6 +1757,62 @@ public class ImportService {
             columnToDef.put(cm.getColumn(), createDefinition(workspaceId, entityType, cm));
         }
         return columnToDef;
+    }
+
+    private void lockCustomFieldTemplateSetBeforeTargets(
+            String entityType,
+            List<ColumnMapping> mapping,
+            List<PlanRow> plan,
+            String action) {
+        Set<String> usedNewColumns = usedNewCustomFieldColumns(plan, action);
+        List<ColumnMapping> usedMappings = mapping.stream()
+            .filter(cm -> Boolean.TRUE.equals(cm.getCreateCustomField()))
+            .filter(cm -> usedNewColumns.contains(cm.getColumn()))
+            .toList();
+        if (usedMappings.isEmpty()) {
+            return;
+        }
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<String> definitionKeys = usedMappings.stream()
+            .map(ImportService::customLabel)
+            .map(ImportService::slug)
+            .toList();
+        Set<String> missingBeforeLock = missingDefinitionKeys(workspaceId, entityType, definitionKeys);
+        if (!missingBeforeLock.isEmpty()) {
+            workspaceService.lockAndRequirePermissions(
+                workspaceId,
+                Map.of(
+                    workspaceService.getCurrentUserId(),
+                    Set.of(Permission.CUSTOM_FIELD_MANAGE)));
+        }
+        RecordCreationRecordType recordType = RecordCreationRecordType.valueOf(entityType);
+        recordCreationTemplateMapper.insertSetIfAbsent(workspaceId, recordType.name());
+        if (recordCreationTemplateMapper.getSetForUpdate(workspaceId, recordType.name()) == null) {
+            throw new IllegalStateException("Record creation template set could not be locked");
+        }
+        if (!missingDefinitionKeys(workspaceId, entityType, definitionKeys).equals(missingBeforeLock)) {
+            throw new ConflictException(
+                "Custom field definitions changed; review the import again");
+        }
+    }
+
+    private Set<String> missingDefinitionKeys(
+            int workspaceId, String entityType, List<String> definitionKeys) {
+        Set<String> missing = new TreeSet<>();
+        for (String key : definitionKeys) {
+            if (customFieldDefinitionMapper.getByKey(workspaceId, entityType, key) == null) {
+                missing.add(key);
+            }
+        }
+        return missing;
+    }
+
+    private void lockImportPermission(int workspaceId, Permission permission) {
+        workspaceService.lockAndRequirePermissions(
+            workspaceId,
+            Map.of(
+                workspaceService.getCurrentUserId(),
+                Set.of(permission)));
     }
 
     private int createDefinition(int workspaceId, String entityType, ColumnMapping cm) {

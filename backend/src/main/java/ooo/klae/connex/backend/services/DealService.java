@@ -92,6 +92,7 @@ import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
+import ooo.klae.connex.backend.recordcreation.RecordCreationAugmentation;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
@@ -138,6 +139,7 @@ public class DealService {
     private final DealOutcomeWriter dealOutcomeWriter;
     private final DuplicatePreflightService duplicatePreflightService;
     private final DuplicateDecisionLockService duplicateDecisionLockService;
+    private final RecordCreationAugmentationService recordCreationAugmentationService;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -999,8 +1001,9 @@ public class DealService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal create(Deal deal) {
+        lockCreatePermission();
         duplicateDecisionLockService.lockCurrentOrganization();
-        return createAfterDuplicateDecisionLock(deal);
+        return createAfterDuplicateDecisionLock(deal, null);
     }
 
     /**
@@ -1013,16 +1016,38 @@ public class DealService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_CREATE)
     public Deal createReviewed(Deal deal, String duplicateReviewToken) {
+        lockCreatePermission();
         duplicatePreflightService.requireReviewedDealCreation(
             new DealDuplicatePreflightRequest(
                 deal.getName(),
                 deal.getCompanyId(),
                 null),
             duplicateReviewToken);
-        return createAfterDuplicateDecisionLock(deal);
+        return createAfterDuplicateDecisionLock(deal, null);
     }
 
-    private Deal createAfterDuplicateDecisionLock(Deal deal) {
+    Deal createReviewed(
+            Deal deal,
+            String duplicateReviewToken,
+            RecordCreationAugmentation augmentation) {
+        duplicatePreflightService.requireReviewedDealCreation(
+            new DealDuplicatePreflightRequest(
+                deal.getName(),
+                deal.getCompanyId(),
+                null),
+            duplicateReviewToken);
+        RecordCreationAugmentationService.PreparedAugmentation prepared =
+            recordCreationAugmentationService.prepareDeal(
+                deal.getPipelineId(),
+                deal.getStageId(),
+                deal.getCompanyId(),
+                augmentation);
+        return createAfterDuplicateDecisionLock(deal, prepared);
+    }
+
+    private Deal createAfterDuplicateDecisionLock(
+            Deal deal,
+            RecordCreationAugmentationService.PreparedAugmentation prepared) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(authService.getCurrentUser().getId());
@@ -1038,13 +1063,39 @@ public class DealService {
             dealStageHistoryService.recordInitial(
                 workspaceId, deal.getId(), deal.getStageId(), deal.getWon());
         }
+        Map<String, Object> auditChanges = auditService.diff(null, deal, AUDIT_FIELDS);
+        if (prepared != null) {
+            auditChanges = withCreationMetadata(
+                auditChanges,
+                recordCreationAugmentationService.applyDeal(
+                    deal.getId(), prepared));
+        }
         auditService.record("deal.create", "deal", deal.getId(), deal.getName(),
             "Created deal " + deal.getName(),
-            auditService.diff(null, deal, AUDIT_FIELDS));
+            auditChanges);
         notificationChanges.publish(workspaceId, "deal", deal.getId());
         ruleTriggers.publish(workspaceId, "deal", deal.getId(), "deal.created");
         syncClosedReasonMentions(workspaceId, deal);
         return hydrateReferences(workspaceId, deal);
+    }
+
+    private static Map<String, Object> withCreationMetadata(
+            Map<String, Object> changes,
+            Map<String, Object> metadata) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (changes != null) {
+            result.putAll(changes);
+        }
+        result.putAll(metadata);
+        return result;
+    }
+
+    private void lockCreatePermission() {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        workspaceService.lockAndRequirePermissions(
+            workspaceId,
+            Map.of(actorId, Set.of(Permission.DEAL_CREATE)));
     }
 
     /**

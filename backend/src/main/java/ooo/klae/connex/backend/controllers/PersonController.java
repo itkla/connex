@@ -287,17 +287,6 @@ public class PersonController {
     }
 
     /**
-     * POST endpoint to create a new person.
-     * @param dto
-     * @return
-     */
-    @PostMapping
-    public PersonDto createPerson(@Valid @RequestBody PersonDto dto) {
-        return PersonDto.from(personService.createReviewed(
-            dto.toBean(), dto.getDuplicateReviewToken()));
-    }
-
-    /**
      * PUT endpoint to update an existing person.
      * @param id
      * @param dto

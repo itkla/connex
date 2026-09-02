@@ -32,6 +32,12 @@ public interface DealDuplicateReviewProofMapper {
         @Param("tokenHash") byte[] tokenHash,
         @Param("workspaceId") int workspaceId);
 
+    int deleteSubmitted(
+        @Param("tokenHash") byte[] tokenHash,
+        @Param("workspaceId") int workspaceId,
+        @Param("actorId") int actorId,
+        @Param("workflowHash") byte[] workflowHash);
+
     int deleteForActor(
         @Param("workspaceId") int workspaceId,
         @Param("actorId") int actorId);

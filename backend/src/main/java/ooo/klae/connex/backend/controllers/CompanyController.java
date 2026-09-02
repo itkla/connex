@@ -247,17 +247,6 @@ public class CompanyController {
     }
 
     /**
-     * POST Creates a new company.
-     * @param company
-     * @return
-     */
-    @PostMapping
-    public CompanyDto createCompany(@Valid @RequestBody CompanyDto dto) {
-        return CompanyDto.from(companyService.createCompanyReviewed(
-            dto.toBean(), dto.getDuplicateReviewToken()));
-    }
-
-    /**
      * PUT Updates an existing company.
      * @param id
      * @param company

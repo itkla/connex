@@ -46,6 +46,14 @@
       AND workspace_id = #{workspaceId}
   </delete>
 
+  <delete id="deleteSubmitted">
+    DELETE FROM deal_duplicate_review_proof
+    WHERE token_hash = #{tokenHash}
+      AND workspace_id = #{workspaceId}
+      AND actor_id = #{actorId}
+      AND workflow_hash = #{workflowHash}
+  </delete>
+
   <delete id="deleteForActor">
     DELETE FROM deal_duplicate_review_proof
     WHERE workspace_id = #{workspaceId}

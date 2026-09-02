@@ -61,6 +61,26 @@ public class DealDuplicateReviewProofService {
                 proof.principal().workspaceId()) == 1;
     }
 
+    /**
+     * Invalidates a submitted proof for the current workspace, actor, and workflow without accepting
+     * it. Binding to the workflow fingerprint keeps an unrelated in-flight proof for a different deal
+     * workflow untouched; the result fingerprint is deliberately not required because an empty final
+     * candidate set legitimately differs from the reviewed result.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean invalidateSubmitted(String rawToken, String workflowFingerprint) {
+        byte[] tokenHash = tokenHash(rawToken);
+        if (tokenHash == null) {
+            return false;
+        }
+        Principal principal = principal();
+        return mapper.deleteSubmitted(
+            tokenHash,
+            principal.workspaceId(),
+            principal.actorId(),
+            fingerprintBytes(workflowFingerprint, "workflow fingerprint")) == 1;
+    }
+
     /** Validates an exact unexpired proof without consuming it. */
     @Transactional(propagation = Propagation.MANDATORY)
     public boolean isConsumable(

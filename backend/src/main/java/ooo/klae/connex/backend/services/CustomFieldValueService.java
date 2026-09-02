@@ -4,9 +4,12 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import tools.jackson.databind.JsonNode;
 
 import org.springframework.stereotype.Service;
 
@@ -114,6 +117,29 @@ public class CustomFieldValueService {
         coerce(workspaceService.getCurrentWorkspaceId(), def.getEntityType(), 0, def, raw);
     }
 
+    void applyJsonValuesForCreate(
+            String entityType,
+            int entityId,
+            Map<Integer, JsonNode> values,
+            Map<Integer, CustomFieldDefinition> lockedDefinitions) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        String type = normalize(entityType);
+        for (int definitionId : new LinkedHashSet<>(values.keySet()).stream().sorted().toList()) {
+            CustomFieldDefinition definition = lockedDefinitions.get(definitionId);
+            if (definition == null
+                    || definition.isArchived()
+                    || !type.equals(definition.getEntityType())) {
+                throw new BadRequestException("Unknown custom field: " + definitionId);
+            }
+            writeOne(
+                workspaceId,
+                type,
+                entityId,
+                definition,
+                rawValue(values.get(definitionId)));
+        }
+    }
+
     private void writeOne(int workspaceId, String entityType, int entityId, CustomFieldDefinition def, Object raw) {
         CustomFieldValue value = coerce(workspaceId, entityType, entityId, def, raw);
         if (value == null) {
@@ -124,6 +150,22 @@ public class CustomFieldValueService {
         } else {
             valueMapper.upsert(value);
         }
+    }
+
+    private static Object rawValue(JsonNode value) {
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (value.isTextual()) {
+            return value.textValue();
+        }
+        if (value.isBoolean()) {
+            return value.booleanValue();
+        }
+        if (value.isNumber()) {
+            return value.decimalValue();
+        }
+        return value.toString();
     }
 
     private Map<Integer, CustomFieldDefinition> activeDefs(int workspaceId, String entityType) {

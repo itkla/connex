@@ -608,17 +608,6 @@ public class DealController {
     }
 
     /**
-     * POST endpoint to create a new deal.
-     * @param dto deal values and duplicate review token
-     * @return
-     */
-    @PostMapping
-    public DealDto createDeal(@Valid @RequestBody DealDto dto) {
-        return DealDto.from(dealService.createReviewed(
-            dto.toBean(), dto.getDuplicateReviewToken()));
-    }
-
-    /**
      * PUT endpoint to update an existing deal.
      * @param id
      * @param deal

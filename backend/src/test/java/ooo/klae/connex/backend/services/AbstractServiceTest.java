@@ -52,7 +52,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional
 @Import(AbstractServiceTest.ApprovalMutationTestConfiguration.class)
-abstract class AbstractServiceTest {
+public abstract class AbstractServiceTest {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class ApprovalMutationTestConfiguration {
@@ -110,7 +110,7 @@ abstract class AbstractServiceTest {
     protected User currentUser;
 
     @BeforeEach
-    void setUpWorkspaceAndAuthentication() {
+    protected void setUpWorkspaceAndAuthentication() {
         workspace = workspaceMapper.getDefaultWorkspace();
         if (workspace == null) {
             workspace = new Workspace();
@@ -140,7 +140,7 @@ abstract class AbstractServiceTest {
     }
 
     @AfterEach
-    void clearAuthentication() {
+    protected void clearAuthentication() {
         SecurityContextHolder.clearContext();
         clearRequestContext();
     }

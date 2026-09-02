@@ -24,10 +24,35 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.RecordCreationTemplateMapper;
 
 class CustomFieldServiceTest extends AbstractServiceTest {
 
     @Autowired CustomFieldDefinitionService service;
+    @Autowired RecordCreationTemplateMapper templateMapper;
+
+    @Test
+    void schemaMutationsAdvanceOnlyTheAffectedTemplateSetRevision() {
+        CustomFieldDefinition created = service.create(def("person", "text", "revision_probe"), null);
+
+        assertEquals(1, templateMapper.getSet(workspace.getId(), "person").getRevision());
+        assertNull(templateMapper.getSet(workspace.getId(), "company"));
+        assertNull(templateMapper.getSet(workspace.getId(), "deal"));
+
+        CustomFieldDefinition edit = def("person", "text", "revision_probe");
+        edit.setLabel("Updated label");
+        service.update(created.getId(), edit, null);
+
+        assertEquals(2, templateMapper.getSet(workspace.getId(), "person").getRevision());
+        assertNull(templateMapper.getSet(workspace.getId(), "company"));
+        assertNull(templateMapper.getSet(workspace.getId(), "deal"));
+
+        service.delete(created.getId());
+
+        assertEquals(3, templateMapper.getSet(workspace.getId(), "person").getRevision());
+        assertNull(templateMapper.getSet(workspace.getId(), "company"));
+        assertNull(templateMapper.getSet(workspace.getId(), "deal"));
+    }
 
     @Test
     void create_persistsAndAssignsId() {

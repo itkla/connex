@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -11,6 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
@@ -26,6 +30,58 @@ class CustomFieldValueServiceTest extends AbstractServiceTest {
     @Autowired CustomFieldValueService valueService;
     @Autowired CompanyService companyService;
     @Autowired CustomFieldValueMapper valueMapper;
+
+    private final JsonMapper objectMapper = JsonMapper.builder().findAndAddModules().build();
+
+    @Test
+    void guidedCreateValuesCoerceEverySupportedTypeFromJson() {
+        Company company = newCompany();
+        CustomFieldDefinition text = companyField("guided_text", "text", null);
+        CustomFieldDefinition textarea = companyField("guided_textarea", "textarea", null);
+        CustomFieldDefinition url = companyField("guided_url", "url", null);
+        CustomFieldDefinition number = companyField("guided_number", "number", null);
+        CustomFieldDefinition date = companyField("guided_date", "date", null);
+        CustomFieldDefinition bool = companyField("guided_boolean", "boolean", null);
+        CustomFieldDefinition select = companyField(
+            "guided_select", "select", List.of(new CustomFieldOption("hot", "Hot")));
+        Map<Integer, CustomFieldDefinition> definitions = new LinkedHashMap<>();
+        for (CustomFieldDefinition definition : List.of(
+                text, textarea, url, number, date, bool, select)) {
+            definitions.put(definition.getId(), definition);
+        }
+        Map<Integer, JsonNode> values = new LinkedHashMap<>();
+        values.put(text.getId(), objectMapper.valueToTree("Gold"));
+        values.put(textarea.getId(), objectMapper.valueToTree("Long guided notes"));
+        values.put(url.getId(), objectMapper.valueToTree("https://example.com/guided"));
+        values.put(number.getId(), objectMapper.valueToTree(new BigDecimal("42.5")));
+        values.put(date.getId(), objectMapper.valueToTree("2026-06-26"));
+        values.put(bool.getId(), objectMapper.valueToTree(false));
+        values.put(select.getId(), objectMapper.valueToTree("hot"));
+
+        valueService.applyJsonValuesForCreate("company", company.getId(), values, definitions);
+
+        List<CustomFieldEntryDto> entries = valueService.getForEntity("company", company.getId());
+        assertEquals("Gold", value(entries, text.getId()));
+        assertEquals("Long guided notes", value(entries, textarea.getId()));
+        assertEquals("https://example.com/guided", value(entries, url.getId()));
+        assertEquals(0, new BigDecimal("42.5").compareTo(
+            (BigDecimal) value(entries, number.getId())));
+        assertEquals("2026-06-26", value(entries, date.getId()));
+        assertEquals(false, value(entries, bool.getId()));
+        assertEquals("hot", value(entries, select.getId()));
+    }
+
+    @Test
+    void guidedCreateValuesRejectWrongRecordType() {
+        Company company = newCompany();
+        CustomFieldDefinition definition = companyField("guided_wrong_type", "text", null);
+
+        assertThrows(BadRequestException.class, () -> valueService.applyJsonValuesForCreate(
+            "person",
+            company.getId(),
+            Map.of(definition.getId(), objectMapper.valueToTree("forged")),
+            Map.of(definition.getId(), definition)));
+    }
 
     @Test
     void getForEntity_listsEveryFieldEvenUnfilled() {

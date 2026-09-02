@@ -46,6 +46,13 @@ Deal acknowledgement:
 - cannot acknowledge a truncated candidate set;
 - is atomically consumed only after the mutation's locked final candidate recheck.
 
+If the locked final deal candidate set is empty, creation needs no acknowledgement, but a submitted
+one-use proof is invalidated for that workspace, actor, and deal workflow before creation proceeds.
+A proof from an earlier non-empty result of the same workflow must not survive candidate
+disappearance for later replay. Invalidation binds to the workflow fingerprint but not the result
+fingerprint — the empty set legitimately differs from the reviewed result — so a still-valid proof
+for a different deal workflow submitted concurrently under the same token is left untouched.
+
 Do not create a separate simplified duplicate path for a new form/import surface.
 
 ## Locking and final recheck
@@ -75,6 +82,10 @@ At commit:
 - a vanished target invalidates its rows without forcing unrelated valid rows to fail;
 - an all-vanished batch produces no dependency/audit side effect;
 - disappearing dependencies fail transactionally so the complete import rolls back.
+
+An import that uses an auto-create custom-field mapping locks the affected record-creation template
+set before writable record targets, as defined in `docs/backend/LOCKING.md`. This is a schema fence;
+the definition itself remains uncreated until target and identity revalidation succeeds.
 
 Do not add a dependency-first lock pass; it reverses the interactive mutation order and creates a deadlock cycle.
 

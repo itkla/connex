@@ -507,7 +507,8 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(IdentityIntakeService.class),
             mock(MatchingService.class),
             mock(DuplicatePreflightService.class),
-            mock(DuplicateDecisionLockService.class));
+            mock(DuplicateDecisionLockService.class),
+            mock(RecordCreationAugmentationService.class));
 
         var engagement = service.getCompanyEngagement(9);
 
@@ -550,7 +551,8 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(IdentityIntakeService.class),
             mock(MatchingService.class),
             mock(DuplicatePreflightService.class),
-            mock(DuplicateDecisionLockService.class));
+            mock(DuplicateDecisionLockService.class),
+            mock(RecordCreationAugmentationService.class));
 
         CompanyService.CompanyTimelineData timeline = service.getCompanyTimeline(9, 25);
 
@@ -600,7 +602,8 @@ class CompanyServiceTest extends AbstractServiceTest {
             mock(IdentityIntakeService.class),
             matchingService(),
             mock(DuplicatePreflightService.class),
-            mock(DuplicateDecisionLockService.class)
+            mock(DuplicateDecisionLockService.class),
+            mock(RecordCreationAugmentationService.class)
         );
     }
 

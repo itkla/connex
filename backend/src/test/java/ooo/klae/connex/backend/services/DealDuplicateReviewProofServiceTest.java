@@ -102,8 +102,29 @@ class DealDuplicateReviewProofServiceTest {
     }
 
     @Test
+    void submittedProofInvalidationIsActorAndWorkflowScopedAndOneUse() {
+        when(mapper.deleteSubmitted(
+                any(),
+                eq(5),
+                eq(9),
+                aryEq(HexFormat.of().parseHex("a".repeat(64)))))
+            .thenReturn(1, 0);
+
+        assertTrue(service.invalidateSubmitted("c".repeat(64), "a".repeat(64)));
+        assertFalse(service.invalidateSubmitted("c".repeat(64), "a".repeat(64)));
+
+        verify(mapper, org.mockito.Mockito.times(2))
+            .deleteSubmitted(
+                any(),
+                eq(5),
+                eq(9),
+                aryEq(HexFormat.of().parseHex("a".repeat(64))));
+    }
+
+    @Test
     void malformedTokenFailsBeforePersistenceAccess() {
         assertFalse(service.consume("not-a-token", "a".repeat(64), "b".repeat(64)));
+        assertFalse(service.invalidateSubmitted("not-a-token", "a".repeat(64)));
         assertFalse(service.consume("C".repeat(64), "a".repeat(64), "b".repeat(64)));
         assertFalse(service.isConsumable(
             "not-a-token",
@@ -113,5 +134,6 @@ class DealDuplicateReviewProofServiceTest {
         verify(mapper, never())
             .lockConsumable(any(), anyInt(), anyInt(), any(), any());
         verify(mapper, never()).deleteClaimed(any(), anyInt());
+        verify(mapper, never()).deleteSubmitted(any(), anyInt(), anyInt(), any());
     }
 }

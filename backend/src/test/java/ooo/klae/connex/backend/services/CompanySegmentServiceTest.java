@@ -48,7 +48,8 @@ class CompanySegmentServiceTest {
         mock(IdentityIntakeService.class),
         mock(MatchingService.class),
         mock(DuplicatePreflightService.class),
-        mock(DuplicateDecisionLockService.class)
+        mock(DuplicateDecisionLockService.class),
+        mock(RecordCreationAugmentationService.class)
     );
 
     @Test

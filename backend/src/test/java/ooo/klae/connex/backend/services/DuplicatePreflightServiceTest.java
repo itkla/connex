@@ -37,6 +37,7 @@ import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.DuplicateReviewException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.IdentityMapper;
@@ -269,16 +270,34 @@ class DuplicatePreflightServiceTest {
             .thenReturn(List.of(
                 row(18, 7, "Changed Candidate", "email", "changing@example.com")));
 
-        assertThrows(
-            ConflictException.class,
-            () -> service.requireReviewedPersonCreation(
-                request, reviewed.reviewToken()));
+        DuplicateReviewException exception = assertThrows(
+            DuplicateReviewException.class,
+            () -> service.requireReviewedPersonCreation(request, reviewed.reviewToken()));
+        assertEquals("DUPLICATE_REVIEW_STALE", exception.getCode());
         org.mockito.InOrder locks =
             org.mockito.Mockito.inOrder(duplicateDecisionLockService, identityMapper);
         locks.verify(duplicateDecisionLockService).lockCurrentOrganization();
         locks.verify(identityMapper).lockCurrentPersonIdentityGroup(
             7, "email", "changing@example.com");
         verify(rateLimiter, org.mockito.Mockito.times(2)).requireAllowed(1);
+    }
+
+    @Test
+    void reviewedCreationUsesRequiredCodeWhenCandidatesExistWithoutProof() {
+        PersonDuplicatePreflightRequest request = new PersonDuplicatePreflightRequest(
+            null, List.of("required@example.com"), List.of());
+        when(matchingService.normalizeIdentifier(IdentityKind.EMAIL, "required@example.com"))
+            .thenReturn(Optional.of("required@example.com"));
+        when(identityMapper.findVisiblePersonIdentityMatches(
+                eq(7), eq("[7,9]"), anyList(), eq(51)))
+            .thenReturn(List.of(row(
+                12, 7, "Candidate", "email", "required@example.com")));
+
+        DuplicateReviewException exception = assertThrows(
+            DuplicateReviewException.class,
+            () -> service.requireReviewedPersonCreation(request, null));
+
+        assertEquals("DUPLICATE_REVIEW_REQUIRED", exception.getCode());
     }
 
     @Test
@@ -396,11 +415,6 @@ class DuplicatePreflightServiceTest {
             IntStream.rangeClosed(1, 51)
                 .mapToObj(id -> deal(id, "Renewal", null))
                 .toList());
-        when(dealReviewProofService.consume(
-                any(),
-                anyString(),
-                anyString()))
-            .thenReturn(true);
 
         DuplicatePreflightResponse response = service.preflightDeal(request);
 
@@ -411,6 +425,10 @@ class DuplicatePreflightServiceTest {
             () -> service.requireReviewedDealCreation(
                 request,
                 response.reviewToken()));
+        verify(dealReviewProofService, never()).consume(
+            any(),
+            anyString(),
+            anyString());
     }
 
     @Test
@@ -422,7 +440,8 @@ class DuplicatePreflightServiceTest {
         when(matchingService.normalizeName("Renewal"))
             .thenReturn(Optional.of("renewal"));
         when(dealMapper.findDuplicatePreflightCandidates(
-                7, "renewal", null, 51)).thenReturn(List.of());
+                7, "renewal", null, 51)).thenReturn(List.of(
+            deal(12, "Renewal", null)));
         when(dealReviewProofService.consume(
                 any(),
                 anyString(),
@@ -447,6 +466,46 @@ class DuplicatePreflightServiceTest {
             7, "renewal", null, 51);
         order.verify(dealReviewProofService).consume(
             eq("e".repeat(64)),
+            anyString(),
+            anyString());
+    }
+
+    @Test
+    void reviewedDealCreationAllowsEmptyCandidateSetWithoutProof() {
+        DealDuplicatePreflightRequest request = new DealDuplicatePreflightRequest(
+            "Unique renewal",
+            null,
+            null);
+        when(matchingService.normalizeName("Unique renewal"))
+            .thenReturn(Optional.of("unique renewal"));
+        when(dealMapper.findDuplicatePreflightCandidates(
+                7, "unique renewal", null, 51)).thenReturn(List.of());
+
+        service.requireReviewedDealCreation(request, null);
+
+        verify(dealReviewProofService, never()).consume(
+            any(),
+            anyString(),
+            anyString());
+    }
+
+    @Test
+    void reviewedDealCreationInvalidatesSubmittedProofWhenCandidatesBecomeEmpty() {
+        DealDuplicatePreflightRequest request = new DealDuplicatePreflightRequest(
+            "Unique renewal",
+            null,
+            null);
+        String reviewToken = "e".repeat(64);
+        when(matchingService.normalizeName("Unique renewal"))
+            .thenReturn(Optional.of("unique renewal"));
+        when(dealMapper.findDuplicatePreflightCandidates(
+                7, "unique renewal", null, 51)).thenReturn(List.of());
+
+        service.requireReviewedDealCreation(request, reviewToken);
+
+        verify(dealReviewProofService).invalidateSubmitted(eq(reviewToken), anyString());
+        verify(dealReviewProofService, never()).consume(
+            any(),
             anyString(),
             anyString());
     }
