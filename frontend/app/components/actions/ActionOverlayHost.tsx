@@ -249,7 +249,8 @@ export default function ActionOverlayHost({
     const defaults = rendered && "defaults" in rendered.request ? rendered.request.defaults : undefined;
     const defaultPersonId = defaults?.personId;
     const defaultDealId = defaults?.dealId;
-    const rosterOnly = rendered !== null &&
+    const rosterOnly = (kind === "create-task" || kind === "create-note" || kind === "create-activity") &&
+        rendered !== null &&
         "restoredDraftGeneration" in rendered.request &&
         rendered.request.restoredDraftGeneration !== undefined;
     const restoredPersonId = rosterOnly
@@ -532,6 +533,7 @@ export default function ActionOverlayHost({
         : defaultDeal;
     const activityDraft = rendered?.request.kind === "create-activity" ? rendered.request.draft : undefined;
     const defaultActivityType = ACTIVITY_TYPES.find((activityType) => activityType === activityDraft?.type);
+    const dealDraft = rendered?.request.kind === "create-deal" ? rendered.request.draft : undefined;
 
     return (
         <OverlayChunkFailureBoundary
@@ -610,7 +612,16 @@ export default function ActionOverlayHost({
                     <ContactCreateContainer open={visible} onOpenChange={handleOpenChange} defaults={rendered.request.defaults} requestInit={requestInit} />
                 ) : null}
                 {rendered?.request.kind === "create-deal" ? (
-                    <DealCreateContainer open={visible} onOpenChange={handleOpenChange} defaults={rendered.request.defaults} requestInit={requestInit} />
+                    <DealCreateContainer
+                        open={visible}
+                        onOpenChange={handleOpenChange}
+                        defaults={rendered.request.defaults}
+                        currentUserId={user.id}
+                        draftPersistence
+                        initialDraft={dealDraft}
+                        initialDraftGeneration={rendered.request.restoredDraftGeneration}
+                        requestInit={requestInit}
+                    />
                 ) : null}
                 {rendered?.request.kind === "import-companies" ? (
                     <ImportDialog

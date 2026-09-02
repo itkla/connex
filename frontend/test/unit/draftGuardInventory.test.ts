@@ -5,6 +5,7 @@ import ts from "typescript";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { installInteractiveDocument } from "@/test/unit/helpers/interactiveDocument";
+import type { MobileDealDiscardControls } from "@/app/components/actions/QuickCreateLauncher";
 
 type ConfirmCapture = {
     open: boolean;
@@ -548,6 +549,32 @@ function requiredConfirm(): ConfirmCapture {
 }
 
 const ownerScenarios: Record<string, OwnerScenario> = {
+    "app/components/actions/QuickCreateLauncher.tsx": async () => {
+        const { MobileDealDiscardGuard } = await import("@/app/components/actions/QuickCreateLauncher");
+        const { Drawer } = await import("@/components/ui/drawer");
+        let isDirty = false;
+        return mountOwner(
+            (onClose) => {
+                const props: Parameters<typeof MobileDealDiscardGuard>[0] = {
+                    active: true,
+                    isDirty,
+                    disabled: false,
+                    onBack: vi.fn(),
+                    onClose: () => onClose(false),
+                    onCloseRequestChange: vi.fn(),
+                    children: ({ handleOpenChange }: MobileDealDiscardControls) => createElement(
+                        Drawer,
+                        { open: true, onOpenChange: handleOpenChange },
+                    ),
+                };
+                return createElement(MobileDealDiscardGuard, props);
+            },
+            (rerender) => {
+                isDirty = true;
+                rerender();
+            },
+        );
+    },
     "app/components/activity/activities/ActivityDialog.tsx": async () => {
         const { default: ActivityDialog } = await import("@/app/components/activity/activities/ActivityDialog");
         return mountOwner(

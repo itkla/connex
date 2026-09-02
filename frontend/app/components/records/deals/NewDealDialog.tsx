@@ -42,19 +42,20 @@ const comboLeadIconClass =
 
 /**
  * Whether a deal-create payload has diverged from its seeded baseline, so a container can drive the
- * accidental-discard guard. Compares every field with null/undefined normalized, so an untouched
+ * accidental-discard guard. Compares every field with null/undefined/zero ids normalized, so an untouched
  * form (still equal to its seed) is never reported dirty.
  */
 export function isDealPayloadDirty(payload: CreateDealPayload, baseline: CreateDealPayload): boolean {
+    const normalizeOptionalId = (value: number | null | undefined) => value && value > 0 ? value : null;
     return (
         payload.name !== baseline.name ||
         payload.value !== baseline.value ||
         payload.actualValue !== baseline.actualValue ||
         payload.currency !== baseline.currency ||
-        (payload.pipeline ?? null) !== (baseline.pipeline ?? null) ||
-        (payload.stage ?? null) !== (baseline.stage ?? null) ||
-        (payload.company ?? null) !== (baseline.company ?? null) ||
-        (payload.ownerId ?? null) !== (baseline.ownerId ?? null) ||
+        normalizeOptionalId(payload.pipeline) !== normalizeOptionalId(baseline.pipeline) ||
+        normalizeOptionalId(payload.stage) !== normalizeOptionalId(baseline.stage) ||
+        normalizeOptionalId(payload.company) !== normalizeOptionalId(baseline.company) ||
+        normalizeOptionalId(payload.ownerId) !== normalizeOptionalId(baseline.ownerId) ||
         (payload.expectedCloseDate ?? '') !== (baseline.expectedCloseDate ?? '') ||
         (payload.closedAt ?? '') !== (baseline.closedAt ?? '') ||
         (payload.closedReason ?? '') !== (baseline.closedReason ?? '') ||
@@ -73,6 +74,8 @@ type Props = {
     isSuccess?: boolean;
     /** Whether the payload has diverged from its seeded baseline; drives the accidental-discard guard. */
     isDirty?: boolean;
+    /** Selected company record supplied by a parent that already resolved it. */
+    selectedCompany?: Company | null;
     createNewDeal: (duplicateReviewToken: string) => void | Promise<void>;
     requestInit?: RequestInit;
 };
@@ -87,6 +90,7 @@ export default function NewDealDialog({
     isCreating,
     isSuccess = false,
     isDirty = false,
+    selectedCompany,
     createNewDeal,
     requestInit,
 }: Props) {
@@ -113,6 +117,7 @@ export default function NewDealDialog({
                         stagesByPipeline={stagesByPipeline}
                         isCreating={isCreating}
                         isSuccess={isSuccess}
+                        selectedCompany={selectedCompany}
                         createNewDeal={createNewDeal}
                         requestInit={requestInit}
                     />
@@ -132,6 +137,8 @@ type NewDealFormProps = {
     stagesByPipeline: Record<number, Stage[]>;
     isCreating: boolean;
     isSuccess?: boolean;
+    /** Selected company record supplied by a parent that already resolved it. */
+    selectedCompany?: Company | null;
     createNewDeal: (duplicateReviewToken: string) => void | Promise<void>;
     requestInit?: RequestInit;
     /** Invoked by the Cancel button — closes the dialog, or steps back to the selector in the morphing launcher. */
@@ -405,6 +412,7 @@ export function NewDealForm({
     stagesByPipeline,
     isCreating,
     isSuccess = false,
+    selectedCompany,
     createNewDeal,
     requestInit,
     onCancel,
@@ -412,7 +420,11 @@ export function NewDealForm({
     const t = useTranslations('DealsNewDialog');
     const { fieldErrors, reset: resetFieldErrors, clearError, captureFieldErrors } = useFieldErrors();
     const submissionPendingRef = useRef(false);
-    const companySearch = useCompanySearch(active, [payload.company]);
+    const companySearch = useCompanySearch(
+        active,
+        [payload.company],
+        selectedCompany ? [selectedCompany] : [],
+    );
     const duplicatePreflight = useDuplicatePreflight('deal', {
         name: payload.name.trim(),
         companyId: payload.company,

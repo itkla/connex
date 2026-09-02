@@ -2,6 +2,11 @@
     "minimumCount": 21,
     "surfaces": [
         {
+            "file": "app/components/actions/QuickCreateLauncher.tsx",
+            "surface": "Mobile Quick Create deal composer",
+            "guard": "own"
+        },
+        {
             "file": "app/components/activity/activities/ActivityDialog.tsx",
             "surface": "Activity composer",
             "guard": "own"

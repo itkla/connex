@@ -24,6 +24,8 @@ import { actionLabel } from '@/app/lib/actions/actionLabels';
 import { deriveCreateDefaults } from '@/app/lib/actions/createDefaults';
 import { getContacts, getDeals, getUsers } from '@/app/lib/api';
 import { easeOut, instant, springJiggle, springSmooth, springSnappy } from '@/app/lib/motion';
+import ConfirmDiscardDialog from '@/app/components/ConfirmDiscardDialog';
+import { useUnsavedChangesGuard } from '@/app/hooks/useUnsavedChangesGuard';
 import type { AppAction, ActionContext } from '@/app/lib/actions/types';
 import type { Contact, Deal, User } from '@/app/lib/types';
 
@@ -96,6 +98,7 @@ export default function QuickCreateLauncher({ compact = false }: { compact?: boo
     const rootRef = useRef<HTMLDivElement>(null);
     const panelRef = useRef<HTMLDivElement>(null);
     const pendingRef = useRef(false);
+    const mobileCloseRequestRef = useRef<(() => void) | null>(null);
     const titleId = useId();
 
     const currentUserId = context.user?.id ?? null;
@@ -123,6 +126,14 @@ export default function QuickCreateLauncher({ compact = false }: { compact?: boo
         setOpen(false);
         const trigger = triggerRef.current;
         if (trigger) requestAnimationFrame(() => trigger.focus());
+    }, []);
+
+    const requestMobileClose = useCallback(() => {
+        (mobileCloseRequestRef.current ?? closeLauncher)();
+    }, [closeLauncher]);
+
+    const handleMobileCloseRequestChange = useCallback((requestClose: (() => void) | null) => {
+        mobileCloseRequestRef.current = requestClose;
     }, []);
 
     const openLauncher = useCallback(() => {
@@ -222,7 +233,7 @@ export default function QuickCreateLauncher({ compact = false }: { compact?: boo
             aria-haspopup="dialog"
             aria-expanded={open}
             aria-label={t('quickCreate.trigger')}
-            onClick={() => (open ? closeLauncher() : openLauncher())}
+            onClick={() => (open ? (activeIsMobile ? requestMobileClose() : closeLauncher()) : openLauncher())}
             whileTap={reduceMotion ? undefined : { scale: 0.95 }}
             transition={reduceMotion ? instant : springJiggle}
             className={cn(
@@ -249,7 +260,7 @@ export default function QuickCreateLauncher({ compact = false }: { compact?: boo
             {mounted && activeIsMobile ? (
                 <Drawer
                     open={open}
-                    onOpenChange={(next) => (next ? openLauncher() : closeLauncher())}
+                    onOpenChange={(next) => (next ? openLauncher() : requestMobileClose())}
                     swipeDirection="down"
                 >
                     <DrawerContent
@@ -265,7 +276,7 @@ export default function QuickCreateLauncher({ compact = false }: { compact?: boo
                             expanded={expanded}
                             onExpand={() => setExpanded(true)}
                             onCollapse={() => setExpanded(false)}
-                            onDismiss={closeLauncher}
+                            onDismiss={requestMobileClose}
                         />
                         <MobileCreateFlow
                             key={openCount}
@@ -274,6 +285,7 @@ export default function QuickCreateLauncher({ compact = false }: { compact?: boo
                             currentUserId={currentUserId}
                             onFallback={selectAction}
                             onClose={closeLauncher}
+                            onCloseRequestChange={handleMobileCloseRequestChange}
                             onPendingChange={handlePendingChange}
                         />
                     </DrawerContent>
@@ -510,8 +522,77 @@ type MobileCreateFlowProps = {
     currentUserId: number | null;
     onFallback: (action: AppAction) => void;
     onClose: () => void;
+    onCloseRequestChange: (requestClose: (() => void) | null) => void;
     onPendingChange: (pending: boolean) => void;
 };
+
+export type MobileDealDiscardControls = {
+    handleOpenChange: (open: boolean) => void;
+    requestBack: () => void;
+};
+
+/** Owns the embedded deal composer's discard decision across Back, Close, and drawer dismissal. */
+export function MobileDealDiscardGuard({
+    active,
+    isDirty,
+    disabled,
+    onBack,
+    onClose,
+    onCloseRequestChange,
+    children,
+}: {
+    active: boolean;
+    isDirty: boolean;
+    disabled: boolean;
+    onBack: () => void;
+    onClose: () => void;
+    onCloseRequestChange: (requestClose: (() => void) | null) => void;
+    children?: (controls: MobileDealDiscardControls) => React.ReactNode;
+}) {
+    const [requestedExit, setRequestedExit] = useState<'back' | 'close'>('close');
+    const guardActive = active && isDirty;
+    const finishExit = useCallback(() => {
+        if (requestedExit === 'back') onBack();
+        else onClose();
+    }, [onBack, onClose, requestedExit]);
+    const guard = useUnsavedChangesGuard({ isDirty: guardActive, onClose: finishExit });
+
+    const handleOpenChange = useCallback((next: boolean) => {
+        if (next || disabled) return;
+        if (!guardActive) {
+            onClose();
+            return;
+        }
+        setRequestedExit('close');
+        guard.onOpenChange(next);
+    }, [disabled, guard, guardActive, onClose]);
+
+    const requestBack = useCallback(() => {
+        if (disabled) return;
+        if (!guardActive) {
+            onBack();
+            return;
+        }
+        setRequestedExit('back');
+        guard.requestClose();
+    }, [disabled, guard, guardActive, onBack]);
+
+    useLayoutEffect(() => {
+        onCloseRequestChange(() => handleOpenChange(false));
+        return () => onCloseRequestChange(null);
+    }, [handleOpenChange, onCloseRequestChange]);
+
+    return (
+        <>
+            {children?.({ handleOpenChange, requestBack })}
+            <ConfirmDiscardDialog
+                open={guard.confirm.open}
+                onKeepEditing={guard.confirm.onKeepEditing}
+                onDiscard={guard.confirm.onDiscard}
+            />
+        </>
+    );
+}
 
 /**
  * The mobile Quick Create surface. It keeps the launcher's bottom drawer open and morphs its content
@@ -520,7 +601,15 @@ type MobileCreateFlowProps = {
  * the sequenced dialog hand-off. The create-form reference data (person/deal/user rosters) loads once
  * on the first form view and is reused across forms.
  */
-function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose, onPendingChange }: MobileCreateFlowProps) {
+export function MobileCreateFlow({
+    actions,
+    context,
+    currentUserId,
+    onFallback,
+    onClose,
+    onCloseRequestChange,
+    onPendingChange,
+}: MobileCreateFlowProps) {
     const t = useTranslations('Actions');
     const reduceMotion = useReducedMotion() ?? false;
     const [view, setView] = useState<FlowView>('selector');
@@ -528,6 +617,7 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
     const [refs, setRefs] = useState<FlowRefs | null>(null);
     const [submitting, setSubmitting] = useState(false);
     const [dismissLocked, setDismissLocked] = useState(false);
+    const [dealDirty, setDealDirty] = useState(false);
     const submittingRef = useRef(false);
     const dismissLockedRef = useRef(false);
     const interactionLocked = submitting || dismissLocked;
@@ -572,15 +662,7 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
         [currentUserId, onFallback],
     );
 
-    const closeFromContainer = useCallback(
-        (next: boolean) => {
-            if (!next && !submittingRef.current && !dismissLockedRef.current) onClose();
-        },
-        [onClose],
-    );
-
-    const back = useCallback(() => {
-        if (submittingRef.current || dismissLockedRef.current) return;
+    const showSelector = useCallback(() => {
         setDirection(-1);
         setView('selector');
     }, []);
@@ -590,12 +672,21 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
     const defaultDeal = refs?.deals.find((d) => d.id === defaults?.dealId) ?? null;
 
     return (
-        <div className="flex min-h-0 flex-1 flex-col">
+        <MobileDealDiscardGuard
+            active={view === 'deal'}
+            isDirty={dealDirty}
+            disabled={interactionLocked}
+            onBack={showSelector}
+            onClose={onClose}
+            onCloseRequestChange={onCloseRequestChange}
+        >
+            {({ handleOpenChange, requestBack }) => (
+                <div className="flex min-h-0 flex-1 flex-col">
             <DrawerHeader className="flex-row items-center gap-2 border-b border-border px-4 py-3.5">
                 {view !== 'selector' ? (
                     <button
                         type="button"
-                        onClick={back}
+                        onClick={requestBack}
                         disabled={interactionLocked}
                         aria-label={t('quickCreate.back')}
                         className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
@@ -614,7 +705,7 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                 <DrawerDescription className="sr-only">{t('quickCreate.description')}</DrawerDescription>
                 <button
                     type="button"
-                    onClick={onClose}
+                    onClick={() => handleOpenChange(false)}
                     disabled={interactionLocked}
                     aria-label={t('quickCreate.close')}
                     className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
@@ -630,15 +721,23 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                             <TypeSelector actions={actions} onSelect={select} />
                         </div>
                     ) : view === 'company' ? (
-                        <CompanyCreateContainer embedded open onOpenChange={closeFromContainer} onCancel={back} />
+                        <CompanyCreateContainer embedded open onOpenChange={handleOpenChange} onCancel={requestBack} />
                     ) : view === 'deal' ? (
-                        <DealCreateContainer embedded open onOpenChange={closeFromContainer} onCancel={back} defaults={defaults} />
+                        <DealCreateContainer
+                            embedded
+                            open
+                            onOpenChange={handleOpenChange}
+                            onCancel={requestBack}
+                            onDirtyChange={setDealDirty}
+                            defaults={defaults}
+                            draftPersistence={false}
+                        />
                     ) : view === 'person' ? (
                         <ContactCreateContainer
                             embedded
                             open
-                            onOpenChange={closeFromContainer}
-                            onCancel={back}
+                            onOpenChange={handleOpenChange}
+                            onCancel={requestBack}
                             onDismissLockChange={handleDismissLockChange}
                             defaults={defaults}
                         />
@@ -657,8 +756,8 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                             defaultDueDate=""
                             defaultDescription=""
                             onSubmittingChange={handleSubmittingChange}
-                            onCancel={back}
-                            onClose={onClose}
+                            onCancel={requestBack}
+                            onClose={() => handleOpenChange(false)}
                         />
                     ) : view === 'note' ? (
                         <NoteDialogForm
@@ -671,8 +770,8 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                             defaultContent=""
                             compact
                             onSubmittingChange={handleSubmittingChange}
-                            onCancel={back}
-                            onClose={onClose}
+                            onCancel={requestBack}
+                            onClose={() => handleOpenChange(false)}
                         />
                     ) : (
                         <ActivityDialogForm
@@ -682,13 +781,15 @@ function MobileCreateFlow({ actions, context, currentUserId, onFallback, onClose
                             defaultPerson={defaultPerson}
                             defaultDeal={defaultDeal}
                             onSubmittingChange={handleSubmittingChange}
-                            onCancel={back}
-                            onClose={onClose}
+                            onCancel={requestBack}
+                            onClose={() => handleOpenChange(false)}
                         />
                     )}
                 </MorphingBody>
             </div>
-        </div>
+                </div>
+            )}
+        </MobileDealDiscardGuard>
     );
 }
 

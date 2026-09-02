@@ -107,6 +107,7 @@
             "linkedRecordLoadFailed": "Couldn't load the linked record. Please try again.",
             "restoredLinkUnavailable": "A saved person or deal is no longer available. Review the linked records before creating this item.",
             "restoredAssigneeUnavailable": "The saved assignee is no longer available. Review the assignee before creating this task.",
+            "restoredDealReferenceUnavailable": "Some saved deal details are no longer available. Review the pipeline, stage, and company before creating this deal.",
             "radarTaskRefreshing": "Refreshing this Radar signal. Your task draft will stay here.",
             "radarTaskChanged": "This Radar signal changed while you were editing. Close and reopen this task after Radar refreshes; your draft will be restored.",
             "radarTaskUnavailable": "Radar could not verify this signal. Close and retry the Radar refresh; your task draft will be restored.",

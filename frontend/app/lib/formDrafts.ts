@@ -11,7 +11,76 @@ export const DEFAULT_DRAFT_FRESHNESS_MS = 60 * 60 * 1000;
  * version no longer matches its form type is dropped on read (the version lives in the envelope, not the
  * key, so a newer reader still sees and sweeps older drafts).
  */
-export const DRAFT_VERSIONS: Record<string, number> = { activity: 1, note: 1, task: 1, comment: 1 };
+export const DRAFT_VERSIONS: Record<string, number> = { activity: 1, note: 1, task: 1, comment: 1, deal: 1 };
+
+/** The serializable fields owned by the shell deal quick-create composer. */
+export type DealDraft = {
+    name: string;
+    value: number;
+    currency: string;
+    pipeline: number | null;
+    stage: number | null;
+    company: number | null;
+    expectedCloseDate: string;
+};
+
+function isNullableId(value: unknown): value is number | null {
+    return value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value > 0);
+}
+
+function isDateInputValue(value: unknown): value is string {
+    if (value === '') return true;
+    if (typeof value !== 'string') return false;
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return false;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    if (year < 1) return false;
+    const date = new Date(0);
+    date.setUTCHours(0, 0, 0, 0);
+    date.setUTCFullYear(year, month - 1, day);
+    return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+/** Validates the exact scalar-only schema accepted for a restored deal draft. */
+export function isDealDraft(value: unknown): value is DealDraft {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+    const expectedKeys: ReadonlySet<string> = new Set([
+        'name',
+        'value',
+        'currency',
+        'pipeline',
+        'stage',
+        'company',
+        'expectedCloseDate',
+    ]);
+    if (Object.keys(value).length !== expectedKeys.size || Object.keys(value).some((key) => !expectedKeys.has(key))) {
+        return false;
+    }
+    if (
+        !('name' in value) ||
+        typeof value.name !== 'string' ||
+        !('value' in value) ||
+        typeof value.value !== 'number' ||
+        !Number.isFinite(value.value) ||
+        value.value < 0 ||
+        !('currency' in value) ||
+        typeof value.currency !== 'string' ||
+        value.currency.length > 8 ||
+        !('pipeline' in value) ||
+        !isNullableId(value.pipeline) ||
+        !('stage' in value) ||
+        !isNullableId(value.stage) ||
+        !('company' in value) ||
+        !isNullableId(value.company) ||
+        !('expectedCloseDate' in value) ||
+        !isDateInputValue(value.expectedCloseDate)
+    ) {
+        return false;
+    }
+    return value.pipeline !== null || value.stage === null;
+}
 
 /** The parts that uniquely scope a draft to a user, workspace, form type, and entity context. */
 export type DraftKeyParts = {
