@@ -49,7 +49,9 @@ public class GuidedRecordCreationService {
             RecordCreationRecordType.person, request.templateUse());
         Map<Integer, JsonNode> customFields = submittedCustomFields(request.customFields());
         List<Integer> tagIds = submittedTagIds(request.tagIds());
-        Person person = request.record().toBean();
+        var record = request.record();
+        String duplicateReviewToken = record.duplicateReviewToken();
+        Person person = record.toBean();
         applyPersonDefaults(person, customFields, tagIds, resolved);
         validateRequiredPerson(person, customFields, tagIds, resolved);
         augmentationService.validatePersonReferences(
@@ -57,7 +59,7 @@ public class GuidedRecordCreationService {
             person.getReferrerPersonId());
         return personService.createReviewed(
             person,
-            request.duplicateReviewProof(),
+            duplicateReviewToken,
             augmentation(request.templateUse(), customFields, tagIds));
     }
 
@@ -69,12 +71,14 @@ public class GuidedRecordCreationService {
             RecordCreationRecordType.company, request.templateUse());
         Map<Integer, JsonNode> customFields = submittedCustomFields(request.customFields());
         List<Integer> tagIds = submittedTagIds(request.tagIds());
-        Company company = request.record().toBean();
+        var record = request.record();
+        String duplicateReviewToken = record.duplicateReviewToken();
+        Company company = record.toBean();
         applyCompanyDefaults(company, customFields, tagIds, resolved);
         validateRequiredCompany(company, customFields, tagIds, resolved);
         return companyService.createCompanyReviewed(
             company,
-            request.duplicateReviewProof(),
+            duplicateReviewToken,
             augmentation(request.templateUse(), customFields, tagIds));
     }
 
@@ -86,14 +90,16 @@ public class GuidedRecordCreationService {
             RecordCreationRecordType.deal, request.templateUse());
         Map<Integer, JsonNode> customFields = submittedCustomFields(request.customFields());
         List<Integer> tagIds = submittedTagIds(request.tagIds());
-        Deal deal = request.record().toBean();
+        var record = request.record();
+        String duplicateReviewToken = record.duplicateReviewToken();
+        Deal deal = record.toBean();
         applyDealDefaults(deal, customFields, tagIds, resolved);
         validateRequiredDeal(deal, customFields, tagIds, resolved);
         augmentationService.validateDealReferences(
             deal.getPipelineId(), deal.getStageId(), deal.getCompanyId());
         return dealService.createReviewed(
             deal,
-            request.duplicateReviewProof(),
+            duplicateReviewToken,
             augmentation(request.templateUse(), customFields, tagIds));
     }
 

@@ -1036,12 +1036,18 @@ public class DealService {
                 deal.getCompanyId(),
                 null),
             duplicateReviewToken);
-        return createAfterDuplicateDecisionLock(deal, augmentation);
+        RecordCreationAugmentationService.PreparedAugmentation prepared =
+            recordCreationAugmentationService.prepareDeal(
+                deal.getPipelineId(),
+                deal.getStageId(),
+                deal.getCompanyId(),
+                augmentation);
+        return createAfterDuplicateDecisionLock(deal, prepared);
     }
 
     private Deal createAfterDuplicateDecisionLock(
             Deal deal,
-            RecordCreationAugmentation augmentation) {
+            RecordCreationAugmentationService.PreparedAugmentation prepared) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         deal.setWorkspaceId(workspaceId);
         deal.setOwnerId(authService.getCurrentUser().getId());
@@ -1058,15 +1064,11 @@ public class DealService {
                 workspaceId, deal.getId(), deal.getStageId(), deal.getWon());
         }
         Map<String, Object> auditChanges = auditService.diff(null, deal, AUDIT_FIELDS);
-        if (augmentation != null) {
+        if (prepared != null) {
             auditChanges = withCreationMetadata(
                 auditChanges,
                 recordCreationAugmentationService.applyDeal(
-                    deal.getId(),
-                    deal.getPipelineId(),
-                    deal.getStageId(),
-                    deal.getCompanyId(),
-                    augmentation));
+                    deal.getId(), prepared));
         }
         auditService.record("deal.create", "deal", deal.getId(), deal.getName(),
             "Created deal " + deal.getName(),

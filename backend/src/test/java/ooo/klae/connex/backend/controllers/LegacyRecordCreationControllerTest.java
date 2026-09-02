@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -22,6 +23,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -36,6 +38,7 @@ import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.config.RequestBodySizeProperties;
 import ooo.klae.connex.backend.config.SecurityConfig;
+import ooo.klae.connex.backend.exceptions.DuplicateReviewException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
@@ -74,6 +77,9 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
     LegacyRecordCreationControllerTest.MapperTestConfig.class})
 @WithMockUser
 class LegacyRecordCreationControllerTest {
+    private static final String LEGACY_STALE_MESSAGE =
+        "Duplicate candidates changed before creation; review them again";
+
     @Autowired private MockMvc mockMvc;
 
     @MockitoBean private PersonService personService;
@@ -200,6 +206,44 @@ class LegacyRecordCreationControllerTest {
             .andExpect(jsonPath("$.fieldErrors.duplicateReviewToken").exists());
 
         verifyNoInteractions(companyService);
+    }
+
+    @Test
+    void personDuplicateConflictPreservesLegacyResponseShape() throws Exception {
+        String reviewToken = "d".repeat(64);
+        when(personService.createReviewed(any(Person.class), eq(reviewToken)))
+            .thenThrow(new DuplicateReviewException("DUPLICATE_REVIEW_STALE", LEGACY_STALE_MESSAGE));
+
+        mockMvc.perform(post("/api/persons")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(personBody(reviewToken)))
+            .andExpect(status().isConflict())
+            .andExpect(content().json(
+                "{\"message\":\"" + LEGACY_STALE_MESSAGE + "\"}",
+                JsonCompareMode.STRICT))
+            .andExpect(jsonPath("$.message").value(LEGACY_STALE_MESSAGE))
+            .andExpect(jsonPath("$.code").doesNotExist())
+            .andExpect(jsonPath("$.fieldErrors").doesNotExist());
+    }
+
+    @Test
+    void companyDuplicateConflictPreservesLegacyResponseShape() throws Exception {
+        String reviewToken = "e".repeat(64);
+        when(companyService.createCompanyReviewed(any(Company.class), eq(reviewToken)))
+            .thenThrow(new DuplicateReviewException("DUPLICATE_REVIEW_STALE", LEGACY_STALE_MESSAGE));
+
+        mockMvc.perform(post("/api/companies")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(companyBody(reviewToken)))
+            .andExpect(status().isConflict())
+            .andExpect(content().json(
+                "{\"message\":\"" + LEGACY_STALE_MESSAGE + "\"}",
+                JsonCompareMode.STRICT))
+            .andExpect(jsonPath("$.message").value(LEGACY_STALE_MESSAGE))
+            .andExpect(jsonPath("$.code").doesNotExist())
+            .andExpect(jsonPath("$.fieldErrors").doesNotExist());
     }
 
     private static String personBody(String reviewToken) {

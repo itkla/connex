@@ -112,65 +112,83 @@ public class RecordCreationAugmentationService {
         }
     }
 
-    Map<String, Object> applyPerson(
-            int personId,
+    PreparedAugmentation preparePerson(
             Integer companyId,
             Integer referrerPersonId,
             RecordCreationAugmentation augmentation) {
-        return apply(
+        return prepare(
             RecordCreationRecordType.person,
-            personId,
             augmentation,
             List.of(),
             List.of(),
             nullable(referrerPersonId),
-            companies(companyId, augmentation),
-            () -> personMapper.insertTags(
-                workspaceService.getCurrentWorkspaceId(), personId, augmentation.tagIds()));
+            companies(companyId, augmentation));
     }
 
-    Map<String, Object> applyCompany(
-            int companyId,
-            RecordCreationAugmentation augmentation) {
-        return apply(
+    PreparedAugmentation prepareCompany(RecordCreationAugmentation augmentation) {
+        return prepare(
             RecordCreationRecordType.company,
-            companyId,
             augmentation,
             List.of(),
             List.of(),
             List.of(),
-            List.of(),
-            () -> companyMapper.insertTags(
-                workspaceService.getCurrentWorkspaceId(), companyId, augmentation.tagIds()));
+            List.of());
     }
 
-    Map<String, Object> applyDeal(
-            int dealId,
+    PreparedAugmentation prepareDeal(
             Integer pipelineId,
             Integer stageId,
             Integer companyId,
             RecordCreationAugmentation augmentation) {
-        return apply(
+        return prepare(
             RecordCreationRecordType.deal,
-            dealId,
             augmentation,
             nullable(pipelineId),
             nullable(stageId),
             List.of(),
-            companies(companyId, augmentation),
-            () -> dealMapper.insertTags(
-                workspaceService.getCurrentWorkspaceId(), dealId, augmentation.tagIds()));
+            companies(companyId, augmentation));
     }
 
-    private Map<String, Object> apply(
+    Map<String, Object> applyPerson(int personId, PreparedAugmentation prepared) {
+        return apply(
+            RecordCreationRecordType.person,
+            personId,
+            prepared,
+            () -> personMapper.insertTags(
+                workspaceService.getCurrentWorkspaceId(),
+                personId,
+                prepared.augmentation().tagIds()));
+    }
+
+    Map<String, Object> applyCompany(int companyId, PreparedAugmentation prepared) {
+        return apply(
+            RecordCreationRecordType.company,
+            companyId,
+            prepared,
+            () -> companyMapper.insertTags(
+                workspaceService.getCurrentWorkspaceId(),
+                companyId,
+                prepared.augmentation().tagIds()));
+    }
+
+    Map<String, Object> applyDeal(int dealId, PreparedAugmentation prepared) {
+        return apply(
+            RecordCreationRecordType.deal,
+            dealId,
+            prepared,
+            () -> dealMapper.insertTags(
+                workspaceService.getCurrentWorkspaceId(),
+                dealId,
+                prepared.augmentation().tagIds()));
+    }
+
+    private PreparedAugmentation prepare(
             RecordCreationRecordType recordType,
-            int entityId,
             RecordCreationAugmentation augmentation,
             List<Integer> pipelineIds,
             List<Integer> stageIds,
             List<Integer> personIds,
-            List<Integer> companyIds,
-            IntSupplier insertTags) {
+            List<Integer> companyIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         templateMapper.insertSetIfAbsent(workspaceId, recordType.name());
         RecordCreationTemplateSet set = templateMapper.getSetForUpdate(workspaceId, recordType.name());
@@ -192,9 +210,24 @@ public class RecordCreationAugmentationService {
         lockReferences(workspaceId, pipelineIds, stageIds, personIds, companyIds);
         ResolvedCreationTemplateDto resolved = requireAvailable(resolveAgain(exact, augmentation));
         validatePayload(recordType, resolved, augmentation);
+        return new PreparedAugmentation(recordType, augmentation, lockedCustomFields);
+    }
+
+    private Map<String, Object> apply(
+            RecordCreationRecordType recordType,
+            int entityId,
+            PreparedAugmentation prepared,
+            IntSupplier insertTags) {
+        if (prepared.recordType() != recordType) {
+            throw new IllegalArgumentException("Prepared record creation type does not match");
+        }
+        RecordCreationAugmentation augmentation = prepared.augmentation();
         try {
             customFieldValueService.applyJsonValuesForCreate(
-                recordType.name(), entityId, augmentation.customFields(), lockedCustomFields);
+                recordType.name(),
+                entityId,
+                augmentation.customFields(),
+                prepared.lockedCustomFields());
         } catch (BadRequestException exception) {
             throw RecordCreationTemplateException.of(
                 HttpStatus.BAD_REQUEST,
@@ -533,5 +566,15 @@ public class RecordCreationAugmentationService {
         RecordCreationTemplateVersion version,
         ResolvedCreationTemplateDto resolved
     ) {
+    }
+
+    record PreparedAugmentation(
+        RecordCreationRecordType recordType,
+        RecordCreationAugmentation augmentation,
+        Map<Integer, CustomFieldDefinition> lockedCustomFields
+    ) {
+        PreparedAugmentation {
+            lockedCustomFields = Map.copyOf(lockedCustomFields);
+        }
     }
 }

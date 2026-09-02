@@ -604,7 +604,7 @@ public class DuplicatePreflightService {
         return new DuplicateReviewException(
             stale ? "DUPLICATE_REVIEW_STALE" : "DUPLICATE_REVIEW_REQUIRED",
             stale
-                ? "Duplicate review changed; review duplicates again"
+                ? "Duplicate candidates changed before creation; review them again"
                 : "Possible duplicates must be reviewed before creation");
     }
 

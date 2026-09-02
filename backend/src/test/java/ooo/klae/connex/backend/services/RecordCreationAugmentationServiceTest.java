@@ -169,7 +169,9 @@ class RecordCreationAugmentationServiceTest {
         when(companyMapper.getVisibleCompanyByIdForUpdate(7, 60)).thenReturn(contextCompany);
         when(personMapper.insertTags(7, 101, List.of(4))).thenReturn(1);
 
-        Map<String, Object> metadata = service.applyPerson(101, 55, 50, augmentation);
+        RecordCreationAugmentationService.PreparedAugmentation prepared =
+            service.preparePerson(55, 50, augmentation);
+        Map<String, Object> metadata = service.applyPerson(101, prepared);
 
         assertEquals("system:person:standard", metadata.get("creationTemplateId"));
         assertEquals(1, metadata.get("creationTemplateVersion"));
@@ -212,7 +214,7 @@ class RecordCreationAugmentationServiceTest {
 
         RecordCreationTemplateException exception = assertThrows(
             RecordCreationTemplateException.class,
-            () -> service.applyDeal(201, 8, 10, null, augmentation));
+            () -> service.prepareDeal(8, 10, null, augmentation));
 
         assertEquals("VALIDATION_FAILED", exception.error().code());
         var order = inOrder(pipelineMapper, shareMapper);
@@ -234,7 +236,7 @@ class RecordCreationAugmentationServiceTest {
 
         RecordCreationTemplateException exception = assertThrows(
             RecordCreationTemplateException.class,
-            () -> service.applyCompany(301, augmentation));
+            () -> service.prepareCompany(augmentation));
 
         assertEquals("TEMPLATE_SET_STALE", exception.error().code());
         verify(customFieldValueService, never()).applyJsonValuesForCreate(any(), any(Integer.class), any(), any());

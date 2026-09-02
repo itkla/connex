@@ -5,7 +5,10 @@ import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.test.context.TestConfiguration;
 
+import ooo.klae.connex.backend.config.RecordCreationProperties;
 import ooo.klae.connex.backend.services.CompanyService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.GuidedRecordCreationService;
@@ -18,6 +21,7 @@ class RecordCreationCutoverConfigurationTest {
         .withBean(DealService.class, () -> mock(DealService.class))
         .withBean(GuidedRecordCreationService.class, () -> mock(GuidedRecordCreationService.class))
         .withUserConfiguration(
+            CutoverPropertiesConfiguration.class,
             LegacyRecordCreationController.class,
             GuidedRecordCreationController.class);
 
@@ -37,5 +41,20 @@ class RecordCreationCutoverConfigurationTest {
                 assertThat(context).hasSingleBean(GuidedRecordCreationController.class);
                 assertThat(context).doesNotHaveBean(LegacyRecordCreationController.class);
             });
+    }
+
+    @Test
+    void malformedReadinessValuesFailStartup() {
+        for (String value : new String[] {"treu", "", "1", "0"}) {
+            contextRunner
+                .withPropertyValues(
+                    "connex.record-creation.guided-cutover-enabled=" + value)
+                .run(context -> assertThat(context).hasFailed());
+        }
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    @EnableConfigurationProperties(RecordCreationProperties.class)
+    static class CutoverPropertiesConfiguration {
     }
 }

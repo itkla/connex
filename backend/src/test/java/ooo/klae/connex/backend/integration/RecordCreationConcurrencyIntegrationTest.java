@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -138,7 +139,7 @@ class RecordCreationConcurrencyIntegrationTest {
     }
 
     @Test
-    void customSchemaRevisionCommittedWhileCreateWaitsRollsBackTheInsertedRecord() throws Exception {
+    void customSchemaRevisionCommittedWhileCreateWaitsRejectsBeforeCoreInsert() throws Exception {
         CountDownLatch setLocked = new CountDownLatch(1);
         CountDownLatch personInserted = new CountDownLatch(1);
         CountDownLatch releaseSchemaMutation = new CountDownLatch(1);
@@ -186,7 +187,7 @@ class RecordCreationConcurrencyIntegrationTest {
             });
             assertTrue(setLocked.await(10, TimeUnit.SECONDS));
             var creation = executor.submit(() -> withActor(() -> guidedService.createPerson(request)));
-            assertTrue(personInserted.await(10, TimeUnit.SECONDS));
+            assertFalse(personInserted.await(500, TimeUnit.MILLISECONDS));
             assertThrows(TimeoutException.class, () -> creation.get(500, TimeUnit.MILLISECONDS));
             releaseSchemaMutation.countDown();
 

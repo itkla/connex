@@ -16,7 +16,4 @@ public record GuidedCompanyCreateRequestDto(
     @NotNull @Size(max = 40) Map<@NotNull @Positive Integer, @NotNull JsonNode> customFields,
     @NotNull @Size(max = 20) List<@NotNull @Positive Integer> tagIds
 ) {
-    public String duplicateReviewProof() {
-        return record.duplicateReviewToken();
-    }
 }

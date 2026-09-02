@@ -398,7 +398,7 @@ public class CompanyService {
 
     private Company createCompanyAfterDuplicateDecisionLock(
             Company company,
-            RecordCreationAugmentation augmentation,
+            RecordCreationAugmentationService.PreparedAugmentation prepared,
             int workspaceId) {
         company.setWorkspaceId(workspaceId);
         company.setOwnerId(authService.getCurrentUser().getId());
@@ -410,10 +410,10 @@ public class CompanyService {
             company.getWorkspaceId(), company.getId(), company.getWebsite(), company.getPhone(),
             IdentityAcquisitionSource.INTERACTIVE_CREATE, null);
         Map<String, Object> auditChanges = auditService.diff(null, company, AUDIT_FIELDS);
-        if (augmentation != null) {
+        if (prepared != null) {
             auditChanges = withCreationMetadata(
                 auditChanges,
-                recordCreationAugmentationService.applyCompany(company.getId(), augmentation));
+                recordCreationAugmentationService.applyCompany(company.getId(), prepared));
         }
         auditService.record("company.create", "company", company.getId(), company.getName(),
             "Created company " + company.getName(),
@@ -453,8 +453,10 @@ public class CompanyService {
                 company.getWebsite() == null ? List.of() : List.of(company.getWebsite()),
                 company.getPhone() == null ? List.of() : List.of(company.getPhone())),
             duplicateReviewToken);
+        RecordCreationAugmentationService.PreparedAugmentation prepared =
+            recordCreationAugmentationService.prepareCompany(augmentation);
         return createCompanyAfterDuplicateDecisionLock(
-            company, augmentation, workspaceService.getCurrentWorkspaceId());
+            company, prepared, workspaceService.getCurrentWorkspaceId());
     }
 
     private static Map<String, Object> withCreationMetadata(

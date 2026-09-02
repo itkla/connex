@@ -50,7 +50,7 @@ management:
 
 connex:
     record-creation:
-        guided-cutover-enabled: ${CONNEX_RECORD_CREATION_GUIDED_CUTOVER_ENABLED:false}
+        guided-cutover-enabled: "${CONNEX_RECORD_CREATION_GUIDED_CUTOVER_ENABLED:false}"
     audit:
         integrity:
             hmac-secret: ${CONNEX_AUDIT_INTEGRITY_HMAC_SECRET:}

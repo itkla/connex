@@ -23,6 +23,7 @@ import ooo.klae.connex.backend.dto.recordcreation.GuidedCompanyCreateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.GuidedDealCreateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.GuidedPersonCreateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.RecordCreationErrorDto;
+import ooo.klae.connex.backend.exceptions.DuplicateReviewException;
 import ooo.klae.connex.backend.services.GuidedRecordCreationService;
 import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
 
@@ -79,6 +80,18 @@ public class GuidedRecordCreationController {
                 null,
                 null);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(error);
+    }
+
+    @ExceptionHandler(DuplicateReviewException.class)
+    public ResponseEntity<RecordCreationErrorDto> duplicateReview(DuplicateReviewException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new RecordCreationErrorDto(
+            exception.getCode(),
+            exception.getMessage(),
+            Map.of(),
+            null,
+            null,
+            null,
+            null));
     }
 
     private static RecordCreationErrorDto requestBodyInvalid(Map<String, String> fieldErrors) {

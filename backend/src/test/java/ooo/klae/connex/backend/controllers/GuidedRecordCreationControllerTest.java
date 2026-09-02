@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.dto.recordcreation.GuidedCompanyCreateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.GuidedDealCreateRequestDto;
 import ooo.klae.connex.backend.dto.recordcreation.GuidedPersonCreateRequestDto;
+import ooo.klae.connex.backend.exceptions.DuplicateReviewException;
 import ooo.klae.connex.backend.services.GuidedRecordCreationService;
 
 class GuidedRecordCreationControllerTest {
@@ -135,6 +136,22 @@ class GuidedRecordCreationControllerTest {
 
         verify(service, never()).createDeal(any());
         verify(service, never()).createPerson(any());
+    }
+
+    @Test
+    void duplicateConflictUsesGuidedCodedResponseShape() throws Exception {
+        when(service.createPerson(any())).thenThrow(new DuplicateReviewException(
+            "DUPLICATE_REVIEW_REQUIRED",
+            "Possible duplicates must be reviewed before creation"));
+
+        mockMvc.perform(post("/api/persons")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(personBody()))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("DUPLICATE_REVIEW_REQUIRED"))
+            .andExpect(jsonPath("$.message")
+                .value("Possible duplicates must be reviewed before creation"))
+            .andExpect(jsonPath("$.fieldErrors").isEmpty());
     }
 
     private static String personBody() {

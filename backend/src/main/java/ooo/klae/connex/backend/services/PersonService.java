@@ -306,8 +306,11 @@ public class PersonService {
                 person.getEmail() == null ? List.of() : List.of(person.getEmail()),
                 person.getPhone() == null ? List.of() : List.of(person.getPhone())),
             duplicateReviewToken);
+        RecordCreationAugmentationService.PreparedAugmentation prepared =
+            recordCreationAugmentationService.preparePerson(
+                companyIdOf(person), person.getReferrerPersonId(), augmentation);
         return createWithSource(
-            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null, augmentation);
+            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null, prepared, true);
     }
 
     /**
@@ -395,9 +398,20 @@ public class PersonService {
             Person person,
             IdentityAcquisitionSource source,
             String sourceRowRef,
-            RecordCreationAugmentation augmentation) {
+            RecordCreationAugmentationService.PreparedAugmentation prepared) {
+        return createWithSource(person, source, sourceRowRef, prepared, false);
+    }
+
+    private Person createWithSource(
+            Person person,
+            IdentityAcquisitionSource source,
+            String sourceRowRef,
+            RecordCreationAugmentationService.PreparedAugmentation prepared,
+            boolean duplicateDecisionAlreadyLocked) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        duplicateDecisionLockService.lockCurrentOrganization();
+        if (!duplicateDecisionAlreadyLocked) {
+            duplicateDecisionLockService.lockCurrentOrganization();
+        }
         preserveHiddenCompanyAndValidateRequestedCompany(workspaceId, null, person);
         if (source == IdentityAcquisitionSource.BUSINESS_CARD && person.getLeadSource() == null) {
             person.setLeadSource(PersonLeadSource.BUSINESS_CARD);
@@ -414,14 +428,11 @@ public class PersonService {
             source, sourceRowRef);
         employmentService.recordInitial(workspaceId, person.getId(), companyIdOf(person), person.getTitle());
         Map<String, Object> auditChanges = auditService.diff(null, person, AUDIT_FIELDS);
-        if (augmentation != null) {
+        if (prepared != null) {
             auditChanges = withCreationMetadata(
                 auditChanges,
                 recordCreationAugmentationService.applyPerson(
-                    person.getId(),
-                    companyIdOf(person),
-                    person.getReferrerPersonId(),
-                    augmentation));
+                    person.getId(), prepared));
         }
         auditService.record("person.create", "person", person.getId(), person.getName(),
             "Created person " + person.getName(),
