@@ -3,7 +3,7 @@
 import { EnvelopeIcon, PhoneIcon } from '@heroicons/react/24/outline';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useState } from 'react';
+import { type KeyboardEvent, useState } from 'react';
 import { copyToClipboard, readableTextColor } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
 import { toastError, toastSuccess } from '@/app/lib/toast';
@@ -112,6 +112,12 @@ export default function ContactCard({
         router.push(recordDetailNavigationPath('contacts', id, returnSelection));
     }
 
+    function handleCardKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+        if (event.target !== event.currentTarget || event.key !== 'Enter') return;
+        event.preventDefault();
+        openContactPage();
+    }
+
     function openInternalQuickEdit() {
         setDraft({
             name: name ?? '',
@@ -180,6 +186,7 @@ export default function ContactCard({
     };
     const menuModel: RecordMenuModel = {
         ...baseMenu,
+        onOpen: openContactPage,
         allowRecordMutation: canMutate && (baseMenu.allowRecordMutation ?? true),
         onQuickEdit: canMutate ? baseMenu.onQuickEdit : undefined,
         onRemove: ownedByActiveWorkspace ? baseMenu.onRemove : undefined,
@@ -215,10 +222,13 @@ export default function ContactCard({
     const card = (
         <div
             className={cn(
-                'group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card transition duration-200',
+                'group relative flex flex-col overflow-hidden rounded-2xl border border-border bg-card outline-hidden transition duration-200 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-brand',
                 !readOnly && 'cursor-pointer hover:-translate-y-1 hover:shadow-lg dark:hover:shadow-[0_20px_45px_-18px_rgb(0_0_0/0.6)]',
             )}
+            role={readOnly ? undefined : 'link'}
+            tabIndex={readOnly ? undefined : 0}
             onClick={readOnly ? undefined : openContactPage}
+            onKeyDown={readOnly ? undefined : handleCardKeyDown}
         >
             <div className="relative aspect-square w-full overflow-hidden">
                 <ProtectedMediaImage

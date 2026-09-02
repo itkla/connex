@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -98,17 +99,17 @@ function mappedActionCodes(locale: (typeof LOCALES)[number]): string[] {
     return codes.sort();
 }
 
-function backendSources(): string {
-    const files: string[] = [];
-    const walk = (dir: string) => {
-        for (const entry of readdirSync(dir, { withFileTypes: true })) {
-            const full = path.join(dir, entry.name);
-            if (entry.isDirectory()) walk(full);
-            else if (entry.name.endsWith(".java")) files.push(readFileSync(full, "utf8"));
-        }
-    };
-    walk(BACKEND_SOURCE);
-    return files.join("\n");
+let backendSourcesPromise: Promise<string> | undefined;
+
+function backendSources(): Promise<string> {
+    backendSourcesPromise ??= readdir(BACKEND_SOURCE, { recursive: true })
+        .then((entries) => Promise.all(
+            entries
+                .filter((entry) => entry.endsWith(".java"))
+                .map((entry) => readFile(path.join(BACKEND_SOURCE, entry), "utf8")),
+        ))
+        .then((files) => files.join("\n"));
+    return backendSourcesPromise;
 }
 
 describe("organization audit action labels", () => {
@@ -129,15 +130,15 @@ describe("organization audit action labels", () => {
         }
     });
 
-    it("holds every listed action against a real backend audit action literal", () => {
-        const source = backendSources();
+    it("holds every listed action against a real backend audit action literal", async () => {
+        const source = await backendSources();
         const stale = ORG_PLANE_AUDIT_ACTIONS.filter((action) => !source.includes(`"${action}"`));
 
         expect(stale, "these actions no longer exist in the backend; drop or rename them").toEqual([]);
     });
 
-    it("re-derives the entity-typed org-plane actions from the backend", () => {
-        const source = backendSources();
+    it("re-derives the entity-typed org-plane actions from the backend", async () => {
+        const source = await backendSources();
         const calls = [...source.matchAll(/\.record([A-Za-z]*)\(\s*"([a-z][a-z0-9_.]*)"\s*,\s*"organization"/g)];
         const derived = new Set(
             calls.filter((match) => !match[1].endsWith("Scoped")).map((match) => match[2]),

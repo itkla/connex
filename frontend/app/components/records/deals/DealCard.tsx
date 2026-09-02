@@ -13,7 +13,7 @@ import CompanyAvatar from '@/app/components/records/companies/CompanyAvatar';
 import { type Company, type Deal, type DealRisk, type Pipeline, type Stage } from '@/app/lib/types';
 import { isDealClosed } from './dealOutcome';
 import DealRiskPill from './DealRiskPill';
-import { Suspense } from 'react';
+import { Suspense, type KeyboardEvent } from 'react';
 import {
     recordDetailNavigationPath,
     type RecordReturnSelectionSnapshot,
@@ -55,6 +55,11 @@ export default function DealCard({
     const t = useTranslations('DealsCard');
     const locale = useLocale();
     const open = () => router.push(recordDetailNavigationPath('deals', deal.id, returnSelection));
+    const handleCardKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (event.target !== event.currentTarget || event.key !== 'Enter') return;
+        event.preventDefault();
+        open();
+    };
     const status = dealStatus(deal);
     const statusLabel = status === 'closed' ? t('statusClosed') : t('statusOpen');
     const baseMenu: RecordMenuModel = menu ?? {
@@ -66,6 +71,7 @@ export default function DealCard({
     };
     const menuModel: RecordMenuModel = {
         ...baseMenu,
+        onOpen: open,
         onQuickEdit: canUpdate ? baseMenu.onQuickEdit : undefined,
         onRemove: canDelete ? baseMenu.onRemove : undefined,
     };
@@ -73,8 +79,11 @@ export default function DealCard({
     return (
         <RecordContextMenu model={menuModel}>
             <div
-                className="group flex cursor-pointer items-center gap-4 rounded-2xl border border-border bg-card p-4 transition duration-200 hover:bg-muted hover:shadow-lg"
+                className="group flex cursor-pointer items-center gap-4 rounded-2xl border border-border bg-card p-4 outline-hidden transition duration-200 hover:bg-muted hover:shadow-lg focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-brand"
+                role="link"
+                tabIndex={0}
                 onClick={open}
+                onKeyDown={handleCardKeyDown}
             >
             <Suspense fallback={<span className="size-16 shrink-0 rounded-2xl bg-muted ring-1 ring-border" />}>
             {company ? (

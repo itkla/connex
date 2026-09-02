@@ -68,6 +68,7 @@ beforeEach(() => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+    window.sessionStorage.clear();
     Object.defineProperty(window, 'matchMedia', {
         configurable: true,
         value: () => ({
@@ -275,6 +276,57 @@ async function renderDealKanban(permissions: readonly string[]) {
 }
 
 describe('real record card action menus', () => {
+    it.each([
+        {
+            name: 'contact',
+            card: <ContactCard id={15} workspaceId={workspace.id} name="Keyboard contact" />,
+        },
+        {
+            name: 'deal',
+            card: <DealCard deal={deal(16)} />,
+        },
+    ])('opens a $name from the whole card with Enter', async ({ card }) => {
+        await renderCard(card);
+        const cardSurface = container.querySelector<HTMLElement>('[role="link"][tabindex="0"]');
+        expect(cardSurface).not.toBeNull();
+
+        await act(async () => {
+            cardSurface?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        });
+
+        expect(router.push).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+        {
+            name: 'contact',
+            card: <ContactCard id={17} workspaceId={workspace.id} name="Selected contact" returnSelection={{ userId: user.id, workspaceId: workspace.id, ids: [17, 18], visibleCount: 30 }} />,
+            collection: 'contacts',
+        },
+        {
+            name: 'deal',
+            card: <DealCard deal={deal(29)} returnSelection={{ userId: user.id, workspaceId: workspace.id, ids: [29, 30], visibleCount: 40 }} />,
+            collection: 'deals',
+        },
+    ])('retains the $name list selection when Open record is selected', async ({ card, collection }) => {
+        await renderCard(card);
+        container.setAttribute('data-app-main', '');
+        container.scrollTop = 96;
+
+        await selectItem('Open record');
+
+        const stored = window.sessionStorage.getItem('connex:record-return-selection');
+        expect(stored).not.toBeNull();
+        expect(JSON.parse(stored ?? '{}')).toMatchObject({
+            collection,
+            userId: user.id,
+            workspaceId: workspace.id,
+            selectedIds: collection === 'contacts' ? [17, 18] : [29, 30],
+            scrollTop: 96,
+            visibleCount: collection === 'contacts' ? 30 : 40,
+        });
+    });
+
     it('renders identical owned-contact items from the kebab and right-click, with Quick edit in the contact-local group', async () => {
         await renderCard(
             <ContactCard

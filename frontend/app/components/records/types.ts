@@ -32,6 +32,8 @@ export type RecordMenuModel = {
     /** Whether actions that can mutate this record belong on this surface. */
     allowRecordMutation?: boolean;
     extraItems?: readonly RecordMenuExtraItem[];
+    /** Card-local detail navigation when the surface must retain browser return state. */
+    onOpen?: () => void;
     onPeek?: () => void;
     onQuickEdit?: () => void;
     onRemove?: () => void;

@@ -74,9 +74,15 @@ function resolveRecordMenuGroups<T>(model: RecordMenuModel, items: ResolvedGroup
             : [],
         [items.remove],
     ];
-    return groups
-        .map((group) => group.filter((item): item is T => item !== null))
-        .filter((group) => group.length > 0);
+    const resolvedGroups: T[][] = [];
+    for (const group of groups) {
+        const resolvedGroup: T[] = [];
+        for (const item of group) {
+            if (item !== null) resolvedGroup.push(item);
+        }
+        if (resolvedGroup.length > 0) resolvedGroups.push(resolvedGroup);
+    }
+    return resolvedGroups;
 }
 
 /**
@@ -109,6 +115,7 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
         if (!enabled) return [];
         const {
             record,
+            onOpen,
             onPeek,
             onQuickEdit,
             onRemove,
@@ -124,7 +131,9 @@ function useRecordMenuGroups(model: RecordMenuModel, enabled: boolean): MenuItem
                 key: id,
                 label: actionLabel(action, t, tMessage),
                 icon: Icon ? <Icon className="size-4 text-muted-foreground" /> : null,
-                onSelect: () => void run(id, { source: 'menu', record }),
+                onSelect: id === 'record.open' && onOpen
+                    ? onOpen
+                    : () => void run(id, { source: 'menu', record }),
             };
         };
         const peek: MenuItemDescriptor | null = onPeek
