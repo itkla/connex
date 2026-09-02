@@ -2,7 +2,7 @@
     "minimumCount": 21,
     "surfaces": [
         {
-            "file": "app/components/actions/QuickCreateLauncher.tsx",
+            "file": "app/components/actions/MobileDealDiscardGuard.tsx",
             "surface": "Mobile Quick Create deal composer",
             "guard": "own"
         },

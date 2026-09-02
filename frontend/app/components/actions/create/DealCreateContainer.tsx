@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
@@ -58,8 +58,6 @@ type DealCreateContainerProps = {
     embedded?: boolean;
     /** Cancel handler for embedded mode — steps back to the launcher selector. */
     onCancel?: () => void;
-    /** Reports embedded-form edits so the mobile launcher can guard every dismissal path. */
-    onDirtyChange?: (dirty: boolean) => void;
     currentUserId?: number | null;
     initialDraft?: DealDraft;
     initialDraftGeneration?: number;
@@ -68,23 +66,30 @@ type DealCreateContainerProps = {
     requestInit?: RequestInit;
 };
 
+export type DealCreateContainerHandle = {
+    /** Reads the current form state at the moment a host needs to decide whether dismissal is safe. */
+    hasUnsavedChanges: () => boolean;
+};
+
 /**
  * Deal quick-create shared by the persistent shell overlay and persistence-free embedded launcher.
- * Only the shell enables the draft controls; the embedded launcher reports dirtiness to its host.
+ * Only the shell enables the draft controls; an embedded host can read dirtiness through the handle.
  */
-export default function DealCreateContainer({
-    open,
-    onOpenChange,
-    defaults,
-    embedded = false,
-    onCancel,
-    onDirtyChange,
-    currentUserId = null,
-    initialDraft,
-    initialDraftGeneration,
-    draftPersistence = false,
-    requestInit,
-}: DealCreateContainerProps) {
+const DealCreateContainer = forwardRef<DealCreateContainerHandle, DealCreateContainerProps>(function DealCreateContainer(
+    {
+        open,
+        onOpenChange,
+        defaults,
+        embedded = false,
+        onCancel,
+        currentUserId = null,
+        initialDraft,
+        initialDraftGeneration,
+        draftPersistence = false,
+        requestInit,
+    },
+    ref,
+) {
     const { activeWorkspaceId } = useWorkspace();
     const draft = useFormDraft<DealDraft>({
         keyParts: {
@@ -217,14 +222,12 @@ export default function DealCreateContainer({
         stage: (seedPipelineId ? stagesByPipeline[seedPipelineId] : undefined)?.[0]?.id ?? 0,
     };
     const isDirty = !creating && !succeeded && isDealPayloadDirty(payload, seededBaseline);
+    useImperativeHandle(ref, () => ({
+        hasUnsavedChanges: () => isDirty,
+    }), [isDirty]);
     const formReady = restorationReady;
     const persistDraft = draftPersistence ? draft.persist : undefined;
     const clearDraft = draftPersistence ? draft.clear : undefined;
-
-    useEffect(() => {
-        onDirtyChange?.(isDirty);
-    }, [isDirty, onDirtyChange]);
-    useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
     useEffect(() => {
         if (!persistDraft || !clearDraft || !open || !formReady || creating || succeeded) return;
@@ -323,4 +326,6 @@ export default function DealCreateContainer({
             requestInit={requestInit}
         />
     );
-}
+});
+
+export default DealCreateContainer;

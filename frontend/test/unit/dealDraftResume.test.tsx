@@ -1,5 +1,6 @@
 import {
     act,
+    createRef,
     createElement,
     Fragment,
     type ButtonHTMLAttributes,
@@ -8,7 +9,9 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import DealCreateContainer from '@/app/components/actions/create/DealCreateContainer';
-import { MobileCreateFlow } from '@/app/components/actions/QuickCreateLauncher';
+import MobileCreateFlow, {
+    type MobileCreateFlowHandle,
+} from '@/app/components/actions/MobileCreateFlow';
 import { isDealPayloadDirty } from '@/app/components/records/deals/NewDealDialog';
 import DraftResumeBridge from '@/app/components/DraftResumeBridge';
 import { DRAFT_DEBOUNCE_MS } from '@/app/hooks/useFormDraft';
@@ -39,7 +42,7 @@ type ConfirmCapture = {
     onDiscard: () => void;
 };
 
-const state = vi.hoisted(() => ({ activeWorkspaceId: 17, switching: false }));
+const state = vi.hoisted(() => ({ activeWorkspaceId: 17, switching: false, reducedMotion: true }));
 const actions = vi.hoisted(() => ({ openOverlay: vi.fn<(request: OverlayRequest) => void>() }));
 const translate = vi.hoisted(() => (key: string, values?: Record<string, string | number>) => (
     values?.label === undefined ? key : `${key}:${values.label}`
@@ -119,6 +122,9 @@ vi.mock('motion/react', async () => {
         }) {
             const motionProps = new Set(['animate', 'custom', 'exit', 'initial', 'layout', 'transition', 'variants', 'whileTap']);
             const domProps = Object.fromEntries(Object.entries(props).filter(([key]) => !motionProps.has(key)));
+            if (props.transition !== undefined) {
+                domProps['data-motion-transition'] = JSON.stringify(props.transition);
+            }
             return React.createElement(tag, domProps, children);
         }
         return MotionElement;
@@ -126,7 +132,7 @@ vi.mock('motion/react', async () => {
     return {
         AnimatePresence: ({ children }: { children?: ReactNode }) => React.createElement(Fragment, null, children),
         motion: { button: element('button'), div: element('div') },
-        useReducedMotion: () => true,
+        useReducedMotion: () => state.reducedMotion,
     };
 });
 
@@ -199,12 +205,21 @@ vi.mock('@/app/components/ConfirmDiscardDialog', () => ({
 vi.mock('@/components/ui/drawer', async () => {
     const React = await import('react');
     const Passthrough = ({ children }: { children?: ReactNode }) => React.createElement(Fragment, null, children);
+    const element = (tag: 'header' | 'h2' | 'p') => {
+        function DrawerElement({ children, ...props }: {
+            children?: ReactNode;
+            [key: string]: unknown;
+        }) {
+            return React.createElement(tag, props, children);
+        }
+        return DrawerElement;
+    };
     return {
         Drawer: Passthrough,
         DrawerContent: Passthrough,
-        DrawerDescription: Passthrough,
-        DrawerHeader: Passthrough,
-        DrawerTitle: Passthrough,
+        DrawerDescription: element('p'),
+        DrawerHeader: element('header'),
+        DrawerTitle: element('h2'),
     };
 });
 
@@ -906,18 +921,85 @@ describe('deal draft persistence', () => {
         expect(readDealDraft()?.data).toMatchObject({ name: 'Overlay draft' });
     });
 
-    it('guards a dirty embedded Quick Create deal across Close, Back, and drawer dismissal', async () => {
-        const onClose = vi.fn();
-        let requestDrawerClose: (() => void) | null = null;
+    it('renders the origin/main mobile Quick Create classes and morph durations after extraction', async () => {
+        state.reducedMotion = false;
         const mounted = await render(createElement(MobileCreateFlow, {
             actions: [DEAL_ACTION],
             context: ACTION_CONTEXT,
             currentUserId: 7,
             onFallback: vi.fn(),
+            onClose: vi.fn(),
+            onPendingChange: vi.fn(),
+        }));
+        const option = requiredButton(mounted, (button) => button.getAttribute('role') === 'option');
+        const close = requiredButton(mounted, (button) => (
+            button.getAttribute('aria-label') === 'quickCreate.close'
+        ));
+        const header = ancestor(close, 'HEADER');
+        const selector = ancestor(option, 'DIV');
+        const optionSpans = descendants(option).filter((element) => element.tagName === 'SPAN');
+
+        expect({
+            root: ancestor(header, 'DIV').getAttribute('class'),
+            header: header.getAttribute('class'),
+            close: close.getAttribute('class'),
+            selector: selector.getAttribute('class'),
+            option: option.getAttribute('class'),
+            optionIcon: optionSpans[0]?.getAttribute('class'),
+            optionLabel: optionSpans[1]?.getAttribute('class'),
+        }).toEqual({
+            root: 'flex min-h-0 flex-1 flex-col',
+            header: 'flex-row items-center gap-2 border-b border-border px-4 py-3.5',
+            close: 'grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50',
+            selector: 'grid gap-1',
+            option: 'group flex items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors duration-(--motion-micro) hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
+            optionIcon: 'grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border transition-colors group-hover:bg-brand-light group-hover:text-brand-dark group-hover:ring-transparent group-focus-visible:bg-brand-light group-focus-visible:text-brand-dark',
+            optionLabel: 'flex-1 text-sm font-medium text-foreground',
+        });
+
+        const fullMotionTransitions = connectedElements(mounted, 'DIV')
+            .map((element) => element.getAttribute('data-motion-transition'))
+            .filter((value): value is string => value !== null)
+            .map((value) => JSON.parse(value) as Record<string, unknown>);
+        expect(fullMotionTransitions).toContainEqual(expect.objectContaining({
+            opacity: expect.objectContaining({ duration: 0.16 }),
+            filter: expect.objectContaining({ duration: 0.16 }),
+        }));
+
+        await act(async () => mounted.dispatch('click', option));
+        const back = requiredButton(mounted, (button) => (
+            button.getAttribute('aria-label') === 'quickCreate.back'
+        ));
+        expect(back.getAttribute('class')).toBe(close.getAttribute('class'));
+        await mounted.unmount();
+
+        state.reducedMotion = true;
+        const reduced = await render(createElement(MobileCreateFlow, {
+            actions: [DEAL_ACTION],
+            context: ACTION_CONTEXT,
+            currentUserId: 7,
+            onFallback: vi.fn(),
+            onClose: vi.fn(),
+            onPendingChange: vi.fn(),
+        }));
+        const reducedTransitions = connectedElements(reduced, 'DIV')
+            .map((element) => element.getAttribute('data-motion-transition'))
+            .filter((value): value is string => value !== null)
+            .map((value) => JSON.parse(value));
+        expect(reducedTransitions).toContainEqual({ duration: 0.12 });
+        await reduced.unmount();
+    });
+
+    it('guards a dirty embedded Quick Create deal across Close, Back, and drawer dismissal', async () => {
+        const onClose = vi.fn();
+        const flowRef = createRef<MobileCreateFlowHandle>();
+        const mounted = await render(createElement(MobileCreateFlow, {
+            ref: flowRef,
+            actions: [DEAL_ACTION],
+            context: ACTION_CONTEXT,
+            currentUserId: 7,
+            onFallback: vi.fn(),
             onClose,
-            onCloseRequestChange: (requestClose) => {
-                requestDrawerClose = requestClose;
-            },
             onPendingChange: vi.fn(),
         }));
 
@@ -947,12 +1029,12 @@ describe('deal draft persistence', () => {
         expect(requiredElement(mounted, 'deal-name').value).toBe('');
         await changeInput(mounted, requiredElement(mounted, 'deal-name'), 'Drawer dismissal');
 
-        await act(async () => requestDrawerClose?.());
+        await act(async () => flowRef.current?.requestClose());
         expect(onClose).not.toHaveBeenCalled();
         await act(async () => latestOpenConfirm().onKeepEditing());
         expect(requiredElement(mounted, 'deal-name').value).toBe('Drawer dismissal');
 
-        await act(async () => requestDrawerClose?.());
+        await act(async () => flowRef.current?.requestClose());
         await act(async () => latestOpenConfirm().onDiscard());
         expect(onClose).toHaveBeenCalledOnce();
         expect(readDealDraft()).toBeNull();
@@ -966,6 +1048,7 @@ beforeEach(() => {
     clearAllDrafts();
     state.activeWorkspaceId = 17;
     state.switching = false;
+    state.reducedMotion = true;
     dialog.confirms.length = 0;
     dialog.dismissals.length = 0;
     api.createDeal.mockResolvedValue(undefined);
