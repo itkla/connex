@@ -569,10 +569,17 @@ Every alert in this rule family is `java/csrf-unprotected-request-type`.
 
 Alert #76 (old root) and its line-exact successor #130 sit on
 `NativeConnectController.java:37`, the `pairingStatus` handler, and are the one site in this batch
-re-derived individually rather than inherited, because the managed native-connect flow was raised as
-a case where the CSRF query's premise might not apply at all. It was re-derived on 2026-09-01 by an
-independent read-only reviewer against `origin/main`, and separately spot-checked. Outcome:
-**the `false positive` dismissal is sound.**
+re-derived individually rather than inherited.
+
+Two independent reviews converged on it from different directions. The CHK-089 re-test on
+[#1244](https://github.com/itkla/connex/issues/1244#issuecomment-5506662478) reconciled all 96
+dismissals against this log's two time-box carriers and found exactly one covered by neither — #76 —
+noting that the log did not mention `NativeConnect` anywhere, by file or by handler name. The
+confirmation review on
+[#1296](https://github.com/itkla/connex/issues/1296#issuecomment-5506561885) reached the same
+batch from the other end, blocking closure on the whole 2026-08-15 set. #76 was then re-derived from
+source on 2026-09-01 by a fresh read-only reviewer, whose citations were each checked back against
+`origin/main`. Outcome: **the `false positive` dismissal is sound.**
 
 The premise correction matters and is recorded here so it is not re-litigated: the loopback/PKCE
 exemptions are **narrower than the class**. `SecurityConfig.java:234` exempts from CSRF, and the
