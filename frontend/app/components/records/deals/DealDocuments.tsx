@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import { useReducedMotion } from 'motion/react';
 import { useLocale, useTranslations } from 'next-intl';
@@ -118,6 +118,77 @@ type Props = {
 
 type ApprovalAction = 'request' | 'approve' | 'reject' | 'delegate';
 
+type ApprovalDialog = {
+    doc: DealDocument;
+    action: ApprovalAction;
+    stepId: number | null;
+};
+
+type ApprovalDialogState = {
+    dialog: ApprovalDialog | null;
+    open: boolean;
+    comment: string;
+    delegateCandidates: ApprovalDelegate[];
+    delegateCandidatesLoading: boolean;
+    delegateCandidatesError: boolean;
+    delegateQuery: string;
+    delegateUserId: number | null;
+};
+
+type ApprovalDialogStateAction =
+    | { type: 'open'; dialog: ApprovalDialog }
+    | { type: 'set-open'; open: boolean }
+    | { type: 'set-comment'; comment: string }
+    | { type: 'delegates-loaded'; candidates: ApprovalDelegate[] }
+    | { type: 'delegates-failed' }
+    | { type: 'delegate-load-finished' }
+    | { type: 'set-delegate-selection'; query: string; userId: number | null };
+
+const INITIAL_APPROVAL_DIALOG_STATE: ApprovalDialogState = {
+    dialog: null,
+    open: false,
+    comment: '',
+    delegateCandidates: [],
+    delegateCandidatesLoading: false,
+    delegateCandidatesError: false,
+    delegateQuery: '',
+    delegateUserId: null,
+};
+
+function approvalDialogReducer(
+    state: ApprovalDialogState,
+    action: ApprovalDialogStateAction,
+): ApprovalDialogState {
+    switch (action.type) {
+        case 'open': {
+            const isDelegate = action.dialog.action === 'delegate';
+            return {
+                ...state,
+                dialog: action.dialog,
+                open: true,
+                comment: '',
+                delegateCandidates: isDelegate ? [] : state.delegateCandidates,
+                delegateCandidatesLoading: isDelegate ? true : state.delegateCandidatesLoading,
+                delegateCandidatesError: isDelegate ? false : state.delegateCandidatesError,
+                delegateQuery: '',
+                delegateUserId: null,
+            };
+        }
+        case 'set-open':
+            return { ...state, open: action.open };
+        case 'set-comment':
+            return { ...state, comment: action.comment };
+        case 'delegates-loaded':
+            return { ...state, delegateCandidates: action.candidates };
+        case 'delegates-failed':
+            return { ...state, delegateCandidates: [], delegateCandidatesError: true };
+        case 'delegate-load-finished':
+            return { ...state, delegateCandidatesLoading: false };
+        case 'set-delegate-selection':
+            return { ...state, delegateQuery: action.query, delegateUserId: action.userId };
+    }
+}
+
 /**
  * This small draft only needs atomic field replacement, so a reducer would add indirection without
  * enforcing more invariants.
@@ -196,15 +267,20 @@ export default function DealDocuments({
     const [documents, setDocuments] = useState<DealDocument[]>(initial);
     const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
     const [busy, setBusy] = useState(false);
-    const [approvalDialog, setApprovalDialog] = useState<
-        { doc: DealDocument; action: ApprovalAction; stepId: number | null } | null>(null);
-    const [approvalDialogOpen, setApprovalDialogOpen] = useState(false);
-    const [comment, setComment] = useState('');
-    const [delegateCandidates, setDelegateCandidates] = useState<ApprovalDelegate[]>([]);
-    const [delegateCandidatesLoading, setDelegateCandidatesLoading] = useState(false);
-    const [delegateCandidatesError, setDelegateCandidatesError] = useState(false);
-    const [delegateQuery, setDelegateQuery] = useState('');
-    const [delegateUserId, setDelegateUserId] = useState<number | null>(null);
+    const [approvalDialogState, dispatchApprovalDialog] = useReducer(
+        approvalDialogReducer,
+        INITIAL_APPROVAL_DIALOG_STATE,
+    );
+    const {
+        dialog: approvalDialog,
+        open: approvalDialogOpen,
+        comment,
+        delegateCandidates,
+        delegateCandidatesLoading,
+        delegateCandidatesError,
+        delegateQuery,
+        delegateUserId,
+    } = approvalDialogState;
     const [approvalMembers, setApprovalMembers] = useState<WorkspaceMember[]>([]);
     const [approvalMemberDirectoryStatus, setApprovalMemberDirectoryStatus] = useState<ApprovalMemberDirectoryStatus>(
         canManageApprovals ? 'loading' : 'hidden',
@@ -280,16 +356,15 @@ export default function DealDocuments({
         let cancelled = false;
         getDocumentApprovalDelegateCandidates(dealId, approvalDialog.doc.id, approvalDialog.stepId)
             .then((candidates) => {
-                if (!cancelled) setDelegateCandidates(candidates);
+                if (!cancelled) dispatchApprovalDialog({ type: 'delegates-loaded', candidates });
             })
             .catch(() => {
                 if (!cancelled) {
-                    setDelegateCandidates([]);
-                    setDelegateCandidatesError(true);
+                    dispatchApprovalDialog({ type: 'delegates-failed' });
                 }
             })
             .finally(() => {
-                if (!cancelled) setDelegateCandidatesLoading(false);
+                if (!cancelled) dispatchApprovalDialog({ type: 'delegate-load-finished' });
             });
         return () => {
             cancelled = true;
@@ -382,21 +457,12 @@ export default function DealDocuments({
             } finally {
                 await refreshDocument(doc.id).catch(() => undefined);
             }
-            setApprovalDialogOpen(false);
+            dispatchApprovalDialog({ type: 'set-open', open: false });
         }, APPROVAL_DIALOG_KEYS[action].failure);
     };
 
     const openApprovalDialog = (doc: DealDocument, action: ApprovalAction, stepId: number | null = null) => {
-        setComment('');
-        setDelegateQuery('');
-        setDelegateUserId(null);
-        if (action === 'delegate') {
-            setDelegateCandidates([]);
-            setDelegateCandidatesLoading(true);
-            setDelegateCandidatesError(false);
-        }
-        setApprovalDialog({ doc, action, stepId });
-        setApprovalDialogOpen(true);
+        dispatchApprovalDialog({ type: 'open', dialog: { doc, action, stepId } });
     };
 
     const openStepManagementDialog = (doc: DealDocument, action: ApprovalStepManagementAction) => {
@@ -443,10 +509,9 @@ export default function DealDocuments({
             const updatedApproval = action === 'escalate'
                 ? await widenDocumentApprovalStepApprovers(dealId, doc.id, stepId, payload)
                 : await reassignDocumentApprovalStepApprovers(dealId, doc.id, stepId, payload);
-            const nextDocuments = documents.map((document) => (
+            setDocuments((current) => current.map((document) => (
                 document.id === doc.id ? { ...document, latestApproval: updatedApproval } : document
-            ));
-            setDocuments(nextDocuments);
+            )));
             setStepManagement(null);
             toastSuccess(t(action === 'escalate' ? 'approversWidened' : 'approversReassigned'));
             try {
@@ -685,7 +750,10 @@ export default function DealDocuments({
                 </div>
             )}
 
-            <Dialog open={approvalDialogOpen} onOpenChange={setApprovalDialogOpen}>
+            <Dialog
+                open={approvalDialogOpen}
+                onOpenChange={(open) => dispatchApprovalDialog({ type: 'set-open', open })}
+            >
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>{dialogKeys ? t(dialogKeys.title) : ''}</DialogTitle>
@@ -707,8 +775,11 @@ export default function DealDocuments({
                                     const picked = eligibleDelegates.find(
                                         (member) => delegateOption(member) === value,
                                     );
-                                    setDelegateQuery(value);
-                                    setDelegateUserId(picked?.id ?? null);
+                                    dispatchApprovalDialog({
+                                        type: 'set-delegate-selection',
+                                        query: value,
+                                        userId: picked?.id ?? null,
+                                    });
                                 }}
                                 mode="list"
                                 openOnInputClick
@@ -747,7 +818,10 @@ export default function DealDocuments({
                             maxLength={approvalDialog?.action === 'delegate' ? 500 : 1000}
                             value={comment}
                             placeholder={t('commentPlaceholder')}
-                            onChange={(e) => setComment(e.target.value)}
+                            onChange={(e) => dispatchApprovalDialog({
+                                type: 'set-comment',
+                                comment: e.target.value,
+                            })}
                             disabled={busy}
                         />
                     </div>

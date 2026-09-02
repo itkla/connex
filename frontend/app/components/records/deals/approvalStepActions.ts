@@ -31,17 +31,22 @@ export function approvalCandidateDirectory(
     builtInRoles: readonly CustomRole[],
     customRoles: readonly CustomRole[],
 ): ApprovalCandidateDirectory {
-    const builtInByName = new Map(builtInRoles.map((role) => [role.name, role]));
-    const customById = new Map(customRoles.map((role) => [role.id, role]));
+    const builtInCanApproveByName = new Map(builtInRoles.map((role) => [
+        role.name,
+        new Set(role.permissions).has('DOCUMENT_APPROVE'),
+    ]));
+    const customCanApproveById = new Map(customRoles.map((role) => [
+        role.id,
+        new Set(role.permissions).has('DOCUMENT_APPROVE'),
+    ]));
     const candidates: WorkspaceMember[] = [];
     const verifiedApproverIds: number[] = [];
 
     for (const member of members) {
         if (member.status === 'pending') continue;
-        const role = member.roleId == null
-            ? builtInByName.get(member.builtInRole)
-            : customById.get(member.roleId);
-        const roleCanApprove = role?.permissions.includes('DOCUMENT_APPROVE');
+        const roleCanApprove = member.roleId == null
+            ? builtInCanApproveByName.get(member.builtInRole)
+            : customCanApproveById.get(member.roleId);
         if (roleCanApprove === false) continue;
         candidates.push(member);
         if (roleCanApprove === true) verifiedApproverIds.push(member.id);
@@ -85,21 +90,27 @@ export function approvalStepQuorumShortfall(
     selection: ApprovalStepApproverSelection,
     verifiedApproverIds: readonly number[],
 ): number {
-    const approvedIds = new Set(
-        step.decisions
-            .filter((decision) => decision.decision === 'approved')
-            .map((decision) => decision.decidedBy),
-    );
+    const approvedIds = new Set<number>();
+    for (const decision of step.decisions) {
+        if (decision.decision === 'approved') approvedIds.add(decision.decidedBy);
+    }
     const verifiedIds = new Set(verifiedApproverIds);
+    const eligibleIds = new Set<number>();
+    if (action === 'escalate') {
+        for (const id of step.effectiveApproverIds) {
+            if (verifiedIds.has(id)) eligibleIds.add(id);
+        }
+    }
     const proposedIds = selection.mode === 'any_approver'
         ? verifiedApproverIds
-        : selection.memberIds.filter((id) => verifiedIds.has(id));
-    const eligibleIds = new Set((
-        action === 'escalate'
-            ? [...step.effectiveApproverIds, ...proposedIds]
-            : proposedIds
-    ).filter((id) => verifiedIds.has(id)));
-    const undecidedCount = [...eligibleIds].filter((id) => !approvedIds.has(id)).length;
+        : selection.memberIds;
+    for (const id of proposedIds) {
+        if (verifiedIds.has(id)) eligibleIds.add(id);
+    }
+    let undecidedCount = 0;
+    for (const id of eligibleIds) {
+        if (!approvedIds.has(id)) undecidedCount += 1;
+    }
     const remainingCount = Math.max(0, step.requiredCount - step.approvedCount);
     return Math.max(0, remainingCount - undecidedCount);
 }
@@ -109,11 +120,18 @@ export function approvalStepApproverChangePayload(
     selection: ApprovalStepApproverSelection,
     comment: string,
 ): ApprovalStepApproverChangePayload {
-    const approvers: ApprovalStepApproverChangePayload['approvers'] = selection.mode === 'any_approver'
-        ? [{ approverKind: 'any_approver' }]
-        : [...new Set(selection.memberIds)]
-            .slice(0, MAX_APPROVAL_STEP_APPROVERS)
-            .map((userId) => ({ approverKind: 'user', userId }));
+    const approvers: ApprovalStepApproverChangePayload['approvers'] = [];
+    if (selection.mode === 'any_approver') {
+        approvers.push({ approverKind: 'any_approver' });
+    } else {
+        const addedIds = new Set<number>();
+        for (const userId of selection.memberIds) {
+            if (addedIds.has(userId)) continue;
+            approvers.push({ approverKind: 'user', userId });
+            addedIds.add(userId);
+            if (approvers.length === MAX_APPROVAL_STEP_APPROVERS) break;
+        }
+    }
     return {
         approvers,
         comment: comment.trim() || null,
