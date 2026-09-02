@@ -182,8 +182,10 @@
         "atLeast": "At least {count, plural, one {# item is} other {# items are}} waiting in My Work",
         "myWorkCritical": "{count} critical",
         "viewMyWork": "Open My Work",
-        "partial": "Some sources couldn't be counted right now.",
-        "unavailable": "Your My Work count couldn't be loaded — open it to check."
+        "partial": "This count may be missing items.",
+        "unavailable": "Your My Work count couldn't be loaded — open it to check.",
+        "myWorkCriticalAtLeast": "At least {count} critical",
+        "allClear": "Nothing is waiting in My Work."
     },
     "DashboardPipelineChart": {
         "pipelineLabel": "Pipeline",

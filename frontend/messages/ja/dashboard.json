@@ -182,8 +182,10 @@
         "atLeast": "マイワークに{count}件以上の対応待ちがあります",
         "myWorkCritical": "緊急{count}件",
         "viewMyWork": "マイワークを開く",
-        "partial": "一部の項目は現在集計できませんでした。",
-        "unavailable": "マイワークの件数を読み込めませんでした。開いてご確認ください。"
+        "partial": "この件数には含まれていない項目がある可能性があります。",
+        "unavailable": "マイワークの件数を読み込めませんでした。開いてご確認ください。",
+        "myWorkCriticalAtLeast": "緊急{count}件以上",
+        "allClear": "マイワークに対応待ちはありません。"
     },
     "DashboardPipelineChart": {
         "pipelineLabel": "パイプライン",

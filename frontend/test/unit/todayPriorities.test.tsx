@@ -35,8 +35,10 @@ async function render(summary: CookieResult<WorkItemSummary>): Promise<string> {
 }
 
 describe("Home My Work count", () => {
-    it("renders nothing for a fresh, complete zero", async () => {
-        expect(await render({ ok: true, data: summaryOf() })).toBe("");
+    it("names the all-clear for a fresh, complete zero instead of vanishing", async () => {
+        const html = await render({ ok: true, data: summaryOf() });
+        expect(html).toContain("allClear");
+        expect(html).toContain('href="/me"');
     });
 
     it("links exact counts and the critical chip to /me", async () => {
@@ -62,8 +64,25 @@ describe("Home My Work count", () => {
             ok: true,
             data: summaryOf({ availability: "partial", totalsComplete: false }),
         });
-        expect(html).not.toBe("");
+        expect(html).not.toContain("allClear");
         expect(html).toContain("atLeast");
+    });
+
+    it("qualifies the critical count when the projection is incomplete", async () => {
+        const html = await render({
+            ok: true,
+            data: summaryOf({ knownTotal: 3, knownCritical: 2, totalsComplete: false, availability: "partial" }),
+        });
+        expect(html).toContain("myWorkCriticalAtLeast");
+        expect(html).not.toContain("myWorkCritical:");
+    });
+
+    it("clamps contradictory counts defensively", async () => {
+        const html = await render({
+            ok: true,
+            data: summaryOf({ knownTotal: -2, knownCritical: -1 }),
+        });
+        expect(html).toContain("allClear");
     });
 
     it("says the count is unavailable rather than staying silent on failure", async () => {
