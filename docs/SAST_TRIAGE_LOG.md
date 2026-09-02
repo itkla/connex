@@ -86,16 +86,24 @@ one — that property, not the alert count, is what matters.
 
 ## Remediated
 
-### `java/csrf-unprotected-request-type` — #110, #111, #114, #141, #142, #143, #144 (7 alerts)
+### `java/csrf-unprotected-request-type` — 7 sites; #110, #141, #142, #143, #144 fixed, #111 and #114 partially remediated
 
 The 2026-08-30 independent re-review of the baseline
 ([#1296](https://github.com/itkla/connex/issues/1296)) found that seven of the CSRF alerts are
 **real**, not false positives. All seven are a `@GetMapping` that inserts a durable `audit_log` row
 on a normal successful request. `JSESSIONID` is `SameSite=Lax`
-(`backend/src/main/resources/application.yml:524`), and `Lax` **is** sent on cross-site top-level
+(`backend/src/main/resources/application.yml:556`), and `Lax` **is** sent on cross-site top-level
 `GET` navigation, so an attacker page could navigate a signed-in victim to any of these URLs and
 forge entries in the evidence trail under that victim's actor id. The attacker cannot read the
 response; the write is the impact.
+
+**Alert-state outcome, so the list above is not misread.** Seven *sites* were addressed here, but
+only **five alerts reached `fixed`**: #110, #141, #142, #143 and #144. #111 and #114 were only
+partially remediated — the severe `?scope=retained` half moved to `POST`, while the deliberate
+administrative-read accountability record still fires from a `GET`. Those two therefore remain
+**dismissed as accepted risk (`won't fix`)**, together with #151 and #152, and are dispositioned in
+*Accepted residual — audited administrative assistant-session reads* below. Nothing in this section
+claims #111 or #114 is closed.
 
 These seven sit in the set of nine CSRF sites that were closed as `fixed` and re-raised under new
 numbers on 2026-08-26 and so never received an individual dismissal record. The log's own standing
@@ -472,3 +480,127 @@ role; expiry **2027-02-14**, re-review **2027-01-14**; reassess immediately if t
 filter, the session-cookie `SameSite` posture, or the audited route set changes (the
 architecture test forces any new route to be classified, which re-opens this question by
 construction).
+
+## Supersession and time-box of the 2026-08-15 dismissal batch
+
+The independent confirmation review of #1296 (two fresh read-only `gpt-5.6-sol` contexts, recorded
+on that issue) returned **Overall: NO** on closure. Both contexts raised the same blocker: the
+canonical time-box above is scoped, verbatim, to *"all alerts dismissed on 2026-08-30–31 under this
+review"*, but **31 dismissals are dated 2026-08-15** and carry no expiry in their code-scanning
+comments. Under the written record those 31 read as indefinite suppressions, which
+[STATIC_ANALYSIS.md](STATIC_ANALYSIS.md) forbids and #1296's completion rule
+(修正 / 期限付き偽陽性却下 / 補償統制付きリスク受容) does not permit. This section closes that reading.
+
+### Why two generations of alert records exist
+
+The CodeQL source root changed on 2026-08-26. Findings analysed before that date carry paths
+prefixed `backend/` or `frontend/`; findings analysed after carry paths rooted at `src/`. GitHub
+does not merge the two: a *dismissed* alert is never auto-closed, so each pre-2026-08-26 dismissal
+persists as a stale record pointing at a path from a superseded analysis, while the same underlying
+finding was re-raised under a new number and re-derived from source in the 2026-08-30 review.
+
+Every alert in the current analysis generation belongs to the new root. The 31 records below are
+**not live findings**; they are historical records of findings that the 2026-08-30 review already
+re-derived and dispositioned with a time box.
+
+### Disposition of the 31 records
+
+**All 31 dismissals dated 2026-08-15 inherit the canonical time-box.** Disposition owner
+**Hunter Nakagawa**; approver **Security Owner** role ([#1230](https://github.com/itkla/connex/issues/1230));
+**expiry 2027-02-14; re-review 2027-01-14**; reassess earlier if a cited data flow changes or the
+relevant query is materially updated. Where a record's successor is a risk acceptance rather than a
+false positive, the compensating control recorded for that successor governs both. No record in
+this batch is exempt, and none is suppressed indefinitely.
+
+### Old-to-new mapping
+
+The mapping is **one-to-one and line-exact**: every one of the 31 records has exactly one successor
+in the current generation with the same rule, the same file and the same start line, and the
+successor's disposition matches the predecessor's in every case. Reproduce with:
+
+```bash
+gh api --paginate "/repos/itkla/connex/code-scanning/alerts?tool_name=CodeQL&per_page=100" > /tmp/alerts.json
+jq -r '.[] | "\(.rule.id)|\(.most_recent_instance.location.path)|\(.most_recent_instance.location.start_line)|#\(.number)|\(.state)/\(.dismissed_reason // "-")|\(.dismissed_at[0:10] // "-")"' /tmp/alerts.json | sort -t'|' -k2,2 -k3,3n
+```
+
+| Old alert (2026-08-15) | Site (`file:line`) | Old disposition | Successor | Successor disposition | Successor dismissed | Time-box carried by |
+| --- | --- | --- | --- | --- | --- | --- |
+| #34 | `AiOrganizationBudgetController.java:27` | false positive | #113 | false positive | 2026-08-31 | canonical clause |
+| #36 | `AttachmentController.java:174` | false positive | #115 | false positive | 2026-08-31 | canonical clause |
+| #37 | `AttachmentController.java:118` | false positive | #116 | false positive | 2026-08-31 | canonical clause |
+| #38 | `AttachmentController.java:102` | false positive | #117 | false positive | 2026-08-31 | canonical clause |
+| #39 | `AttachmentController.java:54` | false positive | #119 | false positive | 2026-08-31 | canonical clause |
+| #40 | `BusinessCardController.java:100` | false positive | #118 | false positive | 2026-08-31 | canonical clause |
+| #41 | `DataSubjectRequestController.java:61` | false positive | #120 | false positive | 2026-08-31 | canonical clause |
+| #42 | `DataSubjectRequestController.java:49` | false positive | #121 | false positive | 2026-08-31 | canonical clause |
+| #43 | `DataSubjectRequestController.java:33` | false positive | #122 | false positive | 2026-08-31 | canonical clause |
+| #44 | `DeliveryUnsubscribeController.java:29` | false positive | #124 | false positive | 2026-08-31 | canonical clause |
+| #45 | `HealthController.java:39` | false positive | #125 | false positive | 2026-08-31 | canonical clause |
+| #46 | `NotificationController.java:122` | false positive | #131 | false positive | 2026-08-31 | canonical clause |
+| #47 | `NotificationController.java:65` | false positive | #132 | false positive | 2026-08-31 | canonical clause |
+| #48 | `IntroductionController.java:111` | false positive | #126 | false positive | 2026-08-31 | canonical clause |
+| #49 | `IntroductionController.java:82` | false positive | #127 | false positive | 2026-08-31 | canonical clause |
+| #50 | `IntroductionController.java:62` | false positive | #128 | false positive | 2026-08-31 | canonical clause |
+| #51 | `IntroductionController.java:51` | false positive | #129 | false positive | 2026-08-31 | canonical clause |
+| #52 | `PersonController.java:649` | false positive | #135 | false positive | 2026-08-31 | canonical clause |
+| #53 | `PersonController.java:618` | false positive | #136 | false positive | 2026-08-31 | canonical clause |
+| #54 | `ProviderCaptureController.java:68` | false positive | #133 | false positive | 2026-08-31 | canonical clause |
+| #55 | `ProviderCaptureController.java:44` | false positive | #137 | false positive | 2026-08-31 | canonical clause |
+| #56 | `RadarController.java:47` | false positive | #139 | false positive | 2026-08-31 | canonical clause |
+| #57 | `RadarController.java:36` | false positive | #140 | false positive | 2026-08-31 | canonical clause |
+| #58 | `ProviderConnectionController.java:47` | won't fix | #134 | won't fix | 2026-08-31 | canonical clause + risk-acceptance table |
+| #59 | `ProviderConnectionController.java:37` | false positive | #138 | false positive | 2026-08-31 | canonical clause |
+| #64 | `TenantDiagnosticsController.java:40` | false positive | #145 | false positive | 2026-08-31 | canonical clause |
+| #65 | `TenantDiagnosticsController.java:32` | false positive | #146 | false positive | 2026-08-31 | canonical clause |
+| #66 | `TenantLifecycleController.java:67` | won't fix | #147 | won't fix | 2026-08-31 | canonical clause + risk-acceptance table |
+| #67 | `UserController.java:67` | false positive | #149 | false positive | 2026-08-31 | canonical clause |
+| #76 | `NativeConnectController.java:37` | false positive | #130 | false positive | 2026-08-31 | canonical clause |
+| #79 | `DocumentAcceptanceController.java:36` | false positive | #123 | false positive | 2026-08-31 | canonical clause |
+
+All 31 successors were dismissed on 2026-08-31 and are therefore inside the canonical clause's
+stated window. The two risk acceptances in the batch — #58 → #134 (OAuth callback) and
+#66 → #147 (tenant export) — additionally appear by successor number in
+*Risk acceptances (`won't fix`) — genuine mutations, accepted with compensating controls* above,
+where their compensating controls, owner and expiry are recorded.
+
+Every alert in this rule family is `java/csrf-unprotected-request-type`.
+
+### Re-derivation of #76 / #130 — `NativeConnectController.pairingStatus`
+
+Alert #76 (old root) and its line-exact successor #130 sit on
+`NativeConnectController.java:37`, the `pairingStatus` handler, and are the one site in this batch
+re-derived individually rather than inherited, because the managed native-connect flow was raised as
+a case where the CSRF query's premise might not apply at all. It was re-derived on 2026-09-01 by an
+independent read-only reviewer against `origin/main`, and separately spot-checked. Outcome:
+**the `false positive` dismissal is sound.**
+
+The premise correction matters and is recorded here so it is not re-litigated: the loopback/PKCE
+exemptions are **narrower than the class**. `SecurityConfig.java:234` exempts from CSRF, and the
+`permitAll` block at `:268`, only `/api/account/connections/native/prepare` and
+`/api/account/connections/native/complete` — the two `POST` handlers. The `GET
+/{provider}/pairing` at line 37 is *not* exempt and *not* `permitAll`; it falls through to
+`auth.anyRequest().authenticated()` (`SecurityConfig.java:283`) and is authorized by the ambient
+session cookie. The CSRF query's premise therefore **does** apply to this handler, and the dismissal
+rests solely on the handler performing no durable mutation.
+
+It performs none:
+
+- `NativeConnectService.pairingStatus` (`:96`) resolves the caller with
+  `workspaceService.getCurrentUserId()` and calls `sessionPersistence.poll(userId, provider)`.
+  It reaches no audit path; nothing in this handler writes an `audit_log` row.
+- `NativeConnectSessionPersistence.poll` (`:84`) is the **only** method in that class carrying no
+  `@Transactional` annotation, and the class itself is `@Component`, not transactional. Its
+  reachable statements are `requireReadableUser` (`:300`, two `SELECT`s) and
+  `getLatestByUserAndProvider`, which is a `<select>` in
+  `NativeConnectSessionMapper.xml:30` scoped by both `user_id` and `provider`.
+- The `setStatus("failed")` / `setErrorCode("expired")` calls inside `poll` mutate only the returned
+  bean. `NativeConnectSession` is a plain Lombok `@Data` bean, not a persistence-managed entity, and
+  MyBatis does not dirty-track result objects, so no implicit flush is possible.
+- Cross-site forgery value is nil: an attacker can cause the `GET` but cannot read the cross-origin
+  response, and the read is bound to the authenticated user id plus a validated provider, so it
+  offers no IDOR or cross-user disclosure either.
+
+Disposition: **false positive**, on the same time-box as the rest of this batch — owner
+Hunter Nakagawa; approver Security Owner role; expiry **2027-02-14**, re-review **2027-01-14**.
+Reassess if `poll` gains a write, if `@Transactional` is added to it, or if the route's
+authentication posture changes. #76's code-scanning comment was updated to carry this expiry inline.
