@@ -1,0 +1,248 @@
+name: Candidate soak evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Immutable qualification tag to audit
+        required: true
+        type: string
+      required_runs:
+        description: Consecutive clean pipeline runs required
+        required: true
+        default: '10'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    name: Audit candidate soak evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Bind the canonical repository and candidate tag
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ inputs.ref }}
+          REQUIRED_RUNS: ${{ inputs.required_runs }}
+          REPOSITORY_NAME: ${{ github.repository }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT_REPOSITORY_ID: ${{ github.event.repository.id }}
+          REPOSITORY_FORK: ${{ github.event.repository.fork }}
+          TAG_FILE: ${{ runner.temp }}/candidate-soak-tag.json
+          MAIN_FILE: ${{ runner.temp }}/candidate-soak-main.json
+        run: |
+          set -euo pipefail
+          [[ "$REQUIRED_RUNS" =~ ^[1-9][0-9]*$ ]]
+          (( REQUIRED_RUNS >= 10 ))
+          [[ "$REPOSITORY_NAME" == "itkla/connex" ]]
+          [[ "$REPOSITORY_ID" == "1222010579" ]]
+          [[ "$EVENT_REPOSITORY_ID" == "1222010579" ]]
+          [[ "$REPOSITORY_FORK" == "false" ]]
+          qualification_tag_pattern='^candidate-soak-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-tc\.([1-9][0-9]*)$'
+          if ! [[ "$REF" =~ $qualification_tag_pattern ]]; then
+            echo "::error::Candidate ref must match candidate-soak-vMAJOR.MINOR.PATCH-tc.N"
+            exit 1
+          fi
+          encoded_ref="$(jq -rn --arg ref "$REF" '$ref | @uri')"
+          tag_document="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/itkla/connex/git/ref/tags/${encoded_ref}")"
+          resolved_ref="$(jq -r '.ref // empty' <<< "$tag_document")"
+          resolved_type="$(jq -r '.object.type // empty' <<< "$tag_document")"
+          tag_object_id="$(jq -r '.object.sha // empty' <<< "$tag_document")"
+          [[ "$resolved_ref" == "refs/tags/$REF" ]]
+          [[ "$resolved_type" == "tag" ]]
+          [[ "$tag_object_id" =~ ^[0-9a-f]{40}$ ]]
+          tag_object="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/itkla/connex/git/tags/${tag_object_id}")"
+          [[ "$(jq -r '.sha // empty' <<< "$tag_object")" == "$tag_object_id" ]]
+          [[ "$(jq -r '.tag // empty' <<< "$tag_object")" == "$REF" ]]
+          [[ "$(jq -r '.object.type // empty' <<< "$tag_object")" == "commit" ]]
+          resolved_sha="$(jq -r '.object.sha // empty' <<< "$tag_object")"
+          [[ "$resolved_sha" =~ ^[0-9a-f]{40}$ ]]
+          main_ref="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            'repos/itkla/connex/git/ref/heads/main')"
+          comparison="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/itkla/connex/compare/main...${resolved_sha}")"
+          jq -n \
+            --argjson ref "$main_ref" \
+            --argjson compare "$comparison" \
+            '{ref: $ref, compare: $compare}' \
+            > "$MAIN_FILE"
+          jq -n \
+            --argjson ref "$tag_document" \
+            --argjson tag "$tag_object" \
+            '{start: {ref: $ref, tag: $tag}, end: null}' \
+            > "$TAG_FILE"
+          {
+            echo "ref=$REF"
+            echo "sha=$resolved_sha"
+            echo "tag_object_id=$tag_object_id"
+            echo "required_runs=$REQUIRED_RUNS"
+          } >> "$GITHUB_OUTPUT"
+      - name: Collect workflow run and job evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ steps.candidate.outputs.ref }}
+          RUNS_FILE: ${{ runner.temp }}/candidate-soak-runs.json
+          JOBS_FILE: ${{ runner.temp }}/candidate-soak-jobs.json
+        run: |
+          set -euo pipefail
+          run_ids_file="$(mktemp)"
+          job_sets_file="$(mktemp)"
+          one_job_set_file="$(mktemp)"
+          start_runs_file="$(mktemp)"
+          end_runs_file="$(mktemp)"
+          trap 'rm -f "$run_ids_file" "$job_sets_file" "$one_job_set_file" "$start_runs_file" "$end_runs_file"' EXIT
+          gh api --method GET --paginate --slurp \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            -f per_page=100 \
+            "repos/itkla/connex/actions/runs" \
+            > "$start_runs_file"
+          jq -r --arg ref "$REF" '
+            .[].workflow_runs[]?
+            | (.path | split("@")[0]) as $workflow_path
+            | select(
+                $workflow_path == ".github/workflows/ci.yml"
+                or $workflow_path == ".github/workflows/security.yml"
+                or $workflow_path == ".github/workflows/deploy-smoke.yml"
+              )
+            | select(.head_branch == $ref)
+            | [.id, .run_attempt]
+            | @tsv
+          ' "$start_runs_file" | sort -n -u > "$run_ids_file"
+          : > "$job_sets_file"
+          while IFS=$'\t' read -r run_id run_attempt; do
+            [[ "$run_id" =~ ^[1-9][0-9]*$ ]]
+            [[ "$run_attempt" =~ ^[1-9][0-9]*$ ]]
+            gh api --paginate --slurp \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/itkla/connex/actions/runs/${run_id}/attempts/${run_attempt}/jobs?per_page=100" \
+              > "$one_job_set_file"
+            jq -cn \
+              --argjson run_id "$run_id" \
+              --argjson run_attempt "$run_attempt" \
+              --slurpfile pages "$one_job_set_file" \
+              '{run_id: $run_id, run_attempt: $run_attempt, pages: $pages[0]}' \
+              >> "$job_sets_file"
+          done < "$run_ids_file"
+          if [ -s "$job_sets_file" ]; then
+            jq -s '.' "$job_sets_file" > "$JOBS_FILE"
+          else
+            printf '[]\n' > "$JOBS_FILE"
+          fi
+          gh api --method GET --paginate --slurp \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            -f per_page=100 \
+            "repos/itkla/connex/actions/runs" \
+            > "$end_runs_file"
+          jq -n \
+            --slurpfile start "$start_runs_file" \
+            --slurpfile end "$end_runs_file" \
+            '{start: $start[0], end: $end[0]}' \
+            > "$RUNS_FILE"
+      - name: Re-resolve the candidate tag after collection
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ steps.candidate.outputs.ref }}
+          TAG_FILE: ${{ runner.temp }}/candidate-soak-tag.json
+        run: |
+          set -euo pipefail
+          encoded_ref="$(jq -rn --arg ref "$REF" '$ref | @uri')"
+          end_ref="$(gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/itkla/connex/git/ref/tags/${encoded_ref}")"
+          end_tag_object_id="$(jq -r '.object.sha // empty' <<< "$end_ref")"
+          if [[ "$(jq -r '.object.type // empty' <<< "$end_ref")" == "tag" \
+            && "$end_tag_object_id" =~ ^[0-9a-f]{40}$ ]]; then
+            end_tag="$(gh api \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/itkla/connex/git/tags/${end_tag_object_id}")"
+          else
+            end_tag='{}'
+          fi
+          jq \
+            --argjson ref "$end_ref" \
+            --argjson tag "$end_tag" \
+            '.end = {ref: $ref, tag: $tag}' \
+            "$TAG_FILE" > "${TAG_FILE}.new"
+          mv "${TAG_FILE}.new" "$TAG_FILE"
+      - name: Audit the consecutive candidate runs
+        id: soak
+        continue-on-error: true
+        env:
+          RUNS_FILE: ${{ runner.temp }}/candidate-soak-runs.json
+          JOBS_FILE: ${{ runner.temp }}/candidate-soak-jobs.json
+          TAG_FILE: ${{ runner.temp }}/candidate-soak-tag.json
+          MAIN_FILE: ${{ runner.temp }}/candidate-soak-main.json
+          EVIDENCE_FILE: ${{ runner.temp }}/candidate-soak-evidence.json
+          SUMMARY_FILE: ${{ runner.temp }}/candidate-soak-summary.md
+          REF: ${{ steps.candidate.outputs.ref }}
+          REQUIRED_RUNS: ${{ steps.candidate.outputs.required_runs }}
+          REPOSITORY_NAME: ${{ github.repository }}
+          REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT_REPOSITORY_ID: ${{ github.event.repository.id }}
+          REPOSITORY_FORK: ${{ github.event.repository.fork }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+          WORKFLOW_FILE_REF: ${{ github.workflow_ref }}
+          WORKFLOW_FILE_SHA: ${{ github.workflow_sha }}
+        run: >-
+          python3 .github/scripts/audit-candidate-soak.py
+          --runs-json "$RUNS_FILE"
+          --jobs-json "$JOBS_FILE"
+          --tag-json "$TAG_FILE"
+          --main-json "$MAIN_FILE"
+          --ref "$REF"
+          --repository "$REPOSITORY_NAME"
+          --repository-id "$REPOSITORY_ID"
+          --event-repository-id "$EVENT_REPOSITORY_ID"
+          --repository-fork "$REPOSITORY_FORK"
+          --workflow-ref "$WORKFLOW_REF"
+          --workflow-sha "$WORKFLOW_SHA"
+          --github-workflow-ref "$WORKFLOW_FILE_REF"
+          --github-workflow-sha "$WORKFLOW_FILE_SHA"
+          --required-runs "$REQUIRED_RUNS"
+          --output "$EVIDENCE_FILE"
+          --summary "$SUMMARY_FILE"
+      - name: Publish the candidate soak step summary
+        if: always()
+        env:
+          SUMMARY_FILE: ${{ runner.temp }}/candidate-soak-summary.md
+        run: |
+          if [ -f "$SUMMARY_FILE" ]; then
+            cat "$SUMMARY_FILE" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "# Candidate soak evidence" >> "$GITHUB_STEP_SUMMARY"
+            echo "Evidence generation failed before a summary could be written." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload candidate soak evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: candidate-soak-evidence-${{ steps.candidate.outputs.sha }}
+          path: ${{ runner.temp }}/candidate-soak-evidence.json
+          if-no-files-found: error
+      - name: Require the candidate soak gate to pass
+        if: always()
+        env:
+          AUDIT_OUTCOME: ${{ steps.soak.outcome }}
+        run: test "$AUDIT_OUTCOME" = success
