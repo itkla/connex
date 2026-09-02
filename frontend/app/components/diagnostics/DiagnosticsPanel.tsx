@@ -10,6 +10,7 @@ import AccessDenied from "@/app/components/AccessDenied";
 import SectionBoundary from "@/app/components/SectionBoundary";
 import { NoAccessCard } from "@/app/components/organization/OrgPrimitives";
 import { Button } from "@/components/ui/button";
+import { BuildIdentitySection } from "./BuildIdentitySection";
 import { JobRunsSection } from "./JobRunsSection";
 import { MailDeliverabilitySection } from "./MailDeliverabilitySection";
 import { ProfileCapabilitiesSection } from "./ProfileCapabilitiesSection";
@@ -41,10 +42,10 @@ export type DiagnosticsScope = "workspace" | "organization";
  * refresh. Refresh stays available on every state that renders the panel, and a failed refresh
  * keeps the last good payload behind a stale banner.
  *
- * The mail section owns its own endpoint and state, so it stays mounted even when the aggregate
- * fails: a broken aggregate is exactly when an administrator needs the send test. A refusal is the
- * one exception — the send test is gated on the same permission as the aggregate, so it leaves
- * with the rest of the panel rather than offering a member an action they cannot take.
+ * The build-identity and mail sections own their own endpoints and state, so they stay mounted even
+ * when the aggregate fails: a broken aggregate is exactly when an administrator needs to identify
+ * the running artifacts or use the send test. A refusal is the one exception — the panel has
+ * already confirmed that the reader lacks access, so both sections leave with the rest of it.
  */
 export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope }) {
     const t = useTranslations("TenantDiagnostics");
@@ -200,6 +201,10 @@ export default function DiagnosticsPanel({ scope }: { scope: DiagnosticsScope })
                     </SectionBoundary>
                 </>
             )}
+
+            <SectionBoundary resetKey={boundaryKey}>
+                <BuildIdentitySection />
+            </SectionBoundary>
 
             <SectionBoundary resetKey={boundaryKey}>
                 <MailDeliverabilitySection

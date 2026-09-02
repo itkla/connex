@@ -2,7 +2,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 import type { DiagnosticsScope } from "./DiagnosticsPanel";
 
-const AGGREGATE_SECTION_COUNT = 4;
+const LOADING_SECTION_COUNT = 5;
 
 function SectionHeading({ withAction }: { withAction?: boolean }) {
     return (
@@ -18,7 +18,8 @@ function SectionHeading({ withAction }: { withAction?: boolean }) {
 
 /**
  * First-load stand-in for a diagnostics panel: the refresh control, the four aggregate sections —
- * profile capabilities, provider readiness, job runs, secret store — and the mail section.
+ * profile capabilities, provider readiness, job runs, secret store — then the independently loaded
+ * build identity and the mail section.
  *
  * The mail section owns its own endpoint and renders immediately rather than waiting on the
  * aggregate, so it is drawn in its settled initial shape, not as rows of bones: at workspace scope
@@ -32,9 +33,9 @@ export default function DiagnosticsPanelSkeleton({ scope }: { scope: Diagnostics
                 <Skeleton className="h-8 w-24 rounded-full" />
             </div>
 
-            {Array.from({ length: AGGREGATE_SECTION_COUNT }, (_, section) => (
+            {Array.from({ length: LOADING_SECTION_COUNT }, (_, section) => (
                 <section key={section} className="space-y-4">
-                    <SectionHeading />
+                    <SectionHeading withAction={section === LOADING_SECTION_COUNT - 1} />
                     <div className="space-y-2">
                         <Skeleton className="h-9 w-full rounded-lg" />
                         <Skeleton className="h-9 w-4/5 rounded-lg" />

@@ -344,6 +344,16 @@ Smoke-check a running backend:
 curl -s http://<backend>/api/version   # {"version":"1.4.0","buildTime":"..."}
 ```
 
+### Checking versions in the product
+
+An authorized administrator can open **Settings → Workspace → Audit & diagnostics** or
+**Settings → Organization → Audit & diagnostics** and read **Version check**. The section compares
+the version of the app shown in the browser with the server version. It also shows when the server
+version was created and its version reference when those details are available. Matching version
+numbers alone are reported as unconfirmed. Connex reports a confirmed match only when it can also
+verify that the browser app and server were released together. If that check says they were not
+released together, the section reports a mismatch even when the displayed version numbers agree.
+
 ## Release channels
 
 Three, no more:

@@ -1,9 +1,126 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 
 import { activeWorkspaceId, csrfBootstrap, registerUser } from "./support/api";
+import { message } from "./support/messages";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
+}
+
+const RELEASE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?$/;
+const DEVELOPMENT_VERSIONS = new Set(["0.0.0-dev", "0.0.1-snapshot"]);
+
+const BUILD_IDENTITY_COPY = {
+    matched: {
+        status: message("en", "workspace", "TenantDiagnostics.buildIdentityMatched"),
+        body: message("en", "workspace", "TenantDiagnostics.buildIdentityMatchedBody"),
+        tone: "bg-emerald-500/10",
+    },
+    unverified: {
+        status: message("en", "workspace", "TenantDiagnostics.buildIdentityVersionAgreementUnverified"),
+        body: message("en", "workspace", "TenantDiagnostics.buildIdentityVersionAgreementUnverifiedBody"),
+        tone: "bg-muted",
+    },
+    mismatched: {
+        status: message("en", "workspace", "TenantDiagnostics.buildIdentityMismatched"),
+        body: message("en", "workspace", "TenantDiagnostics.buildIdentityMismatchedBody"),
+        tone: "bg-amber-500/10",
+    },
+    unavailable: {
+        status: message("en", "workspace", "TenantDiagnostics.buildIdentityBackendUnavailable"),
+        body: message("en", "workspace", "TenantDiagnostics.buildIdentityBackendUnavailableBody"),
+        tone: "bg-amber-500/10",
+    },
+    unversioned: {
+        status: message("en", "workspace", "TenantDiagnostics.buildIdentityUnversioned"),
+        body: message("en", "workspace", "TenantDiagnostics.buildIdentityUnversionedBody"),
+        tone: "bg-muted",
+    },
+} as const;
+
+function isReleaseVersion(version: string | null): version is string {
+    return version !== null
+        && !DEVELOPMENT_VERSIONS.has(version.toLowerCase())
+        && RELEASE_VERSION.test(version);
+}
+
+async function buildValue(section: Locator, label: string): Promise<string> {
+    const value = section.getByText(label, { exact: true }).locator("..").locator("dd");
+    await expect(value).toHaveCount(1);
+    return (await value.innerText()).trim();
+}
+
+/** Verifies the live endpoint, component state, rendered values, tone, and environment-honest copy. */
+async function expectRunningBuildIdentity(page: Page, request: APIRequestContext) {
+    const heading = page.getByRole("heading", {
+        name: message("en", "workspace", "TenantDiagnostics.buildIdentityTitle"),
+    });
+    const section = heading.locator("xpath=ancestor::section[1]");
+    await expect(section).toBeVisible();
+
+    const response = await request.get("/api/version");
+    const frontendDisplay = await buildValue(
+        section,
+        message("en", "workspace", "TenantDiagnostics.buildIdentityFrontendVersion"),
+    );
+    const backendDisplay = await buildValue(
+        section,
+        message("en", "workspace", "TenantDiagnostics.buildIdentityBackendVersion"),
+    );
+    const buildTimeDisplay = await buildValue(
+        section,
+        message("en", "workspace", "TenantDiagnostics.buildIdentityBuildTime"),
+    );
+    const gitShaDisplay = await buildValue(
+        section,
+        message("en", "workspace", "TenantDiagnostics.buildIdentityGitSha"),
+    );
+    const unavailable = message("en", "workspace", "TenantDiagnostics.buildIdentityUnavailable");
+    const notRecorded = message("en", "workspace", "TenantDiagnostics.buildIdentityNotStamped");
+    const frontendVersion = frontendDisplay === notRecorded ? null : frontendDisplay;
+
+    let expected: keyof typeof BUILD_IDENTITY_COPY;
+    if (!response.ok()) {
+        expected = "unavailable";
+        expect(backendDisplay).toBe(unavailable);
+        expect(buildTimeDisplay).toBe(unavailable);
+        expect(gitShaDisplay).toBe(unavailable);
+    } else {
+        const payload: unknown = await response.json();
+        if (!isRecord(payload) || typeof payload.version !== "string") {
+            throw new Error("Version response is missing its version");
+        }
+        const backendVersion = payload.version.trim();
+        expect(backendDisplay).toBe(backendVersion || notRecorded);
+        for (const [value, rendered] of [
+            [payload.buildTime, buildTimeDisplay],
+            [payload.gitSha, gitShaDisplay],
+        ] as const) {
+            const metadata = typeof value === "string" ? value.trim() : "";
+            expect(rendered).toBe(
+                metadata.length > 0 && metadata.toLowerCase() !== "unknown"
+                    ? metadata
+                    : unavailable,
+            );
+        }
+        expected = !isReleaseVersion(frontendVersion) || !isReleaseVersion(backendVersion)
+            ? "unversioned"
+            : frontendVersion === backendVersion
+              ? "unverified"
+              : "mismatched";
+    }
+
+    const expectedCopy = BUILD_IDENTITY_COPY[expected];
+    const status = section.getByText(expectedCopy.status, { exact: true });
+    await expect(status).toBeVisible();
+    await expect(status).toHaveClass(new RegExp(expectedCopy.tone.replace("/", "\\/")));
+    await expect(section.getByText(expectedCopy.body, { exact: true })).toBeVisible();
+    const allStatuses = section.getByText(
+        new RegExp(`^(${Object.values(BUILD_IDENTITY_COPY)
+            .map(({ status: candidate }) => candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+            .join("|")})$`),
+    );
+    await expect(allStatuses).toHaveCount(1);
 }
 
 async function installVirtualAuthenticator(page: Page): Promise<() => Promise<void>> {
@@ -129,6 +246,9 @@ test.describe("workspace and organization identity", () => {
             await passwordDialog.getByRole("button", { name: "Continue", exact: true }).click();
             await expect(page.getByText("Passkey added", { exact: true })).toBeVisible();
 
+            await page.goto("/settings/workspace/audit-diagnostics");
+            await expectRunningBuildIdentity(page, context.request);
+
             await page.goto("/settings/workspace/general");
             await expect(page.getByRole("heading", { name: "Workspace identity" })).toBeVisible();
             await page.getByLabel("Workspace name").fill(workspaceName);
@@ -160,6 +280,9 @@ test.describe("workspace and organization identity", () => {
             await expect(userBreadcrumb).toContainText("E2E Harness");
             await expect(userBreadcrumb).toContainText("Users");
             await expect(userBreadcrumb).not.toContainText(organizationName);
+
+            await page.goto("/settings/organization/audit-diagnostics");
+            await expectRunningBuildIdentity(page, context.request);
 
             const workspacesResponse = await context.request.get("/api/workspaces");
             expect(workspacesResponse.status()).toBe(200);
