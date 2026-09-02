@@ -505,57 +505,78 @@ re-derived and dispositioned with a time box.
 
 ### Disposition of the 31 records
 
-**All 31 dismissals dated 2026-08-15 inherit the canonical time-box.** Disposition owner
-**Hunter Nakagawa**; approver **Security Owner** role ([#1230](https://github.com/itkla/connex/issues/1230));
-**expiry 2027-02-14; re-review 2027-01-14**; reassess earlier if a cited data flow changes or the
-relevant query is materially updated. Where a record's successor is a risk acceptance rather than a
-false positive, the compensating control recorded for that successor governs both. No record in
-this batch is exempt, and none is suppressed indefinitely.
+An earlier revision of this section time-boxed the 31 records **by reference**, stating that they
+inherit the canonical expiry. Independent review rejected that: *False positives and suppressions*
+step 3 in [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md) requires the dismissal's **own comment** to link
+the issue and state its expiry, and declares a dismissal without that record invalid. Inheritance in
+a document does not satisfy a clause that binds the comment. The records were therefore resolved
+individually rather than by reference.
+
+**Outcome, 2026-09-01: 30 of the 31 are now `fixed`, and need no expiry at all.** Each was reopened
+through the code-scanning API. GitHub recomputed every one of the 30 directly to `fixed` rather than
+`open`, because the old-root path it points at does not exist in the current analysis — the platform
+independently confirming these are stale records with no live finding. A `fixed` alert carries no
+suppression and therefore needs no expiry, owner or re-review date, so this is a strictly better
+outcome than a compliant dismissal comment would have been. **None of the 30 ever entered the `open`
+state, so the baseline did not leave 0 open at any point during the operation.**
+
+**#76 alone remains dismissed, deliberately.** The CHK-089 re-test on
+[#1244](https://github.com/itkla/connex/issues/1244#issuecomment-5506662478) set its minimum
+remediation as: reopen, re-triage independently, add a log entry carrying disposition, evidence,
+owner, approver, expiry and re-review date, and only then dismiss again. That is what was done — see
+*Re-derivation of #76 / #130* below — so #76 keeps a genuine dismissal record rather than being
+converted to `fixed`. Its code-scanning comment states the expiry inline (265 characters, within the
+API's 280-character cap), satisfying step 3 directly rather than by reference. Owner
+**Hunter Nakagawa**; approver **Security Owner** role
+([#1230](https://github.com/itkla/connex/issues/1230)); **expiry 2027-02-14; re-review 2027-01-14**.
+
+The new-root generation was not touched by this operation and remains 65 dismissed and 5 fixed.
 
 ### Old-to-new mapping
 
 The mapping is **one-to-one and line-exact**: every one of the 31 records has exactly one successor
 in the current generation with the same rule, the same file and the same start line, and the
-successor's disposition matches the predecessor's in every case. Reproduce with:
+successor's disposition matches the predecessor's *original* disposition in every case.
+Reproduce with:
 
 ```bash
 gh api --paginate "/repos/itkla/connex/code-scanning/alerts?tool_name=CodeQL&per_page=100" > /tmp/alerts.json
 jq -r '.[] | "\(.rule.id)|\(.most_recent_instance.location.path)|\(.most_recent_instance.location.start_line)|#\(.number)|\(.state)/\(.dismissed_reason // "-")|\(.dismissed_at[0:10] // "-")"' /tmp/alerts.json | sort -t'|' -k2,2 -k3,3n
 ```
 
-| Old alert (2026-08-15) | Site (`file:line`) | Old disposition | Successor | Successor disposition | Successor dismissed | Time-box carried by |
+| Old alert (2026-08-15) | Site (`file:line`) | Old disposition | Successor | Successor disposition | Successor dismissed | Final state 2026-09-01 |
 | --- | --- | --- | --- | --- | --- | --- |
-| #34 | `AiOrganizationBudgetController.java:27` | false positive | #113 | false positive | 2026-08-31 | canonical clause |
-| #36 | `AttachmentController.java:174` | false positive | #115 | false positive | 2026-08-31 | canonical clause |
-| #37 | `AttachmentController.java:118` | false positive | #116 | false positive | 2026-08-31 | canonical clause |
-| #38 | `AttachmentController.java:102` | false positive | #117 | false positive | 2026-08-31 | canonical clause |
-| #39 | `AttachmentController.java:54` | false positive | #119 | false positive | 2026-08-31 | canonical clause |
-| #40 | `BusinessCardController.java:100` | false positive | #118 | false positive | 2026-08-31 | canonical clause |
-| #41 | `DataSubjectRequestController.java:61` | false positive | #120 | false positive | 2026-08-31 | canonical clause |
-| #42 | `DataSubjectRequestController.java:49` | false positive | #121 | false positive | 2026-08-31 | canonical clause |
-| #43 | `DataSubjectRequestController.java:33` | false positive | #122 | false positive | 2026-08-31 | canonical clause |
-| #44 | `DeliveryUnsubscribeController.java:29` | false positive | #124 | false positive | 2026-08-31 | canonical clause |
-| #45 | `HealthController.java:39` | false positive | #125 | false positive | 2026-08-31 | canonical clause |
-| #46 | `NotificationController.java:122` | false positive | #131 | false positive | 2026-08-31 | canonical clause |
-| #47 | `NotificationController.java:65` | false positive | #132 | false positive | 2026-08-31 | canonical clause |
-| #48 | `IntroductionController.java:111` | false positive | #126 | false positive | 2026-08-31 | canonical clause |
-| #49 | `IntroductionController.java:82` | false positive | #127 | false positive | 2026-08-31 | canonical clause |
-| #50 | `IntroductionController.java:62` | false positive | #128 | false positive | 2026-08-31 | canonical clause |
-| #51 | `IntroductionController.java:51` | false positive | #129 | false positive | 2026-08-31 | canonical clause |
-| #52 | `PersonController.java:649` | false positive | #135 | false positive | 2026-08-31 | canonical clause |
-| #53 | `PersonController.java:618` | false positive | #136 | false positive | 2026-08-31 | canonical clause |
-| #54 | `ProviderCaptureController.java:68` | false positive | #133 | false positive | 2026-08-31 | canonical clause |
-| #55 | `ProviderCaptureController.java:44` | false positive | #137 | false positive | 2026-08-31 | canonical clause |
-| #56 | `RadarController.java:47` | false positive | #139 | false positive | 2026-08-31 | canonical clause |
-| #57 | `RadarController.java:36` | false positive | #140 | false positive | 2026-08-31 | canonical clause |
-| #58 | `ProviderConnectionController.java:47` | won't fix | #134 | won't fix | 2026-08-31 | canonical clause + risk-acceptance table |
-| #59 | `ProviderConnectionController.java:37` | false positive | #138 | false positive | 2026-08-31 | canonical clause |
-| #64 | `TenantDiagnosticsController.java:40` | false positive | #145 | false positive | 2026-08-31 | canonical clause |
-| #65 | `TenantDiagnosticsController.java:32` | false positive | #146 | false positive | 2026-08-31 | canonical clause |
-| #66 | `TenantLifecycleController.java:67` | won't fix | #147 | won't fix | 2026-08-31 | canonical clause + risk-acceptance table |
-| #67 | `UserController.java:67` | false positive | #149 | false positive | 2026-08-31 | canonical clause |
-| #76 | `NativeConnectController.java:37` | false positive | #130 | false positive | 2026-08-31 | canonical clause |
-| #79 | `DocumentAcceptanceController.java:36` | false positive | #123 | false positive | 2026-08-31 | canonical clause |
+| #34 | `AiOrganizationBudgetController.java:27` | false positive | #113 | false positive | 2026-08-31 | **`fixed`** |
+| #36 | `AttachmentController.java:174` | false positive | #115 | false positive | 2026-08-31 | **`fixed`** |
+| #37 | `AttachmentController.java:118` | false positive | #116 | false positive | 2026-08-31 | **`fixed`** |
+| #38 | `AttachmentController.java:102` | false positive | #117 | false positive | 2026-08-31 | **`fixed`** |
+| #39 | `AttachmentController.java:54` | false positive | #119 | false positive | 2026-08-31 | **`fixed`** |
+| #40 | `BusinessCardController.java:100` | false positive | #118 | false positive | 2026-08-31 | **`fixed`** |
+| #41 | `DataSubjectRequestController.java:61` | false positive | #120 | false positive | 2026-08-31 | **`fixed`** |
+| #42 | `DataSubjectRequestController.java:49` | false positive | #121 | false positive | 2026-08-31 | **`fixed`** |
+| #43 | `DataSubjectRequestController.java:33` | false positive | #122 | false positive | 2026-08-31 | **`fixed`** |
+| #44 | `DeliveryUnsubscribeController.java:29` | false positive | #124 | false positive | 2026-08-31 | **`fixed`** |
+| #45 | `HealthController.java:39` | false positive | #125 | false positive | 2026-08-31 | **`fixed`** |
+| #46 | `NotificationController.java:122` | false positive | #131 | false positive | 2026-08-31 | **`fixed`** |
+| #47 | `NotificationController.java:65` | false positive | #132 | false positive | 2026-08-31 | **`fixed`** |
+| #48 | `IntroductionController.java:111` | false positive | #126 | false positive | 2026-08-31 | **`fixed`** |
+| #49 | `IntroductionController.java:82` | false positive | #127 | false positive | 2026-08-31 | **`fixed`** |
+| #50 | `IntroductionController.java:62` | false positive | #128 | false positive | 2026-08-31 | **`fixed`** |
+| #51 | `IntroductionController.java:51` | false positive | #129 | false positive | 2026-08-31 | **`fixed`** |
+| #52 | `PersonController.java:649` | false positive | #135 | false positive | 2026-08-31 | **`fixed`** |
+| #53 | `PersonController.java:618` | false positive | #136 | false positive | 2026-08-31 | **`fixed`** |
+| #54 | `ProviderCaptureController.java:68` | false positive | #133 | false positive | 2026-08-31 | **`fixed`** |
+| #55 | `ProviderCaptureController.java:44` | false positive | #137 | false positive | 2026-08-31 | **`fixed`** |
+| #56 | `RadarController.java:47` | false positive | #139 | false positive | 2026-08-31 | **`fixed`** |
+| #57 | `RadarController.java:36` | false positive | #140 | false positive | 2026-08-31 | **`fixed`** |
+| #58 | `ProviderConnectionController.java:47` | won't fix | #134 | won't fix | 2026-08-31 | **`fixed`** |
+| #59 | `ProviderConnectionController.java:37` | false positive | #138 | false positive | 2026-08-31 | **`fixed`** |
+| #64 | `TenantDiagnosticsController.java:40` | false positive | #145 | false positive | 2026-08-31 | **`fixed`** |
+| #65 | `TenantDiagnosticsController.java:32` | false positive | #146 | false positive | 2026-08-31 | **`fixed`** |
+| #66 | `TenantLifecycleController.java:67` | won't fix | #147 | won't fix | 2026-08-31 | **`fixed`** |
+| #67 | `UserController.java:67` | false positive | #149 | false positive | 2026-08-31 | **`fixed`** |
+| #76 | `NativeConnectController.java:37` | false positive | #130 | false positive | 2026-08-31 | dismissed, expiry inline |
+| #79 | `DocumentAcceptanceController.java:36` | false positive | #123 | false positive | 2026-08-31 | **`fixed`** |
 
 All 31 successors were dismissed on 2026-08-31 and are therefore inside the canonical clause's
 stated window. The two risk acceptances in the batch — #58 → #134 (OAuth callback) and
