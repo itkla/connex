@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+    type MouseEvent as ReactMouseEvent,
+    type PointerEvent as ReactPointerEvent,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
@@ -8,6 +15,8 @@ import {
     AdjustmentsHorizontalIcon,
     ArrowRightIcon,
     CheckIcon,
+    ChevronLeftIcon,
+    ChevronRightIcon,
     ClipboardDocumentCheckIcon,
     CurrencyYenIcon,
     LockClosedIcon,
@@ -98,6 +107,7 @@ const SOURCE_ICON: Record<WorkItemSource, React.ComponentType<{ className?: stri
 
 const SOURCES: WorkItemSource[] = ["task", "notification", "document_approval"];
 const URGENCIES: WorkItemUrgency[] = ["critical", "high", "normal", "low"];
+const AUTO_ADVANCE_ACTION_GUARD_MS = 500;
 
 type Query = {
     page: number;
@@ -117,6 +127,13 @@ function sameQuery(a: Query, b: Query): boolean {
 
 function isDefaultQuery(query: Query): boolean {
     return query.page === 1 && query.sources.size === 0 && query.urgencies.size === 0;
+}
+
+function detailIdAfterRemoval(items: readonly WorkItem[], removedId: string): string | null {
+    const removedIndex = items.findIndex((item) => item.id === removedId);
+    if (removedIndex < 0) return null;
+    const remaining = items.filter((item) => item.id !== removedId);
+    return remaining[removedIndex]?.id ?? remaining[removedIndex - 1]?.id ?? null;
 }
 
 type Loaded = { page: WorkItemPage; query: Query };
@@ -155,8 +172,15 @@ export default function MyWorkQueue({ userId, initial }: Props) {
     const [rejecting, setRejecting] = useState<RejectDraft | null>(null);
     const [rejectBusy, setRejectBusy] = useState(false);
     const [detailId, setDetailId] = useState<string | null>(null);
+    const [actionGuardId, setActionGuardId] = useState<string | null>(null);
     const [filterSheetOpen, setFilterSheetOpen] = useState(false);
     const [clientLoaded, setClientLoaded] = useState(false);
+    const detailTitleRef = useRef<HTMLHeadingElement | null>(null);
+    const guardedPointerDownTargetRef = useRef<HTMLButtonElement | null>(null);
+    const detailIdRef = useRef(detailId);
+    useEffect(() => {
+        detailIdRef.current = detailId;
+    }, [detailId]);
     const queryRef = useRef(query);
     useEffect(() => {
         queryRef.current = query;
@@ -234,6 +258,8 @@ export default function MyWorkQueue({ userId, initial }: Props) {
         });
     }, [applyQuery]);
 
+    const current = loaded != null && sameQuery(loaded.query, query) ? loaded.page : null;
+
     const act = useCallback(
         async (
             item: WorkItem,
@@ -241,6 +267,10 @@ export default function MyWorkQueue({ userId, initial }: Props) {
             done: string,
         ) => {
             if (pendingIds.has(item.id)) return false;
+            const focusedAtStart = detailId === item.id;
+            const nextDetailId = focusedAtStart
+                ? detailIdAfterRemoval(current?.items ?? [], item.id)
+                : null;
             setPendingIds((current) => new Set(current).add(item.id));
             try {
                 const response = await run();
@@ -253,7 +283,11 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                         knownOverallTotal: Math.max(0, current.page.knownOverallTotal - 1),
                     },
                 });
-                setDetailId((current) => (current === item.id ? null : current));
+                if (focusedAtStart && detailIdRef.current === item.id) {
+                    guardedPointerDownTargetRef.current = null;
+                    setActionGuardId(nextDetailId);
+                    setDetailId(nextDetailId);
+                }
                 if (response.notificationStateVersion != null) {
                     emitNotificationStateChanged(userId, response.notificationStateVersion);
                 }
@@ -281,7 +315,7 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                 });
             }
         },
-        [pendingIds, reconcile, t, userId],
+        [current, detailId, pendingIds, reconcile, t, userId],
     );
 
     const complete = useCallback((item: WorkItem) =>
@@ -300,7 +334,6 @@ export default function MyWorkQueue({ userId, initial }: Props) {
             ...(comment.trim().length > 0 ? { comment: comment.trim() } : {}),
         }), t("queueRejected")), [act, t]);
 
-    const current = loaded != null && sameQuery(loaded.query, query) ? loaded.page : null;
     const detail = detailId != null
         ? current?.items.find((row) => row.id === detailId) ?? null
         : null;
@@ -314,6 +347,53 @@ export default function MyWorkQueue({ userId, initial }: Props) {
         setRejecting(null);
         if (rejectBusy) setRejectBusy(false);
     }
+
+    const detailIndex = detail == null || current == null
+        ? -1
+        : current.items.findIndex((item) => item.id === detail.id);
+    const stepDetail = useCallback((offset: -1 | 1) => {
+        if (current == null || detailId == null) return;
+        const index = current.items.findIndex((item) => item.id === detailId);
+        const target = current.items[index + offset];
+        if (target == null) return;
+        guardedPointerDownTargetRef.current = null;
+        setActionGuardId(null);
+        setDetailId(target.id);
+    }, [current, detailId]);
+
+    useEffect(() => {
+        if (detailId != null) detailTitleRef.current?.focus();
+    }, [detailId]);
+
+    useEffect(() => {
+        if (actionGuardId == null) return;
+        const guardedId = actionGuardId;
+        const timeout = window.setTimeout(() => {
+            guardedPointerDownTargetRef.current = null;
+            setActionGuardId((currentId) => currentId === guardedId ? null : currentId);
+        }, AUTO_ADVANCE_ACTION_GUARD_MS);
+        return () => window.clearTimeout(timeout);
+    }, [actionGuardId]);
+
+    const rememberGuardedPointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+        if (actionGuardId !== detailId) return;
+        const target = event.target instanceof Element ? event.target.closest("button") : null;
+        guardedPointerDownTargetRef.current = target;
+    }, [actionGuardId, detailId]);
+
+    const guardDetailPointerClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
+        if (actionGuardId !== detailId) return;
+        if (event.detail === 0) {
+            guardedPointerDownTargetRef.current = null;
+            return;
+        }
+        const target = event.target instanceof Element ? event.target.closest("button") : null;
+        const beganAfterAdvance = target != null && guardedPointerDownTargetRef.current === target;
+        guardedPointerDownTargetRef.current = null;
+        if (target == null || beganAfterAdvance) return;
+        event.preventDefault();
+        event.stopPropagation();
+    }, [actionGuardId, detailId]);
 
     const rejectDirty = (rejecting?.comment.trim().length ?? 0) > 0;
     const rejectGuard = useUnsavedChangesGuard({
@@ -518,7 +598,10 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                                         onSnooze={snooze}
                                         onApprove={approve}
                                         onReject={(target) => setRejecting({ id: target.id, comment: "" })}
-                                        onDetail={(target) => setDetailId(target.id)}
+                                        onDetail={(target) => {
+                                            setActionGuardId(null);
+                                            setDetailId(target.id);
+                                        }}
                                     />
                                 ))}
                             </ul>
@@ -618,13 +701,61 @@ export default function MyWorkQueue({ userId, initial }: Props) {
 
             <Drawer
                 open={detail != null}
-                onOpenChange={(open) => { if (!open) setDetailId(null); }}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        guardedPointerDownTargetRef.current = null;
+                        setActionGuardId(null);
+                        setDetailId(null);
+                    }
+                }}
                 swipeDirection={wide ? "right" : "down"}
                 showSwipeHandle={!wide}
             >
-                <DrawerContent className="mx-auto flex max-h-[85vh] w-full flex-col gap-0 rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))] md:mx-0 md:h-full md:max-h-none md:max-w-md md:rounded-2xl md:pb-4">
+                <DrawerContent
+                    initialFocus={detailTitleRef}
+                    className="mx-auto flex max-h-[85vh] w-full flex-col gap-0 rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))] md:mx-0 md:h-full md:max-h-none md:max-w-md md:rounded-2xl md:pb-4"
+                    onKeyDown={(event) => {
+                        if (rejecting != null || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+                        const target = event.target instanceof Element ? event.target : null;
+                        const targetDrawer = target?.closest("[data-slot='drawer-content']");
+                        if (
+                            target?.closest("[data-slot='dropdown-menu-content'],[data-slot='dialog-content']") != null
+                            || (targetDrawer != null && targetDrawer !== event.currentTarget)
+                        ) return;
+                        const offset = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : null;
+                        if (offset == null) return;
+                        event.preventDefault();
+                        stepDetail(offset);
+                    }}
+                >
                     {detail != null && (
                         <>
+                            <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-3">
+                                <Button
+                                    variant="outline"
+                                    className="min-h-11 min-w-11 md:min-h-9"
+                                    disabled={detailIndex <= 0}
+                                    onClick={() => stepDetail(-1)}
+                                >
+                                    <ChevronLeftIcon className="size-4" />
+                                    {t("queueStepPrevious")}
+                                </Button>
+                                <p className="min-w-0 flex-1 text-center text-xs tabular-nums text-muted-foreground">
+                                    {t("queueStepPosition", {
+                                        position: detailIndex + 1,
+                                        count: current?.items.length ?? 0,
+                                    })}
+                                </p>
+                                <Button
+                                    variant="outline"
+                                    className="min-h-11 min-w-11 md:min-h-9"
+                                    disabled={current == null || detailIndex >= current.items.length - 1}
+                                    onClick={() => stepDetail(1)}
+                                >
+                                    {t("queueStepNext")}
+                                    <ChevronRightIcon className="size-4" />
+                                </Button>
+                            </div>
                             <DrawerHeader className="gap-2">
                                 <Badge variant="secondary" className="w-fit gap-1.5">
                                     <span className={cn("size-1.5 rounded-full", URGENCY_DOT[detail.urgency])} />
@@ -632,8 +763,21 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                                     {" · "}
                                     {t(`queueUrgency_${detail.urgency}`)}
                                 </Badge>
-                                <DrawerTitle className="text-lg leading-snug">{detail.title}</DrawerTitle>
+                                <DrawerTitle
+                                    ref={detailTitleRef}
+                                    tabIndex={-1}
+                                    className="rounded-sm text-lg leading-snug outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                                >
+                                    {detail.title}
+                                </DrawerTitle>
                                 <DrawerDescription>{reasonLabel(t, format, detail)}</DrawerDescription>
+                                <p className="sr-only" aria-live="polite" aria-atomic="true">
+                                    {t("queueStepAnnouncement", {
+                                        title: detail.title,
+                                        position: detailIndex + 1,
+                                        count: current?.items.length ?? 0,
+                                    })}
+                                </p>
                             </DrawerHeader>
                             <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 pb-2">
                                 <ul className="space-y-1.5 text-sm text-muted-foreground">
@@ -656,7 +800,11 @@ export default function MyWorkQueue({ userId, initial }: Props) {
                                     {" · "}
                                     {t("queueAsOf", { at: formatInstant(format, detail.asOf) })}
                                 </p>
-                                <div className="flex flex-wrap justify-end gap-2">
+                                <div
+                                    className="flex flex-wrap justify-end gap-2"
+                                    onPointerDownCapture={rememberGuardedPointerDown}
+                                    onClickCapture={guardDetailPointerClick}
+                                >
                                     <Button asChild variant="outline">
                                         <Link href={contextHref(detail)}>
                                             {t("queueOpenContext")}
