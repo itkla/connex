@@ -42,6 +42,7 @@ import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredImage;
 import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import ooo.klae.connex.backend.recordcreation.RecordCreationAugmentation;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import java.util.LinkedHashMap;
@@ -83,6 +84,7 @@ public class PersonService {
     private final IdentityIntakeService identityIntakeService;
     private final DuplicatePreflightService duplicatePreflightService;
     private final DuplicateDecisionLockService duplicateDecisionLockService;
+    private final RecordCreationAugmentationService recordCreationAugmentationService;
     private final ProviderCaptureMapper providerCaptureMapper;
     private final AiRestrictionEpoch aiRestrictionEpoch;
 
@@ -268,8 +270,9 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public Person create(Person person) {
+        lockCreatePermission();
         return createWithSource(
-            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null);
+            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null, null);
     }
 
     /**
@@ -282,6 +285,7 @@ public class PersonService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.PERSON_CREATE)
     public Person createReviewed(Person person, String duplicateReviewToken) {
+        lockCreatePermission();
         duplicatePreflightService.requireReviewedPersonCreation(
             new PersonDuplicatePreflightRequest(
                 person.getName(),
@@ -289,7 +293,21 @@ public class PersonService {
                 person.getPhone() == null ? List.of() : List.of(person.getPhone())),
             duplicateReviewToken);
         return createWithSource(
-            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null);
+            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null, null);
+    }
+
+    Person createReviewed(
+            Person person,
+            String duplicateReviewToken,
+            RecordCreationAugmentation augmentation) {
+        duplicatePreflightService.requireReviewedPersonCreation(
+            new PersonDuplicatePreflightRequest(
+                person.getName(),
+                person.getEmail() == null ? List.of() : List.of(person.getEmail()),
+                person.getPhone() == null ? List.of() : List.of(person.getPhone())),
+            duplicateReviewToken);
+        return createWithSource(
+            person, IdentityAcquisitionSource.INTERACTIVE_CREATE, null, augmentation);
     }
 
     /**
@@ -306,6 +324,7 @@ public class PersonService {
             Person person,
             String sourceRowRef,
             String duplicateReviewToken) {
+        lockCreatePermission();
         duplicatePreflightService.requireReviewedPersonCreation(
             new PersonDuplicatePreflightRequest(
                 person.getName(),
@@ -313,7 +332,7 @@ public class PersonService {
                 person.getPhone() == null ? List.of() : List.of(person.getPhone())),
             duplicateReviewToken);
         return createWithSource(
-            person, IdentityAcquisitionSource.BUSINESS_CARD, sourceRowRef);
+            person, IdentityAcquisitionSource.BUSINESS_CARD, sourceRowRef, null);
     }
 
     /**
@@ -369,13 +388,14 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_CREATE)
     Person createFromBusinessCard(Person person, String sourceRowRef) {
         return createWithSource(
-            person, IdentityAcquisitionSource.BUSINESS_CARD, sourceRowRef);
+            person, IdentityAcquisitionSource.BUSINESS_CARD, sourceRowRef, null);
     }
 
     private Person createWithSource(
             Person person,
             IdentityAcquisitionSource source,
-            String sourceRowRef) {
+            String sourceRowRef,
+            RecordCreationAugmentation augmentation) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         duplicateDecisionLockService.lockCurrentOrganization();
         preserveHiddenCompanyAndValidateRequestedCompany(workspaceId, null, person);
@@ -393,11 +413,40 @@ public class PersonService {
             workspaceId, person.getId(), person.getEmail(), person.getPhone(),
             source, sourceRowRef);
         employmentService.recordInitial(workspaceId, person.getId(), companyIdOf(person), person.getTitle());
+        Map<String, Object> auditChanges = auditService.diff(null, person, AUDIT_FIELDS);
+        if (augmentation != null) {
+            auditChanges = withCreationMetadata(
+                auditChanges,
+                recordCreationAugmentationService.applyPerson(
+                    person.getId(),
+                    companyIdOf(person),
+                    person.getReferrerPersonId(),
+                    augmentation));
+        }
         auditService.record("person.create", "person", person.getId(), person.getName(),
             "Created person " + person.getName(),
-            auditService.diff(null, person, AUDIT_FIELDS));
+            auditChanges);
         ruleTriggers.publish(workspaceId, "person", person.getId(), "person.created");
         return person;
+    }
+
+    private static Map<String, Object> withCreationMetadata(
+            Map<String, Object> changes,
+            Map<String, Object> metadata) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (changes != null) {
+            result.putAll(changes);
+        }
+        result.putAll(metadata);
+        return result;
+    }
+
+    private void lockCreatePermission() {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        workspaceService.lockAndRequirePermissions(
+            workspaceId,
+            Map.of(actorId, Set.of(Permission.PERSON_CREATE)));
     }
 
     private static ConflictException businessCardReuseConflict() {

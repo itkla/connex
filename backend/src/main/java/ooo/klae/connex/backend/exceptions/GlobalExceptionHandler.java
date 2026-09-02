@@ -237,6 +237,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", ex.getMessage()));
     }
 
+    @ExceptionHandler(DuplicateReviewException.class)
+    public ResponseEntity<RecordCreationErrorDto> duplicateReview(DuplicateReviewException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(new RecordCreationErrorDto(
+            ex.getCode(),
+            ex.getMessage(),
+            Map.of(),
+            null,
+            null,
+            null,
+            null));
+    }
+
     @ExceptionHandler(OpenDataSubjectRequestException.class)
     public ResponseEntity<Map<String, String>> openDataSubjectRequest(
             OpenDataSubjectRequestException ex) {

@@ -2,23 +2,29 @@ package ooo.klae.connex.backend.services;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import tools.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
+import ooo.klae.connex.backend.beans.RecordCreationTemplateSet;
 import ooo.klae.connex.backend.dto.CustomFieldOption;
 import ooo.klae.connex.backend.dto.CustomFieldSchemaDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
+import ooo.klae.connex.backend.mappers.RecordCreationTemplateMapper;
+import ooo.klae.connex.backend.recordcreation.RecordCreationRecordType;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -42,6 +48,7 @@ public class CustomFieldDefinitionService {
     private static final Logger log = LoggerFactory.getLogger(CustomFieldDefinitionService.class);
 
     private final CustomFieldDefinitionMapper definitionMapper;
+    private final RecordCreationTemplateMapper templateMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
@@ -120,14 +127,18 @@ public class CustomFieldDefinitionService {
      * Defines a new custom field in the active workspace.
      */
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public CustomFieldDefinition create(CustomFieldDefinition def, List<CustomFieldOption> options) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        lockMutationPermission(workspaceId);
         def.setWorkspaceId(workspaceId);
         def.setEntityType(normalize(def.getEntityType()));
         validateShape(def, options);
+        RecordCreationTemplateSet set = lockTemplateSet(workspaceId, def.getEntityType());
         def.setOptionsJson(serializeOptions(def.getFieldType(), options));
         assertUniqueKey(workspaceId, def.getEntityType(), def.getFieldKey());
         definitionMapper.insert(def);
+        advanceTemplateSet(workspaceId, def.getEntityType(), set);
         auditService.record("custom_field.create", "custom_field", def.getId(), def.getLabel(),
             "Created custom field " + def.getLabel(),
             auditService.diff(null, def, AUDIT_FIELDS));
@@ -143,9 +154,14 @@ public class CustomFieldDefinitionService {
      * special-care marking.
      */
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public CustomFieldDefinition update(int id, CustomFieldDefinition def, List<CustomFieldOption> options) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        CustomFieldDefinition before = definitionMapper.getById(workspaceId, id);
+        CustomFieldDefinition preliminary = definitionMapper.getById(workspaceId, id);
+        if (preliminary == null) throw new ResourceNotFoundException("Custom field not found with id: " + id);
+        lockMutationPermission(workspaceId);
+        RecordCreationTemplateSet set = lockTemplateSet(workspaceId, preliminary.getEntityType());
+        CustomFieldDefinition before = definitionMapper.getByIdForUpdate(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Custom field not found with id: " + id);
         def.setId(id);
         def.setWorkspaceId(workspaceId);
@@ -158,6 +174,7 @@ public class CustomFieldDefinitionService {
         validateShape(def, options);
         def.setOptionsJson(serializeOptions(def.getFieldType(), options));
         definitionMapper.update(def);
+        advanceTemplateSet(workspaceId, before.getEntityType(), set);
         auditService.record("custom_field.update", "custom_field", id, def.getLabel(),
             "Updated custom field " + def.getLabel(),
             auditService.diff(before, def, AUDIT_FIELDS));
@@ -168,11 +185,17 @@ public class CustomFieldDefinitionService {
      * Permanently deletes a field and (via cascade) its values.
      */
     @RequirePermission(Permission.CUSTOM_FIELD_MANAGE)
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        CustomFieldDefinition before = definitionMapper.getById(workspaceId, id);
+        CustomFieldDefinition preliminary = definitionMapper.getById(workspaceId, id);
+        if (preliminary == null) throw new ResourceNotFoundException("Custom field not found with id: " + id);
+        lockMutationPermission(workspaceId);
+        RecordCreationTemplateSet set = lockTemplateSet(workspaceId, preliminary.getEntityType());
+        CustomFieldDefinition before = definitionMapper.getByIdForUpdate(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Custom field not found with id: " + id);
         definitionMapper.delete(workspaceId, id);
+        advanceTemplateSet(workspaceId, before.getEntityType(), set);
         auditService.record("custom_field.delete", "custom_field", id, before.getLabel(),
             "Deleted custom field " + before.getLabel(),
             auditService.diff(before, null, AUDIT_FIELDS));
@@ -251,6 +274,39 @@ public class CustomFieldDefinitionService {
         if (definitionMapper.getByKey(workspaceId, entityType, fieldKey) != null) {
             throw new DuplicateResourceException("fieldKey",
                 "A " + entityType + " field with key '" + fieldKey + "' already exists");
+        }
+    }
+
+    private void lockMutationPermission(int workspaceId) {
+        workspaceService.lockAndRequirePermissions(
+            workspaceId,
+            Map.of(
+                workspaceService.getCurrentUserId(),
+                Set.of(Permission.CUSTOM_FIELD_MANAGE)));
+    }
+
+    private RecordCreationTemplateSet lockTemplateSet(int workspaceId, String entityType) {
+        RecordCreationRecordType recordType;
+        try {
+            recordType = RecordCreationRecordType.valueOf(entityType);
+        } catch (RuntimeException exception) {
+            throw new BadRequestException("Unsupported entity type: " + entityType);
+        }
+        templateMapper.insertSetIfAbsent(workspaceId, recordType.name());
+        RecordCreationTemplateSet set = templateMapper.getSetForUpdate(workspaceId, recordType.name());
+        if (set == null) {
+            throw new IllegalStateException("Record creation template set could not be locked");
+        }
+        return set;
+    }
+
+    private void advanceTemplateSet(
+            int workspaceId,
+            String entityType,
+            RecordCreationTemplateSet set) {
+        if (templateMapper.advanceSetRevision(
+                workspaceId, entityType, set.getRevision()) != 1) {
+            throw new IllegalStateException("Record creation template set changed while locked");
         }
     }
 

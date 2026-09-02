@@ -41,6 +41,7 @@ import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredImage;
 import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import ooo.klae.connex.backend.recordcreation.RecordCreationAugmentation;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.util.LikePattern;
@@ -51,6 +52,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -91,6 +93,7 @@ public class CompanyService {
     private final MatchingService matchingService;
     private final DuplicatePreflightService duplicatePreflightService;
     private final DuplicateDecisionLockService duplicateDecisionLockService;
+    private final RecordCreationAugmentationService recordCreationAugmentationService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("name", "website", "industry", "phone", "address", "logoUrl");
@@ -388,7 +391,15 @@ public class CompanyService {
     @RequirePermission(Permission.COMPANY_CREATE)
     public Company createCompany(Company company) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        lockCreatePermission(workspaceId);
         duplicateDecisionLockService.lockCurrentOrganization();
+        return createCompanyAfterDuplicateDecisionLock(company, null, workspaceId);
+    }
+
+    private Company createCompanyAfterDuplicateDecisionLock(
+            Company company,
+            RecordCreationAugmentation augmentation,
+            int workspaceId) {
         company.setWorkspaceId(workspaceId);
         company.setOwnerId(authService.getCurrentUser().getId());
         company.setLogoUrl(null);
@@ -398,9 +409,15 @@ public class CompanyService {
         identityIntakeService.recordCompany(
             company.getWorkspaceId(), company.getId(), company.getWebsite(), company.getPhone(),
             IdentityAcquisitionSource.INTERACTIVE_CREATE, null);
+        Map<String, Object> auditChanges = auditService.diff(null, company, AUDIT_FIELDS);
+        if (augmentation != null) {
+            auditChanges = withCreationMetadata(
+                auditChanges,
+                recordCreationAugmentationService.applyCompany(company.getId(), augmentation));
+        }
         auditService.record("company.create", "company", company.getId(), company.getName(),
             "Created company " + company.getName(),
-            auditService.diff(null, company, AUDIT_FIELDS));
+            auditChanges);
         ruleTriggers.publish(company.getWorkspaceId(), "company", company.getId(), "company.created");
         return company;
     }
@@ -415,13 +432,47 @@ public class CompanyService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.COMPANY_CREATE)
     public Company createCompanyReviewed(Company company, String duplicateReviewToken) {
+        lockCreatePermission(workspaceService.getCurrentWorkspaceId());
         duplicatePreflightService.requireReviewedCompanyCreation(
             new CompanyDuplicatePreflightRequest(
                 company.getName(),
                 company.getWebsite() == null ? List.of() : List.of(company.getWebsite()),
                 company.getPhone() == null ? List.of() : List.of(company.getPhone())),
             duplicateReviewToken);
-        return createCompany(company);
+        return createCompanyAfterDuplicateDecisionLock(
+            company, null, workspaceService.getCurrentWorkspaceId());
+    }
+
+    Company createCompanyReviewed(
+            Company company,
+            String duplicateReviewToken,
+            RecordCreationAugmentation augmentation) {
+        duplicatePreflightService.requireReviewedCompanyCreation(
+            new CompanyDuplicatePreflightRequest(
+                company.getName(),
+                company.getWebsite() == null ? List.of() : List.of(company.getWebsite()),
+                company.getPhone() == null ? List.of() : List.of(company.getPhone())),
+            duplicateReviewToken);
+        return createCompanyAfterDuplicateDecisionLock(
+            company, augmentation, workspaceService.getCurrentWorkspaceId());
+    }
+
+    private static Map<String, Object> withCreationMetadata(
+            Map<String, Object> changes,
+            Map<String, Object> metadata) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (changes != null) {
+            result.putAll(changes);
+        }
+        result.putAll(metadata);
+        return result;
+    }
+
+    private void lockCreatePermission(int workspaceId) {
+        int actorId = workspaceService.getCurrentUserId();
+        workspaceService.lockAndRequirePermissions(
+            workspaceId,
+            Map.of(actorId, Set.of(Permission.COMPANY_CREATE)));
     }
 
     /**

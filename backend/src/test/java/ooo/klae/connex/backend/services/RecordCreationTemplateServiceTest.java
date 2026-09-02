@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -96,6 +97,8 @@ class RecordCreationTemplateServiceTest {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaceService.getCurrentUserId()).thenReturn(11);
         definition = definition("name");
+        RecordCreationPresetService presetService = new RecordCreationPresetService(
+            mapper, resolver, registry, workspaceService);
         service = new RecordCreationTemplateService(
             mapper,
             customFieldMapper,
@@ -106,6 +109,7 @@ class RecordCreationTemplateServiceTest {
             shareMapper,
             validator,
             resolver,
+            presetService,
             registry,
             workspaceService,
             auditService,
@@ -155,6 +159,27 @@ class RecordCreationTemplateServiceTest {
         verify(auditService).record(
             org.mockito.ArgumentMatchers.eq("record_creation_template.create"),
             anyString(), anyInt(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void adminListReusesOneResolutionSnapshotForSelectionAndSummaries() throws Exception {
+        RecordCreationTemplate root = root(42, "person", "enabled", 0, 1);
+        RecordCreationTemplateVersion version = version(42, 1, "canonical");
+        when(mapper.getSet(7, "person")).thenReturn(set(3, 42));
+        when(mapper.listRoots(7, "person", true)).thenReturn(List.of(root));
+        when(mapper.getCurrentVersion(7, 42)).thenReturn(version);
+        when(resolver.resolveWorkspace(root, version, null)).thenReturn(
+            available("workspace:42", RecordCreationRecordType.person, false));
+        when(resolver.resolveSystem(RecordCreationRecordType.person, null)).thenReturn(
+            available("system:person:standard", RecordCreationRecordType.person, true));
+
+        var listed = service.list(RecordCreationRecordType.person, true);
+
+        assertEquals("workspace:42", listed.selectedTemplateId());
+        assertEquals(List.of("workspace:42", "system:person:standard"),
+            listed.templates().stream().map(template -> template.id()).toList());
+        verify(resolver, times(1)).resolveWorkspace(root, version, null);
+        verify(resolver, times(1)).resolveSystem(RecordCreationRecordType.person, null);
     }
 
     @Test
@@ -419,6 +444,12 @@ class RecordCreationTemplateServiceTest {
         RecordCreationTemplateVersion secondVersion = version(2, 1, "second");
         when(mapper.getSetForUpdate(7, "company")).thenReturn(set(3, null));
         when(mapper.listRootsForUpdate(7, "company")).thenReturn(List.of(first, second));
+        doAnswer(invocation -> {
+            int templateId = invocation.getArgument(1);
+            int position = invocation.getArgument(2);
+            (templateId == first.getId() ? first : second).setPosition(position);
+            return 1;
+        }).when(mapper).updatePositions(eq(7), anyInt(), anyInt(), eq(11));
         when(mapper.advanceSetRevision(7, "company", 3)).thenReturn(1);
         when(mapper.getSet(7, "company")).thenReturn(set(4, null));
         when(mapper.listRoots(7, "company", false)).thenReturn(List.of(second, first));
@@ -639,6 +670,8 @@ class RecordCreationTemplateServiceTest {
             workspaceService,
             JsonMapper.builder().findAndAddModules().build());
         when(userCalendarService.today()).thenReturn(java.time.LocalDate.parse("2026-08-31"));
+        RecordCreationPresetService presetService = new RecordCreationPresetService(
+            mapper, liveResolver, registry, workspaceService);
         return new RecordCreationTemplateService(
             mapper,
             customFieldMapper,
@@ -649,6 +682,7 @@ class RecordCreationTemplateServiceTest {
             shareMapper,
             validator,
             liveResolver,
+            presetService,
             registry,
             workspaceService,
             auditService,

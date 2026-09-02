@@ -66,6 +66,7 @@ class PersonRestrictionEpochTest {
             mock(IdentityIntakeService.class),
             mock(DuplicatePreflightService.class),
             duplicateDecisionLockService,
+            mock(RecordCreationAugmentationService.class),
             providerCaptureMapper,
             restrictionEpoch);
 

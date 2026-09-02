@@ -31,9 +31,11 @@ class TenantJournalAttributionArchTest {
         "ooo.klae.connex.backend.controllers.ActivityController",
         "ooo.klae.connex.backend.controllers.CompanyController",
         "ooo.klae.connex.backend.controllers.DealController",
+        "ooo.klae.connex.backend.controllers.LegacyRecordCreationController",
         "ooo.klae.connex.backend.controllers.NoteController",
         "ooo.klae.connex.backend.controllers.PersonController",
         "ooo.klae.connex.backend.controllers.RecordCommentController",
+        "ooo.klae.connex.backend.controllers.RecordCreationPresetController",
         "ooo.klae.connex.backend.controllers.RecordCreationTemplateController",
         "ooo.klae.connex.backend.controllers.TaskController");
     private static final Pattern EXPLICIT_TENANT_TARGET = Pattern.compile(
@@ -43,6 +45,9 @@ class TenantJournalAttributionArchTest {
     @Test
     void onlyReviewedCurrentTenantHandlersAreJournalAttributable() {
         assertAttributionSurface(scanControllers(BACKEND_PACKAGE), ATTRIBUTABLE_CONTROLLERS);
+        assertTrue(AnnotatedElementUtils.hasAnnotation(
+            ooo.klae.connex.backend.controllers.GuidedRecordCreationController.class,
+            TenantJournalAttributable.class));
     }
 
     @Test

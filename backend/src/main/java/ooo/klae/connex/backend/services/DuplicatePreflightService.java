@@ -42,6 +42,7 @@ import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.DuplicateReviewException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.IdentityMapper;
@@ -254,13 +255,18 @@ public class DuplicatePreflightService {
         rateLimiter.requireAllowed(1);
         duplicateDecisionLockService.lockCurrentOrganization();
         DealMatch match = matchDeal(workspaceId, normalized, workflowFingerprint);
+        if (match.truncated()) {
+            throw duplicateReviewConflict(duplicateReviewToken, true);
+        }
+        if (match.candidates().isEmpty()) {
+            return;
+        }
         boolean reviewed = dealReviewProofService.consume(
             duplicateReviewToken,
             workflowFingerprint,
             match.resultFingerprint());
-        if (match.truncated() || !reviewed) {
-            throw new ConflictException(
-                "Deal duplicate review is missing, expired, or changed; review duplicates again");
+        if (!reviewed) {
+            throw duplicateReviewConflict(duplicateReviewToken, false);
         }
     }
 
@@ -582,14 +588,24 @@ public class DuplicatePreflightService {
             DuplicatePreflightResponse response,
             String duplicateReviewToken) {
         if (response.truncated()) {
-            throw new ConflictException(
-                "Duplicate candidates changed before creation; review them again");
+            throw duplicateReviewConflict(duplicateReviewToken, true);
         }
         if (!response.candidates().isEmpty()
                 && !Objects.equals(response.reviewToken(), duplicateReviewToken)) {
-            throw new ConflictException(
-                "Possible duplicates must be reviewed before creation");
+            throw duplicateReviewConflict(duplicateReviewToken, false);
         }
+    }
+
+    private static DuplicateReviewException duplicateReviewConflict(
+            String duplicateReviewToken,
+            boolean definitelyStale) {
+        boolean stale = definitelyStale
+            || (duplicateReviewToken != null && !duplicateReviewToken.isBlank());
+        return new DuplicateReviewException(
+            stale ? "DUPLICATE_REVIEW_STALE" : "DUPLICATE_REVIEW_REQUIRED",
+            stale
+                ? "Duplicate review changed; review duplicates again"
+                : "Possible duplicates must be reviewed before creation");
     }
 
     private DealMatch matchDeal(

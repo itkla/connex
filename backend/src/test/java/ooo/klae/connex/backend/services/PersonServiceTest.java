@@ -870,6 +870,7 @@ class PersonServiceTest extends AbstractServiceTest {
             mock(IdentityIntakeService.class),
             mock(DuplicatePreflightService.class),
             mock(DuplicateDecisionLockService.class),
+            mock(RecordCreationAugmentationService.class),
             mock(ooo.klae.connex.backend.mappers.ProviderCaptureMapper.class),
             mock(AiRestrictionEpoch.class)
         );
