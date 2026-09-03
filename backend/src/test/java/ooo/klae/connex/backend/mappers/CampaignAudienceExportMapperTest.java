@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -24,12 +25,14 @@ import ooo.klae.connex.backend.delivery.provider.list.HttpListConnector;
  */
 class CampaignAudienceExportMapperTest extends AbstractMapperTest {
 
+    private static final long RUNNING_LEASE_MICROS = Duration.ofMinutes(5).toNanos() / 1_000L;
+
     @Autowired private CampaignMapper campaignMapper;
     @Autowired private CampaignAudienceExportMapper exportMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
 
     @Test
-    void existsActiveForSnapshotConnector_matchesNonFailedExportsWithinTheWorkspace() {
+    void existsActiveForSnapshotConnector_matchesTheRollbackCompatibleFenceWithinTheWorkspace() {
         Campaign campaign = newCampaign();
         CampaignAudienceSnapshot snapshot = newSnapshot(campaign.getId());
         String connector = HttpListConnector.PROVIDER_ID;
@@ -43,13 +46,20 @@ class CampaignAudienceExportMapperTest extends AbstractMapperTest {
                 "a definitively failed zero-push attempt must allow re-export");
 
         CampaignAudienceSnapshot pushedFailureSnapshot = newSnapshot(campaign.getId(), 2);
-        insertExport(campaign.getId(), pushedFailureSnapshot.getId(), connector, "failed", "[]", 1, 1);
-        assertTrue(exportMapper.existsActiveForSnapshotConnector(
+        insertExport(campaign.getId(), pushedFailureSnapshot.getId(), connector, "failed", null, 1, 1);
+        assertFalse(exportMapper.existsActiveForSnapshotConnector(
                 workspace.getId(), campaign.getId(), pushedFailureSnapshot.getId(), connector),
-                "a failed export that already pushed members must block a duplicate");
+                "the current and rollback fences must classify every failed row identically");
 
         CampaignAudienceSnapshot reconciliationSnapshot = newSnapshot(campaign.getId(), 3);
-        insertExport(campaign.getId(), reconciliationSnapshot.getId(), connector, "needs_reconciliation");
+        CampaignAudienceExport ambiguous = insertExport(
+                campaign.getId(), reconciliationSnapshot.getId(), connector, "running");
+        jdbcTemplate.update("""
+                UPDATE campaign_audience_export
+                SET lease_until = NULL, reconciliation_required_at = UTC_TIMESTAMP(6),
+                    outcome_classification = 'ambiguous'
+                WHERE workspace_id = ? AND id = ?
+                """, workspace.getId(), ambiguous.getId());
         assertTrue(exportMapper.existsActiveForSnapshotConnector(
                 workspace.getId(), campaign.getId(), reconciliationSnapshot.getId(), connector),
                 "an ambiguous export must block a duplicate");
@@ -82,8 +92,10 @@ class CampaignAudienceExportMapperTest extends AbstractMapperTest {
                 workspace.getId(), campaign.getId()).getFirst();
         CampaignAudienceExport detail = exportMapper.getExport(workspace.getId(), export.getId());
 
-        assertEquals("needs_reconciliation", history.getStatus());
-        assertEquals("needs_reconciliation", detail.getStatus());
+        assertEquals("running", history.getStatus());
+        assertEquals("running", detail.getStatus());
+        assertNotNull(history.getReconciliationRequiredAt());
+        assertNotNull(detail.getReconciliationRequiredAt());
         assertEquals("running", jdbcTemplate.queryForObject("""
                 SELECT status
                 FROM campaign_audience_export
@@ -94,10 +106,64 @@ class CampaignAudienceExportMapperTest extends AbstractMapperTest {
         CampaignAudienceExport reconciled = exportMapper.getExport(workspace.getId(), export.getId());
 
         assertNotNull(reconciled);
-        assertEquals("needs_reconciliation", reconciled.getStatus());
+        assertEquals("running", reconciled.getStatus());
         assertNull(reconciled.getLeaseUntil());
+        assertNotNull(reconciled.getReconciliationRequiredAt());
+        assertEquals("ambiguous", reconciled.getOutcomeClassification());
         assertTrue(exportMapper.existsActiveForSnapshotConnector(
                 workspace.getId(), campaign.getId(), snapshot.getId(), HttpListConnector.PROVIDER_ID));
+    }
+
+    @Test
+    void initialAndRefreshedLeasesAreDerivedFromTheDatabaseClock() {
+        Campaign campaign = newCampaign();
+        CampaignAudienceSnapshot snapshot = newSnapshot(campaign.getId());
+        CampaignAudienceExport export = insertExport(
+                campaign.getId(), snapshot.getId(), HttpListConnector.PROVIDER_ID,
+                "running", "[41]", 1);
+        long initialRemainingMicros = jdbcTemplate.queryForObject("""
+                SELECT TIMESTAMPDIFF(MICROSECOND, UTC_TIMESTAMP(6), lease_until)
+                FROM campaign_audience_export
+                WHERE workspace_id = ? AND id = ?
+                """, Long.class, workspace.getId(), export.getId());
+        long refreshedLeaseMicros = Duration.ofSeconds(48).toNanos() / 1_000L;
+        export.setIdempotencyKey("campaign-audience-test-a1");
+
+        assertEquals(1, exportMapper.stagePush(export, refreshedLeaseMicros));
+        long refreshedRemainingMicros = jdbcTemplate.queryForObject("""
+                SELECT TIMESTAMPDIFF(MICROSECOND, UTC_TIMESTAMP(6), lease_until)
+                FROM campaign_audience_export
+                WHERE workspace_id = ? AND id = ?
+                """, Long.class, workspace.getId(), export.getId());
+
+        assertTrue(initialRemainingMicros > Duration.ofMinutes(4).toNanos() / 1_000L);
+        assertTrue(initialRemainingMicros <= RUNNING_LEASE_MICROS);
+        assertTrue(refreshedRemainingMicros > Duration.ofSeconds(40).toNanos() / 1_000L);
+        assertTrue(refreshedRemainingMicros <= refreshedLeaseMicros);
+        assertEquals("campaign-audience-test-a1",
+                exportMapper.getExport(workspace.getId(), export.getId()).getIdempotencyKey());
+    }
+
+    @Test
+    void definitiveFailureReasonIsPersistedAndVisibleInHistory() {
+        Campaign campaign = newCampaign();
+        CampaignAudienceSnapshot snapshot = newSnapshot(campaign.getId());
+        CampaignAudienceExport export = insertExport(
+                campaign.getId(), snapshot.getId(), HttpListConnector.PROVIDER_ID,
+                "running", "[41]", 1);
+        export.setStatus("failed");
+        export.setPushedCount(0);
+        export.setFailedCount(1);
+        export.setFailureReason("resolver_saturated");
+        export.setOutcomeClassification("definite_no_side_effect");
+
+        assertEquals(1, exportMapper.updateOutcome(export));
+
+        CampaignAudienceExport history = exportMapper.getByCampaign(
+                workspace.getId(), campaign.getId()).getFirst();
+        assertEquals("failed", history.getStatus());
+        assertEquals("resolver_saturated", history.getFailureReason());
+        assertEquals("definite_no_side_effect", history.getOutcomeClassification());
     }
 
     @Test
@@ -118,11 +184,17 @@ class CampaignAudienceExportMapperTest extends AbstractMapperTest {
         export.setPushedCount(0);
         export.setFailedCount(0);
 
-        exportMapper.insertExport(export);
+        exportMapper.insertExport(export, RUNNING_LEASE_MICROS);
+        jdbcTemplate.update("""
+                UPDATE campaign_audience_export
+                SET lease_until = NULL
+                WHERE workspace_id = ? AND id = ?
+                """, workspace.getId(), export.getId());
 
         CampaignAudienceExport history = exportMapper.getExport(workspace.getId(), export.getId());
         assertEquals("running", history.getStatus());
         assertNull(history.getLeaseUntil());
+        assertNull(history.getReconciliationRequiredAt());
         assertEquals(0, exportMapper.markStaleRunningNeedsReconciliation(
                 workspace.getId(), campaign.getId(), List.of(export.getId())));
         assertTrue(exportMapper.existsActiveForSnapshotConnector(
@@ -175,10 +247,19 @@ class CampaignAudienceExportMapperTest extends AbstractMapperTest {
         CampaignAudienceSnapshot snapshot = newSnapshot(campaign.getId());
         CampaignAudienceExport export = insertExport(
                 campaign.getId(), snapshot.getId(), HttpListConnector.PROVIDER_ID,
-                "needs_reconciliation", "[41,73]", 2);
+                "running", "[41,73]", 2);
+        jdbcTemplate.update("""
+                UPDATE campaign_audience_export
+                SET lease_until = NULL, reconciliation_required_at = UTC_TIMESTAMP(6),
+                    outcome_classification = 'ambiguous'
+                WHERE workspace_id = ? AND id = ?
+                """, workspace.getId(), export.getId());
+        export.setLeaseUntil(null);
+        export.setReconciliationRequiredAt(LocalDateTime.now(ZoneOffset.UTC));
         export.setStatus("failed");
         export.setPushedCount(0);
         export.setFailedCount(2);
+        export.setOutcomeClassification("operator_not_delivered");
 
         assertEquals(0, exportMapper.resolveReconciliation(exportForWorkspace(export, workspace.getId() + 1)));
         assertEquals(1, exportMapper.resolveReconciliation(export));
@@ -188,9 +269,55 @@ class CampaignAudienceExportMapperTest extends AbstractMapperTest {
         assertEquals("failed", resolved.getStatus());
         assertEquals(0, resolved.getPushedCount());
         assertEquals(2, resolved.getFailedCount());
+        assertEquals("operator_not_delivered", resolved.getOutcomeClassification());
         assertFalse(exportMapper.existsActiveForSnapshotConnector(
                 workspace.getId(), campaign.getId(), snapshot.getId(), HttpListConnector.PROVIDER_ID));
         assertEquals(0, exportMapper.resolveReconciliation(export));
+    }
+
+    @Test
+    void resolveReconciliationAcceptsOnlyANullLeaseLegacyRunningExport() {
+        Campaign campaign = newCampaign();
+        CampaignAudienceSnapshot snapshot = newSnapshot(campaign.getId());
+        CampaignAudienceExport legacy = insertExport(
+                campaign.getId(), snapshot.getId(), HttpListConnector.PROVIDER_ID,
+                "running", "[41,73]", 2);
+        jdbcTemplate.update("""
+                UPDATE campaign_audience_export
+                SET lease_until = NULL
+                WHERE workspace_id = ? AND id = ?
+                """, workspace.getId(), legacy.getId());
+        legacy.setLeaseUntil(null);
+        legacy.setStatus("failed");
+        legacy.setPushedCount(0);
+        legacy.setFailedCount(2);
+        legacy.setOutcomeClassification("operator_not_delivered");
+
+        assertEquals(1, exportMapper.resolveReconciliation(legacy));
+        CampaignAudienceExport resolved = exportMapper.getExport(workspace.getId(), legacy.getId());
+        assertEquals("failed", resolved.getStatus());
+        assertEquals("operator_not_delivered", resolved.getOutcomeClassification());
+        assertEquals(0, exportMapper.resolveReconciliation(legacy));
+    }
+
+    @Test
+    void lateOutcomeMarkerIsWorkspaceScopedAndVisibleInHistory() {
+        Campaign campaign = newCampaign();
+        CampaignAudienceSnapshot snapshot = newSnapshot(campaign.getId());
+        CampaignAudienceExport export = insertExport(
+                campaign.getId(), snapshot.getId(), HttpListConnector.PROVIDER_ID,
+                "running", "[41]", 1);
+
+        assertEquals(0, exportMapper.markLateOutcome(
+                workspace.getId() + 1, export.getId(), "confirmed_delivery", null));
+        assertEquals(1, exportMapper.markLateOutcome(
+                workspace.getId(), export.getId(), "confirmed_delivery", null));
+        assertEquals(0, exportMapper.markLateOutcome(
+                workspace.getId(), export.getId(), "ambiguous", null));
+
+        CampaignAudienceExport history = exportMapper.getByCampaign(
+                workspace.getId(), campaign.getId()).getFirst();
+        assertEquals("confirmed_delivery", history.getLateOutcome());
     }
 
     private Campaign newCampaign() {
@@ -240,16 +367,16 @@ class CampaignAudienceExportMapperTest extends AbstractMapperTest {
         export.setSnapshotId(snapshotId);
         export.setConnector(connector);
         export.setFrozenMemberIdsJson(frozenMemberIdsJson);
-        export.setPushedMemberIdsJson("[]");
+        export.setPushedMemberIdsJson(frozenMemberIdsJson == null ? null : "[]");
         export.setStatus(status);
-        export.setAttempt(1);
-        if ("running".equals(status)) {
-            export.setLeaseUntil(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(5));
+        if ("failed".equals(status) && frozenMemberIdsJson != null) {
+            export.setOutcomeClassification("definite_no_side_effect");
         }
+        export.setAttempt(1);
         export.setTotalMembers(totalMembers);
         export.setPushedCount(pushedCount);
         export.setFailedCount(0);
-        exportMapper.insertExport(export);
+        exportMapper.insertExport(export, RUNNING_LEASE_MICROS);
         return export;
     }
 

@@ -3,8 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
@@ -15,10 +14,15 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
+
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -26,8 +30,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.BindException;
 import org.springframework.validation.SmartValidator;
-
-import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.Campaign;
 import ooo.klae.connex.backend.beans.CampaignAudienceExport;
@@ -75,24 +77,42 @@ import tools.jackson.databind.ObjectMapper;
  * <p>No database lock is held across provider egress. Consequently, a bounded final-revalidation-to-
  * provider-acceptance window remains. For locked authorization and the connector generation it starts
  * when B commits; for eligibility it starts at B's first consistent read, which loads restrictions.
- * The application portion is
- * normally milliseconds because B is immediately followed by the connector call. The running lease
- * covers the configured connection and response bounds plus a safety margin and cannot exceed five
- * minutes. A permission, consent, restriction, suppression, or connector-generation change committed
- * inside its respective window cannot retract the already-started request; it is honored on the next
- * export, while provider-side unsubscribe synchronization remains the immediate removal path. A lost
- * response or expired nonnull running lease becomes {@code needs_reconciliation} and is never silently
- * retried. A null lease identifies a legacy in-flight writer and remains active without automatic stale
- * classification.
+ * The application portion is normally milliseconds because B is immediately followed by the
+ * connector call. The connector enforces a hard elapsed-time deadline by cancelling the in-flight
+ * request and closing its socket. The running lease covers that deadline plus a safety margin and
+ * cannot exceed five minutes. The lease is
+ * written and refreshed relative to {@code UTC_TIMESTAMP(6)}, and expiry is evaluated only against that
+ * same database clock. The provider budget uses one process-local monotonic anchor captured before the
+ * refresh write. The guarantee that SQL cannot classify the lease as expired while that budget remains
+ * live holds only while forward database-clock adjustments during the lease stay below the configured
+ * safety margin. Operators must raise
+ * {@code connex.delivery.audience-export-lease-safety-margin-ms} above its 30-second floor when the
+ * database host cannot meet that bound; production database hosts must use NTP slewing and must not
+ * apply forward clock steps while leases are active. A permission, consent, restriction, suppression,
+ * or connector-generation change committed inside its respective window cannot retract the
+ * already-started request; it is honored on the next export, while provider-side unsubscribe
+ * synchronization remains the immediate removal path. A lost response or expired nonnull running
+ * lease is flagged for reconciliation while retaining its rollback-compatible {@code running} status
+ * and is never silently retried. A null lease without that flag identifies a legacy in-flight writer:
+ * it remains active without automatic stale classification and can be resolved only through the
+ * audited operator reconciliation path.
  * Request-stable idempotency keys let a supporting provider de-duplicate a retry of the same
  * ambiguous request, while a replacement after a definite failure advances the persisted attempt.
+ * Transaction-C replay is a no-op only when the attempt, persisted/supplied/attempted key, status,
+ * total/pushed/failed counts, and bounded outcome classification all match exactly. When operator
+ * reconciliation wins before transaction C, an exactly matching provider status and count tuple is
+ * audited as an agreement without a late-outcome marker; a mismatch is audited and marked as a
+ * contradiction.
  */
 @Service
-@RequiredArgsConstructor
 public class AudienceExportService {
 
     private static final Logger log = LoggerFactory.getLogger(AudienceExportService.class);
     private static final String CHANNEL = "email";
+    private static final String RESOLVER_SATURATED_REASON = "resolver_saturated";
+    private static final String RESOLVER_SATURATED_LOG_MARKER = "AUDIENCE_EXPORT_RESOLVER_SATURATED";
+    private static final String RESOLVER_SATURATION_METRIC =
+            "connex.delivery.audience_export.resolver_saturated";
 
     private final CampaignMapper campaignMapper;
     private final CampaignAudienceExportMapper campaignAudienceExportMapper;
@@ -108,6 +128,87 @@ public class AudienceExportService {
     private final PlatformTransactionManager transactionManager;
     private final ObjectMapper objectMapper;
     private final SmartValidator validator;
+    private final Counter resolverSaturationCounter;
+    private final LongSupplier nanoTimeSource;
+
+    /**
+     * Builds the production audience-export choke point.
+     * @param campaignMapper campaign persistence
+     * @param campaignAudienceExportMapper export persistence
+     * @param personMapper person persistence
+     * @param audienceEligibilityService audience eligibility classifier
+     * @param connectorConfigService connector configuration resolver
+     * @param deliveryProviderRouter connector router
+     * @param deliveryProperties delivery timing configuration
+     * @param capabilityRegistry capability registry
+     * @param workspaceService current-workspace service
+     * @param tenantContext resolved tenant context
+     * @param auditService strict audit service
+     * @param transactionManager transaction manager
+     * @param objectMapper JSON mapper
+     * @param validator request validator
+     * @param meterRegistry application meter registry
+     */
+    @Autowired
+    public AudienceExportService(
+            CampaignMapper campaignMapper,
+            CampaignAudienceExportMapper campaignAudienceExportMapper,
+            PersonMapper personMapper,
+            AudienceEligibilityService audienceEligibilityService,
+            ConnectorConfigService connectorConfigService,
+            DeliveryProviderRouter deliveryProviderRouter,
+            DeliveryProperties deliveryProperties,
+            CapabilityRegistry capabilityRegistry,
+            WorkspaceService workspaceService,
+            TenantContext tenantContext,
+            AuditService auditService,
+            PlatformTransactionManager transactionManager,
+            ObjectMapper objectMapper,
+            SmartValidator validator,
+            MeterRegistry meterRegistry) {
+        this(campaignMapper, campaignAudienceExportMapper, personMapper, audienceEligibilityService,
+                connectorConfigService, deliveryProviderRouter, deliveryProperties, capabilityRegistry,
+                workspaceService, tenantContext, auditService, transactionManager, objectMapper, validator,
+                meterRegistry, System::nanoTime);
+    }
+
+    AudienceExportService(
+            CampaignMapper campaignMapper,
+            CampaignAudienceExportMapper campaignAudienceExportMapper,
+            PersonMapper personMapper,
+            AudienceEligibilityService audienceEligibilityService,
+            ConnectorConfigService connectorConfigService,
+            DeliveryProviderRouter deliveryProviderRouter,
+            DeliveryProperties deliveryProperties,
+            CapabilityRegistry capabilityRegistry,
+            WorkspaceService workspaceService,
+            TenantContext tenantContext,
+            AuditService auditService,
+            PlatformTransactionManager transactionManager,
+            ObjectMapper objectMapper,
+            SmartValidator validator,
+            MeterRegistry meterRegistry,
+            LongSupplier nanoTimeSource) {
+        this.campaignMapper = Objects.requireNonNull(campaignMapper, "campaignMapper");
+        this.campaignAudienceExportMapper = Objects.requireNonNull(
+                campaignAudienceExportMapper, "campaignAudienceExportMapper");
+        this.personMapper = Objects.requireNonNull(personMapper, "personMapper");
+        this.audienceEligibilityService = Objects.requireNonNull(
+                audienceEligibilityService, "audienceEligibilityService");
+        this.connectorConfigService = Objects.requireNonNull(connectorConfigService, "connectorConfigService");
+        this.deliveryProviderRouter = Objects.requireNonNull(deliveryProviderRouter, "deliveryProviderRouter");
+        this.deliveryProperties = Objects.requireNonNull(deliveryProperties, "deliveryProperties");
+        this.capabilityRegistry = Objects.requireNonNull(capabilityRegistry, "capabilityRegistry");
+        this.workspaceService = Objects.requireNonNull(workspaceService, "workspaceService");
+        this.tenantContext = Objects.requireNonNull(tenantContext, "tenantContext");
+        this.auditService = Objects.requireNonNull(auditService, "auditService");
+        this.transactionManager = Objects.requireNonNull(transactionManager, "transactionManager");
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+        this.validator = Objects.requireNonNull(validator, "validator");
+        this.resolverSaturationCounter = Objects.requireNonNull(meterRegistry, "meterRegistry")
+                .counter(RESOLVER_SATURATION_METRIC);
+        this.nanoTimeSource = Objects.requireNonNull(nanoTimeSource, "nanoTimeSource");
+    }
 
     /**
      * Pushes a frozen snapshot's eligible included members to a connector, recording the outcome.
@@ -137,7 +238,7 @@ public class AudienceExportService {
             log.warn("Campaign audience export {} failed in workspace {} reason=connector_selection_failed",
                     prepared.exportId(), workspaceId);
             return inNewTransaction(() -> recordFailedBeforePush(
-                    workspaceId, actorId, campaignId, prepared));
+                    workspaceId, actorId, campaignId, prepared, "connector_selection_failed"));
         }
 
         ResolvedAudienceTarget target;
@@ -147,7 +248,7 @@ public class AudienceExportService {
             log.warn("Campaign audience export {} failed in workspace {} reason=provider_resolution_failed",
                     prepared.exportId(), workspaceId);
             return inNewTransaction(() -> recordFailedBeforePush(
-                    workspaceId, actorId, campaignId, prepared));
+                    workspaceId, actorId, campaignId, prepared, "provider_resolution_failed"));
         }
 
         FinalAudience finalAudience;
@@ -156,20 +257,23 @@ public class AudienceExportService {
                     workspaceId, actorId, campaignId, prepared, target));
         } catch (ForbiddenException exception) {
             inNewTransaction(() -> recordFailedBeforePush(
-                    workspaceId, actorId, campaignId, prepared));
+                    workspaceId, actorId, campaignId, prepared, null));
             throw exception;
         } catch (DeliveryProviderException exception) {
             log.warn("Campaign audience export {} failed in workspace {} reason=configuration_fence_failed",
                     prepared.exportId(), workspaceId);
             return inNewTransaction(() -> recordFailedBeforePush(
-                    workspaceId, actorId, campaignId, prepared));
+                    workspaceId, actorId, campaignId, prepared, "configuration_fence_failed"));
         }
         boolean noEligibleMembers = finalAudience.members().isEmpty();
-        applyPush(finalAudience.export(), syncConnector, target, finalAudience.members(),
-                finalAudience.excludedCount(), finalAudience.idempotencyKey());
-        return inNewTransaction(() -> recordOutcome(
+        AudiencePushResult.Outcome providerOutcome = applyPush(
+                finalAudience.export(), syncConnector, target, finalAudience.members(),
+                finalAudience.excludedCount(), finalAudience.idempotencyKey(),
+                finalAudience.providerCallBudget());
+        return recordOutcome(
                 workspaceId, actorId, campaignId, prepared.campaignName(),
-                finalAudience.export(), noEligibleMembers));
+                finalAudience.export(), noEligibleMembers, finalAudience.idempotencyKey(),
+                providerOutcome);
     }
 
     /**
@@ -205,11 +309,11 @@ public class AudienceExportService {
     }
 
     /**
-     * Records an operator-confirmed provider outcome for an export that requires reconciliation.
-     * Both campaign and consent management are revalidated from locked authorization rows before
-     * the campaign and export rows are locked.
+     * Records an operator-confirmed provider outcome for an export that requires reconciliation or
+     * for a legacy in-flight export with no lease. Both campaign and consent management are
+     * revalidated from locked authorization rows before the campaign and export rows are locked.
      * @param campaignId the campaign
-     * @param exportId the reconciliation-required export
+     * @param exportId the reconciliation-required or legacy in-flight export
      * @param request the provider-confirmed resolution
      * @return the resolved export with its confirmed counts
      * @throws BindException when the resolution fails request validation
@@ -264,12 +368,11 @@ public class AudienceExportService {
         export.setPushedMemberIdsJson(serializeMemberIds(List.of()));
         export.setStatus("running");
         export.setAttempt(1);
-        export.setLeaseUntil(leaseDeadline());
         export.setTotalMembers(frozenMemberIds.size());
         export.setPushedCount(0);
         export.setFailedCount(0);
         export.setCreatedById(actorId);
-        campaignAudienceExportMapper.insertExport(export);
+        campaignAudienceExportMapper.insertExport(export, leaseDurationMicros());
         auditService.recordStrict(
                 "campaign.audience_export.create", "campaign", campaignId, campaign.getName(),
                 "Created campaign audience export", Map.of(
@@ -300,7 +403,8 @@ public class AudienceExportService {
         CampaignAudienceExport export = campaignAudienceExportMapper.getExportForUpdate(
                 workspaceId, prepared.exportId());
         if (export == null || export.getCampaignId() != campaignId
-                || export.getSnapshotId() != snapshot.getId() || !"running".equals(export.getStatus())) {
+                || export.getSnapshotId() != snapshot.getId() || !"running".equals(export.getStatus())
+                || export.getReconciliationRequiredAt() != null) {
             throw new ResourceNotFoundException(
                     "Campaign audience export not found with id: " + prepared.exportId());
         }
@@ -314,8 +418,12 @@ public class AudienceExportService {
         export.setAttempt(campaignAudienceExportMapper.nextAttemptForSnapshotTarget(
                 workspaceId, campaignId, snapshot.getId(), export.getConnector(), target.externalListId()));
         export.setFailedCount(excludedCount);
-        export.setLeaseUntil(leaseDeadline());
-        if (campaignAudienceExportMapper.stagePush(export) == 0) {
+        ProviderCallBudget providerCallBudget = ProviderCallBudget.start(
+                deliveryProperties.audienceExportProviderDeadline(), nanoTimeSource);
+        String idempotencyKey = idempotencyKey(
+                export, prepared.snapshotVersion(), target, audience.memberIds(), audience.members());
+        export.setIdempotencyKey(idempotencyKey);
+        if (campaignAudienceExportMapper.stagePush(export, leaseDurationMicros()) == 0) {
             throw new ResourceNotFoundException(
                     "Campaign audience export not found with id: " + prepared.exportId());
         }
@@ -323,49 +431,64 @@ public class AudienceExportService {
             throw new DeliveryProviderException("Connector configuration changed before audience push");
         }
         return new FinalAudience(
-                export, audience.members(), excludedCount,
-                idempotencyKey(
-                        export, prepared.snapshotVersion(), target,
-                        audience.memberIds(), audience.members()));
+                export, audience.members(), excludedCount, idempotencyKey, providerCallBudget);
     }
 
-    private void applyPush(
+    private AudiencePushResult.Outcome applyPush(
             CampaignAudienceExport export,
             AudienceSyncConnector connector,
             ResolvedAudienceTarget target,
             List<AudienceMember> members,
             int excludedCount,
-            String idempotencyKey) {
+            String idempotencyKey,
+            ProviderCallBudget providerCallBudget) {
         if (members.isEmpty()) {
             export.setPushedCount(0);
             export.setStatus("failed");
-            return;
+            export.setReconciliationRequiredAt(null);
+            export.setFailureReason("no_eligible_members");
+            return AudiencePushResult.Outcome.DEFINITE_NO_SIDE_EFFECT;
         }
         try {
+            List<AudienceMember> stableMembers = List.copyOf(members);
             AudiencePushResult result = connector.pushAudience(
-                    target.provider(), new AudiencePush(target.externalListId(), members, idempotencyKey));
+                    target.provider(), new AudiencePush(
+                            target.externalListId(), stableMembers, idempotencyKey,
+                            providerCallBudget.deadlineNanos()));
             if (result.outcome() == AudiencePushResult.Outcome.AMBIGUOUS
                     || !isConsistentResult(result, members.size())) {
                 export.setPushedCount(0);
                 export.setFailedCount(excludedCount);
-                export.setStatus("needs_reconciliation");
-                return;
+                export.setStatus("running");
+                export.setReconciliationRequiredAt(null);
+                export.setFailureReason(null);
+                return AudiencePushResult.Outcome.AMBIGUOUS;
             }
             if (result.outcome() == AudiencePushResult.Outcome.DEFINITE_NO_SIDE_EFFECT) {
                 export.setPushedCount(0);
                 export.setFailedCount(excludedCount + members.size());
                 export.setStatus("failed");
-                return;
+                export.setReconciliationRequiredAt(null);
+                export.setFailureReason(result.failureReason() == null
+                        ? "connector_definitive_failure" : result.failureReason());
+                recordResolverSaturation(export);
+                return AudiencePushResult.Outcome.DEFINITE_NO_SIDE_EFFECT;
             }
             export.setPushedCount(result.pushedCount());
             export.setFailedCount(excludedCount + result.failedCount());
             export.setStatus(result.pushedCount() > 0 ? "completed" : "failed");
+            export.setReconciliationRequiredAt(null);
+            export.setFailureReason(null);
+            return AudiencePushResult.Outcome.CONFIRMED;
         } catch (RuntimeException exception) {
             log.warn("Campaign audience export {} failed in workspace {} reason=connector_exception",
                     export.getId(), export.getWorkspaceId());
             export.setPushedCount(0);
             export.setFailedCount(excludedCount);
-            export.setStatus("needs_reconciliation");
+            export.setStatus("running");
+            export.setReconciliationRequiredAt(null);
+            export.setFailureReason(null);
+            return AudiencePushResult.Outcome.AMBIGUOUS;
         }
     }
 
@@ -410,31 +533,122 @@ public class AudienceExportService {
         return new MaterializedAudience(memberIds, members);
     }
 
-    private CampaignAudienceExportDto recordOutcome(
+    CampaignAudienceExportDto recordOutcome(
             int workspaceId,
             int actorId,
             int campaignId,
             String campaignName,
             CampaignAudienceExport export,
-            boolean noEligibleMembers) {
+            boolean noEligibleMembers,
+            String idempotencyKey,
+            AudiencePushResult.Outcome providerOutcome) {
+        export.setOutcomeClassification(outcomeClassification(
+                providerOutcome, noEligibleMembers, export.getPushedCount()));
+        return inNewTransaction(() -> recordOutcomeInTransaction(
+                workspaceId, actorId, campaignId, campaignName, export, noEligibleMembers,
+                idempotencyKey, providerOutcome));
+    }
+
+    private CampaignAudienceExportDto recordOutcomeInTransaction(
+            int workspaceId,
+            int actorId,
+            int campaignId,
+            String campaignName,
+            CampaignAudienceExport export,
+            boolean noEligibleMembers,
+            String idempotencyKey,
+            AudiencePushResult.Outcome providerOutcome) {
         boolean includeDetailedCounts = workspaceService
                 .lockedMemberPermissionsFor(workspaceId, actorId)
                 .contains(Permission.CONSENT_MANAGE);
-        campaignAudienceExportMapper.updateOutcome(export);
-        if (noEligibleMembers) {
-            auditService.recordStrict(
-                    "campaign.audience_export.outcome", "campaign", campaignId, campaignName,
-                    "Recorded campaign audience export outcome", Map.of(
-                            "exportId", export.getId(),
-                            "status", "failed",
-                            "reason", "no_eligible_members"));
+        requireCampaignForUpdate(workspaceId, campaignId);
+        CampaignAudienceExport persisted = campaignAudienceExportMapper.getExportForUpdate(
+                workspaceId, export.getId());
+        if (persisted == null || persisted.getCampaignId() != campaignId) {
+            throw new ResourceNotFoundException(
+                    "Campaign audience export not found with id: " + export.getId());
         }
+        if (campaignAudienceExportMapper.updateOutcome(export) == 0) {
+            if (isIdempotentOutcomeReplay(persisted, export, idempotencyKey)) {
+                return CampaignAudienceExportDto.from(persisted, includeDetailedCounts);
+            }
+            if (isAgreedOperatorOutcome(persisted, export)) {
+                recordLateOutcomeAudit(
+                        campaignId, campaignName, persisted, export, idempotencyKey,
+                        providerOutcome, true);
+                return CampaignAudienceExportDto.from(persisted, includeDetailedCounts);
+            }
+            return recordLateOutcome(
+                    workspaceId, campaignId, campaignName, persisted, export, idempotencyKey,
+                    providerOutcome, includeDetailedCounts);
+        }
+        auditService.recordStrict(
+                "campaign.audience_export.outcome", "campaign", campaignId, campaignName,
+                "Recorded campaign audience export outcome",
+                outcomeAuditChanges(export, providerOutcome, noEligibleMembers));
         return CampaignAudienceExportDto.from(
                 requireExport(workspaceId, campaignId, export.getId()), includeDetailedCounts);
     }
 
+    private CampaignAudienceExportDto recordLateOutcome(
+            int workspaceId,
+            int campaignId,
+            String campaignName,
+            CampaignAudienceExport persisted,
+            CampaignAudienceExport attemptedOutcome,
+            String idempotencyKey,
+            AudiencePushResult.Outcome providerOutcome,
+            boolean includeDetailedCounts) {
+        String lateOutcome = providerOutcome == AudiencePushResult.Outcome.CONFIRMED
+                ? attemptedOutcome.getPushedCount() != null && attemptedOutcome.getPushedCount() > 0
+                        ? "confirmed_delivery"
+                        : "confirmed_no_delivery"
+                : providerOutcome.name().toLowerCase(Locale.ROOT);
+        if (campaignAudienceExportMapper.markLateOutcome(
+                workspaceId, attemptedOutcome.getId(), lateOutcome,
+                attemptedOutcome.getFailureReason()) == 0) {
+            throw new IllegalStateException("Late campaign audience export outcome could not be recorded");
+        }
+        persisted.setLateOutcome(lateOutcome);
+        recordLateOutcomeAudit(
+                campaignId, campaignName, persisted, attemptedOutcome, idempotencyKey,
+                providerOutcome, false);
+        return CampaignAudienceExportDto.from(
+                requireExport(workspaceId, campaignId, attemptedOutcome.getId()), includeDetailedCounts);
+    }
+
+    private void recordLateOutcomeAudit(
+            int campaignId,
+            String campaignName,
+            CampaignAudienceExport persisted,
+            CampaignAudienceExport attemptedOutcome,
+            String idempotencyKey,
+            AudiencePushResult.Outcome providerOutcome,
+            boolean agreement) {
+        String persistedState = persisted.getReconciliationRequiredAt() == null
+                ? persisted.getStatus()
+                : "needs_reconciliation";
+        auditService.recordStrict(
+                "campaign.audience_export.late_outcome",
+                "campaign",
+                campaignId,
+                campaignName,
+                "Recorded late campaign audience export outcome",
+                Map.of(
+                        "exportId", attemptedOutcome.getId(),
+                        "attempt", attemptedOutcome.getAttempt(),
+                        "idempotencyKey", idempotencyKey,
+                        "providerOutcome", providerOutcome.name().toLowerCase(Locale.ROOT),
+                        "persistedState", persistedState,
+                        "agreement", agreement));
+    }
+
     private CampaignAudienceExportDto recordFailedBeforePush(
-            int workspaceId, int actorId, int campaignId, PreparedExport prepared) {
+            int workspaceId,
+            int actorId,
+            int campaignId,
+            PreparedExport prepared,
+            String failureReason) {
         boolean includeDetailedCounts = workspaceService
                 .lockedMemberPermissionsFor(workspaceId, actorId)
                 .contains(Permission.CONSENT_MANAGE);
@@ -450,6 +664,9 @@ public class AudienceExportService {
         export.setStatus("failed");
         export.setPushedCount(0);
         export.setFailedCount(export.getTotalMembers());
+        export.setReconciliationRequiredAt(null);
+        export.setFailureReason(failureReason);
+        export.setOutcomeClassification("definite_no_side_effect");
         campaignAudienceExportMapper.updateOutcome(export);
         return CampaignAudienceExportDto.from(
                 requireExport(workspaceId, campaignId, export.getId()), includeDetailedCounts);
@@ -463,8 +680,17 @@ public class AudienceExportService {
         }
     }
 
-    private LocalDateTime leaseDeadline() {
-        return LocalDateTime.now(ZoneOffset.UTC).plus(deliveryProperties.audienceExportLeaseDuration());
+    private long leaseDurationMicros() {
+        return deliveryProperties.audienceExportLeaseDuration().toNanos() / 1_000L;
+    }
+
+    private void recordResolverSaturation(CampaignAudienceExport export) {
+        if (!RESOLVER_SATURATED_REASON.equals(export.getFailureReason())) {
+            return;
+        }
+        resolverSaturationCounter.increment();
+        log.warn("{} export={} workspace={}",
+                RESOLVER_SATURATED_LOG_MARKER, export.getId(), export.getWorkspaceId());
     }
 
     static String idempotencyKey(
@@ -502,24 +728,37 @@ public class AudienceExportService {
             throw new ResourceNotFoundException(
                     "Campaign audience export not found with id: " + exportId);
         }
-        if (matchesTerminalResolution(export.getStatus(), resolution)) {
+        boolean matchingTerminalResolution = matchesTerminalResolution(export.getStatus(), resolution);
+        if (matchingTerminalResolution) {
             return CampaignAudienceExportDto.from(export, true);
         }
         if ("completed".equals(export.getStatus()) || "failed".equals(export.getStatus())) {
-            throw new BadRequestException("This export was already reconciled with a different resolution");
-        }
-        if (!"needs_reconciliation".equals(export.getStatus())) {
-            throw new BadRequestException("Only an export that needs reconciliation can be resolved");
-        }
-        if ("delivered".equals(resolution)) {
-            applyConfirmedDelivery(export);
-        } else if ("not_delivered".equals(resolution)) {
-            export.setStatus("failed");
-            export.setPushedCount(0);
-            export.setFailedCount(export.getTotalMembers());
+            throw new BadRequestException(
+                    "This export was already reconciled with a different resolution");
         } else {
-            throw new BadRequestException("Unsupported campaign audience export resolution");
+            boolean legacyInFlight = isLegacyInFlight(export);
+            if (export.getReconciliationRequiredAt() == null && !legacyInFlight) {
+                throw new BadRequestException(
+                        "Only an export that needs reconciliation or is legacy in-flight can be resolved");
+            }
+            if ("delivered".equals(resolution)) {
+                if (legacyInFlight) {
+                    export.setPushedCount(null);
+                    export.setFailedCount(null);
+                }
+                applyConfirmedDelivery(export);
+                export.setOutcomeClassification("operator_delivered");
+            } else if ("not_delivered".equals(resolution)) {
+                export.setStatus("failed");
+                export.setPushedCount(0);
+                export.setFailedCount(export.getTotalMembers());
+                export.setOutcomeClassification("operator_not_delivered");
+            } else {
+                throw new BadRequestException("Unsupported campaign audience export resolution");
+            }
         }
+        export.setLeaseUntil(null);
+        export.setReconciliationRequiredAt(null);
         if (campaignAudienceExportMapper.resolveReconciliation(export) == 0) {
             throw new ResourceNotFoundException(
                     "Campaign audience export not found with id: " + exportId);
@@ -556,7 +795,7 @@ public class AudienceExportService {
             int workspaceId, int campaignId, Campaign campaign) {
         List<Integer> projectedStaleIds = campaignAudienceExportMapper
                 .getByCampaign(workspaceId, campaignId).stream()
-                .filter(export -> "needs_reconciliation".equals(export.getStatus()))
+                .filter(export -> export.getReconciliationRequiredAt() != null)
                 .filter(export -> export.getLeaseUntil() != null)
                 .map(CampaignAudienceExport::getId)
                 .sorted()
@@ -566,7 +805,9 @@ public class AudienceExportService {
             CampaignAudienceExport export = campaignAudienceExportMapper.getExportForUpdate(
                     workspaceId, exportId);
             if (export != null && export.getCampaignId() == campaignId
-                    && "running".equals(export.getStatus())) {
+                    && "running".equals(export.getStatus())
+                    && export.getReconciliationRequiredAt() == null
+                    && export.getLeaseUntil() != null) {
                 staleExports.add(export);
             }
         }
@@ -642,12 +883,87 @@ public class AudienceExportService {
                 || ("failed".equals(status) && "not_delivered".equals(resolution));
     }
 
+    private static boolean isIdempotentOutcomeReplay(
+            CampaignAudienceExport persisted,
+            CampaignAudienceExport attempted,
+            String idempotencyKey) {
+        return persisted.getAttempt() == attempted.getAttempt()
+                && Objects.equals(persisted.getIdempotencyKey(), idempotencyKey)
+                && Objects.equals(attempted.getIdempotencyKey(), idempotencyKey)
+                && Objects.equals(persisted.getStatus(), attempted.getStatus())
+                && persisted.getTotalMembers() == attempted.getTotalMembers()
+                && Objects.equals(persisted.getPushedCount(), attempted.getPushedCount())
+                && Objects.equals(persisted.getFailedCount(), attempted.getFailedCount())
+                && Objects.equals(
+                        persisted.getOutcomeClassification(), attempted.getOutcomeClassification());
+    }
+
+    private static boolean isAgreedOperatorOutcome(
+            CampaignAudienceExport persisted,
+            CampaignAudienceExport attempted) {
+        boolean operatorTerminalState =
+                ("completed".equals(persisted.getStatus())
+                        && "operator_delivered".equals(persisted.getOutcomeClassification()))
+                || ("failed".equals(persisted.getStatus())
+                        && "operator_not_delivered".equals(persisted.getOutcomeClassification()));
+        return operatorTerminalState
+                && Objects.equals(persisted.getStatus(), attempted.getStatus())
+                && persisted.getTotalMembers() == attempted.getTotalMembers()
+                && Objects.equals(persisted.getPushedCount(), attempted.getPushedCount())
+                && Objects.equals(persisted.getFailedCount(), attempted.getFailedCount());
+    }
+
+    private static String outcomeClassification(
+            AudiencePushResult.Outcome providerOutcome,
+            boolean noEligibleMembers,
+            Integer pushedCount) {
+        if (noEligibleMembers) {
+            if (providerOutcome != AudiencePushResult.Outcome.DEFINITE_NO_SIDE_EFFECT) {
+                throw new IllegalArgumentException(
+                        "An empty audience must have a definite no-side-effect outcome");
+            }
+            return "no_eligible_members";
+        }
+        return switch (providerOutcome) {
+            case CONFIRMED -> {
+                if (pushedCount == null) {
+                    throw new IllegalArgumentException("A confirmed audience outcome requires a pushed count");
+                }
+                yield pushedCount > 0 ? "confirmed_delivery" : "confirmed_no_delivery";
+            }
+            case DEFINITE_NO_SIDE_EFFECT -> "definite_no_side_effect";
+            case AMBIGUOUS -> "ambiguous";
+        };
+    }
+
+    private static boolean isLegacyInFlight(CampaignAudienceExport export) {
+        return "running".equals(export.getStatus())
+                && export.getLeaseUntil() == null
+                && export.getReconciliationRequiredAt() == null;
+    }
+
     private static Map<String, Object> reconciliationAuditChanges(
             int exportId, String resolution, CampaignAudienceExport export) {
         return Map.of(
                 "exportId", exportId,
                 "resolution", resolution,
                 "countsKnown", export.getPushedCount() != null && export.getFailedCount() != null);
+    }
+
+    private static Map<String, Object> outcomeAuditChanges(
+            CampaignAudienceExport export,
+            AudiencePushResult.Outcome providerOutcome,
+            boolean noEligibleMembers) {
+        if (noEligibleMembers) {
+            return Map.of(
+                    "exportId", export.getId(),
+                    "status", export.getStatus(),
+                    "reason", "no_eligible_members");
+        }
+        return Map.of(
+                "exportId", export.getId(),
+                "status", export.getStatus(),
+                "providerOutcome", providerOutcome.name().toLowerCase(Locale.ROOT));
     }
 
     private static String memberPayloadHash(List<Integer> memberIds, List<AudienceMember> members) {
@@ -783,7 +1099,15 @@ public class AudienceExportService {
             CampaignAudienceExport export,
             List<AudienceMember> members,
             int excludedCount,
-            String idempotencyKey) {
+            String idempotencyKey,
+            ProviderCallBudget providerCallBudget) {
+    }
+
+    private record ProviderCallBudget(long deadlineNanos) {
+
+        private static ProviderCallBudget start(Duration duration, LongSupplier nanoTimeSource) {
+            return new ProviderCallBudget(nanoTimeSource.getAsLong() + duration.toNanos());
+        }
     }
 
     private record MaterializedAudience(List<Integer> memberIds, List<AudienceMember> members) {

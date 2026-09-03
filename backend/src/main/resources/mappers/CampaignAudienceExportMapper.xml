@@ -10,11 +10,16 @@
     <result property="snapshotId" column="snapshot_id"/>
     <result property="connector" column="connector"/>
     <result property="externalListId" column="external_list_id"/>
+    <result property="idempotencyKey" column="idempotency_key"/>
     <result property="frozenMemberIdsJson" column="frozen_member_ids_json"/>
     <result property="pushedMemberIdsJson" column="pushed_member_ids_json"/>
     <result property="status" column="status"/>
     <result property="attempt" column="attempt"/>
     <result property="leaseUntil" column="lease_until"/>
+    <result property="reconciliationRequiredAt" column="reconciliation_required_at"/>
+    <result property="failureReason" column="failure_reason"/>
+    <result property="outcomeClassification" column="outcome_classification"/>
+    <result property="lateOutcome" column="late_outcome"/>
     <result property="totalMembers" column="total_members"/>
     <result property="pushedCount" column="pushed_count"/>
     <result property="failedCount" column="failed_count"/>
@@ -24,19 +29,22 @@
   </resultMap>
 
   <sql id="columns">
-    id, workspace_id, campaign_id, snapshot_id, connector, external_list_id,
+    id, workspace_id, campaign_id, snapshot_id, connector, external_list_id, idempotency_key,
     frozen_member_ids_json, pushed_member_ids_json, status, attempt, lease_until,
+    reconciliation_required_at, failure_reason, outcome_classification, late_outcome,
     total_members, pushed_count, failed_count, created_by_id, created_at, updated_at
   </sql>
 
   <sql id="historyColumns">
-    id, workspace_id, campaign_id, snapshot_id, connector, external_list_id,
-    frozen_member_ids_json, pushed_member_ids_json,
+    id, workspace_id, campaign_id, snapshot_id, connector, external_list_id, idempotency_key,
+    frozen_member_ids_json, pushed_member_ids_json, status, attempt, lease_until,
     CASE
-      WHEN status = 'running' AND lease_until &lt; UTC_TIMESTAMP(6) THEN 'needs_reconciliation'
-      ELSE status
-    END AS status,
-    attempt, lease_until, total_members, pushed_count, failed_count,
+      WHEN reconciliation_required_at IS NOT NULL THEN reconciliation_required_at
+      WHEN status = 'running' AND lease_until &lt; UTC_TIMESTAMP(6) THEN lease_until
+      ELSE NULL
+    END AS reconciliation_required_at,
+    failure_reason, outcome_classification, late_outcome,
+    total_members, pushed_count, failed_count,
     created_by_id, created_at, updated_at
   </sql>
 
@@ -69,16 +77,17 @@
         AND snapshot_id = #{snapshotId}
         AND connector = #{connector}
         AND (
-          status IN ('draft', 'running', 'completed', 'needs_reconciliation')
-          OR (status = 'failed' AND pushed_count &gt; 0)
+          reconciliation_required_at IS NOT NULL
+          OR status IN ('draft', 'running', 'completed')
         )
     )
   </select>
 
   <update id="markStaleRunningNeedsReconciliation">
     UPDATE campaign_audience_export
-    SET status = 'needs_reconciliation',
-        lease_until = NULL
+    SET reconciliation_required_at = UTC_TIMESTAMP(6),
+        lease_until = NULL,
+        outcome_classification = 'ambiguous'
     WHERE workspace_id = #{workspaceId}
       AND campaign_id = #{campaignId}
       AND id IN
@@ -86,6 +95,7 @@
         #{exportId}
       </foreach>
       AND status = 'running'
+      AND reconciliation_required_at IS NULL
       AND lease_until &lt; UTC_TIMESTAMP(6)
   </update>
 
@@ -99,27 +109,39 @@
       AND external_list_id = #{externalListId}
   </select>
 
-  <insert id="insertExport" useGeneratedKeys="true" keyProperty="id">
+  <insert id="insertExport" useGeneratedKeys="true" keyProperty="export.id">
     INSERT INTO campaign_audience_export
-      (workspace_id, campaign_id, snapshot_id, connector, external_list_id,
+      (workspace_id, campaign_id, snapshot_id, connector, external_list_id, idempotency_key,
        frozen_member_ids_json, pushed_member_ids_json, status, attempt, lease_until,
+       reconciliation_required_at, failure_reason, outcome_classification, late_outcome,
        total_members, pushed_count, failed_count, created_by_id)
     VALUES
-      (#{workspaceId}, #{campaignId}, #{snapshotId}, #{connector}, #{externalListId},
-       #{frozenMemberIdsJson}, #{pushedMemberIdsJson}, #{status}, #{attempt}, #{leaseUntil},
-       #{totalMembers}, #{pushedCount}, #{failedCount}, #{createdById})
+      (#{export.workspaceId}, #{export.campaignId}, #{export.snapshotId}, #{export.connector},
+       #{export.externalListId}, #{export.idempotencyKey},
+       #{export.frozenMemberIdsJson}, #{export.pushedMemberIdsJson},
+       #{export.status}, #{export.attempt},
+       CASE
+         WHEN #{export.status} = 'running' AND #{export.reconciliationRequiredAt} IS NULL
+           THEN DATE_ADD(UTC_TIMESTAMP(6), INTERVAL #{leaseMicros} MICROSECOND)
+         ELSE NULL
+       END,
+       #{export.reconciliationRequiredAt}, #{export.failureReason},
+       #{export.outcomeClassification}, #{export.lateOutcome},
+       #{export.totalMembers}, #{export.pushedCount}, #{export.failedCount}, #{export.createdById})
   </insert>
 
   <update id="stagePush">
     UPDATE campaign_audience_export
-    SET external_list_id = #{externalListId},
-        pushed_member_ids_json = #{pushedMemberIdsJson},
-        attempt = #{attempt},
-        failed_count = #{failedCount},
-        lease_until = #{leaseUntil}
-    WHERE workspace_id = #{workspaceId}
-      AND id = #{id}
+    SET external_list_id = #{export.externalListId},
+        idempotency_key = #{export.idempotencyKey},
+        pushed_member_ids_json = #{export.pushedMemberIdsJson},
+        attempt = #{export.attempt},
+        failed_count = #{export.failedCount},
+        lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL #{leaseMicros} MICROSECOND)
+    WHERE workspace_id = #{export.workspaceId}
+      AND id = #{export.id}
       AND status = 'running'
+      AND reconciliation_required_at IS NULL
   </update>
 
   <update id="updateOutcome">
@@ -129,10 +151,28 @@
         total_members = #{totalMembers},
         pushed_count = #{pushedCount},
         failed_count = #{failedCount},
-        lease_until = NULL
+        lease_until = NULL,
+        reconciliation_required_at = CASE
+          WHEN #{status} = 'running' THEN UTC_TIMESTAMP(6)
+          ELSE NULL
+        END,
+        failure_reason = #{failureReason},
+        outcome_classification = #{outcomeClassification}
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
       AND status = 'running'
+      AND reconciliation_required_at IS NULL
+      AND attempt = #{attempt}
+      AND idempotency_key &lt;=&gt; #{idempotencyKey}
+  </update>
+
+  <update id="markLateOutcome">
+    UPDATE campaign_audience_export
+    SET late_outcome = #{lateOutcome},
+        failure_reason = COALESCE(failure_reason, #{failureReason})
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND late_outcome IS NULL
   </update>
 
   <update id="resolveReconciliation">
@@ -140,10 +180,13 @@
     SET status = #{status},
         pushed_count = #{pushedCount},
         failed_count = #{failedCount},
-        lease_until = NULL
+        lease_until = NULL,
+        reconciliation_required_at = NULL,
+        outcome_classification = #{outcomeClassification}
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
-      AND status = 'needs_reconciliation'
+      AND status = 'running'
+      AND lease_until IS NULL
   </update>
 
 </mapper>

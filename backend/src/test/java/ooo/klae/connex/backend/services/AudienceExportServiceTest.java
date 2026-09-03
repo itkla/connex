@@ -10,7 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -19,9 +21,16 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
 
 import org.slf4j.LoggerFactory;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,6 +49,7 @@ import org.springframework.validation.SmartValidator;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import ooo.klae.connex.backend.beans.Campaign;
 import ooo.klae.connex.backend.beans.CampaignAudienceExport;
@@ -107,6 +117,7 @@ class AudienceExportServiceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final DeliveryProperties deliveryProperties = new DeliveryProperties();
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private CampaignAudienceExport storedExport;
 
     @BeforeEach
@@ -116,10 +127,14 @@ class AudienceExportServiceTest {
     }
 
     private AudienceExportService service() {
+        return service(System::nanoTime);
+    }
+
+    private AudienceExportService service(LongSupplier nanoTimeSource) {
         return new AudienceExportService(campaignMapper, exportMapper, personMapper,
                 audienceEligibilityService, connectorConfigService, deliveryProviderRouter,
                 deliveryProperties, capabilityRegistry, workspaceService, tenantContext, auditService,
-                transactionManager, objectMapper, validator);
+                transactionManager, objectMapper, validator, meterRegistry, nanoTimeSource);
     }
 
     private CampaignAudienceExportRequest request() {
@@ -153,15 +168,24 @@ class AudienceExportServiceTest {
         lenient().when(deliveryProviderRouter.connectorFor(CONNECTOR)).thenReturn(connector);
         lenient().doAnswer(invocation -> {
             storedExport = invocation.getArgument(0, CampaignAudienceExport.class);
+            long leaseMicros = invocation.getArgument(1, Long.class);
             storedExport.setId(EXPORT);
+            storedExport.setLeaseUntil(
+                    LocalDateTime.of(2030, 1, 2, 3, 4, 45).plusNanos(leaseMicros * 1_000L));
             return null;
-        }).when(exportMapper).insertExport(any(CampaignAudienceExport.class));
+        }).when(exportMapper).insertExport(any(CampaignAudienceExport.class), anyLong());
         lenient().when(exportMapper.getExportForUpdate(WORKSPACE, EXPORT)).thenAnswer(invocation -> storedExport);
         lenient().when(exportMapper.getExport(WORKSPACE, EXPORT)).thenAnswer(invocation -> storedExport);
         lenient().when(exportMapper.nextAttemptForSnapshotTarget(
                 WORKSPACE, CAMPAIGN, SNAPSHOT, CONNECTOR, LIST_ID)).thenReturn(1);
-        lenient().when(exportMapper.stagePush(any(CampaignAudienceExport.class))).thenReturn(1);
-        lenient().when(exportMapper.updateOutcome(any(CampaignAudienceExport.class))).thenReturn(1);
+        lenient().when(exportMapper.stagePush(any(CampaignAudienceExport.class), anyLong())).thenReturn(1);
+        lenient().when(exportMapper.updateOutcome(any(CampaignAudienceExport.class))).thenAnswer(invocation -> {
+            CampaignAudienceExport export = invocation.getArgument(0, CampaignAudienceExport.class);
+            if ("running".equals(export.getStatus())) {
+                export.setReconciliationRequiredAt(LocalDateTime.now(ZoneOffset.UTC));
+            }
+            return 1;
+        });
         return snapshot;
     }
 
@@ -193,11 +217,16 @@ class AudienceExportServiceTest {
                 "campaign-audience-44-v2-t"));
         assertTrue(pushCaptor.getValue().idempotencyKey().contains("-m"));
         assertTrue(pushCaptor.getValue().idempotencyKey().endsWith("-a1"));
+        assertNotNull(pushCaptor.getValue().providerDeadlineNanos());
+        long remainingNanos = pushCaptor.getValue().providerDeadlineNanos() - System.nanoTime();
+        assertTrue(remainingNanos > 0);
+        assertTrue(remainingNanos <= deliveryProperties.audienceExportProviderDeadline().toNanos());
         assertEquals(List.of("a@dest.test"), pushCaptor.getValue().members().stream()
                 .map(member -> member.email()).toList());
         verify(audienceEligibilityService, times(2)).classify(
                 WORKSPACE, List.of(1, 2), "email", "product_update");
-        verify(exportMapper).stagePush(storedExport);
+        verify(exportMapper).stagePush(
+                storedExport, deliveryProperties.audienceExportLeaseDuration().toNanos() / 1_000L);
         verify(exportMapper).updateOutcome(storedExport);
 
         ArgumentCaptor<TransactionDefinition> transactions =
@@ -205,6 +234,106 @@ class AudienceExportServiceTest {
         verify(transactionManager, times(3)).getTransaction(transactions.capture());
         assertTrue(transactions.getAllValues().stream().allMatch(definition ->
                 definition.getPropagationBehavior() == TransactionDefinition.PROPAGATION_REQUIRES_NEW));
+    }
+
+    @Test
+    void providerBudgetAnchorPrecedesTheLeaseWriteAndCannotBeReanchoredAfterThePause() {
+        primeCreateExport();
+        when(audienceEligibilityService.classify(
+                eq(WORKSPACE), anyList(), eq("email"), eq("product_update")))
+                .thenReturn(classification(List.of(1)));
+        when(personMapper.getByIds(WORKSPACE, List.of(1)))
+                .thenReturn(List.of(person(1, "Ada Lovelace", "a@dest.test")));
+        AtomicLong nanoTime = new AtomicLong(1_000_000L);
+        AtomicReference<Long> capturedAnchor = new AtomicReference<>();
+        LongSupplier clock = () -> {
+            capturedAnchor.compareAndSet(null, nanoTime.get());
+            return nanoTime.get();
+        };
+        doAnswer(invocation -> {
+            assertEquals(1_000_000L, capturedAnchor.get());
+            nanoTime.addAndGet(deliveryProperties.audienceExportProviderDeadline().plusMillis(1).toNanos());
+            return 1;
+        }).when(exportMapper).stagePush(any(CampaignAudienceExport.class), anyLong());
+        AtomicBoolean dnsAttempted = new AtomicBoolean();
+        AtomicBoolean providerContacted = new AtomicBoolean();
+        AtomicReference<Long> receivedDeadline = new AtomicReference<>();
+        when(connector.pushAudience(any(), any())).thenAnswer(invocation -> {
+            AudiencePush push = invocation.getArgument(1, AudiencePush.class);
+            receivedDeadline.set(push.providerDeadlineNanos());
+            if (push.providerDeadlineNanos() <= nanoTime.get()) {
+                return AudiencePushResult.definiteNoSideEffect(
+                        push.members().size(), "deadline exhausted", "provider_deadline_exceeded");
+            }
+            dnsAttempted.set(true);
+            providerContacted.set(true);
+            return new AudiencePushResult(push.members().size(), 0, "accepted");
+        });
+
+        CampaignAudienceExportDto dto = service(clock).createExport(CAMPAIGN, request());
+
+        assertEquals(1_000_000L, capturedAnchor.get());
+        assertEquals(
+                capturedAnchor.get() + deliveryProperties.audienceExportProviderDeadline().toNanos(),
+                receivedDeadline.get());
+        assertFalse(dnsAttempted.get());
+        assertFalse(providerContacted.get());
+        assertEquals("failed", dto.status());
+        assertEquals("provider_deadline_exceeded", dto.failureReason());
+        assertEquals("definite_no_side_effect", storedExport.getOutcomeClassification());
+        assertFalse(dto.reconciliationRequired());
+    }
+
+    @Test
+    void boundedDatabaseClockAdjustmentLeavesTheLeaseBeyondTheLiveMonotonicBudget() {
+        primeCreateExport();
+        when(audienceEligibilityService.classify(
+                eq(WORKSPACE), anyList(), eq("email"), eq("product_update")))
+                .thenReturn(classification(List.of(1)));
+        when(personMapper.getByIds(WORKSPACE, List.of(1)))
+                .thenReturn(List.of(person(1, "Ada Lovelace", "a@dest.test")));
+        LocalDateTime applicationWallClock = LocalDateTime.of(2030, 1, 2, 3, 4, 5);
+        AtomicReference<LocalDateTime> databaseNow = new AtomicReference<>(
+                applicationWallClock.plusSeconds(40));
+        AtomicLong nanoTime = new AtomicLong(5_000_000L);
+        List<LocalDateTime> leaseWrites = new java.util.ArrayList<>();
+        doAnswer(invocation -> {
+            CampaignAudienceExport export = invocation.getArgument(0, CampaignAudienceExport.class);
+            long leaseMicros = invocation.getArgument(1, Long.class);
+            storedExport = export;
+            storedExport.setId(EXPORT);
+            LocalDateTime leaseUntil = databaseNow.get().plusNanos(leaseMicros * 1_000L);
+            storedExport.setLeaseUntil(leaseUntil);
+            leaseWrites.add(leaseUntil);
+            return null;
+        }).when(exportMapper).insertExport(any(CampaignAudienceExport.class), anyLong());
+        doAnswer(invocation -> {
+            long leaseMicros = invocation.getArgument(1, Long.class);
+            LocalDateTime leaseUntil = databaseNow.get().plusNanos(leaseMicros * 1_000L);
+            storedExport.setLeaseUntil(leaseUntil);
+            leaseWrites.add(leaseUntil);
+            databaseNow.set(databaseNow.get().plusSeconds(17));
+            nanoTime.addAndGet(Duration.ofSeconds(17).toNanos());
+            return 1;
+        }).when(exportMapper).stagePush(any(CampaignAudienceExport.class), anyLong());
+        AtomicReference<Long> providerDeadline = new AtomicReference<>();
+        when(connector.pushAudience(any(), any())).thenAnswer(invocation -> {
+            AudiencePush push = invocation.getArgument(1, AudiencePush.class);
+            providerDeadline.set(push.providerDeadlineNanos());
+            return new AudiencePushResult(1, 0, "accepted");
+        });
+
+        service(nanoTime::get).createExport(CAMPAIGN, request());
+
+        Duration leaseDuration = deliveryProperties.audienceExportLeaseDuration();
+        assertEquals(2, leaseWrites.size());
+        assertEquals(applicationWallClock.plusSeconds(40).plus(leaseDuration), leaseWrites.get(0));
+        assertEquals(applicationWallClock.plusSeconds(40).plus(leaseDuration), leaseWrites.get(1));
+        assertTrue(leaseWrites.get(1).isAfter(databaseNow.get()));
+        assertTrue(providerDeadline.get() > nanoTime.get());
+        assertEquals(
+                Duration.ofSeconds(30),
+                leaseDuration.minus(deliveryProperties.audienceExportProviderDeadline()));
     }
 
     @Test
@@ -221,9 +350,14 @@ class AudienceExportServiceTest {
 
         CampaignAudienceExportDto dto = service().createExport(CAMPAIGN, request());
 
-        assertEquals("needs_reconciliation", dto.status());
+        assertEquals("running", dto.status());
+        assertTrue(dto.reconciliationRequired());
+        assertEquals("running", storedExport.getStatus());
+        assertNotNull(storedExport.getReconciliationRequiredAt());
+        assertEquals("ambiguous", storedExport.getOutcomeClassification());
         assertEquals(null, dto.failedCount());
         assertEquals(null, dto.pushedCount());
+        verify(exportMapper).updateOutcome(storedExport);
     }
 
     @Test
@@ -243,6 +377,41 @@ class AudienceExportServiceTest {
         assertEquals("failed", dto.status());
         assertEquals(0, dto.pushedCount());
         assertEquals(2, dto.failedCount());
+        assertEquals("definite_no_side_effect", storedExport.getOutcomeClassification());
+    }
+
+    @Test
+    void resolverSaturationPersistsACodeAndEmitsTheFixedWarningAndMetric() {
+        primeCreateExport();
+        when(audienceEligibilityService.classify(
+                eq(WORKSPACE), anyList(), eq("email"), eq("product_update")))
+                .thenReturn(classification(List.of(1)));
+        when(personMapper.getByIds(WORKSPACE, List.of(1)))
+                .thenReturn(List.of(person(1, "Ada Lovelace", "private-address@example.test")));
+        when(connector.pushAudience(any(), any())).thenReturn(
+                AudiencePushResult.definiteNoSideEffect(
+                        1, "Connector resolver saturated", "resolver_saturated"));
+        Logger logger = (Logger) LoggerFactory.getLogger(AudienceExportService.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            CampaignAudienceExportDto dto = service().createExport(CAMPAIGN, request());
+
+            assertEquals("failed", dto.status());
+            assertEquals("resolver_saturated", dto.failureReason());
+            assertEquals("resolver_saturated", storedExport.getFailureReason());
+            assertEquals(1.0, meterRegistry.get(
+                    "connex.delivery.audience_export.resolver_saturated").counter().count());
+            assertTrue(appender.list.stream().map(ILoggingEvent::getFormattedMessage)
+                    .anyMatch(message -> message.equals(
+                            "AUDIENCE_EXPORT_RESOLVER_SATURATED export=71 workspace=7")));
+            assertFalse(appender.list.stream().map(ILoggingEvent::getFormattedMessage)
+                    .anyMatch(message -> message.contains("private-address@example.test")));
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     @Test
@@ -262,6 +431,7 @@ class AudienceExportServiceTest {
         assertEquals("failed", dto.status());
         assertEquals(0, dto.pushedCount());
         assertEquals(2, dto.failedCount());
+        assertEquals("confirmed_no_delivery", storedExport.getOutcomeClassification());
     }
 
     @Test
@@ -281,7 +451,8 @@ class AudienceExportServiceTest {
         try {
             CampaignAudienceExportDto dto = service().createExport(CAMPAIGN, request());
 
-            assertEquals("needs_reconciliation", dto.status());
+            assertEquals("running", dto.status());
+            assertTrue(dto.reconciliationRequired());
             assertEquals(1, appender.list.size());
             String message = appender.list.getFirst().getFormattedMessage();
             assertEquals(
@@ -346,7 +517,7 @@ class AudienceExportServiceTest {
 
         assertThrows(BadRequestException.class, () -> service().createExport(CAMPAIGN, request()));
 
-        verify(exportMapper, never()).insertExport(any());
+        verify(exportMapper, never()).insertExport(any(), anyLong());
         verify(connector, never()).pushAudience(any(), any());
     }
 
@@ -379,7 +550,7 @@ class AudienceExportServiceTest {
 
         assertEquals("Only email audience snapshots can be exported", exception.getMessage());
         verify(connectorConfigService, never()).isReady(anyInt(), any());
-        verify(exportMapper, never()).insertExport(any());
+        verify(exportMapper, never()).insertExport(any(), anyLong());
         verify(connector, never()).pushAudience(any(), any());
     }
 
@@ -421,6 +592,7 @@ class AudienceExportServiceTest {
         assertEquals("completed", dto.status());
         assertEquals(2, dto.pushedCount());
         assertEquals(1, dto.failedCount());
+        assertEquals("operator_delivered", storedExport.getOutcomeClassification());
         verify(exportMapper).resolveReconciliation(storedExport);
         ArgumentCaptor<Object> auditChanges = ArgumentCaptor.forClass(Object.class);
         verify(auditService).recordStrict(
@@ -448,6 +620,37 @@ class AudienceExportServiceTest {
         assertEquals("failed", dto.status());
         assertEquals(0, dto.pushedCount());
         assertEquals(3, dto.failedCount());
+        assertEquals("operator_not_delivered", storedExport.getOutcomeClassification());
+    }
+
+    @Test
+    void reconciliationResolvesALegacyInFlightExportWithoutAutoTransitionAndRemainsIdempotent()
+            throws BindException {
+        primeReconciliation(null, 3);
+        storedExport.setStatus("running");
+        storedExport.setLeaseUntil(null);
+        storedExport.setReconciliationRequiredAt(null);
+        storedExport.setPushedCount(0);
+        storedExport.setFailedCount(0);
+
+        CampaignAudienceExportDto first = service().reconcileExport(
+                CAMPAIGN, EXPORT,
+                new CampaignAudienceExportReconciliationRequest("delivered"));
+        CampaignAudienceExportDto retry = service().reconcileExport(
+                CAMPAIGN, EXPORT,
+                new CampaignAudienceExportReconciliationRequest("delivered"));
+
+        assertEquals("completed", first.status());
+        assertEquals(false, first.detailedCountsKnown());
+        assertNull(first.pushedCount());
+        assertNull(first.failedCount());
+        assertEquals("operator_delivered", storedExport.getOutcomeClassification());
+        assertEquals(first, retry);
+        verify(exportMapper, never()).markStaleRunningNeedsReconciliation(anyInt(), anyInt(), anyList());
+        verify(exportMapper, times(1)).resolveReconciliation(storedExport);
+        verify(auditService, times(1)).recordStrict(
+                eq("campaign.audience_export.reconcile"), eq("campaign"), eq(CAMPAIGN),
+                eq("Q3"), eq("Reconciled campaign audience export"), any());
     }
 
     @Test
@@ -542,7 +745,10 @@ class AudienceExportServiceTest {
         lenient().when(campaignMapper.getCampaignForUpdate(WORKSPACE, CAMPAIGN)).thenReturn(campaign);
         storedExport = idempotencyExport(EXPORT, 1);
         storedExport.setCampaignId(CAMPAIGN);
-        storedExport.setStatus("needs_reconciliation");
+        storedExport.setStatus("running");
+        storedExport.setLeaseUntil(null);
+        storedExport.setReconciliationRequiredAt(LocalDateTime.now(ZoneOffset.UTC));
+        storedExport.setOutcomeClassification("ambiguous");
         storedExport.setExternalListId(LIST_ID);
         storedExport.setPushedMemberIdsJson(pushedMemberIdsJson);
         storedExport.setTotalMembers(totalMembers);

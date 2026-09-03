@@ -267,6 +267,7 @@ const COMPLETED_EXPORT = {
     connector: "http_list",
     externalListId: "product-updates",
     status: "completed",
+    reconciliationRequired: false,
     totalMembers: 2,
     pushedCount: 1,
     failedCount: 1,
@@ -565,7 +566,8 @@ describe("campaign audience labels and unavailable state", () => {
     it("marks an ambiguous export as delivered from the export panel", async () => {
         const reconciliationExport = {
             ...COMPLETED_EXPORT,
-            status: "needs_reconciliation",
+            status: "running",
+            reconciliationRequired: true,
             pushedCount: null,
             failedCount: null,
             detailedCountsAvailable: false,
@@ -614,7 +616,8 @@ describe("campaign audience labels and unavailable state", () => {
     it("confirms the not-delivered transition without retrying", async () => {
         const reconciliationExport = {
             ...COMPLETED_EXPORT,
-            status: "needs_reconciliation",
+            status: "running",
+            reconciliationRequired: true,
             pushedCount: null,
             failedCount: null,
             detailedCountsAvailable: false,
@@ -699,7 +702,8 @@ describe("campaign audience labels and unavailable state", () => {
     it("surfaces reconciliation-required export history in both locales without false counts", () => {
         const reconciliationExport = {
             ...COMPLETED_EXPORT,
-            status: "needs_reconciliation",
+            status: "running",
+            reconciliationRequired: true,
             pushedCount: null,
             failedCount: null,
             detailedCountsAvailable: false,

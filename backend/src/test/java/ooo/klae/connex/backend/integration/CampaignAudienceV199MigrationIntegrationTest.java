@@ -64,7 +64,8 @@ class CampaignAudienceV199MigrationIntegrationTest {
                         AND COLUMN_NAME IN ('channel', 'purpose', 'excluded_no_address'))
                     OR (TABLE_NAME = 'campaign_audience_export'
                         AND COLUMN_NAME IN ('frozen_member_ids_json', 'pushed_member_ids_json',
-                            'attempt', 'lease_until'))
+                            'attempt', 'idempotency_key', 'lease_until', 'reconciliation_required_at',
+                            'failure_reason', 'outcome_classification', 'late_outcome'))
                     OR (TABLE_NAME = 'connector_config' AND COLUMN_NAME = 'config_version')
                   )
                 """));
@@ -85,6 +86,13 @@ class CampaignAudienceV199MigrationIntegrationTest {
                 VALUES (65201, 65201, 65201, 1, 'person', '{}', 2, 3, 1, 1, 1)
                 """);
             statement.executeUpdate("""
+                INSERT INTO campaign_audience_snapshot (
+                    id, campaign_id, workspace_id, version, record_type, definition_json,
+                    estimated_included, excluded_total, excluded_consent,
+                    excluded_suppressed, excluded_restricted)
+                VALUES (65202, 65201, 65201, 2, 'person', '{}', 2, 0, 0, 0, 0)
+                """);
+            statement.executeUpdate("""
                 INSERT INTO campaign_audience_member (
                     id, snapshot_id, workspace_id, record_type, record_id, status, exclusion_reason)
                 VALUES (65201, 65201, 65201, 'person', 76, 'excluded', 'suppressed')
@@ -102,6 +110,13 @@ class CampaignAudienceV199MigrationIntegrationTest {
                     status, total_members, pushed_count, failed_count)
                 VALUES (65202, 65201, 65201, 65201, 'http_list', 'possibly-accepted-list',
                     'failed', 2, 0, 2)
+                """);
+            statement.executeUpdate("""
+                INSERT INTO campaign_audience_export (
+                    id, workspace_id, campaign_id, snapshot_id, connector, external_list_id,
+                    status, total_members, pushed_count, failed_count)
+                VALUES (65206, 65201, 65201, 65202, 'http_list', 'legacy-running-list',
+                    'running', 2, 0, 0)
                 """);
             statement.executeUpdate("""
                 INSERT INTO connector_config (
@@ -146,27 +161,24 @@ class CampaignAudienceV199MigrationIntegrationTest {
                 WHERE id = 65201
                   AND frozen_member_ids_json IS NULL
                   AND pushed_member_ids_json IS NULL
+                  AND outcome_classification IS NULL
                 """));
             assertEquals(1, scalar(statement, """
                 SELECT COUNT(*) FROM campaign_audience_export
                 WHERE id = 65202
-                  AND status = 'needs_reconciliation'
+                  AND status = 'failed'
                   AND frozen_member_ids_json IS NULL
                   AND pushed_member_ids_json IS NULL
-                  AND pushed_count IS NULL
-                  AND failed_count IS NULL
-                """));
-            assertEquals(1, statement.executeUpdate("""
-                UPDATE campaign_audience_export
-                SET status = 'completed', pushed_count = NULL, failed_count = NULL
-                WHERE id = 65202 AND status = 'needs_reconciliation'
+                  AND pushed_count = 0
+                  AND failed_count = 2
+                  AND reconciliation_required_at IS NULL
+                  AND outcome_classification IS NULL
                 """));
             assertEquals(1, scalar(statement, """
                 SELECT COUNT(*) FROM campaign_audience_export
-                WHERE id = 65202
-                  AND status = 'completed'
-                  AND pushed_count IS NULL
-                  AND failed_count IS NULL
+                WHERE id = 65206
+                  AND status = 'running'
+                  AND lease_until IS NULL
                 """));
             assertEquals(1, scalar(statement, """
                 SELECT config_version FROM connector_config WHERE id = 65201
@@ -194,17 +206,33 @@ class CampaignAudienceV199MigrationIntegrationTest {
                 SET pushed_count = NULL, failed_count = 0
                 WHERE id = 65203
                 """));
+            assertThrows(SQLException.class, () -> statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET failure_reason = 'recipient@example.test'
+                WHERE id = 65203
+                """));
+            assertThrows(SQLException.class, () -> statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET late_outcome = 'unknown'
+                WHERE id = 65203
+                """));
+            assertThrows(SQLException.class, () -> statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET outcome_classification = 'unknown'
+                WHERE id = 65203
+                """));
             assertEquals(1, statement.executeUpdate("""
                 INSERT INTO campaign_audience_export (
-                    id, workspace_id, campaign_id, snapshot_id, connector,
-                    frozen_member_ids_json, pushed_member_ids_json, status,
+                    id, workspace_id, campaign_id, snapshot_id, connector, external_list_id, status,
                     total_members, pushed_count, failed_count)
-                VALUES (65204, 65201, 65201, 65201, 'http_list', JSON_ARRAY(), JSON_ARRAY(),
-                    'running', 0, 0, 0)
+                VALUES (65204, 65201, 65201, 65201, 'http_list', NULL, 'running', 0, 0, 0)
                 """));
             assertEquals(1, scalar(statement, """
                 SELECT COUNT(*) FROM campaign_audience_export
-                WHERE id = 65204 AND status = 'running' AND lease_until IS NULL
+                WHERE id = 65204
+                  AND status = 'running'
+                  AND lease_until IS NULL
+                  AND reconciliation_required_at IS NULL
                 """));
             assertThrows(SQLException.class, () -> statement.executeUpdate("""
                 INSERT INTO campaign_audience_export (
@@ -213,6 +241,187 @@ class CampaignAudienceV199MigrationIntegrationTest {
                     total_members, pushed_count, failed_count)
                 VALUES (65205, 65201, 65201, 65201, 'http_list', JSON_ARRAY(), JSON_ARRAY(),
                     'failed', DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 5 MINUTE), 0, 0, 0)
+                """));
+            statement.executeUpdate("""
+                INSERT INTO campaign_audience_snapshot (
+                    id, campaign_id, workspace_id, version, record_type, definition_json,
+                    estimated_included, excluded_total, excluded_consent,
+                    excluded_suppressed, excluded_restricted)
+                VALUES (65203, 65201, 65201, 3, 'person', '{}', 1, 0, 0, 0, 0)
+                """);
+            statement.executeUpdate("""
+                INSERT INTO campaign_audience_export (
+                    id, workspace_id, campaign_id, snapshot_id, connector, external_list_id,
+                    frozen_member_ids_json, pushed_member_ids_json, status, attempt, lease_until,
+                    total_members, pushed_count, failed_count)
+                VALUES (65207, 65201, 65201, 65203, 'http_list', 'ambiguous-list',
+                    JSON_ARRAY(76), JSON_ARRAY(76), 'running', 1,
+                    DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 MINUTE), 1, 0, 0)
+                """);
+            String originMainDuplicateFence = """
+                SELECT EXISTS (
+                  SELECT 1
+                  FROM campaign_audience_export
+                  WHERE workspace_id = 65201
+                    AND campaign_id = 65201
+                    AND snapshot_id = 65203
+                    AND connector = 'http_list'
+                    AND status IN ('draft', 'running', 'completed')
+                )
+                """;
+            String currentBackendDuplicateFence = """
+                SELECT EXISTS (
+                  SELECT 1
+                  FROM campaign_audience_export
+                  WHERE workspace_id = 65201
+                    AND campaign_id = 65201
+                    AND snapshot_id = 65203
+                    AND connector = 'http_list'
+                    AND (
+                      reconciliation_required_at IS NOT NULL
+                      OR status IN ('draft', 'running', 'completed')
+                    )
+                )
+                """;
+            assertFenceClassification(
+                    statement, 1, "leased running without outcome",
+                    originMainDuplicateFence, currentBackendDuplicateFence);
+            assertEquals(1, statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET lease_until = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 MINUTE)
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertFenceClassification(
+                    statement, 1, "expired leased running without outcome",
+                    originMainDuplicateFence, currentBackendDuplicateFence);
+            assertEquals(1, statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET lease_until = NULL
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertFenceClassification(
+                    statement, 1, "legacy null-lease running without outcome",
+                    originMainDuplicateFence, currentBackendDuplicateFence);
+            assertEquals(1, statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET status = 'running', pushed_count = 0, failed_count = 0,
+                    lease_until = NULL, reconciliation_required_at = UTC_TIMESTAMP(6),
+                    outcome_classification = 'ambiguous'
+                WHERE workspace_id = 65201
+                  AND id = 65207
+                  AND status = 'running'
+                  AND reconciliation_required_at IS NULL
+                """));
+            assertFenceClassification(
+                    statement, 1, "flagged running with ambiguous outcome",
+                    originMainDuplicateFence, currentBackendDuplicateFence);
+            assertEquals(1, statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET status = 'draft', lease_until = NULL, reconciliation_required_at = NULL,
+                    outcome_classification = NULL
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertFenceClassification(
+                    statement, 1, "draft without outcome",
+                    originMainDuplicateFence, currentBackendDuplicateFence);
+            assertEquals(1, statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET status = 'completed', outcome_classification = 'confirmed_delivery'
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertFenceClassification(
+                    statement, 1, "completed with confirmed delivery",
+                    originMainDuplicateFence, currentBackendDuplicateFence);
+            assertEquals(1, statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET outcome_classification = 'operator_delivered'
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertFenceClassification(
+                    statement, 1, "completed with operator delivery",
+                    originMainDuplicateFence, currentBackendDuplicateFence);
+            assertEquals(1, statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET status = 'failed', pushed_count = 0, failed_count = 1,
+                    outcome_classification = 'operator_not_delivered'
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertFenceClassification(
+                    statement, 0, "failed with operator non-delivery",
+                    originMainDuplicateFence, currentBackendDuplicateFence);
+            assertEquals(1, statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET outcome_classification = 'confirmed_no_delivery'
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertFenceClassification(
+                    statement, 0, "failed with confirmed non-delivery",
+                    originMainDuplicateFence, currentBackendDuplicateFence);
+            assertEquals(1, statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET outcome_classification = 'definite_no_side_effect'
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertFenceClassification(
+                    statement, 0, "failed with definite no side effect",
+                    originMainDuplicateFence, currentBackendDuplicateFence);
+            assertEquals(1, statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET outcome_classification = 'no_eligible_members'
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertFenceClassification(
+                    statement, 0, "failed with no eligible members",
+                    originMainDuplicateFence, currentBackendDuplicateFence);
+            assertEquals(1, statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET pushed_count = 1, failed_count = 0
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertFenceClassification(
+                    statement, 0, "failed with accepted-member history",
+                    originMainDuplicateFence, currentBackendDuplicateFence);
+            assertThrows(SQLException.class, () -> statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET outcome_classification = 'ambiguous'
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertThrows(SQLException.class, () -> statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET status = 'running', reconciliation_required_at = NULL,
+                    outcome_classification = 'ambiguous'
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertThrows(SQLException.class, () -> statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET outcome_classification = 'operator_delivered'
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertThrows(SQLException.class, () -> statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET outcome_classification = NULL
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertThrows(SQLException.class, () -> statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET status = 'draft', reconciliation_required_at = UTC_TIMESTAMP(6)
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertThrows(SQLException.class, () -> statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET status = 'completed', reconciliation_required_at = UTC_TIMESTAMP(6)
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertThrows(SQLException.class, () -> statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET reconciliation_required_at = UTC_TIMESTAMP(6)
+                WHERE workspace_id = 65201 AND id = 65207
+                """));
+            assertThrows(SQLException.class, () -> statement.executeUpdate("""
+                UPDATE campaign_audience_export
+                SET status = 'running', lease_until = UTC_TIMESTAMP(6),
+                    reconciliation_required_at = UTC_TIMESTAMP(6)
+                WHERE workspace_id = 65201 AND id = 65207
                 """));
             statement.executeUpdate("""
                 INSERT INTO connector_config (
@@ -330,6 +539,18 @@ class CampaignAudienceV199MigrationIntegrationTest {
             resultSet.next();
             return resultSet.getLong(1);
         }
+    }
+
+    private static void assertFenceClassification(
+            Statement statement,
+            long expected,
+            String state,
+            String originMainDuplicateFence,
+            String currentBackendDuplicateFence) throws SQLException {
+        String oracle = "outcome_classification is ignored by the origin/main and current "
+                + "duplicate fences, so both must agree for state: " + state;
+        assertEquals(expected, scalar(statement, originMainDuplicateFence), oracle);
+        assertEquals(expected, scalar(statement, currentBackendDuplicateFence), oracle);
     }
 
     private static String stringScalar(Statement statement, String sql) throws SQLException {

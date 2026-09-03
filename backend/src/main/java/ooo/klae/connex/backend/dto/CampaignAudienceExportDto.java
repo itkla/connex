@@ -13,7 +13,10 @@ import ooo.klae.connex.backend.beans.CampaignAudienceExport;
  * @param snapshotId the frozen snapshot pushed
  * @param connector the connector id
  * @param externalListId the external list the audience was synced into, or null
- * @param status the export status
+ * @param status the persisted export lifecycle status
+ * @param reconciliationRequired whether provider acceptance must be resolved before another export
+ * @param failureReason a bounded recipient-free diagnostic code for a definitive failure, or null
+ * @param lateOutcome the provider outcome observed after another actor transitioned the export, or null
  * @param totalMembers the member total admitted and frozen by export preparation
  * @param pushedCount the members the connector accepted, or null when detailed counts are unavailable
  * @param failedCount the members not pushed, or null when detailed counts are unavailable
@@ -30,6 +33,9 @@ public record CampaignAudienceExportDto(
         String connector,
         String externalListId,
         String status,
+        boolean reconciliationRequired,
+        String failureReason,
+        String lateOutcome,
         int totalMembers,
         Integer pushedCount,
         Integer failedCount,
@@ -48,12 +54,14 @@ public record CampaignAudienceExportDto(
     public static CampaignAudienceExportDto from(
             CampaignAudienceExport export, boolean includeDetailedCounts) {
         boolean detailsKnown = export.getPushedCount() != null && export.getFailedCount() != null;
+        boolean reconciliationRequired = export.getReconciliationRequiredAt() != null;
         boolean detailsAvailable = detailsKnown && includeDetailedCounts
-                && !"running".equals(export.getStatus())
-                && !"needs_reconciliation".equals(export.getStatus());
+                && !"running".equals(export.getStatus()) && !reconciliationRequired;
         return new CampaignAudienceExportDto(
                 export.getId(), export.getCampaignId(), export.getSnapshotId(), export.getConnector(),
-                export.getExternalListId(), export.getStatus(), export.getTotalMembers(),
+                export.getExternalListId(), export.getStatus(), reconciliationRequired,
+                export.getFailureReason(), export.getLateOutcome(),
+                export.getTotalMembers(),
                 detailsAvailable ? export.getPushedCount() : null,
                 detailsAvailable ? export.getFailedCount() : null,
                 detailsKnown, detailsAvailable, export.getCreatedById(),

@@ -15,7 +15,7 @@ public interface AudienceSyncConnector extends DeliveryProvider {
      * error, transport failure, or incomplete success response is
      * {@link AudiencePushResult.Outcome#AMBIGUOUS}.
      * @param target the resolved workspace-scoped connector configuration and decrypted credential
-     * @param push the external list and eligible members to synchronize
+     * @param push the external list, eligible members, and absolute lease-anchored deadline
      * @return the connector-reported push outcome
      */
     AudiencePushResult pushAudience(ResolvedDeliveryProvider target, AudiencePush push);

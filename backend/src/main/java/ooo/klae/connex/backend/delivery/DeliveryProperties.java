@@ -20,8 +20,7 @@ import lombok.Data;
 @ConfigurationProperties(prefix = "connex.delivery")
 public class DeliveryProperties {
 
-    private static final int AUDIENCE_EXPORT_PROVIDER_RETRIES = 0;
-    private static final Duration AUDIENCE_EXPORT_LEASE_SAFETY_MARGIN = Duration.ofSeconds(30);
+    private static final Duration MIN_AUDIENCE_EXPORT_LEASE_SAFETY_MARGIN = Duration.ofSeconds(30);
     private static final Duration MAX_AUDIENCE_EXPORT_LEASE = Duration.ofMinutes(5);
 
     /** Master switch for native campaign delivery on this instance. */
@@ -30,38 +29,69 @@ public class DeliveryProperties {
     /** Absolute base URL used to build recipient-facing unsubscribe links; empty yields a relative path. */
     private String publicBaseUrl = "";
 
-    /** TCP connect timeout, in milliseconds, for outbound HTTP ESP dispatch. */
+    /** TCP connect timeout, in milliseconds, for outbound HTTP delivery. */
     private long espConnectTimeoutMs = 3000;
 
-    /** Socket read timeout, in milliseconds, for outbound HTTP ESP dispatch. */
+    /** Socket read inactivity timeout, in milliseconds, for outbound HTTP delivery. */
     private long espRequestTimeoutMs = 15000;
+
+    /** Hard wall-clock deadline, in milliseconds, for one audience-export provider call. */
+    private long audienceExportProviderDeadlineMs = 18000;
+
+    /**
+     * Database-clock adjustment allowance, in milliseconds, beyond the provider deadline. Must be
+     * at least 30 seconds; operators with looser database-host clock discipline must raise it.
+     */
+    private long audienceExportLeaseSafetyMarginMs = 30000;
 
     /** Maximum bytes read from an HTTP ESP response before the send is rejected. */
     private int espMaxResponseBytes = 65536;
 
     /**
-     * Returns the running lease for one audience export provider attempt. The lease covers every
-     * configured connect/request attempt plus a fixed handoff and persistence margin. The generic
-     * list connector disables automatic retries, so its current provider-attempt count is one.
+     * Returns the hard wall-clock deadline for one audience-export provider call. Connection and
+     * response timeouts are subordinate inactivity limits and cannot exceed this deadline.
+     * @return the validated provider-call deadline
+     */
+    public Duration audienceExportProviderDeadline() {
+        if (espConnectTimeoutMs <= 0 || espRequestTimeoutMs <= 0
+                || audienceExportProviderDeadlineMs <= 0) {
+            throw invalidAudienceExportTransportBounds(
+                    "timeouts and the provider deadline must be positive");
+        }
+        if (espConnectTimeoutMs > audienceExportProviderDeadlineMs
+                || espRequestTimeoutMs > audienceExportProviderDeadlineMs) {
+            throw invalidAudienceExportTransportBounds(
+                    "connection and response inactivity timeouts must not exceed the provider deadline");
+        }
+        return Duration.ofMillis(audienceExportProviderDeadlineMs);
+    }
+
+    /**
+     * Returns the running lease for one audience export provider call. The lease covers the hard
+     * provider deadline plus the configured database-clock adjustment, handoff, and persistence
+     * margin. It prevents database-clock expiry during a live monotonic provider budget only while
+     * forward database-clock adjustments during the lease stay below that margin.
      * @return the validated audience-export lease duration
      */
     public Duration audienceExportLeaseDuration() {
-        if (espConnectTimeoutMs <= 0 || espRequestTimeoutMs <= 0) {
-            throw invalidAudienceExportTransportBounds();
+        if (audienceExportLeaseSafetyMarginMs
+                < MIN_AUDIENCE_EXPORT_LEASE_SAFETY_MARGIN.toMillis()) {
+            throw invalidAudienceExportTransportBounds(
+                    "the audience-export lease safety margin must be at least 30 seconds");
         }
         try {
-            long attemptMillis = Math.addExact(espConnectTimeoutMs, espRequestTimeoutMs);
-            long providerMillis = Math.multiplyExact(
-                    attemptMillis, Math.addExact(AUDIENCE_EXPORT_PROVIDER_RETRIES, 1));
             long leaseMillis = Math.addExact(
-                    providerMillis, AUDIENCE_EXPORT_LEASE_SAFETY_MARGIN.toMillis());
+                    audienceExportProviderDeadline().toMillis(),
+                    audienceExportLeaseSafetyMarginMs);
             Duration lease = Duration.ofMillis(leaseMillis);
             if (lease.compareTo(MAX_AUDIENCE_EXPORT_LEASE) > 0) {
-                throw invalidAudienceExportTransportBounds();
+                throw invalidAudienceExportTransportBounds(
+                        "the provider deadline plus safety margin must fit within the 5-minute maximum lease");
             }
             return lease;
         } catch (ArithmeticException exception) {
-            throw invalidAudienceExportTransportBounds();
+            throw invalidAudienceExportTransportBounds(
+                    "the provider deadline plus safety margin must fit within the 5-minute maximum lease");
         }
     }
 
@@ -70,9 +100,8 @@ public class DeliveryProperties {
         audienceExportLeaseDuration();
     }
 
-    private static IllegalArgumentException invalidAudienceExportTransportBounds() {
+    private static IllegalArgumentException invalidAudienceExportTransportBounds(String detail) {
         return new IllegalArgumentException(
-                "connex.delivery ESP transport bounds plus the audience-export safety margin "
-                        + "must fit within the 5-minute maximum lease");
+                "Invalid connex.delivery audience-export transport bounds: " + detail);
     }
 }

@@ -20,8 +20,8 @@ public interface CampaignAudienceExportMapper {
     CampaignAudienceExport getExportForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     /**
-     * Tests the duplicate fence. Every running row is active, including a legacy row whose lease is
-     * null and therefore cannot be classified as stale automatically.
+     * Tests the rollback-compatible duplicate fence. Every running row is active, including
+     * reconciliation-required and legacy null-lease rows.
      * @param workspaceId workspace scope
      * @param campaignId owning campaign
      * @param snapshotId immutable audience snapshot
@@ -35,8 +35,10 @@ public interface CampaignAudienceExportMapper {
             @Param("connector") String connector);
 
     /**
-     * Transitions only running rows with an expired nonnull lease. Legacy null-lease rows remain
-     * running because their in-flight lifetime is unknown.
+     * Flags only running rows with an expired nonnull lease for reconciliation and classifies their
+     * outcome as ambiguous in the same write. Their stored status remains rollback-compatible
+     * {@code running}; legacy null-lease rows remain unflagged because their in-flight lifetime is
+     * unknown.
      * @param workspaceId workspace scope
      * @param campaignId owning campaign
      * @param exportIds candidate export ids
@@ -54,11 +56,52 @@ public interface CampaignAudienceExportMapper {
             @Param("connector") String connector,
             @Param("externalListId") String externalListId);
 
-    void insertExport(CampaignAudienceExport export);
+    /**
+     * Inserts an export and derives any running lease exclusively from the database clock.
+     * @param export export row
+     * @param leaseMicros lease duration in microseconds
+     */
+    void insertExport(
+            @Param("export") CampaignAudienceExport export,
+            @Param("leaseMicros") long leaseMicros);
 
-    int stagePush(CampaignAudienceExport export);
+    /**
+     * Stages the exact request identities and refreshes the lease from the database clock.
+     * @param export staged export fields
+     * @param leaseMicros lease duration in microseconds
+     * @return one when the running unflagged row was staged, otherwise zero
+     */
+    int stagePush(
+            @Param("export") CampaignAudienceExport export,
+            @Param("leaseMicros") long leaseMicros);
 
+    /**
+     * Persists an outcome and its bounded classification only for the same running, unflagged
+     * attempt and idempotency key.
+     * @param export workspace-scoped attempted outcome
+     * @return one when the attempt was completed, otherwise zero
+     */
     int updateOutcome(CampaignAudienceExport export);
 
+    /**
+     * Marks a provider outcome that arrived after another actor transitioned the export.
+     * @param workspaceId workspace scope
+     * @param id export id
+     * @param lateOutcome bounded provider outcome code
+     * @param failureReason bounded definitive failure code, or null
+     * @return one when the history marker was persisted, otherwise zero
+     */
+    int markLateOutcome(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("lateOutcome") String lateOutcome,
+            @Param("failureReason") String failureReason);
+
+    /**
+     * Applies an operator-confirmed terminal outcome and classification to a flagged export or to a
+     * legacy in-flight export whose null lease prevents automatic stale classification.
+     * @param export workspace-scoped terminal outcome
+     * @return one when the eligible source state was transitioned, otherwise zero
+     */
     int resolveReconciliation(CampaignAudienceExport export);
 }

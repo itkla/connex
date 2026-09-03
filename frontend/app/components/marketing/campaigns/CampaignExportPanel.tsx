@@ -277,7 +277,10 @@ export default function CampaignExportPanel({
                             <li key={entry.id} className="flex flex-col gap-3 py-4">
                                 <div className="flex flex-wrap items-center justify-between gap-3">
                                     <div className="flex min-w-0 flex-wrap items-center gap-3">
-                                        <ExportStatusBadge status={entry.status} />
+                                        <ExportStatusBadge
+                                            status={entry.status}
+                                            reconciliationRequired={entry.reconciliationRequired}
+                                        />
                                         <span className="truncate text-sm font-medium text-foreground">
                                             {connectorLabel(entry.connector)}
                                         </span>
@@ -317,14 +320,14 @@ export default function CampaignExportPanel({
                                 </div>
                                 {!entry.detailedCountsAvailable && (
                                     <p className="text-xs text-muted-foreground">
-                                        {entry.status === "needs_reconciliation"
+                                        {entry.reconciliationRequired
                                             ? t("reconciliationRequired")
                                             : entry.detailedCountsKnown
                                                 ? t("detailedCountsRestricted")
                                                 : t("detailedCountsUnknown")}
                                     </p>
                                 )}
-                                {entry.status === "needs_reconciliation" && canPushExport && (
+                                {entry.reconciliationRequired && canPushExport && (
                                     <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/40 p-3">
                                         <p className="text-xs text-muted-foreground">
                                             {t("reconciliationPrompt")}

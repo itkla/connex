@@ -5,6 +5,7 @@ import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -25,6 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -34,6 +36,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import jakarta.servlet.Filter;
 
@@ -190,6 +193,112 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
     }
 
     @Test
+    void replayingTransactionCForTheSameAttemptIsAnIdempotentNoOp() {
+        String prefix = "export-outcome-replay-" + unique();
+        person(newCompany(), prefix, prefix + "@example.com");
+        String campaignName = "Outcome replay export " + prefix;
+        CampaignDto campaign = campaignWithSnapshot(prefix, campaignName);
+        when(connector.pushAudience(any(), any())).thenReturn(new AudiencePushResult(1, 0, "accepted"));
+
+        CampaignAudienceExportDto first = audienceExportService.createExport(
+                campaign.id(), new CampaignAudienceExportRequest(1, CONNECTOR));
+        CampaignAudienceExport persisted = campaignAudienceExportMapper.getExport(
+                workspace.getId(), first.id());
+        assertNotNull(persisted.getIdempotencyKey());
+        assertEquals("confirmed_delivery", persisted.getOutcomeClassification());
+        CampaignAudienceExportDto replay = audienceExportService.recordOutcome(
+                workspace.getId(), currentUser.getId(), campaign.id(), campaignName,
+                persisted, false, persisted.getIdempotencyKey(),
+                AudiencePushResult.Outcome.CONFIRMED);
+
+        assertEquals("completed", replay.status());
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM campaign_audience_export
+                WHERE workspace_id = ? AND campaign_id = ? AND id = ? AND status = 'completed'
+                """, Integer.class, workspace.getId(), campaign.id(), first.id()));
+        assertEquals(0, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM campaign_audience_export
+                WHERE workspace_id = ? AND id = ? AND late_outcome IS NOT NULL
+                """, Integer.class, workspace.getId(), first.id()));
+        assertEquals(0, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM campaign_audience_export
+                WHERE workspace_id = ? AND id = ? AND failure_reason IS NOT NULL
+                """, Integer.class, workspace.getId(), first.id()));
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit_log
+                WHERE workspace_id = ?
+                  AND entity_id = ?
+                  AND action = 'campaign.audience_export.outcome'
+                """, Integer.class, workspace.getId(), campaign.id()));
+        assertEquals(0, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit_log
+                WHERE workspace_id = ?
+                  AND entity_id = ?
+                  AND action = 'campaign.audience_export.late_outcome'
+                """, Integer.class, workspace.getId(), campaign.id()));
+    }
+
+    @Test
+    void contradictoryClassificationForTheSameAttemptIsALateOutcome() throws Exception {
+        String prefix = "export-outcome-classification-" + unique();
+        person(newCompany(), prefix, prefix + "@example.com");
+        String campaignName = "Outcome classification export " + prefix;
+        CampaignDto campaign = campaignWithSnapshot(prefix, campaignName);
+        when(connector.pushAudience(any(), any())).thenReturn(
+                new AudiencePushResult(0, 1, "provider confirmed no acceptance"));
+
+        CampaignAudienceExportDto first = audienceExportService.createExport(
+                campaign.id(), new CampaignAudienceExportRequest(1, CONNECTOR));
+        CampaignAudienceExport attempted = campaignAudienceExportMapper.getExport(
+                workspace.getId(), first.id());
+        assertEquals("failed", attempted.getStatus());
+        assertEquals(1, attempted.getTotalMembers());
+        assertEquals(0, attempted.getPushedCount());
+        assertEquals(1, attempted.getFailedCount());
+        assertEquals("confirmed_no_delivery", attempted.getOutcomeClassification());
+
+        CampaignAudienceExportDto replay = audienceExportService.recordOutcome(
+                workspace.getId(), currentUser.getId(), campaign.id(), campaignName,
+                attempted, false, attempted.getIdempotencyKey(),
+                AudiencePushResult.Outcome.DEFINITE_NO_SIDE_EFFECT);
+
+        assertEquals("failed", replay.status());
+        assertEquals("definite_no_side_effect", replay.lateOutcome());
+        CampaignAudienceExport persisted = campaignAudienceExportMapper.getExport(
+                workspace.getId(), first.id());
+        assertEquals("confirmed_no_delivery", persisted.getOutcomeClassification());
+        assertEquals("definite_no_side_effect", persisted.getLateOutcome());
+        assertNull(persisted.getFailureReason());
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM audit_log
+                WHERE workspace_id = ?
+                  AND entity_id = ?
+                  AND action = 'campaign.audience_export.late_outcome'
+                """, Integer.class, workspace.getId(), campaign.id()));
+        JsonNode changes = objectMapper.readTree(jdbcTemplate.queryForObject("""
+                SELECT changes
+                FROM audit_log
+                WHERE workspace_id = ?
+                  AND entity_id = ?
+                  AND action = 'campaign.audience_export.late_outcome'
+                ORDER BY id DESC
+                LIMIT 1
+                """, String.class, workspace.getId(), campaign.id()));
+        assertEquals(first.id(), changes.path("exportId").asInt());
+        assertEquals(attempted.getAttempt(), changes.path("attempt").asInt());
+        assertEquals(attempted.getIdempotencyKey(), changes.path("idempotencyKey").asText());
+        assertEquals("definite_no_side_effect", changes.path("providerOutcome").asText());
+        assertEquals("failed", changes.path("persistedState").asText());
+        assertFalse(changes.path("agreement").asBoolean());
+    }
+
+    @Test
     void allMembersRevokedBetweenTransactionsFailAndAllowAReplacementExport() throws Exception {
         String prefix = "export-consent-race-" + unique();
         Person contact = person(newCompany(), prefix, prefix + "@example.com");
@@ -212,6 +321,8 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
             assertEquals(1, result.totalMembers());
             assertEquals(0, result.pushedCount());
             assertEquals(1, result.failedCount());
+            assertEquals("no_eligible_members", campaignAudienceExportMapper.getExport(
+                    workspace.getId(), result.id()).getOutcomeClassification());
             assertFalse(campaignAudienceExportMapper.existsActiveForSnapshotConnector(
                     workspace.getId(), campaign.id(),
                     campaignMapper.getSnapshot(workspace.getId(), campaign.id(), 1).getId(), CONNECTOR));
@@ -489,9 +600,9 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         export.setPushedMemberIdsJson("[]");
         export.setStatus("running");
         export.setAttempt(1);
-        export.setLeaseUntil(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(5));
         export.setCreatedById(currentUser.getId());
-        campaignAudienceExportMapper.insertExport(export);
+        campaignAudienceExportMapper.insertExport(
+                export, Duration.ofMinutes(5).toNanos() / 1_000L);
         jdbcTemplate.update("""
                 UPDATE campaign_audience_export
                 SET lease_until = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)
@@ -506,8 +617,10 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
                 .orElseThrow();
         CampaignAudienceExportDto detail = audienceExportService.getExport(campaign.id(), export.getId());
 
-        assertEquals("needs_reconciliation", history.status());
-        assertEquals("needs_reconciliation", detail.status());
+        assertEquals("running", history.status());
+        assertEquals("running", detail.status());
+        assertTrue(history.reconciliationRequired());
+        assertTrue(detail.reconciliationRequired());
         assertEquals("running", jdbcTemplate.queryForObject("""
                 SELECT status
                 FROM campaign_audience_export
@@ -518,11 +631,14 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
                 () -> audienceExportService.createExport(
                         campaign.id(), new CampaignAudienceExportRequest(
                                 fixture.snapshotVersion(), CONNECTOR)));
-        assertEquals("needs_reconciliation", jdbcTemplate.queryForObject("""
-                SELECT status
+        assertEquals(1, jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
                 FROM campaign_audience_export
                 WHERE workspace_id = ? AND id = ?
-                """, String.class, workspace.getId(), export.getId()));
+                  AND status = 'running'
+                  AND lease_until IS NULL
+                  AND reconciliation_required_at IS NOT NULL
+                """, Integer.class, workspace.getId(), export.getId()));
         var audit = jdbcTemplate.queryForMap("""
                 SELECT actor_id, action, entity_type, entity_id, target_label, outcome, changes
                 FROM audit_log
@@ -620,6 +736,183 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
     }
 
     @Test
+    void providerOutcomeAgreeingWithConcurrentOperatorResolutionIsAuditedWithoutMarker()
+            throws Exception {
+        String prefix = "export-late-agreement-" + unique();
+        person(newCompany(), prefix, prefix + "@example.com");
+        String campaignName = "Late outcome agreement " + prefix;
+        CampaignDto campaign = campaignWithSnapshot(prefix, campaignName);
+        CountDownLatch providerCallStarted = new CountDownLatch(1);
+        CountDownLatch releaseProvider = new CountDownLatch(1);
+        AtomicReference<String> idempotencyKey = new AtomicReference<>();
+        doAnswer(invocation -> {
+            AudiencePush push = invocation.getArgument(1, AudiencePush.class);
+            idempotencyKey.set(push.idempotencyKey());
+            providerCallStarted.countDown();
+            await(releaseProvider, "Audience export provider call did not resume");
+            return new AudiencePushResult(1, 0, "accepted");
+        }).when(connector).pushAudience(any(), any());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<CampaignAudienceExportDto> pending = executor.submit(() ->
+                    createExportAs(currentUser, campaign.id()));
+            assertTrue(providerCallStarted.await(10, TimeUnit.SECONDS));
+            int exportId = jdbcTemplate.queryForObject("""
+                    SELECT id
+                    FROM campaign_audience_export
+                    WHERE workspace_id = ? AND campaign_id = ? AND status = 'running'
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """, Integer.class, workspace.getId(), campaign.id());
+            assertEquals(1, jdbcTemplate.update("""
+                    UPDATE campaign_audience_export
+                    SET lease_until = NULL, reconciliation_required_at = UTC_TIMESTAMP(6),
+                        outcome_classification = 'ambiguous'
+                    WHERE workspace_id = ? AND id = ? AND status = 'running'
+                    """, workspace.getId(), exportId));
+            CampaignAudienceExportDto reconciled = audienceExportService.reconcileExport(
+                    campaign.id(), exportId,
+                    new CampaignAudienceExportReconciliationRequest("delivered"));
+            releaseProvider.countDown();
+
+            CampaignAudienceExportDto completedRequest = pending.get(20, TimeUnit.SECONDS);
+            CampaignAudienceExportDto history = audienceExportService.listExports(campaign.id()).stream()
+                    .filter(candidate -> candidate.id() == exportId)
+                    .findFirst()
+                    .orElseThrow();
+            CampaignAudienceExport stored = campaignAudienceExportMapper.getExport(
+                    workspace.getId(), exportId);
+
+            assertEquals("completed", reconciled.status());
+            assertEquals("completed", completedRequest.status());
+            assertNull(completedRequest.lateOutcome());
+            assertNull(history.lateOutcome());
+            assertEquals("operator_delivered", stored.getOutcomeClassification());
+            assertNull(stored.getLateOutcome());
+            assertEquals(0, jdbcTemplate.queryForObject("""
+                    SELECT COUNT(*)
+                    FROM campaign_audience_export
+                    WHERE workspace_id = ? AND id = ? AND late_outcome IS NOT NULL
+                    """, Integer.class, workspace.getId(), exportId));
+            var audit = jdbcTemplate.queryForMap("""
+                    SELECT action, entity_type, entity_id, target_label, outcome, changes
+                    FROM audit_log
+                    WHERE workspace_id = ?
+                      AND action = 'campaign.audience_export.late_outcome'
+                      AND entity_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """, workspace.getId(), campaign.id());
+            assertEquals("campaign.audience_export.late_outcome", audit.get("action"));
+            assertEquals("campaign", audit.get("entity_type"));
+            assertEquals(campaign.id(), ((Number) audit.get("entity_id")).intValue());
+            assertEquals(campaignName, audit.get("target_label"));
+            assertEquals("success", audit.get("outcome"));
+            JsonNode changes = objectMapper.readTree((String) audit.get("changes"));
+            assertEquals(exportId, changes.path("exportId").asInt());
+            assertEquals(1, changes.path("attempt").asInt());
+            assertEquals(idempotencyKey.get(), changes.path("idempotencyKey").asText());
+            assertEquals("confirmed", changes.path("providerOutcome").asText());
+            assertEquals("completed", changes.path("persistedState").asText());
+            assertTrue(changes.path("agreement").asBoolean());
+            assertFalse(changes.has("members"));
+            assertFalse(changes.has("pushedCount"));
+            assertFalse(changes.has("failedCount"));
+            assertFalse(changes.toString().contains(prefix + "@example.com"));
+        } finally {
+            releaseProvider.countDown();
+            shutdown(executor);
+        }
+    }
+
+    @Test
+    void providerOutcomeAfterConcurrentReconciliationIsAuditedAndMarkedInHistory() throws Exception {
+        String prefix = "export-late-outcome-" + unique();
+        person(newCompany(), prefix, prefix + "@example.com");
+        String campaignName = "Late outcome export " + prefix;
+        CampaignDto campaign = campaignWithSnapshot(prefix, campaignName);
+        CountDownLatch providerCallStarted = new CountDownLatch(1);
+        CountDownLatch releaseProvider = new CountDownLatch(1);
+        AtomicReference<String> idempotencyKey = new AtomicReference<>();
+        doAnswer(invocation -> {
+            AudiencePush push = invocation.getArgument(1, AudiencePush.class);
+            idempotencyKey.set(push.idempotencyKey());
+            providerCallStarted.countDown();
+            await(releaseProvider, "Audience export provider call did not resume");
+            return new AudiencePushResult(1, 0, "accepted");
+        }).when(connector).pushAudience(any(), any());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<CampaignAudienceExportDto> pending = executor.submit(() ->
+                    createExportAs(currentUser, campaign.id()));
+            assertTrue(providerCallStarted.await(10, TimeUnit.SECONDS));
+            int exportId = jdbcTemplate.queryForObject("""
+                    SELECT id
+                    FROM campaign_audience_export
+                    WHERE workspace_id = ? AND campaign_id = ? AND status = 'running'
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """, Integer.class, workspace.getId(), campaign.id());
+            assertEquals(1, jdbcTemplate.update("""
+                    UPDATE campaign_audience_export
+                    SET lease_until = NULL, reconciliation_required_at = UTC_TIMESTAMP(6),
+                        outcome_classification = 'ambiguous'
+                    WHERE workspace_id = ? AND id = ? AND status = 'running'
+                    """, workspace.getId(), exportId));
+            CampaignAudienceExportDto reconciled = audienceExportService.reconcileExport(
+                    campaign.id(), exportId,
+                    new CampaignAudienceExportReconciliationRequest("not_delivered"));
+            releaseProvider.countDown();
+
+            CampaignAudienceExportDto completedRequest = pending.get(20, TimeUnit.SECONDS);
+            CampaignAudienceExportDto history = audienceExportService.listExports(campaign.id()).stream()
+                    .filter(candidate -> candidate.id() == exportId)
+                    .findFirst()
+                    .orElseThrow();
+
+            assertEquals("failed", reconciled.status());
+            assertEquals("operator_not_delivered", campaignAudienceExportMapper.getExport(
+                    workspace.getId(), exportId).getOutcomeClassification());
+            assertEquals("failed", completedRequest.status());
+            assertEquals("confirmed_delivery", completedRequest.lateOutcome());
+            assertEquals("confirmed_delivery", history.lateOutcome());
+            assertEquals("confirmed_delivery", jdbcTemplate.queryForObject("""
+                    SELECT late_outcome
+                    FROM campaign_audience_export
+                    WHERE workspace_id = ? AND id = ?
+                    """, String.class, workspace.getId(), exportId));
+            var audit = jdbcTemplate.queryForMap("""
+                    SELECT action, entity_type, entity_id, target_label, outcome, changes
+                    FROM audit_log
+                    WHERE workspace_id = ?
+                      AND action = 'campaign.audience_export.late_outcome'
+                      AND entity_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """, workspace.getId(), campaign.id());
+            assertEquals("campaign.audience_export.late_outcome", audit.get("action"));
+            assertEquals("campaign", audit.get("entity_type"));
+            assertEquals(campaign.id(), ((Number) audit.get("entity_id")).intValue());
+            assertEquals(campaignName, audit.get("target_label"));
+            assertEquals("success", audit.get("outcome"));
+            JsonNode changes = objectMapper.readTree((String) audit.get("changes"));
+            assertEquals(exportId, changes.path("exportId").asInt());
+            assertEquals(1, changes.path("attempt").asInt());
+            assertEquals(idempotencyKey.get(), changes.path("idempotencyKey").asText());
+            assertEquals("confirmed", changes.path("providerOutcome").asText());
+            assertEquals("failed", changes.path("persistedState").asText());
+            assertFalse(changes.path("agreement").asBoolean());
+            assertFalse(changes.has("members"));
+            assertFalse(changes.has("pushedCount"));
+            assertFalse(changes.has("failedCount"));
+            assertFalse(changes.toString().contains(prefix + "@example.com"));
+        } finally {
+            releaseProvider.countDown();
+            shutdown(executor);
+        }
+    }
+
+    @Test
     void providerConfirmedNoDeliveryAdvancesTheAttemptAndKeysTheExactDestinationPayload()
             throws BindException {
         String prefix = "export-reconciliation-retry-" + unique();
@@ -639,7 +932,8 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         ArgumentCaptor<AudiencePush> pushes = ArgumentCaptor.forClass(AudiencePush.class);
         verify(connector, times(2)).pushAudience(any(), pushes.capture());
 
-        assertEquals("needs_reconciliation", ambiguous.status());
+        assertEquals("running", ambiguous.status());
+        assertTrue(ambiguous.reconciliationRequired());
         assertEquals("failed", resolved.status());
         assertEquals(0, resolved.pushedCount());
         assertEquals(1, resolved.failedCount());
@@ -650,6 +944,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
                 workspace.getId(), ambiguous.id());
         CampaignAudienceExport replacementStored = campaignAudienceExportMapper.getExport(
                 workspace.getId(), replacement.id());
+        assertEquals("operator_not_delivered", firstStored.getOutcomeClassification());
         var target = connectorConfigService.resolveAudienceTargetForWorkspace(workspace.getId(), CONNECTOR);
         String rederived = AudienceExportService.idempotencyKey(
                 firstStored, 1, target, List.of(contact.getId()), firstPush.members());
@@ -695,6 +990,8 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         assertEquals("completed", resolved.status());
         assertEquals(1, resolved.pushedCount());
         assertEquals(0, resolved.failedCount());
+        assertEquals("operator_delivered", campaignAudienceExportMapper.getExport(
+                workspace.getId(), ambiguous.id()).getOutcomeClassification());
         assertEquals(resolved, retry);
         assertThrows(ooo.klae.connex.backend.exceptions.BadRequestException.class,
                 () -> audienceExportService.reconcileExport(
@@ -772,13 +1069,17 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         legacy.setSnapshotId(snapshot.getId());
         legacy.setConnector(CONNECTOR);
         legacy.setExternalListId("legacy-list");
-        legacy.setStatus("needs_reconciliation");
+        legacy.setStatus("running");
+        legacy.setLeaseUntil(null);
+        legacy.setReconciliationRequiredAt(LocalDateTime.now(ZoneOffset.UTC));
+        legacy.setOutcomeClassification("ambiguous");
         legacy.setAttempt(1);
         legacy.setTotalMembers(1);
         legacy.setPushedCount(null);
         legacy.setFailedCount(null);
         legacy.setCreatedById(currentUser.getId());
-        campaignAudienceExportMapper.insertExport(legacy);
+        campaignAudienceExportMapper.insertExport(
+                legacy, Duration.ofMinutes(5).toNanos() / 1_000L);
 
         CampaignAudienceExportDto resolved = audienceExportService.reconcileExport(
                 campaign.id(), legacy.getId(),
@@ -793,6 +1094,7 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
                 workspace.getId(), legacy.getId());
         assertNull(stored.getPushedCount());
         assertNull(stored.getFailedCount());
+        assertEquals("operator_delivered", stored.getOutcomeClassification());
     }
 
     @Test
@@ -809,13 +1111,17 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
         ambiguous.setExternalListId(listId);
         ambiguous.setFrozenMemberIdsJson("[" + contact.getId() + "]");
         ambiguous.setPushedMemberIdsJson("[" + contact.getId() + "]");
-        ambiguous.setStatus("needs_reconciliation");
+        ambiguous.setStatus("running");
+        ambiguous.setLeaseUntil(null);
+        ambiguous.setReconciliationRequiredAt(LocalDateTime.now(ZoneOffset.UTC));
+        ambiguous.setOutcomeClassification("ambiguous");
         ambiguous.setAttempt(1);
         ambiguous.setTotalMembers(1);
         ambiguous.setPushedCount(0);
         ambiguous.setFailedCount(1);
         ambiguous.setCreatedById(currentUser.getId());
-        campaignAudienceExportMapper.insertExport(ambiguous);
+        campaignAudienceExportMapper.insertExport(
+                ambiguous, Duration.ofMinutes(5).toNanos() / 1_000L);
 
         CampaignActorRole viewer = newCampaignActor(workspace, List.of(Permission.CAMPAIGN_VIEW));
         mockMvc.perform(reconcileRequest(viewer.actor(), campaign.id(), ambiguous.getId(), "unknown"))

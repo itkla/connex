@@ -2612,8 +2612,7 @@ export type CampaignExportStatus =
     | "draft"
     | "running"
     | "completed"
-    | "failed"
-    | "needs_reconciliation";
+    | "failed";
 
 /** A campaign audience export bound to a frozen snapshot and an external connector. */
 export type CampaignAudienceExport = {
@@ -2623,6 +2622,8 @@ export type CampaignAudienceExport = {
     connector: string;
     externalListId: string | null;
     status: CampaignExportStatus;
+    reconciliationRequired: boolean;
+    failureReason?: string | null; lateOutcome?: string | null;
     totalMembers: number;
     pushedCount: number | null;
     failedCount: number | null;

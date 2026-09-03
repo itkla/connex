@@ -29,16 +29,21 @@ ALTER TABLE campaign_audience_member
             'consent_missing', 'consent_revoked', 'suppressed', 'restricted', 'no_address')));
 
 ALTER TABLE campaign_audience_export
-    MODIFY COLUMN status VARCHAR(32) NOT NULL DEFAULT 'draft',
     MODIFY COLUMN pushed_count INT NULL DEFAULT 0,
     MODIFY COLUMN failed_count INT NULL DEFAULT 0,
     ADD COLUMN frozen_member_ids_json JSON NULL AFTER external_list_id,
     ADD COLUMN pushed_member_ids_json JSON NULL AFTER frozen_member_ids_json,
     ADD COLUMN attempt INT NOT NULL DEFAULT 1 AFTER status,
-    ADD COLUMN lease_until DATETIME(6) NULL AFTER attempt,
-    DROP CONSTRAINT chk_campaign_audience_export_status,
-    ADD CONSTRAINT chk_campaign_audience_export_status CHECK (
-        status IN ('draft', 'running', 'completed', 'failed', 'needs_reconciliation')),
+    ADD COLUMN idempotency_key VARCHAR(255)
+        CHARACTER SET ascii COLLATE ascii_bin NULL AFTER attempt,
+    ADD COLUMN lease_until DATETIME(6) NULL AFTER idempotency_key,
+    ADD COLUMN reconciliation_required_at DATETIME(6) NULL AFTER lease_until,
+    ADD COLUMN failure_reason VARCHAR(64)
+        CHARACTER SET ascii COLLATE ascii_bin NULL AFTER reconciliation_required_at,
+    ADD COLUMN outcome_classification VARCHAR(32)
+        CHARACTER SET ascii COLLATE ascii_bin NULL AFTER failure_reason,
+    ADD COLUMN late_outcome VARCHAR(32)
+        CHARACTER SET ascii COLLATE ascii_bin NULL AFTER outcome_classification,
     ADD CONSTRAINT chk_campaign_audience_export_frozen_members
         CHECK (frozen_member_ids_json IS NULL OR JSON_TYPE(frozen_member_ids_json) = 'ARRAY'),
     ADD CONSTRAINT chk_campaign_audience_export_pushed_members
@@ -53,17 +58,58 @@ ALTER TABLE campaign_audience_export
         )),
     ADD CONSTRAINT chk_campaign_audience_export_attempt CHECK (attempt > 0);
 
-UPDATE campaign_audience_export
-SET status = 'needs_reconciliation',
-    pushed_count = NULL,
-    failed_count = NULL
-WHERE status = 'running'
-   OR (status = 'failed' AND external_list_id IS NOT NULL);
-
 ALTER TABLE campaign_audience_export
     ADD CONSTRAINT chk_campaign_audience_export_lease CHECK (
         status = 'running'
-        OR (status <> 'running' AND lease_until IS NULL));
+        OR (status <> 'running' AND lease_until IS NULL)),
+    ADD CONSTRAINT chk_campaign_audience_export_reconciliation CHECK (
+        reconciliation_required_at IS NULL
+        OR (status = 'running' AND lease_until IS NULL)),
+    ADD CONSTRAINT chk_campaign_audience_export_failure_reason CHECK (
+        failure_reason IS NULL OR failure_reason IN (
+            'no_eligible_members',
+            'connector_selection_failed',
+            'provider_resolution_failed',
+            'configuration_fence_failed',
+            'connector_definitive_failure',
+            'provider_deadline_exceeded',
+            'provider_deadline_missing',
+            'resolver_saturated'
+        )),
+    ADD CONSTRAINT chk_campaign_audience_export_outcome_classification CHECK (
+        (
+            outcome_classification IS NULL
+            AND (
+                status IN ('draft', 'running')
+                OR (frozen_member_ids_json IS NULL AND pushed_member_ids_json IS NULL)
+            )
+        )
+        OR (
+            outcome_classification IS NOT NULL
+            AND outcome_classification = 'ambiguous'
+            AND status = 'running'
+            AND reconciliation_required_at IS NOT NULL
+        )
+        OR (
+            outcome_classification IS NOT NULL
+            AND outcome_classification IN ('confirmed_delivery', 'operator_delivered')
+            AND status = 'completed'
+            AND reconciliation_required_at IS NULL
+        )
+        OR (
+            outcome_classification IS NOT NULL
+            AND outcome_classification IN (
+                'no_eligible_members', 'confirmed_no_delivery',
+                'definite_no_side_effect', 'operator_not_delivered'
+            )
+            AND status = 'failed'
+            AND reconciliation_required_at IS NULL
+        )),
+    ADD CONSTRAINT chk_campaign_audience_export_late_outcome CHECK (
+        late_outcome IS NULL OR late_outcome IN (
+            'confirmed_delivery', 'confirmed_no_delivery',
+            'definite_no_side_effect', 'ambiguous'
+        ));
 
 ALTER TABLE connector_config
     ADD COLUMN config_version BIGINT NOT NULL DEFAULT 1 AFTER enabled,

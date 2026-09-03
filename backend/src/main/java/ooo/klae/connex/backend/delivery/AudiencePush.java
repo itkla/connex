@@ -11,8 +11,24 @@ import java.util.Objects;
  * @param members the eligible members to push
  * @param idempotencyKey the export-attempt key a connector passes to its provider, or null for a
  *     legacy caller
+ * @param providerDeadlineNanos the absolute process-local {@link System#nanoTime()} deadline captured
+ *     before the export lease write, or null for a legacy caller
  */
-public record AudiencePush(String externalListId, List<AudienceMember> members, String idempotencyKey) {
+public record AudiencePush(
+        String externalListId,
+        List<AudienceMember> members,
+        String idempotencyKey,
+        Long providerDeadlineNanos) {
+
+    /**
+     * Backward-compatible constructor for connector callers without a lease-anchored provider budget.
+     * @param externalListId the connector-side list identifier
+     * @param members the eligible members to push
+     * @param idempotencyKey the export-attempt key, or null
+     */
+    public AudiencePush(String externalListId, List<AudienceMember> members, String idempotencyKey) {
+        this(externalListId, members, idempotencyKey, null);
+    }
 
     /**
      * Backward-compatible constructor for connector callers that predate provider idempotency.
@@ -20,7 +36,7 @@ public record AudiencePush(String externalListId, List<AudienceMember> members, 
      * @param members the eligible members to push
      */
     public AudiencePush(String externalListId, List<AudienceMember> members) {
-        this(externalListId, members, null);
+        this(externalListId, members, null, null);
     }
 
     public AudiencePush {
