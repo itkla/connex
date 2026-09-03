@@ -1671,7 +1671,7 @@ export type DealLineItem = {
 
 /** Server-computed deal roll-up; recurring vs one-time kept separate to avoid double-counting. */
 export type DealLineItemTotals = {
-    currency: string;
+    currency?: string | null;
     subtotal: number;
     tax: number;
     oneTimeTotal: number;
@@ -5839,3 +5839,42 @@ export type AiCommandCenter = {
     watches: AiWatch[];
     watchLimit: number;
 };
+
+/** A successful, live recipient-link preview. Terminal recipient states are intentionally absent. */
+export type DocumentAcceptancePreview = {
+    content: DocumentContent;
+    dealName: string;
+    workspaceName: string;
+    recipientEmail: string;
+    deliveryStatus: "sent" | "viewed";
+    recipientStatus: "pending" | "viewed";
+    actionable: boolean;
+    documentType: DocumentType;
+    documentTitle?: string | null;
+    documentVersion: number;
+    documentLocale: string;
+    expiresAt?: string | null;
+};
+
+/** The in-session terminal result of one recipient decision. */
+export type DocumentAcceptanceDecision = {
+    deliveryStatus: "sent" | "viewed" | "completed" | "declined";
+    recipientStatus: "completed" | "declined";
+    completed: boolean;
+};
+
+/** Body for a public typed-name acceptance. */
+export type AcceptDocumentPayload = {
+    typedName: string;
+};
+
+/** Body for a public reasoned decline. */
+export type DeclineDocumentPayload = {
+    reason: string;
+};
+
+/** Document-link failures that have distinct recipient-facing recovery guidance. */
+export type DocumentAcceptanceFailureKind =
+    | "unavailable"
+    | "throttled"
+    | "service-unavailable";

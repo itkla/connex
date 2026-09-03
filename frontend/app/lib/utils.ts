@@ -274,11 +274,14 @@ export function formatCompactCurrency(value: number, currency = 'USD', locale = 
  * @returns the formatted value
  */
 export function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
-    // for every 3 digits, add a comma
-    return value.toLocaleString(locale, {
-        style: 'currency',
-        currency,
-    });
+    try {
+        return value.toLocaleString(locale, {
+            style: 'currency',
+            currency,
+        });
+    } catch {
+        return value.toLocaleString(locale);
+    }
 }
 
 /**

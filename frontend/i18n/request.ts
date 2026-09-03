@@ -43,24 +43,36 @@ const namespaces = [
     "legal",
     "docs",
     "unsubscribe",
+    "document-acceptance",
 ] as const;
+
+function isMessagesFragment(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 async function loadMessages(locale: Locale) {
     const fragments = await Promise.all(
         namespaces.map(async (ns) => {
             try {
-                return (await import(`../messages/${locale}/${ns}.json`)).default as Record<string, unknown>;
+                const imported: unknown = await import(`../messages/${locale}/${ns}.json`);
+                if (!isMessagesFragment(imported) || !isMessagesFragment(imported.default)) {
+                    return {};
+                }
+                return imported.default;
             } catch {
-                return {} as Record<string, unknown>;
+                return {};
             }
         }),
     );
     return fragments.reduce<Record<string, unknown>>((acc, fragment) => ({ ...acc, ...fragment }), {});
 }
 
-export default getRequestConfig(async () => {
-    const requested = (await cookies()).get(LOCALE_COOKIE)?.value;
-    const locale = resolveLocale(requested);
+export default getRequestConfig(async ({ locale: explicitLocale, requestLocale }) => {
+    const requestedLocale = explicitLocale ?? await requestLocale;
+    const cookieLocale = requestedLocale == null
+        ? (await cookies()).get(LOCALE_COOKIE)?.value
+        : undefined;
+    const locale = resolveLocale(requestedLocale ?? cookieLocale);
 
     return {
         locale,

@@ -144,6 +144,26 @@ def security_header_mentions() -> dict[str, int]:
     return mentions
 
 
+def effective_referrer_policy(path: str) -> str:
+    site_operations = direct_child_header_operations(":80 {", 0)
+    site_referrer = next(
+        operation[1]
+        for operation in site_operations
+        if operation[0].lstrip("+?->") == "Referrer-Policy"
+    )
+    if path.startswith("/document-acceptance/"):
+        acceptance_operations = direct_child_header_operations(
+            "handle /document-acceptance/* {",
+            2,
+        )
+        return next(
+            operation[1]
+            for operation in acceptance_operations
+            if operation[0].lstrip("+?->") == "Referrer-Policy"
+        )
+    return site_referrer
+
+
 def has_direct_child_directive(parent: str, parent_depth: int, directive: str) -> bool:
     block_depth: int | None = None
     depth = 0
@@ -183,7 +203,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
             by_field["X-Content-Type-Options"],
         )
         self.assertEqual(
-            [">Referrer-Policy", "strict-origin-when-cross-origin"],
+            ["?Referrer-Policy", "strict-origin-when-cross-origin"],
             by_field["Referrer-Policy"],
         )
         self.assertEqual([">X-Frame-Options", "DENY"], by_field["X-Frame-Options"])
@@ -210,10 +230,31 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
         )
 
     def test_security_headers_are_not_redeclared_elsewhere(self) -> None:
+        expected_mentions = {field: 2 for field in SECURITY_HEADER_FIELDS}
+        expected_mentions["Referrer-Policy"] = 3
         self.assertEqual(
-            {field: 2 for field in SECURITY_HEADER_FIELDS},
+            expected_mentions,
             security_header_mentions(),
-            "security headers must appear only in the site and error-handler contract blocks",
+            "security headers must appear only in the site, acceptance, and error contracts",
+        )
+
+    def test_referrer_policy_is_route_specific_after_proxying(self) -> None:
+        acceptance_operations = direct_child_header_operations(
+            "handle /document-acceptance/* {",
+            2,
+        )
+
+        self.assertEqual(
+            [["Referrer-Policy", "no-referrer"], ["defer"]],
+            acceptance_operations,
+        )
+        self.assertEqual(
+            "no-referrer",
+            effective_referrer_policy("/document-acceptance/w42-secret"),
+        )
+        self.assertEqual(
+            "strict-origin-when-cross-origin",
+            effective_referrer_policy("/records/deals/42"),
         )
 
     def test_hsts_is_present_only_when_explicitly_enabled(self) -> None:
@@ -269,6 +310,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
                 "@workflows",
                 "@saml",
                 "/api/*",
+                "/document-acceptance/*",
                 None,
             ],
             direct_route_handles(),
@@ -282,11 +324,12 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
             "@workflows": "{$CONNEX_WORKFLOW_MAX_BODY_BYTES:98304}",
             "@saml": "{$CONNEX_FORM_MAX_BODY_BYTES:1048576}",
             "/api/*": "{$CONNEX_API_MAX_BODY_BYTES:10485760}",
+            "/document-acceptance/*": "{$CONNEX_FORM_MAX_BODY_BYTES:1048576}",
         }
         for matcher, limit in expected_limits.items():
             with self.subTest(matcher=matcher):
                 self.assertEqual(limit, request_body_limit_for_handle(matcher))
-                if matcher != "/api/*":
+                if matcher not in ("/api/*", "/document-acceptance/*"):
                     self.assertLess(
                         caddyfile.index(f"handle {matcher} {{"),
                         caddyfile.index("handle /api/* {"),

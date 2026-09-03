@@ -64,7 +64,7 @@ test.describe("Ask Connex command centre", () => {
         page,
     }, testInfo) => {
         const fixture = runFixture(testInfo.project.name);
-        const contact = fixture.contacts.archive;
+        const contact = fixture.contacts.watch;
         const api = page.request;
         const workspaceId = await activeWorkspaceId(api);
         const watchId = await createWatch(api, workspaceId, contact.id);
@@ -107,7 +107,7 @@ test.describe("Ask Connex command centre", () => {
         page,
     }, testInfo) => {
         const fixture = runFixture(testInfo.project.name);
-        const contact = fixture.contacts.archive;
+        const contact = fixture.contacts.watch;
 
         await page.goto(`/records/contacts/${contact.id}`);
         await page.getByRole("button", { name: message("en", "common", "AskConnex.entryPoint.recordMenu.person") })

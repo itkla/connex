@@ -17,6 +17,8 @@ DEPLOYMENT_DOC_PATH = ROOT / "docs" / "DEPLOYMENT.md"
 UPGRADING_DOC_PATH = ROOT / "docs" / "UPGRADING.md"
 DEPLOY_ENV_PATH = ROOT / "deploy" / ".env"
 LOCAL_DEV_COMPOSE_PATH = ROOT / "backend" / "docker-compose.yml"
+BACKEND_DOCKERFILE_PATH = ROOT / "backend" / "Dockerfile"
+BACKEND_JAVA_SECURITY_PATH = ROOT / "backend" / "connex.java.security"
 EVAL_ENV_PATH = ROOT / "deploy" / "eval.env.example"
 SILO_ENV_PATH = ROOT / "deploy" / "silo.env.example"
 ONPREM_ENV_PATH = ROOT / "deploy" / "onprem.env.example"
@@ -65,7 +67,7 @@ def resolve_compose_model(
             "CONNEX_DB_USERNAME": "network-test-user",
             "CONNEX_CADDY_ADDITIONAL_TRUSTED_PROXIES": "",
             "CONNEX_CADDY_HSTS_ENABLED": "false",
-            "CONNEX_SECURITY_TRUSTED_PROXIES": "",
+            "CONNEX_SECURITY_TRUSTED_PROXIES": "caddy,frontend",
             "CONNEX_API_MAX_BODY_BYTES": "10485760",
             "CONNEX_IMPORT_MAX_BODY_BYTES": "67108864",
             "CONNEX_UPLOAD_MAX_BODY_BYTES": "28311552",
@@ -246,6 +248,72 @@ class DeploymentNetworkTest(unittest.TestCase):
                 with self.subTest(model=model_name, network=network_name):
                     self.assertNotIn("config", network.get("ipam", {}))
 
+    def test_backend_trusts_only_the_docker_dns_caddy_and_frontend_forwarders(self) -> None:
+        for model_name, compose in self.compose_models.items():
+            services = compose["services"]
+            with self.subTest(model=model_name):
+                self.assertEqual(
+                    "caddy,frontend",
+                    services["backend"]["environment"]["CONNEX_SECURITY_TRUSTED_PROXIES"],
+                )
+                self.assertNotIn(
+                    "CONNEX_SSR_TRUSTED_PROXY_HOP",
+                    services["frontend"]["environment"],
+                )
+                self.assertEqual(
+                    "http://backend-app:8080",
+                    services["frontend"]["environment"]["API_URL"],
+                )
+                self.assertEqual(
+                    ["backend-app"],
+                    services["backend"]["networks"]["app"]["aliases"],
+                )
+        for profile_path in (EVAL_ENV_PATH, SILO_ENV_PATH, ONPREM_ENV_PATH):
+            profile = profile_path.read_text(encoding="utf-8")
+            with self.subTest(profile=profile_path.name):
+                self.assertIn("CONNEX_SECURITY_TRUSTED_PROXIES=caddy,frontend", profile)
+                self.assertNotIn("CONNEX_EDGE_SUBNET=", profile)
+                self.assertNotIn("CONNEX_CADDY_IP=", profile)
+                self.assertNotIn("CONNEX_APP_SUBNET=", profile)
+                self.assertNotIn("CONNEX_FRONTEND_APP_IP=", profile)
+
+    def test_backend_image_bounds_jvm_name_service_caching(self) -> None:
+        dockerfile = BACKEND_DOCKERFILE_PATH.read_text(encoding="utf-8")
+        security_properties = BACKEND_JAVA_SECURITY_PATH.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "COPY connex.java.security /app/connex.java.security",
+            dockerfile,
+        )
+        self.assertIn(
+            "-Djava.security.properties=/app/connex.java.security",
+            dockerfile,
+        )
+        self.assertEqual(
+            {
+                "networkaddress.cache.ttl=1",
+                "networkaddress.cache.negative.ttl=0",
+            },
+            set(security_properties.splitlines()),
+        )
+
+    def test_upgrade_keeps_existing_edge_and_app_networks(self) -> None:
+        upgrading_doc = UPGRADING_DOC_PATH.read_text(encoding="utf-8")
+        normalized_doc = " ".join(upgrading_doc.split())
+
+        self.assertIn(
+            "does not require recreating the Compose `edge` or `app` networks",
+            normalized_doc,
+        )
+        self.assertIn(
+            "use the ordinary service-by-service `docker compose up` commands below",
+            normalized_doc,
+        )
+        self.assertIn(
+            "`CONNEX_SECURITY_TRUSTED_PROXIES=caddy,frontend`",
+            normalized_doc,
+        )
+
     def test_only_caddy_publishes_a_host_port(self) -> None:
         for model_name, compose in self.compose_models.items():
             services = compose["services"]
@@ -288,45 +356,6 @@ class DeploymentNetworkTest(unittest.TestCase):
                     "CONNEX_CADDY_HSTS_ENABLED=false",
                     profile_path.read_text(encoding="utf-8"),
                 )
-
-    def test_forwarded_client_ip_trust_is_explicit_per_real_deployment_profile(self) -> None:
-        expected_backend_proxies = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
-        for model_name, compose in self.compose_models.items():
-            services = compose["services"]
-            with self.subTest(model=model_name, service="backend"):
-                self.assertEqual(
-                    "",
-                    services["backend"]["environment"]["CONNEX_SECURITY_TRUSTED_PROXIES"],
-                )
-            with self.subTest(model=model_name, service="caddy"):
-                self.assertEqual(
-                    "",
-                    services["caddy"]["environment"][
-                        "CONNEX_CADDY_ADDITIONAL_TRUSTED_PROXIES"
-                    ],
-                )
-        configured = resolve_compose_model(
-            COMPOSE_PATH,
-            environment_overrides={
-                "CONNEX_SECURITY_TRUSTED_PROXIES": expected_backend_proxies
-            },
-        )
-        self.assertEqual(
-            expected_backend_proxies,
-            configured["services"]["backend"]["environment"][
-                "CONNEX_SECURITY_TRUSTED_PROXIES"
-            ],
-        )
-        for profile_path in (SILO_ENV_PATH, ONPREM_ENV_PATH):
-            with self.subTest(profile=profile_path.name):
-                self.assertIn(
-                    f"CONNEX_SECURITY_TRUSTED_PROXIES={expected_backend_proxies}",
-                    profile_path.read_text(encoding="utf-8"),
-                )
-        self.assertIn(
-            "CONNEX_SECURITY_TRUSTED_PROXIES=\n",
-            EVAL_ENV_PATH.read_text(encoding="utf-8"),
-        )
 
     def test_caddy_request_limits_share_backend_environment_contracts(self) -> None:
         expected_limits = {

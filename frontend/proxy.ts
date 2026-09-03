@@ -10,6 +10,15 @@ import {
 } from '@/security-headers';
 
 const SESSION_COOKIE = 'JSESSIONID';
+const DOCUMENT_ACCEPTANCE_PATH = /^\/document-acceptance\/[^/]+\/?$/;
+const DOCUMENT_ACCEPTANCE_CREDENTIAL_HEADERS = [
+    'authorization',
+    'cookie',
+    'proxy-authorization',
+    'x-csrf-token',
+    'x-workspace-id',
+    'x-xsrf-token',
+] as const;
 
 const ALWAYS_ACCESSIBLE_AUTH_PATHS = new Set([
     '/auth/register',
@@ -49,8 +58,12 @@ function browserFacingRequestOrigin(request: NextRequest): string {
     return new URL(request.url).origin;
 }
 
-function protectedResponse(response: NextResponse, policy: string): NextResponse {
-    applyFrontendSecurityHeaders(response.headers);
+function isDocumentAcceptancePath(pathname: string): boolean {
+    return DOCUMENT_ACCEPTANCE_PATH.test(pathname);
+}
+
+function protectedResponse(response: NextResponse, policy: string, pathname: string): NextResponse {
+    applyFrontendSecurityHeaders(response.headers, pathname);
     applyFrontendContentSecurityPolicy(
         response.headers,
         policy,
@@ -59,19 +72,32 @@ function protectedResponse(response: NextResponse, policy: string): NextResponse
     return response;
 }
 
-function forwardedResponse(request: NextRequest, nonce: string, policy: string): NextResponse {
+function forwardedResponse(
+    request: NextRequest,
+    nonce: string,
+    policy: string,
+    isolateCredentials = false,
+): NextResponse {
     const { pathname, search } = request.nextUrl;
     const requestHeaders = new Headers(request.headers);
+    if (isolateCredentials) {
+        for (const header of DOCUMENT_ACCEPTANCE_CREDENTIAL_HEADERS) {
+            requestHeaders.delete(header);
+        }
+    }
     requestHeaders.set('x-pathname', pathname + search);
     requestHeaders.set('x-nonce', nonce);
     requestHeaders.set('Content-Security-Policy', policy);
-    return protectedResponse(NextResponse.next({ request: { headers: requestHeaders } }), policy);
+    return protectedResponse(
+        NextResponse.next({ request: { headers: requestHeaders } }),
+        policy,
+        pathname,
+    );
 }
 
 /** Applies route protection and a per-request nonce-bearing CSP to frontend HTML routes. */
 export function proxy(request: NextRequest) {
     const { pathname, search, searchParams } = request.nextUrl;
-    const hasSession = request.cookies.has(SESSION_COOKIE);
     const nonce = createNonce();
     const policy = createFrontendContentSecurityPolicy({
         nonce,
@@ -80,8 +106,18 @@ export function proxy(request: NextRequest) {
         configuredWebSocketUrl: process.env.NEXT_PUBLIC_WS_URL,
         configuredImageOrigins: process.env.CONNEX_CSP_IMAGE_ORIGINS,
     });
-    const redirect = (url: URL) => protectedResponse(NextResponse.redirect(url), policy);
+    const redirect = (url: URL) => protectedResponse(
+        NextResponse.redirect(url),
+        policy,
+        pathname,
+    );
     const next = () => forwardedResponse(request, nonce, policy);
+
+    if (isDocumentAcceptancePath(pathname)) {
+        return forwardedResponse(request, nonce, policy, true);
+    }
+
+    const hasSession = request.cookies.has(SESSION_COOKIE);
 
     // Onboarding needs a session but must stay reachable even with a leftover
     // connex_workspace cookie: after involuntary membership removal that cookie

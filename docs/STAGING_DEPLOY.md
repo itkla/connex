@@ -276,7 +276,14 @@ applies to it. `/etc/connex-staging/backend.env` must contain:
 
 ```text
 CONNEX_DEPLOYMENT_PROFILE=silo
+JAVA_TOOL_OPTIONS=-Djava.security.properties=/opt/connex-staging/backend/connex.java.security
 ```
+
+The second setting is required because staging launches the backend JAR directly instead of using
+the published backend image. It loads the tracked one-second positive and zero-second negative JVM
+DNS TTLs used by hostname-based trusted proxies. After adding or changing it, run
+`sudo systemctl restart connex-staging-backend`; a direct-JAR staging launch without this setting
+does not support hostname-based trusted proxies.
 
 Staging is a Connex-operated instance on a dedicated database, which is `silo`. Without it the
 backend fails startup with `CONNEX_DEPLOYMENT_PROFILE must be set to saas, silo, or on-prem

@@ -29,6 +29,7 @@ RUN groupadd --system --gid 10001 connex \
     && useradd --system --uid 10001 --gid connex --home-dir /app connex \
     && install -d -o connex -g connex -m 0700 /var/lib/connex/objects
 COPY --from=build /workspace/app.war /app/app.war
+COPY connex.java.security /app/connex.java.security
 USER 10001:10001
 EXPOSE 8080
-ENTRYPOINT ["sh", "-c", "rm -f /tmp/connex-ready && exec java $JAVA_OPTS -jar /app/app.war"]
+ENTRYPOINT ["sh", "-c", "rm -f /tmp/connex-ready && exec java $JAVA_OPTS -Djava.security.properties=/app/connex.java.security -jar /app/app.war"]

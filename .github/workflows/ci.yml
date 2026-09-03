@@ -343,6 +343,20 @@ jobs:
           CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-e2e-root
           CONNEX_PRIVILEGED_MFA_ENFORCED: 'false'
           CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR: frontend-e2e-suite
+          CONNEX_RECENT_AUTHENTICATION_WINDOW: 2h
+          CONNEX_BREACHED_PASSWORD_SOURCE: OFFLINE
+          CONNEX_BREACHED_PASSWORD_OFFLINE_FILE: src/test/resources/breached-passwords-test.txt
+          CONNEX_BREACHED_PASSWORD_OFFLINE_SHA256: 902cd1791ee85aaf80cc4a31f33912d0bbbd504840b689d947c028d5100a9208
+          CONNEX_SIGNATURE_ENABLED: "true"
+          CONNEX_MAIL_ENABLED: "true"
+          CONNEX_MAIL_HOST: "127.0.0.1"
+          CONNEX_MAIL_PORT: "2525"
+          CONNEX_MAIL_FROM: "connex-e2e@example.test"
+          CONNEX_MAIL_STARTTLS: "false"
+          CONNEX_MAIL_SSL: "false"
+          CONNEX_MAIL_AUTH: "false"
+          CONNEX_MAIL_ALLOW_INTERNAL_HOSTS: "true"
+          CONNEX_SECURITY_TRUSTED_PROXIES: "127.0.0.1,::1"
           # AI governance on with no provider configured: the provider-independent surfaces
           # (watch CRUD, skill directory) are exercisable while every provider-egress path
           # still refuses honestly, which is exactly the state the e2e specs assert.

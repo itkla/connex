@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
 
 import {
+  DOCUMENT_ACCEPTANCE_SECURITY_HEADERS,
   FRAME_ANCESTORS_DIRECTIVE,
   FRONTEND_SECURITY_HEADERS,
 } from "./security-headers";
@@ -72,6 +73,10 @@ const nextConfig: NextConfig = {
       {
         source: "/:path*",
         headers: FRONTEND_SECURITY_HEADERS,
+      },
+      {
+        source: "/document-acceptance/:path*",
+        headers: DOCUMENT_ACCEPTANCE_SECURITY_HEADERS,
       },
       {
         source: "/attachments/:path*",

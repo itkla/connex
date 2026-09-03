@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -50,6 +51,12 @@ class DocumentSignatureWebhookIntegrationTest {
         mockMvc.perform(post("/api/document-acceptance/w1-" + "a".repeat(64) + "/accept")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"typedName\":\"External Signer\"}"))
+            .andExpect(status().isServiceUnavailable());
+    }
+
+    @Test
+    void publicAcceptancePreviewReachesItsFailClosedGateWithTheFeatureDisabled() throws Exception {
+        mockMvc.perform(get("/api/document-acceptance/w1-" + "a".repeat(64)))
             .andExpect(status().isServiceUnavailable());
     }
 }

@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import nextConfig from "@/next.config";
+import { isProtectedPath } from "@/app/lib/protectedRoutes";
 import { config as proxyConfig, proxy } from "@/proxy";
 import {
     createFrontendContentSecurityPolicy,
@@ -43,9 +44,12 @@ async function headersForPath(path: string): Promise<Map<string, string>> {
     return resolved;
 }
 
-function expectFrontendSecurityHeaders(headers: Map<string, string>): void {
+function expectFrontendSecurityHeaders(
+    headers: Map<string, string>,
+    referrerPolicy = "strict-origin-when-cross-origin",
+): void {
     expect(headers.get("x-content-type-options")).toBe("nosniff");
-    expect(headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+    expect(headers.get("referrer-policy")).toBe(referrerPolicy);
     expect(headers.get("x-frame-options")).toBe("DENY");
     expect(headers.get("content-security-policy")).toBe(FRONTEND_CONTENT_SECURITY_POLICY);
 }
@@ -87,6 +91,64 @@ describe("frontend security headers", () => {
         expect(headers.get("x-frame-options")).toBe("DENY");
         expect(headers.get("content-disposition")).toBe("attachment");
         expect(headers.get("content-security-policy")).toBe(ATTACHMENT_CONTENT_SECURITY_POLICY);
+    });
+
+    it("sets no-referrer on document-acceptance HTML and nowhere else", async () => {
+        expectFrontendSecurityHeaders(
+            await headersForPath(`/document-acceptance/w12-${"a".repeat(64)}`),
+            "no-referrer",
+        );
+        expectFrontendSecurityHeaders(await headersForPath("/records/deals/42"));
+    });
+
+    it("keeps document acceptance public while applying the runtime no-referrer override", () => {
+        const path = `/document-acceptance/w12-${"a".repeat(64)}`;
+        const { response } = reportOnlyPolicy(path);
+
+        expect(isProtectedPath(path)).toBe(false);
+        expect(response.status).toBe(200);
+        expect(response.headers.get("location")).toBeNull();
+        expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+        expect(reportOnlyPolicy("/auth/login").response.headers.get("referrer-policy"))
+            .toBe("strict-origin-when-cross-origin");
+    });
+
+    it("strips acceptance credentials while preserving protected-route request headers", () => {
+        vi.stubEnv("CONNEX_CSP_MODE", "report-only");
+        const cookie = "JSESSIONID=session-secret; connex_workspace=42; preference=kept";
+        const requestHeaders = {
+            authorization: "Bearer incoming-secret",
+            cookie,
+            "proxy-authorization": "Basic proxy-secret",
+            "x-csrf-token": "csrf-secret",
+            "x-workspace-id": "42",
+        };
+        const acceptance = proxy(new NextRequest(
+            `http://localhost:3000/document-acceptance/w12-${"a".repeat(64)}`,
+            { headers: requestHeaders },
+        ));
+
+        expect(acceptance.status).toBe(200);
+        for (const header of [
+            "authorization",
+            "cookie",
+            "proxy-authorization",
+            "x-csrf-token",
+            "x-workspace-id",
+        ]) {
+            expect(acceptance.headers.get(`x-middleware-request-${header}`)).toBeNull();
+            expect(acceptance.headers.get("x-middleware-override-headers"))
+                .not.toContain(header);
+        }
+
+        const protectedRoute = proxy(new NextRequest("http://localhost:3000/dashboard", {
+            headers: requestHeaders,
+        }));
+        expect(protectedRoute.status).toBe(200);
+        expect(protectedRoute.headers.get("x-middleware-request-cookie")).toBe(cookie);
+        expect(protectedRoute.headers.get("x-middleware-request-authorization"))
+            .toBe("Bearer incoming-secret");
+        expect(protectedRoute.headers.get("x-middleware-request-x-workspace-id")).toBe("42");
     });
 
     it("resolves every required directive without production unsafe-eval", () => {
