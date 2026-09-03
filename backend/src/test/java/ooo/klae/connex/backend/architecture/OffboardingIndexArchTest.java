@@ -77,7 +77,11 @@ class OffboardingIndexArchTest {
         new String[] {"record_creation_template", "updated_by_id"},
         new String[] {"record_creation_template_version", "created_by_id"},
         new String[] {"ai_brief_schedule", "user_id"},
-        new String[] {"ai_watch", "owner_user_id"});
+        new String[] {"ai_watch", "owner_user_id"},
+        new String[] {"sequence", "owner_id"},
+        new String[] {"sequence", "created_by_id"},
+        new String[] {"sequence", "updated_by_id"},
+        new String[] {"sequence_version_publisher", "published_by_id"});
 
     @Autowired private DataSource dataSource;
 

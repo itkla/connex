@@ -133,7 +133,9 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "GoalMapper",
         MAPPERS + "ScheduleMapper",
         MAPPERS + "TenantLifecycleMapper",
-        MAPPERS + "DisqualificationReasonMapper"
+        MAPPERS + "DisqualificationReasonMapper",
+        MAPPERS + "SequenceMapper",
+        MAPPERS + "SequenceVersionMapper"
     );
 
     /**
@@ -297,7 +299,9 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "ReportMapper.clearSnapshotGeneratorsAnywhere",
         MAPPERS + "SuppressionMapper.clearCreatorsAnywhere",
         MAPPERS + "NotificationMapper.bumpStateVersions",
-        MAPPERS + "AiOutputCacheMapper.deleteForPerson"
+        MAPPERS + "AiOutputCacheMapper.deleteForPerson",
+        MAPPERS + "SequenceMapper.clearSequenceUserReferencesAnywhere",
+        MAPPERS + "SequenceMapper.clearSequenceVersionPublishersAnywhere"
     );
 
     private final TenantContext tenantContext;

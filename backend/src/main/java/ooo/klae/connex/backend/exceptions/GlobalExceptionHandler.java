@@ -64,6 +64,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(ex.status()).body(ex.error());
     }
 
+    @ExceptionHandler(SequenceException.class)
+    public ResponseEntity<Map<String, String>> sequence(SequenceException ex) {
+        return ResponseEntity.status(ex.status()).body(codedError(ex.code(), ex.getMessage()));
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<Map<String, String>> notFound(ResourceNotFoundException ex) {
         Map<String, String> body = new LinkedHashMap<>();

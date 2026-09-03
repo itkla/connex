@@ -382,6 +382,11 @@ public final class TenantLifecycleRegistry {
         raw.add(cascade("ai_chat_turn", "ai_chat_session",
             "fk_ai_chat_turn_session",
             link("workspace_id", "workspace_id"), link("session_id", "id")));
+        raw.add(direct("sequence_version_publisher", 621));
+        raw.add(direct("sequence_version", 622));
+        raw.add(direct("sequence_step_content", 623));
+        raw.add(direct("sequence_step", 624));
+        raw.add(direct("sequence", 625));
 
         Map<String, TableLifecycle> byTable = new LinkedHashMap<>();
         for (TableLifecycle declaration : raw) {

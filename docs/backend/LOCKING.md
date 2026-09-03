@@ -29,6 +29,18 @@ Version/rule key discovery is non-locking and Java-sorted before individual exac
 
 Account offboarding takes the union of owner/workflow workspace roots in one ascending pass before membership rows, then disables affected paired/unpaired rules before principal redaction.
 
+## Sequence template authoring
+
+Sequence mutations acquire and revalidate the actor's permission locks before the exact sequence row. The account-deletion reservation check in that locked authorization path is itself a locking read so it cannot establish a stale consistent-read snapshot before later contention. Update and archive then re-read the locked sequence and enforce personal-versus-shared visibility before writing. Publish retains the sequence root, reads draft steps and content with shared locks, and allocates the next version number with a locking maximum query before inserting its immutable definition and hash. Draft replacement remains inside the same transaction.
+
+The `sequence_version` row is physically insert-only: its canonical definition, hash, sequence identity, version number, and creation timestamp are never updated. Publisher attribution lives in `sequence_version_publisher`, a separate mutable pointer whose user reference may be cleared during account erasure without changing any version-row byte.
+
+Sequence aggregate reads, version reads, and preview are non-locking and perform no writes. Each complete authorization-and-payload load runs in one read-only `REPEATABLE_READ` transaction so a visibility change cannot combine stale shared metadata with newly private draft or version content. Preview proves the contact through the workspace-owned, caller-`MemberScope`-filtered person statement before reading any contact field; shared-in, unassigned, other-owner, archived, suspended, and provision-ceased contacts fail closed.
+
+Method-security checks are preliminary because they run before transactional advice. Every sequence
+read repeats active-membership and `SEQUENCE_VIEW` authorization as its first consistent database
+check inside the read transaction, before sequence visibility and payload loading.
+
 ## Workspace member and role mutations
 
 After preliminary authorization:

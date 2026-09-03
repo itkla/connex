@@ -1007,6 +1007,16 @@
     WHERE d.workspace_id = #{workspaceId} AND dp.person_id = #{personId}
   </select>
 
+  <select id="getSequencePreviewDeals" resultMap="DealResult">
+    SELECT <include refid="qualifiedDealColumns"/>
+    FROM deal d
+    JOIN deal_person dp ON dp.deal_id = d.id
+    WHERE d.workspace_id = #{workspaceId}
+      AND dp.person_id = #{personId}
+      <include refid="memberScopePredicate"/>
+    ORDER BY d.id
+  </select>
+
   <select id="getDealsByTagId" resultMap="DealResult">
     SELECT <include refid="qualifiedDealColumns"/>
     FROM deal d

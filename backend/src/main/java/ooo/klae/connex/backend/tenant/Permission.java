@@ -91,7 +91,9 @@ public enum Permission {
      * Inert. There is no workspace-delete endpoint, so this permission must not
      * be granted, displayed, or used as an authorization gate.
      */
-    WORKSPACE_DELETE;
+    WORKSPACE_DELETE,
+    SEQUENCE_VIEW,
+    SEQUENCE_MANAGE;
 
     private static final EnumSet<Permission> INERT = EnumSet.of(SSO_MANAGE, WORKSPACE_DELETE);
     private static final EnumSet<Permission> GRANTABLE = EnumSet.complementOf(INERT);

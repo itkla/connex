@@ -185,7 +185,9 @@ class TenantScopeArchTest {
         // it in every workspace at once, so these two are deliberately cross-workspace deletes keyed
         // on the user alone, exactly like the saved-view and dashboard erasures above.
         "ooo.klae.connex.backend.mappers.AiBriefScheduleMapper.deleteForUserAnywhere",
-        "ooo.klae.connex.backend.mappers.AiWatchMapper.deleteForUserAnywhere"
+        "ooo.klae.connex.backend.mappers.AiWatchMapper.deleteForUserAnywhere",
+        "ooo.klae.connex.backend.mappers.SequenceMapper.clearSequenceUserReferencesAnywhere",
+        "ooo.klae.connex.backend.mappers.SequenceMapper.clearSequenceVersionPublishersAnywhere"
     );
 
     /**

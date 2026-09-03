@@ -48,6 +48,9 @@ class TenantJournalAttributionArchTest {
         assertTrue(AnnotatedElementUtils.hasAnnotation(
             ooo.klae.connex.backend.controllers.GuidedRecordCreationController.class,
             TenantJournalAttributable.class));
+        assertTrue(AnnotatedElementUtils.hasAnnotation(
+            ooo.klae.connex.backend.controllers.SequenceController.class,
+            TenantJournalAttributable.class));
     }
 
     @Test

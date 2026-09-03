@@ -13,8 +13,12 @@ The policy treats these accounts as privileged:
 - active built-in workspace `owner` and `admin` members; and
 - active custom-role members granted any of `AUDIT_READ`, `CAMPAIGN_MANAGE`, `CAMPAIGN_SEND`,
   `CONSENT_MANAGE`, `CUSTOM_FIELD_MANAGE`, `DOCUMENT_MANAGE`, `MEMBER_MANAGE`, `PIPELINE_MANAGE`,
-  `PRODUCT_MANAGE`, `ROLE_MANAGE`, `RULE_MANAGE`, `SHARE_MANAGE`, `TAG_MANAGE`, or
-  `WORKSPACE_SETTINGS`.
+  `PRODUCT_MANAGE`, `ROLE_MANAGE`, `RULE_MANAGE`, `SEQUENCE_MANAGE`, `SHARE_MANAGE`, `TAG_MANAGE`,
+  or `WORKSPACE_SETTINGS`.
+
+`SEQUENCE_MANAGE` is privileged because it authorizes message-template authorship for future
+outbound sales activity; holding it in any workspace makes the account privileged account-wide.
+`SEQUENCE_VIEW` is read-only and does not by itself make an account privileged.
 
 An unenrolled privileged account may read its own account and workspace-membership snapshot, read
 the public capability posture, obtain a CSRF token, list and enroll passkeys, use the recovery

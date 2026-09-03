@@ -24,6 +24,9 @@ import org.springframework.web.bind.annotation.RestController;
 import ooo.klae.connex.backend.services.InteractionHistoryImportService;
 import ooo.klae.connex.backend.services.ProductImportService;
 import ooo.klae.connex.backend.services.RecordCreationTemplateService;
+import ooo.klae.connex.backend.services.SequencePreviewService;
+import ooo.klae.connex.backend.services.SequenceService;
+import ooo.klae.connex.backend.services.SequenceVersionService;
 import ooo.klae.connex.backend.services.WorkflowRunReadService;
 import ooo.klae.connex.backend.services.WorkflowRunOperationService;
 import ooo.klae.connex.backend.services.WorkflowInterventionService;
@@ -67,7 +70,8 @@ class RbacEnforcementArchTest {
         "BusinessCardService", "CampaignService", "CampaignSendService", "ConsentService",
         "SuppressionService", "WarmPathService", "InteractionHistoryImportService",
         "ProductImportService",
-        "RecordCreationTemplateService",
+        "RecordCreationTemplateService", "SequenceService", "SequenceVersionService",
+        "SequencePreviewService",
         "PersonQualificationService", "QualificationCriterionService",
         "DisqualificationReasonService");
 
@@ -118,6 +122,44 @@ class RbacEnforcementArchTest {
         assertTrue(violations.isEmpty(),
             "Every record creation template admin method must require CUSTOM_FIELD_MANAGE: "
                 + violations);
+    }
+
+    @Test
+    void sequenceSurfacesRequireTheirIntendedPermissions() {
+        Map<Class<?>, Map<String, Permission>> surfaces = Map.of(
+            SequenceService.class, Map.of(
+                "list", Permission.SEQUENCE_VIEW,
+                "get", Permission.SEQUENCE_VIEW,
+                "create", Permission.SEQUENCE_MANAGE,
+                "update", Permission.SEQUENCE_MANAGE,
+                "archive", Permission.SEQUENCE_MANAGE),
+            SequenceVersionService.class, Map.of(
+                "publish", Permission.SEQUENCE_MANAGE,
+                "list", Permission.SEQUENCE_VIEW,
+                "get", Permission.SEQUENCE_VIEW),
+            SequencePreviewService.class, Map.of(
+                "mergeFields", Permission.SEQUENCE_VIEW,
+                "preview", Permission.SEQUENCE_VIEW));
+        List<String> violations = new ArrayList<>();
+        for (Map.Entry<Class<?>, Map<String, Permission>> surface : surfaces.entrySet()) {
+            List<Method> publicMethods = java.util.Arrays.stream(surface.getKey().getDeclaredMethods())
+                .filter(method -> Modifier.isPublic(method.getModifiers()))
+                .filter(method -> !method.isSynthetic() && !method.isBridge())
+                .toList();
+            if (publicMethods.size() != surface.getValue().size()) {
+                violations.add(surface.getKey().getSimpleName() + " exposes "
+                    + publicMethods.size() + " public methods");
+            }
+            for (Method method : publicMethods) {
+                RequirePermission annotation = method.getAnnotation(RequirePermission.class);
+                Permission expected = surface.getValue().get(method.getName());
+                if (expected == null || annotation == null || annotation.value() != expected) {
+                    violations.add(surface.getKey().getSimpleName() + "." + method.getName());
+                }
+            }
+        }
+        assertTrue(violations.isEmpty(),
+            "Sequence service methods must carry their pinned SEQUENCE permissions: " + violations);
     }
 
     @Test

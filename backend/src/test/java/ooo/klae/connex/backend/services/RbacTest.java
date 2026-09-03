@@ -55,7 +55,8 @@ class RbacTest extends AbstractServiceTest {
             Permission.REPORT_DELETE,
             Permission.COMMENT_CREATE,
             Permission.COMMENT_MODERATE,
-            Permission.CAMPAIGN_VIEW)));
+            Permission.CAMPAIGN_VIEW,
+            Permission.SEQUENCE_VIEW)));
         assertFalse(memberPerms.contains(Permission.CAMPAIGN_MANAGE));
         assertFalse(memberPerms.contains(Permission.CONSENT_MANAGE));
         assertFalse(memberPerms.contains(Permission.COMPANY_DELETE));
@@ -63,13 +64,17 @@ class RbacTest extends AbstractServiceTest {
         assertFalse(memberPerms.contains(Permission.MEMBER_MANAGE));
         assertFalse(memberPerms.contains(Permission.AI_SESSION_SHARE));
         assertFalse(memberPerms.contains(Permission.AI_SESSION_ADMIN));
+        assertFalse(memberPerms.contains(Permission.SEQUENCE_MANAGE));
 
         User admin = newUser();
         workspaceMapper.addMember(ws.getId(), admin.getId(), "member");
         workspaceMapper.updateMemberRole(ws.getId(), admin.getId(), "admin");
         assertTrue(workspaceService.permissionsFor(ws.getId(), admin.getId())
             .containsAll(Set.of(
-                Permission.AI_SESSION_SHARE, Permission.AI_SESSION_ADMIN)));
+                Permission.AI_SESSION_SHARE,
+                Permission.AI_SESSION_ADMIN,
+                Permission.SEQUENCE_VIEW,
+                Permission.SEQUENCE_MANAGE)));
     }
 
     @Test

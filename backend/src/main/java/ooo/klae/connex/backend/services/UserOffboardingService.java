@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.mappers.RelationshipSignalMapper;
 import ooo.klae.connex.backend.mappers.RecordCommentMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
+import ooo.klae.connex.backend.mappers.SequenceMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
@@ -106,6 +107,7 @@ public class UserOffboardingService {
     private final ProviderCapturePurgeService providerCapturePurgeService;
     private final TenantWorkScope tenantWorkScope;
     private final TenantContext tenantContext;
+    private final SequenceMapper sequenceMapper;
 
     /**
      * Refuses deletion while the user still owns authored content, mirroring
@@ -259,6 +261,7 @@ public class UserOffboardingService {
         personMapper.clearMemberOwnership(workspaceId, userId);
         dealMapper.clearMemberDealOwnership(workspaceId, userId);
         campaignMapper.clearMemberOwnership(workspaceId, userId);
+        sequenceMapper.clearMemberOwnership(workspaceId, userId);
         dealMapper.removeCollaboratorFromWorkspace(workspaceId, userId);
         notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(
             workspaceId, userId);
@@ -359,5 +362,7 @@ public class UserOffboardingService {
         shareMapper.clearPipelineShareGrantedByAnywhere(userId);
         suppressionMapper.clearCreatorsAnywhere(userId);
         relationshipSignalMapper.deleteActorStateAnywhere(userId);
+        sequenceMapper.clearSequenceUserReferencesAnywhere(userId);
+        sequenceMapper.clearSequenceVersionPublishersAnywhere(userId);
     }
 }
