@@ -482,7 +482,8 @@ class IdentityCollisionPlaneRoutingIntegrationTest {
                 "company",
                 "person_identity",
                 "company_identity",
-                "identity_collision")) {
+                "identity_collision",
+                "duplicate_review_decision")) {
             jdbcTemplate.execute(
                 "CREATE TABLE `" + scratch + "`.`" + table
                     + "` LIKE `" + source + "`.`" + table + "`");

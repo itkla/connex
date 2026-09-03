@@ -40,6 +40,7 @@ import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.ConsentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper;
+import ooo.klae.connex.backend.mappers.DuplicateReviewMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
@@ -78,6 +79,7 @@ class UserOffboardingOrderTest {
     @Mock private PersonLifecyclePassMapper personLifecyclePassMapper;
     @Mock private DealMapper dealMapper;
     @Mock private DealDuplicateReviewProofMapper dealDuplicateReviewProofMapper;
+    @Mock private DuplicateReviewMapper duplicateReviewMapper;
     @Mock private ReportMapper reportMapper;
     @Mock private TaskMapper taskMapper;
     @Mock private AttachmentMapper attachmentMapper;
@@ -128,7 +130,8 @@ class UserOffboardingOrderTest {
         InOrder order = inOrder(
             tenantWorkScope, workspaceMapper, providerCapturePurgeService,
             savedViewPreferenceMapper, savedViewMapper,
-            dealDuplicateReviewProofMapper, aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
+            dealDuplicateReviewProofMapper, duplicateReviewMapper,
+            aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             notificationMapper, dealMapper, relationshipSignalMapper);
         order.verify(tenantWorkScope).withWorkspacePlacement(eq(7), any());
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
@@ -138,6 +141,7 @@ class UserOffboardingOrderTest {
         order.verify(savedViewPreferenceMapper).deleteDefaultsForFreshMembership(7, 9);
         order.verify(savedViewMapper).deleteForFreshMembership(7, 9);
         order.verify(dealDuplicateReviewProofMapper).deleteForActor(7, 9);
+        order.verify(duplicateReviewMapper).clearDismissedBy(7, 9);
         order.verify(aiChatMapper).deleteParticipantsForUser(7, 9);
         order.verify(aiBriefScheduleMapper).deleteForUser(7, 9);
         order.verify(aiWatchMapper).deleteForUser(7, 9);
@@ -195,7 +199,8 @@ class UserOffboardingOrderTest {
         InOrder order = inOrder(
             providerCapturePurgeService, notificationMapper,
             savedViewPreferenceMapper, savedViewMapper,
-            dealDuplicateReviewProofMapper, aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
+            dealDuplicateReviewProofMapper, duplicateReviewMapper,
+            aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             taskMapper, companyMapper,
             personMapper, dealMapper, campaignMapper, relationshipSignalMapper);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
@@ -205,6 +210,7 @@ class UserOffboardingOrderTest {
         order.verify(savedViewPreferenceMapper).deleteDefaultsForUser(7, 9);
         order.verify(savedViewMapper).deleteForUser(7, 9);
         order.verify(dealDuplicateReviewProofMapper).deleteForActor(7, 9);
+        order.verify(duplicateReviewMapper).clearDismissedBy(7, 9);
         order.verify(aiChatMapper).deleteParticipantsForUser(7, 9);
         order.verify(aiBriefScheduleMapper).deleteForUser(7, 9);
         order.verify(aiWatchMapper).deleteForUser(7, 9);
@@ -234,7 +240,8 @@ class UserOffboardingOrderTest {
 
         InOrder order = inOrder(
             userMapper, notificationMapper, savedViewPreferenceMapper, savedViewMapper,
-            dealDuplicateReviewProofMapper, aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
+            dealDuplicateReviewProofMapper, duplicateReviewMapper,
+            aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             stateVersionService, companyMapper,
             personMapper, dealMapper, recordCreationTemplateMapper, workflowOffboardingService, suppressionMapper,
             relationshipSignalMapper, recordCommentMapper);
@@ -251,6 +258,7 @@ class UserOffboardingOrderTest {
         order.verify(savedViewPreferenceMapper).deleteDefaultsForUserAnywhere(9);
         order.verify(savedViewMapper).deleteForUserAnywhere(9);
         order.verify(dealDuplicateReviewProofMapper).deleteForActorAnywhere(9);
+        order.verify(duplicateReviewMapper).clearDismissedByAnywhere(9);
         order.verify(aiChatMapper).deleteParticipantsForUserAnywhere(9);
         order.verify(aiChatMapper).clearParticipantInvitersAnywhere(9);
         order.verify(aiBriefScheduleMapper).deleteForUserAnywhere(9);

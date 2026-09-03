@@ -78,6 +78,8 @@ public final class ProcessingRestrictionRegistry {
             "Backfill candidate reads and identity writes exclude both suspended and provision-ceased people.");
         enroll(entries, "IdentityCollisionMapper", RestrictionStrategy.EXCLUDE_RESTRICTED,
             "Collision group reads exclude both suspended and provision-ceased people at read time.");
+        enroll(entries, "DuplicateReviewMapper", RestrictionStrategy.EXCLUDE_RESTRICTED,
+            "Duplicate review pair summaries and materialized groups exclude suspended and provision-ceased people.");
         enroll(entries, "NotificationMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,
             "Notification person projections exclude suspended people.");
         enroll(entries, "IntroductionMapper", RestrictionStrategy.EXCLUDE_SUSPENDED,

@@ -23,7 +23,8 @@ import ooo.klae.connex.backend.services.IdentityBackfillTransaction.IdentityBack
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
- * Rerunnable startup sweep that backfills canonical identities and collision membership.
+ * Rerunnable startup sweep that backfills canonical identities, collision membership, and
+ * materialized duplicate-review state.
  *
  * <p>Control-plane placement resolution stays fatal: a workspace that cannot be pinned to its
  * active catalog must never be swept, because writing tenant data into the wrong catalog is a

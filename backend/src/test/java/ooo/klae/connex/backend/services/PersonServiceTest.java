@@ -204,6 +204,45 @@ class PersonServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void unrestrictReconcilesEditedIdentityBeforeDuplicatePreflight() {
+        String oldEmail = "restricted-old-" + unique() + "@example.com";
+        String newEmail = "restricted-new-" + unique() + "@example.com";
+        Person draft = personDraft(null);
+        draft.setEmail(oldEmail);
+        Person created = personService.create(draft);
+        personService.updateProcessingRestrictions(created.getId(), true, false);
+
+        Person update = personDraft(null);
+        update.setName(created.getName());
+        update.setEmail(newEmail);
+        update.setTitle(created.getTitle());
+        personService.update(created.getId(), update);
+
+        assertEquals(
+            List.of(oldEmail),
+            jdbcTemplate.queryForList(
+                """
+                SELECT normalized_value
+                FROM person_identity
+                WHERE workspace_id = ? AND person_id = ? AND superseded_at IS NULL
+                """,
+                String.class,
+                workspace.getId(),
+                created.getId()));
+
+        personService.updateProcessingRestrictions(created.getId(), false, false);
+
+        DuplicatePreflightResponse oldAddress = duplicatePreflightService.preflightPerson(
+            new PersonDuplicatePreflightRequest(null, List.of(oldEmail), List.of()));
+        DuplicatePreflightResponse newAddress = duplicatePreflightService.preflightPerson(
+            new PersonDuplicatePreflightRequest(null, List.of(newEmail), List.of()));
+        assertTrue(oldAddress.candidates().isEmpty());
+        assertEquals(
+            List.of(created.getId()),
+            newAddress.candidates().stream().map(candidate -> candidate.recordId()).toList());
+    }
+
+    @Test
     void liveEmailChangesRefreshPersonCollisionMembership() {
         String sharedEmail = "live-collision-" + unique() + "@example.com";
         Person first = new Person();

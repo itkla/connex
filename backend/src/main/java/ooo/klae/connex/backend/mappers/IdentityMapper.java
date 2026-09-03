@@ -88,6 +88,18 @@ public interface IdentityMapper {
         @Param("kind") String kind,
         @Param("normalizedValue") String normalizedValue);
 
+    List<Long> lockCurrentPersonIdentityGroupPrefix(
+        @Param("workspaceId") int workspaceId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue,
+        @Param("limit") int limit);
+
+    List<Long> lockCurrentCompanyIdentityGroupPrefix(
+        @Param("workspaceId") int workspaceId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue,
+        @Param("limit") int limit);
+
     PersonIdentityBackfillCandidate lockPersonIdentityParent(
         @Param("workspaceId") int workspaceId,
         @Param("personId") int personId);

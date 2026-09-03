@@ -308,6 +308,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("provider_participant_decision", 394));
         raw.add(direct("identity_collision", 395));
         raw.add(direct("provider_captured_interaction", 396));
+        raw.add(direct("duplicate_review_decision", 399));
         raw.add(direct("activity", 400));
         raw.add(direct("note", 410));
         raw.add(direct("record_comment_reaction", 411));

@@ -46,7 +46,46 @@ public interface IdentityCollisionMapper {
         @Param("normalizedValue") String normalizedValue,
         @Param("rebuiltAt") LocalDateTime rebuiltAt);
 
+    int deletePersonCollisionMembershipsForRecord(
+        @Param("workspaceId") int workspaceId,
+        @Param("personId") int personId);
+
+    int deleteCompanyCollisionMembershipsForRecord(
+        @Param("workspaceId") int workspaceId,
+        @Param("companyId") int companyId);
+
+    int deletePersonSingletonCollisionMember(
+        @Param("workspaceId") int workspaceId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue);
+
+    int deleteCompanySingletonCollisionMember(
+        @Param("workspaceId") int workspaceId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue);
+
+    int ensurePersonCollisionPairForRecord(
+        @Param("workspaceId") int workspaceId,
+        @Param("personId") int personId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue,
+        @Param("rebuiltAt") LocalDateTime rebuiltAt);
+
+    int ensureCompanyCollisionPairForRecord(
+        @Param("workspaceId") int workspaceId,
+        @Param("companyId") int companyId,
+        @Param("kind") String kind,
+        @Param("normalizedValue") String normalizedValue,
+        @Param("rebuiltAt") LocalDateTime rebuiltAt);
+
     long countForWorkspace(@Param("workspaceId") int workspaceId);
+
+    List<IdentityCollisionGroupKey> findVisibleGroupKeysAfter(
+        @Param("workspaceId") int workspaceId,
+        @Param("afterRecordType") String afterRecordType,
+        @Param("afterKind") String afterKind,
+        @Param("afterNormalizedValue") String afterNormalizedValue,
+        @Param("limit") int limit);
 
     List<IdentityCollisionGroupPageRow> findVisibleGroupPage(
         @Param("workspaceId") int workspaceId,

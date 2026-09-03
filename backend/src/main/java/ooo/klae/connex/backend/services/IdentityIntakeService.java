@@ -42,6 +42,7 @@ public class IdentityIntakeService {
 
     private final IdentityMapper identityMapper;
     private final IdentityCollisionMapper identityCollisionMapper;
+    private final DuplicateReviewService duplicateReviewService;
     private final MatchingService matchingService;
     private final Clock clock;
 
@@ -245,6 +246,50 @@ public class IdentityIntakeService {
         insertCompanyGroups(workspaceId, affectedGroups, acquiredAt);
     }
 
+    /**
+     * Reconciles one person's collision visibility and review shape from current persisted state.
+     * All current kinds are included, including imported external IDs.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordPersonVisibility(int workspaceId, int personId) {
+        requireRecord(workspaceId, personId);
+        LocalDateTime rebuiltAt = now();
+        List<IdentityGroup> groups = currentGroups(
+            identityMapper.lockCurrentPersonIdentityKeysForRecord(workspaceId, personId));
+        lockPersonGroupPrefixes(workspaceId, groups);
+        identityCollisionMapper.deletePersonCollisionMembershipsForRecord(workspaceId, personId);
+        for (IdentityGroup group : groups) {
+            identityCollisionMapper.ensurePersonCollisionPairForRecord(
+                workspaceId, personId, group.kind(), group.normalizedValue(), rebuiltAt);
+            identityCollisionMapper.deletePersonSingletonCollisionMember(
+                workspaceId, group.kind(), group.normalizedValue());
+            duplicateReviewService.refreshPersonEvidence(
+                workspaceId, group.kind(), group.normalizedValue(), rebuiltAt);
+        }
+    }
+
+    /**
+     * Reconciles one company's collision visibility and review shape from current persisted state.
+     * All current kinds are included, including imported external IDs.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordCompanyVisibility(int workspaceId, int companyId) {
+        requireRecord(workspaceId, companyId);
+        LocalDateTime rebuiltAt = now();
+        List<IdentityGroup> groups = currentGroups(
+            identityMapper.lockCurrentCompanyIdentityKeysForRecord(workspaceId, companyId));
+        lockCompanyGroupPrefixes(workspaceId, groups);
+        identityCollisionMapper.deleteCompanyCollisionMembershipsForRecord(workspaceId, companyId);
+        for (IdentityGroup group : groups) {
+            identityCollisionMapper.ensureCompanyCollisionPairForRecord(
+                workspaceId, companyId, group.kind(), group.normalizedValue(), rebuiltAt);
+            identityCollisionMapper.deleteCompanySingletonCollisionMember(
+                workspaceId, group.kind(), group.normalizedValue());
+            duplicateReviewService.refreshCompanyEvidence(
+                workspaceId, group.kind(), group.normalizedValue(), rebuiltAt);
+        }
+    }
+
     private void reconcilePersonEmail(
             int workspaceId,
             int personId,
@@ -346,6 +391,21 @@ public class IdentityIntakeService {
             .toList();
     }
 
+    private List<IdentityGroup> currentGroups(List<IdentityKeyRow> currentKeys) {
+        return currentKeys.stream()
+            .map(currentKey -> {
+                IdentityKeyRow required = Objects.requireNonNull(
+                    currentKey, "current identity key");
+                return new IdentityGroup(
+                    Objects.requireNonNull(required.getKind(), "current identity kind"),
+                    Objects.requireNonNull(
+                        required.getNormalizedValue(), "current normalized identity value"));
+            })
+            .distinct()
+            .sorted(IDENTITY_GROUP_ORDER)
+            .toList();
+    }
+
     private static void addGroup(
             List<IdentityGroup> groups,
             boolean acquired,
@@ -370,6 +430,22 @@ public class IdentityIntakeService {
         }
     }
 
+    private void lockPersonGroupPrefixes(int workspaceId, List<IdentityGroup> groups) {
+        int limit = DuplicateReviewService.MAX_GROUP_SIZE_FOR_PAIR_EXPANSION + 1;
+        for (IdentityGroup group : groups) {
+            identityMapper.lockCurrentPersonIdentityGroupPrefix(
+                workspaceId, group.kind(), group.normalizedValue(), limit);
+        }
+    }
+
+    private void lockCompanyGroupPrefixes(int workspaceId, List<IdentityGroup> groups) {
+        int limit = DuplicateReviewService.MAX_GROUP_SIZE_FOR_PAIR_EXPANSION + 1;
+        for (IdentityGroup group : groups) {
+            identityMapper.lockCurrentCompanyIdentityGroupPrefix(
+                workspaceId, group.kind(), group.normalizedValue(), limit);
+        }
+    }
+
     private void deletePersonGroups(int workspaceId, List<IdentityGroup> groups) {
         for (IdentityGroup group : groups) {
             identityCollisionMapper.deletePersonCollisionGroup(
@@ -391,6 +467,8 @@ public class IdentityIntakeService {
         for (IdentityGroup group : groups) {
             identityCollisionMapper.insertPersonCollisionGroup(
                 workspaceId, group.kind(), group.normalizedValue(), rebuiltAt);
+            duplicateReviewService.refreshPersonEvidence(
+                workspaceId, group.kind(), group.normalizedValue(), rebuiltAt);
         }
     }
 
@@ -400,6 +478,8 @@ public class IdentityIntakeService {
             LocalDateTime rebuiltAt) {
         for (IdentityGroup group : groups) {
             identityCollisionMapper.insertCompanyCollisionGroup(
+                workspaceId, group.kind(), group.normalizedValue(), rebuiltAt);
+            duplicateReviewService.refreshCompanyEvidence(
                 workspaceId, group.kind(), group.normalizedValue(), rebuiltAt);
         }
     }
@@ -414,6 +494,12 @@ public class IdentityIntakeService {
             throw new IllegalArgumentException("Identity intake requires a persisted tenant record");
         }
         Objects.requireNonNull(source, "source");
+    }
+
+    private static void requireRecord(int workspaceId, int recordId) {
+        if (workspaceId <= 0 || recordId <= 0) {
+            throw new IllegalArgumentException("Identity intake requires a persisted tenant record");
+        }
     }
 
     private record IdentityGroup(String kind, String normalizedValue) {

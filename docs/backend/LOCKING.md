@@ -134,6 +134,15 @@ For interactive person/company/deal mutation, sharing, imports, OCR, and identit
 9. Lock canonical identity groups in deterministic kind/value order.
 10. Requery/revalidate current identities while locks are held.
 
+Duplicate-review dismissal and reopen are terminal decision writes within this hierarchy. They lock
+and revalidate both the actor's `REPORT_READ` gate and type-specific update permission before entering
+the organization mutex, then lock exactly one current `duplicate_review_decision` row. They take no
+record or canonical
+identity lock. The shared organization mutex serializes the decision against identity maintenance;
+after obtaining it, the service rechecks the evidence fingerprint and current visibility before
+writing. This places the decision row after the organization mutex without introducing an ordering
+edge against record targets or identity groups.
+
 CSV commits claim their one-use review proof first, then lock and revalidate the actor's create
 permission before entering the duplicate-decision hierarchy. This retains the actor's custom-role
 root and permission rows before the organization mutex, so later dependency permission checks are

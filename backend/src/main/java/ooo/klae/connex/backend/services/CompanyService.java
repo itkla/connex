@@ -602,6 +602,7 @@ public class CompanyService {
         if (companyMapper.archive(workspaceId, id) != 1) {
             throw new ResourceNotFoundException("Company not found");
         }
+        identityIntakeService.recordCompanyVisibility(workspaceId, id);
         Company after = requireArchivedCompany(workspaceId, id);
         auditService.record("company.archive", "company", id, before.getName(),
             "Archived company " + before.getName(),
@@ -634,6 +635,7 @@ public class CompanyService {
         identityIntakeService.recordCompany(
             workspaceId, id, after.getWebsite(), after.getPhone(),
             IdentityAcquisitionSource.BACKFILL, null);
+        identityIntakeService.recordCompanyVisibility(workspaceId, id);
         auditService.record("company.restore", "company", id, after.getName(),
             "Restored company " + after.getName(),
             auditService.singleChange("archivedAt", before.getArchivedAt(), null));

@@ -178,6 +178,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertTrue(entries.containsKey("data/company.jsonl"));
         assertTrue(entries.containsKey("data/company_identity.jsonl"));
         assertTrue(entries.containsKey("data/identity_collision.jsonl"));
+        assertTrue(entries.containsKey("data/duplicate_review_decision.jsonl"));
         assertTrue(entries.containsKey("data/deal.jsonl"));
         assertTrue(entries.containsKey("data/activity.jsonl"));
         assertTrue(entries.containsKey("data/note.jsonl"));
@@ -200,6 +201,8 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertTrue(personJsonl.contains("suspended_at"));
         assertTrue(personJsonl.contains("provision_ceased_at"));
         assertTrue(text(entries, "data/person_identity.jsonl").contains("backfill"));
+        assertTrue(text(entries, "data/duplicate_review_decision.jsonl")
+            .contains("evidence_fingerprint"));
         assertTrue(text(entries, "data/ai_chat_session.jsonl").contains(fixture.chatTitle()));
         assertTrue(text(entries, "data/ai_chat_message.jsonl").contains(fixture.chatMessage()));
         assertTrue(text(entries, "data/ai_chat_tool_call.jsonl").contains(fixture.toolName()));
@@ -249,6 +252,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertEquals(0, rowCount("record_creation_template_set"));
         assertEquals(0, rowCount("record_creation_template"));
         assertEquals(0, rowCount("record_creation_template_version"));
+        assertEquals(0, rowCount("duplicate_review_decision"));
         assertFalse(Files.exists(fixture.objectPath()));
         assertEquals(0, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM workspace WHERE id = ?",
@@ -595,6 +599,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertTrue(rowCount("person_identity") > 0);
         assertTrue(rowCount("company_identity") > 0);
         assertTrue(collisionMemberships > 0);
+        assertTrue(rowCount("duplicate_review_decision") > 0);
         String templateName = "Lifecycle template " + unique();
         RecordCreationTemplateDto template = recordCreationTemplateService.create(
             new RecordCreationTemplateCreateRequestDto(
