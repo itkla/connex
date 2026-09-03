@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.controllers;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.List;
 
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -27,6 +29,7 @@ import ooo.klae.connex.backend.dto.ReportComposerPreviewDto;
 import ooo.klae.connex.backend.dto.ReportComposerRequest;
 import ooo.klae.connex.backend.dto.ReportDocumentDto;
 import ooo.klae.connex.backend.dto.ReportGenerateRequest;
+import ooo.klae.connex.backend.dto.ReportKpiDto;
 import ooo.klae.connex.backend.dto.ReportSnapshotDto;
 import ooo.klae.connex.backend.dto.ReportSnapshotSummaryDto;
 import ooo.klae.connex.backend.dto.ReportTemplateDto;
@@ -110,6 +113,24 @@ public class ReportController {
                 id, request, narrativeMode(narrative));
         HttpStatus status = document.generation() == null ? HttpStatus.OK : HttpStatus.ACCEPTED;
         return ResponseEntity.status(status).body(document);
+    }
+
+    /**
+     * Returns an equal-or-unavailable scalar projection of one generated widget. An available
+     * response has the same {@code total} and {@code unit} as full generation for the same saved
+     * configuration and period; an input-ceiling response has null {@code total} and {@code unit}
+     * with reason {@code input_limit_exceeded}.
+     */
+    @GetMapping("/{id}/widgets/{widgetId}/kpi")
+    @RequirePermission(Permission.REPORT_READ)
+    public ReportKpiDto widgetKpi(
+            @PathVariable int id,
+            @PathVariable String widgetId,
+            @RequestParam(name = "start", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate start,
+            @RequestParam(name = "end", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate end) {
+        return reportService.widgetKpi(id, widgetId, new ReportGenerateRequest(start, end));
     }
 
     private static ReportService.NarrativeMode narrativeMode(String narrative) {

@@ -55,6 +55,7 @@ import ooo.klae.connex.backend.dto.ReportDocumentDto;
 import ooo.klae.connex.backend.dto.ReportFilters;
 import ooo.klae.connex.backend.dto.ReportForecastAggregateRow;
 import ooo.klae.connex.backend.dto.ReportGenerateRequest;
+import ooo.klae.connex.backend.dto.ReportKpiDto;
 import ooo.klae.connex.backend.dto.ReportLayoutItem;
 import ooo.klae.connex.backend.dto.ReportNarrativeDto;
 import ooo.klae.connex.backend.dto.ReportOffsetSegment;
@@ -430,6 +431,79 @@ public class ReportService {
     }
 
     /**
+     * Resolves one saved widget as an equal-or-unavailable scalar without generating a narrative.
+     * When available, its total and unit match full report generation for the same configuration
+     * and period. Bounded input exhaustion instead returns null total and unit. The caller must hold
+     * every permission required by the full saved report definition.
+     */
+    @RequirePermission(Permission.REPORT_READ)
+    public ReportKpiDto widgetKpi(int reportId, String widgetId, ReportGenerateRequest request) {
+        ReportDefinition definition = requireDefinition(reportId);
+        for (Permission permission : reportPermissionPolicy.requiredFor(definition)) {
+            workspaceService.requirePermission(permission);
+        }
+        ReportConfig config = parseConfig(definition.getConfigJson());
+        validateConfig(definition.getCadence(), definition.getTemplateKey(), config);
+        PeriodWindow period = resolvePeriod(definition.getCadence(), config.range(), request, config.bucket());
+        validateAttainmentPeriod(config, period);
+        WidgetSelection selected = selectWidget(config, widgetId);
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        GenerationInputs inputs = generationInputs(
+                workspaceId, config, List.of(selected.widget()), period, RiskInputScope.KPI_BOUNDED);
+        if (inputs.riskInputLimitExceeded()) {
+            ReportWidgetDataDto widget = new ReportWidgetDataDto(
+                    selected.widget().id(),
+                    displayTitle(selected.widget()),
+                    selected.widget().chartType(),
+                    selected.widget().dataSource(),
+                    selected.widget().measure(),
+                    selected.widget().groupBy(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    List.of());
+            return reportKpi(definition, period, widget, "input_limit_exceeded");
+        }
+        WidgetResult result = generateWidget(
+                workspaceId,
+                selected.widget(),
+                config.filters(),
+                config.bucket(),
+                period,
+                selected.index(),
+                inputs);
+        return reportKpi(definition, period, result.widget(), result.unavailabilityReason());
+    }
+
+    private ReportKpiDto reportKpi(
+            ReportDefinition definition,
+            PeriodWindow period,
+            ReportWidgetDataDto widget,
+            String unavailabilityReason) {
+        return new ReportKpiDto(
+                definition.getId(),
+                definition.getName(),
+                widget.widgetId(),
+                widget.title(),
+                widget.chartType(),
+                widget.dataSource(),
+                widget.measure(),
+                widget.groupBy(),
+                widget.unit(),
+                widget.total(),
+                widget.priorTotal(),
+                widget.changePercent(),
+                period.start(),
+                period.end(),
+                period.priorStart(),
+                period.priorEnd(),
+                Instant.now(clock).toString(),
+                unavailabilityReason == null,
+                unavailabilityReason);
+    }
+
+    /**
      * Generates interactive figures once and starts a shared asynchronous narrative on a cache miss.
      * The returned handle resolves to a document built from these exact frozen figures.
      */
@@ -767,7 +841,7 @@ public class ReportService {
     private GeneratedFigures generateFigures(int workspaceId, ReportConfig config, PeriodWindow period) {
         List<ReportWidgetDataDto> widgets = new ArrayList<>();
         List<ReportAppendixRowDto> appendix = new ArrayList<>();
-        GenerationInputs inputs = generationInputs(workspaceId, config, period);
+        GenerationInputs inputs = generationInputs(workspaceId, config, config.widgets(), period);
         int widgetIndex = 0;
         for (ReportWidgetConfig widget : config.widgets()) {
             WidgetResult result = generateWidget(
@@ -796,6 +870,16 @@ public class ReportService {
                 widget, widgetIndex, current, prior, effectiveBucket, period,
                 priorComparable(widget, filters),
                 networkAuthoritativeTotalRows(widget, inputs));
+    }
+
+    private static WidgetSelection selectWidget(ReportConfig config, String widgetId) {
+        for (int index = 0; index < config.widgets().size(); index++) {
+            ReportWidgetConfig widget = config.widgets().get(index);
+            if (widget.id().equals(widgetId)) {
+                return new WidgetSelection(widget, index);
+            }
+        }
+        throw new ResourceNotFoundException("Report widget not found with id: " + widgetId);
     }
 
     /**
@@ -934,7 +1018,7 @@ public class ReportService {
             BigDecimal priorValue = priorPointValue(priorRow, priorComparable, undefinedWhenEmpty);
             BigDecimal value = safe(row.value());
             String sourceId = "metric." + widgetIndex + "." + pointIndex++;
-            String unit = normalizedUnit(row.unit());
+            String unit = resolvedUnit(row.unit());
             points.add(new ReportDataPointDto(row.groupKey(), row.groupLabel(), value, priorValue, sourceId));
             appendix.add(new ReportAppendixRowDto(sourceId, widget.id(),
                     widget.measure() + " · " + row.groupLabel(), value, priorValue, unit));
@@ -951,7 +1035,7 @@ public class ReportService {
                     row, widget, bucket, period.priorStart(), period.start());
             BigDecimal priorValue = safe(row.value());
             String sourceId = "metric." + widgetIndex + "." + pointIndex++;
-            String unit = normalizedUnit(row.unit());
+            String unit = resolvedUnit(row.unit());
             points.add(new ReportDataPointDto(
                     alignedRow.groupKey(), alignedRow.groupLabel(), BigDecimal.ZERO, priorValue, sourceId));
             appendix.add(new ReportAppendixRowDto(sourceId, widget.id(),
@@ -977,10 +1061,18 @@ public class ReportService {
             scalarUnits = new LinkedHashSet<>();
             for (ReportAggregateRow row : authoritativeTotalRows) {
                 scalarTotal = scalarTotal.add(safe(row.value()));
-                scalarUnits.add(normalizedUnit(row.unit()));
+                scalarUnits.add(resolvedUnit(row.unit()));
             }
         }
-        BigDecimal publicTotal = scalarUnits.size() <= 1 && additive && !undefinedCurrent ? scalarTotal : null;
+        String unavailabilityReason = null;
+        if (scalarUnits.size() > 1) {
+            unavailabilityReason = "mixed_currency";
+        } else if (!additive) {
+            unavailabilityReason = "non_additive";
+        } else if (undefinedCurrent) {
+            unavailabilityReason = "undefined";
+        }
+        BigDecimal publicTotal = unavailabilityReason == null ? scalarTotal : null;
         BigDecimal publicPrior = units.size() <= 1 && additive && priorTotalDefined ? priorTotal : null;
         BigDecimal change = "attainment".equals(widget.measure())
                 ? attainmentPercent(publicTotal, publicPrior)
@@ -988,7 +1080,7 @@ public class ReportService {
         ReportWidgetDataDto data = new ReportWidgetDataDto(
                 widget.id(), displayTitle(widget), widget.chartType(), widget.dataSource(), widget.measure(),
                 widget.groupBy(), unit, publicTotal, publicPrior, change, List.copyOf(points));
-        return new WidgetResult(data, List.copyOf(appendix));
+        return new WidgetResult(data, List.copyOf(appendix), unavailabilityReason);
     }
 
     /**
@@ -1074,7 +1166,7 @@ public class ReportService {
         for (ReportAggregateRow row : actualRows) {
             int separator = row.groupKey().indexOf(':');
             String suffix = separator >= 0 ? row.groupKey().substring(separator + 1) : row.groupKey();
-            actualByKey.put(normalizedUnit(row.unit()) + ':' + suffix, safe(row.value()));
+            actualByKey.put(resolvedUnit(row.unit()) + ':' + suffix, safe(row.value()));
         }
         String group = normalizeGroup(widget.groupBy());
         List<ReportAggregateRow> current = new ArrayList<>();
@@ -1089,7 +1181,7 @@ public class ReportService {
                     && !filters.ownerIds().isEmpty() && !filters.ownerIds().contains(goal.getOwnerId())) {
                 continue;
             }
-            String currency = normalizedUnit(goal.getCurrency());
+            String currency = resolvedUnit(goal.getCurrency());
             String ownerKey = goal.getOwnerId() == null ? "total" : Integer.toString(goal.getOwnerId());
             String key = currency + ':' + ownerKey;
             if (!emitted.add(key)) {
@@ -1182,8 +1274,7 @@ public class ReportService {
             String level = "risk".equals(normalizeGroup(widget.groupBy())) ? risk.getLevel() : "total";
             idsByLevel.computeIfAbsent(level, ignored -> new ArrayList<>()).add(risk.getDealId());
         }
-        Map<String, BigDecimal> values = new LinkedHashMap<>();
-        Map<String, String> labels = new LinkedHashMap<>();
+        Map<RiskRowKey, BigDecimal> values = new LinkedHashMap<>();
         LocalDateTime startUtc = LocalDateTime.ofInstant(start.atStartOfDay(zone).toInstant(), ZoneOffset.UTC);
         LocalDateTime endUtc = LocalDateTime.ofInstant(end.plusDays(1).atStartOfDay(zone).toInstant(), ZoneOffset.UTC);
         for (Map.Entry<String, List<Integer>> entry : idsByLevel.entrySet()) {
@@ -1201,18 +1292,16 @@ public class ReportService {
                         zone,
                         batch);
                 for (ReportAggregateRow row : reportMapper.aggregateDeals(query)) {
-                    String currency = normalizedUnit(row.unit());
-                    String key = currency + ':' + entry.getKey();
+                    RiskRowKey key = new RiskRowKey(resolvedUnit(row.unit()), entry.getKey());
                     values.merge(key, safe(row.value()), BigDecimal::add);
-                    labels.put(key, currency + " · " + title(entry.getKey()));
                 }
             }
         }
         return values.entrySet().stream()
                 .map(entry -> new ReportAggregateRow(
-                        entry.getKey(),
-                        labels.get(entry.getKey()),
-                        entry.getKey().substring(0, entry.getKey().indexOf(':')),
+                        entry.getKey().currency() + ':' + entry.getKey().level(),
+                        entry.getKey().currency() + " · " + title(entry.getKey().level()),
+                        entry.getKey().currency(),
                         entry.getValue()))
                 .toList();
     }
@@ -1260,21 +1349,39 @@ public class ReportService {
                 })).toList();
     }
 
-    private GenerationInputs generationInputs(int workspaceId, ReportConfig config, PeriodWindow period) {
-        boolean contactRelationships = config.widgets().stream()
+    private GenerationInputs generationInputs(
+            int workspaceId,
+            ReportConfig config,
+            List<ReportWidgetConfig> requestedWidgets,
+            PeriodWindow period) {
+        return generationInputs(workspaceId, config, requestedWidgets, period, RiskInputScope.COMPLETE);
+    }
+
+    private GenerationInputs generationInputs(
+            int workspaceId,
+            ReportConfig config,
+            List<ReportWidgetConfig> requestedWidgets,
+            PeriodWindow period,
+            RiskInputScope riskInputScope) {
+        boolean contactRelationships = requestedWidgets.stream()
                 .anyMatch(widget -> "relationships".equals(widget.dataSource())
                         && "count".equals(widget.measure()));
-        boolean companyRelationships = config.widgets().stream()
+        boolean companyRelationships = requestedWidgets.stream()
                 .anyMatch(widget -> "relationships".equals(widget.dataSource())
                         && "company_count".equals(widget.measure()));
-        boolean risk = config.widgets().stream()
+        boolean risk = requestedWidgets.stream()
                 .anyMatch(widget -> "at_risk_revenue".equals(widget.measure()));
-        boolean owners = config.widgets().stream()
+        boolean owners = requestedWidgets.stream()
                 .anyMatch(widget -> "owner".equals(normalizeGroup(widget.groupBy())));
-        List<ReportWidgetConfig> warmIntroWidgets = config.widgets().stream()
-                .filter(widget -> WARM_INTRO_MEASURES.contains(widget.measure()))
-                .toList();
-        boolean includeReverseIntros = config.widgets().stream()
+        boolean network = requestedWidgets.stream()
+                .anyMatch(widget -> WARM_INTRO_MEASURES.contains(widget.measure())
+                        || REVERSE_INTRO_MEASURES.contains(widget.measure()));
+        List<ReportWidgetConfig> warmIntroWidgets = network
+                ? config.widgets().stream()
+                        .filter(widget -> WARM_INTRO_MEASURES.contains(widget.measure()))
+                        .toList()
+                : List.of();
+        boolean includeReverseIntros = network && config.widgets().stream()
                 .anyMatch(widget -> REVERSE_INTRO_MEASURES.contains(widget.measure()));
         ReportNetworkService.NetworkSnapshot networkSnapshot;
         if (warmIntroWidgets.isEmpty()) {
@@ -1340,12 +1447,22 @@ public class ReportService {
                 ownerLabels.put(Integer.toString(user.getId()), user.getDisplayName());
             }
         }
+        DealRiskService.BoundedRiskAssessment boundedRiskAssessment =
+                risk && riskInputScope == RiskInputScope.KPI_BOUNDED
+                        ? dealRiskService.assessBoundedWorkspace(workspaceId)
+                        : null;
+        List<DealRiskDto> risks = !risk
+                ? List.of()
+                : boundedRiskAssessment == null
+                        ? dealRiskService.assessWorkspace(workspaceId)
+                        : boundedRiskAssessment.assessments();
         return new GenerationInputs(
                 currentRelationships,
                 priorRelationships,
                 currentCompanyRelationships,
                 priorCompanyRelationships,
-                risk ? dealRiskService.assessWorkspace(workspaceId) : List.of(),
+                risks,
+                boundedRiskAssessment != null && boundedRiskAssessment.inputLimitExceeded(),
                 networkSnapshot.warmIntroOpportunities(),
                 networkSnapshot.reverseIntroSuggestions(),
                 Map.copyOf(ownerLabels),
@@ -1818,7 +1935,7 @@ public class ReportService {
             ReportAppendixRowDto source = sources.get(sourceId);
             if (source != null) {
                 result.add(new ReportCitationDto(source.sourceId(), source.widgetId(), source.label(),
-                        source.value(), source.priorValue(), source.unit()));
+                        source.value(), source.priorValue(), resolvedUnit(source.unit())));
             }
         }
         return List.copyOf(result);
@@ -1856,7 +1973,7 @@ public class ReportService {
     }
 
     private static String rowKey(ReportAggregateRow row) {
-        return row.groupKey() + '\u0000' + row.unit();
+        return resolvedComparisonGroupKey(row) + '\u0000' + resolvedUnit(row.unit());
     }
 
     private static String comparisonKey(
@@ -1872,8 +1989,17 @@ public class ReportService {
             case "month" -> ChronoUnit.MONTHS.between(periodAnchor, bucketDate);
             default -> throw new BadRequestException("Invalid report bucket: " + bucket);
         };
-        return position + "\u0000" + dateGroupPartition(row.groupKey())
-                + "\u0000" + normalizedUnit(row.unit());
+        return position + "\u0000" + dateGroupPartition(resolvedComparisonGroupKey(row))
+                + "\u0000" + resolvedUnit(row.unit());
+    }
+
+    private static String resolvedComparisonGroupKey(ReportAggregateRow row) {
+        String rawUnit = row.unit() == null ? "" : row.unit().strip();
+        String rawPrefix = rawUnit + ':';
+        if (rawUnit.isEmpty() || !row.groupKey().startsWith(rawPrefix)) {
+            return row.groupKey();
+        }
+        return resolvedUnit(row.unit()) + row.groupKey().substring(rawUnit.length());
     }
 
     private static String dateGroupPartition(String groupKey) {
@@ -1952,6 +2078,11 @@ public class ReportService {
         return unit.matches("[A-Za-z]{3,8}") ? unit.toUpperCase(Locale.ROOT) : "currency";
     }
 
+    private static String resolvedUnit(String value) {
+        String unit = normalizedUnit(value);
+        return "currency".equals(unit) ? value.strip() : unit;
+    }
+
     private static String normalizeGroup(String value) {
         String normalized = normalized(value);
         return normalized == null || normalized.isBlank() ? "none" : normalized;
@@ -1964,7 +2095,21 @@ public class ReportService {
     private record ValidatedDefinition(String cadence, String templateKey, String configJson) {
     }
 
-    private record WidgetResult(ReportWidgetDataDto widget, List<ReportAppendixRowDto> appendix) {
+    private record WidgetSelection(ReportWidgetConfig widget, int index) {
+    }
+
+    private record RiskRowKey(String currency, String level) {
+    }
+
+    private enum RiskInputScope {
+        COMPLETE,
+        KPI_BOUNDED
+    }
+
+    private record WidgetResult(
+            ReportWidgetDataDto widget,
+            List<ReportAppendixRowDto> appendix,
+            String unavailabilityReason) {
     }
 
     private record GenerationInputs(
@@ -1973,6 +2118,7 @@ public class ReportService {
             List<RelationshipTemperatureDto> currentCompanyRelationships,
             List<RelationshipTemperatureDto> priorCompanyRelationships,
             List<DealRiskDto> risks,
+            boolean riskInputLimitExceeded,
             List<ReportNetworkService.WarmIntroOpportunity> warmIntroOpportunities,
             List<IntroSuggestionDto> reverseIntroSuggestions,
             Map<String, String> ownerLabels,

@@ -116,6 +116,26 @@ class ReportPermissionPolicyTest {
     }
 
     @Test
+    void persistedDefinitionRequiresGoalReadWhenAttainmentHasAnOrdinarySibling() throws JacksonException {
+        List<ReportWidgetConfig> widgets = List.of(
+                new ReportWidgetConfig("deals", "Deals", "deals", "count", "none", "kpi"),
+                new ReportWidgetConfig(
+                        "attainment", "Attainment", "deals", "attainment", "none", "kpi"));
+        ReportConfig config = new ReportConfig(
+                widgets,
+                new ReportFilters(null, null, null, null, null),
+                null,
+                "month",
+                List.of(
+                        new ReportLayoutItem("deals", 0, 0, 6, 4),
+                        new ReportLayoutItem("attainment", 6, 0, 6, 4)));
+
+        assertEquals(
+                Set.of(Permission.REPORT_READ, Permission.GOAL_READ),
+                policy.requiredFor(definition(config)));
+    }
+
+    @Test
     void malformedPersistedConfigurationsFailClosed() {
         ReportDefinition definition = new ReportDefinition();
         definition.setCadence("monthly");

@@ -122,6 +122,16 @@ public class DealRiskService {
     public record NotificationRiskState(DealRiskDto assessment, String sourceStateHash) {}
 
     /**
+     * Complete bounded risk assessments, or an empty result when the candidate ceiling was
+     * exceeded and publishing a partial aggregate would be misleading.
+     * @param assessments complete assessments within the candidate ceiling
+     * @param inputLimitExceeded whether eligible candidates exceeded the ceiling
+     */
+    public record BoundedRiskAssessment(
+            List<DealRiskDto> assessments,
+            boolean inputLimitExceeded) {}
+
+    /**
      * Assesses every open deal in the workspace and returns only those with at least one risk
      * factor, ordered by descending {@link DealRiskDto#getScore() score}.
      */
@@ -237,6 +247,15 @@ public class DealRiskService {
         }
         assessments.sort(Comparator.comparingInt(DealRiskDto::getScore).reversed());
         return assessments;
+    }
+
+    /** Returns complete workspace risk assessments only when the interactive ceiling is not exceeded. */
+    public BoundedRiskAssessment assessBoundedWorkspace(int workspaceId) {
+        RiskCandidateBatch candidates = riskCandidates(workspaceId, MemberScope.allTeam());
+        if (candidates.truncated()) {
+            return new BoundedRiskAssessment(List.of(), true);
+        }
+        return new BoundedRiskAssessment(assessDeals(workspaceId, candidates.ids()), false);
     }
 
     /** Returns the highest-risk dashboard deals from a fixed candidate ceiling. */
