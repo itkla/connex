@@ -3,10 +3,15 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.doAnswer;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -16,12 +21,22 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
 
-import org.mybatis.spring.SqlSessionTemplate;
+import org.apache.ibatis.executor.Executor;
+import org.apache.ibatis.mapping.MappedStatement;
+import org.apache.ibatis.plugin.Interceptor;
+import org.apache.ibatis.plugin.Intercepts;
+import org.apache.ibatis.plugin.Invocation;
+import org.apache.ibatis.plugin.Signature;
+import org.apache.ibatis.session.ResultHandler;
+import org.apache.ibatis.session.RowBounds;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -29,7 +44,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
@@ -51,12 +65,22 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 
 /** Real-transaction proofs for vocabulary materialization and lifecycle/configuration serialization. */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@Import(DisqualificationReasonMaterializationConcurrencyTest.ProbeConfiguration.class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class DisqualificationReasonMaterializationConcurrencyTest {
+    private static final String WORKSPACE_LOCK =
+        WorkspaceMapper.class.getName() + ".lockActiveIdentity";
+    private static final String REASON_LOCK_BY_ID =
+        DisqualificationReasonMapper.class.getName() + ".getByIdForUpdate";
+    private static final String REASON_LOCK_BY_CODE =
+        DisqualificationReasonMapper.class.getName() + ".getByCodeForUpdate";
+    private static final String REASON_INSERT_BUILT_IN =
+        DisqualificationReasonMapper.class.getName() + ".insertBuiltIn";
+
     @Autowired private DisqualificationReasonService reasonService;
     @Autowired private OrganizationMapper organizationMapper;
-    @MockitoSpyBean private WorkspaceMapper workspaceMapper;
+    @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private UserMapper userMapper;
     @Autowired private TenantContext tenantContext;
     @Autowired private JdbcTemplate jdbcTemplate;
@@ -64,15 +88,13 @@ class DisqualificationReasonMaterializationConcurrencyTest {
     @Autowired private WorkspaceService workspaceService;
     @Autowired private PersonLifecycleService personLifecycleService;
     @Autowired private PersonMapper personMapper;
-    @Autowired private SqlSessionTemplate sqlSessionTemplate;
-    @MockitoSpyBean private DisqualificationReasonMapper reasonMapperSpy;
+    @Autowired private StatementProbe statementProbe;
 
     private Organization organization;
     private Workspace workspace;
     private User owner;
     private User firstMember;
     private User secondMember;
-    private final ThreadLocal<String> operation = new ThreadLocal<>();
 
     @BeforeEach
     void setUp() {
@@ -117,7 +139,6 @@ class DisqualificationReasonMaterializationConcurrencyTest {
         SecurityContextHolder.clearContext();
         RequestContextHolder.resetRequestAttributes();
         tenantContext.clear();
-        operation.remove();
         jdbcTemplate.update("DELETE FROM person WHERE workspace_id = ?", workspace.getId());
         jdbcTemplate.update(
             "DELETE FROM disqualification_reason WHERE workspace_id = ?", workspace.getId());
@@ -149,33 +170,28 @@ class DisqualificationReasonMaterializationConcurrencyTest {
         CountDownLatch releaseArchive = new CountDownLatch(1);
         CountDownLatch lifecycleMutexRequested = new CountDownLatch(1);
         AtomicLong lifecycleConnectionId = new AtomicLong();
-        DisqualificationReasonMapper realMapper =
-            sqlSessionTemplate.getMapper(DisqualificationReasonMapper.class);
-        WorkspaceMapper realWorkspaceMapper = sqlSessionTemplate.getMapper(WorkspaceMapper.class);
-        doAnswer(invocation -> {
-            var locked = realMapper.getByIdForUpdate(workspace.getId(), reason.id());
-            if ("archive".equals(operation.get())) {
+        ProbePlan archiveProbe = ProbePlan.after(REASON_LOCK_BY_ID, (invocation, result) -> {
+            if (hasParameter(invocation, "workspaceId", workspace.getId())
+                    && hasParameter(invocation, "id", reason.id())) {
                 reasonLocked.countDown();
                 assertTrue(releaseArchive.await(30, TimeUnit.SECONDS));
             }
-            return locked;
-        }).when(reasonMapperSpy).getByIdForUpdate(workspace.getId(), reason.id());
-        doAnswer(invocation -> {
-            if ("lifecycle".equals(operation.get())) {
-                lifecycleConnectionId.set(currentConnectionId());
+        });
+        ProbePlan lifecycleProbe = ProbePlan.before(WORKSPACE_LOCK, (invocation, executor) -> {
+            if (hasParameter(invocation, "workspaceId", workspace.getId())) {
+                lifecycleConnectionId.set(currentConnectionId(executor));
                 lifecycleMutexRequested.countDown();
             }
-            return realWorkspaceMapper.lockActiveIdentity(workspace.getId());
-        }).when(workspaceMapper).lockActiveIdentity(workspace.getId());
+        });
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Future<?> archive = executor.submit(() -> asMember(firstMember, "archive", () -> {
+            Future<?> archive = executor.submit(() -> asMember(firstMember, archiveProbe, () -> {
                 reasonService.archive(reason.id());
                 return null;
             }));
             assertTrue(reasonLocked.await(10, TimeUnit.SECONDS));
-            Future<?> disqualify = executor.submit(() -> asMember(secondMember, "lifecycle", () -> {
+            Future<?> disqualify = executor.submit(() -> asMember(secondMember, lifecycleProbe, () -> {
                 PersonLifecycleRequest request = new PersonLifecycleRequest();
                 request.setStage(PersonLifecycleStage.DISQUALIFIED);
                 request.setReason(reason.code());
@@ -203,38 +219,28 @@ class DisqualificationReasonMaterializationConcurrencyTest {
         CountDownLatch releaseFirstInsert = new CountDownLatch(1);
         CountDownLatch secondMutexRequested = new CountDownLatch(1);
         AtomicLong secondConnectionId = new AtomicLong();
-        DisqualificationReasonMapper realMapper =
-            sqlSessionTemplate.getMapper(DisqualificationReasonMapper.class);
-        WorkspaceMapper realWorkspaceMapper = sqlSessionTemplate.getMapper(WorkspaceMapper.class);
-        doAnswer(invocation -> {
-            if ("second-edit".equals(operation.get())) {
-                secondConnectionId.set(currentConnectionId());
+        ProbePlan secondEditProbe = ProbePlan.before(WORKSPACE_LOCK, (invocation, executor) -> {
+            if (hasParameter(invocation, "workspaceId", workspace.getId())) {
+                secondConnectionId.set(currentConnectionId(executor));
                 secondMutexRequested.countDown();
             }
-            return realWorkspaceMapper.lockActiveIdentity(workspace.getId());
-        }).when(workspaceMapper).lockActiveIdentity(workspace.getId());
-        doAnswer(invocation -> {
-            String code = invocation.getArgument(1);
-            if (PersonDisqualificationReason.NO_BUDGET.equals(code)
-                    && "first-edit".equals(operation.get())) {
+        });
+        ProbePlan firstEditProbe = ProbePlan.before(REASON_INSERT_BUILT_IN, (invocation, ignored) -> {
+            if (hasParameter(invocation, "workspaceId", workspace.getId())
+                    && hasParameter(
+                        invocation, "code", PersonDisqualificationReason.NO_BUDGET)) {
                 firstInsertReached.countDown();
                 assertTrue(releaseFirstInsert.await(30, TimeUnit.SECONDS));
             }
-            return realMapper.insertBuiltIn(
-                invocation.getArgument(0), code, invocation.getArgument(2), invocation.getArgument(3));
-        }).when(reasonMapperSpy).insertBuiltIn(
-            org.mockito.ArgumentMatchers.anyInt(),
-            org.mockito.ArgumentMatchers.anyString(),
-            org.mockito.ArgumentMatchers.anyBoolean(),
-            org.mockito.ArgumentMatchers.anyInt());
+        });
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Future<?> first = executor.submit(() -> asMember(firstMember, "first-edit", () -> {
+            Future<?> first = executor.submit(() -> asMember(firstMember, firstEditProbe, () -> {
                 editFallback("Budget unavailable");
                 return null;
             }));
             assertTrue(firstInsertReached.await(10, TimeUnit.SECONDS));
-            Future<?> second = executor.submit(() -> asMember(secondMember, "second-edit", () -> {
+            Future<?> second = executor.submit(() -> asMember(secondMember, secondEditProbe, () -> {
                 editFallback("No budget available");
                 return null;
             }));
@@ -271,31 +277,24 @@ class DisqualificationReasonMaterializationConcurrencyTest {
         CountDownLatch releaseLifecycleMiss = new CountDownLatch(1);
         CountDownLatch editMutexRequested = new CountDownLatch(1);
         AtomicLong editConnectionId = new AtomicLong();
-        DisqualificationReasonMapper realReasonMapper =
-            sqlSessionTemplate.getMapper(DisqualificationReasonMapper.class);
-        WorkspaceMapper realWorkspaceMapper = sqlSessionTemplate.getMapper(WorkspaceMapper.class);
-        doAnswer(invocation -> {
-            if ("first-edit".equals(operation.get())) {
-                editConnectionId.set(currentConnectionId());
+        ProbePlan firstEditProbe = ProbePlan.before(WORKSPACE_LOCK, (invocation, executor) -> {
+            if (hasParameter(invocation, "workspaceId", workspace.getId())) {
+                editConnectionId.set(currentConnectionId(executor));
                 editMutexRequested.countDown();
             }
-            return realWorkspaceMapper.lockActiveIdentity(workspace.getId());
-        }).when(workspaceMapper).lockActiveIdentity(workspace.getId());
-        doAnswer(invocation -> {
-            var locked = realReasonMapper.getByCodeForUpdate(
-                workspace.getId(), PersonDisqualificationReason.NO_FIT);
-            if ("lifecycle".equals(operation.get())) {
-                assertNull(locked);
+        });
+        ProbePlan lifecycleProbe = ProbePlan.after(REASON_LOCK_BY_CODE, (invocation, result) -> {
+            if (hasParameter(invocation, "workspaceId", workspace.getId())
+                    && hasParameter(invocation, "code", PersonDisqualificationReason.NO_FIT)) {
+                assertNull(singleResult(result));
                 lifecycleMissObserved.countDown();
                 assertTrue(releaseLifecycleMiss.await(30, TimeUnit.SECONDS));
             }
-            return locked;
-        }).when(reasonMapperSpy).getByCodeForUpdate(
-            workspace.getId(), PersonDisqualificationReason.NO_FIT);
+        });
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Future<?> lifecycle = executor.submit(() -> asMember(firstMember, "lifecycle", () -> {
+            Future<?> lifecycle = executor.submit(() -> asMember(firstMember, lifecycleProbe, () -> {
                 PersonLifecycleRequest request = new PersonLifecycleRequest();
                 request.setStage(PersonLifecycleStage.DISQUALIFIED);
                 request.setReason(PersonDisqualificationReason.NO_FIT);
@@ -303,7 +302,7 @@ class DisqualificationReasonMaterializationConcurrencyTest {
                 return null;
             }));
             assertTrue(lifecycleMissObserved.await(10, TimeUnit.SECONDS));
-            Future<?> firstEdit = executor.submit(() -> asMember(secondMember, "first-edit", () -> {
+            Future<?> firstEdit = executor.submit(() -> asMember(secondMember, firstEditProbe, () -> {
                 DisqualificationReasonRequest request = request(
                     PersonDisqualificationReason.NO_FIT, "Fit changed after transition", true, 1);
                 reasonService.update(-2, request);
@@ -339,12 +338,39 @@ class DisqualificationReasonMaterializationConcurrencyTest {
         reasonService.update(-1, request);
     }
 
-    private long currentConnectionId() {
-        Long connectionId = jdbcTemplate.queryForObject("SELECT CONNECTION_ID()", Long.class);
-        if (connectionId == null) {
-            throw new AssertionError("MySQL did not return the current connection id");
+    private static long currentConnectionId(Executor executor) throws SQLException {
+        try (Statement statement = executor.getTransaction().getConnection().createStatement();
+                ResultSet result = statement.executeQuery("SELECT CONNECTION_ID()")) {
+            if (!result.next()) {
+                throw new AssertionError("MySQL did not return the current connection id");
+            }
+            long connectionId = result.getLong(1);
+            if (result.wasNull()) {
+                throw new AssertionError("MySQL did not return the current connection id");
+            }
+            return connectionId;
         }
-        return connectionId;
+    }
+
+    private static Object singleResult(Object result) {
+        if (!(result instanceof List<?> rows)) {
+            throw new AssertionError("A MyBatis query probe did not receive a result list");
+        }
+        if (rows.isEmpty()) {
+            return null;
+        }
+        if (rows.size() != 1) {
+            throw new AssertionError("A single-row mapper query returned multiple rows");
+        }
+        return rows.getFirst();
+    }
+
+    private static boolean hasParameter(Invocation invocation, String name, Object expected) {
+        Object parameter = invocation.getArgs()[1];
+        if (!(parameter instanceof Map<?, ?> parameters)) {
+            return false;
+        }
+        return Objects.equals(expected, parameters.get(name));
     }
 
     private void awaitMySqlWorkspaceMutex(long connectionId, int workspaceId) {
@@ -393,8 +419,10 @@ class DisqualificationReasonMaterializationConcurrencyTest {
     }
 
     private static void releaseAndShutDown(
-            ExecutorService executor, CountDownLatch release) throws InterruptedException {
-        release.countDown();
+            ExecutorService executor, CountDownLatch... releases) throws InterruptedException {
+        for (CountDownLatch release : releases) {
+            release.countDown();
+        }
         executor.shutdown();
         if (!executor.awaitTermination(20, TimeUnit.SECONDS)) {
             executor.shutdownNow();
@@ -404,18 +432,15 @@ class DisqualificationReasonMaterializationConcurrencyTest {
         }
     }
 
-    private <T> T asMember(
-            User actor, String action, java.util.concurrent.Callable<T> work) {
-        operation.set(action);
+    private <T> T asMember(User actor, ProbePlan probe, Callable<T> work) {
         authenticate(actor);
         try {
-            return work.call();
+            return statementProbe.execute(probe, work);
         } catch (RuntimeException exception) {
             throw exception;
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         } finally {
-            operation.remove();
             SecurityContextHolder.clearContext();
             RequestContextHolder.resetRequestAttributes();
             tenantContext.clear();
@@ -457,5 +482,73 @@ class DisqualificationReasonMaterializationConcurrencyTest {
         tenantContext.set(
             workspace.getId(), organization.getId(), user.getId(),
             workspaceMapper.getRole(workspace.getId(), user.getId()), null);
+    }
+
+    private record ProbePlan(String statementId, BeforeProbe before, AfterProbe after) {
+        static ProbePlan before(String statementId, BeforeProbe before) {
+            return new ProbePlan(statementId, before, (invocation, result) -> {
+            });
+        }
+
+        static ProbePlan after(String statementId, AfterProbe after) {
+            return new ProbePlan(statementId, (invocation, executor) -> {
+            }, after);
+        }
+    }
+
+    @FunctionalInterface
+    private interface BeforeProbe {
+        void execute(Invocation invocation, Executor executor) throws Throwable;
+    }
+
+    @FunctionalInterface
+    private interface AfterProbe {
+        void execute(Invocation invocation, Object result) throws Throwable;
+    }
+
+    @Intercepts({
+        @Signature(type = Executor.class, method = "update",
+            args = { MappedStatement.class, Object.class }),
+        @Signature(type = Executor.class, method = "query",
+            args = { MappedStatement.class, Object.class, RowBounds.class, ResultHandler.class })
+    })
+    static final class StatementProbe implements Interceptor {
+        private final ThreadLocal<ProbePlan> armed = new ThreadLocal<>();
+
+        @Override
+        public Object intercept(Invocation invocation) throws Throwable {
+            ProbePlan probe = armed.get();
+            MappedStatement statement = (MappedStatement) invocation.getArgs()[0];
+            if (probe == null || !probe.statementId().equals(statement.getId())) {
+                return invocation.proceed();
+            }
+            if (!(invocation.getTarget() instanceof Executor executor)) {
+                throw new AssertionError("A MyBatis statement probe requires an Executor target");
+            }
+            probe.before().execute(invocation, executor);
+            Object result = invocation.proceed();
+            probe.after().execute(invocation, result);
+            return result;
+        }
+
+        <T> T execute(ProbePlan probe, Callable<T> work) throws Exception {
+            if (armed.get() != null) {
+                throw new IllegalStateException("A statement probe is already armed on this thread");
+            }
+            armed.set(probe);
+            try {
+                return work.call();
+            } finally {
+                armed.remove();
+            }
+        }
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class ProbeConfiguration {
+        @Bean
+        StatementProbe statementProbe() {
+            return new StatementProbe();
+        }
     }
 }
