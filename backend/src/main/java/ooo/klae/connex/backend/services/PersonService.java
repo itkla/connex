@@ -662,6 +662,11 @@ public class PersonService {
         boolean wasVisible = before.getSuspendedAt() == null && before.getProvisionCeasedAt() == null;
         boolean isVisible = after.getSuspendedAt() == null && after.getProvisionCeasedAt() == null;
         if (wasVisible != isVisible) {
+            if (isVisible) {
+                identityIntakeService.recordPerson(
+                    workspaceId, id, after.getEmail(), after.getPhone(),
+                    IdentityAcquisitionSource.INTERACTIVE_UPDATE, null);
+            }
             identityIntakeService.recordPersonVisibility(workspaceId, id);
         }
         if (after.getSuspendedAt() == null && after.getProvisionCeasedAt() == null) {
