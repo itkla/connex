@@ -115,12 +115,17 @@ public class WorkflowService {
             request.getExecutionMode(),
             request.getDefinition(),
             request.getCanvas());
-        lockAuthoringPrincipals(
+        LockedPrincipals principals = lockAuthoringPrincipals(
             workspaceId,
             actorId,
             draft.executionMode(),
             new TreeSet<>(List.of(actorId, runAsUserId)),
             "user".equals(draft.executionMode()) ? Set.of(runAsUserId) : Set.of());
+        Set<Permission> requiredPermissions = workflowDefinitionValidator.validateForMutation(
+            draft.recordType(),
+            draft.executionMode(),
+            canonicalizer.parseDefinition(draft.definitionJson()));
+        principals.requirePermissions(requiredPermissions);
 
         Workflow workflow = new Workflow();
         workflow.setWorkspaceId(workspaceId);
@@ -187,6 +192,11 @@ public class WorkflowService {
             "user".equals(draft.executionMode())
                 ? Set.of(discoveredRunAsUserId)
                 : Set.of());
+        Set<Permission> requiredPermissions = workflowDefinitionValidator.validateForMutation(
+            draft.recordType(),
+            draft.executionMode(),
+            canonicalizer.parseDefinition(draft.definitionJson()));
+        principals.requirePermissions(requiredPermissions);
         Workflow existing = requireWorkflowForUpdate(workspaceId, id);
         requireMutable(existing);
         requireStableAuthorizationDiscovery(discovered, existing);

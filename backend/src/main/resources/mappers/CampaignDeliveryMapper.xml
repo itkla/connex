@@ -83,6 +83,16 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
+  <select id="getDeliveryIdentity" resultType="CampaignDelivery">
+    SELECT id, workspace_id, person_id FROM campaign_delivery
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getBySendAndPerson" resultType="CampaignDelivery">
+    SELECT <include refid="deliveryColumns"/> FROM campaign_delivery
+    WHERE workspace_id = #{workspaceId} AND send_id = #{sendId} AND person_id = #{personId}
+  </select>
+
   <select id="getByToken" resultType="CampaignDelivery">
     SELECT <include refid="deliveryColumns"/> FROM campaign_delivery
     WHERE unsubscribe_token = #{token}
@@ -101,6 +111,13 @@
     ORDER BY id
   </select>
 
+  <select id="pendingDeliveryIdsPage" resultType="int">
+    SELECT id FROM campaign_delivery
+    WHERE workspace_id = #{workspaceId} AND send_id = #{sendId} AND status = 'pending'
+    ORDER BY id
+    LIMIT #{limit}
+  </select>
+
   <select id="countPending" resultType="int">
     SELECT COUNT(*) FROM campaign_delivery
     WHERE workspace_id = #{workspaceId} AND send_id = #{sendId} AND status = 'pending'
@@ -110,6 +127,11 @@
     UPDATE campaign_delivery
     SET status = 'dispatching', attempt_count = attempt_count + 1
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'pending'
+  </update>
+
+  <update id="releaseClaim">
+    UPDATE campaign_delivery SET status = 'pending'
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
   </update>
 
   <update id="markDispatched">

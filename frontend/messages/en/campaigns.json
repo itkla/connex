@@ -210,7 +210,8 @@
             "paused": "Paused",
             "completed": "Completed",
             "failed": "Failed",
-            "cancelled": "Cancelled"
+            "cancelled": "Cancelled",
+            "triggered": "Workflow managed"
         },
         "snapshot": "Snapshot",
         "snapshotPlaceholder": "Pick a snapshot",
@@ -235,6 +236,7 @@
         "created": "Send created",
         "empty": "No sends yet",
         "messageVersionLabel": "revision v{version}",
+        "workflowOrigin": "Workflow",
         "total": "Total",
         "dispatched": "Dispatched",
         "skipped": "Skipped",

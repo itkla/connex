@@ -314,7 +314,7 @@ describe("workflow diagnostic localization", () => {
         if (!match) throw new Error("WorkflowDiagnosticCode enum was not found");
         const codes = match[1].split(",").map((value) => value.trim().toLowerCase()).sort();
 
-        expect(codes).toHaveLength(69);
+        expect(codes).toHaveLength(76);
         expect(diagnosticMessageKeys("en")).toEqual(codes);
         expect(diagnosticMessageKeys("ja")).toEqual(codes);
     });

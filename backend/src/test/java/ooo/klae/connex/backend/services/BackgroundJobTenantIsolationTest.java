@@ -87,16 +87,18 @@ class BackgroundJobTenantIsolationTest {
         CampaignSendMapper mapper = mock(CampaignSendMapper.class);
         CampaignDispatchService dispatchService = mock(CampaignDispatchService.class);
         JobRunRecorder jobRunRecorder = mock(JobRunRecorder.class);
+        WorkflowTriggeredSendGate triggeredSendGate = mock(WorkflowTriggeredSendGate.class);
         CampaignSendWorker worker = new CampaignSendWorker(
                 placementRegistry,
                 tenantWorkScope,
                 mapper,
                 dispatchService,
-                jobRunRecorder);
+                jobRunRecorder,
+                triggeredSendGate);
         ReflectionTestUtils.setField(worker, "dispatchEnabled", true);
         when(placementRegistry.activeCatalogs())
                 .thenReturn(Arrays.asList(null, FOREIGN_CATALOG));
-        when(mapper.workspaceIdsWithQueuedSends())
+        when(mapper.workspaceIdsWithQueuedSends(false))
                 .thenReturn(List.of(SIBLING_WORKSPACE_ID))
                 .thenReturn(List.of(FOREIGN_ORGANIZATION_WORKSPACE_ID));
 

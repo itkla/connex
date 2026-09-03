@@ -83,6 +83,14 @@ public interface CampaignDeliveryMapper {
 
     CampaignDelivery getDelivery(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
+    /** Returns only identifiers so restriction can be checked before the address column is read. */
+    CampaignDelivery getDeliveryIdentity(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    CampaignDelivery getBySendAndPerson(
+            @Param("workspaceId") int workspaceId,
+            @Param("sendId") int sendId,
+            @Param("personId") int personId);
+
     CampaignDelivery getByToken(@Param("token") String token);
 
     CampaignDelivery findByProviderMessage(
@@ -94,9 +102,18 @@ public interface CampaignDeliveryMapper {
             @Param("workspaceId") int workspaceId,
             @Param("sendId") int sendId);
 
+    /** Returns one ordered, bounded page for a worker sweep. */
+    List<Integer> pendingDeliveryIdsPage(
+            @Param("workspaceId") int workspaceId,
+            @Param("sendId") int sendId,
+            @Param("limit") int limit);
+
     int countPending(@Param("workspaceId") int workspaceId, @Param("sendId") int sendId);
 
     int claim(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    /** Restores a claim when the triggered-send rollout fence closes before provider egress. */
+    int releaseClaim(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     int markDispatched(
             @Param("workspaceId") int workspaceId,

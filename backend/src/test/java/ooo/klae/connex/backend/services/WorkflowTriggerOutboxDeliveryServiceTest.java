@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -15,6 +16,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,7 @@ import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
@@ -51,6 +54,8 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
     @Mock private WorkflowExecutionPrincipalService principalService;
     @Mock private RuleEngineService ruleEngineService;
     @Mock private WorkflowRuntimeProperties properties;
+    @Mock private WorkflowTriggeredSendGate triggeredSendGate;
+    @Mock private AuditService auditService;
 
     private WorkflowTriggerOutboxDeliveryService service;
 
@@ -67,7 +72,10 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
             claimService,
             principalService,
             ruleEngineService,
-            properties);
+            properties,
+            triggeredSendGate,
+            auditService);
+        lenient().when(triggeredSendGate.recipientLimit()).thenReturn(200);
     }
 
     @Test
@@ -142,6 +150,7 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
         WorkflowNode.Condition condition = new WorkflowNode.Condition(
             "enrollment", definition);
         CompiledWorkflow compiled = mock(CompiledWorkflow.class);
+        when(compiled.nodes()).thenReturn(java.util.Map.of());
         WorkflowRuntimeClaimService.ScheduleEnrollment enrollment =
             new WorkflowRuntimeClaimService.ScheduleEnrollment(
                 11, version, compiled, condition, 17);
@@ -154,7 +163,7 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
         when(properties.maxScheduleRecordsPerPage()).thenReturn(100);
         when(segmentMapper.entityIdsPage(7, "company", 0, 0, 100))
             .thenReturn(List.of());
-        when(outboxMapper.saveSchedulePage(7, 31L, "lease", 0, true))
+        when(outboxMapper.saveSchedulePage(7, 31L, "lease", 0, 0, true))
             .thenReturn(1);
 
         service.deliver(7, 31L, "lease");
@@ -193,8 +202,58 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
 
         assertEquals("actor_unavailable", failure.code());
         verify(outboxMapper, never()).saveSchedulePage(
-            anyInt(), anyLong(), anyString(), anyInt(), anyBoolean());
+            anyInt(), anyLong(), anyString(), anyInt(), anyInt(), anyBoolean());
         verifyNoInteractions(segmentMapper, segmentService);
+    }
+
+    @Test
+    void scheduledTriggeredSendStopsAtConfiguredRecipientLimitWithDiagnosticAndStrictAudit() {
+        WorkflowTriggerOutbox outbox = scheduleOutbox();
+        outbox.setRecordType("person");
+        outbox.setRecordScanUpperId(2);
+        Workflow workflow = matchingWorkflow();
+        workflow.setLegacyRuleId(null);
+        WorkflowVersion version = new WorkflowVersion();
+        version.setId(23L);
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
+        SegmentDefinition definition = new SegmentDefinition();
+        WorkflowNode.Condition condition = new WorkflowNode.Condition("enrollment", definition);
+        RuleAction send = new RuleAction();
+        send.setType("send_message");
+        CompiledWorkflow compiled = mock(CompiledWorkflow.class);
+        when(compiled.nodes()).thenReturn(Map.of(
+            "send", new WorkflowNode.Action("send", send)));
+        WorkflowRuntimeClaimService.ScheduleEnrollment enrollment =
+            new WorkflowRuntimeClaimService.ScheduleEnrollment(
+                11, version, compiled, condition, 17);
+        when(outboxMapper.getOwnedForUpdate(7, 31L, "lease")).thenReturn(outbox);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        when(versionMapper.getById(7, 11, 23L)).thenReturn(version);
+        when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
+        when(claimService.outboxScheduleEnrollment(outbox)).thenReturn(enrollment);
+        when(properties.maxScheduleRecordsPerPage()).thenReturn(100);
+        when(triggeredSendGate.recipientLimit()).thenReturn(1);
+        when(segmentMapper.entityIdsPage(7, "person", 0, 2, 100))
+            .thenReturn(List.of(1, 2));
+        when(segmentService.matchesEntity(7, 17, "person", definition, 1)).thenReturn(true);
+        when(segmentService.matchesEntity(7, 17, "person", definition, 2)).thenReturn(true);
+        when(outboxMapper.deadLetter(
+            7, 31L, "lease", "triggered_send_recipient_limit")).thenReturn(1);
+
+        service.deliver(7, 31L, "lease");
+
+        verify(claimService).claimOutbox(outbox, 1);
+        verify(claimService, never()).claimOutbox(outbox, 2);
+        verify(outboxMapper).deadLetter(
+            7, 31L, "lease", "triggered_send_recipient_limit");
+        verify(auditService).recordStrict(
+            "workflow.triggered_send.recipient_limit",
+            "workflow",
+            11,
+            "Workflow 11",
+            "Scheduled send-message recipients were capped",
+            Map.of("limit", 1, "code", "triggered_send_recipient_limit"));
     }
 
     private static WorkflowTriggerOutbox scheduleOutbox() {

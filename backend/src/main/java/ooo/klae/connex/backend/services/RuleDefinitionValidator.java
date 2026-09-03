@@ -30,7 +30,8 @@ import ooo.klae.connex.backend.tenant.Permission;
  * Validates and normalizes the shared semantic definition used by automation rules. Every path that
  * authors, publishes, manually runs, simulates, or revalidates a definition passes through here, so
  * {@link WorkflowDocumentAutomationGate} refusing {@code document} here closes the rolling-deployment
- * fence for every one of them.
+ * fence for every one of them. {@link WorkflowTriggeredSendGate} applies the same posture to the
+ * {@code send_message} action.
  */
 @Component
 @RequiredArgsConstructor
@@ -42,7 +43,7 @@ public class RuleDefinitionValidator {
     private static final Set<String> EXECUTION_MODES = Set.of("user", "system");
     private static final Set<String> ACTION_TYPES = Set.of(
         "create_task", "log_activity", "add_tag", "remove_tag", "create_note",
-        "assign_owner", "set_response_due", "change_stage", "notify");
+        "assign_owner", "set_response_due", "change_stage", "notify", "send_message");
     private static final Set<String> CADENCES = Set.of("hourly", "daily", "weekly");
     private static final int MAX_RESPONSE_DUE_IN_HOURS = 24 * 365;
     private static final Set<String> ENTITY_CHANGE_RECORD_TYPES = Set.of(
@@ -69,12 +70,15 @@ public class RuleDefinitionValidator {
         "assign_owner", Set.of("person", "deal"),
         "set_response_due", Set.of("person"),
         "change_stage", Set.of("deal"),
-        "notify", Set.of("company", "person", "deal", "task", "document"));
+        "notify", Set.of("company", "person", "deal", "task", "document"),
+        "send_message", Set.of("person"));
 
     private final SegmentService segmentService;
     private final WorkspaceService workspaceService;
     private final Validator beanValidator;
     private final WorkflowDocumentAutomationGate documentAutomationGate;
+    private final WorkflowTriggeredSendGate triggeredSendGate;
+    private final SystemActor systemActor;
 
     String validatePreview(RulePreviewRequest request) {
         String recordType = normalize(request.getRecordType());
@@ -285,7 +289,21 @@ public class RuleDefinitionValidator {
         }
         validateTrigger(trigger, recordType, !conditions.isEmpty());
         validateActions(actions, recordType);
-        return actionPermissions(actions, recordType);
+        Set<Permission> permissions = actionPermissions(actions, recordType);
+        if ("system".equals(mode)) {
+            Permission missing = permissions.stream()
+                    .filter(permission -> !systemActor.permissions().contains(permission))
+                    .sorted()
+                    .findFirst()
+                    .orElse(null);
+            if (missing != null) {
+                throw invalid(
+                    WorkflowDiagnosticCode.ACTION_SYSTEM_PERMISSION_MISSING,
+                    "The system automation actor cannot perform this action",
+                    null, "executionMode", Map.of("permission", missing.name()));
+            }
+        }
+        return permissions;
     }
 
     private <T> void requireStructurallyValid(Configured<T> configured) {
@@ -321,11 +339,8 @@ public class RuleDefinitionValidator {
             List<Configured<RuleAction>> actions, String recordType) {
         EnumSet<Permission> required = EnumSet.noneOf(Permission.class);
         for (Configured<RuleAction> action : actions) {
-            Permission permission = actionPermission(
-                normalize(action.value().getType()), recordType);
-            if (permission != null) {
-                required.add(permission);
-            }
+            required.addAll(actionPermissions(
+                normalize(action.value().getType()), recordType));
         }
         return Set.copyOf(required);
     }
@@ -340,29 +355,33 @@ public class RuleDefinitionValidator {
         }
     }
 
-    Permission actionPermission(RuleAction action, String recordType) {
-        return actionPermission(normalize(action.getType()), recordType);
+    Set<Permission> actionPermissions(RuleAction action, String recordType) {
+        return actionPermissions(normalize(action.getType()), recordType);
     }
 
-    private Permission actionPermission(String type, String recordType) {
+    private Set<Permission> actionPermissions(String type, String recordType) {
         return switch (type) {
-            case "create_task" -> Permission.TASK_CREATE;
-            case "log_activity" -> Permission.ACTIVITY_CREATE;
-            case "create_note" -> Permission.NOTE_CREATE;
-            case "change_stage" -> Permission.DEAL_UPDATE;
-            case "set_response_due" -> Permission.PERSON_UPDATE;
+            case "create_task" -> Set.of(Permission.TASK_CREATE);
+            case "log_activity" -> Set.of(Permission.ACTIVITY_CREATE);
+            case "create_note" -> Set.of(Permission.NOTE_CREATE);
+            case "change_stage" -> Set.of(Permission.DEAL_UPDATE);
+            case "set_response_due" -> Set.of(Permission.PERSON_UPDATE);
+            case "send_message" -> Set.of(
+                    Permission.CAMPAIGN_MANAGE,
+                    Permission.CAMPAIGN_SEND,
+                    Permission.CONSENT_MANAGE);
             case "assign_owner" -> switch (recordType) {
-                case "person" -> Permission.PERSON_UPDATE;
-                case "deal" -> Permission.DEAL_UPDATE;
-                default -> null;
+                case "person" -> Set.of(Permission.PERSON_UPDATE);
+                case "deal" -> Set.of(Permission.DEAL_UPDATE);
+                default -> Set.of();
             };
             case "add_tag", "remove_tag" -> switch (recordType) {
-                case "company" -> Permission.COMPANY_UPDATE;
-                case "person" -> Permission.PERSON_UPDATE;
-                case "deal" -> Permission.DEAL_UPDATE;
-                default -> null;
+                case "company" -> Set.of(Permission.COMPANY_UPDATE);
+                case "person" -> Set.of(Permission.PERSON_UPDATE);
+                case "deal" -> Set.of(Permission.DEAL_UPDATE);
+                default -> Set.of();
             };
-            default -> null;
+            default -> Set.of();
         };
     }
 
@@ -434,7 +453,7 @@ public class RuleDefinitionValidator {
         for (Configured<RuleAction> configured : actions) {
             RuleAction action = configured.value();
             String type = normalize(action.getType());
-            if (!ACTION_TYPES.contains(type)) {
+            if (!ACTION_TYPES.contains(type) || !triggeredSendGate.permits(type)) {
                 throw invalid(
                     WorkflowDiagnosticCode.ACTION_TYPE_INVALID,
                     "Invalid action type: " + action.getType(),
@@ -483,6 +502,20 @@ public class RuleDefinitionValidator {
                         throw requiredActionField(
                             "A change_stage action requires a targetStageId",
                             configured.nodeId(), "targetStageId");
+                    }
+                }
+                case "send_message" -> {
+                    if (action.getCampaignMessageId() == null
+                            || action.getCampaignMessageId() < 1) {
+                        throw requiredActionField(
+                            "A send_message action requires a campaignMessageId",
+                            configured.nodeId(), "campaignMessageId");
+                    }
+                    if (action.getCampaignMessageVersion() == null
+                            || action.getCampaignMessageVersion() < 1) {
+                        throw requiredActionField(
+                            "A send_message action requires a positive campaignMessageVersion",
+                            configured.nodeId(), "campaignMessageVersion");
                     }
                 }
                 default -> throw invalid(

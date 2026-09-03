@@ -75,6 +75,7 @@ public interface WorkflowTriggerOutboxMapper {
         @Param("id") long id,
         @Param("leaseOwner") String leaseOwner,
         @Param("recordScanAfterId") int recordScanAfterId,
+        @Param("scheduleMatchCount") int scheduleMatchCount,
         @Param("completed") boolean completed);
 
     int resolveDeadForWorkflow(

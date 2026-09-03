@@ -210,7 +210,8 @@
             "paused": "一時停止",
             "completed": "完了",
             "failed": "失敗",
-            "cancelled": "キャンセル"
+            "cancelled": "キャンセル",
+            "triggered": "ワークフロー管理"
         },
         "snapshot": "スナップショット",
         "snapshotPlaceholder": "スナップショットを選択",
@@ -235,6 +236,7 @@
         "created": "配信を作成しました",
         "empty": "配信はまだありません",
         "messageVersionLabel": "リビジョン v{version}",
+        "workflowOrigin": "ワークフロー",
         "total": "合計",
         "dispatched": "送信済み",
         "skipped": "スキップ",

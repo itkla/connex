@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -22,6 +23,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Propagation;
@@ -73,6 +75,7 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
     @Autowired private DeliveryUnsubscribeService deliveryUnsubscribeService;
     @Autowired private CampaignDeliveryMapper campaignDeliveryMapper;
     @Autowired private CampaignSendMapper campaignSendMapper;
+    @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private FakeDispatcher fakeDispatcher;
     @MockitoBean private DeliveryProviderConfigService deliveryProviderConfigService;
 
@@ -109,6 +112,40 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
         assertEquals(included.getId(), delivery.getPersonId());
         assertEquals(prefix + "-in@example.com", delivery.getAddress());
         assertEquals(64, delivery.getUnsubscribeToken().length());
+    }
+
+    @Test
+    void sendOriginAndSnapshotMustRemainPaired() {
+        String prefix = "send-origin-" + unique();
+        person(newCompany(), prefix + "-in", prefix + "-in@example.com");
+        CampaignSendDto audience = readySend(prefix);
+
+        assertCheckViolation(() -> jdbcTemplate.update(
+                "INSERT INTO campaign_send "
+                        + "(workspace_id, campaign_id, snapshot_id, origin, message_id, message_version, "
+                        + "channel, purpose, status) VALUES (?, ?, ?, 'audience', ?, ?, 'email', "
+                        + "'marketing', 'triggered')",
+                workspace.getId(), audience.campaignId(), audience.snapshotId(),
+                audience.messageId(), audience.messageVersion()));
+        assertCheckViolation(() -> jdbcTemplate.update(
+                "INSERT INTO campaign_send "
+                        + "(workspace_id, campaign_id, snapshot_id, origin, message_id, message_version, "
+                        + "channel, purpose, status) VALUES (?, ?, ?, 'triggered', ?, ?, 'email', "
+                        + "'marketing', 'running')",
+                workspace.getId(), audience.campaignId(), audience.snapshotId(),
+                audience.messageId(), audience.messageVersion()));
+    }
+
+    private static void assertCheckViolation(org.junit.jupiter.api.function.Executable write) {
+        RuntimeException failure = assertThrows(RuntimeException.class, write);
+        Throwable root = failure;
+        while (root.getCause() != null) {
+            root = root.getCause();
+        }
+        assertTrue(root instanceof SQLException);
+        SQLException sql = (SQLException) root;
+        assertEquals("HY000", sql.getSQLState());
+        assertEquals(3819, sql.getErrorCode());
     }
 
     @Test

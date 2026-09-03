@@ -2447,13 +2447,15 @@ export type CampaignSendStatus =
     | "paused"
     | "completed"
     | "failed"
-    | "cancelled";
+    | "cancelled"
+    | "triggered";
 
-/** A campaign send bound to a frozen audience snapshot and a message revision. */
+/** An audience-backed or triggered campaign send for one message revision. */
 export type CampaignSend = {
     id: number;
     campaignId: number;
     snapshotId: number;
+    origin: "audience" | "triggered";
     messageId: number;
     messageVersion: number;
     channel: string;
@@ -4682,7 +4684,14 @@ export type WorkflowDiagnosticCode =
     | "record_unavailable"
     | "trigger_filter_not_matched"
     | "action_permission_missing"
+    | "action_system_permission_missing"
     | "action_tag_unavailable"
+    | "action_campaign_message_unavailable"
+    | "action_campaign_message_revision_unavailable"
+    | "action_delivery_capability_unavailable"
+    | "action_delivery_transport_unavailable"
+    | "action_recipient_address_unavailable"
+    | "action_triggered_send_unavailable"
     | "action_target_member_unavailable"
     | "action_stage_unavailable"
     | "action_stage_pipeline_mismatch"
@@ -4792,6 +4801,8 @@ export type WorkflowStepRun = {
     selectedOutcome: WorkflowEdgeOutcome | null;
     selectedEdgeId: string | null;
     nextNodeId: string | null;
+    actionOutcome: "delivery_queued" | "delivery_dedup_skipped" | "delivery_capped" | null;
+    actionReferenceId: number | null;
     startedAt: string;
     finishedAt: string | null;
     durationMs: number | null;

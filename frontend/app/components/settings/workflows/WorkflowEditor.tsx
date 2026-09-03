@@ -271,7 +271,9 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
     const diagnosticMessage = useCallback((diagnostic: {
         code: WorkflowDiagnosticCode;
         params: Record<string, string>;
-    }) => t(`diagnostics.${diagnostic.code}`, diagnostic.params), [t]);
+    }) => t.has(`diagnostics.${diagnostic.code}`)
+        ? t(`diagnostics.${diagnostic.code}`, diagnostic.params)
+        : diagnostic.code, [t]);
     const localDiagnostics = useMemo(
         () => workflowDelayDiagnostics(editor.document.definition),
         [editor.document.definition],

@@ -82,6 +82,21 @@ public class SegmentService {
         return evaluate(workspaceId, userId, recordType, definition, false);
     }
 
+    /** Returns at most {@code limit} deterministic matches for a bounded automation enrollment. */
+    public List<Integer> evaluate(
+            int workspaceId,
+            int userId,
+            String recordType,
+            SegmentDefinition definition,
+            int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("Segment evaluation limit must be positive");
+        }
+        return evaluate(workspaceId, userId, recordType, definition, false).stream()
+            .limit(limit)
+            .toList();
+    }
+
     /**
      * Session-free campaign evaluation that includes processing-restricted people in the candidate
      * set so the caller can classify them explicitly. Normal smart-segment and rule evaluation

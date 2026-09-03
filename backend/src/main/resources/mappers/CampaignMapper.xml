@@ -15,6 +15,7 @@
 
   <sql id="snapshotColumns">
     id, campaign_id, workspace_id, version, record_type, definition_json, channel, purpose,
+    origin, triggered_message_id, triggered_message_version,
     estimated_included, excluded_total, excluded_consent, excluded_suppressed,
     excluded_restricted, excluded_no_address, created_by_id, created_at
   </sql>
@@ -99,11 +100,13 @@
 
   <insert id="insertSnapshot" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO campaign_audience_snapshot
-      (campaign_id, workspace_id, version, record_type, definition_json, channel, purpose,
+      (campaign_id, workspace_id, version, record_type, definition_json, channel, purpose, origin,
+       triggered_message_id, triggered_message_version,
        estimated_included, excluded_total, excluded_consent, excluded_suppressed,
        excluded_restricted, excluded_no_address, created_by_id)
     VALUES
       (#{campaignId}, #{workspaceId}, #{version}, #{recordType}, #{definitionJson}, #{channel}, #{purpose},
+       COALESCE(#{origin}, 'audience'), #{triggeredMessageId}, #{triggeredMessageVersion},
        #{estimatedIncluded}, #{excludedTotal}, #{excludedConsent}, #{excludedSuppressed},
        #{excludedRestricted}, #{excludedNoAddress}, #{createdById})
   </insert>
@@ -113,7 +116,7 @@
            excluded_no_address, excluded_consent, excluded_suppressed, excluded_restricted,
            created_by_id, created_at
     FROM campaign_audience_snapshot
-    WHERE workspace_id = #{workspaceId} AND campaign_id = #{campaignId}
+    WHERE workspace_id = #{workspaceId} AND campaign_id = #{campaignId} AND origin = 'audience'
     ORDER BY version DESC
   </select>
 
@@ -122,6 +125,7 @@
     WHERE workspace_id = #{workspaceId}
       AND campaign_id = #{campaignId}
       AND version = #{version}
+      AND origin = 'audience'
   </select>
 
   <select id="getSnapshotForShare" resultType="CampaignAudienceSnapshot">
@@ -129,7 +133,15 @@
     WHERE workspace_id = #{workspaceId}
       AND campaign_id = #{campaignId}
       AND version = #{version}
-    FOR SHARE
+      AND origin = 'audience'
+      FOR SHARE
+  </select>
+
+  <select id="getTriggeredSnapshot" resultType="CampaignAudienceSnapshot">
+    SELECT <include refid="snapshotColumns"/> FROM campaign_audience_snapshot
+    WHERE workspace_id = #{workspaceId}
+      AND triggered_message_id = #{messageId}
+      AND triggered_message_version = #{messageVersion}
   </select>
 
   <select id="getSnapshotMembers" resultType="CampaignAudienceMember">

@@ -680,6 +680,11 @@
             "durationMs": "{value} ミリ秒",
             "failureAtNode": "このステップが失敗しました。",
             "stepFailure": "このステップに起因する失敗",
+            "actionOutcome": {
+                "delivery_queued": "配信 #{id} を待機中にしました",
+                "delivery_dedup_skipped": "配信 #{id} はすでに待機中です",
+                "delivery_capped": "配信 #{id} は上限により停止しました"
+            },
             "status": {
                 "queued": "順番待ち",
                 "running": "実行中",
@@ -753,7 +758,14 @@
             "record_unavailable": "選択したレコードを利用できないか、表示権限がありません。",
             "trigger_filter_not_matched": "選択したレコードはトリガーフィルターに一致しません。",
             "action_permission_missing": "設定された実行者にはこのアクションの権限がありません。",
+            "action_system_permission_missing": "システム実行のワークフローでは、このアクションに必要な権限を利用できません。",
             "action_tag_unavailable": "選択したタグを利用できません。",
+            "action_campaign_message_unavailable": "選択したキャンペーンメッセージを利用できません。",
+            "action_campaign_message_revision_unavailable": "選択したキャンペーンメッセージのバージョンを利用できません。",
+            "action_delivery_capability_unavailable": "現在、キャンペーン配信を利用できません。",
+            "action_delivery_transport_unavailable": "このメッセージに利用できる配信手段が設定されていません。",
+            "action_recipient_address_unavailable": "この連絡先にはメッセージを届けられる宛先がありません。",
+            "action_triggered_send_unavailable": "現在、このワークフロー管理の配信を利用できません。",
             "action_target_member_unavailable": "選択したメンバーを利用できません。",
             "action_stage_unavailable": "選択したステージを利用できません。",
             "action_stage_pipeline_mismatch": "選択したステージはレコードのパイプラインに属していません。",

@@ -316,7 +316,7 @@ class WorkflowDraftCanonicalizerTest {
     }
 
     @Test
-    void anActionWithoutAResponseDeadlineCanonicalizesWithoutTheField() {
+    void aLegacyActionCanonicalizesAndHashesWithoutNewOptionalFields() {
         String withoutSla = definition(
             "[{\"type\":\"ACTION\",\"id\":\"action-1\","
                 + "\"config\":{\"title\":\"Notify\",\"type\":\"notify\"}},"
@@ -325,7 +325,19 @@ class WorkflowDraftCanonicalizerTest {
                 + "\"targetNodeId\":\"end\",\"outcome\":\"next\"}]",
             "action-1");
 
-        String canonical = canonicalize(withoutSla, canvas("action-1", "end")).definitionJson();
+        WorkflowDraftCanonicalizer.CanonicalDraft legacy =
+            canonicalize(withoutSla, canvas("action-1", "end"));
+        String explicitNulls = definition(
+            "[{\"type\":\"ACTION\",\"id\":\"action-1\","
+                + "\"config\":{\"campaignMessageId\":null,\"campaignMessageVersion\":null,"
+                + "\"dueInHours\":null,\"title\":\"Notify\",\"type\":\"notify\"}},"
+                + "{\"type\":\"END\",\"id\":\"end\"}]",
+            "[{\"id\":\"action-1--next--end\",\"sourceNodeId\":\"action-1\","
+                + "\"targetNodeId\":\"end\",\"outcome\":\"next\"}]",
+            "action-1");
+        WorkflowDraftCanonicalizer.CanonicalDraft explicit =
+            canonicalize(explicitNulls, canvas("action-1", "end"));
+        String canonical = legacy.definitionJson();
 
         assertFalse(canonical.contains("dueInHours"),
             "the canonical definition is content-addressed by a stored hash, so an action that "
@@ -334,6 +346,9 @@ class WorkflowDraftCanonicalizerTest {
                 + "backfill's replay check rejects its own stored definition");
         assertTrue(canonical.contains("\"dueInDays\":null"),
             "every other optional field is still written, so the omission is specific");
+        assertFalse(canonical.contains("campaignMessageId"));
+        assertFalse(canonical.contains("campaignMessageVersion"));
+        assertArrayEquals(legacy.definitionHash(), explicit.definitionHash());
     }
 
     @Test
@@ -348,6 +363,23 @@ class WorkflowDraftCanonicalizerTest {
 
         assertTrue(canonicalize(withSla, canvas("action-1", "end")).definitionJson()
             .contains("\"dueInHours\":4"));
+    }
+
+    @Test
+    void aSendMessageActionCanonicalizesWithItsImmutableRevisionIdentity() {
+        String sendMessage = definition(
+            "[{\"type\":\"ACTION\",\"id\":\"action-1\","
+                + "\"config\":{\"campaignMessageId\":17,\"campaignMessageVersion\":3,"
+                + "\"type\":\"send_message\"}},"
+                + "{\"type\":\"END\",\"id\":\"end\"}]",
+            "[{\"id\":\"action-1--next--end\",\"sourceNodeId\":\"action-1\","
+                + "\"targetNodeId\":\"end\",\"outcome\":\"next\"}]",
+            "action-1");
+
+        String canonical = canonicalize(sendMessage, canvas("action-1", "end")).definitionJson();
+
+        assertTrue(canonical.contains("\"campaignMessageId\":17"));
+        assertTrue(canonical.contains("\"campaignMessageVersion\":3"));
     }
 
     private WorkflowDraftCanonicalizer.CanonicalDraft canonicalize(

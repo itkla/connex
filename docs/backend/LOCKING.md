@@ -318,8 +318,17 @@ Historical rows whose exact prepared or pushed identities were not recorded reta
 rather than fabricated empty arrays. Callers without `CONSENT_MANAGE` may read only the stable prepared
 total; known final pushed/not-pushed counts remain consent-gated.
 
-Do not move the campaign mutex ahead of authorization roots, add a consistent read before it, or
-use a missing child-row locking read as a substitute for the campaign mutex.
+Triggered single-recipient enrollment participates in the workflow step's `READ_COMMITTED`
+transaction. The step first discovers the immutable run/version without a lock, then acquires actor
+user, workspace, membership, custom role, and permission roots in canonical order. Only after those
+authorization roots are held does it lock and revalidate `workflow_run`. The action may make a
+non-locking observation of the revision's triggered send, but never treats absence as authoritative;
+it then discovers the campaign through a workspace-scoped message read, locks the campaign mutex,
+re-reads the message and revision under shared locks, classifies restriction before contact address,
+and finally creates the synthetic snapshot, triggered send, and delivery. The campaign mutex
+serializes cooperating writers. The unique triggered-send key and catch-and-re-read remain the final
+race defense across mixed-version writers. Missing child-row locking reads never substitute for the
+campaign mutex. No provider dispatch occurs in this transaction.
 
 ## Duplicate review, record mutation, and imports
 

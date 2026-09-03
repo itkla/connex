@@ -680,6 +680,11 @@
             "durationMs": "{value, number} ms",
             "failureAtNode": "This step failed.",
             "stepFailure": "Failure attributed to this step",
+            "actionOutcome": {
+                "delivery_queued": "Delivery #{id} queued",
+                "delivery_dedup_skipped": "Delivery #{id} was already queued",
+                "delivery_capped": "Delivery #{id} was capped"
+            },
             "status": {
                 "queued": "Queued",
                 "running": "Running",
@@ -753,7 +758,14 @@
             "record_unavailable": "The selected record is unavailable or not visible.",
             "trigger_filter_not_matched": "The selected record does not match the trigger filter.",
             "action_permission_missing": "The configured actor does not have permission for this action.",
+            "action_system_permission_missing": "System-run workflows cannot use the permissions required by this action.",
             "action_tag_unavailable": "The selected tag is no longer available.",
+            "action_campaign_message_unavailable": "The selected campaign message is no longer available.",
+            "action_campaign_message_revision_unavailable": "The selected campaign message version is no longer available.",
+            "action_delivery_capability_unavailable": "Campaign delivery isn't available right now.",
+            "action_delivery_transport_unavailable": "No usable delivery transport is configured for this message.",
+            "action_recipient_address_unavailable": "The contact has no usable address for this message.",
+            "action_triggered_send_unavailable": "This workflow-managed delivery isn't available right now.",
             "action_target_member_unavailable": "The selected member is no longer available.",
             "action_stage_unavailable": "The selected stage is no longer available.",
             "action_stage_pipeline_mismatch": "The selected stage does not belong to the record's pipeline.",

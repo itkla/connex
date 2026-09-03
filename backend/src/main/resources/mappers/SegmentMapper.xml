@@ -8,7 +8,8 @@
 
     <select id="personIdsInWorkspace" resultType="int">
         SELECT id FROM person
-        WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL AND archived_at IS NULL
+        WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL
+          AND provision_ceased_at IS NULL AND archived_at IS NULL
     </select>
 
     <select id="personIdsInWorkspaceIncludingRestricted" resultType="int">
@@ -29,7 +30,8 @@
                 <when test="recordType == 'person'">
                     SELECT 1 FROM person
                     WHERE workspace_id = #{workspaceId} AND id = #{entityId}
-                      AND suspended_at IS NULL AND archived_at IS NULL
+                      AND suspended_at IS NULL AND provision_ceased_at IS NULL
+                      AND archived_at IS NULL
                 </when>
                 <when test="recordType == 'deal'">
                     SELECT 1 FROM deal WHERE workspace_id = #{workspaceId} AND id = #{entityId}
@@ -54,7 +56,8 @@
             <when test="recordType == 'person'">
                 SELECT MAX(id) FROM person
                 WHERE workspace_id = #{workspaceId}
-                  AND suspended_at IS NULL AND archived_at IS NULL
+                  AND suspended_at IS NULL AND provision_ceased_at IS NULL
+                  AND archived_at IS NULL
             </when>
             <when test="recordType == 'deal'">
                 SELECT MAX(id) FROM deal WHERE workspace_id = #{workspaceId}
@@ -79,7 +82,8 @@
             <when test="recordType == 'person'">
                 SELECT id FROM person
                 WHERE workspace_id = #{workspaceId}
-                  AND suspended_at IS NULL AND archived_at IS NULL
+                  AND suspended_at IS NULL AND provision_ceased_at IS NULL
+                  AND archived_at IS NULL
                   AND id &gt; #{afterId} AND id &lt;= #{upperId}
             </when>
             <when test="recordType == 'deal'">
@@ -117,6 +121,7 @@
                     SELECT 1 FROM person processable
                     WHERE processable.id = a.person_id
                       AND processable.suspended_at IS NULL
+                      AND processable.provision_ceased_at IS NULL
                       AND processable.archived_at IS NULL
                       AND (processable.workspace_id = #{workspaceId}
                         OR EXISTS (
@@ -144,6 +149,7 @@
         FROM person p
         WHERE p.workspace_id = #{workspaceId}
           AND p.suspended_at IS NULL
+          AND p.provision_ceased_at IS NULL
           AND p.archived_at IS NULL
           AND p.company_id IS NOT NULL
           AND p.id IN
@@ -156,6 +162,7 @@
                     SELECT 1 FROM person processable
                     WHERE processable.id = a.person_id
                       AND processable.suspended_at IS NULL
+                      AND processable.provision_ceased_at IS NULL
                       AND processable.archived_at IS NULL
                       AND (processable.workspace_id = #{workspaceId}
                         OR EXISTS (
@@ -174,6 +181,7 @@
                         WHERE p2.workspace_id = #{workspaceId}
                           AND p2.company_id = p.company_id
                           AND p2.suspended_at IS NULL
+                          AND p2.provision_ceased_at IS NULL
                           AND p2.archived_at IS NULL)
                     OR a.deal_id IN (SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.company_id = p.company_id)
                 )
@@ -266,7 +274,8 @@
 
     <select id="personIdsMatching" resultType="int">
         SELECT id FROM person
-        WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL AND archived_at IS NULL
+        WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL
+          AND provision_ceased_at IS NULL AND archived_at IS NULL
         <choose>
             <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
             <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
@@ -395,7 +404,9 @@
     <select id="personExistence" resultType="int">
         SELECT p.id FROM person p
         WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL
-        <if test="!includeRestrictedPeople">AND p.suspended_at IS NULL</if>
+        <if test="!includeRestrictedPeople">
+            AND p.suspended_at IS NULL AND p.provision_ceased_at IS NULL
+        </if>
         <include refid="existencePredicate">
             <property name="alias" value="p"/>
             <property name="fk" value="person_id"/>

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -31,6 +32,8 @@ class WorkflowRuntimeServiceTest {
     @Mock private WorkflowExecutionPrincipalService principalService;
     @Mock private SegmentService segmentService;
     @Mock private RuleEngineService ruleEngineService;
+    @Mock private WorkflowTriggeredSendGate triggeredSendGate;
+    @Mock private AuditService auditService;
 
     private WorkflowRuntimeService service;
     private WorkflowTriggerDispatch.EntityChange dispatch;
@@ -45,7 +48,10 @@ class WorkflowRuntimeServiceTest {
             traversalService,
             principalService,
             segmentService,
-            ruleEngineService);
+            ruleEngineService,
+            triggeredSendGate,
+            auditService);
+        lenient().when(triggeredSendGate.recipientLimit()).thenReturn(200);
         dispatch = new WorkflowTriggerDispatch.EntityChange(
             7,
             "company",

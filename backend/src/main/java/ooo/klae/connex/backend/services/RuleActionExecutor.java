@@ -43,12 +43,13 @@ public class RuleActionExecutor {
     private final NotificationDelivery notificationDelivery;
     private final TagMapper tagMapper;
     private final DealDocumentMapper documentMapper;
+    private final CampaignTriggeredSendService campaignTriggeredSendService;
 
     private static final DateTimeFormatter TIMESTAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final int DEFAULT_DUE_DAYS = 3;
 
-    public void execute(RuleAction action, AutomationActionContext ctx) {
+    public WorkflowActionResult execute(RuleAction action, AutomationActionContext ctx) {
         String type = action.getType() == null ? "" : action.getType().trim().toLowerCase();
         switch (type) {
             case "create_task" -> createTask(action, ctx);
@@ -61,8 +62,27 @@ public class RuleActionExecutor {
                 leadResponseSlaService.startFirstResponseClock(ctx.entityId(), action.getDueInHours());
             case "change_stage" -> dealService.changeStage(ctx.entityId(), action.getTargetStageId());
             case "notify" -> notify(action, ctx);
+            case "send_message" -> {
+                CampaignTriggeredSendService.EnrollmentResult result =
+                        ctx instanceof WorkflowActionContext workflowContext
+                    ? campaignTriggeredSendService.enrollWithLockedAuthorization(
+                        ctx.entityId(),
+                        action.getCampaignMessageId(),
+                        action.getCampaignMessageVersion(),
+                        workflowContext.actorUserId(),
+                        workflowContext.lockedPermissions())
+                    : campaignTriggeredSendService.enroll(
+                        ctx.entityId(),
+                        action.getCampaignMessageId(),
+                        action.getCampaignMessageVersion());
+                return result.outcome() == null
+                    ? WorkflowActionResult.none()
+                    : new WorkflowActionResult(
+                        result.outcome(), result.deliveryId().longValue());
+            }
             default -> throw new BadRequestException("Unsupported action: " + action.getType());
         }
+        return WorkflowActionResult.none();
     }
 
     /**

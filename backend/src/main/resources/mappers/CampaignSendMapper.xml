@@ -4,7 +4,7 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.CampaignSendMapper">
 
   <sql id="sendColumns">
-    id, workspace_id, campaign_id, snapshot_id, message_id, message_version, channel, purpose,
+    id, workspace_id, campaign_id, snapshot_id, origin, message_id, message_version, channel, purpose,
     provider_id, status, scheduled_at, started_at, completed_at, total_recipients,
     dispatched_count, skipped_count, failed_count, created_by_id, created_at, updated_at
   </sql>
@@ -26,12 +26,20 @@
     FOR UPDATE
   </select>
 
+  <select id="getTriggeredSend" resultType="CampaignSend">
+    SELECT <include refid="sendColumns"/> FROM campaign_send
+    WHERE workspace_id = #{workspaceId}
+      AND message_id = #{messageId}
+      AND triggered_message_version = #{messageVersion}
+  </select>
+
   <insert id="insertSend" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO campaign_send
-      (workspace_id, campaign_id, snapshot_id, message_id, message_version, channel, purpose,
+      (workspace_id, campaign_id, snapshot_id, origin, message_id, message_version, channel, purpose,
        provider_id, status, scheduled_at, total_recipients, created_by_id)
     VALUES
-      (#{workspaceId}, #{campaignId}, #{snapshotId}, #{messageId}, #{messageVersion}, #{channel},
+      (#{workspaceId}, #{campaignId}, #{snapshotId}, COALESCE(#{origin}, 'audience'),
+       #{messageId}, #{messageVersion}, #{channel},
        #{purpose}, #{providerId}, #{status}, #{scheduledAt}, #{totalRecipients}, #{createdById})
   </insert>
 
@@ -59,7 +67,10 @@
 
   <update id="refreshCounters">
     UPDATE campaign_send s
-    SET s.dispatched_count = (
+    SET s.total_recipients = (
+          SELECT COUNT(*) FROM campaign_delivery d
+          WHERE d.workspace_id = s.workspace_id AND d.send_id = s.id),
+        s.dispatched_count = (
           SELECT COUNT(*) FROM campaign_delivery d
           WHERE d.workspace_id = s.workspace_id AND d.send_id = s.id AND d.status = 'dispatched'),
         s.skipped_count = (
@@ -73,12 +84,24 @@
 
   <select id="queuedSendIds" resultType="int">
     SELECT id FROM campaign_send
-    WHERE workspace_id = #{workspaceId} AND status IN ('queued', 'running')
+    WHERE workspace_id = #{workspaceId}
+      AND (status IN ('queued', 'running')
+        OR (#{triggeredSendEnabled} AND status = 'triggered' AND EXISTS (
+          SELECT 1 FROM campaign_delivery d
+          WHERE d.workspace_id = campaign_send.workspace_id
+            AND d.send_id = campaign_send.id
+            AND d.status = 'pending')))
     ORDER BY id
   </select>
 
   <select id="workspaceIdsWithQueuedSends" resultType="int">
-    SELECT DISTINCT workspace_id FROM campaign_send WHERE status IN ('queued', 'running')
+    SELECT DISTINCT workspace_id FROM campaign_send
+    WHERE status IN ('queued', 'running')
+      OR (#{triggeredSendEnabled} AND status = 'triggered' AND EXISTS (
+        SELECT 1 FROM campaign_delivery d
+        WHERE d.workspace_id = campaign_send.workspace_id
+          AND d.send_id = campaign_send.id
+          AND d.status = 'pending'))
   </select>
 
 </mapper>

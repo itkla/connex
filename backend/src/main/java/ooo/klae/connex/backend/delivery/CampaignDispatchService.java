@@ -19,7 +19,9 @@ import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignMessageMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
+import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.services.AudienceEligibilityService;
+import ooo.klae.connex.backend.services.WorkflowTriggeredSendGate;
 
 /**
  * Processes queued campaign deliveries for a send, claim-first and never throwing to the caller
@@ -52,6 +54,8 @@ public class CampaignDispatchService {
     private final DeliveryProviderRouter deliveryProviderRouter;
     private final DeliveryProperties deliveryProperties;
     private final CapabilityRegistry capabilityRegistry;
+    private final WorkflowTriggeredSendGate triggeredSendGate;
+    private final WorkflowRunMapper workflowRunMapper;
 
     /** Processes every queued send in the workspace. Never throws. */
     public int processWorkspace(int workspaceId) {
@@ -59,7 +63,8 @@ public class CampaignDispatchService {
             return 0;
         }
         int failed = 0;
-        for (int sendId : campaignSendMapper.queuedSendIds(workspaceId)) {
+        for (int sendId : campaignSendMapper.queuedSendIds(
+                workspaceId, triggeredSendGate.enabled())) {
             try {
                 if (!processSend(workspaceId, sendId)) {
                     failed++;
@@ -89,7 +94,10 @@ public class CampaignDispatchService {
             return true;
         }
         CampaignSend send = campaignSendMapper.getSend(workspaceId, sendId);
-        if (send == null || !("queued".equals(send.getStatus()) || "running".equals(send.getStatus()))) {
+        if (send == null || !dispatchable(send)) {
+            return true;
+        }
+        if (triggered(send) && !triggeredSendGate.enabled()) {
             return true;
         }
         DeliveryChannel channel;
@@ -110,14 +118,18 @@ public class CampaignDispatchService {
             return false;
         }
         campaignSendMapper.assignProvider(workspaceId, sendId, target.providerId());
-        campaignSendMapper.markRunning(workspaceId, sendId);
+        if (!triggered(send)) {
+            campaignSendMapper.markRunning(workspaceId, sendId);
+        }
         CampaignSend running = campaignSendMapper.getSend(workspaceId, sendId);
-        if (running == null || !"running".equals(running.getStatus())) {
+        if (running == null || !dispatchable(running)) {
             return true;
         }
-        for (int deliveryId : campaignDeliveryMapper.pendingDeliveryIds(workspaceId, sendId)) {
+        for (int deliveryId : campaignDeliveryMapper.pendingDeliveryIdsPage(
+                workspaceId, sendId, triggeredSendGate.dispatchPageSize())) {
             CampaignSend current = campaignSendMapper.getSend(workspaceId, sendId);
-            if (current == null || !"running".equals(current.getStatus())) {
+            if (current == null || !dispatchable(current)
+                    || (triggered(current) && !triggeredSendGate.enabled())) {
                 break;
             }
             try {
@@ -130,6 +142,7 @@ public class CampaignDispatchService {
         campaignSendMapper.refreshCounters(workspaceId, sendId);
         CampaignSend settled = campaignSendMapper.getSend(workspaceId, sendId);
         if (settled != null && "running".equals(settled.getStatus())
+                && "audience".equals(settled.getOrigin())
                 && campaignDeliveryMapper.countPending(workspaceId, sendId) == 0) {
             campaignSendMapper.markCompleted(workspaceId, sendId);
         }
@@ -142,6 +155,21 @@ public class CampaignDispatchService {
         if (campaignDeliveryMapper.claim(workspaceId, deliveryId) != 1) {
             return;
         }
+        if (triggered(send) && !triggeredSendGate.enabled()) {
+            campaignDeliveryMapper.releaseClaim(workspaceId, deliveryId);
+            return;
+        }
+        CampaignDelivery identity = campaignDeliveryMapper.getDeliveryIdentity(workspaceId, deliveryId);
+        if (identity == null) {
+            return;
+        }
+        Integer personId = identity.getPersonId();
+        if (personId != null
+                && !audienceEligibilityService.restrictedIds(
+                        workspaceId, List.of(personId)).isEmpty()) {
+            campaignDeliveryMapper.markSkipped(workspaceId, deliveryId, "restricted");
+            return;
+        }
         CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(workspaceId, deliveryId);
         if (delivery == null) {
             return;
@@ -149,12 +177,19 @@ public class CampaignDispatchService {
         String skipReason = evaluate(workspaceId, send, channel, delivery);
         if (skipReason != null) {
             campaignDeliveryMapper.markSkipped(workspaceId, deliveryId, skipReason);
+            if ("frequency_capped".equals(skipReason)) {
+                workflowRunMapper.markActionDeliveryCapped(workspaceId, deliveryId);
+            }
             return;
         }
         RenderedMessage content = render(channel, revision, delivery);
         DeliveryRequest request = new DeliveryRequest(
                 channel, delivery.getAddress(), content, delivery.getPersonId(),
                 "send:" + send.getId() + ":" + deliveryId);
+        if (triggered(send) && !triggeredSendGate.enabled()) {
+            campaignDeliveryMapper.releaseClaim(workspaceId, deliveryId);
+            return;
+        }
         DispatchReceipt receipt = dispatcher.dispatch(target, request);
         if (receipt.status() == DispatchStatus.SENT) {
             campaignDeliveryMapper.markDispatched(
@@ -167,21 +202,18 @@ public class CampaignDispatchService {
     }
 
     private String evaluate(int workspaceId, CampaignSend send, DeliveryChannel channel, CampaignDelivery delivery) {
+        Integer personId = delivery.getPersonId();
+        String channelToken = channel.token();
         String address = delivery.getAddress();
         if (address == null || address.isBlank()) {
             return "no_address";
-        }
-        Integer personId = delivery.getPersonId();
-        String channelToken = channel.token();
-        if (personId != null
-                && !audienceEligibilityService.restrictedIds(workspaceId, List.of(personId)).isEmpty()) {
-            return "restricted";
         }
         String normalizedAddress = ChannelAddressNormalizer.normalize(channel, address);
         if (normalizedAddress == null) {
             return "no_address";
         }
-        if (!audienceEligibilityService.suppressedAddresses(workspaceId, channelToken, List.of(normalizedAddress)).isEmpty()) {
+        if (!audienceEligibilityService.suppressedAddresses(
+                workspaceId, channelToken, List.of(normalizedAddress)).isEmpty()) {
             return "suppressed";
         }
         if (personId != null && !audienceEligibilityService
@@ -202,6 +234,16 @@ public class CampaignDispatchService {
             return "quiet_hours";
         }
         return null;
+    }
+
+    private static boolean dispatchable(CampaignSend send) {
+        return "queued".equals(send.getStatus())
+                || "running".equals(send.getStatus())
+                || triggered(send);
+    }
+
+    private static boolean triggered(CampaignSend send) {
+        return "triggered".equals(send.getOrigin()) && "triggered".equals(send.getStatus());
     }
 
     /**

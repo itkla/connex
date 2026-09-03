@@ -22,6 +22,7 @@ public class WorkflowTriggerOutbox {
     private LocalDateTime occurredAt;
     private int recordScanAfterId;
     private int recordScanUpperId;
+    private int scheduleMatchCount;
     private String dedupeKey;
     private String status;
     private LocalDateTime availableAt;

@@ -27,7 +27,7 @@ public class WorkflowActionRetryPolicy {
         return switch (type) {
             case "create_task", "log_activity", "add_tag", "remove_tag", "create_note",
                  "assign_owner", "set_response_due", "change_stage" -> RetrySafety.TRANSACTIONAL;
-            case "notify" -> RetrySafety.DEDUPLICATED;
+            case "notify", "send_message" -> RetrySafety.DEDUPLICATED;
             default -> RetrySafety.NONE;
         };
     }

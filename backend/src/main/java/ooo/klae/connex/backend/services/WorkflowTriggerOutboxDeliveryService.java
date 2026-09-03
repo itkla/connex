@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -16,6 +17,7 @@ import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
+import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
@@ -40,6 +42,8 @@ public class WorkflowTriggerOutboxDeliveryService {
     private final WorkflowExecutionPrincipalService principalService;
     private final RuleEngineService ruleEngineService;
     private final WorkflowRuntimeProperties properties;
+    private final WorkflowTriggeredSendGate triggeredSendGate;
+    private final AuditService auditService;
 
     @Transactional(
         propagation = Propagation.REQUIRES_NEW,
@@ -119,6 +123,12 @@ public class WorkflowTriggerOutboxDeliveryService {
                 outbox.getWorkspaceId(),
                 outbox.getTriggerEvent(),
                 outbox.getTriggerKey());
+        boolean triggeredSend = enrollment.compiled().nodes().values().stream()
+            .filter(WorkflowNode.Action.class::isInstance)
+            .map(WorkflowNode.Action.class::cast)
+            .anyMatch(action -> action.config().getType() != null
+                && "send_message".equalsIgnoreCase(action.config().getType().trim()));
+        int matchedCount = outbox.getScheduleMatchCount();
         for (int recordId : recordIds) {
             boolean matched = segmentService.matchesEntity(
                 outbox.getWorkspaceId(),
@@ -129,11 +139,23 @@ public class WorkflowTriggerOutboxDeliveryService {
             if (!matched) {
                 continue;
             }
+            if (triggeredSend && matchedCount >= triggeredSendGate.recipientLimit()) {
+                recordRecipientLimit(outbox);
+                requireUpdated(outboxMapper.deadLetter(
+                    outbox.getWorkspaceId(),
+                    outbox.getId(),
+                    leaseOwner,
+                    "triggered_send_recipient_limit"));
+                return;
+            }
             ruleEngineService.runScheduleRecordForWorkflow(
                 outbox.getWorkflowId(), dispatch, recordId);
             claimService.claimOutbox(outbox, recordId);
             ruleEngineService.runScheduleRecordForWorkflow(
                 outbox.getWorkflowId(), dispatch, recordId);
+            if (triggeredSend) {
+                matchedCount++;
+            }
         }
         int afterId = recordIds.isEmpty()
             ? outbox.getRecordScanUpperId()
@@ -144,11 +166,24 @@ public class WorkflowTriggerOutboxDeliveryService {
             outbox.getId(),
             leaseOwner,
             afterId,
+            matchedCount,
             completed));
         if (completed) {
             outboxMapper.resolveDeadForWorkflow(
                 outbox.getWorkspaceId(), outbox.getWorkflowId());
         }
+    }
+
+    private void recordRecipientLimit(WorkflowTriggerOutbox outbox) {
+        auditService.recordStrict(
+            "workflow.triggered_send.recipient_limit",
+            "workflow",
+            outbox.getWorkflowId(),
+            "Workflow " + outbox.getWorkflowId(),
+            "Scheduled send-message recipients were capped",
+            Map.of(
+                "limit", triggeredSendGate.recipientLimit(),
+                "code", "triggered_send_recipient_limit"));
     }
 
     private void lockDispatchPrincipals(

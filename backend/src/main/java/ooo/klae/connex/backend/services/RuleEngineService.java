@@ -9,6 +9,7 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -53,6 +54,8 @@ public class RuleEngineService {
     private final ObjectMapper objectMapper;
     private final WorkflowRuntimeClaimService workflowRuntimeClaimService;
     private final WorkflowMapper workflowMapper;
+    private final WorkflowTriggeredSendGate triggeredSendGate;
+    private final AuditService auditService;
 
     private static final Logger log = LoggerFactory.getLogger(RuleEngineService.class);
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("yyyyMMdd");
@@ -111,7 +114,12 @@ public class RuleEngineService {
                 if (trigger.getCadence() == null || !cadence.equalsIgnoreCase(trigger.getCadence().trim())) {
                     continue;
                 }
-                for (int entityId : scheduleMatches(rule, workspaceId)) {
+                List<Integer> matches = scheduleMatches(rule, workspaceId);
+                if (hasTriggeredSend(rule) && matches.size() > triggeredSendGate.recipientLimit()) {
+                    recordRecipientLimit(rule, dispatch);
+                    matches = matches.subList(0, triggeredSendGate.recipientLimit());
+                }
+                for (int entityId : matches) {
                     fireSchedule(rule, dispatch, entityId);
                 }
             } catch (Exception e) {
@@ -212,7 +220,51 @@ public class RuleEngineService {
             return List.of();
         }
         SegmentDefinition definition = read(rule.getConditionJson(), SegmentDefinition.class);
-        return segmentService.evaluate(workspaceId, conditionActorId(rule), rule.getRecordType(), definition);
+        if (hasTriggeredSend(rule)) {
+            return segmentService.evaluate(
+                workspaceId,
+                conditionActorId(rule),
+                rule.getRecordType(),
+                definition,
+                triggeredSendGate.recipientLimit() + 1);
+        }
+        return segmentService.evaluate(
+            workspaceId, conditionActorId(rule), rule.getRecordType(), definition);
+    }
+
+    private boolean hasTriggeredSend(Rule rule) {
+        for (RuleAction action : read(rule.getActionsJson(), RuleAction[].class)) {
+            if (action.getType() != null
+                    && "send_message".equalsIgnoreCase(action.getType().trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void recordRecipientLimit(
+            Rule rule, WorkflowTriggerDispatch.ScheduleTick dispatch) {
+        String code = "triggered_send_recipient_limit";
+        RuleExecution diagnostic = new RuleExecution();
+        diagnostic.setWorkspaceId(dispatch.workspaceId());
+        diagnostic.setRuleId(rule.getId());
+        diagnostic.setStatus("partial");
+        diagnostic.setDedupeKey("schedule:" + dispatch.bucketKey() + ":" + code);
+        diagnostic.setDetail(writeDetail(
+            code,
+            "The scheduled send-message recipient limit was reached."));
+        try {
+            ruleMapper.insertExecution(diagnostic);
+        } catch (DuplicateKeyException ignored) {
+            log.debug("Rule recipient-limit diagnostic already exists ruleId={}", rule.getId());
+        }
+        auditService.recordStrict(
+            "workflow.triggered_send.recipient_limit",
+            "rule",
+            rule.getId(),
+            "Rule " + rule.getId(),
+            "Scheduled send-message recipients were capped",
+            Map.of("limit", triggeredSendGate.recipientLimit(), "code", code));
     }
 
     private int conditionActorId(Rule rule) {

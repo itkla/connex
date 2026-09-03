@@ -92,8 +92,10 @@ class SegmentMapperXmlTest {
         assertTrue(sql(configuration, "entityIdInWorkspace", parameters).contains(
             "SELECT 1 FROM company WHERE workspace_id = ? AND id = ?"));
         parameters.put("recordType", "person");
-        assertTrue(sql(configuration, "entityIdInWorkspace", parameters).contains(
+        String personGuard = sql(configuration, "entityIdInWorkspace", parameters);
+        assertTrue(personGuard.contains(
             "SELECT 1 FROM person WHERE workspace_id = ? AND id = ? AND suspended_at IS NULL"));
+        assertTrue(personGuard.contains("provision_ceased_at IS NULL"));
         parameters.put("recordType", "deal");
         assertTrue(sql(configuration, "entityIdInWorkspace", parameters).contains(
             "SELECT 1 FROM deal WHERE workspace_id = ? AND id = ?"));

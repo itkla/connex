@@ -20,6 +20,8 @@ function step(overrides: Partial<WorkflowStepRun> = {}): WorkflowStepRun {
         selectedOutcome: null,
         selectedEdgeId: null,
         nextNodeId: null,
+        actionOutcome: null,
+        actionReferenceId: null,
         startedAt: "2026-08-03T10:00:00",
         finishedAt: "2026-08-03T10:00:01",
         durationMs: 1_000,

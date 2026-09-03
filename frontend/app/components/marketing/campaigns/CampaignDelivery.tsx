@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 import { InformationCircleIcon, PlusIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -724,18 +725,25 @@ export default function CampaignDelivery({
                         <ul className="divide-y divide-border">
                             {sends.map((send) => {
                                 const busy = actionSendId === send.id;
-                                const canQueue = send.status === "draft";
-                                const canPause = send.status === "queued" || send.status === "running";
+                                const isAudienceSend = send.origin === "audience";
+                                const canQueue = isAudienceSend && send.status === "draft";
+                                const canPause = isAudienceSend
+                                    && (send.status === "queued" || send.status === "running");
                                 const canCancelSend =
-                                    send.status === "draft" ||
-                                    send.status === "queued" ||
-                                    send.status === "running" ||
-                                    send.status === "paused";
+                                    isAudienceSend && (
+                                        send.status === "draft" ||
+                                        send.status === "queued" ||
+                                        send.status === "running" ||
+                                        send.status === "paused"
+                                    );
                                 return (
                                     <li key={send.id} className="flex flex-col gap-3 py-4">
                                         <div className="flex flex-wrap items-center justify-between gap-3">
                                             <div className="flex min-w-0 flex-wrap items-center gap-3">
                                                 <SendStatusBadge status={send.status} />
+                                                {!isAudienceSend && (
+                                                    <Badge variant="outline">{st("workflowOrigin")}</Badge>
+                                                )}
                                                 <span className="truncate text-sm font-medium text-foreground">
                                                     {messageName(send.messageId)}
                                                 </span>

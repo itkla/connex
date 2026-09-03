@@ -60,6 +60,56 @@ Add a new action to the closed validated vocabulary and `RuleActionExecutor`, de
 - Classify retry behavior explicitly; unknown actions default to no automatic retry.
 - Preserve the existing transactional/deduplicated effect semantics.
 
+### Triggered campaign delivery
+
+`send_message` is a person-only, deduplicated action. Its configuration pins
+`campaignMessageId` and `campaignMessageVersion`; both optional bean fields are omitted from JSON
+when null so definitions created before this action retain their canonical bytes and SHA-256 hash.
+Authoring and runtime preflight require `CAMPAIGN_MANAGE`, `CAMPAIGN_SEND`, and `CONSENT_MANAGE`.
+System-mode definitions are rejected because the fixed system actor does not have both campaign
+permissions.
+
+The action uses one long-lived `campaign_send` with `origin=triggered` per message revision and one
+`campaign_delivery` per contact. Each send points to a real zero-member synthetic snapshot for the
+revision and retains `status=triggered`; binaries from before this feature can map the non-null
+snapshot id but cannot select or mutate the new status during a rollback. The delivery unique key
+makes retries idempotent while the contact id is non-null. A prior delivery for the
+same contact and revision is permanent evidence: dispatched, failed, and skipped rows are all returned
+as an idempotent replay and are never reset to pending. In particular, a delivery skipped by the 24-hour
+frequency cap cannot be retried with that revision. Its `skipped` status and `frequency_capped` reason
+remain visible in campaign recipient history.
+
+Triggered sends use the fixed `marketing` consent purpose. Dispatch remains asynchronous and reuses
+the ordinary per-recipient restriction, address suppression, person suppression, consent, frequency,
+and quiet-hours checks. The enqueue audit says “Queued campaign delivery”; no action path claims that
+the provider sent it. A contact is classified in restriction, address, suppression, and consent order
+before any delivery row is written. An excluded contact creates neither a send nor a delivery, and the
+exclusion reason is strict-audited. An unsubscribe or other mandatory-stop signal skips that delivery
+but does not cancel later workflow nodes in this increment.
+
+Triggered sends remain `triggered` after their pending queue drains so later contacts can enroll. Dormant
+triggered sends are excluded from worker workspace/send scans until another pending delivery exists.
+Their recipient total is refreshed from delivery rows. The campaign API returns them with the
+synthetic `snapshotId` and `origin=triggered`; the campaign UI labels them as workflow-managed and exposes no
+queue, pause, or cancel controls. The lifecycle service also rejects those mutations for triggered
+sends.
+
+Concurrent get-or-create calls are serialized by the campaign mutex. The unique triggered-send key and
+the delivery `(workspace_id, send_id, person_id)` key remain final defenses: duplicate-key collisions
+are caught and re-read, while unrelated uniqueness failures still propagate. Creating the long-lived
+send and enrolling a contact write separate bounded audit events.
+
+The `connex.workflows.triggered-send.enabled` rolling fence defaults off. Roll forward with the fence
+closed on every node, then open it everywhere only after all nodes understand `send_message`. To roll
+back, close it everywhere before replacing binaries. While closed, validation and enrollment reject
+the action, worker selectors exclude triggered sends, and the dispatch service re-checks the fence
+before each provider call so already-pending rows remain intact.
+
+`connex.workflows.triggered-send.recipient-limit` defaults to 200 and must be between 1 and 500.
+Scheduled send-message enrollment stops at that ceiling, persists a diagnostic, and writes a strict
+audit event. `connex.workflows.triggered-send.dispatch-page-size` defaults to 200 and must be between
+1 and 1,000 so a worker sweep never selects an unbounded delivery set.
+
 ## Document automation fence
 
 A `document` workflow subject is a `deal_document` id, not its parent deal.
