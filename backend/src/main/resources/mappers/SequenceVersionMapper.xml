@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.SequenceVersionMapper">
+
+  <sql id="versionColumns">
+    v.id, v.workspace_id, v.sequence_id, v.version_number, v.definition_json,
+    v.definition_hash, publisher.published_by_id, v.created_at
+  </sql>
+
+  <select id="nextVersionNumberForUpdate" resultType="int">
+    SELECT COALESCE(MAX(version_number), 0) + 1
+    FROM sequence_version
+    WHERE workspace_id = #{workspaceId} AND sequence_id = #{sequenceId}
+    FOR UPDATE
+  </select>
+
+  <insert id="insertVersion" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO sequence_version
+      (workspace_id, sequence_id, version_number, definition_json, definition_hash)
+    VALUES
+      (#{workspaceId}, #{sequenceId}, #{versionNumber}, #{definitionJson},
+       #{definitionHash})
+  </insert>
+
+  <insert id="insertVersionPublisher">
+    INSERT INTO sequence_version_publisher (workspace_id, version_id, published_by_id)
+    VALUES (#{workspaceId}, #{versionId}, #{publishedById})
+  </insert>
+
+  <select id="getVersions" resultType="SequenceVersion">
+    SELECT <include refid="versionColumns"/>
+    FROM sequence_version v
+    LEFT JOIN sequence_version_publisher publisher
+      ON publisher.workspace_id = v.workspace_id AND publisher.version_id = v.id
+    WHERE v.workspace_id = #{workspaceId} AND v.sequence_id = #{sequenceId}
+    ORDER BY v.version_number DESC
+  </select>
+
+  <select id="getVersion" resultType="SequenceVersion">
+    SELECT <include refid="versionColumns"/>
+    FROM sequence_version v
+    LEFT JOIN sequence_version_publisher publisher
+      ON publisher.workspace_id = v.workspace_id AND publisher.version_id = v.id
+    WHERE v.workspace_id = #{workspaceId}
+      AND v.sequence_id = #{sequenceId}
+      AND v.version_number = #{versionNumber}
+  </select>
+
+</mapper>

@@ -117,10 +117,15 @@ class TenantScopeInterceptorTest {
         assertFalse(interceptor.requiresResolvedContext(NS + "SuppressionMapper.clearCreatorsAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(
             NS + "RecordCreationTemplateMapper.clearUserReferencesAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(
+            NS + "SequenceMapper.clearSequenceUserReferencesAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(
+            NS + "SequenceMapper.clearSequenceVersionPublishersAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "SavedViewPreferenceMapper.deletePinsForUserAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "SavedViewPreferenceMapper.deleteDefaultsForUserAnywhere"));
         assertTrue(interceptor.requiresResolvedContext(NS + "CompanyMapper.clearMemberOwnership"));
         assertTrue(interceptor.requiresResolvedContext(NS + "PersonMapper.clearMemberOwnership"));
+        assertTrue(interceptor.requiresResolvedContext(NS + "SequenceMapper.clearMemberOwnership"));
     }
 
     /**

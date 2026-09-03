@@ -53,6 +53,7 @@ import ooo.klae.connex.backend.mappers.RecordCreationTemplateMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
+import ooo.klae.connex.backend.mappers.SequenceMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
@@ -93,6 +94,7 @@ class UserOffboardingOrderTest {
     @Mock private RelationshipSignalMapper relationshipSignalMapper;
     @Mock private RecordCommentMapper recordCommentMapper;
     @Mock private RecordCreationTemplateMapper recordCreationTemplateMapper;
+    @Mock private SequenceMapper sequenceMapper;
     @Mock private UserDashboardMapper userDashboardMapper;
     @Mock private UserMapper userMapper;
     @Mock private WorkspaceMapper workspaceMapper;
@@ -202,7 +204,7 @@ class UserOffboardingOrderTest {
             dealDuplicateReviewProofMapper, duplicateReviewMapper,
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             taskMapper, companyMapper,
-            personMapper, dealMapper, campaignMapper, relationshipSignalMapper);
+            personMapper, dealMapper, campaignMapper, sequenceMapper, relationshipSignalMapper);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
         order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
         order.verify(notificationMapper).lockRecipientMemberships(9);
@@ -219,6 +221,7 @@ class UserOffboardingOrderTest {
         order.verify(personMapper).clearMemberOwnership(7, 9);
         order.verify(dealMapper).clearMemberDealOwnership(7, 9);
         order.verify(campaignMapper).clearMemberOwnership(7, 9);
+        order.verify(sequenceMapper).clearMemberOwnership(7, 9);
         order.verify(dealMapper).removeCollaboratorFromWorkspace(7, 9);
         order.verify(notificationMapper)
             .deleteHistoricalNotificationBaselinesForRecipient(7, 9);
@@ -244,7 +247,7 @@ class UserOffboardingOrderTest {
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             stateVersionService, companyMapper,
             personMapper, dealMapper, recordCreationTemplateMapper, workflowOffboardingService, suppressionMapper,
-            relationshipSignalMapper, recordCommentMapper);
+            relationshipSignalMapper, recordCommentMapper, sequenceMapper);
         order.verify(userMapper).lockById(9);
         order.verify(notificationMapper).findRecipientIdsByActor(9);
         order.verify(workflowOffboardingService).discover(9);
@@ -285,6 +288,8 @@ class UserOffboardingOrderTest {
         order.verify(recordCommentMapper).deleteReactionsAnywhere(9);
         order.verify(suppressionMapper).clearCreatorsAnywhere(9);
         order.verify(relationshipSignalMapper).deleteActorStateAnywhere(9);
+        order.verify(sequenceMapper).clearSequenceUserReferencesAnywhere(9);
+        order.verify(sequenceMapper).clearSequenceVersionPublishersAnywhere(9);
     }
 
     @Test

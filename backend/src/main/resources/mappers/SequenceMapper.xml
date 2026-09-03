@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.SequenceMapper">
+
+  <sql id="sequenceColumns">
+    id, workspace_id, name, purpose, owner_id, visibility, status, timezone,
+    weekday_mask, send_window_start, send_window_end, created_by_id, updated_by_id,
+    archived_at, created_at, updated_at
+  </sql>
+
+  <sql id="visibleSequence">
+    workspace_id = #{workspaceId}
+    AND (visibility = 'shared' OR owner_id = #{userId})
+  </sql>
+
+  <select id="getVisibleSequences" resultType="Sequence">
+    SELECT <include refid="sequenceColumns"/> FROM sequence
+    WHERE <include refid="visibleSequence"/>
+      AND archived_at IS NULL
+    ORDER BY updated_at DESC, id DESC
+  </select>
+
+  <select id="getVisibleSequence" resultType="Sequence">
+    SELECT <include refid="sequenceColumns"/> FROM sequence
+    WHERE <include refid="visibleSequence"/>
+      AND id = #{id}
+      AND archived_at IS NULL
+  </select>
+
+  <select id="getVisibleSequenceForUpdate" resultType="Sequence">
+    SELECT <include refid="sequenceColumns"/> FROM sequence
+    WHERE <include refid="visibleSequence"/>
+      AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <insert id="insertSequence" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO sequence
+      (workspace_id, name, purpose, owner_id, visibility, status, timezone,
+       weekday_mask, send_window_start, send_window_end, created_by_id, updated_by_id)
+    VALUES
+      (#{workspaceId}, #{name}, #{purpose}, #{ownerId}, #{visibility}, #{status}, #{timezone},
+       #{weekdayMask}, #{sendWindowStart}, #{sendWindowEnd}, #{createdById}, #{updatedById})
+  </insert>
+
+  <update id="updateSequence">
+    UPDATE sequence
+    SET name = #{name}, purpose = #{purpose}, visibility = #{visibility},
+        timezone = #{timezone}, weekday_mask = #{weekdayMask},
+        send_window_start = #{sendWindowStart}, send_window_end = #{sendWindowEnd},
+        updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL
+  </update>
+
+  <update id="archiveSequence">
+    UPDATE sequence
+    SET status = 'archived', archived_at = #{archivedAt}, updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL
+  </update>
+
+  <update id="markPublished">
+    UPDATE sequence
+    SET status = 'active', updated_by_id = #{updatedById}
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL
+  </update>
+
+  <select id="getSteps" resultType="SequenceStep">
+    SELECT id, workspace_id, sequence_id, position, step_type, delay_value, delay_unit, advance_policy
+    FROM sequence_step
+    WHERE workspace_id = #{workspaceId} AND sequence_id = #{sequenceId}
+    ORDER BY position, id
+  </select>
+
+  <select id="getStepsForShare" resultType="SequenceStep">
+    SELECT id, workspace_id, sequence_id, position, step_type, delay_value, delay_unit, advance_policy
+    FROM sequence_step
+    WHERE workspace_id = #{workspaceId} AND sequence_id = #{sequenceId}
+    ORDER BY position, id
+    FOR SHARE
+  </select>
+
+  <select id="getStepContents" resultType="SequenceStepContent">
+    SELECT workspace_id, step_id, locale, subject, body_text, body_html
+    FROM sequence_step_content
+    WHERE workspace_id = #{workspaceId}
+      AND step_id IN
+      <foreach item="stepId" collection="stepIds" open="(" separator="," close=")">#{stepId}</foreach>
+    ORDER BY step_id, locale
+  </select>
+
+  <select id="getStepContentsForShare" resultType="SequenceStepContent">
+    SELECT workspace_id, step_id, locale, subject, body_text, body_html
+    FROM sequence_step_content
+    WHERE workspace_id = #{workspaceId}
+      AND step_id IN
+      <foreach item="stepId" collection="stepIds" open="(" separator="," close=")">#{stepId}</foreach>
+    ORDER BY step_id, locale
+    FOR SHARE
+  </select>
+
+  <delete id="deleteDraftSteps">
+    DELETE FROM sequence_step
+    WHERE workspace_id = #{workspaceId} AND sequence_id = #{sequenceId}
+  </delete>
+
+  <insert id="insertStep" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO sequence_step
+      (workspace_id, sequence_id, position, step_type, delay_value, delay_unit, advance_policy)
+    VALUES
+      (#{workspaceId}, #{sequenceId}, #{position}, #{stepType}, #{delayValue},
+       #{delayUnit}, #{advancePolicy})
+  </insert>
+
+  <insert id="insertStepContent">
+    INSERT INTO sequence_step_content
+      (workspace_id, step_id, locale, subject, body_text, body_html)
+    VALUES
+      (#{workspaceId}, #{stepId}, #{locale}, #{subject}, #{bodyText}, #{bodyHtml})
+  </insert>
+
+  <update id="clearMemberOwnership">
+    UPDATE sequence SET owner_id = NULL
+    WHERE workspace_id = #{workspaceId} AND owner_id = #{userId}
+  </update>
+
+  <update id="clearSequenceUserReferencesAnywhere">
+    UPDATE sequence
+    SET owner_id = CASE WHEN owner_id = #{userId} THEN NULL ELSE owner_id END,
+        created_by_id = CASE WHEN created_by_id = #{userId} THEN NULL ELSE created_by_id END,
+        updated_by_id = CASE WHEN updated_by_id = #{userId} THEN NULL ELSE updated_by_id END
+    WHERE owner_id = #{userId} OR created_by_id = #{userId} OR updated_by_id = #{userId}
+  </update>
+
+  <update id="clearSequenceVersionPublishersAnywhere">
+    UPDATE sequence_version_publisher SET published_by_id = NULL WHERE published_by_id = #{userId}
+  </update>
+
+</mapper>

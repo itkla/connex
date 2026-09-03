@@ -90,7 +90,8 @@ public class WorkspaceService {
             Permission.TASK_CREATE, Permission.TASK_UPDATE, Permission.TASK_DELETE,
             Permission.ATTACHMENT_CREATE, Permission.ATTACHMENT_DELETE,
             Permission.REPORT_READ, Permission.REPORT_CREATE, Permission.REPORT_UPDATE,
-            Permission.REPORT_DELETE, Permission.GOAL_READ, Permission.CAMPAIGN_VIEW);
+            Permission.REPORT_DELETE, Permission.GOAL_READ, Permission.CAMPAIGN_VIEW,
+            Permission.SEQUENCE_VIEW);
     }
 
     private static EnumSet<Permission> adminPermissions() {
@@ -104,7 +105,8 @@ public class WorkspaceService {
             Permission.AI_USE, Permission.AI_SESSION_SHARE, Permission.AI_SESSION_ADMIN,
             Permission.GOAL_MANAGE,
             Permission.CAMPAIGN_MANAGE,
-            Permission.CAMPAIGN_SEND, Permission.CONSENT_MANAGE));
+            Permission.CAMPAIGN_SEND, Permission.CONSENT_MANAGE,
+            Permission.SEQUENCE_MANAGE));
         return permissions;
     }
 
@@ -461,7 +463,7 @@ public class WorkspaceService {
             Set<Permission> required = Objects.requireNonNull(
                     requiredByUser.get(userId), "required permissions");
             if (userMapper.lockByIdForShare(userId) == null
-                    || userMapper.isAccountDeletionReserved(userId)) {
+                    || userMapper.isAccountDeletionReservedForShare(userId)) {
                 throw authorizationRequired(userId, required);
             }
         }

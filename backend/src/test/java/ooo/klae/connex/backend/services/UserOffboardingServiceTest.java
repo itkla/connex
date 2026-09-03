@@ -1,13 +1,17 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -32,6 +36,8 @@ import ooo.klae.connex.backend.beans.RecordComment;
 import ooo.klae.connex.backend.beans.RecordCommentThread;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.SavedView;
+import ooo.klae.connex.backend.beans.Sequence;
+import ooo.klae.connex.backend.beans.SequenceVersion;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.SuppressionEntry;
 import ooo.klae.connex.backend.beans.Task;
@@ -51,6 +57,8 @@ import ooo.klae.connex.backend.mappers.RecordCommentMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SavedViewMapper;
 import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
+import ooo.klae.connex.backend.mappers.SequenceMapper;
+import ooo.klae.connex.backend.mappers.SequenceVersionMapper;
 import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
 import tools.jackson.databind.ObjectMapper;
@@ -80,6 +88,8 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     @Autowired private ConsentMapper consentMapper;
     @Autowired private SuppressionMapper suppressionMapper;
     @Autowired private IdentityBackfillTransaction identityBackfillTransaction;
+    @Autowired private SequenceMapper sequenceMapper;
+    @Autowired private SequenceVersionMapper sequenceVersionMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
 
@@ -104,7 +114,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void erasureDetachesAndDeletesEveryReferenceWhileTheUserStillExists() {
+    void erasureDetachesAndDeletesEveryReferenceWhileTheUserStillExists() throws Exception {
         User target = newUser();
         Company company = newCompany();
         Person person = newPerson(company);
@@ -126,6 +136,9 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         Person otherPerson = personInWorkspace(otherWorkspace, target.getId());
         int templateRoot = recordCreationTemplateFor(workspace.getId(), target.getId());
         int otherTemplateRoot = recordCreationTemplateFor(otherWorkspace.getId(), target.getId());
+        Sequence sequence = sequenceFor(workspace.getId(), target.getId());
+        Sequence otherSequence = sequenceFor(otherWorkspace.getId(), target.getId());
+        SequenceVersion sequenceVersion = sequenceVersionFor(sequence, target.getId());
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 1);
 
@@ -193,6 +206,8 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
                 + "resolved_at = UTC_TIMESTAMP(6) WHERE workspace_id = ? AND id = ?",
             target.getId(), workspace.getId(), commentThread.getId());
 
+        byte[] sequenceVersionBytesBefore = sequenceVersionRowBytes(sequenceVersion.getId());
+
         offboardingService.eraseOrgDataReferences(target.getId());
 
         assertNull(companyMapper.getCompanyById(workspace.getId(), company.getId()).getOwnerId());
@@ -203,6 +218,14 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             otherWorkspace.getId(), otherPerson.getId()).getOwnerId());
         assertTemplateActorsCleared(workspace.getId(), templateRoot);
         assertTemplateActorsCleared(otherWorkspace.getId(), otherTemplateRoot);
+        assertSequenceActorsCleared(sequence.getId());
+        assertSequenceActorsCleared(otherSequence.getId());
+        assertArrayEquals(
+            sequenceVersionBytesBefore,
+            sequenceVersionRowBytes(sequenceVersion.getId()));
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT published_by_id FROM sequence_version_publisher WHERE version_id = ?",
+            Integer.class, sequenceVersion.getId()));
         assertNull(dealMapper.getDealById(workspace.getId(), deal.getId()).getOwnerId());
         assertTrue(dealMapper.getCollaborators(workspace.getId(), deal.getId()).isEmpty());
         assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());
@@ -307,6 +330,8 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         newNotification(workspace.getId(), member.getId());
         Task task = newTask(member, null, null);
         Campaign campaign = campaignFor(member);
+        Sequence sequence = sequenceFor(workspace.getId(), member.getId());
+        Sequence retainedOtherSequence = sequenceFor(otherWorkspace.getId(), member.getId());
         SavedView memberView = savedView(member);
         SavedView retainedOtherWorkspaceView = savedViewInWorkspace(otherWorkspace, member);
         SavedView sharedTarget = savedView(newUser());
@@ -330,6 +355,11 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         assertEquals(0, notificationMapper.countPage(member.getId(), null, null, null, null));
         assertNull(taskMapper.getTaskById(workspace.getId(), task.getId()).getAssignedTo());
         assertNull(campaignMapper.getCampaign(workspace.getId(), campaign.getId()).getOwnerUserId());
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT owner_id FROM sequence WHERE id = ?", Integer.class, sequence.getId()));
+        assertEquals(member.getId(), jdbcTemplate.queryForObject(
+            "SELECT owner_id FROM sequence WHERE id = ?",
+            Integer.class, retainedOtherSequence.getId()));
         assertNull(savedViewMapper.getAccessibleById(
             workspace.getId(), member.getId(), memberView.getId()));
         assertNull(savedViewPreferenceMapper.getPin(
@@ -652,6 +682,58 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         entry.setCreatedById(user.getId());
         suppressionMapper.insert(entry);
         return entry;
+    }
+
+    private Sequence sequenceFor(int workspaceId, int actorId) {
+        Sequence sequence = new Sequence();
+        sequence.setWorkspaceId(workspaceId);
+        sequence.setName("Sequence " + unique());
+        sequence.setOwnerId(actorId);
+        sequence.setVisibility("personal");
+        sequence.setStatus("draft");
+        sequence.setTimezone("UTC");
+        sequence.setWeekdayMask(31);
+        sequence.setSendWindowStart(LocalTime.of(9, 0));
+        sequence.setSendWindowEnd(LocalTime.of(17, 0));
+        sequence.setCreatedById(actorId);
+        sequence.setUpdatedById(actorId);
+        sequenceMapper.insertSequence(sequence);
+        return sequence;
+    }
+
+    private SequenceVersion sequenceVersionFor(Sequence sequence, int actorId) throws Exception {
+        String definition = "{\"schemaVersion\":1,\"steps\":[]}";
+        SequenceVersion version = new SequenceVersion();
+        version.setWorkspaceId(sequence.getWorkspaceId());
+        version.setSequenceId(sequence.getId());
+        version.setVersionNumber(1);
+        version.setDefinitionJson(definition);
+        version.setDefinitionHash(MessageDigest.getInstance("SHA-256")
+            .digest(definition.getBytes(StandardCharsets.UTF_8)));
+        version.setPublishedById(actorId);
+        sequenceVersionMapper.insertVersion(version);
+        sequenceVersionMapper.insertVersionPublisher(
+            sequence.getWorkspaceId(), version.getId(), actorId);
+        return version;
+    }
+
+    private byte[] sequenceVersionRowBytes(long versionId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT CAST(CONCAT_WS(0x1F, id, workspace_id, sequence_id, version_number,"
+                + " HEX(CONVERT(definition_json USING utf8mb4)), HEX(definition_hash),"
+                + " DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%s.%f')) AS BINARY)"
+                + " FROM sequence_version WHERE id = ?",
+            byte[].class,
+            versionId);
+    }
+
+    private void assertSequenceActorsCleared(int sequenceId) {
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT owner_id FROM sequence WHERE id = ?", Integer.class, sequenceId));
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT created_by_id FROM sequence WHERE id = ?", Integer.class, sequenceId));
+        assertNull(jdbcTemplate.queryForObject(
+            "SELECT updated_by_id FROM sequence WHERE id = ?", Integer.class, sequenceId));
     }
 
     private int recordCreationTemplateFor(int workspaceId, int actorId) {

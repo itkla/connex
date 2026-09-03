@@ -308,6 +308,11 @@ public interface DealMapper {
             @Param("companyId") int companyId, @Param("excludeDealId") int excludeDealId,
             @Param("limit") int limit);
     List<Deal> getDealsByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
+    /** Returns ordered active deals for a contact inside the supplied member ownership scope. */
+    List<Deal> getSequencePreviewDeals(
+            @Param("workspaceId") int workspaceId,
+            @Param("personId") int personId,
+            @Param("memberScope") MemberScope memberScope);
     List<Deal> getDealsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     Deal getDealById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Deal getDealByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);

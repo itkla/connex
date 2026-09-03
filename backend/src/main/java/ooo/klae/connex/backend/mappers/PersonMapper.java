@@ -63,6 +63,15 @@ public interface PersonMapper {
     List<Person> getPersonsByTagId(@Param("workspaceId") int workspaceId, @Param("tagId") int tagId);
     List<Person> getPersonsByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     Person getPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /**
+     * Returns one active, processable, workspace-owned contact inside the supplied member scope.
+     * Shared-in, unassigned, archived, suspended, and provision-ceased contacts are excluded, and
+     * an associated company is projected only when it satisfies the same member scope.
+     */
+    Person getSequencePreviewPerson(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("memberScope") MemberScope memberScope);
     Person getVisiblePersonByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Person getOwnedPersonByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /** The owned contact only when it is archived; the restore path's pre-image read. */

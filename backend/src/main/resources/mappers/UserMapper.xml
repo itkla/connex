@@ -120,6 +120,16 @@
     WHERE id = #{id}
   </select>
 
+  <select id="isAccountDeletionReservedForShare" resultType="boolean">
+    SELECT COALESCE(
+      account_deletion_reservation_until &gt; UTC_TIMESTAMP(6),
+      FALSE
+    )
+    FROM app_user
+    WHERE id = #{id}
+    FOR SHARE
+  </select>
+
   <select id="isAccountDeletionReservationOwner" resultType="boolean">
     SELECT COALESCE(
       account_deletion_reservation_owner = #{owner}
@@ -197,8 +207,8 @@
         AND wrp.permission IN (
           'AUDIT_READ', 'CAMPAIGN_MANAGE', 'CAMPAIGN_SEND', 'CONSENT_MANAGE',
           'CUSTOM_FIELD_MANAGE', 'DOCUMENT_MANAGE', 'MEMBER_MANAGE', 'PIPELINE_MANAGE',
-          'PRODUCT_MANAGE', 'ROLE_MANAGE', 'RULE_MANAGE', 'SHARE_MANAGE',
-          'TAG_MANAGE', 'WORKSPACE_SETTINGS'
+          'PRODUCT_MANAGE', 'ROLE_MANAGE', 'RULE_MANAGE', 'SEQUENCE_MANAGE',
+          'SHARE_MANAGE', 'TAG_MANAGE', 'WORKSPACE_SETTINGS'
         )
     )
   </select>

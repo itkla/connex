@@ -159,13 +159,14 @@ them and no API that changes them.
 
 | | `MEMBER` | `ADMIN` | `OWNER` |
 |---|---|---|---|
-| Grantable permissions held | 25 | 42 | 43 (all) |
+| Grantable permissions held | 28 | 49 | 50 (all) |
 | Record work — create/update/delete on companies, people, deals, activities, notes, tasks, attachments | yes (except `COMPANY_DELETE`) | yes | yes |
-| `REPORT_READ/CREATE/UPDATE/DELETE`, `GOAL_READ`, `CAMPAIGN_VIEW` | yes | yes | yes |
+| `REPORT_READ/CREATE/UPDATE/DELETE`, `GOAL_READ`, `CAMPAIGN_VIEW`, `SEQUENCE_VIEW` | yes | yes | yes |
 | `COMPANY_DELETE`, `PIPELINE_MANAGE`, `TAG_MANAGE`, `PRODUCT_MANAGE`, `GOAL_MANAGE` | — | yes | yes |
 | `DOCUMENT_MANAGE`, `DOCUMENT_APPROVE`, `CUSTOM_FIELD_MANAGE`, `SHARE_MANAGE`, `RULE_MANAGE` | — | yes | yes |
 | `MEMBER_MANAGE`, `WORKSPACE_SETTINGS`, `AUDIT_READ` | — | yes | yes |
 | `CAMPAIGN_MANAGE`, `CAMPAIGN_SEND`, `CONSENT_MANAGE` | — | yes | yes |
+| `SEQUENCE_MANAGE` | — | yes | yes |
 | **`AI_USE`** | **—** | **yes** | **yes** |
 | **`ROLE_MANAGE`** | — | **—** | **yes** |
 

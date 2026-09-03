@@ -85,6 +85,15 @@ class UserMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void deletionReservationForShareReadsCurrentState() {
+        User user = newUser();
+
+        assertFalse(userMapper.isAccountDeletionReservedForShare(user.getId()));
+        assertEquals(1, userMapper.reserveAccountDeletion(user.getId(), "mapper-lock-proof"));
+        assertTrue(userMapper.isAccountDeletionReservedForShare(user.getId()));
+    }
+
+    @Test
     void getActiveWorkspaceMemberReferencesByIdsReturnsOnlyActiveMembersOfRequestedWorkspace() {
         User active = newUser();
         String profilePictureUrl = "/api/users/" + active.getId() + "/profile-picture";
@@ -285,6 +294,23 @@ class UserMapperTest extends AbstractMapperTest {
         Integer orgId = jdbcTemplate.queryForObject(
                 "SELECT org_id FROM workspace WHERE id = ?", Integer.class, workspace.getId());
         orgMemberMapper.addMember(orgId, user.getId(), "admin");
+        assertTrue(userMapper.isPrivilegedAccount(user.getId()));
+    }
+
+    @Test
+    void sequenceManageButNotSequenceViewClassifiesCustomRoleAsPrivileged() {
+        User user = newUser();
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(workspace.getId());
+        role.setName("sequence-manager-" + unique());
+        roleMapper.insertRole(role);
+        workspaceMapper.setMemberCustomRole(workspace.getId(), user.getId(), role.getId());
+
+        roleMapper.insertPermissions(workspace.getId(), role.getId(), List.of("SEQUENCE_VIEW"));
+        assertFalse(userMapper.isPrivilegedAccount(user.getId()));
+
+        roleMapper.clearPermissions(workspace.getId(), role.getId());
+        roleMapper.insertPermissions(workspace.getId(), role.getId(), List.of("SEQUENCE_MANAGE"));
         assertTrue(userMapper.isPrivilegedAccount(user.getId()));
     }
 

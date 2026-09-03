@@ -234,7 +234,12 @@ public final class TablePlaneRegistry {
         "workflow_step_run",
         "workflow_trigger_outbox",
         "workflow_version",
-        "disqualification_reason");
+        "disqualification_reason",
+        "sequence",
+        "sequence_version",
+        "sequence_version_publisher",
+        "sequence_step",
+        "sequence_step_content");
 
     private static Set<String> controlPlaneTables() {
         Set<String> tables = new HashSet<>(CONTROL_PLANE_STATE_TABLES);

@@ -465,6 +465,33 @@
     WHERE <include refid="visible"/> AND p.id = #{id}
   </select>
 
+  <select id="getSequencePreviewPerson" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/>, <include refid="companyJoinColumns"/>
+    FROM person p
+    LEFT JOIN company c
+      ON c.id = p.company_id
+      AND c.workspace_id = #{workspaceId}
+      AND c.archived_at IS NULL
+      <choose>
+        <when test="memberScope.mode.name() == 'ME'">
+          AND c.owner_id = #{memberScope.userId}
+        </when>
+        <when test="memberScope.mode.name() == 'MEMBERS'">
+          AND c.owner_id IN
+          <foreach item="id" collection="memberScope.memberIds" open="(" separator="," close=")">#{id}</foreach>
+        </when>
+        <when test="memberScope.mode.name() == 'UNASSIGNED'">
+          AND c.owner_id IS NULL
+        </when>
+      </choose>
+    WHERE p.workspace_id = #{workspaceId}
+      AND p.id = #{id}
+      AND p.archived_at IS NULL
+      AND p.suspended_at IS NULL
+      AND p.provision_ceased_at IS NULL
+      <include refid="memberScopePredicate"/>
+  </select>
+
   <select id="getVisiblePersonByIdForUpdate" resultMap="PersonResult">
     SELECT <include refid="personColumns"/>, p.company_id
     FROM person p

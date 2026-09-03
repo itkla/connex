@@ -257,6 +257,8 @@ class WorkspaceIdentityLockOrderTest {
         int targetUserId = 17;
         when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
         when(userMapper.lockByIdForShare(targetUserId)).thenReturn(targetUserId);
+        when(userMapper.isAccountDeletionReservedForShare(ACTOR_ID)).thenReturn(false);
+        when(userMapper.isAccountDeletionReservedForShare(targetUserId)).thenReturn(false);
         when(workspaceMapper.lockActiveWorkspaceForShare(WORKSPACE_ID)).thenReturn(ORG_ID);
         when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID))
             .thenReturn(membership(ACTOR_ID, "admin", null, "active"));
@@ -273,7 +275,9 @@ class WorkspaceIdentityLockOrderTest {
 
         InOrder order = inOrder(userMapper, workspaceMapper, roleMapper);
         order.verify(userMapper).lockByIdForShare(ACTOR_ID);
+        order.verify(userMapper).isAccountDeletionReservedForShare(ACTOR_ID);
         order.verify(userMapper).lockByIdForShare(targetUserId);
+        order.verify(userMapper).isAccountDeletionReservedForShare(targetUserId);
         order.verify(workspaceMapper).lockActiveWorkspaceForShare(WORKSPACE_ID);
         order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID);
         order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, targetUserId);
