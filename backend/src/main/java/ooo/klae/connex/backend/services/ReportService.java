@@ -431,8 +431,10 @@ public class ReportService {
     }
 
     /**
-     * Resolves one saved widget as a deterministic scalar without generating a narrative. The
-     * caller must hold every permission required by the full saved report definition.
+     * Resolves one saved widget as an equal-or-unavailable scalar without generating a narrative.
+     * When available, its total and unit match full report generation for the same configuration
+     * and period. Bounded input exhaustion instead returns null total and unit. The caller must hold
+     * every permission required by the full saved report definition.
      */
     @RequirePermission(Permission.REPORT_READ)
     public ReportKpiDto widgetKpi(int reportId, String widgetId, ReportGenerateRequest request) {
@@ -447,7 +449,22 @@ public class ReportService {
         WidgetSelection selected = selectWidget(config, widgetId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         GenerationInputs inputs = generationInputs(
-                workspaceId, config, List.of(selected.widget()), period);
+                workspaceId, config, List.of(selected.widget()), period, RiskInputScope.KPI_BOUNDED);
+        if (inputs.riskInputLimitExceeded()) {
+            ReportWidgetDataDto widget = new ReportWidgetDataDto(
+                    selected.widget().id(),
+                    displayTitle(selected.widget()),
+                    selected.widget().chartType(),
+                    selected.widget().dataSource(),
+                    selected.widget().measure(),
+                    selected.widget().groupBy(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    List.of());
+            return reportKpi(definition, period, widget, "input_limit_exceeded");
+        }
         WidgetResult result = generateWidget(
                 workspaceId,
                 selected.widget(),
@@ -456,7 +473,14 @@ public class ReportService {
                 period,
                 selected.index(),
                 inputs);
-        ReportWidgetDataDto widget = result.widget();
+        return reportKpi(definition, period, result.widget(), result.unavailabilityReason());
+    }
+
+    private ReportKpiDto reportKpi(
+            ReportDefinition definition,
+            PeriodWindow period,
+            ReportWidgetDataDto widget,
+            String unavailabilityReason) {
         return new ReportKpiDto(
                 definition.getId(),
                 definition.getName(),
@@ -475,8 +499,8 @@ public class ReportService {
                 period.priorStart(),
                 period.priorEnd(),
                 Instant.now(clock).toString(),
-                result.unavailabilityReason() == null,
-                result.unavailabilityReason());
+                unavailabilityReason == null,
+                unavailabilityReason);
     }
 
     /**
@@ -984,7 +1008,6 @@ public class ReportService {
         List<ReportDataPointDto> points = new ArrayList<>();
         List<ReportAppendixRowDto> appendix = new ArrayList<>();
         Set<String> units = new LinkedHashSet<>();
-        Set<String> unitKeys = new LinkedHashSet<>();
         BigDecimal total = BigDecimal.ZERO;
         BigDecimal priorTotal = BigDecimal.ZERO;
         boolean priorTotalDefined = priorComparable && !(undefinedWhenEmpty && prior.isEmpty());
@@ -995,12 +1018,11 @@ public class ReportService {
             BigDecimal priorValue = priorPointValue(priorRow, priorComparable, undefinedWhenEmpty);
             BigDecimal value = safe(row.value());
             String sourceId = "metric." + widgetIndex + "." + pointIndex++;
-            String unit = normalizedUnit(row.unit());
+            String unit = resolvedUnit(row.unit());
             points.add(new ReportDataPointDto(row.groupKey(), row.groupLabel(), value, priorValue, sourceId));
             appendix.add(new ReportAppendixRowDto(sourceId, widget.id(),
                     widget.measure() + " · " + row.groupLabel(), value, priorValue, unit));
             units.add(unit);
-            unitKeys.add(unitKey(row.unit()));
             total = total.add(value);
             if (priorValue == null) {
                 priorTotalDefined = false;
@@ -1013,13 +1035,12 @@ public class ReportService {
                     row, widget, bucket, period.priorStart(), period.start());
             BigDecimal priorValue = safe(row.value());
             String sourceId = "metric." + widgetIndex + "." + pointIndex++;
-            String unit = normalizedUnit(row.unit());
+            String unit = resolvedUnit(row.unit());
             points.add(new ReportDataPointDto(
                     alignedRow.groupKey(), alignedRow.groupLabel(), BigDecimal.ZERO, priorValue, sourceId));
             appendix.add(new ReportAppendixRowDto(sourceId, widget.id(),
                     widget.measure() + " · " + alignedRow.groupLabel(), BigDecimal.ZERO, priorValue, unit));
             units.add(unit);
-            unitKeys.add(unitKey(row.unit()));
             priorTotal = priorTotal.add(priorValue);
         }
         if ("date".equals(normalizeGroup(widget.groupBy()))) {
@@ -1027,20 +1048,20 @@ public class ReportService {
                     .comparing((ReportDataPointDto point) -> parseBucketDate(point.key(), bucket))
                     .thenComparing(ReportDataPointDto::key));
         }
-        String unit = units.size() == 1 && unitKeys.size() == 1 ? units.iterator().next() : "mixed";
+        String unit = units.size() == 1 ? units.iterator().next() : "mixed";
         boolean additive = DISCOUNT_MEASURES.contains(widget.measure())
                 ? points.size() <= 1
                 : !NON_ADDITIVE_MEASURES.contains(widget.measure())
                         || "none".equals(normalizeGroup(widget.groupBy()));
         boolean undefinedCurrent = undefinedWhenEmpty && current.isEmpty();
         BigDecimal scalarTotal = total;
-        Set<String> scalarUnits = unitKeys;
+        Set<String> scalarUnits = units;
         if (authoritativeTotalRows != null) {
             scalarTotal = BigDecimal.ZERO;
             scalarUnits = new LinkedHashSet<>();
             for (ReportAggregateRow row : authoritativeTotalRows) {
                 scalarTotal = scalarTotal.add(safe(row.value()));
-                scalarUnits.add(unitKey(row.unit()));
+                scalarUnits.add(resolvedUnit(row.unit()));
             }
         }
         String unavailabilityReason = null;
@@ -1052,7 +1073,7 @@ public class ReportService {
             unavailabilityReason = "undefined";
         }
         BigDecimal publicTotal = unavailabilityReason == null ? scalarTotal : null;
-        BigDecimal publicPrior = unitKeys.size() <= 1 && additive && priorTotalDefined ? priorTotal : null;
+        BigDecimal publicPrior = units.size() <= 1 && additive && priorTotalDefined ? priorTotal : null;
         BigDecimal change = "attainment".equals(widget.measure())
                 ? attainmentPercent(publicTotal, publicPrior)
                 : percentChange(publicTotal, publicPrior);
@@ -1145,7 +1166,7 @@ public class ReportService {
         for (ReportAggregateRow row : actualRows) {
             int separator = row.groupKey().indexOf(':');
             String suffix = separator >= 0 ? row.groupKey().substring(separator + 1) : row.groupKey();
-            actualByKey.put(unitKey(row.unit()) + ':' + suffix, safe(row.value()));
+            actualByKey.put(resolvedUnit(row.unit()) + ':' + suffix, safe(row.value()));
         }
         String group = normalizeGroup(widget.groupBy());
         List<ReportAggregateRow> current = new ArrayList<>();
@@ -1160,7 +1181,7 @@ public class ReportService {
                     && !filters.ownerIds().isEmpty() && !filters.ownerIds().contains(goal.getOwnerId())) {
                 continue;
             }
-            String currency = unitKey(goal.getCurrency());
+            String currency = resolvedUnit(goal.getCurrency());
             String ownerKey = goal.getOwnerId() == null ? "total" : Integer.toString(goal.getOwnerId());
             String key = currency + ':' + ownerKey;
             if (!emitted.add(key)) {
@@ -1271,7 +1292,7 @@ public class ReportService {
                         zone,
                         batch);
                 for (ReportAggregateRow row : reportMapper.aggregateDeals(query)) {
-                    RiskRowKey key = new RiskRowKey(row.unit().strip(), entry.getKey());
+                    RiskRowKey key = new RiskRowKey(resolvedUnit(row.unit()), entry.getKey());
                     values.merge(key, safe(row.value()), BigDecimal::add);
                 }
             }
@@ -1333,6 +1354,15 @@ public class ReportService {
             ReportConfig config,
             List<ReportWidgetConfig> requestedWidgets,
             PeriodWindow period) {
+        return generationInputs(workspaceId, config, requestedWidgets, period, RiskInputScope.COMPLETE);
+    }
+
+    private GenerationInputs generationInputs(
+            int workspaceId,
+            ReportConfig config,
+            List<ReportWidgetConfig> requestedWidgets,
+            PeriodWindow period,
+            RiskInputScope riskInputScope) {
         boolean contactRelationships = requestedWidgets.stream()
                 .anyMatch(widget -> "relationships".equals(widget.dataSource())
                         && "count".equals(widget.measure()));
@@ -1417,12 +1447,22 @@ public class ReportService {
                 ownerLabels.put(Integer.toString(user.getId()), user.getDisplayName());
             }
         }
+        DealRiskService.BoundedRiskAssessment boundedRiskAssessment =
+                risk && riskInputScope == RiskInputScope.KPI_BOUNDED
+                        ? dealRiskService.assessBoundedWorkspace(workspaceId)
+                        : null;
+        List<DealRiskDto> risks = !risk
+                ? List.of()
+                : boundedRiskAssessment == null
+                        ? dealRiskService.assessWorkspace(workspaceId)
+                        : boundedRiskAssessment.assessments();
         return new GenerationInputs(
                 currentRelationships,
                 priorRelationships,
                 currentCompanyRelationships,
                 priorCompanyRelationships,
-                risk ? dealRiskService.assessWorkspace(workspaceId) : List.of(),
+                risks,
+                boundedRiskAssessment != null && boundedRiskAssessment.inputLimitExceeded(),
                 networkSnapshot.warmIntroOpportunities(),
                 networkSnapshot.reverseIntroSuggestions(),
                 Map.copyOf(ownerLabels),
@@ -1895,7 +1935,7 @@ public class ReportService {
             ReportAppendixRowDto source = sources.get(sourceId);
             if (source != null) {
                 result.add(new ReportCitationDto(source.sourceId(), source.widgetId(), source.label(),
-                        source.value(), source.priorValue(), source.unit()));
+                        source.value(), source.priorValue(), resolvedUnit(source.unit())));
             }
         }
         return List.copyOf(result);
@@ -1933,7 +1973,7 @@ public class ReportService {
     }
 
     private static String rowKey(ReportAggregateRow row) {
-        return row.groupKey() + '\u0000' + row.unit();
+        return resolvedComparisonGroupKey(row) + '\u0000' + resolvedUnit(row.unit());
     }
 
     private static String comparisonKey(
@@ -1949,8 +1989,17 @@ public class ReportService {
             case "month" -> ChronoUnit.MONTHS.between(periodAnchor, bucketDate);
             default -> throw new BadRequestException("Invalid report bucket: " + bucket);
         };
-        return position + "\u0000" + dateGroupPartition(row.groupKey())
-                + "\u0000" + unitKey(row.unit());
+        return position + "\u0000" + dateGroupPartition(resolvedComparisonGroupKey(row))
+                + "\u0000" + resolvedUnit(row.unit());
+    }
+
+    private static String resolvedComparisonGroupKey(ReportAggregateRow row) {
+        String rawUnit = row.unit() == null ? "" : row.unit().strip();
+        String rawPrefix = rawUnit + ':';
+        if (rawUnit.isEmpty() || !row.groupKey().startsWith(rawPrefix)) {
+            return row.groupKey();
+        }
+        return resolvedUnit(row.unit()) + row.groupKey().substring(rawUnit.length());
     }
 
     private static String dateGroupPartition(String groupKey) {
@@ -2029,7 +2078,7 @@ public class ReportService {
         return unit.matches("[A-Za-z]{3,8}") ? unit.toUpperCase(Locale.ROOT) : "currency";
     }
 
-    private static String unitKey(String value) {
+    private static String resolvedUnit(String value) {
         String unit = normalizedUnit(value);
         return "currency".equals(unit) ? value.strip() : unit;
     }
@@ -2052,6 +2101,11 @@ public class ReportService {
     private record RiskRowKey(String currency, String level) {
     }
 
+    private enum RiskInputScope {
+        COMPLETE,
+        KPI_BOUNDED
+    }
+
     private record WidgetResult(
             ReportWidgetDataDto widget,
             List<ReportAppendixRowDto> appendix,
@@ -2064,6 +2118,7 @@ public class ReportService {
             List<RelationshipTemperatureDto> currentCompanyRelationships,
             List<RelationshipTemperatureDto> priorCompanyRelationships,
             List<DealRiskDto> risks,
+            boolean riskInputLimitExceeded,
             List<ReportNetworkService.WarmIntroOpportunity> warmIntroOpportunities,
             List<IntroSuggestionDto> reverseIntroSuggestions,
             Map<String, String> ownerLabels,

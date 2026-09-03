@@ -14,13 +14,42 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class DealRiskProjectionServiceTest {
+    @Test
+    void boundedWorkspaceAssessmentRejectsOverCeilingCandidatesWithoutHydration() {
+        DealMapper dealMapper = mock(DealMapper.class);
+        ActivityMapper activityMapper = mock(ActivityMapper.class);
+        NoteMapper noteMapper = mock(NoteMapper.class);
+        TaskMapper taskMapper = mock(TaskMapper.class);
+        ScoringService scoringService = mock(ScoringService.class);
+        List<Integer> candidates = IntStream.rangeClosed(1, 1_001).boxed().toList();
+        when(dealMapper.getRiskCandidateIds(7, MemberScope.allTeam(), 1_001)).thenReturn(candidates);
+        DealRiskService service = new DealRiskService(
+            dealMapper,
+            activityMapper,
+            noteMapper,
+            taskMapper,
+            scoringService,
+            Clock.systemUTC());
+
+        var assessment = service.assessBoundedWorkspace(7);
+
+        assertTrue(assessment.inputLimitExceeded());
+        assertTrue(assessment.assessments().isEmpty());
+        verify(dealMapper).getRiskCandidateIds(7, MemberScope.allTeam(), 1_001);
+        verify(dealMapper, never()).getByIds(eq(7), anyList());
+        verifyNoInteractions(activityMapper, noteMapper, taskMapper, scoringService);
+    }
+
     @Test
     void analyticsCapsCandidateHydrationAndReportsTruncation() {
         DealMapper dealMapper = mock(DealMapper.class);

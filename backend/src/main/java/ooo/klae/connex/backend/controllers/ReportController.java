@@ -115,6 +115,12 @@ public class ReportController {
         return ResponseEntity.status(status).body(document);
     }
 
+    /**
+     * Returns an equal-or-unavailable scalar projection of one generated widget. An available
+     * response has the same {@code total} and {@code unit} as full generation for the same saved
+     * configuration and period; an input-ceiling response has null {@code total} and {@code unit}
+     * with reason {@code input_limit_exceeded}.
+     */
     @GetMapping("/{id}/widgets/{widgetId}/kpi")
     @RequirePermission(Permission.REPORT_READ)
     public ReportKpiDto widgetKpi(
