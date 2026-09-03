@@ -7,7 +7,7 @@ import { ArrowPathIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outl
 
 import Rise from '@/app/components/motion/Rise';
 import { Button } from '@/components/ui/button';
-import { reportBoundaryError } from '@/app/lib/clientErrorReporter';
+import { reportBoundaryErrorWithConsole } from '@/app/lib/clientErrorReporter';
 
 /**
  * Props Next.js passes to a route segment `error.tsx` boundary component.
@@ -42,8 +42,7 @@ export default function ErrorState({
     const [isRetrying, startTransition] = useTransition();
 
     useEffect(() => {
-        console.error(error);
-        reportBoundaryError(error);
+        reportBoundaryErrorWithConsole(error);
     }, [error]);
 
     const goBack = () => {

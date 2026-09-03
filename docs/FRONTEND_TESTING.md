@@ -142,6 +142,17 @@ Known scope cut: **Ask Connex specs stop short of asking a question.** The e2e s
 
 Known scope cut: the notifications flow asserts the inbox/read-state surface but does not exercise *mark as read on a real notification* — generating one deterministically requires a second workspace member (mention flow), which is deferred until the volume-seeder workstream lands. Documented here so nobody mistakes it for coverage.
 
+The document-acceptance spec creates frozen documents both without and with a real deal line item,
+then sends their deliveries with the authenticated request context. Its dependency-free SMTP capture
+obtains the only supported bearer surface exposed by `InAppAcceptanceProvider`. Playwright opens
+those links in a new context with no storage state, inspects every bearer-route request for absent
+session/workspace credentials, and drives preview, viewed, and accept through the running frontend
+and backend without interception before verifying the committed delivery receipt. CI enables
+signature delivery, permits the loopback SMTP destination, and trusts only loopback as the
+sanitizing proxy for this dev-profile test process. The separate bounded preview fixture remains
+responsible for viewer presentation, themes, responsive layout, reduced motion, and Japanese-document
+rendering; it does not stand in for persistence proof.
+
 ## Flake policy
 
 - **No sleeps.** Waits are Playwright auto-retrying assertions (`toBeVisible`, `toHaveURL`, …). Animations are neutralized with `reducedMotion: "reduce"`; locale/timezone are pinned (`en-US`/UTC).

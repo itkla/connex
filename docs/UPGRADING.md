@@ -209,6 +209,15 @@ exactly V191 — staging and developer clones. Anonymous sessions are spared, as
    `docker compose --profile ocr pull ocr` while keeping the persisted `COMPOSE_PROFILES` value
    empty. Require the backend, frontend, and OCR digest to be locally available before starting the
    target version so every deployment stages the complete signed image set.
+
+   This upgrade does not require recreating the Compose `edge` or `app` networks. The target bundle
+   does not pin their subnets or container addresses: the backend trusts only the `caddy` and
+   `frontend` service names and refreshes their Docker DNS addresses after service recreation.
+   Keep the existing networks in place and use the ordinary service-by-service `docker compose up`
+   commands below. If an unreleased preview added `CONNEX_EDGE_SUBNET`, `CONNEX_CADDY_IP`,
+   `CONNEX_APP_SUBNET`, or `CONNEX_FRONTEND_APP_IP` to `.env`, remove those obsolete variables;
+   set `CONNEX_SECURITY_TRUSTED_PROXIES=caddy,frontend`, replacing any prior IP or CIDR value.
+   Do not run `docker compose down` or delete a network to take this upgrade.
 5. **Refresh the backup tooling and network discovery** — from the target deployment directory,
    rerun the shipped installer before Compose recreates the database. It preserves operator-owned
    settings, migrates a legacy `<project>_default` Docker network value to automatic discovery, and

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
     ensureUrlScheme,
     fixedOffsetSeconds,
+    formatCurrency,
     formatFileSize,
     formatRelativeTime,
     initials,
@@ -177,6 +178,12 @@ describe("formatFileSize", () => {
     it("returns a dash for missing or negative input", () => {
         expect(formatFileSize(undefined)).toBe("—");
         expect(formatFileSize(-1)).toBe("—");
+    });
+});
+
+describe("formatCurrency", () => {
+    it("falls back to localized numeric formatting for non-ISO product currencies", () => {
+        expect(formatCurrency(1234.5, "USDT", "en-US")).toBe("1,234.5");
     });
 });
 

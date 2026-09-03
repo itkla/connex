@@ -66,8 +66,11 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<Map<String, String>> notFound(ResourceNotFoundException ex) {
+        Map<String, String> body = new LinkedHashMap<>();
+        body.put("code", ex.getCode());
+        body.put("message", Objects.requireNonNullElse(ex.getMessage(), "Request failed"));
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
-            .body(codedError(ex.getCode(), ex.getMessage()));
+            .body(body);
     }
 
     @ExceptionHandler(BusinessCardImportResultGoneException.class)

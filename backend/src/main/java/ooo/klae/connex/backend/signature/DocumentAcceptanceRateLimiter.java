@@ -31,19 +31,10 @@ public class DocumentAcceptanceRateLimiter {
     public void acquire(String tokenHash, String sourceAddress) {
         long now = clock.millis();
         long windowMillis = properties.getRateLimitWindow().toMillis();
-        if (windowMillis <= 0
-                || properties.getMaxRequestsPerToken() <= 0
-                || properties.getMaxRequestsPerSource() <= 0
-                || properties.getRateLimitMaxKeys() <= 0) {
-            throw new IllegalStateException("Document-acceptance rate limits must be positive");
-        }
-        String sourceKey = sha256(sourceAddress == null
-            ? "unresolved"
-            : sourceAddress.trim().toLowerCase(Locale.ROOT));
+        requireValidConfiguration(windowMillis);
         boolean tokenAccepted = acquire(
             tokenWindows, tokenHash, properties.getMaxRequestsPerToken(), now, windowMillis);
-        boolean sourceAccepted = acquire(
-            sourceWindows, sourceKey, properties.getMaxRequestsPerSource(), now, windowMillis);
+        boolean sourceAccepted = acquireSource(sourceAddress, now, windowMillis);
         if (!tokenAccepted || !sourceAccepted) {
             throw new TooManyRequestsException("Too many document-link requests. Please try again later.");
         }
@@ -83,6 +74,23 @@ public class DocumentAcceptanceRateLimiter {
             return new Window(existing.startedAtMillis(), existing.count() + 1);
         });
         return accepted.get();
+    }
+
+    private boolean acquireSource(String sourceAddress, long now, long windowMillis) {
+        String sourceKey = sha256(sourceAddress == null
+            ? "unresolved"
+            : sourceAddress.trim().toLowerCase(Locale.ROOT));
+        return acquire(
+            sourceWindows, sourceKey, properties.getMaxRequestsPerSource(), now, windowMillis);
+    }
+
+    private void requireValidConfiguration(long windowMillis) {
+        if (windowMillis <= 0
+                || properties.getMaxRequestsPerToken() <= 0
+                || properties.getMaxRequestsPerSource() <= 0
+                || properties.getRateLimitMaxKeys() <= 0) {
+            throw new IllegalStateException("Document-acceptance rate limits must be positive");
+        }
     }
 
     private static void evict(

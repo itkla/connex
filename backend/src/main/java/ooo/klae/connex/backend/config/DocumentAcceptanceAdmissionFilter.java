@@ -12,6 +12,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.services.DocumentAcceptanceAdmissionService;
 import ooo.klae.connex.backend.signature.DocumentAcceptanceRateLimiter;
 import ooo.klae.connex.backend.signature.DocumentAcceptanceToken;
 import ooo.klae.connex.backend.util.ClientIpResolver;
@@ -21,11 +23,17 @@ import ooo.klae.connex.backend.util.ClientIpResolver;
 public class DocumentAcceptanceAdmissionFilter extends OncePerRequestFilter {
     private static final String PATH_PREFIX = "/api/document-acceptance/";
     private static final String UNAVAILABLE = "Document link is no longer available";
+    private static final String UNAVAILABLE_BODY = "{\"code\":\""
+        + ResourceNotFoundException.CODE
+        + "\",\"message\":\""
+        + UNAVAILABLE
+        + "\"}";
     private static final String RATE_LIMITED =
         "Too many document-link requests. Please try again later.";
 
     private final DocumentAcceptanceRateLimiter rateLimiter;
     private final ClientIpResolver clientIpResolver;
+    private final DocumentAcceptanceAdmissionService admissionService;
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -38,16 +46,19 @@ public class DocumentAcceptanceAdmissionFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain chain) throws ServletException, IOException {
         String token = tokenFrom(apiPath(request));
-        if (!DocumentAcceptanceToken.hasValidShape(token)) {
-            reject(response, HttpServletResponse.SC_NOT_FOUND, UNAVAILABLE);
-            return;
-        }
+        String sourceAddress = clientIpResolver.resolve(request);
+        boolean malformed = !DocumentAcceptanceToken.hasValidShape(token);
         try {
             rateLimiter.acquire(
-                DocumentAcceptanceToken.hash(token),
-                clientIpResolver.resolve(request));
+                DocumentAcceptanceToken.hashForAdmission(token),
+                sourceAddress);
         } catch (TooManyRequestsException exception) {
             reject(response, 429, RATE_LIMITED);
+            return;
+        }
+        if (malformed) {
+            admissionService.lookup(token);
+            rejectUnavailable(response);
             return;
         }
         chain.doFilter(request, response);
@@ -76,5 +87,13 @@ public class DocumentAcceptanceAdmissionFilter extends OncePerRequestFilter {
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType(MediaType.TEXT_PLAIN_VALUE);
         response.getWriter().write(message);
+    }
+
+    private static void rejectUnavailable(HttpServletResponse response) throws IOException {
+        SecurityResponseHeaders.apply(response);
+        response.setHeader("Cache-Control", "no-store");
+        response.setStatus(HttpServletResponse.SC_NOT_FOUND);
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.getWriter().write(UNAVAILABLE_BODY);
     }
 }

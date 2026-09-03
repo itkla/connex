@@ -38,7 +38,6 @@ import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.DocumentDeliveryMapper;
-import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.signature.DocumentAcceptanceToken;
 import ooo.klae.connex.backend.signature.SignatureProperties;
 import ooo.klae.connex.backend.util.ContactMask;
@@ -56,7 +55,7 @@ public class DocumentAcceptanceService {
     private final DocumentDeliveryMapper deliveryMapper;
     private final DealDocumentMapper documentMapper;
     private final DealMapper dealMapper;
-    private final WorkspaceMapper workspaceMapper;
+    private final DocumentAcceptanceAdmissionService admissionService;
     private final DocumentDeliveryLifecycleService lifecycleService;
     private final AuditService auditService;
     private final SignatureProperties signatureProperties;
@@ -122,14 +121,7 @@ public class DocumentAcceptanceService {
             aggregate.delivery().setStatus("viewed");
             aggregate.recipient().setStatus("viewed");
         }
-        DocumentAcceptancePreviewDto viewed = new DocumentAcceptancePreviewDto(
-            parseContent(aggregate.document()),
-            aggregate.deal().getName(),
-            link.workspace().getName(),
-            ContactMask.maskEmail(aggregate.recipient().getEmail()),
-            aggregate.delivery().getStatus(),
-            aggregate.recipient().getStatus(),
-            true);
+        DocumentAcceptancePreviewDto viewed = previewDto(link, aggregate);
         auditRecipientOperation(
             aggregate, "document_delivery.preview", "Viewed a delivered document");
         return viewed;
@@ -170,15 +162,25 @@ public class DocumentAcceptanceService {
     private DocumentAcceptancePreviewDto previewInTransaction(Link link) {
         Aggregate aggregate = lockAggregate(link, false);
         requireActionable(aggregate.delivery(), aggregate.recipient(), now());
-        DocumentAcceptancePreviewDto preview = new DocumentAcceptancePreviewDto(
+        return previewDto(link, aggregate);
+    }
+
+    private DocumentAcceptancePreviewDto previewDto(Link link, Aggregate aggregate) {
+        return new DocumentAcceptancePreviewDto(
             parseContent(aggregate.document()),
             aggregate.deal().getName(),
             link.workspace().getName(),
             ContactMask.maskEmail(aggregate.recipient().getEmail()),
             aggregate.delivery().getStatus(),
             aggregate.recipient().getStatus(),
-            true);
-        return preview;
+            "signer".equals(aggregate.recipient().getRole()),
+            aggregate.document().getType(),
+            aggregate.document().getTitle(),
+            aggregate.document().getVersion(),
+            aggregate.document().getLocale(),
+            aggregate.delivery().getExpiresAt() == null
+                ? null
+                : aggregate.delivery().getExpiresAt().toInstant(ZoneOffset.UTC));
     }
 
     private DocumentAcceptanceDecisionDto acceptInTransaction(
@@ -357,21 +359,11 @@ public class DocumentAcceptanceService {
 
     private Link admit(String token) {
         requireAvailable();
-        if (!DocumentAcceptanceToken.hasValidShape(token)) {
+        DocumentAcceptanceAdmissionService.Admission admission = admissionService.lookup(token);
+        if (!admission.originalShapeValid() || admission.workspace() == null) {
             throw unavailable();
         }
-        String tokenHash = DocumentAcceptanceToken.hash(token);
-        int workspaceId;
-        try {
-            workspaceId = DocumentAcceptanceToken.workspaceId(token);
-        } catch (IllegalArgumentException exception) {
-            throw unavailable();
-        }
-        Workspace workspace = workspaceMapper.getActiveById(workspaceId);
-        if (workspace == null) {
-            throw unavailable();
-        }
-        return new Link(workspace, tokenHash);
+        return new Link(admission.workspace(), admission.tokenHash());
     }
 
     private void requireAvailable() {

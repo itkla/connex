@@ -1,6 +1,7 @@
 export const FRAME_ANCESTORS_DIRECTIVE = "frame-ancestors 'none'";
 
 export const FRONTEND_CONTENT_SECURITY_POLICY = [FRAME_ANCESTORS_DIRECTIVE].join("; ");
+export const DOCUMENT_ACCEPTANCE_REFERRER_POLICY = "no-referrer";
 
 const FRONTEND_STANDARD_SECURITY_HEADERS = [
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -11,6 +12,10 @@ const FRONTEND_STANDARD_SECURITY_HEADERS = [
 export const FRONTEND_SECURITY_HEADERS = [
   ...FRONTEND_STANDARD_SECURITY_HEADERS,
   { key: "Content-Security-Policy", value: FRONTEND_CONTENT_SECURITY_POLICY },
+];
+
+export const DOCUMENT_ACCEPTANCE_SECURITY_HEADERS = [
+  { key: "Referrer-Policy", value: DOCUMENT_ACCEPTANCE_REFERRER_POLICY },
 ];
 
 /** Runtime mode for the frontend's full Content Security Policy. */
@@ -126,11 +131,19 @@ export function resolveContentSecurityPolicyMode(value: string | undefined): Con
   return value === "enforce" ? "enforce" : "report-only";
 }
 
+/** Resolves the referrer policy for a frontend HTML route. */
+export function frontendReferrerPolicy(pathname: string): string {
+  return pathname === "/document-acceptance" || pathname.startsWith("/document-acceptance/")
+    ? DOCUMENT_ACCEPTANCE_REFERRER_POLICY
+    : "strict-origin-when-cross-origin";
+}
+
 /** Applies the shared browser security headers to a frontend response. */
-export function applyFrontendSecurityHeaders(headers: Headers): void {
+export function applyFrontendSecurityHeaders(headers: Headers, pathname: string): void {
   for (const header of FRONTEND_STANDARD_SECURITY_HEADERS) {
     headers.set(header.key, header.value);
   }
+  headers.set("Referrer-Policy", frontendReferrerPolicy(pathname));
 }
 
 /** Applies the full policy in the selected runtime mode. */

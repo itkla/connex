@@ -1239,13 +1239,17 @@ function isStringRecord(value: unknown): value is Record<string, string> {
     );
 }
 
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /**
  * An error response body: string metadata keys, plus either flat string field errors or a nested
  * `fieldErrors` envelope — the envelope keeps a field literally named "message" or "code" from
  * colliding with the reserved metadata keys.
  */
 function isErrorRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
+    return isObjectRecord(value);
 }
 
 function asString(value: unknown): string | undefined {
@@ -1307,25 +1311,254 @@ async function getAuthenticatedApiError(res: Response): Promise<ApiError> {
  * @param path the API path to request
  * @param method the HTTP method
  * @param init optional fetch overrides
- * @returns the parsed JSON body, or {@code undefined} for an empty response
+ * @param parse validates and returns the endpoint-specific response
+ * @returns the validated JSON body
  * @throws ApiError when the response status is not ok
  */
 async function publicJson<T>(
     path: string,
     method: "GET" | "POST",
+    parse: (value: unknown) => T,
     init: RequestInit = {},
 ): Promise<T> {
     const res = await fetch(`${API_BASE}${path}`, {
         cache: "no-store",
         ...init,
         method,
+        credentials: "omit",
         headers: { Accept: "application/json", ...init.headers },
     });
     if (!res.ok) {
         throw await getApiError(res);
     }
     const text = await res.text();
-    return text ? (JSON.parse(text) as T) : (undefined as T);
+    if (!text) throw invalidPublicResponse();
+    let value: unknown;
+    try {
+        value = JSON.parse(text);
+    } catch {
+        throw invalidPublicResponse();
+    }
+    return parse(value);
+}
+
+const INVALID_PUBLIC_RESPONSE_CODE = "INVALID_PUBLIC_RESPONSE";
+const ISO_INSTANT_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?Z$/;
+const ISO_LOCAL_DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?$/;
+
+function invalidPublicResponse(): ApiError {
+    return new ApiError(
+        "The public endpoint returned an invalid response",
+        502,
+        INVALID_PUBLIC_RESPONSE_CODE,
+    );
+}
+
+function isNullableString(value: unknown): value is string | null {
+    return value === null || typeof value === "string";
+}
+
+function isOptionalNullableString(value: unknown): value is string | null | undefined {
+    return value === undefined || isNullableString(value);
+}
+
+function isIsoInstant(value: unknown): value is string {
+    if (typeof value !== "string") return false;
+    const match = ISO_INSTANT_PATTERN.exec(value);
+    if (!match) return false;
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) return false;
+    const parsed = new Date(timestamp);
+    return parsed.getUTCFullYear() === Number(match[1])
+        && parsed.getUTCMonth() + 1 === Number(match[2])
+        && parsed.getUTCDate() === Number(match[3])
+        && parsed.getUTCHours() === Number(match[4])
+        && parsed.getUTCMinutes() === Number(match[5])
+        && parsed.getUTCSeconds() === Number(match[6]);
+}
+
+function isNullableIsoInstant(value: unknown): value is string | null {
+    return value === null || isIsoInstant(value);
+}
+
+function isIsoLocalDateTime(value: unknown): value is string {
+    if (typeof value !== "string") return false;
+    const match = ISO_LOCAL_DATE_TIME_PATTERN.exec(value);
+    if (!match) return false;
+    const seconds = match[6] ?? "00";
+    const timestamp = Date.parse(
+        `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${seconds}Z`,
+    );
+    if (!Number.isFinite(timestamp)) return false;
+    const parsed = new Date(timestamp);
+    return parsed.getUTCFullYear() === Number(match[1])
+        && parsed.getUTCMonth() + 1 === Number(match[2])
+        && parsed.getUTCDate() === Number(match[3])
+        && parsed.getUTCHours() === Number(match[4])
+        && parsed.getUTCMinutes() === Number(match[5])
+        && parsed.getUTCSeconds() === Number(seconds);
+}
+
+function isProductCurrency(value: unknown): value is string {
+    return typeof value === "string" && value.length <= 8 && value.trim().length > 0;
+}
+
+function isOptionalProductCurrency(value: unknown): value is string | null | undefined {
+    return value === undefined || value === null || isProductCurrency(value);
+}
+
+function isDocumentParty(value: unknown): value is Types.DocumentParty {
+    return isObjectRecord(value)
+        && typeof value.name === "string"
+        && isOptionalNullableString(value.address);
+}
+
+function isOptionalDocumentParty(
+    value: unknown,
+): value is Types.DocumentParty | null | undefined {
+    return value === undefined || value === null || isDocumentParty(value);
+}
+
+function isDocumentBodyMark(value: unknown): value is Types.DocumentBodyMark {
+    return isObjectRecord(value)
+        && typeof value.type === "string"
+        && (value.attrs === undefined || isObjectRecord(value.attrs));
+}
+
+function isDocumentBodyNode(value: unknown): value is Types.DocumentBodyNode {
+    return isObjectRecord(value)
+        && typeof value.type === "string"
+        && (value.attrs === undefined || isObjectRecord(value.attrs))
+        && (value.content === undefined
+            || (Array.isArray(value.content) && value.content.every(isDocumentBodyNode)))
+        && (value.marks === undefined
+            || (Array.isArray(value.marks) && value.marks.every(isDocumentBodyMark)))
+        && (value.text === undefined || typeof value.text === "string");
+}
+
+function isDealLineItem(value: unknown): value is Types.DealLineItem {
+    return isObjectRecord(value)
+        && Number.isInteger(value.id)
+        && Number.isInteger(value.dealId)
+        && (value.productId === undefined || value.productId === null || Number.isInteger(value.productId))
+        && typeof value.name === "string"
+        && isOptionalNullableString(value.sku)
+        && isOptionalNullableString(value.unit)
+        && typeof value.unitPrice === "number"
+        && typeof value.quantity === "number"
+        && (value.discountType === undefined
+            || value.discountType === null
+            || value.discountType === "amount"
+            || value.discountType === "percent")
+        && (value.discountValue === undefined
+            || value.discountValue === null
+            || typeof value.discountValue === "number")
+        && (value.taxRate === undefined || value.taxRate === null || typeof value.taxRate === "number")
+        && (value.billingFrequency === "one_time" || value.billingFrequency === "recurring")
+        && isOptionalNullableString(value.description)
+        && isOptionalNullableString(value.servicePeriodStart)
+        && isOptionalNullableString(value.servicePeriodEnd)
+        && Number.isInteger(value.position)
+        && isProductCurrency(value.currency)
+        && typeof value.lineSubtotal === "number"
+        && typeof value.lineTax === "number"
+        && typeof value.lineTotal === "number"
+        && typeof value.createdAt === "string"
+        && typeof value.updatedAt === "string";
+}
+
+function isDealLineItemTotals(value: unknown): value is Types.DealLineItemTotals {
+    return isObjectRecord(value)
+        && isOptionalProductCurrency(value.currency)
+        && typeof value.subtotal === "number"
+        && typeof value.tax === "number"
+        && typeof value.oneTimeTotal === "number"
+        && typeof value.recurringTotal === "number"
+        && typeof value.grandTotal === "number";
+}
+
+function isDocumentContent(value: unknown): value is Types.DocumentContent {
+    if (!isObjectRecord(value)
+            || !isIsoLocalDateTime(value.generatedAt)
+            || !isOptionalDocumentParty(value.workspace)
+            || !isOptionalDocumentParty(value.company)
+            || !isOptionalDocumentParty(value.owner)
+            || !isObjectRecord(value.deal)
+            || typeof value.deal.name !== "string"
+            || !isProductCurrency(value.deal.currency)
+            || !isObjectRecord(value.sections)
+            || !isOptionalNullableString(value.sections.title)
+            || !isOptionalNullableString(value.sections.intro)
+            || !isOptionalNullableString(value.sections.terms)
+            || !isOptionalNullableString(value.sections.footer)
+            || (value.body !== undefined && value.body !== null && !isDocumentBodyNode(value.body))
+            || !Array.isArray(value.lineItems)
+            || !value.lineItems.every(isDealLineItem)
+            || !isDealLineItemTotals(value.totals)) {
+        return false;
+    }
+    return true;
+}
+
+function isDocumentAcceptancePreview(
+    value: unknown,
+): value is Types.DocumentAcceptancePreview {
+    return isObjectRecord(value)
+        && isDocumentContent(value.content)
+        && typeof value.dealName === "string"
+        && typeof value.workspaceName === "string"
+        && typeof value.recipientEmail === "string"
+        && (value.deliveryStatus === "sent" || value.deliveryStatus === "viewed")
+        && (value.recipientStatus === "pending" || value.recipientStatus === "viewed")
+        && typeof value.actionable === "boolean"
+        && (value.documentType === "quote"
+            || value.documentType === "proposal"
+            || value.documentType === "order_form"
+            || value.documentType === "contract")
+        && isNullableString(value.documentTitle)
+        && typeof value.documentVersion === "number"
+        && Number.isInteger(value.documentVersion)
+        && value.documentVersion >= 1
+        && typeof value.documentLocale === "string"
+        && value.documentLocale.length <= 8
+        && value.documentLocale.trim().length > 0
+        && isNullableIsoInstant(value.expiresAt);
+}
+
+function parseDocumentAcceptancePreview(value: unknown): Types.DocumentAcceptancePreview {
+    if (!isDocumentAcceptancePreview(value)) throw invalidPublicResponse();
+    return value;
+}
+
+function isDocumentAcceptanceDecision(
+    value: unknown,
+): value is Types.DocumentAcceptanceDecision {
+    return isObjectRecord(value)
+        && (value.deliveryStatus === "sent"
+            || value.deliveryStatus === "viewed"
+            || value.deliveryStatus === "completed"
+            || value.deliveryStatus === "declined")
+        && (value.recipientStatus === "completed" || value.recipientStatus === "declined")
+        && typeof value.completed === "boolean";
+}
+
+function parseDocumentAcceptanceDecision(value: unknown): Types.DocumentAcceptanceDecision {
+    if (!isDocumentAcceptanceDecision(value)) throw invalidPublicResponse();
+    return value;
+}
+
+function parseDeliveryUnsubscribeInfo(value: unknown): Types.DeliveryUnsubscribeInfo {
+    if (!isObjectRecord(value)
+            || typeof value.channel !== "string"
+            || typeof value.address !== "string"
+            || typeof value.unsubscribed !== "boolean") {
+        throw invalidPublicResponse();
+    }
+    return {
+        channel: value.channel,
+        address: value.address,
+        unsubscribed: value.unsubscribed,
+    };
 }
 
 
@@ -6333,9 +6566,10 @@ export function getCampaignRecipients(
  * @returns the masked address, channel, and current suppression state
  */
 export function getUnsubscribeInfo(token: string, init: RequestInit = {}) {
-    return publicJson<Types.DeliveryUnsubscribeInfo>(
+    return publicJson(
         `/api/delivery/unsubscribe/${token}`,
         "GET",
+        parseDeliveryUnsubscribeInfo,
         init,
     );
 }
@@ -6347,7 +6581,11 @@ export function getUnsubscribeInfo(token: string, init: RequestInit = {}) {
  * @returns the masked address, channel, and resulting suppression state
  */
 export function confirmUnsubscribe(token: string) {
-    return publicJson<Types.DeliveryUnsubscribeInfo>(`/api/delivery/unsubscribe/${token}`, "POST");
+    return publicJson(
+        `/api/delivery/unsubscribe/${token}`,
+        "POST",
+        parseDeliveryUnsubscribeInfo,
+    );
 }
 
 export function getPersonConsent(personId: number, init: RequestInit = {}) {
@@ -6442,4 +6680,61 @@ export function deleteAiWatch(id: number) {
 /** Fetches the public backend product version without reusing a cached artifact identity. */
 export function getVersion(init: RequestInit = {}) {
     return getJson<Types.ProductVersion>("/api/version", { cache: "no-store", ...init });
+}
+
+/** Fetches a frozen document through its session-less recipient bearer. */
+export function getDocumentAcceptancePreview(token: string, init: RequestInit = {}) {
+    return publicJson(
+        `/api/document-acceptance/${encodeURIComponent(token)}`,
+        "GET",
+        parseDocumentAcceptancePreview,
+        init,
+    );
+}
+
+/** Records one rendered view through the session-less recipient bearer. */
+export function markDocumentAcceptanceViewed(token: string) {
+    return publicJson(
+        `/api/document-acceptance/${encodeURIComponent(token)}/viewed`,
+        "POST",
+        parseDocumentAcceptancePreview,
+    );
+}
+
+/** Records a typed-name acceptance through the session-less recipient bearer. */
+export function acceptDocument(token: string, payload: Types.AcceptDocumentPayload) {
+    return publicJson(
+        `/api/document-acceptance/${encodeURIComponent(token)}/accept`,
+        "POST",
+        parseDocumentAcceptanceDecision,
+        {
+            body: JSON.stringify(payload),
+            headers: { "Content-Type": "application/json" },
+        },
+    );
+}
+
+/** Records a reasoned decline through the session-less recipient bearer. */
+export function declineDocument(token: string, payload: Types.DeclineDocumentPayload) {
+    return publicJson(
+        `/api/document-acceptance/${encodeURIComponent(token)}/decline`,
+        "POST",
+        parseDocumentAcceptanceDecision,
+        {
+            body: JSON.stringify(payload),
+            headers: { "Content-Type": "application/json" },
+        },
+    );
+}
+
+/** Maps only documented recipient-link statuses into stable, non-diagnostic UI states. */
+export function documentAcceptanceFailureKind(
+    error: unknown,
+): Types.DocumentAcceptanceFailureKind | null {
+    if (!(error instanceof ApiError)) return null;
+    if (error.code === INVALID_PUBLIC_RESPONSE_CODE) return "service-unavailable";
+    if (error.status === 404) return "unavailable";
+    if (error.status === 429) return "throttled";
+    if (error.status === 503) return "service-unavailable";
+    return null;
 }

@@ -15,24 +15,28 @@ A single [Caddy](../deploy/Caddyfile) ingress fronts everything on one origin:
 - everything else → the frontend
 
 Single-origin means cookies, WebAuthn (RP = the serving host), and realtime all work without a
-browser-facing backend URL. Internally the frontend still talks to `backend:8080` directly.
+browser-facing backend URL. Internally, browser rewrites still talk to `backend:8080`, while
+server-rendered preview fetches use the app-network-only `backend-app:8080` alias.
 
 The site-level edge header contract applies to every response, including frontend HTML and static
 assets, downloads, backend JSON, and Caddy-generated error responses. Caddy normalizes
-`X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, and
-`X-Frame-Options: DENY`. It supplies `Content-Security-Policy: frame-ancestors 'none'` only when an
-upstream did not already set CSP, preserving the backend's stricter API policy without emitting a
-second value. Next.js carries the same browser-facing defaults for local, standalone, and non-Caddy
-deployments; its later attachment rule retains `default-src 'none'; sandbox; frame-ancestors 'none'`
-and `Content-Disposition: attachment`. Connex currently has no frame-embedded workflow. Any future
-framing exception must name each allowed origin explicitly in the shared policy and this runbook;
-wildcard framing exceptions are forbidden.
+`X-Content-Type-Options: nosniff` and `X-Frame-Options: DENY`. It preserves an upstream
+`Referrer-Policy` and supplies `strict-origin-when-cross-origin` when one is absent; the
+`/document-acceptance/*` frontend handle also defers an explicit `no-referrer` override so the
+credential-bearing page keeps that stricter value after proxying. It supplies
+`Content-Security-Policy: frame-ancestors 'none'` only when an upstream did not already set CSP,
+preserving the backend's stricter API policy without emitting a second value. Next.js carries the
+same browser-facing defaults for local, standalone, and non-Caddy deployments; its later attachment
+rule retains `default-src 'none'; sandbox; frame-ancestors 'none'` and `Content-Disposition:
+attachment`. Connex currently has no frame-embedded workflow. Any future framing exception must
+name each allowed origin explicitly in the shared policy and this runbook; wildcard framing
+exceptions are forbidden.
 
 ```
 browser ──▶ caddy :80 ─┬─ /api/*, /saml2/*  ─▶ backend:8080 ───▶ db:3306
                        └─ everything else    ─▶ frontend:3000
                                                     │
-                                                    └──────▶ backend:8080 (SSR)
+                                                    └──────▶ backend-app:8080 (SSR on app network)
                                                                │
                                                                ├──────▶ ocr:8090 (default profile)
                                                                └──────▶ clamav:8091 (required)
@@ -49,17 +53,50 @@ throwaway client containers discover and join only the running Compose project's
 network. Compose one-off backend migration and maintenance commands inherit the backend service's
 networks and therefore retain DB access.
 
-The published profile pins Caddy to `CONNEX_CADDY_IP` inside `CONNEX_EDGE_SUBNET` and configures
-that exact address as `CONNEX_SECURITY_TRUSTED_PROXIES`. This lets the backend accept Caddy's
-normalized client address without trusting another edge-network peer. Caddy, in turn, trusts only
-the exact TLS-terminating proxy CIDRs in `CONNEX_CADDY_TRUSTED_PROXIES`, parses forwarded chains
-right-to-left, and replaces the backend-facing `X-Forwarded-For` value with that validated address.
-Fill the production template's `REPLACE_WITH_EXACT_TLS_PROXY_CIDRS` with the address or CIDRs of the
-proxy that connects directly to Caddy; never use all private ranges. A direct-HTTP evaluation keeps
-the loopback-only default. If the default edge subnet conflicts with an operator network, change
-the subnet and Caddy address together and keep the backend trusted-proxy value equal to that one
-Caddy address. Without correct hop configuration, public link exchanges can fall back to the
-high-capacity instance circuit breaker instead of the ordinary per-client throttle.
+The published profile sets `CONNEX_SECURITY_TRUSTED_PROXIES=caddy,frontend`. The backend resolves
+those Compose service names through Docker DNS at startup and refreshes them periodically and after
+an address miss, so service recreation does not require pinned bridge addresses or operator-managed
+subnets. Caddy is the backend peer for browser `/api/*` traffic, while the frontend is the backend
+peer for server-rendered document previews. Caddy trusts only the exact
+TLS-terminating proxy CIDRs in `CONNEX_CADDY_ADDITIONAL_TRUSTED_PROXIES`, parses forwarded chains
+right-to-left, and replaces the frontend-facing `X-Forwarded-For` value with that validated client
+address. The frontend passes that one validated `<client>` value to the backend for an SSR preview;
+the backend accepts it only when the direct socket peer resolves to the configured `frontend`
+service. The frontend's `API_URL` uses the `backend-app` alias, which exists only on the `app`
+network. Direct browser API traffic carries the same one-value form from the separately trusted
+`caddy` peer. A recipient-supplied forwarding header is overwritten by Caddy and never trusted
+directly.
+
+The published backend image loads `networkaddress.cache.ttl=1` and
+`networkaddress.cache.negative.ttl=0` through its JVM security-properties file before application
+startup. `ClientIpResolver` retains resolved service addresses for one minute during normal traffic
+but permits one refresh per second after an address miss. The one-second JVM positive TTL prevents
+that refresh from replaying Docker's prior answer, while the zero negative TTL lets an initially
+unresolved service recover. A request from a recreated peer still fails closed until resolution
+succeeds; retrying after two seconds is outside both cache windows and must use the current Docker
+DNS answer.
+
+Direct-JAR and systemd installations that configure hostname-based trusted proxies must load the
+same tracked [`backend/connex.java.security`](../backend/connex.java.security) file. Use an absolute
+path and place the option before `-jar`:
+
+```bash
+java -Djava.security.properties=/absolute/path/to/backend/connex.java.security \
+    -jar /absolute/path/to/backend.jar
+```
+
+For systemd, put the same option in the service's `ExecStart` command or set
+`JAVA_TOOL_OPTIONS=-Djava.security.properties=/absolute/path/to/backend/connex.java.security` in its
+root-owned environment file, then restart the service. The loaded file must retain both the
+one-second positive TTL and zero negative TTL; hostname-based trusted proxies are unsupported for a
+non-image launch that omits this JVM configuration.
+
+The frontend is a sanitizing peer in this design: compromise of that container can spoof an SSR
+source address to the backend. That bounded risk is accepted because the frontend and backend share
+the private application network, neither publishes a host port, and only Caddy accepts recipient
+traffic. Do not publish either service or configure whole private ranges as trusted proxies.
+Without both service names, document-preview traffic collapses into one frontend source bucket,
+allowing unrelated recipient links to throttle each other.
 
 New services must join the minimum network set required for their documented traffic. Do not use
 the implicit `default` network, attach an edge or auxiliary service to `db` or `ocr_internal`, or

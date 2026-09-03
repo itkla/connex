@@ -17,7 +17,7 @@ of truth and pins every component by immutable digest. A release is always the s
 the components are never upgraded independently. The running backend version is exposed at
 `GET /api/version`.
 
-The frontend image bakes the **internal** backend address (`BACKEND_URL`, default `http://backend:8080`) into its build-time route rewrites, and defaults the server-side fetch base (`API_URL`) to the same. Because that is the internal service hop (the browser always talks to the frontend origin), the one image is portable across all deployment modes as long as the bundle names the backend service `backend`. Decoupling this behind an ingress proxy is a follow-up (#499).
+The frontend image bakes the **internal** backend address (`BACKEND_URL`, default `http://backend:8080`) into its build-time route rewrites, and defaults the server-side fetch base (`API_URL`) to the same. The published Compose bundle overrides `API_URL` with the app-network-only `http://backend-app:8080` alias so recipient-preview SSR reaches the backend from the Docker-DNS-resolved `frontend` peer; browser rewrites retain the baked `backend` service hop. The one image remains portable across deployment modes as long as the bundle names the backend service `backend`. Decoupling this behind an ingress proxy is a follow-up (#499).
 
 ## Cutting a release
 

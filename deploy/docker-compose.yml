@@ -35,7 +35,7 @@ services:
     image: ghcr.io/itkla/connex-frontend@sha256:${CONNEX_FRONTEND_DIGEST:?set CONNEX_FRONTEND_DIGEST to the verified 64-character digest in deploy/.env}
     restart: unless-stopped
     environment:
-      API_URL: http://backend:8080
+      API_URL: http://backend-app:8080
       CONNEX_CSP_MODE: ${CONNEX_CSP_MODE:-report-only}
       CONNEX_CSP_IMAGE_ORIGINS: ${CONNEX_CSP_IMAGE_ORIGINS:-}
     expose:
@@ -61,8 +61,8 @@ services:
     environment:
       CONNEX_DB_ROOT_PASSWORD: ""
       CONNEX_READINESS_FILE: /tmp/connex-ready
-      # Real deployment profiles opt in only for private peers that sanitize forwarding headers.
-      CONNEX_SECURITY_TRUSTED_PROXIES: "${CONNEX_SECURITY_TRUSTED_PROXIES:-}"
+      # Docker DNS tracks the two sanitizing peers without pinning install-specific bridge addresses.
+      CONNEX_SECURITY_TRUSTED_PROXIES: "${CONNEX_SECURITY_TRUSTED_PROXIES:-caddy,frontend}"
       CONNEX_API_MAX_BODY_BYTES: "${CONNEX_API_MAX_BODY_BYTES:-10485760}"
       CONNEX_IMPORT_MAX_BODY_BYTES: "${CONNEX_IMPORT_MAX_BODY_BYTES:-67108864}"
       CONNEX_UPLOAD_MAX_BODY_BYTES: "${CONNEX_UPLOAD_MAX_BODY_BYTES:-28311552}"
@@ -87,6 +87,8 @@ services:
       edge: {}
       app:
         gw_priority: 1
+        aliases:
+          - backend-app
       db: {}
       ocr_internal: {}
       clamav_internal: {}

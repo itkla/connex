@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import ooo.klae.connex.backend.config.DocumentAcceptanceAdmissionFilter;
+import ooo.klae.connex.backend.services.DocumentAcceptanceAdmissionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 
 /**
@@ -24,10 +25,14 @@ public class DocumentAcceptanceAdmissionConfiguration {
     @Bean
     FilterRegistrationBean<DocumentAcceptanceAdmissionFilter> documentAcceptanceAdmissionFilterRegistration(
             DocumentAcceptanceRateLimiter rateLimiter,
-            ClientIpResolver clientIpResolver) {
+            ClientIpResolver clientIpResolver,
+            DocumentAcceptanceAdmissionService admissionService) {
         FilterRegistrationBean<DocumentAcceptanceAdmissionFilter> registration =
             new FilterRegistrationBean<>(
-                new DocumentAcceptanceAdmissionFilter(rateLimiter, clientIpResolver));
+                new DocumentAcceptanceAdmissionFilter(
+                    rateLimiter,
+                    clientIpResolver,
+                    admissionService));
         registration.setOrder(OrderedFormContentFilter.DEFAULT_ORDER - 3);
         return registration;
     }

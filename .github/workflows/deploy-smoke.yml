@@ -401,6 +401,7 @@ jobs:
             local expected_status="$2"
             local expected_csp="$3"
             local expected_content_type="${4:-}"
+            local expected_referrer_policy="${5:-strict-origin-when-cross-origin}"
             local status
             : > "$EDGE_HEADERS_FILE"
             status=$(curl -sS -D "$EDGE_HEADERS_FILE" -o /dev/null -w '%{http_code}' "$url")
@@ -409,7 +410,7 @@ jobs:
               exit 1
             fi
             require_edge_header_once 'X-Content-Type-Options: nosniff'
-            require_edge_header_once 'Referrer-Policy: strict-origin-when-cross-origin'
+            require_edge_header_once "Referrer-Policy: $expected_referrer_policy"
             require_edge_header_once 'X-Frame-Options: DENY'
             require_edge_header_once "Content-Security-Policy: $expected_csp"
             if [ -n "$expected_content_type" ]; then
@@ -427,6 +428,12 @@ jobs:
             200 \
             "frame-ancestors 'none'" \
             'text/html'
+          probe_edge_headers \
+            http://localhost:18099/document-acceptance/not-a-bearer \
+            200 \
+            "frame-ancestors 'none'" \
+            'text/html' \
+            'no-referrer'
           probe_edge_headers \
             http://localhost:18099/does-not-exist \
             404 \

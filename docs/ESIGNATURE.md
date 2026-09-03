@@ -13,10 +13,26 @@ built-in roles receive that permission; custom roles receive it only when explic
 gate returns an explicit unavailable response and never pretends that a send succeeded. Deployment setup
 is described in [DEPLOYMENT.md](DEPLOYMENT.md).
 
-The recipient-facing `/document-acceptance/{token}` frontend page is not implemented yet.
-`CONNEX_SIGNATURE_ENABLED` must remain `false` until that page ships. The backend acceptance API and
-email-link contract exist now for integration work, but enabling delivery before the page exists would
-send recipients to a route that cannot render the document or submit their decision.
+The recipient-facing `/document-acceptance/{token}` frontend page renders the frozen document in the
+document's own locale and lets signers accept with a typed name or decline with a reason. It does not
+write an anonymous visitor's locale cookie. Viewers see the document without decision controls. A
+successful decision produces an in-session receipt; reloading a completed or declined link returns the
+same unavailable state as any other inactive link.
+
+Delivery remains off by default. There is no sender-side frontend for send, resend, void, or artifact
+download yet, so an operator who enables the flag can initiate the flow only through the authenticated
+API. Before enabling any environment, verify a usable mail transport and the Cloudflare no-log Skip rule
+for both the frontend and API bearer paths. Configure `connex.security.trusted-proxies` so source
+throttling resolves the recipient address instead of collapsing all recipients behind the Next.js
+server. The published bundle trusts the `caddy` and `frontend` service names through Docker DNS.
+Caddy replaces the browser-supplied forwarding header with one validated client address; for SSR,
+the frontend passes that value to the backend over the private app network. The backend accepts it
+only from the resolved frontend socket peer reached through the app-network-only `backend-app`
+alias. A compromised frontend can spoof this SSR source value; this accepted boundary does not let
+a recipient supply a trusted forwarding value through Caddy. Metadata and page rendering share one
+request-scoped preview fetch, so one frontend render consumes one backend admission.
+Whether preview staging should enable the flag is an operator decision; the checked-in deployment
+examples remain disabled.
 
 Send and resend require a caller-retained UUID `Idempotency-Key`. Connex claims the key in the workspace
 and binds it to the complete operation fingerprint and actor. Retrying the same request with the same key
@@ -38,15 +54,54 @@ comes exclusively from the random secret. Connex stores only SHA-256 of the comp
 to the routed workspace, and revalidates the hash with a constant-time comparison. Resend replaces the
 stored hash. Void, expiry, decline, and supersede invalidate every outstanding token. Public requests are
 bounded independently per token hash and per hashed, trusted source address.
+Malformed input is canonicalized to a fixed `w-1-…` admission sentinel. Its reserved negative
+workspace identifier is excluded by the public token grammar and Connex's positive workspace-ID
+contract, so no legitimately issued bearer can equal the sentinel.
 
 The emailed bearer link points to the frontend route `/document-acceptance/{token}`. The recipient page
-will call `/api/document-acceptance/{token}` and its decision subpaths, so the complete bearer appears in
+calls `/api/document-acceptance/{token}` and its decision subpaths, so the complete bearer appears in
 both frontend and API request paths. Cloudflare must apply the no-log Skip rule and compatibility
 exception to both routes; the API route also stays excluded from the generic API rate rule. The
 application stores only the hash, never writes the token or raw path to application/audit logs, uses a
 uniform unavailable response, and applies the per-token and trusted-source admission before request-body
 parsing. These controls compensate for the path shape; edge events or exported raw paths must never be
 treated as secret-free evidence.
+
+The frontend HTML response sets `Referrer-Policy: no-referrer`, preventing the bearer path from reaching
+same-origin asset, API, or navigation requests. Client error reporting replaces bearer path segments in
+the pathname, message, and stack before the report can reach the control-plane diagnostics row. The
+default `strict-origin-when-cross-origin` policy already withholds the path from cross-origin links; the
+route-specific override closes the same-origin exposure.
+
+Security control #1237 / SEC-56 prescribes exchanging an emailed one-time token for a short-lived
+server-side session followed by an immediate redirect to a token-free URL. This increment retains the
+path bearer under the compensating controls above. Because that bearer is the dynamic route segment,
+Next.js necessarily carries its value in the canonical route URL and dynamic router tree in the RSC
+payload, including the Flight scripts embedded in initial HTML. The page does not copy it into
+application metadata, client props, component keys, visible body content, links, or form actions, but
+the segment itself cannot be removed from router state without the SEC-56 token-to-session exchange.
+The security workstream that owns #1237 also owns closing that residual browser-history, RSC, initial
+HTML, and access-log gap.
+
+### Accepted residual: unavailable-link timing
+
+Unavailable responses deliberately share status, content type, and body bytes, but their server work
+is not equal. A malformed token is hashed as the fixed impossible sentinel and performs only the
+catalog lookup for its reserved negative workspace. A well-shaped unknown token for an active
+workspace continues through recipient discovery. An expired, voided, completed, or declined token
+can additionally discover its delivery and acquire the deal, document, delivery, and recipient locks
+before it is rejected. Those differences make repeated latency sampling a plausible token-history
+oracle even though response content reveals nothing.
+
+The admission filter bounds, but does not eliminate, that oracle before request-body parsing. The
+defaults allow at most 60 requests per token hash and 120 requests per trusted source address in one
+minute on each replica; every malformed token shares the sentinel token bucket. Closing the residual
+requires a measured, fixed-work admission design for every token class, such as bounded decoy
+catalog/recipient/delivery records and equivalent lock work or calibrated response padding validated
+against production latency distributions. Hash equalization alone is insufficient. This release
+accepts the bounded timing difference; its PR-facing security note must reference this section, and a
+future security change must re-review the residual when admission storage, lock shape, replica count,
+or rate limits change.
 
 ## What a recorded view means
 
@@ -58,6 +113,11 @@ The view is recorded by `POST /api/document-acceptance/{token}/viewed`, which th
 page calls. Automated fetchers do not execute that page, so they cannot forge
 `first_viewed_at` or a `viewed` event into the completion certificate. The call is idempotent — only
 the first one stamps the timestamp and appends the event.
+
+Inactive, expired, voided, completed, declined, unknown, and wrong-hash links share one HTTP 404 and one
+recipient-facing unavailable state. A disabled feature or capability returns HTTP 503 and the page shows
+a distinct service-unavailable state; admission throttling returns HTTP 429 and asks the recipient to try
+again shortly. The UI never displays the backend response body.
 
 The residual limitation is deliberate and bounded: anyone holding the token can record a view, but
 holding the token is already the credential for accepting or declining, so there is no privilege to

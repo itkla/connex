@@ -10,6 +10,7 @@ import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.List;
 
@@ -48,14 +49,41 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
             workspace.getId(),
             delivery.id()));
 
-        acceptanceService.markViewed(token, "192.0.2.10");
-        acceptanceService.markViewed(token, "192.0.2.10");
+        DocumentAcceptancePreviewDto firstViewed =
+            acceptanceService.markViewed(token, "192.0.2.10");
+        LocalDateTime firstViewedAt = jdbcTemplate.queryForObject(
+            "SELECT first_viewed_at FROM document_delivery_recipient "
+                + "WHERE workspace_id = ? AND id = ?",
+            LocalDateTime.class,
+            workspace.getId(),
+            delivery.recipients().getFirst().id());
+        DocumentAcceptancePreviewDto secondViewed =
+            acceptanceService.markViewed(token, "192.0.2.10");
+        LocalDateTime secondViewedAt = jdbcTemplate.queryForObject(
+            "SELECT first_viewed_at FROM document_delivery_recipient "
+                + "WHERE workspace_id = ? AND id = ?",
+            LocalDateTime.class,
+            workspace.getId(),
+            delivery.recipients().getFirst().id());
 
         assertEquals(fixture.deal().getName(), first.dealName());
+        assertEquals(workspace.getName(), first.workspaceName());
         assertEquals(fixture.document().content(), first.content());
         assertEquals("s***@example.test", first.recipientEmail());
         assertTrue(first.actionable());
+        assertEquals(fixture.document().type(), first.documentType());
+        assertEquals(fixture.document().title(), first.documentTitle());
+        assertEquals(fixture.document().version(), first.documentVersion());
+        assertEquals(fixture.document().locale(), first.documentLocale());
+        assertEquals(delivery.expiresAt().toInstant(ZoneOffset.UTC), first.expiresAt());
         assertEquals(first.content(), second.content());
+        assertEquals(first.documentType(), firstViewed.documentType());
+        assertEquals(first.documentTitle(), firstViewed.documentTitle());
+        assertEquals(first.documentVersion(), firstViewed.documentVersion());
+        assertEquals(first.documentLocale(), firstViewed.documentLocale());
+        assertEquals(first.expiresAt(), firstViewed.expiresAt());
+        assertEquals(firstViewed, secondViewed);
+        assertEquals(firstViewedAt, secondViewedAt);
         assertEquals(1, countEvents(delivery.id(), "viewed"));
         assertEquals(1, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM document_delivery_recipient WHERE workspace_id = ? "
@@ -72,12 +100,20 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
 
+        DocumentAcceptancePreviewDto preview =
+            acceptanceService.preview(token, "192.0.2.11");
+        DocumentAcceptancePreviewDto viewed =
+            acceptanceService.markViewed(token, "192.0.2.11");
+
         DocumentAcceptanceDecisionDto result = acceptanceService.accept(
             token,
             new AcceptDocumentRequest("External Signer"),
             "192.0.2.11",
             "Acceptance test agent");
 
+        assertEquals(fixture.document().content(), preview.content());
+        assertEquals(preview.documentType(), viewed.documentType());
+        assertEquals(preview.documentVersion(), viewed.documentVersion());
         assertTrue(result.completed());
         assertEquals("completed", result.deliveryStatus());
         assertEquals("signed", documentService.getOne(
@@ -185,6 +221,35 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
     }
 
     @Test
+    void completedAndDeclinedLinksShareTheUnavailablePreviewResponse() {
+        DocumentFixture completedFixture = finalDocument();
+        DocumentDeliveryDto completedDelivery = send(
+            completedFixture, signer("completed@example.test", 1));
+        String completedToken = installToken(completedDelivery.recipients().getFirst().id());
+        acceptanceService.accept(
+            completedToken,
+            new AcceptDocumentRequest("Completed Signer"),
+            "192.0.2.18",
+            "completed-agent");
+
+        DocumentFixture declinedFixture = finalDocument();
+        DocumentDeliveryDto declinedDelivery = send(
+            declinedFixture, signer("declined@example.test", 1));
+        String declinedToken = installToken(declinedDelivery.recipients().getFirst().id());
+        acceptanceService.decline(
+            declinedToken,
+            new DeclineDocumentRequest("Declined for this test"),
+            "192.0.2.19",
+            "declined-agent");
+
+        String unknownToken = completedToken.substring(0, completedToken.length() - 1)
+            + (completedToken.endsWith("a") ? "b" : "a");
+        String unavailable = unavailableMessage(unknownToken);
+        assertEquals(unavailable, unavailableMessage(completedToken));
+        assertEquals(unavailable, unavailableMessage(declinedToken));
+    }
+
+    @Test
     void declineReasonValidationMatchesThePersistedTerminationWidth() {
         assertTrue(validator.validate(new DeclineDocumentRequest("a".repeat(500))).isEmpty());
         assertFalse(validator.validate(new DeclineDocumentRequest("a".repeat(501))).isEmpty());
@@ -260,6 +325,7 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
     void publicEntryPointsAreNotTransactional() throws Exception {
         List<Method> entries = List.of(
             DocumentAcceptanceService.class.getMethod("preview", String.class, String.class),
+            DocumentAcceptanceService.class.getMethod("markViewed", String.class, String.class),
             DocumentAcceptanceService.class.getMethod(
                 "accept", String.class, AcceptDocumentRequest.class, String.class, String.class),
             DocumentAcceptanceService.class.getMethod(

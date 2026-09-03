@@ -23,6 +23,7 @@ const TYPE_KEY: Record<DocumentType, string> = {
 type Props = {
     content: DocumentContent;
     type: DocumentType;
+    title?: string;
     status?: DocumentStatus;
     version?: number;
     generatedAt?: string;
@@ -34,7 +35,7 @@ type Props = {
  * otherwise it falls back to the legacy intro/terms/footer sections. Presentational only — it renders
  * the paper body, not page or print chrome, and never computes money (totals come pre-computed).
  */
-export default function DocumentView({ content, type, status, version, generatedAt }: Props) {
+export default function DocumentView({ content, type, title, status, version, generatedAt }: Props) {
     const t = useTranslations('DealsDocuments');
     const tp = useTranslations('DealsDocuments.print');
     const locale = useLocale();
@@ -44,46 +45,92 @@ export default function DocumentView({ content, type, status, version, generated
         : status != null && status !== 'final' ? tp('draftWatermark') : null;
 
     const lineItemsTable = content.lineItems.length > 0 ? (
-        <div className="overflow-x-auto">
-            <table className="w-full min-w-[34rem] text-sm">
-                <thead>
-                    <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted-foreground">
-                        <th className="py-2.5 pr-4 font-medium">{tp('columnItem')}</th>
-                        <th className="w-20 px-3 py-2.5 text-right font-medium">{tp('columnQty')}</th>
-                        <th className="w-32 px-3 py-2.5 text-right font-medium">{tp('columnUnitPrice')}</th>
-                        <th className="w-32 py-2.5 pl-3 text-right font-medium">{tp('columnLineTotal')}</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
+        <div>
+            <div className="sm:hidden print:hidden" data-testid="document-line-items-stacked">
+                <ul className="divide-y divide-border border-y border-border">
                     {content.lineItems.map((item) => (
-                        <tr key={item.id} className="align-top">
-                            <td className="py-3 pr-4">
-                                <div className="font-medium text-foreground">{item.name}</div>
-                                {item.description && (
-                                    <div className="mt-0.5 text-xs text-muted-foreground">{item.description}</div>
-                                )}
-                                <div className="mt-0.5 text-xs text-muted-foreground">
-                                    {item.billingFrequency === 'recurring' ? tp('recurring') : tp('oneTime')}
+                        <li key={item.id} className="min-w-0 py-4">
+                            <div className="min-w-0 font-medium text-foreground break-words">{item.name}</div>
+                            {item.description && (
+                                <div className="mt-1 min-w-0 text-xs text-muted-foreground break-words">
+                                    {item.description}
                                 </div>
-                            </td>
-                            <td className="px-3 py-3 text-right tabular-nums">{item.quantity}</td>
-                            <td className="px-3 py-3 text-right tabular-nums">{money(item.unitPrice)}</td>
-                            <td className="py-3 pl-3 text-right font-medium tabular-nums">{money(item.lineTotal)}</td>
-                        </tr>
+                            )}
+                            <div className="mt-1 text-xs text-muted-foreground">
+                                {item.billingFrequency === 'recurring' ? tp('recurring') : tp('oneTime')}
+                            </div>
+                            <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+                                <div className="min-w-0">
+                                    <dt className="text-xs text-muted-foreground">{tp('columnQty')}</dt>
+                                    <dd className="mt-0.5 text-sm tabular-nums">{item.quantity}</dd>
+                                </div>
+                                <div className="min-w-0 text-right">
+                                    <dt className="text-xs text-muted-foreground">{tp('columnUnitPrice')}</dt>
+                                    <dd className="mt-0.5 text-sm tabular-nums">{money(item.unitPrice)}</dd>
+                                </div>
+                                <div className="col-span-2 flex min-w-0 items-baseline justify-between gap-4 border-t border-border pt-3">
+                                    <dt className="text-xs text-muted-foreground">{tp('columnLineTotal')}</dt>
+                                    <dd className="min-w-0 text-right text-sm font-medium tabular-nums">
+                                        {money(item.lineTotal)}
+                                    </dd>
+                                </div>
+                            </dl>
+                        </li>
                     ))}
-                </tbody>
-                <tfoot className="border-t border-border">
-                    <TotalRow label={tp('subtotal')} value={money(content.totals.subtotal)} />
-                    <TotalRow label={tp('tax')} value={money(content.totals.tax)} />
+                </ul>
+                <dl className="mt-4 space-y-2">
+                    <MobileTotalRow label={tp('subtotal')} value={money(content.totals.subtotal)} />
+                    <MobileTotalRow label={tp('tax')} value={money(content.totals.tax)} />
                     {content.totals.recurringTotal > 0 && (
                         <>
-                            <TotalRow label={tp('oneTimeTotal')} value={money(content.totals.oneTimeTotal)} muted />
-                            <TotalRow label={tp('recurringTotal')} value={money(content.totals.recurringTotal)} muted />
+                            <MobileTotalRow label={tp('oneTimeTotal')} value={money(content.totals.oneTimeTotal)} muted />
+                            <MobileTotalRow label={tp('recurringTotal')} value={money(content.totals.recurringTotal)} muted />
                         </>
                     )}
-                    <TotalRow label={tp('grandTotal')} value={money(content.totals.grandTotal)} emphasis />
-                </tfoot>
-            </table>
+                    <MobileTotalRow label={tp('grandTotal')} value={money(content.totals.grandTotal)} emphasis />
+                </dl>
+            </div>
+            <div className="hidden sm:block print:block" data-testid="document-line-items-table">
+                <table className="w-full table-fixed text-sm">
+                    <thead>
+                        <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted-foreground">
+                            <th className="py-2.5 pr-4 font-medium">{tp('columnItem')}</th>
+                            <th className="w-20 px-3 py-2.5 text-right font-medium">{tp('columnQty')}</th>
+                            <th className="w-32 px-3 py-2.5 text-right font-medium">{tp('columnUnitPrice')}</th>
+                            <th className="w-32 py-2.5 pl-3 text-right font-medium">{tp('columnLineTotal')}</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                        {content.lineItems.map((item) => (
+                            <tr key={item.id} className="align-top">
+                                <td className="min-w-0 py-3 pr-4">
+                                    <div className="font-medium text-foreground break-words">{item.name}</div>
+                                    {item.description && (
+                                        <div className="mt-0.5 text-xs text-muted-foreground break-words">{item.description}</div>
+                                    )}
+                                    <div className="mt-0.5 text-xs text-muted-foreground">
+                                        {item.billingFrequency === 'recurring' ? tp('recurring') : tp('oneTime')}
+                                    </div>
+                                </td>
+                                <td className="px-3 py-3 text-right tabular-nums">{item.quantity}</td>
+                                <td className="px-3 py-3 text-right tabular-nums">{money(item.unitPrice)}</td>
+                                <td className="py-3 pl-3 text-right font-medium tabular-nums">{money(item.lineTotal)}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                    <tfoot className="border-t border-border">
+                        <TotalRow label={tp('subtotal')} value={money(content.totals.subtotal)} />
+                        <TotalRow label={tp('tax')} value={money(content.totals.tax)} />
+                        {content.totals.recurringTotal > 0 && (
+                            <>
+                                <TotalRow label={tp('oneTimeTotal')} value={money(content.totals.oneTimeTotal)} muted />
+                                <TotalRow label={tp('recurringTotal')} value={money(content.totals.recurringTotal)} muted />
+                            </>
+                        )}
+                        <TotalRow label={tp('grandTotal')} value={money(content.totals.grandTotal)} emphasis />
+                    </tfoot>
+                </table>
+            </div>
         </div>
     ) : null;
 
@@ -101,7 +148,7 @@ export default function DocumentView({ content, type, status, version, generated
                         {t(TYPE_KEY[type])}
                     </div>
                     <h1 className="mt-2 text-pretty text-3xl font-semibold tracking-tight text-foreground">
-                        {content.sections.title || t('untitled')}
+                        {title || content.sections.title || t('untitled')}
                     </h1>
                 </div>
                 {(version != null || generatedAt) && (
@@ -284,5 +331,16 @@ function TotalRow({ label, value, emphasis, muted }: { label: string; value: str
                 {value}
             </td>
         </tr>
+    );
+}
+
+function MobileTotalRow({ label, value, emphasis, muted }: { label: string; value: string; emphasis?: boolean; muted?: boolean }) {
+    return (
+        <div className={`flex min-w-0 items-baseline justify-between gap-4 ${muted ? 'text-muted-foreground' : ''}`}>
+            <dt className="text-xs text-muted-foreground">{label}</dt>
+            <dd className={`min-w-0 text-right tabular-nums ${emphasis ? 'text-base font-semibold text-foreground' : 'text-sm'}`}>
+                {value}
+            </dd>
+        </div>
     );
 }
