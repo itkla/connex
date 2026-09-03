@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.DisqualificationReasonMapper">
+
+  <resultMap id="DisqualificationReasonResult" type="DisqualificationReason">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="code" column="code"/>
+    <result property="label" column="label"/>
+    <result property="requiresNote" column="requires_note"/>
+    <result property="position" column="position"/>
+    <result property="builtIn" column="built_in"/>
+    <result property="archivedAt" column="archived_at"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <sql id="reasonColumns">
+    id, workspace_id, code, label, requires_note, position, built_in,
+    archived_at, created_at, updated_at
+  </sql>
+
+  <select id="getAll" resultMap="DisqualificationReasonResult">
+    SELECT <include refid="reasonColumns"/>
+    FROM disqualification_reason
+    WHERE workspace_id = #{workspaceId}
+    ORDER BY position, id
+  </select>
+
+  <select id="getById" resultMap="DisqualificationReasonResult">
+    SELECT <include refid="reasonColumns"/>
+    FROM disqualification_reason
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getByIdForUpdate" resultMap="DisqualificationReasonResult">
+    SELECT <include refid="reasonColumns"/>
+    FROM disqualification_reason
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getByCode" resultMap="DisqualificationReasonResult">
+    SELECT <include refid="reasonColumns"/>
+    FROM disqualification_reason
+    WHERE workspace_id = #{workspaceId} AND code = #{code}
+  </select>
+
+  <select id="getByCodeForUpdate" resultMap="DisqualificationReasonResult">
+    SELECT <include refid="reasonColumns"/>
+    FROM disqualification_reason
+    WHERE workspace_id = #{workspaceId} AND code = #{code}
+    FOR UPDATE
+  </select>
+
+  <insert id="insertBuiltIn">
+    INSERT IGNORE INTO disqualification_reason
+      (workspace_id, code, label, requires_note, position, built_in)
+    VALUES
+      (#{workspaceId}, #{code}, NULL, #{requiresNote}, #{position}, TRUE)
+  </insert>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO disqualification_reason
+      (workspace_id, code, label, requires_note, position, built_in)
+    VALUES
+      (#{workspaceId}, #{code}, #{label}, #{requiresNote}, #{position}, FALSE)
+  </insert>
+
+  <update id="update">
+    UPDATE disqualification_reason
+    SET label = #{label},
+        requires_note = #{requiresNote},
+        position = #{position}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="archive">
+    UPDATE disqualification_reason
+    SET archived_at = CURRENT_TIMESTAMP
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL
+  </update>
+
+  <update id="restore">
+    UPDATE disqualification_reason
+    SET archived_at = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NOT NULL
+  </update>
+</mapper>

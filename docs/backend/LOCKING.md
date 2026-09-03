@@ -111,6 +111,23 @@ Invitation/participant-removal paths lock caller/target active memberships ascen
 
 The session row is the per-session mutex. Allocate message sequence with the established `MAX(seq)+1` calculation while holding the session root, insert, and update `last_message_at`. Do not lock the message aggregate or use `MAX(seq) ... FOR UPDATE`.
 
+## Disqualification vocabulary materialization
+
+Disqualification-reason settings mutations and lifecycle transitions into `DISQUALIFIED` share the
+exclusive workspace row as the workspace-level materialization mutex. They run at the caller's
+transaction isolation and acquire locks in this order:
+
+1. Lock the actor's `app_user` root.
+2. Lock the active workspace root exclusively.
+3. Lock and revalidate the actor's membership, custom role, and required permission.
+4. Read or lock the workspace's disqualification-reason catalog.
+5. For lifecycle changes, lock and revalidate the exact owned person only after the reason decision.
+
+Settings mutators require `WORKSPACE_SETTINGS`; lifecycle changes require `PERSON_UPDATE`. A row-less
+catalog may be synthesized only while the workspace mutex is held. First-edit materialization holds
+the same mutex, so it cannot commit between a lifecycle miss and the row-less check. Persist the code
+returned by the locked resolution, never a separately compared caller value.
+
 ## Duplicate review, record mutation, and imports
 
 `DuplicateDecisionLockService` serializes candidate-affecting mutations across the same-organization visibility domain.

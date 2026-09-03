@@ -10,10 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
@@ -30,6 +32,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DataSubjectRequestDto;
 import ooo.klae.connex.backend.dto.DataSubjectRequestUpsertRequest;
+import ooo.klae.connex.backend.dto.DisqualificationReasonRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -44,6 +47,9 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
     @Autowired private AuditLogMapper auditLogMapper;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private DisqualificationReasonService reasonService;
+    @Autowired private RoleService roleService;
+    @Autowired private WorkspaceService workspaceService;
     private final List<Integer> createdUserIds = new ArrayList<>();
     private final List<Integer> createdOrganizationIds = new ArrayList<>();
     private final List<Integer> createdWorkspaceIds = new ArrayList<>();
@@ -56,14 +62,22 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
         createdCompanyIds.forEach(id -> jdbcTemplate.update("DELETE FROM company WHERE id = ?", id));
         createdOrganizationIds.forEach(
             id -> jdbcTemplate.update("DELETE FROM data_subject_request WHERE org_id = ?", id));
+        createdWorkspaceIds.forEach(id -> jdbcTemplate.update(
+            "DELETE FROM disqualification_reason WHERE workspace_id = ?", id));
         createdWorkspaceIds.forEach(
             id -> jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ?", id));
+        createdWorkspaceIds.forEach(id -> jdbcTemplate.update(
+            "DELETE FROM workspace_role_permission WHERE workspace_role_id IN "
+                + "(SELECT id FROM workspace_role WHERE workspace_id = ?)", id));
+        createdWorkspaceIds.forEach(
+            id -> jdbcTemplate.update("DELETE FROM workspace_role WHERE workspace_id = ?", id));
         createdWorkspaceIds.forEach(id -> jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", id));
         createdOrganizationIds.forEach(id -> jdbcTemplate.update("DELETE FROM org_member WHERE org_id = ?", id));
         createdOrganizationIds.forEach(id -> jdbcTemplate.update("DELETE FROM organization WHERE id = ?", id));
         createdUserIds.forEach(
             id -> jdbcTemplate.update("DELETE FROM workspace_member WHERE user_id = ?", id));
         createdUserIds.forEach(id -> jdbcTemplate.update("DELETE FROM app_user WHERE id = ?", id));
+        LocaleContextHolder.resetLocaleContext();
     }
 
     @Override
@@ -309,6 +323,100 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
             identities.getLast().getPurposeOfUseCode());
         assertNotNull(identities.getLast().getSupersededAt());
     }
+
+    @Test
+    void disclosureIncludesConfiguredAndLocalizedDisqualificationLabels() {
+        Organization org = orgOwnedByCurrentUser();
+        ReasonWorkspace subjectFixture = reasonWorkspace(
+            org.getId(), "NO_REGION", "Outside our region", true);
+        ReasonWorkspace collisionFixture = reasonWorkspace(
+            org.getId(), "NO_REGION", "Different workspace label", false);
+        Workspace subjectWorkspace = subjectFixture.workspace();
+        Person customSubject = newPerson(subjectWorkspace.getId());
+        setDisqualification(
+            subjectWorkspace, customSubject, "NO_REGION", subjectFixture.actor().getId());
+        authenticateAs(currentUser, subjectWorkspace.getId());
+        DataSubjectRequestDto customRequest = dataSubjectRequestService.create(
+            org.getId(), currentUser.getId(),
+            linkedRequest(subjectWorkspace.getId(), customSubject.getId()));
+
+        var customDisclosure = dataSubjectRequestService.disclosure(
+            org.getId(), customRequest.getId(), currentUser.getId());
+        assertEquals("Outside our region", customDisclosure.getPerson().getDisqualifiedReasonLabel());
+        assertEquals("Outside our region", customDisclosure.getLifecycleHistory().getFirst().getReasonLabel());
+        assertTrue(!"Different workspace label".equals(
+            customDisclosure.getPerson().getDisqualifiedReasonLabel()));
+        assertEquals("Different workspace label",
+            jdbcTemplate.queryForObject(
+                "SELECT label FROM disqualification_reason WHERE workspace_id = ? AND code = ?",
+                String.class, collisionFixture.workspace().getId(), "NO_REGION"));
+
+        Person builtInSubject = newPerson(subjectWorkspace.getId());
+        setDisqualification(
+            subjectWorkspace, builtInSubject, "NO_FIT", subjectFixture.actor().getId());
+        DataSubjectRequestDto builtInRequest = dataSubjectRequestService.create(
+            org.getId(), currentUser.getId(),
+            linkedRequest(subjectWorkspace.getId(), builtInSubject.getId()));
+        LocaleContextHolder.setLocale(Locale.JAPANESE);
+
+        var builtInDisclosure = dataSubjectRequestService.disclosure(
+            org.getId(), builtInRequest.getId(), currentUser.getId());
+        assertEquals("適合しない", builtInDisclosure.getPerson().getDisqualifiedReasonLabel());
+        assertEquals("適合しない", builtInDisclosure.getLifecycleHistory().getFirst().getReasonLabel());
+    }
+
+    private void setDisqualification(
+            Workspace subjectWorkspace, Person subject, String code, int changedById) {
+        jdbcTemplate.update(
+            "UPDATE person SET lifecycle_stage = 'DISQUALIFIED', disqualified_reason = ? "
+                + "WHERE workspace_id = ? AND id = ?",
+            code, subjectWorkspace.getId(), subject.getId());
+        jdbcTemplate.update(
+            "INSERT INTO person_lifecycle_history "
+                + "(workspace_id, person_id, from_stage, to_stage, reason, changed_by_id) "
+                + "VALUES (?, ?, 'WORKING', 'DISQUALIFIED', ?, ?)",
+            subjectWorkspace.getId(), subject.getId(), code, changedById);
+    }
+
+    private ReasonWorkspace reasonWorkspace(
+            int orgId, String code, String label, boolean archive) {
+        Workspace reasonWorkspace = newWorkspace(orgId);
+        workspaceMapper.addMember(reasonWorkspace.getId(), currentUser.getId(), "owner");
+        User actor = standaloneUser("subject-reason-member");
+        workspaceMapper.addMember(reasonWorkspace.getId(), actor.getId(), "member");
+        authenticateAs(currentUser, reasonWorkspace.getId());
+        var role = roleService.createRole(
+            reasonWorkspace.getId(), currentUser.getId(), "Subject reason manager " + unique(),
+            List.of("WORKSPACE_SETTINGS", "PERSON_UPDATE"));
+        workspaceService.assignCustomRole(
+            reasonWorkspace.getId(), currentUser.getId(), actor.getId(), role.getId());
+        authenticateAs(actor, reasonWorkspace.getId());
+        DisqualificationReasonRequest request = new DisqualificationReasonRequest();
+        request.setCode(code);
+        request.setLabel(label);
+        request.setRequiresNote(false);
+        request.setPosition(20);
+        var reason = reasonService.create(request);
+        if (archive) {
+            reasonService.archive(reason.id());
+        }
+        return new ReasonWorkspace(reasonWorkspace, actor);
+    }
+
+    private User standaloneUser(String qualifier) {
+        String value = unique();
+        User user = new User();
+        user.setUsername(qualifier + "-" + value);
+        user.setDisplayName(qualifier + " " + value);
+        user.setEmail(qualifier + "-" + value + "@example.com");
+        user.setPasswordHash("hash-" + value);
+        user.setTimezone("UTC");
+        userMapper.insert(user);
+        createdUserIds.add(user.getId());
+        return user;
+    }
+
+    private record ReasonWorkspace(Workspace workspace, User actor) {}
 
     @Test
     void disclosureAuditCommitsOutsideAnAmbientCallerTransaction() {

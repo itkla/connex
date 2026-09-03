@@ -20,7 +20,6 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
-import ooo.klae.connex.backend.beans.PersonDisqualificationReason;
 import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.beans.Tag;
@@ -96,7 +95,7 @@ public class PersonDto {
     private LocalDateTime lifecycleChangedAt;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
-    private PersonDisqualificationReason disqualifiedReason;
+    private String disqualifiedReason;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String qualificationNotes;

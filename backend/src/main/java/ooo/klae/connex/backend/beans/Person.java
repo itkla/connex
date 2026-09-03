@@ -44,7 +44,7 @@ public class Person {
     private LocalDateTime archivedAt;
     private PersonLifecycleStage lifecycleStage;
     private LocalDateTime lifecycleChangedAt;
-    private PersonDisqualificationReason disqualifiedReason;
+    private String disqualifiedReason;
     private String qualificationNotes;
     private PersonLeadSource leadSource;
     private String leadSourceDetail;

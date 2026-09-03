@@ -6,7 +6,6 @@ import java.util.List;
 import org.apache.ibatis.annotations.Param;
 
 import ooo.klae.connex.backend.beans.Person;
-import ooo.klae.connex.backend.beans.PersonDisqualificationReason;
 import ooo.klae.connex.backend.beans.PersonFirstResponseState;
 import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
@@ -233,7 +232,7 @@ public interface PersonMapper {
         @Param("id") int id,
         @Param("stage") PersonLifecycleStage stage,
         @Param("changedAt") LocalDateTime changedAt,
-        @Param("reason") PersonDisqualificationReason reason,
+        @Param("reason") String reason,
         @Param("notes") String notes
     );
     /**

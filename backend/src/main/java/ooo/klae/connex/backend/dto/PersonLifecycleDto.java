@@ -5,7 +5,6 @@ import java.util.Comparator;
 import java.util.List;
 
 import ooo.klae.connex.backend.beans.Person;
-import ooo.klae.connex.backend.beans.PersonDisqualificationReason;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 
 /**
@@ -16,7 +15,8 @@ public record PersonLifecycleDto(
     Integer personId,
     PersonLifecycleStage stage,
     LocalDateTime changedAt,
-    PersonDisqualificationReason disqualifiedReason,
+    String disqualifiedReason,
+    String reasonLabel,
     String qualificationNotes,
     List<PersonLifecycleStage> allowedTransitions
 ) {
@@ -32,7 +32,7 @@ public record PersonLifecycleDto(
      * @param qualifiable whether every required qualification criterion is met
      * @return lifecycle state, or {@code null} when there is no contact
      */
-    public static PersonLifecycleDto from(Person person, boolean qualifiable) {
+    public static PersonLifecycleDto from(Person person, boolean qualifiable, String reasonLabel) {
         if (person == null) {
             return null;
         }
@@ -41,6 +41,7 @@ public record PersonLifecycleDto(
             person.getLifecycleStage(),
             person.getLifecycleChangedAt(),
             person.getDisqualifiedReason(),
+            reasonLabel,
             person.getQualificationNotes(),
             PersonLifecycleStage.allowedTransitionsFrom(person.getLifecycleStage()).stream()
                 .filter(stage -> qualifiable || stage != PersonLifecycleStage.QUALIFIED)

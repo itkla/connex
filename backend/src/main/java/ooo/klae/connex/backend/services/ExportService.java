@@ -5,8 +5,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -14,6 +16,7 @@ import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.CustomFieldDefinition;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.beans.PersonDisqualificationReason;
 import ooo.klae.connex.backend.beans.PersonFirstResponseState;
 import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
@@ -49,6 +52,7 @@ public class ExportService {
     private final TagMapper tagMapper;
     private final CustomFieldDefinitionMapper customFieldDefinitionMapper;
     private final CustomFieldValueService customFieldValueService;
+    private final DisqualificationReasonService disqualificationReasonService;
 
     /**
      * CSV of contacts matching the given list filters and member scope (all contacts when
@@ -68,9 +72,22 @@ public class ExportService {
         Map<Integer, Map<Integer, Object>> custom =
             customFieldValueService.getForEntities("person", people.stream().map(Person::getId).toList());
         Map<Integer, List<String>> tags = groupTags(tagMapper.getPersonTagNames(workspaceId));
+        Locale locale = LocaleContextHolder.getLocale();
+        Map<String, String> reasonLabels = new HashMap<>();
+        disqualificationReasonService.resolved(workspaceId).stream()
+            .filter(reason -> PersonDisqualificationReason.isCanonicalCode(reason.code()))
+            .forEach(reason -> reasonLabels.put(
+                reason.code(),
+                reason.label() == null
+                    ? PersonDisqualificationReason.localizedLabel(reason.code(), locale)
+                    : reason.label()));
 
         StringBuilder sb = new StringBuilder();
-        writeRow(sb, headers(List.of("id", "name", "email", "phone", "title", "company"), defs));
+        List<String> personHeaders = headers(
+            List.of("id", "name", "email", "phone", "title", "company"), defs);
+        personHeaders.addAll(List.of(
+            "lifecycleStage", "disqualificationReason", "disqualificationReasonLabel"));
+        writeRow(sb, personHeaders);
         for (Person p : people) {
             List<String> row = new ArrayList<>();
             row.add(Integer.toString(p.getId()));
@@ -81,6 +98,9 @@ public class ExportService {
             row.add(p.getCompany() != null ? p.getCompany().getName() : null);
             appendCustom(row, defs, custom.get(p.getId()));
             row.add(joinTags(tags.get(p.getId())));
+            row.add(p.getLifecycleStage() == null ? null : p.getLifecycleStage().name());
+            row.add(p.getDisqualifiedReason());
+            row.add(disqualificationLabel(p.getDisqualifiedReason(), reasonLabels, locale));
             writeRow(sb, row);
         }
         return sb.toString();
@@ -256,6 +276,17 @@ public class ExportService {
 
     private static String value(String value) {
         return value == null ? "" : value;
+    }
+
+    private static String disqualificationLabel(
+            String code, Map<String, String> labels, Locale locale) {
+        if (code == null) {
+            return null;
+        }
+        if (!PersonDisqualificationReason.isCanonicalCode(code)) {
+            return code;
+        }
+        return labels.getOrDefault(code, PersonDisqualificationReason.localizedLabel(code, locale));
     }
 
     private static void writeRow(StringBuilder sb, List<String> cells) {

@@ -3319,6 +3319,34 @@ export function restoreQualificationCriterion(id: number) {
     return postJson<void>(`/api/qualification-criteria/${id}/restore`, {});
 }
 
+/** The workspace's resolved disqualification vocabulary (issue #559). */
+export function getDisqualificationReasons(includeArchived = false, init: RequestInit = {}) {
+    return getJson<Types.DisqualificationReason[]>(
+        `/api/disqualification-reasons${includeArchived ? '?includeArchived=true' : ''}`,
+        init,
+    );
+}
+
+export function createDisqualificationReason(payload: Types.DisqualificationReasonPayload) {
+    return postJson<Types.DisqualificationReason>('/api/disqualification-reasons', payload);
+}
+
+export function updateDisqualificationReason(
+    id: number,
+    payload: Types.DisqualificationReasonPayload,
+) {
+    return putJson<Types.DisqualificationReason>(`/api/disqualification-reasons/${id}`, payload);
+}
+
+/** Archives a reason while keeping historical lifecycle labels resolvable. */
+export function archiveDisqualificationReason(id: number) {
+    return deleteJson<void>(`/api/disqualification-reasons/${id}`);
+}
+
+export function restoreDisqualificationReason(id: number) {
+    return postJson<void>(`/api/disqualification-reasons/${id}/restore`, {});
+}
+
 export function getContactLifecycleHistory(id: number, init: RequestInit = {}) {
     return getJson<Types.ContactLifecycleHistoryEntry[]>(`/api/persons/${id}/lifecycle/history`, init);
 }

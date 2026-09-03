@@ -8,6 +8,7 @@ import { PageHeader } from "@/app/components/PageHeader";
 import ApprovalPoliciesBrowser from "@/app/components/records/approval-policies/ApprovalPoliciesBrowser";
 import CustomFieldsPanel from "@/app/components/settings/CustomFieldsPanel";
 import QualificationCriteriaPanel from "@/app/components/settings/QualificationCriteriaPanel";
+import DisqualificationReasonsPanel from "@/app/components/settings/DisqualificationReasonsPanel";
 import SettingsAvailabilityNotice from "@/app/components/settings/SettingsAvailabilityNotice";
 import { SettingsSection } from "@/app/components/settings/SettingsSection";
 import {
@@ -103,7 +104,10 @@ export default function CrmConfiguration({ policies }: { policies: ApprovalPolic
             <SettingsSectionRegion section="qualification" arrived={arrived} register={register}>
                 <Rise>
                     {qualification === "granted" ? (
-                        <QualificationCriteriaPanel />
+                        <div className="flex flex-col gap-12">
+                            <QualificationCriteriaPanel />
+                            <DisqualificationReasonsPanel />
+                        </div>
                     ) : (
                         <SettingsSection
                             title={tQualification("title")}

@@ -66,6 +66,10 @@ class DataSubjectDisclosureMapperXmlTest {
         }
         assertTrue(found.equals(expectedStatements), found.toString());
         assertFalse(xml.contains("${"));
+        assertTrue(xml.contains("dr.label AS disqualified_reason_label"));
+        assertTrue(xml.contains("dr.label AS reason_label"));
+        assertTrue(xml.contains("BINARY dr.code = BINARY p.disqualified_reason"));
+        assertTrue(xml.contains("BINARY dr.code = BINARY h.reason"));
         for (String table : Set.of("workspace", "audit_log", "data_subject_request")) {
             assertFalse(xml.matches("(?s).*(?:FROM|JOIN|INTO|UPDATE)\\s+" + table + "\\b.*"), table);
         }

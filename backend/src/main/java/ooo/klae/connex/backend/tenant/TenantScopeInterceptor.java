@@ -132,7 +132,8 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "RelationshipSignalMapper",
         MAPPERS + "GoalMapper",
         MAPPERS + "ScheduleMapper",
-        MAPPERS + "TenantLifecycleMapper"
+        MAPPERS + "TenantLifecycleMapper",
+        MAPPERS + "DisqualificationReasonMapper"
     );
 
     /**
