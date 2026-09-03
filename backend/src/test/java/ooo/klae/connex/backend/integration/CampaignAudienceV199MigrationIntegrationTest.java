@@ -194,13 +194,25 @@ class CampaignAudienceV199MigrationIntegrationTest {
                 SET pushed_count = NULL, failed_count = 0
                 WHERE id = 65203
                 """));
-            assertThrows(SQLException.class, () -> statement.executeUpdate("""
+            assertEquals(1, statement.executeUpdate("""
                 INSERT INTO campaign_audience_export (
-                    workspace_id, campaign_id, snapshot_id, connector,
+                    id, workspace_id, campaign_id, snapshot_id, connector,
                     frozen_member_ids_json, pushed_member_ids_json, status,
                     total_members, pushed_count, failed_count)
-                VALUES (65201, 65201, 65201, 'http_list', JSON_ARRAY(), JSON_ARRAY(),
+                VALUES (65204, 65201, 65201, 65201, 'http_list', JSON_ARRAY(), JSON_ARRAY(),
                     'running', 0, 0, 0)
+                """));
+            assertEquals(1, scalar(statement, """
+                SELECT COUNT(*) FROM campaign_audience_export
+                WHERE id = 65204 AND status = 'running' AND lease_until IS NULL
+                """));
+            assertThrows(SQLException.class, () -> statement.executeUpdate("""
+                INSERT INTO campaign_audience_export (
+                    id, workspace_id, campaign_id, snapshot_id, connector,
+                    frozen_member_ids_json, pushed_member_ids_json, status, lease_until,
+                    total_members, pushed_count, failed_count)
+                VALUES (65205, 65201, 65201, 65201, 'http_list', JSON_ARRAY(), JSON_ARRAY(),
+                    'failed', DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 5 MINUTE), 0, 0, 0)
                 """));
             statement.executeUpdate("""
                 INSERT INTO connector_config (

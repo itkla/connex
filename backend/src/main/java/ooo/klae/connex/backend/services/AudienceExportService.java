@@ -3,7 +3,6 @@ package ooo.klae.connex.backend.services;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -44,6 +43,7 @@ import ooo.klae.connex.backend.delivery.AudienceSyncConnector;
 import ooo.klae.connex.backend.delivery.ChannelAddressNormalizer;
 import ooo.klae.connex.backend.delivery.ConnectorConfigService;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
+import ooo.klae.connex.backend.delivery.DeliveryProperties;
 import ooo.klae.connex.backend.delivery.DeliveryProviderException;
 import ooo.klae.connex.backend.delivery.DeliveryProviderRouter;
 import ooo.klae.connex.backend.delivery.ResolvedAudienceTarget;
@@ -76,12 +76,14 @@ import tools.jackson.databind.ObjectMapper;
  * provider-acceptance window remains. For locked authorization and the connector generation it starts
  * when B commits; for eligibility it starts at B's first consistent read, which loads restrictions.
  * The application portion is
- * normally milliseconds because B is immediately followed by the connector call, and provider
- * acceptance is bounded by configured connection/response timeouts (3 and 15 seconds by default). A
- * permission, consent, restriction, suppression, or connector-generation change committed inside its
- * respective window cannot retract the already-started request; it is honored on the next export,
- * while provider-side unsubscribe synchronization remains the immediate removal path. A lost response
- * or expired running lease becomes {@code needs_reconciliation} and is never silently retried.
+ * normally milliseconds because B is immediately followed by the connector call. The running lease
+ * covers the configured connection and response bounds plus a safety margin and cannot exceed five
+ * minutes. A permission, consent, restriction, suppression, or connector-generation change committed
+ * inside its respective window cannot retract the already-started request; it is honored on the next
+ * export, while provider-side unsubscribe synchronization remains the immediate removal path. A lost
+ * response or expired nonnull running lease becomes {@code needs_reconciliation} and is never silently
+ * retried. A null lease identifies a legacy in-flight writer and remains active without automatic stale
+ * classification.
  * Request-stable idempotency keys let a supporting provider de-duplicate a retry of the same
  * ambiguous request, while a replacement after a definite failure advances the persisted attempt.
  */
@@ -91,7 +93,6 @@ public class AudienceExportService {
 
     private static final Logger log = LoggerFactory.getLogger(AudienceExportService.class);
     private static final String CHANNEL = "email";
-    private static final Duration EXPORT_LEASE = Duration.ofMinutes(5);
 
     private final CampaignMapper campaignMapper;
     private final CampaignAudienceExportMapper campaignAudienceExportMapper;
@@ -99,6 +100,7 @@ public class AudienceExportService {
     private final AudienceEligibilityService audienceEligibilityService;
     private final ConnectorConfigService connectorConfigService;
     private final DeliveryProviderRouter deliveryProviderRouter;
+    private final DeliveryProperties deliveryProperties;
     private final CapabilityRegistry capabilityRegistry;
     private final WorkspaceService workspaceService;
     private final TenantContext tenantContext;
@@ -162,10 +164,12 @@ public class AudienceExportService {
             return inNewTransaction(() -> recordFailedBeforePush(
                     workspaceId, actorId, campaignId, prepared));
         }
+        boolean noEligibleMembers = finalAudience.members().isEmpty();
         applyPush(finalAudience.export(), syncConnector, target, finalAudience.members(),
                 finalAudience.excludedCount(), finalAudience.idempotencyKey());
         return inNewTransaction(() -> recordOutcome(
-                workspaceId, actorId, campaignId, finalAudience.export()));
+                workspaceId, actorId, campaignId, prepared.campaignName(),
+                finalAudience.export(), noEligibleMembers));
     }
 
     /**
@@ -272,7 +276,9 @@ public class AudienceExportService {
                         "exportId", export.getId(), "connector", connector,
                         "members", frozenMemberIds.size()));
         return Optional.of(
-                new PreparedExport(export.getId(), snapshotVersion, snapshot.getChannel(), snapshot.getPurpose()));
+                new PreparedExport(
+                        export.getId(), snapshotVersion, snapshot.getChannel(),
+                        snapshot.getPurpose(), campaign.getName()));
     }
 
     private FinalAudience finalRevalidation(
@@ -332,7 +338,7 @@ public class AudienceExportService {
             String idempotencyKey) {
         if (members.isEmpty()) {
             export.setPushedCount(0);
-            export.setStatus("completed");
+            export.setStatus("failed");
             return;
         }
         try {
@@ -405,11 +411,24 @@ public class AudienceExportService {
     }
 
     private CampaignAudienceExportDto recordOutcome(
-            int workspaceId, int actorId, int campaignId, CampaignAudienceExport export) {
+            int workspaceId,
+            int actorId,
+            int campaignId,
+            String campaignName,
+            CampaignAudienceExport export,
+            boolean noEligibleMembers) {
         boolean includeDetailedCounts = workspaceService
                 .lockedMemberPermissionsFor(workspaceId, actorId)
                 .contains(Permission.CONSENT_MANAGE);
         campaignAudienceExportMapper.updateOutcome(export);
+        if (noEligibleMembers) {
+            auditService.recordStrict(
+                    "campaign.audience_export.outcome", "campaign", campaignId, campaignName,
+                    "Recorded campaign audience export outcome", Map.of(
+                            "exportId", export.getId(),
+                            "status", "failed",
+                            "reason", "no_eligible_members"));
+        }
         return CampaignAudienceExportDto.from(
                 requireExport(workspaceId, campaignId, export.getId()), includeDetailedCounts);
     }
@@ -444,8 +463,8 @@ public class AudienceExportService {
         }
     }
 
-    private static LocalDateTime leaseDeadline() {
-        return LocalDateTime.now(ZoneOffset.UTC).plus(EXPORT_LEASE);
+    private LocalDateTime leaseDeadline() {
+        return LocalDateTime.now(ZoneOffset.UTC).plus(deliveryProperties.audienceExportLeaseDuration());
     }
 
     static String idempotencyKey(
@@ -756,7 +775,8 @@ public class AudienceExportService {
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private record PreparedExport(int exportId, int snapshotVersion, String channel, String purpose) {
+    private record PreparedExport(
+            int exportId, int snapshotVersion, String channel, String purpose, String campaignName) {
     }
 
     private record FinalAudience(

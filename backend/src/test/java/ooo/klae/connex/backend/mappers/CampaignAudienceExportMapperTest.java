@@ -101,6 +101,35 @@ class CampaignAudienceExportMapperTest extends AbstractMapperTest {
     }
 
     @Test
+    void legacyRunningExportWithoutALeaseIsNotStaleAndRemainsDuplicateBlocking() {
+        Campaign campaign = newCampaign();
+        CampaignAudienceSnapshot snapshot = newSnapshot(campaign.getId());
+        CampaignAudienceExport export = new CampaignAudienceExport();
+        export.setWorkspaceId(workspace.getId());
+        export.setCampaignId(campaign.getId());
+        export.setSnapshotId(snapshot.getId());
+        export.setConnector(HttpListConnector.PROVIDER_ID);
+        export.setFrozenMemberIdsJson(null);
+        export.setPushedMemberIdsJson(null);
+        export.setStatus("running");
+        export.setAttempt(1);
+        export.setLeaseUntil(null);
+        export.setTotalMembers(0);
+        export.setPushedCount(0);
+        export.setFailedCount(0);
+
+        exportMapper.insertExport(export);
+
+        CampaignAudienceExport history = exportMapper.getExport(workspace.getId(), export.getId());
+        assertEquals("running", history.getStatus());
+        assertNull(history.getLeaseUntil());
+        assertEquals(0, exportMapper.markStaleRunningNeedsReconciliation(
+                workspace.getId(), campaign.getId(), List.of(export.getId())));
+        assertTrue(exportMapper.existsActiveForSnapshotConnector(
+                workspace.getId(), campaign.getId(), snapshot.getId(), HttpListConnector.PROVIDER_ID));
+    }
+
+    @Test
     void frozenMemberIdsRoundTripThroughTheLockingRead() {
         Campaign campaign = newCampaign();
         CampaignAudienceSnapshot snapshot = newSnapshot(campaign.getId());

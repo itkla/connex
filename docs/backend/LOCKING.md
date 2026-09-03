@@ -196,6 +196,7 @@ include detailed counts.
 
 | Connector observation | Outcome | Export state |
 |---|---|---|
+| Final revalidation leaves no eligible member to send | `DEFINITE_NO_SIDE_EFFECT` | `failed` with audit reason `no_eligible_members` |
 | Local validation, serialization, DNS, or connection refusal before the request body can be sent | `DEFINITE_NO_SIDE_EFFECT` | `failed` |
 | Provider-specific response whose documented atomic contract proves non-acceptance | `DEFINITE_NO_SIDE_EFFECT` | `failed` |
 | Any generic non-2xx response after the request body was sent | `AMBIGUOUS` | `needs_reconciliation` |
@@ -214,16 +215,22 @@ B's first consistent read, the restriction read. The later address, suppression,
 share that snapshot, so a change committed after the restriction read is outside B even if it commits
 before the corresponding later query. The remaining in-process reads, stage write, fence, commit, and
 handoff are normally milliseconds, while provider acceptance is bounded by the connector's configured
-connection and response timeouts (3 and 15 seconds by default). An authorization, eligibility, or
-connector-generation change committed inside its respective window cannot retract an already-started
-request. It is honored on the next export; provider-side unsubscribe synchronization is the immediate
-removal path for an in-flight disclosure. Rotation inside the window is the same residual class and
-must not be described as an unconditional pre-egress abort.
+connection and response timeouts (3 and 15 seconds by default). Automatic connector retries are
+disabled. The running lease is the sum of those one-attempt transport bounds plus a 30-second
+handoff/persistence margin; startup refuses a configuration whose derived lease would exceed the
+five-minute maximum. An authorization, eligibility, or connector-generation change committed inside
+its respective window cannot retract an already-started request. It is honored on the next export;
+provider-side unsubscribe synchronization is the immediate removal path for an in-flight disclosure.
+Rotation inside the window is the same residual class and must not be described as an unconditional
+pre-egress abort.
 
-Every `running` export carries a lease. An expired lease or an outcome whose provider acceptance is
-unknown transitions to `needs_reconciliation`, is shown as such in history, and blocks silent
-re-export. A `failed` export with a nonzero pushed count also blocks re-export until an operator
-resolves it. An operator holding locked `CAMPAIGN_MANAGE` and `CONSENT_MANAGE` authority can resolve a
+Every export written by the current backend carries a lease while `running`. A `running` row with a
+null lease is a legacy in-flight write left possible for application rollback compatibility; it is
+never treated as stale and remains active for duplicate prevention. An expired nonnull lease or an
+outcome whose provider acceptance is unknown transitions to `needs_reconciliation`, is shown as such
+in history, and blocks silent re-export. A `failed` export with a nonzero pushed count also blocks
+re-export until an operator resolves it. An operator holding locked `CAMPAIGN_MANAGE` and
+`CONSENT_MANAGE` authority can resolve a
 `needs_reconciliation` export only after provider confirmation: delivered preserves the recorded
 request counts and completes the export; not delivered records a definite zero-push failure and
 unblocks a replacement export. Neither resolution retries the provider request. V199 conservatively

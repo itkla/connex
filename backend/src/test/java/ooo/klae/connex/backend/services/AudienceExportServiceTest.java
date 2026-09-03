@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -54,6 +55,7 @@ import ooo.klae.connex.backend.delivery.AudiencePushResult;
 import ooo.klae.connex.backend.delivery.AudienceSyncConnector;
 import ooo.klae.connex.backend.delivery.ConnectorConfigService;
 import ooo.klae.connex.backend.delivery.DeliveryCredentials;
+import ooo.klae.connex.backend.delivery.DeliveryProperties;
 import ooo.klae.connex.backend.delivery.DeliveryProviderRouter;
 import ooo.klae.connex.backend.delivery.ResolvedAudienceTarget;
 import ooo.klae.connex.backend.delivery.ResolvedDeliveryProvider;
@@ -104,6 +106,7 @@ class AudienceExportServiceTest {
     @Mock private SmartValidator validator;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final DeliveryProperties deliveryProperties = new DeliveryProperties();
     private CampaignAudienceExport storedExport;
 
     @BeforeEach
@@ -115,7 +118,7 @@ class AudienceExportServiceTest {
     private AudienceExportService service() {
         return new AudienceExportService(campaignMapper, exportMapper, personMapper,
                 audienceEligibilityService, connectorConfigService, deliveryProviderRouter,
-                capabilityRegistry, workspaceService, tenantContext, auditService,
+                deliveryProperties, capabilityRegistry, workspaceService, tenantContext, auditService,
                 transactionManager, objectMapper, validator);
     }
 
@@ -184,6 +187,7 @@ class AudienceExportServiceTest {
         assertEquals(1, storedExport.getPushedCount());
         assertEquals(1, storedExport.getFailedCount());
         assertEquals("[1]", storedExport.getPushedMemberIdsJson());
+        assertNotNull(storedExport.getLeaseUntil());
         assertEquals("completed", dto.status());
         assertTrue(pushCaptor.getValue().idempotencyKey().startsWith(
                 "campaign-audience-44-v2-t"));
@@ -343,6 +347,25 @@ class AudienceExportServiceTest {
         assertThrows(BadRequestException.class, () -> service().createExport(CAMPAIGN, request()));
 
         verify(exportMapper, never()).insertExport(any());
+        verify(connector, never()).pushAudience(any(), any());
+    }
+
+    @Test
+    void legacyRunningExportWithoutALeaseRemainsActiveAndIsNeverMarkedStale() {
+        primeCreateExport();
+        CampaignAudienceExport legacy = idempotencyExport(72, 1);
+        legacy.setCampaignId(CAMPAIGN);
+        legacy.setStatus("running");
+        legacy.setLeaseUntil(null);
+        when(exportMapper.getByCampaign(WORKSPACE, CAMPAIGN)).thenReturn(List.of(legacy));
+        when(exportMapper.existsActiveForSnapshotConnector(
+                WORKSPACE, CAMPAIGN, SNAPSHOT, CONNECTOR)).thenReturn(true);
+
+        assertThrows(BadRequestException.class, () -> service().createExport(CAMPAIGN, request()));
+
+        verify(exportMapper, never()).markStaleRunningNeedsReconciliation(anyInt(), anyInt(), anyList());
+        verify(exportMapper).existsActiveForSnapshotConnector(
+                WORKSPACE, CAMPAIGN, SNAPSHOT, CONNECTOR);
         verify(connector, never()).pushAudience(any(), any());
     }
 

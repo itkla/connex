@@ -10,8 +10,9 @@ import lombok.NoArgsConstructor;
  * marketing connector. Bound to an immutable snapshot; the frozen member ids retain the exact set
  * admitted by preparation and the pushed member ids retain the exact identities placed in the
  * provider request. Null member-id fields identify historical rows whose exact identities were not
- * recorded. Running rows are leased so an interrupted request becomes reconciliation-required rather
- * than being retried silently.
+ * recorded. New running rows are leased so an interrupted request becomes reconciliation-required
+ * rather than being retried silently. A running row with a null lease is a legacy in-flight write:
+ * it remains active and is never classified as stale automatically.
  */
 @Data
 @NoArgsConstructor

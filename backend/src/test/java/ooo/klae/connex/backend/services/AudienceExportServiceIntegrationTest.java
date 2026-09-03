@@ -190,12 +190,14 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
     }
 
     @Test
-    void consentRevokedInTransactionAToTransactionBWindowIsNotPushed() throws Exception {
+    void allMembersRevokedBetweenTransactionsFailAndAllowAReplacementExport() throws Exception {
         String prefix = "export-consent-race-" + unique();
         Person contact = person(newCompany(), prefix, prefix + "@example.com");
         CampaignDto campaign = campaignWithSnapshot(prefix, "Consent race export");
         CountDownLatch releaseFinalRevalidation = new CountDownLatch(1);
         CountDownLatch preparationCommitted = pauseAfterPreparation(releaseFinalRevalidation);
+        when(connector.pushAudience(any(), any()))
+                .thenReturn(new AudiencePushResult(1, 0, "accepted"));
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try {
             Future<CampaignAudienceExportDto> export = executor.submit(() ->
@@ -206,10 +208,37 @@ class AudienceExportServiceIntegrationTest extends CampaignRealDbTestSupport {
             releaseFinalRevalidation.countDown();
 
             CampaignAudienceExportDto result = export.get(20, TimeUnit.SECONDS);
+            assertEquals("failed", result.status());
             assertEquals(1, result.totalMembers());
             assertEquals(0, result.pushedCount());
             assertEquals(1, result.failedCount());
-            verify(connector, never()).pushAudience(any(), any());
+            assertFalse(campaignAudienceExportMapper.existsActiveForSnapshotConnector(
+                    workspace.getId(), campaign.id(),
+                    campaignMapper.getSnapshot(workspace.getId(), campaign.id(), 1).getId(), CONNECTOR));
+            var audit = jdbcTemplate.queryForMap("""
+                    SELECT action, outcome, changes
+                    FROM audit_log
+                    WHERE workspace_id = ?
+                      AND action = 'campaign.audience_export.outcome'
+                      AND entity_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """, workspace.getId(), campaign.id());
+            assertEquals("campaign.audience_export.outcome", audit.get("action"));
+            assertEquals("success", audit.get("outcome"));
+            JsonNode changes = objectMapper.readTree((String) audit.get("changes"));
+            assertEquals(result.id(), changes.path("exportId").asInt());
+            assertEquals("failed", changes.path("status").asText());
+            assertEquals("no_eligible_members", changes.path("reason").asText());
+
+            consentService.setForPerson(contact.getId(), new ContactChannelConsentRequest(
+                    "email", PURPOSE, "granted", "manual", null, null));
+            CampaignAudienceExportDto replacement = audienceExportService.createExport(
+                    campaign.id(), new CampaignAudienceExportRequest(1, CONNECTOR));
+
+            assertEquals("completed", replacement.status());
+            assertEquals(1, replacement.pushedCount());
+            verify(connector, times(1)).pushAudience(any(), any());
         } finally {
             releaseFinalRevalidation.countDown();
             shutdown(executor);

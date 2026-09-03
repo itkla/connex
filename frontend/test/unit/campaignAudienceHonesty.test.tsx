@@ -142,6 +142,35 @@ vi.mock("@/components/ui/select", async () => {
     };
 });
 
+vi.mock("@/components/ui/responsive-dialog", async () => {
+    const React = await import("react");
+    const CloseContext = React.createContext<(() => void) | null>(null);
+    const Passthrough = ({ children }: PropsWithChildren) => <>{children}</>;
+    return {
+        ResponsiveDialog: ({
+            children,
+            open,
+            onOpenChange,
+        }: PropsWithChildren<{
+            open?: boolean;
+            onOpenChange?: (open: boolean) => void;
+        }>) => (
+            <CloseContext.Provider value={() => onOpenChange?.(false)}>
+                {open ? children : null}
+            </CloseContext.Provider>
+        ),
+        ResponsiveDialogClose: ({ children }: PropsWithChildren) => {
+            const close = React.useContext(CloseContext);
+            return <span onClick={() => close?.()}>{children}</span>;
+        },
+        ResponsiveDialogContent: Passthrough,
+        ResponsiveDialogDescription: Passthrough,
+        ResponsiveDialogFooter: Passthrough,
+        ResponsiveDialogHeader: Passthrough,
+        ResponsiveDialogTitle: Passthrough,
+    };
+});
+
 vi.mock("@/app/components/records/SegmentBuilder", () => ({
     EMPTY_DEFINITION: { match: "all", conditions: [] },
     default: () => <div>segment-builder</div>,
@@ -482,7 +511,26 @@ describe("campaign audience labels and unavailable state", () => {
         expect(html).toContain(enCampaigns.CampaignExports.total);
         expect(html).toContain(enCampaigns.CampaignExports.detailedCountsRestricted);
         expect(html).not.toContain(`>${enCampaigns.CampaignExports.pushed}<`);
-        expect(html).not.toContain(`>${enCampaigns.CampaignExports.failed}<`);
+        expect(html).not.toContain(`>${enCampaigns.CampaignExports.notPushed}<`);
+    });
+
+    it("labels the aggregate exclusion and connector remainder as not pushed in both locales", () => {
+        const catalogs = { en: enCampaigns, ja: jaCampaigns };
+
+        for (const locale of ["en", "ja"] as const) {
+            localeState.locale = locale;
+            const html = renderToStaticMarkup(
+                <CampaignExportPanel
+                    campaignId={CAMPAIGN.id}
+                    initialExports={[COMPLETED_EXPORT]}
+                    snapshots={[]}
+                    access={{ manage: true, send: true, consent: true }}
+                    deliveryAvailability="enabled"
+                />,
+            );
+
+            expect(html).toContain(`>${catalogs[locale].CampaignExports.notPushed}<`);
+        }
     });
 
     it("shows unknown counts for a reconciled legacy export in both locales", () => {
@@ -510,7 +558,7 @@ describe("campaign audience labels and unavailable state", () => {
             expect(html).toContain(catalogs[locale].CampaignExports.status.completed);
             expect(html).toContain(catalogs[locale].CampaignExports.detailedCountsUnknown);
             expect(html).not.toContain(`>${catalogs[locale].CampaignExports.pushed}<`);
-            expect(html).not.toContain(`>${catalogs[locale].CampaignExports.failed}<`);
+            expect(html).not.toContain(`>${catalogs[locale].CampaignExports.notPushed}<`);
         }
     });
 
@@ -563,7 +611,7 @@ describe("campaign audience labels and unavailable state", () => {
         await act(async () => root.unmount());
     });
 
-    it("offers the provider-confirmed no-delivery transition without retrying", async () => {
+    it("confirms the not-delivered transition without retrying", async () => {
         const reconciliationExport = {
             ...COMPLETED_EXPORT,
             status: "needs_reconciliation",
@@ -600,6 +648,40 @@ describe("campaign audience labels and unavailable state", () => {
 
         await act(async () => {
             interactive.dispatch("click", notDelivered);
+        });
+
+        expect(reconcileCampaignExportMock).not.toHaveBeenCalled();
+        expect(interactive.container.textContent).toContain(
+            enCampaigns.CampaignExports.notDeliveredConfirmDescription,
+        );
+
+        const cancel = requiredElement(
+            interactive.elements,
+            (element) => element.tagName === "BUTTON"
+                && element.textContent === enCampaigns.CampaignExports.cancel,
+            "Not-delivered cancellation action",
+        );
+        await act(async () => {
+            interactive.dispatch("click", cancel);
+        });
+
+        expect(reconcileCampaignExportMock).not.toHaveBeenCalled();
+        expect(interactive.container.textContent).not.toContain(
+            enCampaigns.CampaignExports.notDeliveredConfirmTitle,
+        );
+
+        await act(async () => {
+            interactive.dispatch("click", notDelivered);
+        });
+        const confirm = requiredElement(
+            interactive.elements,
+            (element) => element.tagName === "BUTTON"
+                && element.textContent === enCampaigns.CampaignExports.confirmNotDelivered,
+            "Not-delivered confirmation action",
+        );
+        expect(confirm.getAttribute("data-variant")).toBe("destructive");
+        await act(async () => {
+            interactive.dispatch("click", confirm);
             await Promise.resolve();
         });
 
@@ -639,7 +721,7 @@ describe("campaign audience labels and unavailable state", () => {
             expect(html).toContain(catalogs[locale].CampaignExports.status.needs_reconciliation);
             expect(html).toContain(catalogs[locale].CampaignExports.reconciliationRequired);
             expect(html).not.toContain(`>${catalogs[locale].CampaignExports.pushed}<`);
-            expect(html).not.toContain(`>${catalogs[locale].CampaignExports.failed}<`);
+            expect(html).not.toContain(`>${catalogs[locale].CampaignExports.notPushed}<`);
         }
     });
 

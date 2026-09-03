@@ -62,7 +62,7 @@ WHERE status = 'running'
 
 ALTER TABLE campaign_audience_export
     ADD CONSTRAINT chk_campaign_audience_export_lease CHECK (
-        (status = 'running' AND lease_until IS NOT NULL)
+        status = 'running'
         OR (status <> 'running' AND lease_until IS NULL));
 
 ALTER TABLE connector_config

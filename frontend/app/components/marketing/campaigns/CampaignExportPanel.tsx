@@ -7,6 +7,15 @@ import { InformationCircleIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
+    ResponsiveDialog,
+    ResponsiveDialogClose,
+    ResponsiveDialogContent,
+    ResponsiveDialogDescription,
+    ResponsiveDialogFooter,
+    ResponsiveDialogHeader,
+    ResponsiveDialogTitle,
+} from "@/components/ui/responsive-dialog";
+import {
     Select,
     SelectTrigger,
     SelectValue,
@@ -64,6 +73,7 @@ export default function CampaignExportPanel({
     const [exportConnector, setExportConnector] = useState<string>("");
     const [isCreatingExport, setIsCreatingExport] = useState(false);
     const [exportRefused, setExportRefused] = useState(false);
+    const [notDeliveredExportId, setNotDeliveredExportId] = useState<number | null>(null);
     const [resolvingExport, setResolvingExport] = useState<{
         exportId: number;
         resolution: CampaignAudienceExportResolution;
@@ -126,12 +136,25 @@ export default function CampaignExportPanel({
             toastSuccess(resolution === "delivered"
                 ? t("markedDelivered")
                 : t("markedNotDelivered"));
+            return true;
         } catch (err) {
             showApiError(err, "reconcileFailed");
+            return false;
         } finally {
             setResolvingExport(null);
         }
     };
+
+    const confirmNotDelivered = async () => {
+        if (notDeliveredExportId === null) return;
+        if (await resolveExport(notDeliveredExportId, "not_delivered")) {
+            setNotDeliveredExportId(null);
+        }
+    };
+
+    const isConfirmingNotDelivered = notDeliveredExportId !== null
+        && resolvingExport?.exportId === notDeliveredExportId
+        && resolvingExport.resolution === "not_delivered";
 
     return (
         <Panel title={t("title")} subtitle={t("subtitle")}>
@@ -223,7 +246,7 @@ export default function CampaignExportPanel({
                             <p className="text-xs text-muted-foreground">{t("createHint")}</p>
                             <Button
                                 variant="outline"
-                                size="sm"
+                                size="inline"
                                 onClick={createExport}
                                 disabled={
                                     isCreatingExport ||
@@ -286,7 +309,7 @@ export default function CampaignExportPanel({
                                                 value={entry.pushedCount.toLocaleString(locale)}
                                             />
                                             <CampaignCounter
-                                                label={t("failed")}
+                                                label={t("notPushed")}
                                                 value={entry.failedCount.toLocaleString(locale)}
                                             />
                                         </>
@@ -310,7 +333,7 @@ export default function CampaignExportPanel({
                                             <Button
                                                 type="button"
                                                 variant="outline"
-                                                size="sm"
+                                                size="inline"
                                                 disabled={resolvingExport?.exportId === entry.id}
                                                 onClick={() => resolveExport(entry.id, "delivered")}
                                             >
@@ -323,14 +346,10 @@ export default function CampaignExportPanel({
                                             <Button
                                                 type="button"
                                                 variant="outline"
-                                                size="sm"
+                                                size="inline"
                                                 disabled={resolvingExport?.exportId === entry.id}
-                                                onClick={() => resolveExport(entry.id, "not_delivered")}
+                                                onClick={() => setNotDeliveredExportId(entry.id)}
                                             >
-                                                {resolvingExport?.exportId === entry.id
-                                                    && resolvingExport.resolution === "not_delivered" && (
-                                                    <Loader2Icon className="size-4 animate-spin" />
-                                                )}
                                                 {t("markNotDelivered")}
                                             </Button>
                                         </div>
@@ -341,6 +360,47 @@ export default function CampaignExportPanel({
                     </ul>
                 )}
             </div>
+            <ResponsiveDialog
+                open={notDeliveredExportId !== null}
+                onOpenChange={(open) => {
+                    if (!open && !isConfirmingNotDelivered) setNotDeliveredExportId(null);
+                }}
+            >
+                <ResponsiveDialogContent className="sm:max-w-md" showCloseButton={!isConfirmingNotDelivered}>
+                    <ResponsiveDialogHeader className="px-4 pt-4 sm:px-0 sm:pt-0">
+                        <ResponsiveDialogTitle>{t("notDeliveredConfirmTitle")}</ResponsiveDialogTitle>
+                        <ResponsiveDialogDescription>
+                            {t("notDeliveredConfirmDescription")}
+                        </ResponsiveDialogDescription>
+                    </ResponsiveDialogHeader>
+                    <ResponsiveDialogFooter className="border-t border-border px-4 py-4 sm:border-0 sm:px-0 sm:py-0">
+                        <ResponsiveDialogClose asChild>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="dialog"
+                                disabled={isConfirmingNotDelivered}
+                            >
+                                {t("cancel")}
+                            </Button>
+                        </ResponsiveDialogClose>
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            size="dialog"
+                            disabled={isConfirmingNotDelivered}
+                            onClick={() => void confirmNotDelivered()}
+                        >
+                            {isConfirmingNotDelivered && (
+                                <Loader2Icon className="size-4 animate-spin" />
+                            )}
+                            {isConfirmingNotDelivered
+                                ? t("confirmingNotDelivered")
+                                : t("confirmNotDelivered")}
+                        </Button>
+                    </ResponsiveDialogFooter>
+                </ResponsiveDialogContent>
+            </ResponsiveDialog>
         </Panel>
     );
 }
