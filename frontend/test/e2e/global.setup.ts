@@ -96,6 +96,7 @@ setup("provision tenant and seed records", async ({}, testInfo) => {
         search: `Searchable Sable ${runId}`,
         archive: `Archive Target ${runId}`,
         watch: `Watch Target ${runId}`,
+        manualDuplicate: `Manual Duplicate ${runId}`,
     } as const;
     const fixture: RunFixture = {
         username: `e2e_${runId}`,
@@ -109,6 +110,7 @@ setup("provision tenant and seed records", async ({}, testInfo) => {
             search: { id: 0, name: contactNames.search },
             archive: { id: 0, name: contactNames.archive },
             watch: { id: 0, name: contactNames.watch },
+            manualDuplicate: { id: 0, name: contactNames.manualDuplicate },
             ambiguityPrimary: { id: 0, name: `Evaluator Primary ${runId}` },
             ambiguitySecondary: { id: 0, name: `Evaluator Secondary ${runId}` },
             ambiguityPrimaryJa: { id: 0, name: `Evaluator Primary JA ${runId}` },

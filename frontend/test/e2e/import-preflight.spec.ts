@@ -71,7 +71,7 @@ test.describe("CSV duplicate review", () => {
 test.describe("manual duplicate review", () => {
     test("requires acknowledgement before creating a contact with an exact identity", async ({ page }, testInfo) => {
         const fixture = runFixture(testInfo.project.name);
-        const contact = fixture.contacts.peek;
+        const contact = fixture.contacts.manualDuplicate;
         const email = `${contact.name.toLowerCase().replace(/[^a-z0-9]+/g, ".")}@acme-rocket.example.com`;
 
         await page.goto("/dashboard");
