@@ -26,6 +26,8 @@ All authentication methods continue through `AuthService.establishAuthenticatedS
 
 Every tenant-owned query uses server-resolved tenant/workspace scope; every endpoint follows the owning domain's RBAC pattern. Sharing/permission changes require explicit other-tenant and unauthorized verification.
 
+Workspace teams are tenant-plane configuration. Reads require active workspace membership; every mutation requires the grantable `TEAM_MANAGE` permission and revalidates it from locked authorization rows before locking or changing a team. Team seats may name only active members of the same workspace. Path-addressed membership removal performs preliminary authorization against the path workspace before resolving its placement, then pins that workspace's catalog and tenant identity before opening the transaction, regardless of the active-header workspace. Active removal, pending-invitation decline, leave, fresh re-invitation, and account erasure delete team seats and clear manager references in the routed catalog without treating those configuration references as authored content.
+
 ## AI and model-provider egress
 
 Read `docs/backend/AI_SECURITY.md` before changing AI gates, masking, prompts, media admission, provider adapters, endpoint validation, budgets, streaming, assistant tools, or transcript collaboration.

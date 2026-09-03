@@ -93,7 +93,8 @@ public enum Permission {
      */
     WORKSPACE_DELETE,
     SEQUENCE_VIEW,
-    SEQUENCE_MANAGE;
+    SEQUENCE_MANAGE,
+    TEAM_MANAGE;
 
     private static final EnumSet<Permission> INERT = EnumSet.of(SSO_MANAGE, WORKSPACE_DELETE);
     private static final EnumSet<Permission> GRANTABLE = EnumSet.complementOf(INERT);

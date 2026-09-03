@@ -304,7 +304,13 @@
         "clearAll": "Clear",
         "create": "Create role",
         "noPermissionsHint": "Select at least the actions this role should allow.",
-        "roleEntityLabel": "role"
+        "roleEntityLabel": "role",
+        "permissionLabels": {
+            "teamManage": {
+                "group": "Teams",
+                "action": "Manage"
+            }
+        }
     },
     "WorkflowAuthoring": {
         "noAccess": "You can't manage workflows in this workspace. Ask a workspace admin if you need access.",

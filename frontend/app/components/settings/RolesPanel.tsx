@@ -130,7 +130,15 @@ export default function RolesPanel({ presentation = "page" }: { presentation?: R
     const [removeTarget, setRemoveTarget] = useState<CustomRole | null>(null);
     const [isRemoving, setIsRemoving] = useState(false);
 
-    const groups = useMemo(() => groupPermissions(catalog), [catalog]);
+    const groups = useMemo(
+        () => groupPermissions(catalog, {
+            TEAM_MANAGE: {
+                group: t("permissionLabels.teamManage.group"),
+                action: t("permissionLabels.teamManage.action"),
+            },
+        }),
+        [catalog, t],
+    );
 
     useEffect(() => {
         if (!workspaceId) return;

@@ -93,6 +93,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.RuleMapper.workspaceIdsWithRules",
         "ooo.klae.connex.backend.mappers.WorkflowMapper.workspaceIdsWithEnabledScheduleWorkflows",
         "ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper.workspaceIdsPage",
+        "ooo.klae.connex.backend.mappers.TeamMapper.findReferencesForUserAnywhere",
         "ooo.klae.connex.backend.mappers.ScheduleMapper.dueScheduleRefs",
         "ooo.klae.connex.backend.mappers.ObjectDeletionQueueMapper.workspaceIdsWithDueTasks",
         "ooo.klae.connex.backend.mappers.BusinessCardImportRequestMapper.workspaceIdsWithExpired",
@@ -187,7 +188,9 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.AiBriefScheduleMapper.deleteForUserAnywhere",
         "ooo.klae.connex.backend.mappers.AiWatchMapper.deleteForUserAnywhere",
         "ooo.klae.connex.backend.mappers.SequenceMapper.clearSequenceUserReferencesAnywhere",
-        "ooo.klae.connex.backend.mappers.SequenceMapper.clearSequenceVersionPublishersAnywhere"
+        "ooo.klae.connex.backend.mappers.SequenceMapper.clearSequenceVersionPublishersAnywhere",
+        "ooo.klae.connex.backend.mappers.TeamMapper.deleteMembershipsAnywhere",
+        "ooo.klae.connex.backend.mappers.TeamMapper.clearManagerAnywhere"
     );
 
     /**

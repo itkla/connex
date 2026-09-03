@@ -239,7 +239,9 @@ public final class TablePlaneRegistry {
         "sequence_version",
         "sequence_version_publisher",
         "sequence_step",
-        "sequence_step_content");
+        "sequence_step_content",
+        "team",
+        "team_member");
 
     private static Set<String> controlPlaneTables() {
         Set<String> tables = new HashSet<>(CONTROL_PLANE_STATE_TABLES);

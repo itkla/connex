@@ -4,15 +4,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -27,6 +27,7 @@ import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.beans.Team;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.connectedaccounts.ProviderAccountOffboardingService;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
@@ -57,6 +58,7 @@ import ooo.klae.connex.backend.mappers.SequenceMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.mappers.TeamMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -83,6 +85,7 @@ class UserOffboardingOrderTest {
     @Mock private DuplicateReviewMapper duplicateReviewMapper;
     @Mock private ReportMapper reportMapper;
     @Mock private TaskMapper taskMapper;
+    @Mock private TeamMapper teamMapper;
     @Mock private AttachmentMapper attachmentMapper;
     @Mock private CampaignMapper campaignMapper;
     @Mock private ConsentMapper consentMapper;
@@ -126,6 +129,8 @@ class UserOffboardingOrderTest {
             assertFreshMembershipScope();
             return null;
         }).when(dealMapper).removeCollaboratorFromWorkspace(7, 9);
+        Team team = team(7, 12);
+        when(teamMapper.findReferencesForUser(7, 9)).thenReturn(List.of(team));
 
         service.prepareFreshMembership(7, 9);
 
@@ -134,7 +139,7 @@ class UserOffboardingOrderTest {
             savedViewPreferenceMapper, savedViewMapper,
             dealDuplicateReviewProofMapper, duplicateReviewMapper,
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
-            notificationMapper, dealMapper, relationshipSignalMapper);
+            notificationMapper, dealMapper, relationshipSignalMapper, teamMapper);
         order.verify(tenantWorkScope).withWorkspacePlacement(eq(7), any());
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
@@ -152,6 +157,10 @@ class UserOffboardingOrderTest {
         order.verify(notificationMapper).deleteAllForRecipient(7, 9);
         order.verify(dealMapper).removeCollaboratorFromWorkspace(7, 9);
         order.verify(relationshipSignalMapper).deleteActorState(7, 9);
+        order.verify(teamMapper).findReferencesForUser(7, 9);
+        order.verify(teamMapper).getByIdForUpdate(7, 12);
+        order.verify(teamMapper).deleteMembershipsForUser(7, 9);
+        order.verify(teamMapper).clearManagerForUser(7, 9);
         assertPreviousTenantContext();
     }
 
@@ -196,6 +205,9 @@ class UserOffboardingOrderTest {
 
     @Test
     void removeAndLeaveDetachmentLocksMembershipBeforeNotificationDeletion() {
+        Team team = team(7, 12);
+        when(teamMapper.findReferencesForUser(7, 9)).thenReturn(List.of(team));
+
         service.detachMemberContent(7, 9);
 
         InOrder order = inOrder(
@@ -204,7 +216,8 @@ class UserOffboardingOrderTest {
             dealDuplicateReviewProofMapper, duplicateReviewMapper,
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             taskMapper, companyMapper,
-            personMapper, dealMapper, campaignMapper, sequenceMapper, relationshipSignalMapper);
+            personMapper, dealMapper, campaignMapper, sequenceMapper, relationshipSignalMapper,
+            teamMapper);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
         order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
         order.verify(notificationMapper).lockRecipientMemberships(9);
@@ -227,6 +240,10 @@ class UserOffboardingOrderTest {
             .deleteHistoricalNotificationBaselinesForRecipient(7, 9);
         order.verify(notificationMapper).deleteAllForRecipient(7, 9);
         order.verify(relationshipSignalMapper).deleteActorState(7, 9);
+        order.verify(teamMapper).findReferencesForUser(7, 9);
+        order.verify(teamMapper).getByIdForUpdate(7, 12);
+        order.verify(teamMapper).deleteMembershipsForUser(7, 9);
+        order.verify(teamMapper).clearManagerForUser(7, 9);
         verifyNoInteractions(stateVersionService);
     }
 
@@ -238,6 +255,9 @@ class UserOffboardingOrderTest {
         when(notificationMapper.clearActorAnywhere(9)).thenReturn(3);
         OffboardingPlan plan = new OffboardingPlan(List.of(), List.of(), List.of());
         when(workflowOffboardingService.discover(9)).thenReturn(plan);
+        Team later = team(8, 14);
+        Team earlier = team(7, 12);
+        when(teamMapper.findReferencesForUserAnywhere(9)).thenReturn(List.of(later, earlier));
 
         service.eraseOrgDataReferences(9);
 
@@ -247,7 +267,7 @@ class UserOffboardingOrderTest {
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             stateVersionService, companyMapper,
             personMapper, dealMapper, recordCreationTemplateMapper, workflowOffboardingService, suppressionMapper,
-            relationshipSignalMapper, recordCommentMapper, sequenceMapper);
+            relationshipSignalMapper, recordCommentMapper, sequenceMapper, teamMapper);
         order.verify(userMapper).lockById(9);
         order.verify(notificationMapper).findRecipientIdsByActor(9);
         order.verify(workflowOffboardingService).discover(9);
@@ -290,6 +310,18 @@ class UserOffboardingOrderTest {
         order.verify(relationshipSignalMapper).deleteActorStateAnywhere(9);
         order.verify(sequenceMapper).clearSequenceUserReferencesAnywhere(9);
         order.verify(sequenceMapper).clearSequenceVersionPublishersAnywhere(9);
+        order.verify(teamMapper).findReferencesForUserAnywhere(9);
+        order.verify(teamMapper).getByIdForUpdate(7, 12);
+        order.verify(teamMapper).getByIdForUpdate(8, 14);
+        order.verify(teamMapper).deleteMembershipsAnywhere(9);
+        order.verify(teamMapper).clearManagerAnywhere(9);
+    }
+
+    private Team team(int workspaceId, int id) {
+        Team team = new Team();
+        team.setWorkspaceId(workspaceId);
+        team.setId(id);
+        return team;
     }
 
     @Test

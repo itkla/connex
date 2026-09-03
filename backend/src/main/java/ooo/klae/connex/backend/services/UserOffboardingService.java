@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -9,6 +10,7 @@ import java.util.function.Supplier;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.beans.Team;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiBriefScheduleMapper;
@@ -36,6 +38,7 @@ import ooo.klae.connex.backend.mappers.SequenceMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.SuppressionMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.mappers.TeamMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -89,6 +92,7 @@ public class UserOffboardingService {
     private final DealDuplicateReviewProofMapper dealDuplicateReviewProofMapper;
     private final DuplicateReviewMapper duplicateReviewMapper;
     private final TaskMapper taskMapper;
+    private final TeamMapper teamMapper;
     private final AttachmentMapper attachmentMapper;
     private final CampaignMapper campaignMapper;
     private final ConsentMapper consentMapper;
@@ -148,7 +152,8 @@ public class UserOffboardingService {
      * Clears personal workspace data for a user who is about to receive a
      * brand-new membership. This removes saved views and preferences, assistant-chat
      * participant grants, notifications inserted while an earlier removal was
-     * committing, and stale deal-collaborator seats. Chat sessions the user authored
+     * committing, stale deal-collaborator seats, and stale team seats or manager
+     * references. Chat sessions the user authored
      * are workspace data and are retained with their provenance intact, so a
      * returning member regains their own prior sessions. Guarded by a current locking read that proves no
      * membership row exists, so a pending invitee's legitimate data is never
@@ -188,6 +193,9 @@ public class UserOffboardingService {
             notificationMapper.deleteAllForRecipient(workspaceId, userId);
             dealMapper.removeCollaboratorFromWorkspace(workspaceId, userId);
             relationshipSignalMapper.deleteActorState(workspaceId, userId);
+            lockTeamReferences(teamMapper.findReferencesForUser(workspaceId, userId));
+            teamMapper.deleteMembershipsForUser(workspaceId, userId);
+            teamMapper.clearManagerForUser(workspaceId, userId);
         }
     }
 
@@ -233,7 +241,8 @@ public class UserOffboardingService {
      * dropped cross-plane constraints used to: tasks are unassigned and company,
      * contact, and deal ownership is cleared (SET NULL) so authored history survives,
      * while the member's saved-view preferences, owned saved views, assistant-chat
-     * participant grants, notifications, and deal-collaborator seats are deleted.
+     * participant grants, notifications, deal-collaborator seats, and team seats are deleted;
+     * team manager references are cleared.
      * Authored chat sessions are retained with {@code created_by_user_id} intact;
      * only permanent account erasure nulls that provenance.
      * Per-workspace twin of {@link #eraseOrgDataReferences(int)}; called by the
@@ -267,21 +276,24 @@ public class UserOffboardingService {
             workspaceId, userId);
         notificationMapper.deleteAllForRecipient(workspaceId, userId);
         relationshipSignalMapper.deleteActorState(workspaceId, userId);
+        lockTeamReferences(teamMapper.findReferencesForUser(workspaceId, userId));
+        teamMapper.deleteMembershipsForUser(workspaceId, userId);
+        teamMapper.clearManagerForUser(workspaceId, userId);
     }
 
     /**
      * Erases or detaches every org-data reference to the user, in the same
      * shape the dropped constraints had: personal artifacts are deleted
      * (CASCADE — saved-view preferences, saved views, dashboards, assistant-chat grants,
-     * notifications, collaborator seats)
+     * notifications, collaborator seats, and team seats)
      * and shared-history references are nulled (SET NULL — company, contact, deal, and
      * campaign ownership, duplicate-review dismissal actors, assistant-chat provenance,
      * record-comment authorship, creation, redaction, and resolution provenance, task assignment, uploader,
      * notification actor, report and campaign actors, rule principals,
-     * consent/suppression actors, share grantors).
-     * Statements are grouped deletes-then-nulls
-     * for readability; no data dependency exists between them, so the order is otherwise
-     * immaterial. Must run inside the caller's deletion transaction.
+     * consent/suppression actors, share grantors, and team managers).
+     * Statements are grouped deletes-then-nulls for readability except that affected team
+     * parents are locked in deterministic order before team seats are deleted and manager
+     * references are cleared. Must run inside the caller's deletion transaction.
      * Recipient memberships are locked in user-id order before notification
      * rows so concurrent inbox mutations use the same membership-to-notification
      * lock order. Recipients whose actor reference is cleared receive a
@@ -364,5 +376,14 @@ public class UserOffboardingService {
         relationshipSignalMapper.deleteActorStateAnywhere(userId);
         sequenceMapper.clearSequenceUserReferencesAnywhere(userId);
         sequenceMapper.clearSequenceVersionPublishersAnywhere(userId);
+        lockTeamReferences(teamMapper.findReferencesForUserAnywhere(userId));
+        teamMapper.deleteMembershipsAnywhere(userId);
+        teamMapper.clearManagerAnywhere(userId);
+    }
+
+    private void lockTeamReferences(List<Team> teams) {
+        teams.stream()
+            .sorted(Comparator.comparingInt(Team::getWorkspaceId).thenComparingInt(Team::getId))
+            .forEach(team -> teamMapper.getByIdForUpdate(team.getWorkspaceId(), team.getId()));
     }
 }

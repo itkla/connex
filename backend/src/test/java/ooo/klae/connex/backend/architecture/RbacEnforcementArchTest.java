@@ -73,7 +73,7 @@ class RbacEnforcementArchTest {
         "RecordCreationTemplateService", "SequenceService", "SequenceVersionService",
         "SequencePreviewService",
         "PersonQualificationService", "QualificationCriterionService",
-        "DisqualificationReasonService");
+        "DisqualificationReasonService", "TeamService");
 
     /** Verb prefixes that denote a state-changing public method in these services. */
     private static final Pattern MUTATOR = Pattern.compile(

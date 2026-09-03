@@ -80,6 +80,7 @@ class TenantScopeInterceptorTest {
         assertTrue(interceptor.requiresResolvedContext(NS + "DataSubjectDisclosureMapper.findPerson"));
         assertTrue(interceptor.requiresResolvedContext(
             NS + "RecordCreationTemplateMapper.getCurrentVersion"));
+        assertTrue(interceptor.requiresResolvedContext(NS + "TeamMapper.getAll"));
     }
 
     @Test
@@ -123,6 +124,9 @@ class TenantScopeInterceptorTest {
             NS + "SequenceMapper.clearSequenceVersionPublishersAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "SavedViewPreferenceMapper.deletePinsForUserAnywhere"));
         assertFalse(interceptor.requiresResolvedContext(NS + "SavedViewPreferenceMapper.deleteDefaultsForUserAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "TeamMapper.findReferencesForUserAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "TeamMapper.deleteMembershipsAnywhere"));
+        assertFalse(interceptor.requiresResolvedContext(NS + "TeamMapper.clearManagerAnywhere"));
         assertTrue(interceptor.requiresResolvedContext(NS + "CompanyMapper.clearMemberOwnership"));
         assertTrue(interceptor.requiresResolvedContext(NS + "PersonMapper.clearMemberOwnership"));
         assertTrue(interceptor.requiresResolvedContext(NS + "SequenceMapper.clearMemberOwnership"));
@@ -142,6 +146,8 @@ class TenantScopeInterceptorTest {
             NS + "SavedViewPreferenceMapper.deletePinsForFreshMembership",
             NS + "SavedViewPreferenceMapper.deleteDefaultsForFreshMembership",
             NS + "SavedViewMapper.deleteForFreshMembership",
+            NS + "TeamMapper.deleteMembershipsForUser",
+            NS + "TeamMapper.clearManagerForUser",
         }) {
             assertTrue(interceptor.requiresResolvedContext(id), id);
             assertThrows(ForbiddenException.class, () -> interceptor.enforce(id), id);
