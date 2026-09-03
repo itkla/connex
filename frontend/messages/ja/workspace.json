@@ -139,7 +139,7 @@
         "loadFailedBody": "現在の理由一覧を確認できません。変更する前にもう一度お試しください。",
         "retry": "再試行",
         "codeField": "コード",
-        "codePlaceholder": "NO_REGION",
+        "codePlaceholder": "コードを入力",
         "codeInvalid": "2〜32文字で入力してください。先頭は半角英大文字、その後は半角英大文字、数字、アンダースコアのみ使用できます。",
         "labelField": "表示名",
         "labelPlaceholder": "対応地域外",

@@ -139,7 +139,7 @@
         "loadFailedBody": "The current vocabulary is unavailable. Try again before making changes.",
         "retry": "Retry",
         "codeField": "Code",
-        "codePlaceholder": "NO_REGION",
+        "codePlaceholder": "Enter a code",
         "codeInvalid": "Use 2–32 characters. Start with A–Z, then use only A–Z, 0–9, or an underscore.",
         "labelField": "Label",
         "labelPlaceholder": "Outside our region",
