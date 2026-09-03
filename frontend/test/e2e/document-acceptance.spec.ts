@@ -362,25 +362,24 @@ function decodedSmtpMessage(message: string): string {
 }
 
 async function startSmtpCapture(
-    expectedMessages: number,
-    expectedRecipient: string,
+    expectedRecipients: readonly string[],
     port: number,
 ): Promise<{
     server: TcpServer;
     sockets: Set<Socket>;
     port: number;
-    acceptancePaths: Promise<string[]>;
+    acceptancePaths: Promise<ReadonlyMap<string, string>>;
 }> {
-    const capturedPaths = deferred<string[]>();
-    const paths: string[] = [];
+    const capturedPaths = deferred<ReadonlyMap<string, string>>();
+    const recipientKeys = new Set(expectedRecipients.map((recipient) => recipient.toLowerCase()));
+    const paths = new Map<string, string>();
     const sockets = new Set<Socket>();
     const server = createTcpServer((socket) => {
         sockets.add(socket);
         socket.once("close", () => sockets.delete(socket));
         serveSmtp(socket, (body, recipientAddress) => {
-            if (recipientAddress?.toLowerCase() !== expectedRecipient.toLowerCase()) {
-                return;
-            }
+            const recipientKey = recipientAddress?.toLowerCase();
+            if (!recipientKey || !recipientKeys.has(recipientKey)) return;
             const decoded = decodedSmtpMessage(body);
             const match = /\/document-acceptance\/w\d+-[a-f0-9]{64}/.exec(decoded);
             const acceptancePath = match?.[0];
@@ -388,8 +387,8 @@ async function startSmtpCapture(
                 capturedPaths.reject(new Error("Document acceptance URL was absent from SMTP message"));
                 return;
             }
-            paths.push(acceptancePath);
-            if (paths.length === expectedMessages) capturedPaths.resolve([...paths]);
+            paths.set(recipientKey, acceptancePath);
+            if (paths.size === recipientKeys.size) capturedPaths.resolve(new Map(paths));
         });
     });
     await new Promise<void>((resolve, reject) => {
@@ -603,13 +602,18 @@ test("authenticated setup completes through a cookie-less public bearer", async 
 }, testInfo) => {
     test.setTimeout(120_000);
     const fixture = runFixture(testInfo.project.name);
-    const smtp = await startSmtpCapture(2, "rina.sato@example.test", SMTP_CAPTURE_PORT);
+    const unique = randomUUID();
+    const emptyDocumentRecipient = `rina.sato+empty-${unique}@example.test`;
+    const populatedDocumentRecipient = `rina.sato+populated-${unique}@example.test`;
+    const smtp = await startSmtpCapture(
+        [emptyDocumentRecipient, populatedDocumentRecipient],
+        SMTP_CAPTURE_PORT,
+    );
     let anonymousContext: BrowserContext | null = null;
 
     try {
         const writeHeaders = await authenticatedWriteHeaders(authenticatedApi, fixture);
 
-        const unique = randomUUID();
         const sourceDeal = await jsonObject(await authenticatedApi.get(
             `/api/deals/${fixture.deals.primary.id}`,
             { headers: writeHeaders },
@@ -620,32 +624,36 @@ test("authenticated setup completes through a cookie-less public bearer", async 
         if (companyId !== null && typeof companyId !== "number") {
             throw new Error("source deal.company was not nullable numeric data");
         }
-        const dealName = `Acceptance E2E Deal ${unique}`;
-        const duplicateReview = await jsonObject(await authenticatedApi.post(
-            "/api/duplicate-preflight/deals",
-            {
+        const createAcceptanceDeal = async (variant: string): Promise<number> => {
+            const dealName = `Acceptance E2E ${variant} Deal ${unique}`;
+            const duplicateReview = await jsonObject(await authenticatedApi.post(
+                "/api/duplicate-preflight/deals",
+                {
+                    headers: writeHeaders,
+                    data: { name: dealName, companyId },
+                },
+            ), `${variant} acceptance deal duplicate review`);
+            const duplicateReviewToken = duplicateReview.reviewToken;
+            if (typeof duplicateReviewToken !== "string") {
+                throw new Error(`${variant} acceptance deal duplicate review omitted its token`);
+            }
+            const acceptanceDeal = await jsonObject(await authenticatedApi.post("/api/deals", {
                 headers: writeHeaders,
-                data: { name: dealName, companyId },
-            },
-        ), "acceptance deal duplicate review");
-        const duplicateReviewToken = duplicateReview.reviewToken;
-        if (typeof duplicateReviewToken !== "string") {
-            throw new Error("Acceptance deal duplicate review omitted its token");
-        }
-        const acceptanceDeal = await jsonObject(await authenticatedApi.post("/api/deals", {
-            headers: writeHeaders,
-            data: {
-                name: dealName,
-                value: 10_000,
-                actualValue: 0,
-                currency: "USDT",
-                pipeline: pipelineId,
-                stage: stageId,
-                company: companyId,
-                duplicateReviewToken,
-            },
-        }), "acceptance deal");
-        const dealId = numberField(acceptanceDeal, "id", "acceptance deal");
+                data: {
+                    name: dealName,
+                    value: 10_000,
+                    actualValue: 0,
+                    currency: "USDT",
+                    pipeline: pipelineId,
+                    stage: stageId,
+                    company: companyId,
+                    duplicateReviewToken,
+                },
+            }), `${variant} acceptance deal`);
+            return numberField(acceptanceDeal, "id", `${variant} acceptance deal`);
+        };
+        const dealWithoutItemsId = await createAcceptanceDeal("empty");
+        const dealWithItemsId = await createAcceptanceDeal("populated");
         const template = await jsonObject(await authenticatedApi.post("/api/document-templates", {
             headers: writeHeaders,
             data: {
@@ -662,7 +670,7 @@ test("authenticated setup completes through a cookie-less public bearer", async 
         }), "document template");
         const templateId = numberField(template, "id", "document template");
         const generatedWithoutItems = await jsonObject(await authenticatedApi.post(
-            `/api/deals/${dealId}/documents`,
+            `/api/deals/${dealWithoutItemsId}/documents`,
             { headers: writeHeaders, data: { templateId } },
         ), "generated document without line items");
         const documentWithoutItemsId = numberField(
@@ -679,12 +687,12 @@ test("authenticated setup completes through a cookie-less public bearer", async 
         expect(contentWithoutItems.lineItems).toHaveLength(0);
         expect(contentWithoutItems.totals.currency).toBeUndefined();
         await jsonObject(await authenticatedApi.put(
-            `/api/deals/${dealId}/documents/${documentWithoutItemsId}/status`,
+            `/api/deals/${dealWithoutItemsId}/documents/${documentWithoutItemsId}/status`,
             { headers: writeHeaders, data: { status: "final" } },
         ), "final document without line items");
 
         await jsonObject(await authenticatedApi.post(
-            `/api/deals/${dealId}/line-items`,
+            `/api/deals/${dealWithItemsId}/line-items`,
             {
                 headers: writeHeaders,
                 data: {
@@ -700,7 +708,7 @@ test("authenticated setup completes through a cookie-less public bearer", async 
         ), "deal line item");
 
         const generatedWithItems = await jsonObject(await authenticatedApi.post(
-            `/api/deals/${dealId}/documents`,
+            `/api/deals/${dealWithItemsId}/documents`,
             { headers: writeHeaders, data: { templateId } },
         ), "generated document with line items");
         const documentWithItemsId = numberField(
@@ -717,11 +725,16 @@ test("authenticated setup completes through a cookie-less public bearer", async 
         expect(contentWithItems.lineItems.length).toBeGreaterThan(0);
         expect(contentWithItems.totals.currency).toBe("USDT");
         await jsonObject(await authenticatedApi.put(
-            `/api/deals/${dealId}/documents/${documentWithItemsId}/status`,
+            `/api/deals/${dealWithItemsId}/documents/${documentWithItemsId}/status`,
             { headers: writeHeaders, data: { status: "final" } },
         ), "final document with line items");
 
-        const sendDocument = async (documentId: number, label: string): Promise<number> => {
+        const sendDocument = async (
+            dealId: number,
+            documentId: number,
+            recipientEmail: string,
+            label: string,
+        ): Promise<number> => {
             const sent = await jsonObject(await authenticatedApi.post(
                 `/api/deals/${dealId}/documents/${documentId}/delivery`,
                 {
@@ -733,7 +746,7 @@ test("authenticated setup completes through a cookie-less public bearer", async 
                         recipients: [{
                             personId: null,
                             name: "Rina Sato",
-                            email: "rina.sato@example.test",
+                            email: recipientEmail,
                             role: "signer",
                             recipientOrder: 1,
                         }],
@@ -743,15 +756,25 @@ test("authenticated setup completes through a cookie-less public bearer", async 
             return numberField(sent, "id", label);
         };
 
-        await sendDocument(documentWithoutItemsId, "empty document delivery");
-        const deliveryId = await sendDocument(documentWithItemsId, "populated document delivery");
+        await sendDocument(
+            dealWithoutItemsId,
+            documentWithoutItemsId,
+            emptyDocumentRecipient,
+            "empty document delivery",
+        );
+        const deliveryId = await sendDocument(
+            dealWithItemsId,
+            documentWithItemsId,
+            populatedDocumentRecipient,
+            "populated document delivery",
+        );
         const acceptancePaths = await withTimeout(
             smtp.acceptancePaths,
             20_000,
             "SMTP document acceptance links",
         );
-        const acceptanceWithoutItemsPath = acceptancePaths[0];
-        const acceptanceWithItemsPath = acceptancePaths[1];
+        const acceptanceWithoutItemsPath = acceptancePaths.get(emptyDocumentRecipient);
+        const acceptanceWithItemsPath = acceptancePaths.get(populatedDocumentRecipient);
         if (!acceptanceWithoutItemsPath || !acceptanceWithItemsPath) {
             throw new Error("SMTP capture did not return both document acceptance links");
         }
@@ -791,7 +814,10 @@ test("authenticated setup completes through a cookie-less public bearer", async 
         await expect(anonymousPage.getByRole("heading", {
             name: "Full-stack acceptance agreement",
         })).toBeVisible();
-        await expect(anonymousPage.getByText("Acceptance implementation service", {
+        const desktopLineItems = anonymousPage.getByTestId("document-line-items-table");
+        await expect(desktopLineItems).toBeVisible();
+        await expect(anonymousPage.getByTestId("document-line-items-stacked")).toBeHidden();
+        await expect(desktopLineItems.getByText("Acceptance implementation service", {
             exact: true,
         })).toBeVisible();
         const acceptButton = anonymousPage.getByRole("button", {
@@ -824,7 +850,7 @@ test("authenticated setup completes through a cookie-less public bearer", async 
         expect(await anonymousContext.cookies()).toEqual([]);
 
         const deliveriesResponse = await authenticatedApi.get(
-            `/api/deals/${dealId}/documents/${documentWithItemsId}/delivery`,
+            `/api/deals/${dealWithItemsId}/documents/${documentWithItemsId}/delivery`,
             { headers: writeHeaders },
         );
         const deliveriesText = await deliveriesResponse.text();
