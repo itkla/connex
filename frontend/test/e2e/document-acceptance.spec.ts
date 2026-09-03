@@ -15,7 +15,10 @@ import {
 } from "@playwright/test";
 
 import type { DocumentAcceptancePreview } from "@/app/lib/types";
-import { runFixture } from "./support/fixtures";
+import {
+    activeWorkspaceId,
+    registerUser,
+} from "./support/api";
 import { message } from "./support/messages";
 
 const SIGNER_TOKEN = `w42-${"a".repeat(64)}`;
@@ -446,14 +449,14 @@ function numberField(body: Record<string, unknown>, field: string, label: string
 
 async function authenticatedWriteHeaders(
     api: APIRequestContext,
-    fixture: ReturnType<typeof runFixture>,
+    workspaceId: number,
 ): Promise<Record<string, string>> {
     const csrf = await jsonObject(await api.get("/api/auth/csrf"), "CSRF bootstrap");
     if (typeof csrf.token !== "string" || typeof csrf.headerName !== "string") {
         throw new Error("CSRF bootstrap omitted its token or header name");
     }
     return {
-        "X-Workspace-Id": String(fixture.workspaceId),
+        "X-Workspace-Id": String(workspaceId),
         [csrf.headerName]: csrf.token,
     };
 }
@@ -598,39 +601,59 @@ test.describe("anonymous and presentation document acceptance", () => {
 
 test("authenticated setup completes through a cookie-less public bearer", async ({
     browser,
-    request: authenticatedApi,
 }, testInfo) => {
     test.setTimeout(120_000);
-    const fixture = runFixture(testInfo.project.name);
     const unique = randomUUID();
+    const actorId = unique.replaceAll("-", "").slice(0, 16);
     const emptyDocumentRecipient = `rina.sato+empty-${unique}@example.test`;
     const populatedDocumentRecipient = `rina.sato+populated-${unique}@example.test`;
     const smtp = await startSmtpCapture(
         [emptyDocumentRecipient, populatedDocumentRecipient],
         SMTP_CAPTURE_PORT,
     );
+    let actorContext: BrowserContext | null = null;
     let anonymousContext: BrowserContext | null = null;
 
     try {
-        const writeHeaders = await authenticatedWriteHeaders(authenticatedApi, fixture);
-
-        const sourceDeal = await jsonObject(await authenticatedApi.get(
-            `/api/deals/${fixture.deals.primary.id}`,
-            { headers: writeHeaders },
-        ), "source deal");
-        const pipelineId = numberField(sourceDeal, "pipeline", "source deal");
-        const stageId = numberField(sourceDeal, "stage", "source deal");
-        const companyId = sourceDeal.company;
-        if (companyId !== null && typeof companyId !== "number") {
-            throw new Error("source deal.company was not nullable numeric data");
-        }
+        const baseURL = testInfo.project.use.baseURL;
+        if (typeof baseURL !== "string") throw new Error("The E2E project requires a base URL");
+        actorContext = await browser.newContext({
+            baseURL,
+            storageState: { cookies: [], origins: [] },
+        });
+        const authenticatedApi = actorContext.request;
+        await registerUser(authenticatedApi, {
+            username: `acceptance${actorId}`,
+            password: `Acceptance!${actorId}A1`,
+            email: `acceptance-${actorId}@example.com`,
+        });
+        const workspaceId = await activeWorkspaceId(authenticatedApi);
+        const writeHeaders = await authenticatedWriteHeaders(authenticatedApi, workspaceId);
+        const pipeline = await jsonObject(await authenticatedApi.post("/api/pipelines", {
+            headers: writeHeaders,
+            data: { name: `Acceptance E2E Pipeline ${unique}` },
+        }), "acceptance pipeline");
+        const pipelineId = numberField(pipeline, "id", "acceptance pipeline");
+        const stage = await jsonObject(await authenticatedApi.post(
+            `/api/pipelines/${pipelineId}/stages`,
+            {
+                headers: writeHeaders,
+                data: {
+                    name: "Acceptance review",
+                    position: 0,
+                    success: false,
+                    failure: false,
+                },
+            },
+        ), "acceptance pipeline stage");
+        const stageId = numberField(stage, "id", "acceptance pipeline stage");
         const createAcceptanceDeal = async (variant: string): Promise<number> => {
             const dealName = `Acceptance E2E ${variant} Deal ${unique}`;
             const duplicateReview = await jsonObject(await authenticatedApi.post(
                 "/api/duplicate-preflight/deals",
                 {
                     headers: writeHeaders,
-                    data: { name: dealName, companyId },
+                    data: { name: dealName, companyId: null },
                 },
             ), `${variant} acceptance deal duplicate review`);
             const duplicateReviewToken = duplicateReview.reviewToken;
@@ -646,7 +669,7 @@ test("authenticated setup completes through a cookie-less public bearer", async 
                     currency: "USDT",
                     pipeline: pipelineId,
                     stage: stageId,
-                    company: companyId,
+                    company: null,
                     duplicateReviewToken,
                 },
             }), `${variant} acceptance deal`);
@@ -779,8 +802,6 @@ test("authenticated setup completes through a cookie-less public bearer", async 
             throw new Error("SMTP capture did not return both document acceptance links");
         }
 
-        const baseURL = testInfo.project.use.baseURL;
-        if (typeof baseURL !== "string") throw new Error("The E2E project requires a base URL");
         anonymousContext = await browser.newContext({
             baseURL,
             locale: "en-US",
@@ -880,6 +901,7 @@ test("authenticated setup completes through a cookie-less public bearer", async 
     } finally {
         const cleanupResults = await Promise.allSettled([
             anonymousContext?.close() ?? Promise.resolve(),
+            actorContext?.close() ?? Promise.resolve(),
             closeTcpServer(smtp.server, smtp.sockets),
         ]);
         for (const result of cleanupResults) {
