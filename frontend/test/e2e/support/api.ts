@@ -16,6 +16,7 @@ export type RunFixture = {
         activity: SeededRecord;
         search: SeededRecord;
         archive: SeededRecord;
+        watch: SeededRecord;
         ambiguityPrimary: SeededRecord;
         ambiguitySecondary: SeededRecord;
         ambiguityPrimaryJa: SeededRecord;

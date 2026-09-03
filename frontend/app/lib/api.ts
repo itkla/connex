@@ -1381,6 +1381,10 @@ function isNullableIsoInstant(value: unknown): value is string | null {
     return value === null || isIsoInstant(value);
 }
 
+function isOptionalNullableIsoInstant(value: unknown): value is string | null | undefined {
+    return value === undefined || isNullableIsoInstant(value);
+}
+
 function isIsoLocalDateTime(value: unknown): value is string {
     if (typeof value !== "string") return false;
     const match = ISO_LOCAL_DATE_TIME_PATTERN.exec(value);
@@ -1515,14 +1519,14 @@ function isDocumentAcceptancePreview(
             || value.documentType === "proposal"
             || value.documentType === "order_form"
             || value.documentType === "contract")
-        && isNullableString(value.documentTitle)
+        && isOptionalNullableString(value.documentTitle)
         && typeof value.documentVersion === "number"
         && Number.isInteger(value.documentVersion)
         && value.documentVersion >= 1
         && typeof value.documentLocale === "string"
         && value.documentLocale.length <= 8
         && value.documentLocale.trim().length > 0
-        && isNullableIsoInstant(value.expiresAt);
+        && isOptionalNullableIsoInstant(value.expiresAt);
 }
 
 function parseDocumentAcceptancePreview(value: unknown): Types.DocumentAcceptancePreview {

@@ -190,6 +190,39 @@ describe("document acceptance public response boundary", () => {
         },
     );
 
+    it("accepts every nullable preview field when non-null serialization omits its key", async () => {
+        const response = validPreview();
+        response.content.lineItems = [{
+            id: 1,
+            dealId: 2,
+            name: "Implementation",
+            unitPrice: 100,
+            quantity: 1,
+            billingFrequency: "one_time",
+            position: 0,
+            currency: "JPY",
+            lineSubtotal: 100,
+            lineTax: 0,
+            lineTotal: 100,
+            createdAt: "2026-09-01T10:00:00",
+            updatedAt: "2026-09-01T10:00:00",
+        }];
+        delete response.documentTitle;
+        delete response.expiresAt;
+        delete response.content.workspace?.address;
+        delete response.content.company;
+        delete response.content.owner;
+        delete response.content.sections.title;
+        delete response.content.sections.intro;
+        delete response.content.sections.terms;
+        delete response.content.sections.footer;
+        delete response.content.body;
+        delete response.content.totals.currency;
+        stubPublicResponse(response);
+
+        await expect(getDocumentAcceptancePreview(TOKEN)).resolves.toEqual(response);
+    });
+
     it("accepts product currency codes up to eight non-blank characters", async () => {
         const response = validPreview();
         response.content.deal.currency = "USDT";

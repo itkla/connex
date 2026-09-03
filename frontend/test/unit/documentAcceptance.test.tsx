@@ -10,7 +10,7 @@ import type {
     DocumentAcceptanceFailureKind,
     DocumentAcceptancePreview,
 } from "@/app/lib/types";
-import { formatDateTime } from "@/app/lib/utils";
+import { formatDateTime, formatUtcDateTime } from "@/app/lib/utils";
 import dealsMessages from "@/messages/en/deals.json";
 import acceptanceMessages from "@/messages/en/document-acceptance.json";
 import jaAcceptanceMessages from "@/messages/ja/document-acceptance.json";
@@ -76,9 +76,8 @@ vi.mock("@/app/lib/api", async () => {
     };
 });
 
-import DocumentAcceptance, {
-    documentAcceptanceViewFailure,
-} from "@/app/components/marketing/campaigns/DocumentAcceptance";
+import DocumentAcceptance from "@/app/components/marketing/campaigns/DocumentAcceptance";
+import { documentAcceptanceViewFailure } from "@/app/components/marketing/campaigns/documentAcceptance";
 import DocumentAcceptanceUnavailable from "@/app/components/marketing/campaigns/DocumentAcceptanceUnavailable";
 import DocumentAcceptancePage, {
     generateMetadata,
@@ -464,6 +463,20 @@ describe("document acceptance", () => {
         expect(api.markViewed).toHaveBeenCalledTimes(1);
         expect(api.markViewed).toHaveBeenCalledWith(TOKEN);
 
+        await unmount(rendered.root);
+    });
+
+    it("interprets the offset-less generated timestamp as UTC", async () => {
+        vi.stubEnv("TZ", "Asia/Tokyo");
+        const initial = preview();
+        const utcDisplay = formatUtcDateTime(initial.content.generatedAt, "en");
+        const browserLocalDisplay = formatDateTime(initial.content.generatedAt, "en");
+        expect(utcDisplay).not.toBe(browserLocalDisplay);
+
+        const rendered = await renderAcceptance(initial);
+
+        expect(rendered.container.textContent).toContain(utcDisplay);
+        expect(rendered.container.textContent).not.toContain(browserLocalDisplay);
         await unmount(rendered.root);
     });
 

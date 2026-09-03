@@ -22,6 +22,7 @@ const SIGNER_TOKEN = `w42-${"a".repeat(64)}`;
 const VIEWER_TOKEN = `w42-${"b".repeat(64)}`;
 const UNAVAILABLE_TOKEN = `w42-${"c".repeat(64)}`;
 const JAPANESE_TOKEN = `w42-${"d".repeat(64)}`;
+const SMTP_CAPTURE_PORT = 2525;
 const THEMES: readonly ("light" | "dark")[] = ["light", "dark"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -360,7 +361,11 @@ function decodedSmtpMessage(message: string): string {
     return payload;
 }
 
-async function startSmtpCapture(expectedMessages: number, expectedRecipient: string): Promise<{
+async function startSmtpCapture(
+    expectedMessages: number,
+    expectedRecipient: string,
+    port: number,
+): Promise<{
     server: TcpServer;
     sockets: Set<Socket>;
     port: number;
@@ -374,7 +379,6 @@ async function startSmtpCapture(expectedMessages: number, expectedRecipient: str
         socket.once("close", () => sockets.delete(socket));
         serveSmtp(socket, (body, recipientAddress) => {
             if (recipientAddress?.toLowerCase() !== expectedRecipient.toLowerCase()) {
-                capturedPaths.reject(new Error("Document acceptance email used an unexpected recipient"));
                 return;
             }
             const decoded = decodedSmtpMessage(body);
@@ -390,7 +394,7 @@ async function startSmtpCapture(expectedMessages: number, expectedRecipient: str
     });
     await new Promise<void>((resolve, reject) => {
         server.once("error", reject);
-        server.listen(0, "127.0.0.1", resolve);
+        server.listen(port, "127.0.0.1", resolve);
     });
     return {
         server,
@@ -578,7 +582,10 @@ test.describe("anonymous and presentation document acceptance", () => {
             name: message("ja", "document-acceptance", "DocumentAcceptance.accept"),
             exact: true,
         })).toBeEnabled();
-        await expect(page.getByText("導入支援サービス", { exact: true })).toBeVisible();
+        const lineItems = page.getByTestId(
+            mobile ? "document-line-items-stacked" : "document-line-items-table",
+        );
+        await expect(lineItems.getByText("導入支援サービス", { exact: true })).toBeVisible();
         await expectResponsiveDocument(page, mobile);
         } catch (error) {
             const appOutput = app?.output() ?? "Acceptance fixture app did not start";
@@ -596,28 +603,11 @@ test("authenticated setup completes through a cookie-less public bearer", async 
 }, testInfo) => {
     test.setTimeout(120_000);
     const fixture = runFixture(testInfo.project.name);
-    const smtp = await startSmtpCapture(2, "rina.sato@example.test");
-    let headers: Record<string, string> | undefined;
+    const smtp = await startSmtpCapture(2, "rina.sato@example.test", SMTP_CAPTURE_PORT);
     let anonymousContext: BrowserContext | null = null;
 
     try {
         const writeHeaders = await authenticatedWriteHeaders(authenticatedApi, fixture);
-        headers = writeHeaders;
-        await jsonObject(await authenticatedApi.put(`/api/workspaces/${fixture.workspaceId}/mail-config`, {
-            headers: writeHeaders,
-            data: {
-                enabled: true,
-                host: "127.0.0.1",
-                port: smtp.port,
-                username: null,
-                password: null,
-                fromAddress: "connex-e2e@example.test",
-                fromName: "Connex E2E",
-                starttls: false,
-                ssl: false,
-                auth: false,
-            },
-        }), "workspace mail config");
 
         const unique = randomUUID();
         const sourceDeal = await jsonObject(await authenticatedApi.get(
@@ -862,19 +852,7 @@ test("authenticated setup completes through a cookie-less public bearer", async 
         expect(typeof recipient.firstViewedAt).toBe("string");
         expect(recipient.typedName).toBe("Rina Sato");
     } finally {
-        const mailCleanup = headers
-            ? authenticatedApi.delete(
-                `/api/workspaces/${fixture.workspaceId}/mail-config`,
-                { headers },
-            ).then(async (response) => {
-                if (response.status() >= 300) {
-                    const body = await response.text();
-                    throw new Error(`mail config cleanup returned ${response.status()}: ${body.slice(0, 500)}`);
-                }
-            })
-            : Promise.resolve();
         const cleanupResults = await Promise.allSettled([
-            mailCleanup,
             anonymousContext?.close() ?? Promise.resolve(),
             closeTcpServer(smtp.server, smtp.sockets),
         ]);

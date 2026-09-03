@@ -5850,10 +5850,10 @@ export type DocumentAcceptancePreview = {
     recipientStatus: "pending" | "viewed";
     actionable: boolean;
     documentType: DocumentType;
-    documentTitle: string | null;
+    documentTitle?: string | null;
     documentVersion: number;
     documentLocale: string;
-    expiresAt: string | null;
+    expiresAt?: string | null;
 };
 
 /** The in-session terminal result of one recipient decision. */

@@ -41,8 +41,16 @@ class DocumentAcceptanceCommittedFixtureTest
     @Test
     void viewerCanReadAndRecordAViewWithoutReceivingDecisionControls() {
         DocumentFixture fixture = finalDocument();
-        DocumentDeliveryDto delivery = send(fixture, viewer("viewer@example.test", 1));
-        String token = installToken(delivery.recipients().getFirst().id());
+        DocumentDeliveryDto delivery = send(
+            fixture,
+            viewer("viewer@example.test", 1),
+            signer("signer@example.test", 2));
+        int viewerRecipientId = delivery.recipients().stream()
+            .filter(recipient -> "viewer".equals(recipient.role()))
+            .findFirst()
+            .orElseThrow()
+            .id();
+        String token = installToken(viewerRecipientId);
 
         DocumentAcceptancePreviewDto preview =
             acceptanceService.preview(token, "192.0.2.17");

@@ -34,6 +34,7 @@ function isRunFixture(value: unknown): value is RunFixture {
         "activity",
         "search",
         "archive",
+        "watch",
         "ambiguityPrimary",
         "ambiguitySecondary",
         "ambiguityPrimaryJa",

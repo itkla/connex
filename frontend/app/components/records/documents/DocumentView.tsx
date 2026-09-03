@@ -3,7 +3,7 @@
 import { Fragment, type CSSProperties, type ReactNode } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 
-import { formatCurrency, formatDateTime } from '@/app/lib/utils';
+import { formatCurrency, formatUtcDateTime } from '@/app/lib/utils';
 import type {
     DocumentBodyMark,
     DocumentBodyNode,
@@ -157,7 +157,7 @@ export default function DocumentView({ content, type, title, status, version, ge
                         {generatedAt && (
                             <div>
                                 <span className="text-muted-foreground">{tp('generatedOn')} </span>
-                                <span className="font-medium text-foreground">{formatDateTime(generatedAt, locale)}</span>
+                                <span className="font-medium text-foreground">{formatUtcDateTime(generatedAt, locale)}</span>
                             </div>
                         )}
                     </div>
