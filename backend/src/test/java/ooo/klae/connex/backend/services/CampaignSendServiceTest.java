@@ -24,6 +24,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.CampaignDelivery;
 import ooo.klae.connex.backend.beans.Company;
@@ -40,6 +42,7 @@ import ooo.klae.connex.backend.delivery.DispatchStatus;
 import ooo.klae.connex.backend.delivery.MessageDispatcher;
 import ooo.klae.connex.backend.delivery.ResolvedDeliveryProvider;
 import ooo.klae.connex.backend.dto.CampaignAudienceRequest;
+import ooo.klae.connex.backend.dto.CampaignAudienceSnapshotDto;
 import ooo.klae.connex.backend.dto.CampaignDto;
 import ooo.klae.connex.backend.dto.CampaignMessageDto;
 import ooo.klae.connex.backend.dto.CampaignMessageRequest;
@@ -51,24 +54,25 @@ import ooo.klae.connex.backend.dto.ContactChannelConsentRequest;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.SuppressionEntryRequest;
-import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
+import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 
 @TestPropertySource(properties = "connex.delivery.enabled=true")
 @Import(CampaignSendServiceTest.FakeDeliveryConfig.class)
-class CampaignSendServiceTest extends AbstractServiceTest {
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
+class CampaignSendServiceTest extends CampaignRealDbTestSupport {
 
     @Autowired private CampaignService campaignService;
     @Autowired private CampaignSendService campaignSendService;
     @Autowired private ConsentService consentService;
     @Autowired private SuppressionService suppressionService;
-    @Autowired private WorkspaceService workspaceService;
     @Autowired private CampaignDispatchService campaignDispatchService;
     @Autowired private DeliveryUnsubscribeService deliveryUnsubscribeService;
     @Autowired private CampaignDeliveryMapper campaignDeliveryMapper;
+    @Autowired private CampaignSendMapper campaignSendMapper;
     @Autowired private FakeDispatcher fakeDispatcher;
     @MockitoBean private DeliveryProviderConfigService deliveryProviderConfigService;
 
@@ -143,14 +147,63 @@ class CampaignSendServiceTest extends AbstractServiceTest {
         String prefix = "iso-" + unique();
         person(newCompany(), prefix + "-in", prefix + "-in@example.com");
         CampaignSendDto send = readySend(prefix);
-        User other = newUser();
-        WorkspaceMembershipDto otherWorkspace = workspaceService.createWorkspace("Tenant B", other.getId());
-        authenticateAs(other, otherWorkspace.getId());
+        CampaignActorWorkspace other = newCampaignWorkspaceActor();
+        authenticateAs(other.actor(), other.workspace().getId());
 
         assertThrows(ResourceNotFoundException.class,
                 () -> campaignSendService.getSend(send.campaignId(), send.id()));
         assertThrows(ResourceNotFoundException.class,
                 () -> campaignSendService.queueSend(send.campaignId(), send.id()));
+    }
+
+    @Test
+    void createSendRejectsForeignCampaignSnapshotAndMessageWithoutWritingSends() {
+        String prefix = "create-send-iso-" + unique();
+        CampaignDto foreignCampaign = campaignService.create(new CampaignRequest(
+                "Foreign campaign " + prefix, null, "email", null, currentUser.getId(),
+                null, null, null, null, null));
+        campaignService.setAudience(foreignCampaign.id(), audience(prefix));
+        campaignService.snapshotAudience(foreignCampaign.id());
+        CampaignMessageDto foreignMessage = campaignSendService.createMessage(
+                foreignCampaign.id(), new CampaignMessageRequest("Foreign message " + prefix, "email"));
+        campaignSendService.addRevision(
+                foreignCampaign.id(), foreignMessage.id(), emailRevision());
+
+        CampaignActorWorkspace other = newCampaignWorkspaceActor();
+        authenticateAs(other.actor(), other.workspace().getId());
+        CampaignDto localMessageBoundary = campaignService.create(new CampaignRequest(
+                "Local message boundary " + prefix, null, "email", null, other.actor().getId(),
+                null, null, null, null, null));
+        campaignService.setAudience(localMessageBoundary.id(), audience(prefix));
+        campaignService.snapshotAudience(localMessageBoundary.id());
+        CampaignMessageDto localMessage = campaignSendService.createMessage(
+                localMessageBoundary.id(), new CampaignMessageRequest("Local message " + prefix, "email"));
+        campaignSendService.addRevision(
+                localMessageBoundary.id(), localMessage.id(), emailRevision());
+        CampaignDto localSnapshotBoundary = campaignService.create(new CampaignRequest(
+                "Local snapshot boundary " + prefix, null, "email", null, other.actor().getId(),
+                null, null, null, null, null));
+        CampaignMessageDto snapshotBoundaryMessage = campaignSendService.createMessage(
+                localSnapshotBoundary.id(), new CampaignMessageRequest("Snapshot boundary " + prefix, "email"));
+        campaignSendService.addRevision(
+                localSnapshotBoundary.id(), snapshotBoundaryMessage.id(), emailRevision());
+
+        CampaignSendRequest foreignRequest = new CampaignSendRequest(
+                1, foreignMessage.id(), 1, "marketing", null);
+        assertThrows(ResourceNotFoundException.class,
+                () -> campaignSendService.createSend(foreignCampaign.id(), foreignRequest));
+        assertThrows(ResourceNotFoundException.class,
+                () -> campaignSendService.createSend(localMessageBoundary.id(), foreignRequest));
+        assertThrows(ResourceNotFoundException.class, () -> campaignSendService.createSend(
+                localSnapshotBoundary.id(), new CampaignSendRequest(
+                        1, snapshotBoundaryMessage.id(), 1, "marketing", null)));
+        assertTrue(campaignSendMapper.getSendsByCampaign(
+                other.workspace().getId(), foreignCampaign.id()).isEmpty());
+        assertTrue(campaignSendService.listSends(localMessageBoundary.id()).isEmpty());
+        assertTrue(campaignSendService.listSends(localSnapshotBoundary.id()).isEmpty());
+
+        authenticateAs(currentUser, workspace.getId());
+        assertTrue(campaignSendService.listSends(foreignCampaign.id()).isEmpty());
     }
 
     @Test
@@ -217,7 +270,8 @@ class CampaignSendServiceTest extends AbstractServiceTest {
         Person textable = phonePerson(company, prefix + "-in-a", "+81 90-1234-5678");
         Person emailOnly = person(company, prefix + "-in-b", prefix + "-b@example.com");
 
-        int sendId = readySmsSend(prefix).id();
+        CampaignSendDto send = readySmsSend(prefix);
+        int sendId = send.id();
 
         List<Integer> pending = campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), sendId);
         assertEquals(1, pending.size());
@@ -225,6 +279,59 @@ class CampaignSendServiceTest extends AbstractServiceTest {
         assertEquals(textable.getId(), delivery.getPersonId());
         assertNotEquals(emailOnly.getId(), delivery.getPersonId());
         assertEquals("+819012345678", delivery.getAddress());
+        CampaignAudienceSnapshotDto snapshot = campaignService.getSnapshot(send.campaignId(), 1);
+        assertEquals(1, snapshot.excludedNoAddress());
+        assertEquals(snapshot.estimatedIncluded(), send.totalRecipients());
+    }
+
+    @Test
+    void createSendRejectsAMessageOnADifferentChannelThanTheSnapshot() {
+        String prefix = "channel-mismatch-" + unique();
+        Person person = person(newCompany(), prefix + "-in", prefix + "-in@example.com");
+        person.setPhone("+819012345678");
+        personMapper.update(person);
+        CampaignDto campaign = campaignService.create(new CampaignRequest(
+                "Campaign " + prefix, null, "email", null, currentUser.getId(),
+                null, null, null, null, null));
+        campaignService.setAudience(campaign.id(), audience(prefix, "email", "marketing"));
+        campaignService.snapshotAudience(campaign.id());
+        CampaignMessageDto message = campaignSendService.createMessage(
+                campaign.id(), new CampaignMessageRequest("Message " + prefix, "sms"));
+        campaignSendService.addRevision(campaign.id(), message.id(), new CampaignMessageRevisionRequest(
+                "en", null, null, "Hi from {{unsubscribe_url}}"));
+
+        BadRequestException exception = assertThrows(BadRequestException.class,
+                () -> campaignSendService.createSend(campaign.id(),
+                        new CampaignSendRequest(1, message.id(), 1, null, null)));
+
+        assertEquals("This audience snapshot was frozen for the email channel "
+                + "and cannot be sent with a sms message", exception.getMessage());
+    }
+
+    @Test
+    void createSendRejectsADifferentPurposeAndAcceptsTheFrozenPurpose() {
+        String prefix = "purpose-mismatch-" + unique();
+        person(newCompany(), prefix + "-in", prefix + "-in@example.com");
+        CampaignDto campaign = campaignService.create(new CampaignRequest(
+                "Campaign " + prefix, null, "email", null, currentUser.getId(),
+                null, null, null, null, null));
+        campaignService.setAudience(campaign.id(), audience(prefix, "email", "product_update"));
+        campaignService.snapshotAudience(campaign.id());
+        CampaignMessageDto message = campaignSendService.createMessage(
+                campaign.id(), new CampaignMessageRequest("Message " + prefix, "email"));
+        campaignSendService.addRevision(campaign.id(), message.id(), new CampaignMessageRevisionRequest(
+                "en", "Hello", "<p>Hi</p><a href=\"{{unsubscribe_url}}\">unsubscribe</a>", null));
+
+        BadRequestException exception = assertThrows(BadRequestException.class,
+                () -> campaignSendService.createSend(campaign.id(),
+                        new CampaignSendRequest(1, message.id(), 1, "marketing", null)));
+        CampaignSendDto send = campaignSendService.createSend(campaign.id(),
+                new CampaignSendRequest(1, message.id(), 1, "product_update", null));
+
+        assertEquals("This audience snapshot was frozen for the product_update purpose "
+                + "and cannot be sent with the marketing purpose", exception.getMessage());
+        assertEquals("product_update", send.purpose());
+        assertEquals(1, send.totalRecipients());
     }
 
     @Test
@@ -471,9 +578,8 @@ class CampaignSendServiceTest extends AbstractServiceTest {
         String prefix = "sms-iso-" + unique();
         phonePerson(newCompany(), prefix + "-in", "+819012345678");
         CampaignSendDto send = readySmsSend(prefix);
-        User other = newUser();
-        WorkspaceMembershipDto otherWorkspace = workspaceService.createWorkspace("Tenant C", other.getId());
-        authenticateAs(other, otherWorkspace.getId());
+        CampaignActorWorkspace other = newCampaignWorkspaceActor();
+        authenticateAs(other.actor(), other.workspace().getId());
 
         assertThrows(ResourceNotFoundException.class,
                 () -> campaignSendService.getSend(send.campaignId(), send.id()));
@@ -509,7 +615,7 @@ class CampaignSendServiceTest extends AbstractServiceTest {
     private CampaignSendDto readySmsSend(String prefix) {
         CampaignDto campaign = campaignService.create(new CampaignRequest(
                 "Campaign " + prefix, null, "sms", null, currentUser.getId(), null, null, null, null, null));
-        campaignService.setAudience(campaign.id(), audience(prefix));
+        campaignService.setAudience(campaign.id(), audience(prefix, "sms", "marketing"));
         campaignService.snapshotAudience(campaign.id());
         CampaignMessageDto message = campaignSendService.createMessage(
                 campaign.id(), new CampaignMessageRequest("Message " + prefix, "sms"));
@@ -545,6 +651,10 @@ class CampaignSendServiceTest extends AbstractServiceTest {
     }
 
     private CampaignAudienceRequest audience(String namePrefix) {
+        return audience(namePrefix, null, null);
+    }
+
+    private CampaignAudienceRequest audience(String namePrefix, String channel, String purpose) {
         SegmentCondition condition = new SegmentCondition();
         condition.setType("field");
         condition.setField("name");
@@ -553,11 +663,16 @@ class CampaignSendServiceTest extends AbstractServiceTest {
         SegmentDefinition definition = new SegmentDefinition();
         definition.setMatch("all");
         definition.setConditions(List.of(condition));
-        return new CampaignAudienceRequest("person", definition);
+        return new CampaignAudienceRequest("person", definition, channel, purpose);
     }
 
     private ContactChannelConsentRequest grantedConsent() {
         return new ContactChannelConsentRequest("email", "marketing", "granted", "manual", null, null);
+    }
+
+    private CampaignMessageRevisionRequest emailRevision() {
+        return new CampaignMessageRevisionRequest(
+                "en", "Hello", "<p>Hi</p><a href=\"{{unsubscribe_url}}\">unsubscribe</a>", null);
     }
 
     @TestConfiguration

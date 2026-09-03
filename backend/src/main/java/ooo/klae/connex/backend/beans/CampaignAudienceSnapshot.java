@@ -15,11 +15,14 @@ public class CampaignAudienceSnapshot {
     private int version;
     private String recordType;
     private String definitionJson;
+    private String channel;
+    private String purpose;
     private int estimatedIncluded;
     private int excludedTotal;
     private int excludedConsent;
     private int excludedSuppressed;
     private int excludedRestricted;
+    private int excludedNoAddress;
     private Integer createdById;
     private LocalDateTime createdAt;
 }

@@ -18,6 +18,12 @@ public interface ConnectorConfigMapper {
     ConnectorConfig findByWorkspaceConnector(
             @Param("workspaceId") int workspaceId, @Param("connector") String connector);
 
+    Integer findCurrentAudienceTargetIdForShare(
+            @Param("workspaceId") int workspaceId,
+            @Param("connector") String connector,
+            @Param("configId") int configId,
+            @Param("configVersion") long configVersion);
+
     int upsert(ConnectorConfig config);
 
     int delete(@Param("workspaceId") int workspaceId, @Param("connector") String connector);

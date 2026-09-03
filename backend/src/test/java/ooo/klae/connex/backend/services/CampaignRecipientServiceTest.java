@@ -239,9 +239,11 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         CampaignAudienceSnapshot snapshot = new CampaignAudienceSnapshot();
         snapshot.setWorkspaceId(workspace.getId());
         snapshot.setCampaignId(campaign.getId());
-        snapshot.setVersion(campaignMapper.nextSnapshotVersion(workspace.getId(), campaign.getId()));
+        snapshot.setVersion(1);
         snapshot.setRecordType("person");
         snapshot.setDefinitionJson("{\"match\":\"all\",\"conditions\":[]}");
+        snapshot.setChannel("email");
+        snapshot.setPurpose("marketing");
         snapshot.setEstimatedIncluded(0);
         snapshot.setExcludedTotal(0);
         snapshot.setExcludedConsent(0);

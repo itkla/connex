@@ -22,9 +22,10 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 /**
  * Session-free classification of person eligibility for a marketing channel. Extracted from
  * {@code CampaignService} so both the audience estimate/snapshot flow and the dispatch choke point
- * apply exactly the same precedence: processing restrictions take precedence over workspace-owned
- * suppressions, which take precedence over consent. Callers pass the workspace explicitly; this
- * service never reads the request tenant context and is not permission-gated — its callers are.
+ * apply the same eligibility checks. Snapshot classification first removes people with processing
+ * restrictions, then resolves channel addresses and applies workspace-owned suppressions and
+ * consent. Callers pass the workspace explicitly; this service never reads the request tenant
+ * context and is not permission-gated — its callers are.
  *
  * <p>This is also the one place the {@link ConsentPolicy} is read, so the snapshot classification,
  * the dispatch re-check, and the connector export cannot disagree about what consent means.
@@ -65,7 +66,8 @@ public class AudienceEligibilityService {
      * and a dispatch of the same audience cannot disagree: an SMS audience is matched on phone
      * numbers rather than on email addresses, and a suppression stored in a different but equivalent
      * format still matches. A person with no address the channel can reach is not address-matched
-     * here; materialization skips them as {@code no_address}.
+     * here; {@link #classify(int, List, String, String)} assigns them to {@code no_address} before
+     * suppression processing.
      *
      * <p>Suppression is additionally sticky to the person: a candidate is suppressed when a
      * {@code suppression_entry} on this channel carries their {@code person_id}, regardless of the
@@ -82,15 +84,19 @@ public class AudienceEligibilityService {
             return Set.of();
         }
         DeliveryChannel deliveryChannel = DeliveryChannel.fromToken(channel);
+        return suppressedIds(
+                workspaceId, personIds, channel, resolveAddresses(workspaceId, personIds, deliveryChannel));
+    }
+
+    private Set<Integer> suppressedIds(
+            int workspaceId, List<Integer> personIds, String channel, Map<Integer, String> addresses) {
         Map<String, List<Integer>> idsByAddress = new LinkedHashMap<>();
-        forEachBatch(personIds, batch -> {
-            for (Person person : personMapper.getByIds(workspaceId, batch)) {
-                String address = ChannelAddressNormalizer.addressFor(deliveryChannel, person);
-                if (address != null) {
-                    idsByAddress.computeIfAbsent(address, key -> new ArrayList<>()).add(person.getId());
-                }
+        for (int personId : personIds) {
+            String address = addresses.get(personId);
+            if (address != null) {
+                idsByAddress.computeIfAbsent(address, key -> new ArrayList<>()).add(personId);
             }
-        });
+        }
         Set<Integer> result = new HashSet<>(suppressedPersonRefIds(workspaceId, personIds, channel));
         if (!idsByAddress.isEmpty()) {
             for (String address : suppressedAddresses(workspaceId, channel, new ArrayList<>(idsByAddress.keySet()))) {
@@ -206,8 +212,10 @@ public class AudienceEligibilityService {
 
     /**
      * Classifies the candidates into included and per-reason excluded sets, applying the precedence
-     * restricted &rarr; suppressed &rarr; consent. Which people the consent step blocks, and the reason
-     * it reports, follow {@link #CONSENT_POLICY}.
+     * restricted &rarr; no address &rarr; suppressed &rarr; consent. Processing restrictions are
+     * resolved before person records or contact addresses are read, so restricted subjects cannot
+     * be reclassified into a channel-specific bucket. Which people the consent step blocks, and the
+     * reason it reports, follow {@link #CONSENT_POLICY}.
      * @param workspaceId the workspace
      * @param candidateIds the ordered candidate person ids
      * @param channel the delivery channel
@@ -215,21 +223,44 @@ public class AudienceEligibilityService {
      * @return the classification
      */
     public AudienceClassification classify(int workspaceId, List<Integer> candidateIds, String channel, String purpose) {
+        DeliveryChannel deliveryChannel = DeliveryChannel.fromToken(channel);
         LinkedHashSet<Integer> remaining = new LinkedHashSet<>(candidateIds);
-        Set<Integer> restricted = restrictedIds(workspaceId, candidateIds);
+        Set<Integer> restricted = restrictedIds(workspaceId, new ArrayList<>(remaining));
         remaining.removeAll(restricted);
-        Set<Integer> suppressed = suppressedIds(workspaceId, new ArrayList<>(remaining), channel);
+        Map<Integer, String> addresses = resolveAddresses(
+                workspaceId, new ArrayList<>(remaining), deliveryChannel);
+        Set<Integer> noAddress = new LinkedHashSet<>(remaining);
+        noAddress.removeAll(addresses.keySet());
+        remaining.removeAll(noAddress);
+        Set<Integer> suppressed = suppressedIds(
+                workspaceId, new ArrayList<>(remaining), channel, addresses);
         remaining.removeAll(suppressed);
         Set<Integer> consentBlocked =
                 consentBlockedIds(workspaceId, new ArrayList<>(remaining), channel, purpose);
 
         List<Integer> includedIds = new ArrayList<>(candidateIds.size());
         for (int id : candidateIds) {
-            if (!restricted.contains(id) && !suppressed.contains(id) && !consentBlocked.contains(id)) {
+            if (!noAddress.contains(id) && !restricted.contains(id)
+                    && !suppressed.contains(id) && !consentBlocked.contains(id)) {
                 includedIds.add(id);
             }
         }
-        return new AudienceClassification(restricted, suppressed, consentBlocked, List.copyOf(includedIds));
+        return new AudienceClassification(
+                noAddress, restricted, suppressed, consentBlocked, List.copyOf(includedIds));
+    }
+
+    private Map<Integer, String> resolveAddresses(
+            int workspaceId, List<Integer> personIds, DeliveryChannel channel) {
+        Map<Integer, String> addresses = new LinkedHashMap<>();
+        forEachBatch(personIds, batch -> {
+            for (Person person : personMapper.getByIds(workspaceId, batch)) {
+                String address = ChannelAddressNormalizer.addressFor(channel, person);
+                if (address != null) {
+                    addresses.put(person.getId(), address);
+                }
+            }
+        });
+        return addresses;
     }
 
     private static <T> void forEachBatch(List<T> values, Consumer<List<T>> consumer) {
@@ -239,13 +270,15 @@ public class AudienceEligibilityService {
     }
 
     /**
-     * The result of classifying an audience against restrictions, suppressions, and consent.
+     * The result of classifying an audience against addressability, restrictions, suppressions, and consent.
+     * @param noAddress person ids excluded because the channel has no usable address for them
      * @param restricted person ids excluded because their processing is restricted
      * @param suppressed person ids excluded because they are suppressed on the channel
      * @param consentBlocked person ids excluded by consent under {@link #CONSENT_POLICY}
      * @param includedIds person ids that passed every check, in input order
      */
     public record AudienceClassification(
+            Set<Integer> noAddress,
             Set<Integer> restricted,
             Set<Integer> suppressed,
             Set<Integer> consentBlocked,
@@ -260,6 +293,9 @@ public class AudienceEligibilityService {
         public String reasonFor(int personId) {
             if (restricted.contains(personId)) {
                 return "restricted";
+            }
+            if (noAddress.contains(personId)) {
+                return "no_address";
             }
             if (suppressed.contains(personId)) {
                 return "suppressed";

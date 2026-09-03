@@ -7,8 +7,11 @@ import lombok.NoArgsConstructor;
 
 /**
  * A record of one push of a frozen audience snapshot's eligible included members to a third-party
- * marketing connector. Bound to an immutable snapshot; the counts are the eligible total after a fresh
- * eligibility re-check and the connector-reported pushed and failed tallies.
+ * marketing connector. Bound to an immutable snapshot; the frozen member ids retain the exact set
+ * admitted by preparation and the pushed member ids retain the exact identities placed in the
+ * provider request. Null member-id fields identify historical rows whose exact identities were not
+ * recorded. Running rows are leased so an interrupted request becomes reconciliation-required rather
+ * than being retried silently.
  */
 @Data
 @NoArgsConstructor
@@ -19,10 +22,14 @@ public class CampaignAudienceExport {
     private int snapshotId;
     private String connector;
     private String externalListId;
+    private String frozenMemberIdsJson;
+    private String pushedMemberIdsJson;
     private String status;
+    private int attempt;
+    private LocalDateTime leaseUntil;
     private int totalMembers;
-    private int pushedCount;
-    private int failedCount;
+    private Integer pushedCount;
+    private Integer failedCount;
     private Integer createdById;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

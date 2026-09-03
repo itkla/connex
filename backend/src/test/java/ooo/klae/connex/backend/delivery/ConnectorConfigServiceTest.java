@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -78,12 +79,14 @@ class ConnectorConfigServiceTest {
     private ConnectorConfig enabledConnector() {
         ConnectorConfig config = new ConnectorConfig();
         config.setWorkspaceId(WORKSPACE);
+        config.setId(81);
         config.setConnector(HttpListConnector.PROVIDER_ID);
         config.setEndpoint(ENDPOINT);
         config.setExternalListId(LIST_ID);
         config.setCredentialRef("secret:v1:55");
         config.setCreatedById(ACTOR);
         config.setEnabled(true);
+        config.setConfigVersion(4L);
         return config;
     }
 
@@ -163,6 +166,48 @@ class ConnectorConfigServiceTest {
     void resolveForWorkspace_failsClosedWhenNotEnabled() {
         when(mapper.findByWorkspaceConnector(WORKSPACE, "http_list")).thenReturn(null);
         assertThrows(DeliveryProviderException.class, () -> service().resolveForWorkspace(WORKSPACE, "http_list"));
+    }
+
+    @Test
+    void resolveAudienceTargetForWorkspaceUsesOneCurrentConfigForProviderAndList() {
+        when(mapper.findByWorkspaceConnector(WORKSPACE, "http_list")).thenReturn(enabledConnector());
+        when(cipher.decryptCredential(WORKSPACE, "secret:v1:55")).thenReturn(API_KEY);
+
+        ResolvedAudienceTarget resolved =
+                service().resolveAudienceTargetForWorkspace(WORKSPACE, "http_list");
+
+        assertEquals(LIST_ID, resolved.externalListId());
+        assertEquals(ENDPOINT, resolved.provider().endpoint());
+        assertEquals(API_KEY, resolved.provider().credentials().require("apiKey"));
+        assertEquals(81, resolved.configId());
+        assertEquals(4L, resolved.configVersion());
+        verify(mapper, times(1)).findByWorkspaceConnector(WORKSPACE, "http_list");
+    }
+
+    @Test
+    void isCurrentAudienceTargetChecksTheResolvedRowAndGeneration() {
+        ResolvedAudienceTarget target = new ResolvedAudienceTarget(
+                ResolvedDeliveryProvider.of(
+                        "http_list", DeliveryChannel.EMAIL, WORKSPACE,
+                        DeliveryCredentials.of(java.util.Map.of("apiKey", API_KEY))),
+                LIST_ID, 81, 4L);
+        when(mapper.findCurrentAudienceTargetIdForShare(WORKSPACE, "http_list", 81, 4L))
+                .thenReturn(81);
+
+        assertTrue(service().isCurrentAudienceTarget(WORKSPACE, "http_list", target));
+
+        verify(mapper).findCurrentAudienceTargetIdForShare(WORKSPACE, "http_list", 81, 4L);
+    }
+
+    @Test
+    void resolveAudienceTargetForWorkspaceFailsClosedWithoutAList() {
+        ConnectorConfig config = enabledConnector();
+        config.setExternalListId(null);
+        when(mapper.findByWorkspaceConnector(WORKSPACE, "http_list")).thenReturn(config);
+
+        assertThrows(DeliveryProviderException.class,
+                () -> service().resolveAudienceTargetForWorkspace(WORKSPACE, "http_list"));
+        verify(cipher, never()).decryptCredential(WORKSPACE, "secret:v1:55");
     }
 
     @Test

@@ -100,6 +100,7 @@ export default async function CampaignDetailPage({
         <CampaignDetail
             campaign={campaignAccess.record}
             initialAudience={initialAudience}
+            audienceUnavailable={!audienceResult.ok}
             initialSnapshots={snapshotsAccess.kind === "loaded" ? snapshotsAccess.items : []}
             snapshotsRestricted={snapshotsAccess.kind === "forbidden"}
             initialMessages={messages}

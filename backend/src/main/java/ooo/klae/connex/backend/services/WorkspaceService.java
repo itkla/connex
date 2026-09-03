@@ -463,7 +463,7 @@ public class WorkspaceService {
             Set<Permission> required = Objects.requireNonNull(
                     requiredByUser.get(userId), "required permissions");
             if (userMapper.lockByIdForShare(userId) == null
-                    || userMapper.isAccountDeletionReservedForShare(userId)) {
+                    || !Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(userId))) {
                 throw authorizationRequired(userId, required);
             }
         }
@@ -622,7 +622,15 @@ public class WorkspaceService {
         if (systemActor.is(userId)) {
             return systemActor.permissions();
         }
-        if (userMapper.isAccountDeletionReserved(userId)) {
+        return lockedMemberPermissionsFor(workspaceId, userId);
+    }
+
+    /**
+     * A non-system member's effective permissions from locking reads only, without resolving the
+     * system actor through an ordinary database read.
+     */
+    public Set<Permission> lockedMemberPermissionsFor(int workspaceId, int userId) {
+        if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(userId))) {
             return EnumSet.noneOf(Permission.class);
         }
         if (workspaceMapper.lockActiveWorkspaceForShare(workspaceId) == null) {

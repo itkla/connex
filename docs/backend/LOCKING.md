@@ -140,6 +140,104 @@ catalog may be synthesized only while the workspace mutex is held. First-edit ma
 the same mutex, so it cannot commit between a lifecycle miss and the row-less check. Persist the code
 returned by the locked resolution, never a separately compared caller value.
 
+## Campaign mutations
+
+Campaign update, live-audience replacement, snapshot creation, and send creation acquire current
+authorization before the exact campaign row. The permission read locks the actor's user row while
+checking its account-deletion reservation, then the active workspace, exact membership, custom-role
+root, and permission rows. These are locking reads and do not establish a consistent-read snapshot.
+Final authorization is derived from those locked rows, then the campaign row is the per-campaign
+mutex and the first aggregate row lock.
+
+These mutations keep the default `REPEATABLE_READ` isolation. No consistent, non-locking read may
+run inside the transaction before the campaign mutex is acquired. The first ordinary read after the
+mutex establishes one snapshot newer than every campaign change that previously committed under
+that mutex, and every later segment-condition and eligibility query shares it. Missing audience or
+snapshot-version rows are ordinary reads, not locking reads, so unrelated campaigns' first child-row
+inserts do not acquire conflicting index-gap locks.
+
+- Campaign update performs any membership, parent-campaign, and other ordinary validation reads
+  only after the campaign mutex.
+- Live-audience replacement reads the previous audience ordinarily after the mutex, then upserts
+  and audits the transition under the same mutex.
+- Snapshot creation ordinarily reads the live audience and next snapshot version after the mutex,
+  then evaluates every segment condition and eligibility source in that same consistent snapshot.
+  The campaign mutex serializes allocation of the unique campaign-local snapshot version.
+- Send creation reads its message, immutable revision, and immutable snapshot `FOR SHARE` after the
+  mutex. `authService.getCurrentUser()` then refreshes `app_user` with the ordinary read that
+  establishes the transaction's consistent snapshot. Snapshot members are subsequently read
+  `FOR SHARE`, and the later person/address reads share that post-mutex snapshot while the immutable
+  inputs remain locked.
+
+Audience export uses three transactions around provider egress. Transaction A locks and revalidates
+the actor's `CAMPAIGN_MANAGE` and `CONSENT_MANAGE` authority, locks the campaign mutex, classifies
+the snapshot members, and persists the export with that exact member-id set and a bounded running
+lease. Outside locks, the complete provider destination (endpoint, credential, and external list) is
+then resolved from one connector-configuration row together with that row's id and generation.
+
+Transaction B is the last database work before egress. It repeats locked authorization and the
+campaign mutex, reloads the persisted member set, rechecks restrictions, channel suppressions,
+consent, and addressability, records the exact ids that will be placed in the provider request,
+refreshes the lease, and finally rechecks the connector row id/generation with a current locking read.
+No application database
+work occurs between B's commit and the connector invocation. Authorization or eligibility changes
+that commit before B starts affect this export. More precisely, an eligibility change must commit
+before B's first consistent read, the restriction read, to enter B's repeatable-read snapshot;
+connector changes that commit before the final locking fence abort the export before egress.
+
+The provider push runs only after B commits. Its idempotency key binds the snapshot/version, a stable
+hash of the fenced connector configuration identity and external list, a stable hash of the final
+ordered member ids and outbound member fields, and the persisted attempt. B allocates attempt one plus
+the count of prior requests for the same snapshot, connector, and external list while holding the
+campaign mutex. A retry of the same ambiguous export row therefore retains its request key, while a
+replacement after a definite failure advances the attempt. Transaction C records the confirmed
+outcome and locking-reads current `CONSENT_MANAGE` authority before deciding whether its response may
+include detailed counts.
+
+| Connector observation | Outcome | Export state |
+|---|---|---|
+| Local validation, serialization, DNS, or connection refusal before the request body can be sent | `DEFINITE_NO_SIDE_EFFECT` | `failed` |
+| Provider-specific response whose documented atomic contract proves non-acceptance | `DEFINITE_NO_SIDE_EFFECT` | `failed` |
+| Any generic non-2xx response after the request body was sent | `AMBIGUOUS` | `needs_reconciliation` |
+| Post-send transport failure or incomplete/inconsistent 2xx counters | `AMBIGUOUS` | `needs_reconciliation` |
+| Complete, consistent 2xx counters | `CONFIRMED` | `completed` when any member was accepted; otherwise `failed` |
+
+The generic HTTP list connector has no provider-specific atomic non-acceptance contract. Its
+`400`, `401`, `403`, `404`, and `422` responses therefore remain ambiguous even when their bodies do
+not report acceptance; receiving an HTTP response does not prove that the provider applied none of
+the submitted members.
+
+Provider/network I/O must not be moved under B's locks.
+That prohibition leaves an inherent final-revalidation-to-provider-acceptance window. For locked
+authorization and the connector generation it starts when B commits; for eligibility it starts at
+B's first consistent read, the restriction read. The later address, suppression, and consent reads
+share that snapshot, so a change committed after the restriction read is outside B even if it commits
+before the corresponding later query. The remaining in-process reads, stage write, fence, commit, and
+handoff are normally milliseconds, while provider acceptance is bounded by the connector's configured
+connection and response timeouts (3 and 15 seconds by default). An authorization, eligibility, or
+connector-generation change committed inside its respective window cannot retract an already-started
+request. It is honored on the next export; provider-side unsubscribe synchronization is the immediate
+removal path for an in-flight disclosure. Rotation inside the window is the same residual class and
+must not be described as an unconditional pre-egress abort.
+
+Every `running` export carries a lease. An expired lease or an outcome whose provider acceptance is
+unknown transitions to `needs_reconciliation`, is shown as such in history, and blocks silent
+re-export. A `failed` export with a nonzero pushed count also blocks re-export until an operator
+resolves it. An operator holding locked `CAMPAIGN_MANAGE` and `CONSENT_MANAGE` authority can resolve a
+`needs_reconciliation` export only after provider confirmation: delivered preserves the recorded
+request counts and completes the export; not delivered records a definite zero-push failure and
+unblocks a replacement export. Neither resolution retries the provider request. V199 conservatively
+transitions pre-V199 failed rows with a resolved external list to
+`needs_reconciliation`, because those rows cannot distinguish a definite provider rejection from an
+accepted request whose response was lost. Historical rows whose exact prepared or pushed identities
+were not recorded retain null member-id sets rather than fabricated empty arrays. Rows migrated into
+reconciliation also retain null pushed/not-pushed counts after a delivered resolution instead of
+presenting legacy rejection counts as a confirmed provider outcome. Callers without `CONSENT_MANAGE`
+may read only the stable prepared total; known final pushed/not-pushed counts remain consent-gated.
+
+Do not move the campaign mutex ahead of authorization roots, add a consistent read before it, or
+use a missing child-row locking read as a substitute for the campaign mutex.
+
 ## Duplicate review, record mutation, and imports
 
 `DuplicateDecisionLockService` serializes candidate-affecting mutations across the same-organization visibility domain.

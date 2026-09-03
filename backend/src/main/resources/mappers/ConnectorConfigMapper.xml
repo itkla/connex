@@ -12,6 +12,7 @@
     <result property="credentialRef" column="credential_ref"/>
     <result property="credentialLast4" column="credential_last4"/>
     <result property="enabled" column="enabled"/>
+    <result property="configVersion" column="config_version"/>
     <result property="createdById" column="created_by_id"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
@@ -19,7 +20,7 @@
 
   <sql id="columns">
     id, workspace_id, connector, endpoint, external_list_id,
-    credential_ref, credential_last4, enabled, created_by_id, created_at, updated_at
+    credential_ref, credential_last4, enabled, config_version, created_by_id, created_at, updated_at
   </sql>
 
   <select id="listByWorkspace" resultMap="ConnectorConfigResult">
@@ -27,6 +28,23 @@
     FROM connector_config
     WHERE workspace_id = #{workspaceId}
     ORDER BY connector
+  </select>
+
+  <select id="findCurrentAudienceTargetIdForShare" resultType="java.lang.Integer">
+    SELECT id
+    FROM connector_config
+    WHERE workspace_id = #{workspaceId}
+      AND connector = #{connector}
+      AND id = #{configId}
+      AND config_version = #{configVersion}
+      AND enabled = TRUE
+      AND endpoint IS NOT NULL
+      AND endpoint &lt;&gt; ''
+      AND external_list_id IS NOT NULL
+      AND external_list_id &lt;&gt; ''
+      AND credential_ref IS NOT NULL
+      AND credential_ref &lt;&gt; ''
+    FOR SHARE
   </select>
 
   <select id="findByWorkspaceConnector" resultMap="ConnectorConfigResult">
@@ -47,7 +65,8 @@
       external_list_id = VALUES(external_list_id),
       credential_ref = VALUES(credential_ref),
       credential_last4 = VALUES(credential_last4),
-      enabled = VALUES(enabled)
+      enabled = VALUES(enabled),
+      config_version = config_version + 1
   </insert>
 
   <delete id="delete">

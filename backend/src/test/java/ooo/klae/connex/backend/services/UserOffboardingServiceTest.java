@@ -645,6 +645,8 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         snapshot.setVersion(1);
         snapshot.setRecordType("company");
         snapshot.setDefinitionJson("{\"match\":\"all\",\"conditions\":[]}");
+        snapshot.setChannel("email");
+        snapshot.setPurpose("marketing");
         snapshot.setCreatedById(user.getId());
         campaignMapper.insertSnapshot(snapshot);
         return snapshot;

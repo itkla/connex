@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Currency;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -31,10 +32,12 @@ import ooo.klae.connex.backend.dto.CampaignRequest;
 import ooo.klae.connex.backend.dto.RecordLabelDto;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.tenant.TenantContext;
 
 /** Business logic for campaigns, live audiences, estimates, and immutable audience snapshots. */
 @Service
@@ -54,6 +57,7 @@ public class CampaignService {
     private final SegmentService segmentService;
     private final AudienceEligibilityService audienceEligibilityService;
     private final WorkspaceService workspaceService;
+    private final TenantContext tenantContext;
     private final AuthService authService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
@@ -90,8 +94,8 @@ public class CampaignService {
     @Transactional
     @RequirePermission(Permission.CAMPAIGN_MANAGE)
     public CampaignDto update(int id, CampaignRequest request) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Campaign campaign = requireCampaignForUpdate(workspaceId, id);
+        int workspaceId = requireResolvedWorkspaceId();
+        Campaign campaign = lockCampaignForManage(workspaceId, id).campaign();
         String previousStatus = campaign.getStatus();
         applyRequest(campaign, request, workspaceId, id);
         if (TERMINAL_STATUSES.contains(previousStatus) && !previousStatus.equals(campaign.getStatus())) {
@@ -128,8 +132,7 @@ public class CampaignService {
     @Transactional
     @RequirePermission(Permission.CAMPAIGN_MANAGE)
     public CampaignAudienceDto setAudience(int campaignId, CampaignAudienceRequest request) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Campaign campaign = requireCampaign(workspaceId, campaignId);
+        int workspaceId = requireResolvedWorkspaceId();
         if (request == null) {
             throw new BadRequestException("Campaign audience is required");
         }
@@ -142,9 +145,13 @@ public class CampaignService {
         audience.setRecordType(recordType);
         audience.setDefinitionJson(serializeDefinition(definition));
         audience.setMode("live");
+        audience.setChannel(normalizeAudienceChannel(request.channel()));
+        audience.setPurpose(normalizeAudiencePurpose(request.purpose()));
+        Campaign campaign = lockCampaignForManage(workspaceId, campaignId).campaign();
+        CampaignAudience previous = campaignMapper.getAudience(workspaceId, campaignId);
         campaignMapper.upsertAudience(audience);
         auditService.record("campaign.audience.set", "campaign", campaignId, campaign.getName(),
-                "Updated campaign audience", null);
+                "Updated campaign audience", audienceScopeChanges(previous, audience));
         return toAudienceDto(requireAudience(workspaceId, campaignId));
     }
 
@@ -157,10 +164,7 @@ public class CampaignService {
         return audience == null ? null : toAudienceDto(audience);
     }
 
-    /**
-     * Estimates the active audience using email marketing opt-in by default. Processing restrictions
-     * take precedence over workspace-owned suppressions, which take precedence over missing consent.
-     */
+    /** Estimates the active audience against its stored delivery channel and consent purpose. */
     @RequirePermission(Permission.CAMPAIGN_VIEW)
     public CampaignAudienceEstimateDto estimateAudience(int campaignId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -175,18 +179,23 @@ public class CampaignService {
     @Transactional
     @RequirePermission(Permission.CAMPAIGN_MANAGE)
     public CampaignAudienceSnapshotDto snapshotAudience(int campaignId) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Campaign campaign = requireCampaignForUpdate(workspaceId, campaignId);
+        int workspaceId = requireResolvedWorkspaceId();
+        LockedCampaign locked = lockCampaignForManage(workspaceId, campaignId);
+        Campaign campaign = locked.campaign();
         CampaignAudience audience = requireAudience(workspaceId, campaignId);
-        requireConsentAccess(audience.getRecordType());
+        requireConsentAccess(audience.getRecordType(), locked.permissions());
+        int nextSnapshotVersion = campaignMapper.nextSnapshotVersion(workspaceId, campaignId);
         AudienceEvaluation evaluation = evaluate(workspaceId, audience);
         CampaignAudienceSnapshot snapshot = new CampaignAudienceSnapshot();
         snapshot.setCampaignId(campaignId);
         snapshot.setWorkspaceId(workspaceId);
-        snapshot.setVersion(campaignMapper.nextSnapshotVersion(workspaceId, campaignId));
+        snapshot.setVersion(nextSnapshotVersion);
         snapshot.setRecordType(audience.getRecordType());
         snapshot.setDefinitionJson(audience.getDefinitionJson());
+        snapshot.setChannel(audience.getChannel());
+        snapshot.setPurpose(audience.getPurpose());
         snapshot.setEstimatedIncluded(evaluation.estimatedIncluded());
+        snapshot.setExcludedNoAddress(evaluation.excludedNoAddress());
         snapshot.setExcludedConsent(evaluation.excludedConsent());
         snapshot.setExcludedSuppressed(evaluation.excludedSuppressed());
         snapshot.setExcludedRestricted(evaluation.excludedRestricted());
@@ -195,8 +204,11 @@ public class CampaignService {
         campaignMapper.insertSnapshot(snapshot);
         insertMembers(workspaceId, snapshot.getId(), audience.getRecordType(), evaluation.records());
         auditService.record("campaign.audience.snapshot", "campaign", campaignId, campaign.getName(),
-                "Created campaign audience snapshot", Map.of("version", snapshot.getVersion()));
-        return getSnapshotInternal(workspaceId, campaignId, snapshot.getVersion());
+                "Created campaign audience snapshot", Map.of(
+                        "version", snapshot.getVersion(),
+                        "channel", snapshot.getChannel(),
+                        "purpose", snapshot.getPurpose()));
+        return getSnapshotForShareInternal(workspaceId, campaignId, snapshot.getVersion());
     }
 
     /** Lists immutable audience snapshot summaries for a campaign. */
@@ -233,11 +245,14 @@ public class CampaignService {
         if (!"person".equals(audience.getRecordType())) {
             List<ClassifiedRecord> records = candidateIds.stream()
                     .map(id -> new ClassifiedRecord(id, "included", null)).toList();
-            return evaluation(audience.getRecordType(), records, 0, 0, 0);
+            return evaluation(
+                    audience.getRecordType(), audience.getChannel(), audience.getPurpose(),
+                    records, 0, 0, 0, 0);
         }
 
         AudienceEligibilityService.AudienceClassification classification =
-                audienceEligibilityService.classify(workspaceId, candidateIds, DEFAULT_CHANNEL, DEFAULT_PURPOSE);
+                audienceEligibilityService.classify(
+                        workspaceId, candidateIds, audience.getChannel(), audience.getPurpose());
         List<ClassifiedRecord> records = new ArrayList<>(candidateIds.size());
         for (int id : candidateIds) {
             String reason = classification.reasonFor(id);
@@ -245,13 +260,15 @@ public class CampaignService {
                     ? new ClassifiedRecord(id, "included", null)
                     : new ClassifiedRecord(id, "excluded", reason));
         }
-        return evaluation(audience.getRecordType(), records,
+        return evaluation(audience.getRecordType(), audience.getChannel(), audience.getPurpose(), records,
+                classification.noAddress().size(),
                 classification.consentBlocked().size(), classification.suppressed().size(),
                 classification.restricted().size());
     }
 
     private AudienceEvaluation evaluation(
-            String recordType, List<ClassifiedRecord> records, int excludedConsent,
+            String recordType, String channel, String purpose, List<ClassifiedRecord> records,
+            int excludedNoAddress, int excludedConsent,
             int excludedSuppressed, int excludedRestricted) {
         List<Integer> includedIds = records.stream()
                 .filter(record -> "included".equals(record.status()))
@@ -260,8 +277,9 @@ public class CampaignService {
         List<Integer> sampleIds = includedIds.stream().limit(SAMPLE_SIZE).toList();
         List<RecordLabelDto> sampleLabels = segmentService.labels(recordType, sampleIds);
         return new AudienceEvaluation(
-                List.copyOf(records), includedIds.size(), excludedConsent, excludedSuppressed,
-                excludedRestricted, excludedConsent + excludedSuppressed + excludedRestricted,
+                List.copyOf(records), channel, purpose, includedIds.size(), excludedNoAddress,
+                excludedConsent, excludedSuppressed, excludedRestricted,
+                excludedNoAddress + excludedConsent + excludedSuppressed + excludedRestricted,
                 List.copyOf(sampleLabels));
     }
 
@@ -299,10 +317,34 @@ public class CampaignService {
                         member.getRecordType(), member.getRecordId(), member.getStatus(),
                         member.getExclusionReason()))
                 .toList();
+        return toSnapshotDto(snapshot, members);
+    }
+
+    private CampaignAudienceSnapshotDto getSnapshotForShareInternal(
+            int workspaceId, int campaignId, int version) {
+        CampaignAudienceSnapshot snapshot = campaignMapper.getSnapshotForShare(
+                workspaceId, campaignId, version);
+        if (snapshot == null) {
+            throw new ResourceNotFoundException(
+                    "Campaign audience snapshot not found for version: " + version);
+        }
+        List<CampaignAudienceMemberDto> members = campaignMapper.getSnapshotMembersForShare(
+                        workspaceId, snapshot.getId())
+                .stream()
+                .map(member -> new CampaignAudienceMemberDto(
+                        member.getRecordType(), member.getRecordId(), member.getStatus(),
+                        member.getExclusionReason()))
+                .toList();
+        return toSnapshotDto(snapshot, members);
+    }
+
+    private CampaignAudienceSnapshotDto toSnapshotDto(
+            CampaignAudienceSnapshot snapshot, List<CampaignAudienceMemberDto> members) {
         return new CampaignAudienceSnapshotDto(
                 snapshot.getCampaignId(), snapshot.getVersion(), snapshot.getRecordType(),
-                parseDefinition(snapshot.getDefinitionJson()), snapshot.getEstimatedIncluded(),
-                snapshot.getExcludedTotal(), snapshot.getExcludedConsent(),
+                parseDefinition(snapshot.getDefinitionJson()), snapshot.getChannel(), snapshot.getPurpose(),
+                snapshot.getEstimatedIncluded(), snapshot.getExcludedTotal(), snapshot.getExcludedNoAddress(),
+                snapshot.getExcludedConsent(),
                 snapshot.getExcludedSuppressed(), snapshot.getExcludedRestricted(),
                 snapshot.getCreatedById(), snapshot.getCreatedAt(), members);
     }
@@ -383,12 +425,34 @@ public class CampaignService {
         }
     }
 
-    private Campaign requireCampaignForUpdate(int workspaceId, int id) {
+    private LockedCampaign lockCampaignForManage(int workspaceId, int id) {
+        Set<Permission> permissions = workspaceService.lockedMemberPermissionsFor(
+                workspaceId, workspaceService.getCurrentUserId());
         Campaign campaign = campaignMapper.getCampaignForUpdate(workspaceId, id);
         if (campaign == null) {
             throw new ResourceNotFoundException("Campaign not found with id: " + id);
         }
-        return campaign;
+        if (!permissions.contains(Permission.CAMPAIGN_MANAGE)) {
+            throw new ForbiddenException("Requires the CAMPAIGN_MANAGE permission in this workspace");
+        }
+        return new LockedCampaign(campaign, permissions);
+    }
+
+    private int requireResolvedWorkspaceId() {
+        if (!tenantContext.isResolved()) {
+            throw new ForbiddenException("A resolved workspace membership is required");
+        }
+        Integer workspaceId = tenantContext.getWorkspaceId();
+        if (workspaceId == null || workspaceId <= 0) {
+            throw new ForbiddenException("A resolved workspace membership is required");
+        }
+        return workspaceId;
+    }
+
+    private static void requireConsentAccess(String recordType, Set<Permission> permissions) {
+        if ("person".equals(recordType) && !permissions.contains(Permission.CONSENT_MANAGE)) {
+            throw new ForbiddenException("Requires the CONSENT_MANAGE permission in this workspace");
+        }
     }
 
     private CampaignAudience requireAudience(int workspaceId, int campaignId) {
@@ -397,6 +461,23 @@ public class CampaignService {
             throw new ResourceNotFoundException("Campaign audience is not configured");
         }
         return audience;
+    }
+
+    private static Map<String, Object> audienceScopeChanges(
+            CampaignAudience previous, CampaignAudience current) {
+        Map<String, Object> changes = new LinkedHashMap<>();
+        changes.put("channel", change(
+                previous == null ? null : previous.getChannel(), current.getChannel()));
+        changes.put("purpose", change(
+                previous == null ? null : previous.getPurpose(), current.getPurpose()));
+        return changes;
+    }
+
+    private static Map<String, Object> change(Object before, Object after) {
+        Map<String, Object> delta = new LinkedHashMap<>();
+        delta.put("old", before);
+        delta.put("new", after);
+        return delta;
     }
 
     private SegmentDefinition requireDefinition(SegmentDefinition definition) {
@@ -431,7 +512,8 @@ public class CampaignService {
     private CampaignAudienceDto toAudienceDto(CampaignAudience audience) {
         return new CampaignAudienceDto(
                 audience.getCampaignId(), audience.getRecordType(),
-                parseDefinition(audience.getDefinitionJson()), audience.getMode(), audience.getUpdatedAt());
+                parseDefinition(audience.getDefinitionJson()), audience.getMode(), audience.getChannel(),
+                audience.getPurpose(), audience.getUpdatedAt());
     }
 
     private static CampaignDto toDto(Campaign campaign) {
@@ -451,6 +533,22 @@ public class CampaignService {
         return normalized;
     }
 
+    private static String normalizeAudienceChannel(String value) {
+        String normalized = value == null || value.isBlank() ? DEFAULT_CHANNEL : normalize(value);
+        if (!("email".equals(normalized) || "sms".equals(normalized))) {
+            throw new BadRequestException("Campaign audience channel must be email or sms");
+        }
+        return normalized;
+    }
+
+    private static String normalizeAudiencePurpose(String value) {
+        String normalized = value == null || value.isBlank() ? DEFAULT_PURPOSE : normalize(value);
+        if (!normalized.matches("[a-z][a-z0-9_-]{0,31}")) {
+            throw new BadRequestException("Campaign audience purpose is invalid");
+        }
+        return normalized;
+    }
+
     private static String normalize(String value) {
         return value == null ? null : value.trim().toLowerCase(Locale.ROOT);
     }
@@ -465,9 +563,15 @@ public class CampaignService {
     private record ClassifiedRecord(int recordId, String status, String exclusionReason) {
     }
 
+    private record LockedCampaign(Campaign campaign, Set<Permission> permissions) {
+    }
+
     private record AudienceEvaluation(
             List<ClassifiedRecord> records,
+            String channel,
+            String purpose,
             int estimatedIncluded,
+            int excludedNoAddress,
             int excludedConsent,
             int excludedSuppressed,
             int excludedRestricted,
@@ -475,8 +579,8 @@ public class CampaignService {
             List<RecordLabelDto> sampleLabels) {
         private CampaignAudienceEstimateDto toEstimate() {
             return new CampaignAudienceEstimateDto(
-                    estimatedIncluded, excludedConsent, excludedSuppressed, excludedRestricted,
-                    excludedTotal, sampleLabels);
+                    channel, purpose, estimatedIncluded, excludedNoAddress, excludedConsent,
+                    excludedSuppressed, excludedRestricted, excludedTotal, sampleLabels);
         }
     }
 

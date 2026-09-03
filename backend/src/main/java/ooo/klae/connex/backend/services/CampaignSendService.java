@@ -43,6 +43,7 @@ import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
  * The campaign send choke point: message and revision authoring, and creation/lifecycle of a send
@@ -71,6 +72,7 @@ public class CampaignSendService {
     private final CapabilityRegistry capabilityRegistry;
     private final DeliveryProviderConfigService deliveryProviderConfigService;
     private final WorkspaceService workspaceService;
+    private final TenantContext tenantContext;
     private final AuthService authService;
     private final AuditService auditService;
 
@@ -156,28 +158,36 @@ public class CampaignSendService {
 
     /**
      * Creates a draft send bound to a frozen snapshot version and message revision, materializing one
-     * pending {@code campaign_delivery} row per included person that has an address resolvable on the
-     * message's channel. The send inherits that channel; a person the channel cannot address — no email
-     * for an email send, no usable phone for an SMS send — is not materialized.
+     * pending {@code campaign_delivery} row per included person. The message channel and normalized
+     * send purpose must match the classification scope frozen on the snapshot.
      */
     @Transactional
     @RequirePermission(Permission.CAMPAIGN_MANAGE)
     public CampaignSendDto createSend(int campaignId, CampaignSendRequest request) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Campaign campaign = requireCampaign(workspaceId, campaignId);
+        int workspaceId = requireResolvedWorkspaceId();
         if (request == null) {
             throw new BadRequestException("Campaign send is required");
         }
-        CampaignMessage message = requireMessage(workspaceId, campaignId, request.messageId());
+        Set<Permission> permissions = workspaceService.lockedMemberPermissionsFor(
+                workspaceId, workspaceService.getCurrentUserId());
+        Campaign campaign = campaignMapper.getCampaignForUpdate(workspaceId, campaignId);
+        if (campaign == null) {
+            throw new ResourceNotFoundException("Campaign not found with id: " + campaignId);
+        }
+        if (!permissions.contains(Permission.CAMPAIGN_MANAGE)) {
+            throw new ForbiddenException("Requires the CAMPAIGN_MANAGE permission in this workspace");
+        }
+        CampaignMessage message = requireMessageForShare(workspaceId, campaignId, request.messageId());
         DeliveryChannel channel = resolveDispatchableChannel(message.getChannel());
         CampaignMessageRevision revision =
-                campaignMessageMapper.getRevision(workspaceId, request.messageId(), request.messageVersion());
+                campaignMessageMapper.getRevisionForShare(
+                        workspaceId, request.messageId(), request.messageVersion());
         if (revision == null) {
             throw new ResourceNotFoundException("Campaign message revision not found for version: "
                     + request.messageVersion());
         }
         CampaignAudienceSnapshot snapshot =
-                campaignMapper.getSnapshot(workspaceId, campaignId, request.snapshotVersion());
+                campaignMapper.getSnapshotForShare(workspaceId, campaignId, request.snapshotVersion());
         if (snapshot == null) {
             throw new ResourceNotFoundException("Campaign audience snapshot not found for version: "
                     + request.snapshotVersion());
@@ -185,8 +195,20 @@ public class CampaignSendService {
         if (!"person".equals(snapshot.getRecordType())) {
             throw new BadRequestException("Only person audiences can be sent to");
         }
-        workspaceService.requirePermission(Permission.CONSENT_MANAGE);
+        if (!permissions.contains(Permission.CONSENT_MANAGE)) {
+            throw new ForbiddenException("Requires the CONSENT_MANAGE permission in this workspace");
+        }
         String purpose = normalizePurpose(request.purpose());
+        if (!message.getChannel().equals(snapshot.getChannel())) {
+            throw new BadRequestException("This audience snapshot was frozen for the "
+                    + snapshot.getChannel() + " channel and cannot be sent with a "
+                    + message.getChannel() + " message");
+        }
+        if (!purpose.equals(snapshot.getPurpose())) {
+            throw new BadRequestException("This audience snapshot was frozen for the "
+                    + snapshot.getPurpose() + " purpose and cannot be sent with the "
+                    + purpose + " purpose");
+        }
 
         CampaignSend send = new CampaignSend();
         send.setWorkspaceId(workspaceId);
@@ -208,7 +230,7 @@ public class CampaignSendService {
         forEachBatch(deliveries, batch -> campaignDeliveryMapper.insertDeliveries(workspaceId, batch));
         auditService.record("campaign.send.create", "campaign", campaignId, campaign.getName(),
                 "Created campaign send", Map.of("sendId", send.getId(), "recipients", deliveries.size()));
-        return toSendDto(requireSend(workspaceId, campaignId, send.getId()));
+        return toSendDto(requireSendForUpdate(workspaceId, campaignId, send.getId()));
     }
 
     /** Queues a draft send for background dispatch. */
@@ -303,7 +325,7 @@ public class CampaignSendService {
     }
 
     private List<CampaignDelivery> materialize(int workspaceId, int snapshotId, DeliveryChannel channel) {
-        List<Integer> personIds = campaignMapper.getSnapshotMembers(workspaceId, snapshotId).stream()
+        List<Integer> personIds = campaignMapper.getSnapshotMembersForShare(workspaceId, snapshotId).stream()
                 .filter(member -> "included".equals(member.getStatus()))
                 .map(CampaignAudienceMember::getRecordId)
                 .toList();
@@ -342,6 +364,17 @@ public class CampaignSendService {
         return campaign;
     }
 
+    private int requireResolvedWorkspaceId() {
+        if (!tenantContext.isResolved()) {
+            throw new ForbiddenException("A resolved workspace membership is required");
+        }
+        Integer workspaceId = tenantContext.getWorkspaceId();
+        if (workspaceId == null || workspaceId <= 0) {
+            throw new ForbiddenException("A resolved workspace membership is required");
+        }
+        return workspaceId;
+    }
+
     private CampaignMessage requireMessage(int workspaceId, int campaignId, int messageId) {
         CampaignMessage message = campaignMessageMapper.getMessage(workspaceId, messageId);
         if (message == null || message.getCampaignId() != campaignId) {
@@ -350,8 +383,24 @@ public class CampaignSendService {
         return message;
     }
 
+    private CampaignMessage requireMessageForShare(int workspaceId, int campaignId, int messageId) {
+        CampaignMessage message = campaignMessageMapper.getMessageForShare(workspaceId, messageId);
+        if (message == null || message.getCampaignId() != campaignId) {
+            throw new ResourceNotFoundException("Campaign message not found with id: " + messageId);
+        }
+        return message;
+    }
+
     private CampaignSend requireSend(int workspaceId, int campaignId, int sendId) {
         CampaignSend send = campaignSendMapper.getSend(workspaceId, sendId);
+        if (send == null || send.getCampaignId() != campaignId) {
+            throw new ResourceNotFoundException("Campaign send not found with id: " + sendId);
+        }
+        return send;
+    }
+
+    private CampaignSend requireSendForUpdate(int workspaceId, int campaignId, int sendId) {
+        CampaignSend send = campaignSendMapper.getSendForUpdate(workspaceId, sendId);
         if (send == null || send.getCampaignId() != campaignId) {
             throw new ResourceNotFoundException("Campaign send not found with id: " + sendId);
         }

@@ -17,13 +17,31 @@ public interface CampaignAudienceExportMapper {
 
     CampaignAudienceExport getExport(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
+    CampaignAudienceExport getExportForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
     boolean existsActiveForSnapshotConnector(
             @Param("workspaceId") int workspaceId,
             @Param("campaignId") int campaignId,
             @Param("snapshotId") int snapshotId,
             @Param("connector") String connector);
 
+    int markStaleRunningNeedsReconciliation(
+            @Param("workspaceId") int workspaceId,
+            @Param("campaignId") int campaignId,
+            @Param("exportIds") List<Integer> exportIds);
+
+    int nextAttemptForSnapshotTarget(
+            @Param("workspaceId") int workspaceId,
+            @Param("campaignId") int campaignId,
+            @Param("snapshotId") int snapshotId,
+            @Param("connector") String connector,
+            @Param("externalListId") String externalListId);
+
     void insertExport(CampaignAudienceExport export);
 
+    int stagePush(CampaignAudienceExport export);
+
     int updateOutcome(CampaignAudienceExport export);
+
+    int resolveReconciliation(CampaignAudienceExport export);
 }

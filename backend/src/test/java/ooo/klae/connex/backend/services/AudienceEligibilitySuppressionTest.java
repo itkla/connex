@@ -9,20 +9,30 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
+import ooo.klae.connex.backend.dto.CampaignAudienceRequest;
+import ooo.klae.connex.backend.dto.CampaignAudienceSnapshotDto;
+import ooo.klae.connex.backend.dto.CampaignDto;
+import ooo.klae.connex.backend.dto.CampaignRequest;
+import ooo.klae.connex.backend.dto.SegmentCondition;
+import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.SuppressionEntryRequest;
 
 /**
  * Proves the audience snapshot matches suppressions on the address the channel actually contacts,
  * against a real database, so the snapshot classification cannot drift from the dispatch re-check.
  */
-class AudienceEligibilitySuppressionTest extends AbstractServiceTest {
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
+class AudienceEligibilitySuppressionTest extends CampaignRealDbTestSupport {
 
     private static final String PURPOSE = "marketing";
 
     @Autowired private AudienceEligibilityService audienceEligibilityService;
+    @Autowired private CampaignService campaignService;
     @Autowired private SuppressionService suppressionService;
 
     @Test
@@ -31,12 +41,11 @@ class AudienceEligibilitySuppressionTest extends AbstractServiceTest {
         suppressionService.add(new SuppressionEntryRequest(
                 "workspace", "sms", "+819012345678", person.getId(), "do_not_contact", null));
 
-        AudienceEligibilityService.AudienceClassification result = audienceEligibilityService.classify(
-                workspace.getId(), List.of(person.getId()), "sms", PURPOSE);
+        CampaignAudienceSnapshotDto snapshot = snapshotFor(person, "sms");
 
-        assertEquals(Set.of(person.getId()), result.suppressed());
-        assertTrue(result.includedIds().isEmpty());
-        assertEquals("suppressed", result.reasonFor(person.getId()));
+        assertEquals(0, snapshot.estimatedIncluded());
+        assertEquals(1, snapshot.excludedSuppressed());
+        assertEquals("suppressed", snapshot.members().getFirst().exclusionReason());
     }
 
     @Test
@@ -45,12 +54,12 @@ class AudienceEligibilitySuppressionTest extends AbstractServiceTest {
         suppressionService.add(new SuppressionEntryRequest(
                 "workspace", "email", "email.blocked@example.com", person.getId(), "unsubscribe", null));
 
-        AudienceEligibilityService.AudienceClassification result = audienceEligibilityService.classify(
-                workspace.getId(), List.of(person.getId()), "sms", PURPOSE);
+        CampaignAudienceSnapshotDto snapshot = snapshotFor(person, "sms");
 
-        assertTrue(result.suppressed().isEmpty());
-        assertEquals(List.of(person.getId()), result.includedIds());
-        assertNull(result.reasonFor(person.getId()));
+        assertEquals("sms", snapshot.channel());
+        assertEquals(0, snapshot.excludedSuppressed());
+        assertEquals(1, snapshot.estimatedIncluded());
+        assertNull(snapshot.members().getFirst().exclusionReason());
     }
 
     @Test
@@ -59,12 +68,12 @@ class AudienceEligibilitySuppressionTest extends AbstractServiceTest {
         suppressionService.add(new SuppressionEntryRequest(
                 "workspace", "sms", "+819055554321", person.getId(), "do_not_contact", null));
 
-        AudienceEligibilityService.AudienceClassification result = audienceEligibilityService.classify(
-                workspace.getId(), List.of(person.getId()), "email", PURPOSE);
+        CampaignAudienceSnapshotDto snapshot = snapshotFor(person, "email");
 
-        assertTrue(result.suppressed().isEmpty());
-        assertEquals(List.of(person.getId()), result.includedIds());
-        assertNull(result.reasonFor(person.getId()));
+        assertEquals("email", snapshot.channel());
+        assertEquals(0, snapshot.excludedSuppressed());
+        assertEquals(1, snapshot.estimatedIncluded());
+        assertNull(snapshot.members().getFirst().exclusionReason());
     }
 
     @Test
@@ -135,7 +144,9 @@ class AudienceEligibilitySuppressionTest extends AbstractServiceTest {
                 workspace.getId(), List.of(person.getId()), "sms", PURPOSE);
 
         assertTrue(result.suppressed().isEmpty());
-        assertEquals(List.of(person.getId()), result.includedIds());
+        assertEquals(Set.of(person.getId()), result.noAddress());
+        assertTrue(result.includedIds().isEmpty());
+        assertEquals("no_address", result.reasonFor(person.getId()));
     }
 
     private Person newPersonWith(String email, String phone) {
@@ -149,5 +160,22 @@ class AudienceEligibilitySuppressionTest extends AbstractServiceTest {
         person.setWorkspaceId(workspace.getId());
         personMapper.insert(person);
         return person;
+    }
+
+    private CampaignAudienceSnapshotDto snapshotFor(Person person, String channel) {
+        CampaignDto campaign = campaignService.create(new CampaignRequest(
+                "Campaign " + unique(), null, "email", null, currentUser.getId(),
+                null, null, null, null, null));
+        SegmentCondition condition = new SegmentCondition();
+        condition.setType("field");
+        condition.setField("name");
+        condition.setOp("starts_with");
+        condition.setValue(person.getName());
+        SegmentDefinition definition = new SegmentDefinition();
+        definition.setMatch("all");
+        definition.setConditions(List.of(condition));
+        campaignService.setAudience(campaign.id(), new CampaignAudienceRequest(
+                "person", definition, channel, PURPOSE));
+        return campaignService.snapshotAudience(campaign.id());
     }
 }

@@ -18,9 +18,10 @@ import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
 import CampaignCounter from "@/app/components/marketing/campaigns/CampaignCounter";
 import ExportStatusBadge from "@/app/components/marketing/campaigns/ExportStatusBadge";
-import { ApiError, createCampaignExport } from "@/app/lib/api";
+import { ApiError, createCampaignExport, reconcileCampaignExport } from "@/app/lib/api";
 import {
     type CampaignAudienceExport,
+    type CampaignAudienceExportResolution,
     type CampaignAudienceSnapshotSummary,
 } from "@/app/lib/types";
 import { canCreateExport, type CampaignAccess } from "@/app/lib/campaignAccess";
@@ -63,10 +64,18 @@ export default function CampaignExportPanel({
     const [exportConnector, setExportConnector] = useState<string>("");
     const [isCreatingExport, setIsCreatingExport] = useState(false);
     const [exportRefused, setExportRefused] = useState(false);
+    const [resolvingExport, setResolvingExport] = useState<{
+        exportId: number;
+        resolution: CampaignAudienceExportResolution;
+    } | null>(null);
 
     const exportDisabled = deliveryAvailability === "disabled" || exportRefused;
     const exportUnavailable = deliveryAvailability !== "enabled" || exportRefused;
     const canPushExport = canCreateExport(access);
+    const emailSnapshots = useMemo(
+        () => snapshots.filter((snapshot) => snapshot.channel === "email"),
+        [snapshots],
+    );
 
     const chosenSnapshot = useMemo(
         () => snapshots.find((snapshot) => String(snapshot.version) === exportSnapshot) ?? null,
@@ -79,6 +88,10 @@ export default function CampaignExportPanel({
     const createExport = async () => {
         const snapshotVersion = Number(exportSnapshot);
         if (!snapshotVersion || !exportConnector) return;
+        if (chosenSnapshot?.channel !== "email") {
+            toastError(t("nonEmailSnapshot"));
+            return;
+        }
         setIsCreatingExport(true);
         try {
             const created = await createCampaignExport(campaignId, {
@@ -98,6 +111,25 @@ export default function CampaignExportPanel({
             }
         } finally {
             setIsCreatingExport(false);
+        }
+    };
+
+    const resolveExport = async (
+        exportId: number,
+        resolution: CampaignAudienceExportResolution,
+    ) => {
+        setResolvingExport({ exportId, resolution });
+        try {
+            const resolved = await reconcileCampaignExport(campaignId, exportId, { resolution });
+            setExports((current) => current.map((entry) =>
+                entry.id === resolved.id ? resolved : entry));
+            toastSuccess(resolution === "delivered"
+                ? t("markedDelivered")
+                : t("markedNotDelivered"));
+        } catch (err) {
+            showApiError(err, "reconcileFailed");
+        } finally {
+            setResolvingExport(null);
         }
     };
 
@@ -135,16 +167,22 @@ export default function CampaignExportPanel({
                                         <SelectValue placeholder={t("snapshotPlaceholder")} />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {snapshots.map((snapshot) => (
+                                        {emailSnapshots.map((snapshot) => (
                                             <SelectItem key={snapshot.version} value={String(snapshot.version)}>
                                                 {t("snapshotOption", {
                                                     version: snapshot.version,
                                                     count: snapshot.estimatedIncluded.toLocaleString(locale),
+                                                    purpose: snapshot.purpose,
                                                 })}
                                             </SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
+                                {emailSnapshots.length === 0 && (
+                                    <p className="text-xs text-muted-foreground">
+                                        {t("noEmailSnapshots")}
+                                    </p>
+                                )}
                             </div>
                             <div className="grid gap-1.5">
                                 <Label htmlFor="export-connector">{t("connector")}</Label>
@@ -231,20 +269,73 @@ export default function CampaignExportPanel({
                                     </span>
                                 </div>
 
-                                <div className="grid grid-cols-3 gap-3 sm:gap-4">
+                                <div className={entry.detailedCountsAvailable
+                                    ? "grid grid-cols-3 gap-3 sm:gap-4"
+                                    : "grid grid-cols-1 gap-3"}
+                                >
                                     <CampaignCounter
                                         label={t("total")}
                                         value={entry.totalMembers.toLocaleString(locale)}
                                     />
-                                    <CampaignCounter
-                                        label={t("pushed")}
-                                        value={entry.pushedCount.toLocaleString(locale)}
-                                    />
-                                    <CampaignCounter
-                                        label={t("failed")}
-                                        value={entry.failedCount.toLocaleString(locale)}
-                                    />
+                                    {entry.detailedCountsAvailable
+                                        && entry.pushedCount !== null
+                                        && entry.failedCount !== null && (
+                                        <>
+                                            <CampaignCounter
+                                                label={t("pushed")}
+                                                value={entry.pushedCount.toLocaleString(locale)}
+                                            />
+                                            <CampaignCounter
+                                                label={t("failed")}
+                                                value={entry.failedCount.toLocaleString(locale)}
+                                            />
+                                        </>
+                                    )}
                                 </div>
+                                {!entry.detailedCountsAvailable && (
+                                    <p className="text-xs text-muted-foreground">
+                                        {entry.status === "needs_reconciliation"
+                                            ? t("reconciliationRequired")
+                                            : entry.detailedCountsKnown
+                                                ? t("detailedCountsRestricted")
+                                                : t("detailedCountsUnknown")}
+                                    </p>
+                                )}
+                                {entry.status === "needs_reconciliation" && canPushExport && (
+                                    <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/40 p-3">
+                                        <p className="text-xs text-muted-foreground">
+                                            {t("reconciliationPrompt")}
+                                        </p>
+                                        <div className="flex flex-wrap gap-2">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                disabled={resolvingExport?.exportId === entry.id}
+                                                onClick={() => resolveExport(entry.id, "delivered")}
+                                            >
+                                                {resolvingExport?.exportId === entry.id
+                                                    && resolvingExport.resolution === "delivered" && (
+                                                    <Loader2Icon className="size-4 animate-spin" />
+                                                )}
+                                                {t("markDelivered")}
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                disabled={resolvingExport?.exportId === entry.id}
+                                                onClick={() => resolveExport(entry.id, "not_delivered")}
+                                            >
+                                                {resolvingExport?.exportId === entry.id
+                                                    && resolvingExport.resolution === "not_delivered" && (
+                                                    <Loader2Icon className="size-4 animate-spin" />
+                                                )}
+                                                {t("markNotDelivered")}
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )}
                             </li>
                         ))}
                     </ul>

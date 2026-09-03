@@ -53,9 +53,16 @@ export default function AudienceEstimatePanel({
     const total = estimate.estimatedIncluded + estimate.excludedTotal;
     const includedPct = total === 0 ? 0 : Math.round((estimate.estimatedIncluded / total) * 100);
     const isPerson = recordType === "person";
+    const noAddressIsSms = estimate.channel === "sms";
 
     return (
         <div className="flex flex-col gap-5">
+            <p className="text-xs font-medium text-muted-foreground">
+                {t("estimateScope", {
+                    channel: t(`channels.${estimate.channel}`),
+                    purpose: estimate.purpose,
+                })}
+            </p>
             <div className="grid grid-cols-1 gap-px overflow-hidden rounded-2xl bg-border ring-1 ring-border sm:grid-cols-2">
                 <div className="flex flex-col gap-2 bg-card p-5">
                     <span className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
@@ -87,6 +94,13 @@ export default function AudienceEstimatePanel({
             {isPerson ? (
                 <div className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
                     <ExclusionRow
+                        label={t(noAddressIsSms ? "excludedNoAddressSms" : "excludedNoAddressEmail")}
+                        hint={t(noAddressIsSms ? "noAddressSmsHint" : "noAddressEmailHint")}
+                        value={estimate.excludedNoAddress}
+                        dotClass="bg-muted-foreground"
+                        locale={locale}
+                    />
+                    <ExclusionRow
                         label={t("excludedRestricted")}
                         hint={t("restrictedHint")}
                         value={estimate.excludedRestricted}
@@ -102,7 +116,10 @@ export default function AudienceEstimatePanel({
                     />
                     <ExclusionRow
                         label={t("excludedConsent")}
-                        hint={t("consentHint")}
+                        hint={t("consentHint", {
+                            channel: t(`channels.${estimate.channel}`),
+                            purpose: estimate.purpose,
+                        })}
                         value={estimate.excludedConsent}
                         dotClass="bg-muted-foreground"
                         locale={locale}

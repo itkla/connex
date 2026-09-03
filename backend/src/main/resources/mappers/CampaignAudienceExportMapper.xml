@@ -10,7 +10,11 @@
     <result property="snapshotId" column="snapshot_id"/>
     <result property="connector" column="connector"/>
     <result property="externalListId" column="external_list_id"/>
+    <result property="frozenMemberIdsJson" column="frozen_member_ids_json"/>
+    <result property="pushedMemberIdsJson" column="pushed_member_ids_json"/>
     <result property="status" column="status"/>
+    <result property="attempt" column="attempt"/>
+    <result property="leaseUntil" column="lease_until"/>
     <result property="totalMembers" column="total_members"/>
     <result property="pushedCount" column="pushed_count"/>
     <result property="failedCount" column="failed_count"/>
@@ -20,21 +24,40 @@
   </resultMap>
 
   <sql id="columns">
-    id, workspace_id, campaign_id, snapshot_id, connector, external_list_id, status,
+    id, workspace_id, campaign_id, snapshot_id, connector, external_list_id,
+    frozen_member_ids_json, pushed_member_ids_json, status, attempt, lease_until,
     total_members, pushed_count, failed_count, created_by_id, created_at, updated_at
   </sql>
 
+  <sql id="historyColumns">
+    id, workspace_id, campaign_id, snapshot_id, connector, external_list_id,
+    frozen_member_ids_json, pushed_member_ids_json,
+    CASE
+      WHEN status = 'running' AND lease_until &lt; UTC_TIMESTAMP(6) THEN 'needs_reconciliation'
+      ELSE status
+    END AS status,
+    attempt, lease_until, total_members, pushed_count, failed_count,
+    created_by_id, created_at, updated_at
+  </sql>
+
   <select id="getByCampaign" resultMap="CampaignAudienceExportResult">
-    SELECT <include refid="columns"/>
+    SELECT <include refid="historyColumns"/>
     FROM campaign_audience_export
     WHERE workspace_id = #{workspaceId} AND campaign_id = #{campaignId}
     ORDER BY id DESC
   </select>
 
   <select id="getExport" resultMap="CampaignAudienceExportResult">
+    SELECT <include refid="historyColumns"/>
+    FROM campaign_audience_export
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getExportForUpdate" resultMap="CampaignAudienceExportResult">
     SELECT <include refid="columns"/>
     FROM campaign_audience_export
     WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
   </select>
 
   <select id="existsActiveForSnapshotConnector" resultType="boolean">
@@ -45,26 +68,82 @@
         AND campaign_id = #{campaignId}
         AND snapshot_id = #{snapshotId}
         AND connector = #{connector}
-        AND status IN ('draft', 'running', 'completed')
+        AND (
+          status IN ('draft', 'running', 'completed', 'needs_reconciliation')
+          OR (status = 'failed' AND pushed_count &gt; 0)
+        )
     )
+  </select>
+
+  <update id="markStaleRunningNeedsReconciliation">
+    UPDATE campaign_audience_export
+    SET status = 'needs_reconciliation',
+        lease_until = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND campaign_id = #{campaignId}
+      AND id IN
+      <foreach collection="exportIds" item="exportId" open="(" separator="," close=")">
+        #{exportId}
+      </foreach>
+      AND status = 'running'
+      AND lease_until &lt; UTC_TIMESTAMP(6)
+  </update>
+
+  <select id="nextAttemptForSnapshotTarget" resultType="int">
+    SELECT COUNT(*) + 1
+    FROM campaign_audience_export
+    WHERE workspace_id = #{workspaceId}
+      AND campaign_id = #{campaignId}
+      AND snapshot_id = #{snapshotId}
+      AND connector = #{connector}
+      AND external_list_id = #{externalListId}
   </select>
 
   <insert id="insertExport" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO campaign_audience_export
-      (workspace_id, campaign_id, snapshot_id, connector, external_list_id, status,
+      (workspace_id, campaign_id, snapshot_id, connector, external_list_id,
+       frozen_member_ids_json, pushed_member_ids_json, status, attempt, lease_until,
        total_members, pushed_count, failed_count, created_by_id)
     VALUES
-      (#{workspaceId}, #{campaignId}, #{snapshotId}, #{connector}, #{externalListId}, #{status},
+      (#{workspaceId}, #{campaignId}, #{snapshotId}, #{connector}, #{externalListId},
+       #{frozenMemberIdsJson}, #{pushedMemberIdsJson}, #{status}, #{attempt}, #{leaseUntil},
        #{totalMembers}, #{pushedCount}, #{failedCount}, #{createdById})
   </insert>
 
+  <update id="stagePush">
+    UPDATE campaign_audience_export
+    SET external_list_id = #{externalListId},
+        pushed_member_ids_json = #{pushedMemberIdsJson},
+        attempt = #{attempt},
+        failed_count = #{failedCount},
+        lease_until = #{leaseUntil}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+  </update>
+
   <update id="updateOutcome">
     UPDATE campaign_audience_export
-    SET status = #{status},
+    SET external_list_id = #{externalListId},
+        status = #{status},
         total_members = #{totalMembers},
         pushed_count = #{pushedCount},
-        failed_count = #{failedCount}
-    WHERE workspace_id = #{workspaceId} AND id = #{id}
+        failed_count = #{failedCount},
+        lease_until = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+  </update>
+
+  <update id="resolveReconciliation">
+    UPDATE campaign_audience_export
+    SET status = #{status},
+        pushed_count = #{pushedCount},
+        failed_count = #{failedCount},
+        lease_until = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'needs_reconciliation'
   </update>
 
 </mapper>

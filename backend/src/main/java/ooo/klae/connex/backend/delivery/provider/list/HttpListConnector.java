@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.delivery.provider.list;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.URI;
 import java.time.Duration;
@@ -49,6 +50,20 @@ import tools.jackson.databind.ObjectMapper;
  * <p>Every vendor-specific detail — the request field names, the credential scheme, and the response
  * tally fields — is confined to the constants and the single {@link #memberPayload} mapping method in
  * this class, so a second connector is a new adapter and nothing else.
+ *
+ * <p>This generic adapter has no provider-specific atomic non-acceptance contract. Its outcome table
+ * is therefore conservative:
+ * <table>
+ *   <caption>Audience push outcome classification</caption>
+ *   <tr><th>Observed result</th><th>Outcome</th></tr>
+ *   <tr><td>Local validation, serialization, DNS, or connection refusal before send</td>
+ *       <td>{@code DEFINITE_NO_SIDE_EFFECT}</td></tr>
+ *   <tr><td>Any non-2xx HTTP response after the request body was sent</td>
+ *       <td>{@code AMBIGUOUS}</td></tr>
+ *   <tr><td>Post-send transport failure or incomplete/inconsistent 2xx counters</td>
+ *       <td>{@code AMBIGUOUS}</td></tr>
+ *   <tr><td>Complete, consistent 2xx acceptance counters</td><td>{@code CONFIRMED}</td></tr>
+ * </table>
  */
 @Service
 public class HttpListConnector implements AudienceSyncConnector {
@@ -69,6 +84,7 @@ public class HttpListConnector implements AudienceSyncConnector {
     private static final String FIELD_LAST_NAME = "lastName";
     private static final String FIELD_ADDED = "added";
     private static final String FIELD_FAILED = "failed";
+    private static final String IDEMPOTENCY_HEADER = "Idempotency-Key";
 
     private final RestClient restClient;
     private final Duration connectTimeout;
@@ -119,29 +135,44 @@ public class HttpListConnector implements AudienceSyncConnector {
         int memberCount = push.members().size();
         URI endpoint = parseHttpsEndpoint(target.endpoint());
         if (endpoint == null) {
-            return AudiencePushResult.failed(memberCount, "No usable connector endpoint is configured");
+            return AudiencePushResult.definiteNoSideEffect(
+                    memberCount, "No usable connector endpoint is configured");
         }
         String apiKey = target.credentials().get(CREDENTIAL_KEY_API);
         if (apiKey == null || apiKey.isBlank()) {
-            return AudiencePushResult.failed(memberCount, "No usable connector credential is configured");
+            return AudiencePushResult.definiteNoSideEffect(
+                    memberCount, "No usable connector credential is configured");
         }
         if (push.externalListId() == null || push.externalListId().isBlank()) {
-            return AudiencePushResult.failed(memberCount, "No external list is configured for the connector");
+            return AudiencePushResult.definiteNoSideEffect(
+                    memberCount, "No external list is configured for the connector");
         }
         byte[] body;
         try {
             body = objectMapper.writeValueAsBytes(pushPayload(push));
         } catch (RuntimeException exception) {
-            return AudiencePushResult.failed(memberCount, "Could not encode the connector push request");
+            return AudiencePushResult.definiteNoSideEffect(
+                    memberCount, "Could not encode the connector push request");
+        }
+        InetAddress pinnedAddress;
+        try {
+            pinnedAddress = AiEgressGuard.resolveFetchableHost(endpoint.getHost(), false);
+        } catch (RuntimeException exception) {
+            return AudiencePushResult.definiteNoSideEffect(memberCount, bounded(exception.getMessage()));
         }
         ListResponse response;
         try {
-            response = send(endpoint, apiKey, body);
+            response = send(endpoint, pinnedAddress, apiKey, push.idempotencyKey(), body);
         } catch (RuntimeException exception) {
-            return AudiencePushResult.failed(memberCount, bounded(exception.getMessage()));
+            if (hasCause(exception, ConnectException.class)) {
+                return AudiencePushResult.definiteNoSideEffect(memberCount, bounded(exception.getMessage()));
+            }
+            return AudiencePushResult.ambiguous(memberCount, bounded(exception.getMessage()));
         }
         if (response.statusCode() < 200 || response.statusCode() > 299) {
-            return AudiencePushResult.failed(memberCount, "connector rejected with status " + response.statusCode());
+            return AudiencePushResult.ambiguous(
+                    memberCount,
+                    "connector returned status " + response.statusCode() + " after the request was sent");
         }
         return parseResult(response.body(), memberCount);
     }
@@ -173,9 +204,15 @@ public class HttpListConnector implements AudienceSyncConnector {
         try {
             JsonNode root = objectMapper.readTree(responseBody == null ? new byte[0] : responseBody);
             if (root != null && root.isObject()) {
-                int added = intField(root, FIELD_ADDED, memberCount);
-                int failed = intField(root, FIELD_FAILED, 0);
-                return new AudiencePushResult(clamp(added, memberCount), clamp(failed, memberCount), "connector accepted");
+                JsonNode addedNode = root.get(FIELD_ADDED);
+                JsonNode failedNode = root.get(FIELD_FAILED);
+                if (isNonNegativeInt(addedNode) && isNonNegativeInt(failedNode)) {
+                    int added = addedNode.intValue();
+                    int failed = failedNode.intValue();
+                    if ((long) added + failed == memberCount) {
+                        return new AudiencePushResult(added, failed, "connector accepted");
+                    }
+                }
             }
         } catch (RuntimeException exception) {
             return unconfirmed(memberCount);
@@ -184,32 +221,37 @@ public class HttpListConnector implements AudienceSyncConnector {
     }
 
     private static AudiencePushResult unconfirmed(int memberCount) {
-        return new AudiencePushResult(0, memberCount, "provider returned an unparseable response");
+        return AudiencePushResult.ambiguous(
+                memberCount, "provider returned an incomplete or inconsistent response");
     }
 
-    private ListResponse send(URI endpoint, String apiKey, byte[] body) {
+    private ListResponse send(
+            URI endpoint, InetAddress pinnedAddress, String apiKey, String idempotencyKey, byte[] body) {
         String host = endpoint.getHost();
-        InetAddress pinnedAddress = AiEgressGuard.resolveFetchableHost(host, false);
         if (restClient != null) {
-            return exchange(restClient, endpoint, apiKey, body);
+            return exchange(restClient, endpoint, apiKey, idempotencyKey, body);
         }
         try (CloseableHttpClient httpClient = pinnedHttpClient(host, pinnedAddress)) {
             RestClient pinned = RestClient.builder()
                     .requestFactory(new HttpComponentsClientHttpRequestFactory(httpClient))
                     .build();
-            return exchange(pinned, endpoint, apiKey, body);
+            return exchange(pinned, endpoint, apiKey, idempotencyKey, body);
         } catch (IOException exception) {
             throw new DeliveryProviderException("Connector transport could not be closed");
         }
     }
 
-    private ListResponse exchange(RestClient client, URI endpoint, String apiKey, byte[] body) {
-        return client.post()
+    private ListResponse exchange(
+            RestClient client, URI endpoint, String apiKey, String idempotencyKey, byte[] body) {
+        RestClient.RequestBodySpec request = client.post()
                 .uri(endpoint)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.APPLICATION_JSON)
-                .header("Authorization", "Bearer " + apiKey)
-                .body(body)
+                .header("Authorization", "Bearer " + apiKey);
+        if (idempotencyKey != null) {
+            request.header(IDEMPOTENCY_HEADER, idempotencyKey);
+        }
+        return request.body(body)
                 .exchange((httpRequest, httpResponse) -> new ListResponse(
                         httpResponse.getStatusCode().value(), readBounded(httpResponse.getBody())));
     }
@@ -251,16 +293,20 @@ public class HttpListConnector implements AudienceSyncConnector {
         return output.toByteArray();
     }
 
-    private static int intField(JsonNode node, String field, int fallback) {
-        JsonNode value = node.path(field);
-        return value.isIntegralNumber() ? value.asInt() : fallback;
+    private static boolean isNonNegativeInt(JsonNode value) {
+        return value != null && value.isIntegralNumber() && value.canConvertToInt()
+                && value.intValue() >= 0;
     }
 
-    private static int clamp(int value, int max) {
-        if (value < 0) {
-            return 0;
+    private static boolean hasCause(Throwable exception, Class<? extends Throwable> type) {
+        Throwable current = exception;
+        while (current != null) {
+            if (type.isInstance(current)) {
+                return true;
+            }
+            current = current.getCause();
         }
-        return Math.min(value, max);
+        return false;
     }
 
     private static URI parseHttpsEndpoint(String endpoint) {

@@ -55,7 +55,18 @@ public interface CampaignMapper {
             @Param("campaignId") int campaignId,
             @Param("version") int version);
 
+    /** Returns a current immutable snapshot while retaining a shared lock through the transaction. */
+    CampaignAudienceSnapshot getSnapshotForShare(
+            @Param("workspaceId") int workspaceId,
+            @Param("campaignId") int campaignId,
+            @Param("version") int version);
+
     List<CampaignAudienceMember> getSnapshotMembers(
+            @Param("workspaceId") int workspaceId,
+            @Param("snapshotId") int snapshotId);
+
+    /** Returns current immutable snapshot members under shared locks. */
+    List<CampaignAudienceMember> getSnapshotMembersForShare(
             @Param("workspaceId") int workspaceId,
             @Param("snapshotId") int snapshotId);
 
