@@ -341,6 +341,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("tag", 570));
         raw.add(direct("task_board_lock", 580));
         raw.add(direct("user_dashboard", 590));
+        raw.add(direct("disqualification_reason", 591));
         raw.add(storage("managed_object_usage", 600));
         raw.add(storage("object_deletion_queue", 610));
         raw.add(storage("object_storage_quota", 620));

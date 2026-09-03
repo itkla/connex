@@ -24,10 +24,13 @@
            c.id AS company_id, c.name AS company_name,
            p.image_url, p.risk_excluded, p.intro_excluded, p.suspended_at,
            p.provision_ceased_at, p.lifecycle_stage, p.lifecycle_changed_at,
-           p.disqualified_reason, p.qualification_notes, p.lead_source, p.lead_source_detail,
+           p.disqualified_reason, dr.label AS disqualified_reason_label,
+           p.qualification_notes, p.lead_source, p.lead_source_detail,
            p.referrer_person_id, p.first_response_due_at, p.first_response_started_at,
            p.first_responded_at, p.first_response_breached_at, p.created_at, p.updated_at
     FROM person p
+    LEFT JOIN disqualification_reason dr
+      ON dr.workspace_id = p.workspace_id AND BINARY dr.code = BINARY p.disqualified_reason
     LEFT JOIN company c ON c.id = p.company_id AND c.workspace_id IN
       <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
         #{candidateWorkspaceId}
@@ -261,13 +264,16 @@
 
   <select id="findLifecycleHistory"
           resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$LifecycleTransitionDto">
-    SELECT h.id, h.workspace_id, h.person_id, h.from_stage, h.to_stage, h.reason, h.note,
+    SELECT h.id, h.workspace_id, h.person_id, h.from_stage, h.to_stage, h.reason,
+           dr.label AS reason_label, h.note,
            h.changed_by_id, h.changed_at
     FROM person p
     JOIN person_lifecycle_history h ON h.person_id = p.id AND h.workspace_id IN
       <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
         #{candidateWorkspaceId}
       </foreach>
+    LEFT JOIN disqualification_reason dr
+      ON dr.workspace_id = h.workspace_id AND BINARY dr.code = BINARY h.reason
     WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
     ORDER BY h.changed_at DESC, h.id DESC
   </select>

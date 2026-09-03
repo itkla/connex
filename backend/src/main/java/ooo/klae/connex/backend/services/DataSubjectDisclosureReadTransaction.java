@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Semaphore;
 import java.util.function.Function;
@@ -12,10 +13,12 @@ import java.util.stream.Collectors;
 
 import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
+import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.beans.PersonDisqualificationReason;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.PersonDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.RecordCommentDisclosureDto;
@@ -128,6 +131,11 @@ public class DataSubjectDisclosureReadTransaction {
         if (person == null) {
             throw new ResourceNotFoundException("Linked subject person not found: " + personId);
         }
+        Locale locale = LocaleContextHolder.getLocale();
+        if (person.getDisqualifiedReason() != null) {
+            person.setDisqualifiedReasonLabel(reasonLabel(
+                person.getDisqualifiedReason(), person.getDisqualifiedReasonLabel(), locale));
+        }
         DataSubjectDisclosureDto disclosure = new DataSubjectDisclosureDto();
         disclosure.setPerson(person);
         disclosure.setIdentities(
@@ -147,8 +155,15 @@ public class DataSubjectDisclosureReadTransaction {
             dataSubjectDisclosureMapper.findAttachments(workspaceId, personId, workspaceIds));
         disclosure.setEmploymentHistory(
             dataSubjectDisclosureMapper.findEmployment(workspaceId, personId, workspaceIds));
-        disclosure.setLifecycleHistory(
-            dataSubjectDisclosureMapper.findLifecycleHistory(workspaceId, personId, workspaceIds));
+        var lifecycleHistory =
+            dataSubjectDisclosureMapper.findLifecycleHistory(workspaceId, personId, workspaceIds);
+        lifecycleHistory.forEach(transition -> {
+            if (transition.getReason() != null) {
+                transition.setReasonLabel(reasonLabel(
+                    transition.getReason(), transition.getReasonLabel(), locale));
+            }
+        });
+        disclosure.setLifecycleHistory(lifecycleHistory);
         disclosure.setLifecyclePasses(
             dataSubjectDisclosureMapper.findLifecyclePasses(workspaceId, personId, workspaceIds));
         disclosure.setQualificationAnswers(
@@ -160,6 +175,15 @@ public class DataSubjectDisclosureReadTransaction {
         disclosure.setThirdPartyProvisions(
             dataSubjectDisclosureMapper.findProvisions(workspaceId, personId, workspaceIds));
         return disclosure;
+    }
+
+    private static String reasonLabel(String code, String configuredLabel, Locale locale) {
+        if (!PersonDisqualificationReason.isCanonicalCode(code)) {
+            return code;
+        }
+        return configuredLabel == null
+            ? PersonDisqualificationReason.localizedLabel(code, locale)
+            : configuredLabel;
     }
 
     private List<RecordCommentThreadDisclosureDto> recordCommentThreads(

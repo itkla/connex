@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.beans.PersonDisqualificationReason;
 import ooo.klae.connex.backend.beans.PersonLifecycleHistory;
 import ooo.klae.connex.backend.beans.PersonLifecyclePass;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
+import ooo.klae.connex.backend.dto.DisqualificationReasonDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleHistoryDto;
 import ooo.klae.connex.backend.dto.PersonLifecycleRequest;
@@ -58,19 +59,10 @@ public class PersonLifecycleService {
     private final LeadResponseSlaService leadResponseSla;
     private final PersonLifecyclePassMapper passMapper;
     private final PersonQualificationService qualificationService;
+    private final DisqualificationReasonService disqualificationReasonService;
     private final NotificationChangePublisher notificationChanges;
     private final Clock clock;
 
-    /**
-     * Moves a contact to the requested lifecycle stage.
-     *
-     * <p>Requesting the stage the contact already holds is accepted as an update of the accompanying
-     * reason and notes only: it records no transition, because nothing transitioned.
-     *
-     * @param personId contact to move
-     * @param request requested stage with its reason and note
-     * @return the contact after the move
-     */
     /**
      * Moves a contact and returns the resulting lifecycle state, with the advertised next moves
      * already filtered by the qualification gate.
@@ -145,17 +137,28 @@ public class PersonLifecycleService {
     public List<PersonLifecycleHistoryDto> getHistory(int personId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         requireOwnedPerson(workspaceId, personId);
+        Map<String, String> labels = new LinkedHashMap<>();
+        for (DisqualificationReasonDto reason
+                : disqualificationReasonService.resolved(workspaceId)) {
+            if (PersonDisqualificationReason.isCanonicalCode(reason.code())) {
+                labels.put(reason.code(), reason.label());
+            }
+        }
         return historyMapper.getByPersonId(workspaceId, personId, MAX_HISTORY_ROWS).stream()
-            .map(PersonLifecycleHistoryDto::from)
+            .map(history -> PersonLifecycleHistoryDto.from(
+                history, resolvedLabel(labels, history.getReason())))
             .toList();
     }
 
     private Person applyStage(
             int personId,
             PersonLifecycleStage requested,
-            PersonDisqualificationReason reason,
+            String reason,
             String note) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        DisqualificationReasonDto lockedReason = requested == PersonLifecycleStage.DISQUALIFIED
+            ? disqualificationReasonService.lockForLifecycle(workspaceId, reason)
+            : null;
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, personId);
         if (before == null
                 || before.getArchivedAt() != null
@@ -169,8 +172,9 @@ public class PersonLifecycleService {
             throw new BadRequestException(
                 "A contact cannot move from " + stageLabel(current) + " to " + stageLabel(requested));
         }
-        PersonDisqualificationReason acceptedReason =
-            requireReasonDisposition(requested, reason);
+        AcceptedReason accepted = requireReasonDisposition(
+            requested, reason, current, before.getDisqualifiedReason(), lockedReason);
+        String acceptedReason = accepted.code();
         if (transitioning && requested == PersonLifecycleStage.QUALIFIED) {
             requireQualificationCriteriaMet(workspaceId, personId);
         }
@@ -178,9 +182,9 @@ public class PersonLifecycleService {
             requireLinkedDeal(workspaceId, personId);
         }
         String acceptedNote = trimToNull(note);
-        if (acceptedReason == PersonDisqualificationReason.OTHER && acceptedNote == null) {
+        if (accepted.requiresNote() && acceptedNote == null) {
             throw new BadRequestException(
-                "Disqualifying for another reason requires a note explaining it");
+                "The selected disqualification reason requires a note explaining it");
         }
         String retainedNote = requested == null ? null : acceptedNote;
         LocalDateTime changedAt = transitioning ? now() : before.getLifecycleChangedAt();
@@ -283,22 +287,33 @@ public class PersonLifecycleService {
     public PersonLifecycleDto project(int workspaceId, Person person) {
         return PersonLifecycleDto.from(
             person,
-            qualificationService.unmetRequiredCriteria(workspaceId, person.getId()).isEmpty());
+            qualificationService.unmetRequiredCriteria(workspaceId, person.getId()).isEmpty(),
+            resolvedLabel(workspaceId, person.getDisqualifiedReason()));
     }
 
-    private PersonDisqualificationReason requireReasonDisposition(
-            PersonLifecycleStage requested, PersonDisqualificationReason reason) {
+    private AcceptedReason requireReasonDisposition(
+            PersonLifecycleStage requested,
+            String reason,
+            PersonLifecycleStage current,
+            String currentReason,
+            DisqualificationReasonDto resolved) {
         if (requested == PersonLifecycleStage.DISQUALIFIED) {
             if (reason == null) {
                 throw new BadRequestException("A disqualification reason is required");
             }
-            return reason;
+            if (resolved == null
+                    || (resolved.archivedAt() != null
+                        && (current != PersonLifecycleStage.DISQUALIFIED
+                            || !Objects.equals(currentReason, resolved.code())))) {
+                throw new BadRequestException("That disqualification reason is not available");
+            }
+            return new AcceptedReason(resolved.code(), resolved.requiresNote());
         }
         if (reason != null) {
             throw new BadRequestException(
                 "A disqualification reason applies only when disqualifying a contact");
         }
-        return null;
+        return new AcceptedReason(null, false);
     }
 
     /**
@@ -329,7 +344,7 @@ public class PersonLifecycleService {
             int personId,
             PersonLifecycleStage from,
             PersonLifecycleStage to,
-            PersonDisqualificationReason reason,
+            String reason,
             String note) {
         PersonLifecycleHistory history = new PersonLifecycleHistory();
         history.setWorkspaceId(workspaceId);
@@ -346,7 +361,7 @@ public class PersonLifecycleService {
             Person before,
             Person after,
             boolean transitioning,
-            PersonDisqualificationReason reason,
+            String reason,
             String note) {
         Map<String, Object> changes = new LinkedHashMap<>();
         if (transitioning) {
@@ -386,8 +401,24 @@ public class PersonLifecycleService {
         return stage == null ? "none" : stage.name();
     }
 
-    private static String reasonLabel(PersonDisqualificationReason reason) {
-        return reason == null ? "none" : reason.name();
+    private String resolvedLabel(int workspaceId, String code) {
+        DisqualificationReasonDto reason =
+            disqualificationReasonService.resolve(workspaceId, code);
+        return reason == null ? code : reason.label();
+    }
+
+    private static String resolvedLabel(Map<String, String> labels, String code) {
+        if (code == null) {
+            return null;
+        }
+        if (!PersonDisqualificationReason.isCanonicalCode(code)) {
+            return code;
+        }
+        return labels.containsKey(code) ? labels.get(code) : code;
+    }
+
+    private static String reasonLabel(String reason) {
+        return reason == null ? "none" : reason;
     }
 
     private static String trimToNull(String value) {
@@ -400,5 +431,8 @@ public class PersonLifecycleService {
 
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(Instant.now(clock), ZoneOffset.UTC);
+    }
+
+    private record AcceptedReason(String code, boolean requiresNote) {
     }
 }

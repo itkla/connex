@@ -1,11 +1,13 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -277,6 +279,53 @@ class WorkspaceIdentityLockOrderTest {
         order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, targetUserId);
         order.verify(roleMapper).lockRole(WORKSPACE_ID, 5);
         order.verify(roleMapper).lockPermissions(WORKSPACE_ID, 5);
+    }
+
+    @Test
+    void emptyPermissionCheckForCustomRoleMemberDoesNotLoadTheRole() {
+        int targetUserId = 17;
+        when(userMapper.lockByIdForShare(targetUserId)).thenReturn(targetUserId);
+        when(workspaceMapper.lockActiveWorkspaceForShare(WORKSPACE_ID)).thenReturn(ORG_ID);
+        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, targetUserId))
+            .thenReturn(membership(targetUserId, "member", 5, "active"));
+
+        assertDoesNotThrow(() -> service.lockAndRequirePermissions(
+            WORKSPACE_ID, Map.of(targetUserId, Set.of())));
+
+        verify(roleMapper, never()).lockRole(WORKSPACE_ID, 5);
+        verify(roleMapper, never()).lockPermissions(WORKSPACE_ID, 5);
+    }
+
+    @Test
+    void materializationAuthorityLocksEachRootOnceAndRevalidatesWithoutReacquiring() {
+        when(userMapper.lockByIdForShare(ACTOR_ID)).thenReturn(ACTOR_ID);
+        when(workspaceMapper.lockActiveIdentity(WORKSPACE_ID))
+            .thenReturn(workspace("Workspace", null));
+        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID))
+            .thenReturn(membership("member", 5, "active"));
+        when(roleMapper.lockRole(WORKSPACE_ID, 5)).thenReturn(5);
+        when(roleMapper.lockPermissions(WORKSPACE_ID, 5))
+            .thenReturn(List.of(Permission.WORKSPACE_SETTINGS.name()));
+
+        WorkspaceService.LockedPermissionSnapshot authorization =
+            service.lockAndRequirePermissionsWithWorkspaceMutex(
+                WORKSPACE_ID,
+                Map.of(ACTOR_ID, Set.of(Permission.WORKSPACE_SETTINGS)));
+        authorization.revalidate();
+
+        InOrder order = inOrder(userMapper, workspaceMapper, roleMapper);
+        order.verify(userMapper).lockByIdForShare(ACTOR_ID);
+        order.verify(workspaceMapper).lockActiveIdentity(WORKSPACE_ID);
+        order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID);
+        order.verify(roleMapper).lockRole(WORKSPACE_ID, 5);
+        order.verify(roleMapper).lockPermissions(WORKSPACE_ID, 5);
+        verify(userMapper, times(1)).lockByIdForShare(ACTOR_ID);
+        verify(workspaceMapper, times(1)).lockActiveIdentity(WORKSPACE_ID);
+        verify(workspaceMapper, times(1))
+            .lockAuthorizationMembership(WORKSPACE_ID, ACTOR_ID);
+        verify(roleMapper, times(1)).lockRole(WORKSPACE_ID, 5);
+        verify(roleMapper, times(1)).lockPermissions(WORKSPACE_ID, 5);
+        verify(workspaceMapper, never()).lockActiveWorkspaceForShare(WORKSPACE_ID);
     }
 
     private static Workspace workspace(String name, String timezone) {

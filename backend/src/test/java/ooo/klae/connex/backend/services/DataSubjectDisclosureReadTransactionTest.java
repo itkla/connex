@@ -27,6 +27,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.PersonDto;
+import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.LifecycleTransitionDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.RecordCommentDisclosureDto;
 import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto.RecordCommentThreadDisclosureDto;
 import ooo.klae.connex.backend.mappers.DataSubjectDisclosureMapper;
@@ -180,6 +181,8 @@ class DataSubjectDisclosureReadTransactionTest {
             .thenReturn(List.of(thread));
         when(dataSubjectDisclosureMapper.findRecordComments(4, 5, List.of(4, 6)))
             .thenReturn(List.of(active, redacted));
+        when(dataSubjectDisclosureMapper.findLifecycleHistory(4, 5, List.of(4, 6)))
+            .thenReturn(List.of());
 
         var disclosure = readTransaction.assemble(4, 5, List.of(4, 6));
 
@@ -192,5 +195,24 @@ class DataSubjectDisclosureReadTransactionTest {
             .getComments().getLast().getContent());
         assertEquals(redacted.getDeletedAt(), disclosure.getRecordCommentThreads().getFirst()
             .getComments().getLast().getDeletedAt());
+    }
+
+    @Test
+    void disclosureDoesNotResolveNoncanonicalCodesThroughConfiguredLabels() {
+        PersonDto person = new PersonDto();
+        person.setId(5);
+        person.setDisqualifiedReason("other");
+        person.setDisqualifiedReasonLabel("Configured label");
+        LifecycleTransitionDto transition = new LifecycleTransitionDto();
+        transition.setReason("ÖTHER");
+        transition.setReasonLabel("Configured history label");
+        when(dataSubjectDisclosureMapper.findPerson(4, 5, List.of(4))).thenReturn(person);
+        when(dataSubjectDisclosureMapper.findLifecycleHistory(4, 5, List.of(4)))
+            .thenReturn(List.of(transition));
+
+        var disclosure = readTransaction.assemble(4, 5, List.of(4));
+
+        assertEquals("other", disclosure.getPerson().getDisqualifiedReasonLabel());
+        assertEquals("ÖTHER", disclosure.getLifecycleHistory().getFirst().getReasonLabel());
     }
 }

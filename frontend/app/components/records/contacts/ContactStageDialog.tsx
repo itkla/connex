@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 
@@ -23,15 +23,24 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { updateContactLifecycle, withdrawContactLifecycle } from '@/app/lib/api';
+import {
+    getDisqualificationReasons,
+    updateContactLifecycle,
+    withdrawContactLifecycle,
+} from '@/app/lib/api';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
+import { useWorkspace } from '@/app/hooks/useWorkspace';
 import { toastSuccess } from '@/app/lib/toast';
-import { DISQUALIFICATION_REASONS } from '@/app/lib/contactLifecycle';
 import type {
     ContactDisqualificationReason,
     ContactLifecycle,
     ContactLifecycleStage,
+    DisqualificationReason,
 } from '@/app/lib/types';
+import {
+    isBuiltInDisqualificationReason,
+    isCanonicalDisqualificationReasonCode,
+} from '@/app/lib/contactLifecycle';
 
 const WITHDRAW_VALUE = '__withdraw__';
 
@@ -52,6 +61,13 @@ type Props = {
  * so the control never presents a move whose only outcome is an error.
  */
 export default function ContactStageDialog({
+    ...props
+}: Props) {
+    const { activeWorkspaceId } = useWorkspace();
+    return <WorkspaceContactStageDialog key={activeWorkspaceId ?? 'none'} {...props} />;
+}
+
+function WorkspaceContactStageDialog({
     contactId,
     lifecycle,
     hasLinkedDeal,
@@ -67,8 +83,31 @@ export default function ContactStageDialog({
 
     const [saving, setSaving] = useState(false);
     const [stage, setStage] = useState<string>('');
-    const [reason, setReason] = useState<ContactDisqualificationReason | ''>('');
-    const [note, setNote] = useState('');
+    const [reason, setReason] = useState<ContactDisqualificationReason | ''>(
+        currentStage === 'DISQUALIFIED' ? (currentReason ?? '') : '',
+    );
+    const [note, setNote] = useState(currentNotes ?? '');
+    const [reasons, setReasons] = useState<DisqualificationReason[] | null>(null);
+    const [reasonsUnavailable, setReasonsUnavailable] = useState(false);
+
+    useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        getDisqualificationReasons(true)
+            .then((loaded) => {
+                if (cancelled) return;
+                setReasons(loaded);
+                setReasonsUnavailable(false);
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setReasons(null);
+                setReasonsUnavailable(true);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [open]);
 
     const stageOptions = useMemo(() => {
         const moves = lifecycle.allowedTransitions
@@ -85,8 +124,20 @@ export default function ContactStageDialog({
 
     const disqualifying = stage === 'DISQUALIFIED';
     const withdrawing = stage === WITHDRAW_VALUE;
+    const availableReasons = useMemo(
+        () => reasons?.filter((candidate) =>
+            isCanonicalDisqualificationReasonCode(candidate.code)
+            && (candidate.archivedAt === null || candidate.code === currentReason)) ?? [],
+        [currentReason, reasons],
+    );
+    const selectedReason = isCanonicalDisqualificationReasonCode(reason)
+        ? availableReasons.find((candidate) => candidate.code === reason) ?? null
+        : null;
     const submittable = stage !== ''
-        && (!disqualifying || (reason !== '' && (reason !== 'OTHER' || note.trim() !== '')));
+        && (!disqualifying || (
+            selectedReason !== null
+            && (!selectedReason.requiresNote || note.trim() !== '')
+        ));
 
     const openDialog = (next: boolean) => {
         if (!next && saving) return;
@@ -94,12 +145,17 @@ export default function ContactStageDialog({
             setStage('');
             setReason(currentStage === 'DISQUALIFIED' ? (currentReason ?? '') : '');
             setNote(currentNotes ?? '');
+            setReasonsUnavailable(false);
         }
         onOpenChange(next);
     };
 
     const submit = async () => {
         if (!submittable || saving) return;
+        const submittedReason = disqualifying && isCanonicalDisqualificationReasonCode(reason)
+            ? reason
+            : null;
+        if (disqualifying && submittedReason === null) return;
         setSaving(true);
         try {
             if (withdrawing) {
@@ -107,7 +163,7 @@ export default function ContactStageDialog({
             } else {
                 await updateContactLifecycle(contactId, {
                     stage: stage as ContactLifecycleStage,
-                    reason: disqualifying ? (reason as ContactDisqualificationReason) : null,
+                    reason: submittedReason,
                     note: note.trim() || null,
                 });
             }
@@ -157,20 +213,33 @@ export default function ContactStageDialog({
                             <Label htmlFor="contact-lifecycle-reason">{t('reasonLabel')}</Label>
                             <Select
                                 value={reason}
-                                onValueChange={(value) => setReason(value as ContactDisqualificationReason)}
+                                onValueChange={setReason}
                                 disabled={saving}
                             >
                                 <SelectTrigger id="contact-lifecycle-reason">
                                     <SelectValue placeholder={t('reasonPlaceholder')} />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {DISQUALIFICATION_REASONS.map((value) => (
-                                        <SelectItem key={value} value={value}>
-                                            {t(`reason.${value}`)}
+                                    {availableReasons.map((candidate) => (
+                                        <SelectItem key={candidate.code} value={candidate.code}>
+                                            {candidate.label ?? (
+                                                isBuiltInDisqualificationReason(candidate.code)
+                                                    ? t(`reason.${candidate.code}`)
+                                                    : candidate.code
+                                            )}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
+                            {reasons === null && !reasonsUnavailable ? (
+                                <p className="text-xs text-muted-foreground">{t('reasonsLoading')}</p>
+                            ) : null}
+                            {reasonsUnavailable ? (
+                                <p className="text-xs text-destructive">{t('reasonsUnavailable')}</p>
+                            ) : null}
+                            {selectedReason?.requiresNote ? (
+                                <p className="text-xs text-muted-foreground">{t('reasonNoteRequired')}</p>
+                            ) : null}
                         </div>
                     ) : null}
 

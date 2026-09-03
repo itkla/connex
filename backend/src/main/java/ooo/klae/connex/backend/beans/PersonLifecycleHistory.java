@@ -19,7 +19,7 @@ public class PersonLifecycleHistory {
     private int personId;
     private PersonLifecycleStage fromStage;
     private PersonLifecycleStage toStage;
-    private PersonDisqualificationReason reason;
+    private String reason;
     private String note;
     private Integer changedById;
     private LocalDateTime changedAt;

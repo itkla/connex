@@ -124,7 +124,7 @@ tasks.withType(JavaCompile).configureEach {
 
 tasks.named('test') {
 	useJUnitPlatform()
-	maxHeapSize = '1536m'
+	maxHeapSize = '2048m'
 	maxParallelForks = 1
 	forkEvery = 100
 	// One test fork retains at most 10 cached pools. Including one context loading, the application-pool

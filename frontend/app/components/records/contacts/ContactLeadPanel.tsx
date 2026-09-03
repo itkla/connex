@@ -15,6 +15,7 @@ import type {
     QualificationDimension,
 } from '@/app/lib/types';
 import { cn } from '@/lib/utils';
+import { disqualificationReasonLabel } from '@/app/lib/contactLifecycle';
 import ContactProvenanceDialog from './ContactProvenanceDialog';
 import ContactQualificationDialog from './ContactQualificationDialog';
 import ContactStageDialog from './ContactStageDialog';
@@ -190,7 +191,11 @@ export default function ContactLeadPanel({
                         <div className="px-6 py-3 xl:px-4">
                             <dt className="text-xs text-muted-foreground">{t('reason')}</dt>
                             <dd className="mt-0.5 text-foreground">
-                                {tl(`reason.${lifecycle.disqualifiedReason}`)}
+                                {disqualificationReasonLabel(
+                                    lifecycle.disqualifiedReason,
+                                    lifecycle.reasonLabel,
+                                    tl,
+                                )}
                             </dd>
                         </div>
                     ) : null}

@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.dto;
 
 import java.time.LocalDateTime;
 
-import ooo.klae.connex.backend.beans.PersonDisqualificationReason;
 import ooo.klae.connex.backend.beans.PersonLifecycleHistory;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 
@@ -15,7 +14,8 @@ public record PersonLifecycleHistoryDto(
     int personId,
     PersonLifecycleStage fromStage,
     PersonLifecycleStage toStage,
-    PersonDisqualificationReason reason,
+    String reason,
+    String reasonLabel,
     String note,
     Integer changedById,
     LocalDateTime changedAt
@@ -26,13 +26,15 @@ public record PersonLifecycleHistoryDto(
      * @param history persisted transition row
      * @return timeline entry
      */
-    public static PersonLifecycleHistoryDto from(PersonLifecycleHistory history) {
+    public static PersonLifecycleHistoryDto from(
+            PersonLifecycleHistory history, String reasonLabel) {
         return new PersonLifecycleHistoryDto(
             history.getId(),
             history.getPersonId(),
             history.getFromStage(),
             history.getToStage(),
             history.getReason(),
+            reasonLabel,
             history.getNote(),
             history.getChangedById(),
             history.getChangedAt());

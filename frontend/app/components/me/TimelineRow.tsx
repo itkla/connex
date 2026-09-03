@@ -24,6 +24,7 @@ import NoteDialog from '@/app/components/activity/notes/NoteDialog';
 import NoteContent from '@/app/components/activity/notes/NoteContent';
 import ProviderCaptureEvidence from '@/app/components/activity/ProviderCaptureEvidence';
 import { isProviderOwnedActivity } from '@/app/lib/connectedCapture';
+import { disqualificationReasonLabel } from '@/app/lib/contactLifecycle';
 import {
     useContactTargetSearch,
     useDealTargetSearch,
@@ -301,7 +302,13 @@ export default function TimelineRow({
             </p>
         );
         const detail = [
-            lifecycle.reason != null ? tl(`reason.${lifecycle.reason}`) : null,
+            lifecycle.reason != null
+                ? disqualificationReasonLabel(
+                    lifecycle.reason,
+                    lifecycle.reasonLabel,
+                    tl,
+                )
+                : null,
             lifecycle.note ?? null,
         ].filter((part): part is string => part !== null).join(' · ');
         if (detail) {

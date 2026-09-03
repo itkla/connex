@@ -1254,8 +1254,8 @@ export type ContactLifecycleStage =
     | 'CONVERTED'
     | 'RECYCLED';
 
-/** Why a contact was disqualified from its lead lifecycle (issue #559). */
-export type ContactDisqualificationReason =
+/** The built-in disqualification codes localized by the client (issue #559). */
+export type BuiltInContactDisqualificationReason =
     | 'NO_BUDGET'
     | 'NO_FIT'
     | 'NO_AUTHORITY'
@@ -1266,6 +1266,9 @@ export type ContactDisqualificationReason =
     | 'SPAM'
     | 'OTHER';
 
+/** A workspace-configured disqualification code. */
+export type ContactDisqualificationReason = string;
+
 /**
  * A contact's current lifecycle state plus the stages it may move to next. The server owns the
  * transition rules, so the client renders `allowedTransitions` rather than recomputing them.
@@ -1275,6 +1278,7 @@ export type ContactLifecycle = {
     stage: ContactLifecycleStage | null;
     changedAt: string | null;
     disqualifiedReason: ContactDisqualificationReason | null;
+    reasonLabel: string | null;
     qualificationNotes: string | null;
     allowedTransitions: ContactLifecycleStage[];
 };
@@ -1350,6 +1354,25 @@ export type QualificationCriterionPayload = {
     position?: number;
 };
 
+/** One resolved entry in the workspace's disqualification vocabulary. */
+export type DisqualificationReason = {
+    id: number;
+    code: string;
+    label: string | null;
+    requiresNote: boolean;
+    position: number;
+    builtIn: boolean;
+    archivedAt: string | null;
+};
+
+/** Editable fields for a disqualification reason. Codes remain immutable after creation. */
+export type DisqualificationReasonPayload = {
+    code: string;
+    label: string | null;
+    requiresNote: boolean;
+    position: number;
+};
+
 /** One entry of a contact's append-only lifecycle timeline (issue #559). */
 export type ContactLifecycleHistoryEntry = {
     id: number;
@@ -1357,6 +1380,7 @@ export type ContactLifecycleHistoryEntry = {
     fromStage: ContactLifecycleStage | null;
     toStage: ContactLifecycleStage | null;
     reason: ContactDisqualificationReason | null;
+    reasonLabel: string | null;
     note: string | null;
     changedById: number | null;
     changedAt: string;

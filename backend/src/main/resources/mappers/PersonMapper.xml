@@ -21,7 +21,7 @@
     <result property="archivedAt" column="archived_at"/>
     <result property="lifecycleStage" column="lifecycle_stage"/>
     <result property="lifecycleChangedAt" column="lifecycle_changed_at"/>
-    <result property="disqualifiedReason" column="disqualified_reason"/>
+    <result property="disqualifiedReason" column="disqualified_reason" javaType="java.lang.String"/>
     <result property="qualificationNotes" column="qualification_notes"/>
     <result property="leadSource" column="lead_source"/>
     <result property="leadSourceDetail" column="lead_source_detail"/>

@@ -161,8 +161,8 @@ Rules the implementation enforces:
 
 - A transition into `DISQUALIFIED` requires a reason from the workspace's configured vocabulary.
 - `CONVERTED` is reachable only from `QUALIFIED`, and requires a deal already linked to the contact, so the
-  stage can never claim a deal that does not exist. The conversion action of increment 5 automates that pairing;
-  until it lands, a user who has created the deal by hand can still record the outcome truthfully.
+  stage can never claim a deal that does not exist. A future one-step conversion action will automate that
+  pairing; until it lands, a user who has created the deal by hand can still record the outcome truthfully.
 - Re-selecting the current stage is a no-op, not a history row.
 - Withdrawing to *(null)* is always allowed and is recorded like any other transition.
 
@@ -174,17 +174,21 @@ time-to-convert reporting, and it survives archive/restore of the contact.
 
 ## Delivery increments
 
+<!-- BEGIN UNIT 559 DELIVERY RECONCILIATION -->
 | Increment | Scope | Status |
 |---|---|---|
 | 0 | This decision document | ✅ |
-| 1 | Lifecycle stage, qualification/disqualification reasons, transition history, RBAC, audit, rule triggers, contact-list filtering and facets | see #559 children |
-| 2 | Lifecycle UI: stage control, disqualify dialog, history timeline, browser filter, EN/JA | see #559 children |
-| 3 | Record-level source provenance and the untrusted-intake quarantine table | deferred |
-| 4 | Routing, assignment, first-response SLA and escalation on the existing rule engine | ✅ |
-| 5 | Qualification criteria configuration and deterministic scoring | deferred |
-| 6 | Lifecycle reporting and attribution | deferred |
+| 1 | Lifecycle stage, configurable qualification/disqualification vocabulary, transition history, RBAC, audit, rule triggers, contact-list filtering and facets | ✅ #1316 and workspace vocabulary follow-on |
+| 2 | Lifecycle UI: stage control, disqualify dialog, history timeline, browser filter, EN/JA | ✅ #1317 |
+| 3a | Record-level source provenance | ✅ #1318 |
+| 3b | Untrusted-intake quarantine | Deferred; parent issue #1325 requires product validation before implementation |
+| 4 | Rule-based assignment and first-response SLA/escalation on the existing workflow engine | ✅ #1319 and #1320; round-robin and capacity awareness remain |
+| 5 | Qualification criteria configuration and deterministic scoring | ✅ #1328 |
+| 6 | Lifecycle cohort reporting and attribution spine | ✅ #1330; fit/engagement and pipeline/revenue measures remain |
 
-Increments 3–6 are tracked as separate issues under #559 and are not blocked on further model decisions.
+Remaining delivery work is the one-step conversion action, round-robin and capacity-aware assignment,
+the fit/engagement and pipeline/revenue reporting measures, and intake quarantine after its product gate opens.
+<!-- END UNIT 559 DELIVERY RECONCILIATION -->
 
 ## First-response SLA
 

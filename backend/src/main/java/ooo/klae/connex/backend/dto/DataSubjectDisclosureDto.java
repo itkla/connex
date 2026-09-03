@@ -52,6 +52,7 @@ public class DataSubjectDisclosureDto {
         private String lifecycleStage;
         private LocalDateTime lifecycleChangedAt;
         private String disqualifiedReason;
+        private String disqualifiedReasonLabel;
         private String qualificationNotes;
         private String leadSource;
         private String leadSourceDetail;
@@ -238,6 +239,7 @@ public class DataSubjectDisclosureDto {
         private String fromStage;
         private String toStage;
         private String reason;
+        private String reasonLabel;
         private String note;
         private Integer changedById;
         private LocalDateTime changedAt;

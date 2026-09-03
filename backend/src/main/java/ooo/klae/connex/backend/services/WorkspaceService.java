@@ -430,6 +430,28 @@ public class WorkspaceService {
     public void lockAndRequirePermissions(
             int workspaceId,
             Map<Integer, Set<Permission>> requiredByUser) {
+        lockAndRequirePermissions(workspaceId, requiredByUser, false);
+    }
+
+    /**
+     * Locks the workspace exclusively while revalidating current membership and permissions.
+     *
+     * <p>Workspace-scoped configuration that must make a row-less materialization decision uses
+     * this variant as its workspace-level mutex. The user, workspace, membership, custom-role, and
+     * permission roots are acquired in the same order as ordinary locked authorization.
+     */
+    public LockedPermissionSnapshot lockAndRequirePermissionsWithWorkspaceMutex(
+            int workspaceId,
+            Map<Integer, Set<Permission>> requiredByUser) {
+        Map<Integer, Set<Permission>> effectiveByUser =
+            lockAndRequirePermissions(workspaceId, requiredByUser, true);
+        return new LockedPermissionSnapshot(effectiveByUser, requiredByUser);
+    }
+
+    private Map<Integer, Set<Permission>> lockAndRequirePermissions(
+            int workspaceId,
+            Map<Integer, Set<Permission>> requiredByUser,
+            boolean exclusiveWorkspace) {
         Objects.requireNonNull(requiredByUser, "requiredByUser");
         TreeSet<Integer> userIds = new TreeSet<>(requiredByUser.keySet());
         if (userIds.isEmpty()) {
@@ -443,7 +465,10 @@ public class WorkspaceService {
                 throw authorizationRequired(userId, required);
             }
         }
-        if (workspaceMapper.lockActiveWorkspaceForShare(workspaceId) == null) {
+        boolean workspaceAvailable = exclusiveWorkspace
+            ? workspaceMapper.lockActiveIdentity(workspaceId) != null
+            : workspaceMapper.lockActiveWorkspaceForShare(workspaceId) != null;
+        if (!workspaceAvailable) {
             int firstUserId = userIds.first();
             throw authorizationRequired(firstUserId, requiredByUser.get(firstUserId));
         }
@@ -484,6 +509,7 @@ public class WorkspaceService {
             }
             rolePermissions.put(roleId, parsePermissions(locked));
         }
+        Map<Integer, Set<Permission>> effectiveByUser = new LinkedHashMap<>();
         for (int userId : userIds) {
             WorkspaceMember membership = memberships.get(userId);
             Set<Permission> effective;
@@ -494,13 +520,51 @@ public class WorkspaceService {
                 }
                 effective = builtInPermissions(role);
             } else {
-                effective = rolePermissions.get(membership.getRoleId());
+                effective = rolePermissions.getOrDefault(membership.getRoleId(), Set.of());
             }
             for (Permission required : requiredByUser.get(userId)) {
                 if (effective == null || !effective.contains(required)) {
                     throw permissionRequired(required);
                 }
             }
+            effectiveByUser.put(userId, Set.copyOf(effective));
+        }
+        return Map.copyOf(effectiveByUser);
+    }
+
+    /**
+     * Immutable authorization derived from rows whose locks remain held by the surrounding transaction.
+     * Revalidation performs no database access and therefore cannot invert a parent-to-child lock order.
+     */
+    public static class LockedPermissionSnapshot {
+        private final Map<Integer, Set<Permission>> effectiveByUser;
+        private final Map<Integer, Set<Permission>> requiredByUser;
+
+        LockedPermissionSnapshot(
+                Map<Integer, Set<Permission>> effectiveByUser,
+                Map<Integer, Set<Permission>> requiredByUser) {
+            this.effectiveByUser = immutablePermissionMap(effectiveByUser);
+            this.requiredByUser = immutablePermissionMap(requiredByUser);
+        }
+
+        /** Revalidates the original permission requirements from the already-locked row snapshot. */
+        public void revalidate() {
+            for (Map.Entry<Integer, Set<Permission>> entry : requiredByUser.entrySet()) {
+                Set<Permission> effective = effectiveByUser.get(entry.getKey());
+                for (Permission required : entry.getValue()) {
+                    if (effective == null || !effective.contains(required)) {
+                        throw permissionRequired(required);
+                    }
+                }
+            }
+        }
+
+        private static Map<Integer, Set<Permission>> immutablePermissionMap(
+                Map<Integer, Set<Permission>> source) {
+            Map<Integer, Set<Permission>> copy = new LinkedHashMap<>();
+            source.forEach((userId, permissions) ->
+                copy.put(userId, Set.copyOf(permissions)));
+            return Map.copyOf(copy);
         }
     }
 
