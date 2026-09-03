@@ -664,11 +664,14 @@ class AiAssistantServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void removedParticipantReceivesDirectRevocationFrame() {
+    void removedCustomRoleParticipantWithoutPermissionsReceivesDirectRevocationFrame() {
         AiChatSessionDto created = service.create(createRequest("Direct revocation"));
         service.setShared(created.getId(), true);
         User participant = aiUser("admin");
         service.invite(created.getId(), participant.getId());
+        WorkspaceRole noPermissions = customRole("No assistant permissions", List.of());
+        workspaceMapper.setMemberCustomRole(
+            workspace.getId(), participant.getId(), noPermissions.getId());
         clearInvocations(realtimeDispatcher);
 
         assertThrows(ForbiddenException.class,

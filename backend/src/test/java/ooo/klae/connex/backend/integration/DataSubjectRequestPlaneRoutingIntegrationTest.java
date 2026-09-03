@@ -74,8 +74,11 @@ class DataSubjectRequestPlaneRoutingIntegrationTest {
             statement.execute("CREATE DATABASE IF NOT EXISTS " + SCRATCH_CATALOG);
             statement.execute("DROP TABLE IF EXISTS " + SCRATCH_CATALOG + ".person");
             statement.execute("DROP TABLE IF EXISTS " + SCRATCH_CATALOG + ".company");
+            statement.execute("DROP TABLE IF EXISTS " + SCRATCH_CATALOG + ".disqualification_reason");
             statement.execute("CREATE TABLE " + SCRATCH_CATALOG + ".company LIKE " + defaultCatalog + ".company");
             statement.execute("CREATE TABLE " + SCRATCH_CATALOG + ".person LIKE " + defaultCatalog + ".person");
+            statement.execute("CREATE TABLE " + SCRATCH_CATALOG + ".disqualification_reason LIKE "
+                + defaultCatalog + ".disqualification_reason");
             insertFixtures(connection);
         } catch (SQLException exception) {
             assumeTrue(false, "Cannot prepare scratch catalog " + SCRATCH_CATALOG + " ("

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -278,6 +279,21 @@ class WorkspaceIdentityLockOrderTest {
         order.verify(workspaceMapper).lockAuthorizationMembership(WORKSPACE_ID, targetUserId);
         order.verify(roleMapper).lockRole(WORKSPACE_ID, 5);
         order.verify(roleMapper).lockPermissions(WORKSPACE_ID, 5);
+    }
+
+    @Test
+    void emptyPermissionCheckForCustomRoleMemberDoesNotLoadTheRole() {
+        int targetUserId = 17;
+        when(userMapper.lockByIdForShare(targetUserId)).thenReturn(targetUserId);
+        when(workspaceMapper.lockActiveWorkspaceForShare(WORKSPACE_ID)).thenReturn(ORG_ID);
+        when(workspaceMapper.lockAuthorizationMembership(WORKSPACE_ID, targetUserId))
+            .thenReturn(membership(targetUserId, "member", 5, "active"));
+
+        assertDoesNotThrow(() -> service.lockAndRequirePermissions(
+            WORKSPACE_ID, Map.of(targetUserId, Set.of())));
+
+        verify(roleMapper, never()).lockRole(WORKSPACE_ID, 5);
+        verify(roleMapper, never()).lockPermissions(WORKSPACE_ID, 5);
     }
 
     @Test

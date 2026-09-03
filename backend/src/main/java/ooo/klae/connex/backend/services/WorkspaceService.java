@@ -520,7 +520,7 @@ public class WorkspaceService {
                 }
                 effective = builtInPermissions(role);
             } else {
-                effective = rolePermissions.get(membership.getRoleId());
+                effective = rolePermissions.getOrDefault(membership.getRoleId(), Set.of());
             }
             for (Permission required : requiredByUser.get(userId)) {
                 if (effective == null || !effective.contains(required)) {
