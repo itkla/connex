@@ -304,7 +304,13 @@
         "clearAll": "クリア",
         "create": "ロールを作成",
         "noPermissionsHint": "このロールに許可するアクションを少なくとも 1 つ選択してください。",
-        "roleEntityLabel": "ロール"
+        "roleEntityLabel": "ロール",
+        "permissionLabels": {
+            "teamManage": {
+                "group": "チーム",
+                "action": "管理"
+            }
+        }
     },
     "WorkflowAuthoring": {
         "noAccess": "このワークスペースでワークフローを管理する権限がありません。必要な場合はワークスペース管理者にご相談ください。",

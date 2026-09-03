@@ -387,6 +387,9 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("sequence_step_content", 623));
         raw.add(direct("sequence_step", 624));
         raw.add(direct("sequence", 625));
+        raw.add(direct("team", 630));
+        raw.add(cascade("team_member", "team", "fk_team_member_team",
+            link("workspace_id", "workspace_id"), link("team_id", "id")));
 
         Map<String, TableLifecycle> byTable = new LinkedHashMap<>();
         for (TableLifecycle declaration : raw) {

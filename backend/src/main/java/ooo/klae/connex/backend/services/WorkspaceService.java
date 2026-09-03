@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -62,6 +63,7 @@ public class WorkspaceService {
     private final RoleMapper roleMapper;
     private final NotificationMapper notificationMapper;
     private final UserOffboardingService userOffboardingService;
+    private final WorkspaceMembershipRemovalTransaction membershipRemovalTransaction;
     private final NotificationDelivery notificationDelivery;
     private final NotificationStateVersionService notificationStateVersionService;
     private final TenantContext tenantContext;
@@ -106,7 +108,7 @@ public class WorkspaceService {
             Permission.GOAL_MANAGE,
             Permission.CAMPAIGN_MANAGE,
             Permission.CAMPAIGN_SEND, Permission.CONSENT_MANAGE,
-            Permission.SEQUENCE_MANAGE));
+            Permission.SEQUENCE_MANAGE, Permission.TEAM_MANAGE));
         return permissions;
     }
 
@@ -1308,8 +1310,35 @@ public class WorkspaceService {
      * first so authored history survives. Only an owner may remove an owner, and
      * never the last one.
      */
-    @Transactional
     public void removeMember(int workspaceId, int actorId, int targetUserId) {
+        membershipRemovalTransaction.execute(
+            workspaceId,
+            actorId,
+            () -> authorizeMemberRemovalBeforeRouting(workspaceId, actorId),
+            (scopedWorkspaceId, scopedOrgId) -> {
+                removeMemberInTransaction(
+                    scopedWorkspaceId, scopedOrgId, actorId, targetUserId);
+                return true;
+            });
+    }
+
+    private String authorizeMemberRemovalBeforeRouting(int workspaceId, int actorId) {
+        requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
+        if (systemActor.is(actorId)) {
+            return "system";
+        }
+        String role = workspaceMapper.getRole(workspaceId, actorId);
+        if (role == null) {
+            throw permissionRequired(Permission.MEMBER_MANAGE);
+        }
+        return role;
+    }
+
+    private void removeMemberInTransaction(
+            int workspaceId,
+            int orgId,
+            int actorId,
+            int targetUserId) {
         requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
         LockedRoleMutation locks = lockRoleMutation(
@@ -1330,8 +1359,10 @@ public class WorkspaceService {
         userOffboardingService.detachMemberContent(workspaceId, targetUserId);
         workspaceMapper.removeMember(workspaceId, targetUserId);
         notificationStateVersionService.markChanged(targetUserId);
-        auditService.record("workspace.member.remove", "workspace", workspaceId, target.getDisplayName(),
-                "Removed " + target.getDisplayName() + " from the workspace", null);
+        auditService.recordScoped(
+            "workspace.member.remove", "workspace", workspaceId, workspaceId, orgId,
+            target.getDisplayName(),
+            "Removed " + target.getDisplayName() + " from the workspace", null);
     }
 
     /**
@@ -1422,28 +1453,44 @@ public class WorkspaceService {
         return new ResourceNotFoundException("No pending invitation for this workspace");
     }
 
-    /** The user declines a pending invitation; the row and its notifications are removed. */
-    @Transactional
+    /** The user declines a pending invitation; the row and its workspace data are removed. */
     public void declineMembership(int workspaceId, int userId) {
+        membershipRemovalTransaction.execute(
+            workspaceId,
+            userId,
+            () -> requirePendingMembership(workspaceId, userId).getBuiltInRole(),
+            (scopedWorkspaceId, scopedOrgId) -> {
+                declineMembershipInTransaction(scopedWorkspaceId, scopedOrgId, userId);
+                return true;
+            });
+    }
+
+    private void declineMembershipInTransaction(int workspaceId, int orgId, int userId) {
         if (userMapper.lockById(userId) == null) {
-            throw new ResourceNotFoundException("No pending invitation for this workspace");
+            throw pendingMembershipNotFound();
         }
-        MemberDto member = workspaceMapper.getMember(workspaceId, userId);
-        if (member == null || !"pending".equals(member.getStatus())) {
-            throw new ResourceNotFoundException("No pending invitation for this workspace");
-        }
-        notificationMapper.lockRecipientMemberships(userId);
-        notificationMapper.deleteHistoricalNotificationBaselinesForRecipient(
-            workspaceId, userId);
-        notificationMapper.deleteAllForRecipient(workspaceId, userId);
+        requirePendingMembership(workspaceId, userId);
+        userOffboardingService.detachMemberContent(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
         notificationStateVersionService.markChanged(userId);
-        auditService.record("workspace.member.decline", "workspace", workspaceId, null, "Declined invitation", null);
+        auditService.recordScoped(
+            "workspace.member.decline", "workspace", workspaceId, workspaceId, orgId,
+            null, "Declined invitation", null);
     }
 
     /** The user leaves a workspace they belong to, unassigning their tasks and clearing deal ownership. */
-    @Transactional
     public void leaveWorkspace(int workspaceId, int userId) {
+        membershipRemovalTransaction.execute(
+            workspaceId,
+            userId,
+            () -> requireActiveMembershipRole(workspaceId, userId),
+            (scopedWorkspaceId, scopedOrgId) -> {
+                leaveWorkspaceInTransaction(scopedWorkspaceId, scopedOrgId, userId);
+                return true;
+            });
+    }
+
+    private void leaveWorkspaceInTransaction(int workspaceId, int orgId, int userId) {
         if (userMapper.lockById(userId) == null) {
             throw new ResourceNotFoundException("You are not a member of this workspace");
         }
@@ -1461,7 +1508,9 @@ public class WorkspaceService {
         userOffboardingService.detachMemberContent(workspaceId, userId);
         workspaceMapper.removeMember(workspaceId, userId);
         notificationStateVersionService.markChanged(userId);
-        auditService.record("workspace.member.leave", "workspace", workspaceId, null, "Left the workspace", null);
+        auditService.recordScoped(
+            "workspace.member.leave", "workspace", workspaceId, workspaceId, orgId,
+            null, "Left the workspace", null);
     }
 
     /**
@@ -1470,14 +1519,35 @@ public class WorkspaceService {
      * @param userId the departing member
      * @return the next active workspace id, or null when no membership remains
      */
-    @Transactional
     public Integer leaveWorkspaceAndSelectNext(int workspaceId, int userId) {
-        leaveWorkspace(workspaceId, userId);
-        Integer nextWorkspaceId = defaultWorkspaceIdFor(userId);
-        if (nextWorkspaceId != null) {
-            rememberActive(userId, nextWorkspaceId);
+        return membershipRemovalTransaction.execute(
+            workspaceId,
+            userId,
+            () -> requireActiveMembershipRole(workspaceId, userId),
+            (scopedWorkspaceId, scopedOrgId) -> {
+                leaveWorkspaceInTransaction(scopedWorkspaceId, scopedOrgId, userId);
+                Integer nextWorkspaceId = defaultWorkspaceIdFor(userId);
+                if (nextWorkspaceId != null) {
+                    rememberActive(userId, nextWorkspaceId);
+                }
+                return Optional.ofNullable(nextWorkspaceId);
+            }).orElse(null);
+    }
+
+    private String requireActiveMembershipRole(int workspaceId, int userId) {
+        String role = workspaceMapper.getRole(workspaceId, userId);
+        if (role == null) {
+            throw new ResourceNotFoundException("You are not a member of this workspace");
         }
-        return nextWorkspaceId;
+        return role;
+    }
+
+    private MemberDto requirePendingMembership(int workspaceId, int userId) {
+        MemberDto member = workspaceMapper.getMember(workspaceId, userId);
+        if (member == null || !"pending".equals(member.getStatus())) {
+            throw pendingMembershipNotFound();
+        }
+        return member;
     }
 
     private void notifyJoinRequest(int workspaceId, int recipientId, User actor) {

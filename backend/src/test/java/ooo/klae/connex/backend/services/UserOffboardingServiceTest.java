@@ -41,6 +41,8 @@ import ooo.klae.connex.backend.beans.SequenceVersion;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.SuppressionEntry;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.Team;
+import ooo.klae.connex.backend.beans.TeamMember;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.UserDashboard;
 import ooo.klae.connex.backend.beans.Workspace;
@@ -60,6 +62,7 @@ import ooo.klae.connex.backend.mappers.SavedViewPreferenceMapper;
 import ooo.klae.connex.backend.mappers.SequenceMapper;
 import ooo.klae.connex.backend.mappers.SequenceVersionMapper;
 import ooo.klae.connex.backend.mappers.SuppressionMapper;
+import ooo.klae.connex.backend.mappers.TeamMapper;
 import ooo.klae.connex.backend.mappers.UserDashboardMapper;
 import tools.jackson.databind.ObjectMapper;
 
@@ -90,6 +93,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     @Autowired private IdentityBackfillTransaction identityBackfillTransaction;
     @Autowired private SequenceMapper sequenceMapper;
     @Autowired private SequenceVersionMapper sequenceVersionMapper;
+    @Autowired private TeamMapper teamMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
 
@@ -111,6 +115,34 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     void cleanAccountPassesTheGuard() {
         User target = newUser();
         offboardingService.assertNoAuthoredContent(target.getId());
+    }
+
+    @Test
+    void teamReferencesDoNotBlockDeletionAndAreClearedAcrossWorkspaces() {
+        User target = newUser();
+        Team localTeam = teamInWorkspace(workspace, target);
+        Workspace otherWorkspace = newOtherWorkspace();
+        workspaceMapper.addMember(otherWorkspace.getId(), target.getId(), "member");
+        Team otherTeam = teamInWorkspace(otherWorkspace, target);
+
+        offboardingService.assertNoAuthoredContent(target.getId());
+        offboardingService.eraseOrgDataReferences(target.getId());
+
+        assertFalse(teamMapper.hasMember(workspace.getId(), localTeam.getId(), target.getId()));
+        assertFalse(teamMapper.hasMember(otherWorkspace.getId(), otherTeam.getId(), target.getId()));
+        assertNull(teamMapper.getById(workspace.getId(), localTeam.getId()).getManagerUserId());
+        assertNull(teamMapper.getById(otherWorkspace.getId(), otherTeam.getId()).getManagerUserId());
+    }
+
+    @Test
+    void memberDetachmentClearsTeamSeatAndManagerReference() {
+        User departing = newUser();
+        Team team = teamInWorkspace(workspace, departing);
+
+        offboardingService.detachMemberContent(workspace.getId(), departing.getId());
+
+        assertFalse(teamMapper.hasMember(workspace.getId(), team.getId(), departing.getId()));
+        assertNull(teamMapper.getById(workspace.getId(), team.getId()).getManagerUserId());
     }
 
     @Test
@@ -423,6 +455,18 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void freshMembershipPurgesResidualTeamSeatsAndManagerReferences() {
+        User returning = newUser();
+        Team team = teamInWorkspace(workspace, returning);
+        workspaceMapper.removeMember(workspace.getId(), returning.getId());
+
+        offboardingService.prepareFreshMembership(workspace.getId(), returning.getId());
+
+        assertFalse(teamMapper.hasMember(workspace.getId(), team.getId(), returning.getId()));
+        assertNull(teamMapper.getById(workspace.getId(), team.getId()).getManagerUserId());
+    }
+
+    @Test
     void freshMembershipRetainsOwnedTranscriptAndRejoiningOwnerCanReadAndAppend() {
         User returning = newUser();
         User retainedOwner = newUser();
@@ -466,6 +510,21 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         other.setSlug("other-" + unique());
         workspaceMapper.insert(other);
         return other;
+    }
+
+    private Team teamInWorkspace(Workspace targetWorkspace, User manager) {
+        Team team = new Team();
+        team.setWorkspaceId(targetWorkspace.getId());
+        team.setName("Team " + unique());
+        team.setManagerUserId(manager.getId());
+        teamMapper.insert(team);
+        TeamMember member = new TeamMember();
+        member.setWorkspaceId(targetWorkspace.getId());
+        member.setTeamId(team.getId());
+        member.setUserId(manager.getId());
+        member.setRole("manager");
+        teamMapper.upsertMember(member);
+        return team;
     }
 
     private RelationshipSignal radarSignal() {

@@ -314,6 +314,18 @@ class UserMapperTest extends AbstractMapperTest {
         assertTrue(userMapper.isPrivilegedAccount(user.getId()));
     }
 
+    @Test
+    void customRoleHoldingOnlyTeamManageIsPrivileged() {
+        User user = newUser();
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(workspace.getId());
+        role.setName("team-admin-" + unique());
+        roleMapper.insertRole(role);
+        workspaceMapper.setMemberCustomRole(workspace.getId(), user.getId(), role.getId());
+        roleMapper.insertPermissions(workspace.getId(), role.getId(), List.of("TEAM_MANAGE"));
+        assertTrue(userMapper.isPrivilegedAccount(user.getId()));
+    }
+
     private User newUnassignedUser() {
         String suffix = unique();
         User user = new User();

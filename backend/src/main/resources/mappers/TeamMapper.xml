@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.TeamMapper">
+
+  <resultMap id="teamResult" type="Team">
+    <id property="id" column="id"/>
+    <result property="workspaceId" column="workspace_id"/>
+    <result property="name" column="name"/>
+    <result property="description" column="description"/>
+    <result property="managerUserId" column="manager_user_id"/>
+    <result property="archivedAt" column="archived_at"/>
+    <result property="createdAt" column="created_at"/>
+    <result property="updatedAt" column="updated_at"/>
+  </resultMap>
+
+  <resultMap id="teamMemberResult" type="TeamMember">
+    <id property="workspaceId" column="workspace_id"/>
+    <id property="teamId" column="team_id"/>
+    <id property="userId" column="user_id"/>
+    <result property="role" column="role"/>
+    <result property="createdAt" column="created_at"/>
+  </resultMap>
+
+  <sql id="teamColumns">
+    id, workspace_id, name, description, manager_user_id, archived_at, created_at, updated_at
+  </sql>
+
+  <select id="getAll" resultMap="teamResult">
+    SELECT <include refid="teamColumns"/>
+    FROM team
+    WHERE workspace_id = #{workspaceId}
+    <if test="!includeArchived">
+      AND archived_at IS NULL
+    </if>
+    ORDER BY archived_at IS NOT NULL, name, id
+  </select>
+
+  <select id="getById" resultMap="teamResult">
+    SELECT <include refid="teamColumns"/>
+    FROM team
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getByIdForUpdate" resultMap="teamResult">
+    SELECT <include refid="teamColumns"/>
+    FROM team
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="findReferencesForUser" resultMap="teamResult">
+    SELECT <include refid="teamColumns"/>
+    FROM team t
+    WHERE t.workspace_id = #{workspaceId}
+      AND (
+        t.manager_user_id = #{userId}
+        OR EXISTS (
+          SELECT 1
+          FROM team_member tm
+          WHERE tm.workspace_id = t.workspace_id
+            AND tm.team_id = t.id
+            AND tm.user_id = #{userId}
+        )
+      )
+    ORDER BY t.workspace_id, t.id
+  </select>
+
+  <select id="findReferencesForUserAnywhere" resultMap="teamResult">
+    SELECT <include refid="teamColumns"/>
+    FROM team t
+    WHERE t.manager_user_id = #{userId}
+       OR EXISTS (
+         SELECT 1
+         FROM team_member tm
+         WHERE tm.workspace_id = t.workspace_id
+           AND tm.team_id = t.id
+           AND tm.user_id = #{userId}
+       )
+    ORDER BY t.workspace_id, t.id
+  </select>
+
+  <select id="getMembersForTeams" resultMap="teamMemberResult">
+    SELECT workspace_id, team_id, user_id, role, created_at
+    FROM team_member
+    WHERE workspace_id = #{workspaceId}
+      AND team_id IN
+      <foreach collection="teamIds" item="teamId" open="(" separator="," close=")">
+        #{teamId}
+      </foreach>
+    ORDER BY team_id, role = 'manager' DESC, user_id
+  </select>
+
+  <select id="hasMember" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM team_member
+      WHERE workspace_id = #{workspaceId} AND team_id = #{teamId} AND user_id = #{userId}
+    )
+  </select>
+
+  <select id="lockMember" resultType="java.lang.Integer">
+    SELECT user_id
+    FROM team_member
+    WHERE workspace_id = #{workspaceId} AND team_id = #{teamId} AND user_id = #{userId}
+    FOR UPDATE
+  </select>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO team (workspace_id, name, description, manager_user_id)
+    VALUES (#{workspaceId}, #{name}, #{description}, #{managerUserId})
+  </insert>
+
+  <update id="update">
+    UPDATE team
+    SET name = #{name}, description = #{description}, manager_user_id = #{managerUserId}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
+  <update id="archive">
+    UPDATE team
+    SET archived_at = COALESCE(archived_at, UTC_TIMESTAMP(6))
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND archived_at IS NULL
+  </update>
+
+  <insert id="upsertMember">
+    INSERT INTO team_member (workspace_id, team_id, user_id, role)
+    VALUES (#{workspaceId}, #{teamId}, #{userId}, #{role})
+    ON DUPLICATE KEY UPDATE role = VALUES(role)
+  </insert>
+
+  <update id="demoteManagers">
+    UPDATE team_member
+    SET role = 'member'
+    WHERE workspace_id = #{workspaceId} AND team_id = #{teamId} AND role = 'manager'
+  </update>
+
+  <delete id="removeMember">
+    DELETE FROM team_member
+    WHERE workspace_id = #{workspaceId} AND team_id = #{teamId} AND user_id = #{userId}
+  </delete>
+
+  <update id="clearManager">
+    UPDATE team
+    SET manager_user_id = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{teamId} AND manager_user_id = #{userId}
+  </update>
+
+  <delete id="deleteMembershipsForUser">
+    DELETE FROM team_member WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </delete>
+
+  <update id="clearManagerForUser">
+    UPDATE team SET manager_user_id = NULL
+    WHERE workspace_id = #{workspaceId} AND manager_user_id = #{userId}
+  </update>
+
+  <delete id="deleteMembershipsAnywhere">
+    DELETE FROM team_member WHERE user_id = #{userId}
+  </delete>
+
+  <update id="clearManagerAnywhere">
+    UPDATE team SET manager_user_id = NULL WHERE manager_user_id = #{userId}
+  </update>
+
+</mapper>

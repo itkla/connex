@@ -78,6 +78,7 @@ Numbered and testable. Cite them by number in reviews.
 | Deal record | **Deal** | **案件** | opportunity as a countable UI noun (intro suggestions are "suggested intros"); 商談 except as an example stage name |
 | What a deal is worth if it closed today | **Projected** — "Projected value", "Projected revenue"; the counterpart of won/realized revenue | **予測** —「予測金額」「予測売上」 | — |
 | Where records live and are shared | **workspace** | **ワークスペース** | organization (for workspace scope), team (as a scope; fine informally for the humans), tenant (legal pages: allowed) |
+| A named group of members within one workspace | **team**; **Teams** as the plural label | **チーム** | — |
 | The admin level above workspaces | **Organization** (as a destination or section name, only on organization-admin surfaces; fine in prose stating a genuinely organization-scoped fact — "your organization's AI provider") | **組織** | tenant (legal pages: allowed); テナント (legal pages: allowed) |
 | A person in a workspace | **member** | **メンバー** | user (except auth/sign-in/session contexts), teammate (as a label; fine in informal prose) |
 | Org-level admin | **organization administrator** | **組織管理者** | — |

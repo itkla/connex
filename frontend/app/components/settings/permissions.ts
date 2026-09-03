@@ -1,5 +1,6 @@
 export type PermissionItem = { permission: string; action: string };
 export type PermissionGroup = { group: string; label: string; items: PermissionItem[] };
+export type PermissionLabel = { group: string; action: string };
 
 const OVERRIDES: Record<string, string> = {
     MANAGE: 'Manage',
@@ -29,13 +30,20 @@ function split(permission: string): { group: string; label: string; action: stri
 
 /**
  * Group a flat permission catalog by entity (the part before the first `_`)
- * into humanized, locale-independent sections, preserving catalog order.
+ * into humanized sections, preserving catalog order and applying localized overrides.
  */
-export function groupPermissions(catalog: string[]): PermissionGroup[] {
+export function groupPermissions(
+    catalog: string[],
+    labels: Partial<Record<string, PermissionLabel>> = {},
+): PermissionGroup[] {
     const order: string[] = [];
     const map = new Map<string, PermissionGroup>();
     for (const permission of catalog) {
-        const { group, label, action } = split(permission);
+        const parsed = split(permission);
+        const localized = labels[permission];
+        const { group } = parsed;
+        const label = localized?.group ?? parsed.label;
+        const action = localized?.action ?? parsed.action;
         if (!map.has(group)) {
             map.set(group, { group, label, items: [] });
             order.push(group);

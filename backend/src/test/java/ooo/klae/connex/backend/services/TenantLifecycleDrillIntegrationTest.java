@@ -49,6 +49,8 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Team;
+import ooo.klae.connex.backend.beans.TeamMember;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.TenantResidualReport;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
@@ -66,6 +68,7 @@ import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldValueMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
+import ooo.klae.connex.backend.mappers.TeamMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ScannedUpload;
@@ -105,16 +108,29 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     @Autowired private AuditIntegrityService auditIntegrityService;
     @Autowired private IdentityBackfillTransaction identityBackfillTransaction;
     @Autowired private RecordCreationTemplateService recordCreationTemplateService;
+    @Autowired private TeamMapper teamMapper;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private JdbcTemplate jdbcTemplate;
 
     private Organization drillOrganization;
     private Organization otherOrganization;
     private Workspace drillWorkspace;
+    private Workspace otherWorkspace;
 
     @AfterEach
     void cleanCommittedDrillRoots() {
         if (otherOrganization != null) {
+            if (otherWorkspace != null) {
+                jdbcTemplate.update(
+                    "DELETE FROM team_member WHERE workspace_id = ?",
+                    otherWorkspace.getId());
+                jdbcTemplate.update(
+                    "DELETE FROM team WHERE workspace_id = ?",
+                    otherWorkspace.getId());
+                jdbcTemplate.update(
+                    "DELETE FROM workspace WHERE id = ?",
+                    otherWorkspace.getId());
+            }
             jdbcTemplate.update(
                 "DELETE FROM organization WHERE id = ?",
                 otherOrganization.getId());
@@ -160,6 +176,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     void exportsRestrictedHoldingsAndBinaryThenTeardownLeavesNoResiduals() throws Exception {
         createDedicatedDrillRoots();
         Fixture fixture = seedRepresentativeTenant();
+        String foreignTeamName = seedForeignTenantTeam();
         WorkspaceLifecycleRef target = controlMapper.findWorkspaceInOrg(
             drillOrganization.getId(),
             drillWorkspace.getId());
@@ -188,6 +205,8 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertTrue(entries.containsKey("data/record_creation_template_set.jsonl"));
         assertTrue(entries.containsKey("data/record_creation_template.jsonl"));
         assertTrue(entries.containsKey("data/record_creation_template_version.jsonl"));
+        assertTrue(entries.containsKey("data/team.jsonl"));
+        assertTrue(entries.containsKey("data/team_member.jsonl"));
         assertTrue(entries.containsKey("data/notification.jsonl"));
         assertTrue(entries.containsKey("data/saved_view.jsonl"));
         assertTrue(entries.containsKey("data/ai_output_cache.jsonl"));
@@ -212,6 +231,9 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             .contains(Integer.toString(fixture.templateRootId())));
         assertTrue(text(entries, "data/record_creation_template_version.jsonl")
             .contains(fixture.templateName()));
+        String teamJsonl = text(entries, "data/team.jsonl");
+        assertTrue(teamJsonl.contains(fixture.teamName()));
+        assertFalse(teamJsonl.contains(foreignTeamName));
         assertArrayEquals(BINARY, entries.get("objects/" + fixture.objectKey()));
         String manifest = text(entries, "manifest.json");
         assertTrue(manifest.contains("\"schemaVersion\":1"));
@@ -253,6 +275,8 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertEquals(0, rowCount("record_creation_template"));
         assertEquals(0, rowCount("record_creation_template_version"));
         assertEquals(0, rowCount("duplicate_review_decision"));
+        assertEquals(0, rowCount("team"));
+        assertEquals(0, rowCount("team_member"));
         assertFalse(Files.exists(fixture.objectPath()));
         assertEquals(0, jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM workspace WHERE id = ?",
@@ -431,6 +455,24 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             token,
             ageMinutes);
         return token;
+    }
+
+    private String seedForeignTenantTeam() {
+        otherOrganization = new Organization();
+        otherOrganization.setName("Lifecycle Foreign " + unique());
+        otherOrganization.setSlug("lifecycle-foreign-" + unique());
+        organizationMapper.insert(otherOrganization);
+        otherWorkspace = new Workspace();
+        otherWorkspace.setOrgId(otherOrganization.getId());
+        otherWorkspace.setName("Lifecycle Foreign " + unique());
+        otherWorkspace.setSlug("lifecycle-foreign-" + unique());
+        workspaceMapper.insert(otherWorkspace);
+        String teamName = "Foreign lifecycle team " + unique();
+        Team team = new Team();
+        team.setWorkspaceId(otherWorkspace.getId());
+        team.setName(teamName);
+        teamMapper.insert(team);
+        return teamName;
     }
 
     private boolean leaseExists(String leaseToken) {
@@ -616,6 +658,18 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
                 true,
                 0));
         int templateRootId = Integer.parseInt(template.id().substring("workspace:".length()));
+        String teamName = "Lifecycle team " + unique();
+        Team team = new Team();
+        team.setWorkspaceId(drillWorkspace.getId());
+        team.setName(teamName);
+        team.setManagerUserId(currentUser.getId());
+        teamMapper.insert(team);
+        TeamMember teamMember = new TeamMember();
+        teamMember.setWorkspaceId(drillWorkspace.getId());
+        teamMember.setTeamId(team.getId());
+        teamMember.setUserId(currentUser.getId());
+        teamMember.setRole("manager");
+        teamMapper.upsertMember(teamMember);
         StoredBinary binary = storeAttachment(company);
         String token = binary.url().substring("/api/attachments/content/".length());
         String objectKey = "workspaces/" + drillWorkspace.getId()
@@ -631,7 +685,8 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             toolName,
             terminalReason,
             templateRootId,
-            templateName);
+            templateName,
+            teamName);
     }
 
     private int rowCount(String table) {
@@ -690,6 +745,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             String toolName,
             String terminalReason,
             int templateRootId,
-            String templateName) {
+            String templateName,
+            String teamName) {
     }
 }

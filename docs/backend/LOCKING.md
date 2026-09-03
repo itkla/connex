@@ -62,6 +62,21 @@ Invite grants lock creator/known-recipient users ascending, reject deletion rese
 
 Pending-membership approval locks user, workspace exclusively, organization for share, and exact pending membership before domain/version-gated activation.
 
+### Workspace teams
+
+Team mutations lock the exact `team` parent before any `team_member` child row. Manager replacement,
+seat removal, workspace-member removal, fresh-membership residual cleanup, and account erasure all
+use that order. Offboarding discovers affected teams without locks, Java-sorts them by
+`(workspace_id, team_id)`, acquires each exact team lock in that order, and only then deletes seats
+or clears manager references. Tenant teardown deletes the team parent and relies on its cascading
+child foreign key, so it follows the same parent-before-child hierarchy.
+
+Path-addressed membership removal performs its preliminary path-workspace authorization before
+placement resolution, then installs that path workspace's tenant identity and catalog before the
+transaction. The locked authorization recheck remains inside the transaction. Active removal,
+pending-invitation decline, and leave all use this boundary so audit attribution and tenant-plane
+cleanup cannot inherit the active-header workspace.
+
 ## Lifecycle, APPI requests, and organization SSO
 
 Control writes share this root order:

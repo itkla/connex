@@ -2,6 +2,9 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -9,6 +12,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.function.BiFunction;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -44,6 +49,7 @@ class WorkspaceNotificationLockOrderTest {
     @Mock private RoleMapper roleMapper;
     @Mock private NotificationMapper notificationMapper;
     @Mock private UserOffboardingService userOffboardingService;
+    @Mock private WorkspaceMembershipRemovalTransaction membershipRemovalTransaction;
     @Mock private NotificationDelivery notificationDelivery;
     @Mock private NotificationStateVersionService stateVersionService;
     @Mock private TenantContext tenantContext;
@@ -53,27 +59,39 @@ class WorkspaceNotificationLockOrderTest {
 
     @InjectMocks private WorkspaceService service;
 
+    private void runMembershipRemovalWork() {
+        doAnswer(invocation -> {
+            int workspaceId = invocation.getArgument(0);
+            Supplier<String> authorization = invocation.getArgument(2);
+            authorization.get();
+            BiFunction<Integer, Integer, ?> work = invocation.getArgument(3);
+            return work.apply(workspaceId, 41);
+        }).when(membershipRemovalTransaction).execute(
+            anyInt(), anyInt(), any(), any());
+    }
+
     @Test
-    void declineLocksMembershipBeforeNotificationDeleteAndStateChange() {
+    void declineRunsRoutedCleanupBeforeMembershipDeleteAndStateChange() {
+        runMembershipRemovalWork();
         MemberDto pending = new MemberDto();
+        pending.setBuiltInRole("member");
         pending.setStatus("pending");
         when(userMapper.lockById(9)).thenReturn(9);
         when(workspaceMapper.getMember(7, 9)).thenReturn(pending);
 
         service.declineMembership(7, 9);
 
-        InOrder order = inOrder(userMapper, notificationMapper, workspaceMapper, stateVersionService);
+        InOrder order = inOrder(
+            userMapper, userOffboardingService, workspaceMapper, stateVersionService);
         order.verify(userMapper).lockById(9);
-        order.verify(notificationMapper).lockRecipientMemberships(9);
-        order.verify(notificationMapper)
-            .deleteHistoricalNotificationBaselinesForRecipient(7, 9);
-        order.verify(notificationMapper).deleteAllForRecipient(7, 9);
+        order.verify(userOffboardingService).detachMemberContent(7, 9);
         order.verify(workspaceMapper).removeMember(7, 9);
         order.verify(stateVersionService).markChanged(9);
     }
 
     @Test
     void ownerLeaveLocksWorkspaceAndMembershipsBeforeOwnerRowsAndNotifications() {
+        runMembershipRemovalWork();
         when(userMapper.lockById(9)).thenReturn(9);
         when(workspaceMapper.getRole(7, 9)).thenReturn("owner");
         when(workspaceMapper.workspaceIdsOwnedBy(9)).thenReturn(List.of(3, 7));
@@ -95,6 +113,7 @@ class WorkspaceNotificationLockOrderTest {
 
     @Test
     void ownerRemovalLocksUsersWorkspaceAndMembershipsBeforeOwnerRowsAndCleanup() {
+        runMembershipRemovalWork();
         stubOwnerActor();
         stubRoleMutationTarget("owner");
         when(workspaceMapper.lockOwnerIds(7)).thenReturn(List.of(1, 9));
@@ -122,6 +141,7 @@ class WorkspaceNotificationLockOrderTest {
 
     @Test
     void memberRemovalRevalidatesCurrentPermissionBeforeCleanup() {
+        runMembershipRemovalWork();
         when(workspaceMapper.getMemberRoleId(7, 1)).thenReturn(null);
         when(workspaceMapper.getRole(7, 1)).thenReturn("owner");
         when(userMapper.lockById(1)).thenReturn(1);
@@ -140,6 +160,7 @@ class WorkspaceNotificationLockOrderTest {
 
     @Test
     void memberRemovalUsesLockedOwnerState() {
+        runMembershipRemovalWork();
         when(workspaceMapper.getMemberRoleId(7, 1)).thenReturn(null);
         when(workspaceMapper.getRole(7, 1)).thenReturn("admin");
         when(userMapper.lockById(1)).thenReturn(1);
