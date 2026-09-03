@@ -34,6 +34,7 @@ public class IdentityBackfillTransaction {
 
     private final IdentityMapper identityMapper;
     private final IdentityCollisionMapper identityCollisionMapper;
+    private final DuplicateReviewService duplicateReviewService;
     private final MatchingService matchingService;
     private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final Clock clock;
@@ -284,6 +285,7 @@ public class IdentityBackfillTransaction {
         identityCollisionMapper.deleteForWorkspace(workspaceId);
         identityCollisionMapper.insertPersonCollisionMembers(workspaceId, rebuiltAt);
         identityCollisionMapper.insertCompanyCollisionMembers(workspaceId, rebuiltAt);
+        duplicateReviewService.refreshWorkspaceItems(workspaceId, rebuiltAt);
         return Math.toIntExact(identityCollisionMapper.countForWorkspace(workspaceId));
     }
 

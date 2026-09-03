@@ -44,6 +44,7 @@ class OrgShareCeilingArchTest {
         "mappers/AiAssistantIdentifierMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/CompanyMapper.xml", Pattern.compile("FROM company_share"),
         "mappers/DealMapper.xml", Pattern.compile("FROM (?:company|person|pipeline)_share"),
+        "mappers/DuplicateReviewMapper.xml", Pattern.compile("FROM company_share"),
         "mappers/IdentityMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PersonEdgeMapper.xml", Pattern.compile("FROM (?:person|company)_share"),
         "mappers/PersonMapper.xml", Pattern.compile("FROM (?:person|company)_share"),

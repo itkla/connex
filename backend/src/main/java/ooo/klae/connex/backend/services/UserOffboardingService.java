@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.ConsentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper;
+import ooo.klae.connex.backend.mappers.DuplicateReviewMapper;
 import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
@@ -85,6 +86,7 @@ public class UserOffboardingService {
     private final DealMapper dealMapper;
     private final RecordCreationTemplateMapper recordCreationTemplateMapper;
     private final DealDuplicateReviewProofMapper dealDuplicateReviewProofMapper;
+    private final DuplicateReviewMapper duplicateReviewMapper;
     private final TaskMapper taskMapper;
     private final AttachmentMapper attachmentMapper;
     private final CampaignMapper campaignMapper;
@@ -175,6 +177,7 @@ public class UserOffboardingService {
             savedViewPreferenceMapper.deleteDefaultsForFreshMembership(workspaceId, userId);
             savedViewMapper.deleteForFreshMembership(workspaceId, userId);
             dealDuplicateReviewProofMapper.deleteForActor(workspaceId, userId);
+            duplicateReviewMapper.clearDismissedBy(workspaceId, userId);
             aiChatMapper.deleteParticipantsForUser(workspaceId, userId);
             aiBriefScheduleMapper.deleteForUser(workspaceId, userId);
             aiWatchMapper.deleteForUser(workspaceId, userId);
@@ -247,6 +250,7 @@ public class UserOffboardingService {
         savedViewPreferenceMapper.deleteDefaultsForUser(workspaceId, userId);
         savedViewMapper.deleteForUser(workspaceId, userId);
         dealDuplicateReviewProofMapper.deleteForActor(workspaceId, userId);
+        duplicateReviewMapper.clearDismissedBy(workspaceId, userId);
         aiChatMapper.deleteParticipantsForUser(workspaceId, userId);
         aiBriefScheduleMapper.deleteForUser(workspaceId, userId);
         aiWatchMapper.deleteForUser(workspaceId, userId);
@@ -268,8 +272,8 @@ public class UserOffboardingService {
      * (CASCADE — saved-view preferences, saved views, dashboards, assistant-chat grants,
      * notifications, collaborator seats)
      * and shared-history references are nulled (SET NULL — company, contact, deal, and
-     * campaign ownership, assistant-chat provenance, record-comment authorship,
-     * creation, redaction, and resolution provenance, task assignment, uploader,
+     * campaign ownership, duplicate-review dismissal actors, assistant-chat provenance,
+     * record-comment authorship, creation, redaction, and resolution provenance, task assignment, uploader,
      * notification actor, report and campaign actors, rule principals,
      * consent/suppression actors, share grantors).
      * Statements are grouped deletes-then-nulls
@@ -314,6 +318,7 @@ public class UserOffboardingService {
         savedViewPreferenceMapper.deleteDefaultsForUserAnywhere(userId);
         savedViewMapper.deleteForUserAnywhere(userId);
         dealDuplicateReviewProofMapper.deleteForActorAnywhere(userId);
+        duplicateReviewMapper.clearDismissedByAnywhere(userId);
         userDashboardMapper.deleteForUserAnywhere(userId);
         aiChatMapper.deleteParticipantsForUserAnywhere(userId);
         aiChatMapper.clearParticipantInvitersAnywhere(userId);

@@ -35,6 +35,7 @@ class OffboardingIndexArchTest {
         new String[] {"notification", "actor_id"},
         new String[] {"deal_collaborator", "user_id"},
         new String[] {"deal_duplicate_review_proof", "actor_id"},
+        new String[] {"duplicate_review_decision", "dismissed_by_user_id"},
         new String[] {"deal", "owner_id"},
         new String[] {"company", "owner_id"},
         new String[] {"person", "owner_id"},

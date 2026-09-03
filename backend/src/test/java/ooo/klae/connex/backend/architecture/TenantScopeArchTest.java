@@ -154,6 +154,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.DealMapper.clearOwnershipAnywhere",
         "ooo.klae.connex.backend.mappers.DealMapper.removeCollaboratorAnywhere",
         "ooo.klae.connex.backend.mappers.DealDuplicateReviewProofMapper.deleteForActorAnywhere",
+        "ooo.klae.connex.backend.mappers.DuplicateReviewMapper.clearDismissedByAnywhere",
         "ooo.klae.connex.backend.mappers.TaskMapper.unassignAnywhere",
         "ooo.klae.connex.backend.mappers.AttachmentMapper.clearUploaderAnywhere",
         "ooo.klae.connex.backend.mappers.CampaignMapper.clearCampaignUserReferencesAnywhere",

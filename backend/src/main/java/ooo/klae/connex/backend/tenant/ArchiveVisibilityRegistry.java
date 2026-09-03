@@ -224,6 +224,10 @@ public final class ArchiveVisibilityRegistry {
                 + "records drop out of it exactly as suspended and provision-ceased ones do. The keys "
                 + "themselves remain retained, and a restored duplicate returns to the collision "
                 + "report instead of being silently attached to one record.");
+        declare(entries, "DuplicateReviewMapper", ArchiveStrategy.EXCLUDE_ARCHIVED,
+            "Duplicate review is an actionable worklist, so pair summaries and materialized groups "
+                + "exclude archived contacts and companies while retaining prior decision rows for "
+                + "suppression memory and later restoration.");
         declare(entries, "ActivityMapper", ArchiveStrategy.NO_RECORD_PROJECTION,
             "Activity reads join contacts only to resolve which activities belong to a company, so "
                 + "the company timeline excludes rows linked to archived contacts while direct "

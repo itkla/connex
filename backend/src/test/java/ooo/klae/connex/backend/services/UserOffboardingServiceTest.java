@@ -79,6 +79,7 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
     @Autowired private CampaignMapper campaignMapper;
     @Autowired private ConsentMapper consentMapper;
     @Autowired private SuppressionMapper suppressionMapper;
+    @Autowired private IdentityBackfillTransaction identityBackfillTransaction;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
 
@@ -107,6 +108,17 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
         User target = newUser();
         Company company = newCompany();
         Person person = newPerson(company);
+        newPerson(company);
+        identityBackfillTransaction.backfillPersonPage(
+            null, workspace.getId(), 0, 500);
+        identityBackfillTransaction.rebuildCollisionReport(null, workspace.getId());
+        int dismissedDecisions = jdbcTemplate.update(
+            "UPDATE duplicate_review_decision SET state = 'dismissed',"
+                + " dismissed_at = UTC_TIMESTAMP(6), dismissed_by_user_id = ?"
+                + " WHERE workspace_id = ? AND is_current = TRUE",
+            target.getId(),
+            workspace.getId());
+        assertTrue(dismissedDecisions > 0);
         companyMapper.updateOwner(workspace.getId(), company.getId(), target.getId());
         personMapper.updateOwner(workspace.getId(), person.getId(), target.getId());
         Workspace otherWorkspace = newOtherWorkspace();
@@ -268,6 +280,14 @@ class UserOffboardingServiceTest extends AbstractServiceTest {
             "SELECT requested_by_user_id FROM ai_chat_turn WHERE workspace_id = ? AND session_id = ?",
             Integer.class, workspace.getId(), retainedChatSession.getId()));
         assertEquals(target.getDisplayName(), userMapper.getUserById(target.getId()).getDisplayName());
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM duplicate_review_decision WHERE dismissed_by_user_id = ?",
+            Integer.class,
+            target.getId()));
+        assertEquals(dismissedDecisions, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM duplicate_review_decision WHERE workspace_id = ?",
+            Integer.class,
+            workspace.getId()));
     }
 
     @Test

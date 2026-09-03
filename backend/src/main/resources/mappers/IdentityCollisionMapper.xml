@@ -3,6 +3,15 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="ooo.klae.connex.backend.mappers.IdentityCollisionMapper">
 
+  <resultMap id="collisionGroupKey"
+             type="ooo.klae.connex.backend.dto.IdentityCollisionGroupKey">
+    <constructor>
+      <arg column="record_type" javaType="java.lang.String"/>
+      <arg column="kind" javaType="java.lang.String"/>
+      <arg column="normalized_value" javaType="java.lang.String"/>
+    </constructor>
+  </resultMap>
+
   <sql id="visiblePersonRestriction">
     AND p.suspended_at IS NULL
     AND p.provision_ceased_at IS NULL
@@ -166,10 +175,233 @@
     ON DUPLICATE KEY UPDATE rebuilt_at = #{rebuiltAt}
   </insert>
 
+  <delete id="deletePersonCollisionMembershipsForRecord">
+    DELETE identity_collision
+    FROM identity_collision
+    JOIN person_identity
+      ON person_identity.workspace_id = identity_collision.workspace_id
+      AND person_identity.id = identity_collision.person_identity_id
+    WHERE identity_collision.workspace_id = #{workspaceId}
+      AND person_identity.person_id = #{personId}
+  </delete>
+
+  <delete id="deleteCompanyCollisionMembershipsForRecord">
+    DELETE identity_collision
+    FROM identity_collision
+    JOIN company_identity
+      ON company_identity.workspace_id = identity_collision.workspace_id
+      AND company_identity.id = identity_collision.company_identity_id
+    WHERE identity_collision.workspace_id = #{workspaceId}
+      AND company_identity.company_id = #{companyId}
+  </delete>
+
+  <delete id="deletePersonSingletonCollisionMember">
+    DELETE FROM identity_collision
+    WHERE workspace_id = #{workspaceId}
+      AND person_identity_id = (
+        SELECT singleton_identity.id
+        FROM person_identity singleton_identity
+        JOIN person singleton_record
+          ON singleton_record.workspace_id = singleton_identity.workspace_id
+          AND singleton_record.id = singleton_identity.person_id
+          AND singleton_record.archived_at IS NULL
+          AND singleton_record.suspended_at IS NULL
+          AND singleton_record.provision_ceased_at IS NULL
+        WHERE singleton_identity.workspace_id = #{workspaceId}
+          AND singleton_identity.kind = #{kind}
+          AND singleton_identity.normalized_value = #{normalizedValue}
+          AND singleton_identity.superseded_at IS NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM person_identity other_identity
+            JOIN person other_record
+              ON other_record.workspace_id = other_identity.workspace_id
+              AND other_record.id = other_identity.person_id
+              AND other_record.archived_at IS NULL
+              AND other_record.suspended_at IS NULL
+              AND other_record.provision_ceased_at IS NULL
+            WHERE other_identity.workspace_id = singleton_identity.workspace_id
+              AND other_identity.kind = singleton_identity.kind
+              AND other_identity.normalized_value = singleton_identity.normalized_value
+              AND other_identity.superseded_at IS NULL
+              AND other_identity.person_id &lt;&gt; singleton_identity.person_id
+            LIMIT 1
+          )
+        ORDER BY singleton_identity.person_id, singleton_identity.id
+        LIMIT 1
+      )
+  </delete>
+
+  <delete id="deleteCompanySingletonCollisionMember">
+    DELETE FROM identity_collision
+    WHERE workspace_id = #{workspaceId}
+      AND company_identity_id = (
+        SELECT singleton_identity.id
+        FROM company_identity singleton_identity
+        JOIN company singleton_record
+          ON singleton_record.workspace_id = singleton_identity.workspace_id
+          AND singleton_record.id = singleton_identity.company_id
+          AND singleton_record.archived_at IS NULL
+        WHERE singleton_identity.workspace_id = #{workspaceId}
+          AND singleton_identity.kind = #{kind}
+          AND singleton_identity.normalized_value = #{normalizedValue}
+          AND singleton_identity.superseded_at IS NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM company_identity other_identity
+            JOIN company other_record
+              ON other_record.workspace_id = other_identity.workspace_id
+              AND other_record.id = other_identity.company_id
+              AND other_record.archived_at IS NULL
+            WHERE other_identity.workspace_id = singleton_identity.workspace_id
+              AND other_identity.kind = singleton_identity.kind
+              AND other_identity.normalized_value = singleton_identity.normalized_value
+              AND other_identity.superseded_at IS NULL
+              AND other_identity.company_id &lt;&gt; singleton_identity.company_id
+            LIMIT 1
+          )
+        ORDER BY singleton_identity.company_id, singleton_identity.id
+        LIMIT 1
+      )
+  </delete>
+
+  <insert id="ensurePersonCollisionPairForRecord">
+    INSERT INTO identity_collision (workspace_id, person_identity_id, rebuilt_at)
+    WITH target_identity AS (
+      SELECT person_identity.workspace_id, person_identity.id
+      FROM person_identity
+      JOIN person
+        ON person.workspace_id = person_identity.workspace_id
+        AND person.id = person_identity.person_id
+        AND person.archived_at IS NULL
+        AND person.suspended_at IS NULL
+        AND person.provision_ceased_at IS NULL
+      WHERE person_identity.workspace_id = #{workspaceId}
+        AND person_identity.person_id = #{personId}
+        AND person_identity.kind = #{kind}
+        AND person_identity.normalized_value = #{normalizedValue}
+        AND person_identity.superseded_at IS NULL
+      LIMIT 1
+    ),
+    other_identity AS (
+      SELECT person_identity.workspace_id, person_identity.id
+      FROM person_identity
+      JOIN person
+        ON person.workspace_id = person_identity.workspace_id
+        AND person.id = person_identity.person_id
+        AND person.archived_at IS NULL
+        AND person.suspended_at IS NULL
+        AND person.provision_ceased_at IS NULL
+      WHERE person_identity.workspace_id = #{workspaceId}
+        AND person_identity.person_id &lt;&gt; #{personId}
+        AND person_identity.kind = #{kind}
+        AND person_identity.normalized_value = #{normalizedValue}
+        AND person_identity.superseded_at IS NULL
+      ORDER BY person_identity.person_id, person_identity.id
+      LIMIT 1
+    )
+    SELECT target_identity.workspace_id, target_identity.id, #{rebuiltAt}
+    FROM target_identity
+    CROSS JOIN other_identity
+    UNION ALL
+    SELECT other_identity.workspace_id, other_identity.id, #{rebuiltAt}
+    FROM target_identity
+    CROSS JOIN other_identity
+    WHERE TRUE
+    ON DUPLICATE KEY UPDATE rebuilt_at = #{rebuiltAt}
+  </insert>
+
+  <insert id="ensureCompanyCollisionPairForRecord">
+    INSERT INTO identity_collision (workspace_id, company_identity_id, rebuilt_at)
+    WITH target_identity AS (
+      SELECT company_identity.workspace_id, company_identity.id
+      FROM company_identity
+      JOIN company
+        ON company.workspace_id = company_identity.workspace_id
+        AND company.id = company_identity.company_id
+        AND company.archived_at IS NULL
+      WHERE company_identity.workspace_id = #{workspaceId}
+        AND company_identity.company_id = #{companyId}
+        AND company_identity.kind = #{kind}
+        AND company_identity.normalized_value = #{normalizedValue}
+        AND company_identity.superseded_at IS NULL
+      LIMIT 1
+    ),
+    other_identity AS (
+      SELECT company_identity.workspace_id, company_identity.id
+      FROM company_identity
+      JOIN company
+        ON company.workspace_id = company_identity.workspace_id
+        AND company.id = company_identity.company_id
+        AND company.archived_at IS NULL
+      WHERE company_identity.workspace_id = #{workspaceId}
+        AND company_identity.company_id &lt;&gt; #{companyId}
+        AND company_identity.kind = #{kind}
+        AND company_identity.normalized_value = #{normalizedValue}
+        AND company_identity.superseded_at IS NULL
+      ORDER BY company_identity.company_id, company_identity.id
+      LIMIT 1
+    )
+    SELECT target_identity.workspace_id, target_identity.id, #{rebuiltAt}
+    FROM target_identity
+    CROSS JOIN other_identity
+    UNION ALL
+    SELECT other_identity.workspace_id, other_identity.id, #{rebuiltAt}
+    FROM target_identity
+    CROSS JOIN other_identity
+    WHERE TRUE
+    ON DUPLICATE KEY UPDATE rebuilt_at = #{rebuiltAt}
+  </insert>
+
   <select id="countForWorkspace" resultType="long">
     SELECT COUNT(*)
     FROM identity_collision
     WHERE workspace_id = #{workspaceId}
+  </select>
+
+  <select id="findVisibleGroupKeysAfter" resultMap="collisionGroupKey">
+    SELECT record_type, kind, normalized_value
+    FROM (
+      SELECT 'person' AS record_type,
+             pi.kind,
+             pi.normalized_value
+      FROM person_identity pi
+      JOIN identity_collision ic
+        ON ic.workspace_id = pi.workspace_id
+        AND ic.person_identity_id = pi.id
+      JOIN person p
+        ON p.workspace_id = pi.workspace_id
+        AND p.id = pi.person_id
+      WHERE pi.workspace_id = #{workspaceId}
+        AND pi.superseded_at IS NULL
+        <include refid="visiblePersonRestriction"/>
+      GROUP BY pi.kind, pi.normalized_value
+      HAVING COUNT(*) &gt;= 2
+      UNION ALL
+      SELECT 'company' AS record_type,
+             ci.kind,
+             ci.normalized_value
+      FROM company_identity ci
+      JOIN identity_collision ic
+        ON ic.workspace_id = ci.workspace_id
+        AND ic.company_identity_id = ci.id
+      JOIN company c
+        ON c.workspace_id = ci.workspace_id
+        AND c.id = ci.company_id
+      WHERE ci.workspace_id = #{workspaceId}
+        AND ci.superseded_at IS NULL
+        AND c.archived_at IS NULL
+      GROUP BY ci.kind, ci.normalized_value
+      HAVING COUNT(*) &gt;= 2
+    ) collision_group
+    <if test="afterRecordType != null">
+      WHERE record_type &gt; #{afterRecordType}
+         OR (record_type = #{afterRecordType} AND kind &gt; #{afterKind})
+         OR (record_type = #{afterRecordType} AND kind = #{afterKind}
+             AND normalized_value &gt; #{afterNormalizedValue})
+    </if>
+    ORDER BY record_type, kind, normalized_value
+    LIMIT #{limit}
   </select>
 
   <select id="findVisibleGroupPage"

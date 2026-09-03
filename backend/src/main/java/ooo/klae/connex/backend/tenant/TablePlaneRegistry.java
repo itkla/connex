@@ -167,6 +167,7 @@ public final class TablePlaneRegistry {
         "document_delivery_recipient",
         "document_delivery_request",
         "document_template",
+        "duplicate_review_decision",
         "product",
         "entity_reference",
         "historical_notification_baseline",

@@ -659,10 +659,12 @@ public class PersonService {
             purgedAiOutputs = aiOutputCacheMapper.deleteForPerson(workspaceId, id);
         }
         Person after = requireOwnedPerson(workspaceId, id);
+        boolean wasVisible = before.getSuspendedAt() == null && before.getProvisionCeasedAt() == null;
+        boolean isVisible = after.getSuspendedAt() == null && after.getProvisionCeasedAt() == null;
+        if (wasVisible != isVisible) {
+            identityIntakeService.recordPersonVisibility(workspaceId, id);
+        }
         if (after.getSuspendedAt() == null && after.getProvisionCeasedAt() == null) {
-            identityIntakeService.recordPerson(
-                workspaceId, id, after.getEmail(), after.getPhone(),
-                IdentityAcquisitionSource.INTERACTIVE_UPDATE, null);
             providerCaptureMapper.releaseRestoredParticipantReviews(workspaceId, id);
         }
         Map<String, Object> diff = auditService.diff(before, after, RESTRICTION_AUDIT_FIELDS);
@@ -754,6 +756,7 @@ public class PersonService {
         if (personMapper.archive(workspaceId, id) != 1) {
             throw new ResourceNotFoundException("Contact not found");
         }
+        identityIntakeService.recordPersonVisibility(workspaceId, id);
         withdrawProviderCapture(workspaceId, id);
         Person after = requireArchivedPerson(workspaceId, id);
         auditService.record("person.archive", "person", id, before.getName(),
@@ -787,6 +790,7 @@ public class PersonService {
         identityIntakeService.recordPerson(
             workspaceId, id, after.getEmail(), after.getPhone(),
             IdentityAcquisitionSource.BACKFILL, null);
+        identityIntakeService.recordPersonVisibility(workspaceId, id);
         providerCaptureMapper.releaseRestoredParticipantReviews(workspaceId, id);
         auditService.record("person.restore", "person", id, after.getName(),
             "Restored person " + after.getName(),
