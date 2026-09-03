@@ -98,7 +98,7 @@ dependencies {
 	implementation("org.springframework.data:spring-data-commons:4.1.0")
 	implementation 'org.springframework.security:spring-security-webauthn'
 	implementation 'org.springframework.security:spring-security-messaging'
-	implementation platform('software.amazon.awssdk:bom:2.51.3')
+	implementation platform('software.amazon.awssdk:bom:2.54.7')
 	implementation 'software.amazon.awssdk:s3'
 	compileOnly 'io.micrometer:micrometer-registry-prometheus'
 	compileOnly 'org.projectlombok:lombok'
