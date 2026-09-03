@@ -23,6 +23,7 @@ public class ConnectorConfig {
     private String credentialRef;
     private String credentialLast4;
     private boolean enabled;
+    private long configVersion;
     private Integer createdById;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

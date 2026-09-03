@@ -2326,18 +2326,23 @@ export type CampaignPayload = {
 };
 
 export type CampaignAudienceRecordType = "person" | "company" | "deal";
+export type CampaignChannel = "email" | "sms";
 
 export type CampaignAudience = {
     campaignId: number;
     recordType: CampaignAudienceRecordType;
     definition: SegmentDefinition;
     mode: string;
+    channel: CampaignChannel;
+    purpose: string;
     updatedAt: string;
 };
 
 export type CampaignAudiencePayload = {
     recordType: CampaignAudienceRecordType;
     definition: SegmentDefinition;
+    channel?: CampaignChannel;
+    purpose?: string;
 };
 
 export type RecordLabel = {
@@ -2346,7 +2351,10 @@ export type RecordLabel = {
 };
 
 export type CampaignAudienceEstimate = {
+    channel: CampaignChannel;
+    purpose: string;
     estimatedIncluded: number;
+    excludedNoAddress: number;
     excludedConsent: number;
     excludedSuppressed: number;
     excludedRestricted: number;
@@ -2358,7 +2366,8 @@ export type CampaignAudienceExclusionReason =
     | "consent_revoked"
     | "consent_missing"
     | "suppressed"
-    | "restricted";
+    | "restricted"
+    | "no_address";
 
 export type CampaignAudienceMember = {
     recordType: CampaignAudienceRecordType;
@@ -2370,8 +2379,11 @@ export type CampaignAudienceMember = {
 export type CampaignAudienceSnapshotSummary = {
     version: number;
     recordType: CampaignAudienceRecordType;
+    channel: CampaignChannel;
+    purpose: string;
     estimatedIncluded: number;
     excludedTotal: number;
+    excludedNoAddress: number;
     excludedConsent: number;
     excludedSuppressed: number;
     excludedRestricted: number;
@@ -2384,8 +2396,6 @@ export type CampaignAudienceSnapshot = CampaignAudienceSnapshotSummary & {
     definition: SegmentDefinition;
     members: CampaignAudienceMember[];
 };
-
-export type CampaignChannel = "email" | "sms";
 
 export type CampaignMessageStatus = "draft" | "final";
 
@@ -2405,7 +2415,7 @@ export type CampaignMessageRevision = {
 export type CampaignMessage = {
     id: number;
     campaignId: number;
-    channel: string;
+    channel: CampaignChannel;
     name: string;
     status: CampaignMessageStatus;
     createdById: number | null;
@@ -2598,7 +2608,11 @@ export type PersonCampaignTouch = {
     updatedAt?: string;
 };
 
-export type CampaignExportStatus = "draft" | "running" | "completed" | "failed";
+export type CampaignExportStatus =
+    | "draft"
+    | "running"
+    | "completed"
+    | "failed";
 
 /** A campaign audience export bound to a frozen snapshot and an external connector. */
 export type CampaignAudienceExport = {
@@ -2608,9 +2622,13 @@ export type CampaignAudienceExport = {
     connector: string;
     externalListId: string | null;
     status: CampaignExportStatus;
+    reconciliationRequired: boolean;
+    failureReason?: string | null; lateOutcome?: string | null;
     totalMembers: number;
-    pushedCount: number;
-    failedCount: number;
+    pushedCount: number | null;
+    failedCount: number | null;
+    detailedCountsKnown: boolean;
+    detailedCountsAvailable: boolean;
     createdById: number | null;
     createdAt: string;
     updatedAt: string;
@@ -2619,6 +2637,13 @@ export type CampaignAudienceExport = {
 export type CampaignAudienceExportPayload = {
     snapshotVersion: number;
     connector: string;
+};
+
+export type CampaignAudienceExportResolution = "delivered" | "not_delivered";
+
+/** An operator-confirmed outcome for an export that requires reconciliation. */
+export type CampaignAudienceExportReconciliationPayload = {
+    resolution: CampaignAudienceExportResolution;
 };
 
 /** Public confirmation payload for an unsubscribe link; the address is masked by the backend. */

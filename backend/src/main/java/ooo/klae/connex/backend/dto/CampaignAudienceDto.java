@@ -8,6 +8,8 @@ import java.time.LocalDateTime;
  * @param recordType person, company, or deal
  * @param definition smart-segment definition
  * @param mode audience mode
+ * @param channel delivery channel used to classify the audience
+ * @param purpose consent purpose used to classify the audience
  * @param updatedAt last update timestamp
  */
 public record CampaignAudienceDto(
@@ -15,5 +17,7 @@ public record CampaignAudienceDto(
         String recordType,
         SegmentDefinition definition,
         String mode,
+        String channel,
+        String purpose,
         LocalDateTime updatedAt) {
 }

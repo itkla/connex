@@ -9,8 +9,11 @@ import java.util.List;
  * @param version campaign-local version
  * @param recordType record type
  * @param definition frozen smart-segment definition
+ * @param channel delivery channel used for classification
+ * @param purpose consent purpose used for classification
  * @param estimatedIncluded included count
  * @param excludedTotal total excluded count
+ * @param excludedNoAddress missing-address exclusion count
  * @param excludedConsent consent exclusion count
  * @param excludedSuppressed suppression exclusion count
  * @param excludedRestricted restriction exclusion count
@@ -23,8 +26,11 @@ public record CampaignAudienceSnapshotDto(
         int version,
         String recordType,
         SegmentDefinition definition,
+        String channel,
+        String purpose,
         int estimatedIncluded,
         int excludedTotal,
+        int excludedNoAddress,
         int excludedConsent,
         int excludedSuppressed,
         int excludedRestricted,

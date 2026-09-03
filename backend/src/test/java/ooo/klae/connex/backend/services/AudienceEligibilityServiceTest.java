@@ -101,10 +101,24 @@ class AudienceEligibilityServiceTest {
                 service.classify(WORKSPACE, candidates, CHANNEL, PURPOSE);
 
         assertEquals(Set.of(10, 11), result.restricted());
+        assertTrue(result.noAddress().isEmpty());
         assertTrue(result.includedIds().isEmpty());
         assertTrue(result.suppressed().isEmpty());
         assertTrue(result.consentBlocked().isEmpty());
         verify(personMapper, never()).getByIds(anyInt(), anyList());
         verify(campaignMapper, never()).suppressedAddresses(anyInt(), anyString(), anyList());
+    }
+
+    @Test
+    void restrictedPersonWithoutAChannelAddressRemainsRestrictedWithoutReadingPii() {
+        when(campaignMapper.restrictedPersonIds(WORKSPACE, List.of(12))).thenReturn(List.of(12));
+
+        AudienceEligibilityService.AudienceClassification result =
+                service.classify(WORKSPACE, List.of(12), "sms", PURPOSE);
+
+        assertEquals(Set.of(12), result.restricted());
+        assertTrue(result.noAddress().isEmpty());
+        assertEquals("restricted", result.reasonFor(12));
+        verify(personMapper, never()).getByIds(anyInt(), anyList());
     }
 }

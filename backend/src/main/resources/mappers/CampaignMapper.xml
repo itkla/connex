@@ -10,13 +10,13 @@
   </sql>
 
   <sql id="audienceColumns">
-    id, campaign_id, workspace_id, record_type, definition_json, mode, updated_at
+    id, campaign_id, workspace_id, record_type, definition_json, mode, channel, purpose, updated_at
   </sql>
 
   <sql id="snapshotColumns">
-    id, campaign_id, workspace_id, version, record_type, definition_json,
+    id, campaign_id, workspace_id, version, record_type, definition_json, channel, purpose,
     estimated_included, excluded_total, excluded_consent, excluded_suppressed,
-    excluded_restricted, created_by_id, created_at
+    excluded_restricted, excluded_no_address, created_by_id, created_at
   </sql>
 
   <sql id="memberColumns">
@@ -82,12 +82,13 @@
 
   <insert id="upsertAudience">
     INSERT INTO campaign_audience
-      (campaign_id, workspace_id, record_type, definition_json, mode)
+      (campaign_id, workspace_id, record_type, definition_json, mode, channel, purpose)
     VALUES
-      (#{campaignId}, #{workspaceId}, #{recordType}, #{definitionJson}, #{mode})
+      (#{campaignId}, #{workspaceId}, #{recordType}, #{definitionJson}, #{mode}, #{channel}, #{purpose})
     ON DUPLICATE KEY UPDATE
       record_type = VALUES(record_type), definition_json = VALUES(definition_json),
-      mode = VALUES(mode), updated_at = CURRENT_TIMESTAMP
+      mode = VALUES(mode), channel = VALUES(channel), purpose = VALUES(purpose),
+      updated_at = CURRENT_TIMESTAMP
   </insert>
 
   <select id="nextSnapshotVersion" resultType="int">
@@ -98,18 +99,19 @@
 
   <insert id="insertSnapshot" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO campaign_audience_snapshot
-      (campaign_id, workspace_id, version, record_type, definition_json,
+      (campaign_id, workspace_id, version, record_type, definition_json, channel, purpose,
        estimated_included, excluded_total, excluded_consent, excluded_suppressed,
-       excluded_restricted, created_by_id)
+       excluded_restricted, excluded_no_address, created_by_id)
     VALUES
-      (#{campaignId}, #{workspaceId}, #{version}, #{recordType}, #{definitionJson},
+      (#{campaignId}, #{workspaceId}, #{version}, #{recordType}, #{definitionJson}, #{channel}, #{purpose},
        #{estimatedIncluded}, #{excludedTotal}, #{excludedConsent}, #{excludedSuppressed},
-       #{excludedRestricted}, #{createdById})
+       #{excludedRestricted}, #{excludedNoAddress}, #{createdById})
   </insert>
 
   <select id="getSnapshots" resultType="ooo.klae.connex.backend.dto.CampaignAudienceSnapshotSummaryDto">
-    SELECT version, record_type, estimated_included, excluded_total, excluded_consent,
-           excluded_suppressed, excluded_restricted, created_by_id, created_at
+    SELECT version, record_type, channel, purpose, estimated_included, excluded_total,
+           excluded_no_address, excluded_consent, excluded_suppressed, excluded_restricted,
+           created_by_id, created_at
     FROM campaign_audience_snapshot
     WHERE workspace_id = #{workspaceId} AND campaign_id = #{campaignId}
     ORDER BY version DESC
@@ -122,10 +124,25 @@
       AND version = #{version}
   </select>
 
+  <select id="getSnapshotForShare" resultType="CampaignAudienceSnapshot">
+    SELECT <include refid="snapshotColumns"/> FROM campaign_audience_snapshot
+    WHERE workspace_id = #{workspaceId}
+      AND campaign_id = #{campaignId}
+      AND version = #{version}
+    FOR SHARE
+  </select>
+
   <select id="getSnapshotMembers" resultType="CampaignAudienceMember">
     SELECT <include refid="memberColumns"/> FROM campaign_audience_member
     WHERE workspace_id = #{workspaceId} AND snapshot_id = #{snapshotId}
     ORDER BY record_id
+  </select>
+
+  <select id="getSnapshotMembersForShare" resultType="CampaignAudienceMember">
+    SELECT <include refid="memberColumns"/> FROM campaign_audience_member
+    WHERE workspace_id = #{workspaceId} AND snapshot_id = #{snapshotId}
+    ORDER BY record_id
+    FOR SHARE
   </select>
 
   <insert id="insertSnapshotMembers">

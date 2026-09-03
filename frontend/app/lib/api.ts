@@ -6566,6 +6566,18 @@ export function getCampaignExport(id: number, exportId: number, init: RequestIni
     return getJson<Types.CampaignAudienceExport>(`/api/campaigns/${id}/exports/${exportId}`, init);
 }
 
+/** Records a provider-confirmed outcome without invoking the connector again. */
+export function reconcileCampaignExport(
+    id: number,
+    exportId: number,
+    payload: Types.CampaignAudienceExportReconciliationPayload,
+) {
+    return postJson<Types.CampaignAudienceExport>(
+        `/api/campaigns/${id}/exports/${exportId}/reconcile`,
+        payload,
+    );
+}
+
 export function getCampaignEngagement(id: number, init: RequestInit = {}) {
     return getJson<Types.CampaignEngagement>(`/api/campaigns/${id}/engagement`, init);
 }

@@ -108,12 +108,19 @@ function json(body: unknown): Response {
     });
 }
 
-function stubCampaignReads(capabilities: InstanceCapabilities | null) {
+function stubCampaignReads(
+    capabilities: InstanceCapabilities | null,
+    audienceUnavailable = false,
+) {
     vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
         const url = String(input);
         if (url.endsWith("/api/auth/me")) return Promise.resolve(json(USER));
         if (url.endsWith("/api/campaigns/1/audience/snapshots")) return Promise.resolve(json([]));
-        if (url.endsWith("/api/campaigns/1/audience")) return Promise.resolve(new Response(null, { status: 204 }));
+        if (url.endsWith("/api/campaigns/1/audience")) {
+            return Promise.resolve(audienceUnavailable
+                ? new Response("", { status: 503 })
+                : new Response(null, { status: 204 }));
+        }
         if (url.endsWith("/api/campaigns/1/messages")) return Promise.resolve(json([]));
         if (url.endsWith("/api/campaigns/1/sends")) return Promise.resolve(json([]));
         if (url.endsWith("/api/campaigns/1/exports")) return Promise.resolve(json([]));
@@ -170,6 +177,22 @@ afterEach(() => {
 });
 
 describe("campaign delivery capability honesty", () => {
+    it("preserves an audience lookup failure instead of presenting an empty audience", async () => {
+        stubCampaignReads(DISABLED_CAPABILITIES, true);
+
+        const rendered = await CampaignDetailPage({ params: Promise.resolve({ id: "1" }) });
+
+        expect(isValidElement(rendered)).toBe(true);
+        if (!isValidElement(rendered)) {
+            throw new Error("Campaign detail did not render");
+        }
+        expect(rendered.type).toBe(CampaignDetail);
+        expect(rendered.props).toMatchObject({
+            initialAudience: null,
+            audienceUnavailable: true,
+        });
+    });
+
     it("keeps campaign authoring and history available while delivery controls show retryable lookup failure", async () => {
         stubCampaignReads(null);
 

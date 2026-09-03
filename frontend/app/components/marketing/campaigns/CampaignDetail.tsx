@@ -6,6 +6,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { PencilSquareIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import {
     Select,
     SelectTrigger,
@@ -35,6 +36,7 @@ import {
     type CampaignAudienceExport,
     type CampaignAudienceRecordType,
     type CampaignAudienceSnapshotSummary,
+    type CampaignChannel,
     type CampaignEngagement as CampaignEngagementData,
     type CampaignMessage,
     type CampaignPayload,
@@ -59,6 +61,7 @@ import {
     type CampaignAccess,
 } from "@/app/lib/campaignAccess";
 import AccessDenied from "@/app/components/AccessDenied";
+import SectionUnavailable from "@/app/components/SectionUnavailable";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { toastSuccess } from "@/app/lib/toast";
 import { formatCurrency, formatDate } from "@/app/lib/utils";
@@ -124,6 +127,7 @@ function GlanceTile({ label, value }: { label: string; value: string }) {
 export default function CampaignDetail({
     campaign,
     initialAudience,
+    audienceUnavailable,
     initialSnapshots,
     initialMessages,
     initialSends,
@@ -135,6 +139,7 @@ export default function CampaignDetail({
 }: {
     campaign: Campaign;
     initialAudience: CampaignAudience | null;
+    audienceUnavailable: boolean;
     initialSnapshots: CampaignAudienceSnapshotSummary[];
     initialMessages: CampaignMessage[];
     initialSends: CampaignSend[];
@@ -157,6 +162,8 @@ export default function CampaignDetail({
     const [definition, setDefinition] = useState<SegmentDefinition>(
         initialAudience?.definition ?? EMPTY_DEFINITION,
     );
+    const [channel, setChannel] = useState<CampaignChannel>(initialAudience?.channel ?? "email");
+    const purpose = initialAudience?.purpose ?? "marketing";
     const [segmentFields, setSegmentFields] = useState<SegmentFields | null>(null);
     const [audienceSaved, setAudienceSaved] = useState(Boolean(initialAudience));
     const [estimate, setEstimate] = useState<CampaignAudienceEstimate | null>(null);
@@ -203,6 +210,12 @@ export default function CampaignDetail({
         setEstimate(null);
     };
 
+    const changeChannel = (next: CampaignChannel) => {
+        setChannel(next);
+        setAudienceSaved(false);
+        setEstimate(null);
+    };
+
     const changeDefinition = (next: SegmentDefinition) => {
         setDefinition(next);
         setAudienceSaved(false);
@@ -212,7 +225,7 @@ export default function CampaignDetail({
     const saveAudience = async () => {
         setIsSaving(true);
         try {
-            await setCampaignAudience(current.id, { recordType, definition });
+            await setCampaignAudience(current.id, { recordType, definition, channel, purpose });
             setAudienceSaved(true);
             toastSuccess(at("saved"));
         } catch (err) {
@@ -399,26 +412,78 @@ export default function CampaignDetail({
                                 title={at("title")}
                                 subtitle={at("subtitle")}
                                 action={
-                                    <Select
-                                        value={recordType}
-                                        onValueChange={(value) =>
-                                            changeRecordType(value as CampaignAudienceRecordType)
-                                        }
-                                    >
-                                        <SelectTrigger size="sm" className="w-36">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {RECORD_TYPES.map((value) => (
-                                                <SelectItem key={value} value={value}>
-                                                    {at(value)}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                                    audienceUnavailable ? undefined : (
+                                        <div className="flex flex-wrap items-end gap-3">
+                                            <div className="grid gap-1.5">
+                                                <Label htmlFor="audience-record-type" className="text-xs">
+                                                    {at("recordType")}
+                                                </Label>
+                                                <Select
+                                                    value={recordType}
+                                                    onValueChange={(value) => {
+                                                        if (value === "person" || value === "company" || value === "deal") {
+                                                            changeRecordType(value);
+                                                        }
+                                                    }}
+                                                    disabled={!canManage}
+                                                >
+                                                    <SelectTrigger
+                                                        id="audience-record-type"
+                                                        size="sm"
+                                                        className="w-36"
+                                                    >
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {RECORD_TYPES.map((value) => (
+                                                            <SelectItem key={value} value={value}>
+                                                                {at(value)}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div className="grid gap-1.5">
+                                                <Label htmlFor="audience-channel" className="text-xs">
+                                                    {at("channel")}
+                                                </Label>
+                                                <Select
+                                                    value={channel}
+                                                    onValueChange={(value) => {
+                                                        if (value === "email" || value === "sms") {
+                                                            changeChannel(value);
+                                                        }
+                                                    }}
+                                                    disabled={!canManage}
+                                                >
+                                                    <SelectTrigger
+                                                        id="audience-channel"
+                                                        size="sm"
+                                                        className="w-32"
+                                                    >
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="email">
+                                                            {at("channels.email")}
+                                                        </SelectItem>
+                                                        <SelectItem value="sms">
+                                                            {at("channels.sms")}
+                                                        </SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </div>
+                                    )
                                 }
                             >
-                                <div className="flex flex-col gap-4">
+                                {audienceUnavailable ? (
+                                    <SectionUnavailable
+                                        title={at("unavailableTitle")}
+                                        body={at("unavailableBody")}
+                                    />
+                                ) : (
+                                    <div className="flex flex-col gap-4">
                                     <div className="flex flex-wrap items-center gap-2">
                                         {canManage && (
                                             <>
@@ -472,6 +537,12 @@ export default function CampaignDetail({
                                         </p>
                                     )}
 
+                                    {snapshots.length > 0 && (
+                                        <p className="text-xs text-muted-foreground">
+                                            {at("existingSnapshotChannelHint")}
+                                        </p>
+                                    )}
+
                                     {estimate ? (
                                         <div className="flex flex-col gap-4 border-t border-border pt-4">
                                             <div>
@@ -518,7 +589,8 @@ export default function CampaignDetail({
                                             </p>
                                         </div>
                                     )}
-                                </div>
+                                    </div>
+                                )}
                             </Panel>
 
                             <Panel title={at("snapshots")} subtitle={at("snapshotsSubtitle")}>
@@ -542,6 +614,12 @@ export default function CampaignDetail({
                                                 <div className="flex items-center gap-3">
                                                     <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 font-mono text-xs text-foreground ring-1 ring-inset ring-border">
                                                         {at("version", { version: snapshot.version })}
+                                                    </span>
+                                                    <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-foreground ring-1 ring-inset ring-border">
+                                                        {at(`channels.${snapshot.channel}`)}
+                                                    </span>
+                                                    <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 font-mono text-xs text-foreground ring-1 ring-inset ring-border">
+                                                        {at("purposeLabel", { purpose: snapshot.purpose })}
                                                     </span>
                                                     <span className="text-sm text-muted-foreground">
                                                         {formatDate(snapshot.createdAt, locale)}

@@ -32,6 +32,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.validation.BindException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.validation.BeanPropertyBindingResult;
@@ -290,13 +291,12 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
-    void validationReturnsStableCodeAndEnvelopedFieldErrors() {
+    void bindValidationReturnsStableCodeAndEnvelopedFieldErrors() {
         BeanPropertyBindingResult bindingResult =
             new BeanPropertyBindingResult(new Object(), "request");
         bindingResult.addError(new FieldError(
             "request", "discountType", "Choose either an amount or a percentage discount."));
-        MethodArgumentNotValidException failure = new MethodArgumentNotValidException(
-            mock(MethodParameter.class), bindingResult);
+        BindException failure = new BindException(bindingResult);
 
         ResponseEntity<Map<String, Object>> response = handler.validation(failure);
 

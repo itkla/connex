@@ -58,6 +58,42 @@ public class ConnectorConfigService {
      */
     public ResolvedDeliveryProvider resolveForWorkspace(int workspaceId, String connector) {
         ConnectorConfig config = requireEnabledConfig(workspaceId, connector);
+        return resolveProvider(workspaceId, config);
+    }
+
+    /**
+     * Resolves the complete audience destination from one current connector configuration row.
+     * @param workspaceId the workspace
+     * @param connector the connector id
+     * @return the resolved provider and external list id from the same configuration version
+     * @throws DeliveryProviderException when the connector is not enabled or not fully configured
+     */
+    public ResolvedAudienceTarget resolveAudienceTargetForWorkspace(int workspaceId, String connector) {
+        ConnectorConfig config = requireEnabledConfig(workspaceId, connector);
+        if (isBlank(config.getExternalListId())) {
+            throw new DeliveryProviderException("Connector external list is not configured");
+        }
+        return new ResolvedAudienceTarget(
+                resolveProvider(workspaceId, config), config.getExternalListId(),
+                config.getId(), config.getConfigVersion());
+    }
+
+    /**
+     * Checks the generation fence for a previously resolved audience target using a current locking
+     * read retained through the caller's transaction. Callers use this as their final database read
+     * before provider egress.
+     * @param workspaceId the workspace
+     * @param connector the connector id
+     * @param target the resolved target and its configuration marker
+     * @return true only when the same enabled configuration generation is still current
+     */
+    public boolean isCurrentAudienceTarget(
+            int workspaceId, String connector, ResolvedAudienceTarget target) {
+        return connectorConfigMapper.findCurrentAudienceTargetIdForShare(
+                workspaceId, normalizeConnector(connector), target.configId(), target.configVersion()) != null;
+    }
+
+    private ResolvedDeliveryProvider resolveProvider(int workspaceId, ConnectorConfig config) {
         if (isBlank(config.getEndpoint())) {
             throw new DeliveryProviderException("Connector endpoint is not configured");
         }

@@ -131,6 +131,12 @@ export default function CampaignDelivery({
         () => snapshots.find((snapshot) => String(snapshot.version) === sendSnapshot) ?? null,
         [snapshots, sendSnapshot],
     );
+    const compatibleSnapshots = useMemo(
+        () => sendMessage === null
+            ? snapshots
+            : snapshots.filter((snapshot) => snapshot.channel === sendMessage.channel),
+        [sendMessage, snapshots],
+    );
 
     const channelLabel = (channel: string) => {
         if (channel === "email") return t("channels.email");
@@ -139,6 +145,9 @@ export default function CampaignDelivery({
     };
 
     const isSmsMessage = selectedMessage?.channel === "sms";
+    const normalizedSendPurpose = sendPurpose.trim().toLowerCase() || "marketing";
+    const purposeMismatch = chosenSnapshot !== null
+        && normalizedSendPurpose !== chosenSnapshot.purpose;
 
     const openMessageDialog = () => {
         setMessagePayload(EMPTY_MESSAGE_PAYLOAD);
@@ -202,15 +211,51 @@ export default function CampaignDelivery({
     };
 
     const changeSendMessage = (value: string) => {
+        const nextMessage = messages.find((message) => String(message.id) === value) ?? null;
+        if (chosenSnapshot !== null && nextMessage !== null
+                && chosenSnapshot.channel !== nextMessage.channel) {
+            toastError(st("channelMismatch", {
+                snapshotChannel: channelLabel(chosenSnapshot.channel),
+                messageChannel: channelLabel(nextMessage.channel),
+            }));
+            setSendSnapshot("");
+            setSendPurpose("");
+        }
         setSendMessageId(value);
         setSendVersion("");
+    };
+
+    const changeSendSnapshot = (value: string) => {
+        const nextSnapshot = snapshots.find((snapshot) => String(snapshot.version) === value) ?? null;
+        if (nextSnapshot !== null && sendMessage !== null
+                && nextSnapshot.channel !== sendMessage.channel) {
+            toastError(st("channelMismatch", {
+                snapshotChannel: channelLabel(nextSnapshot.channel),
+                messageChannel: channelLabel(sendMessage.channel),
+            }));
+            return;
+        }
+        setSendSnapshot(value);
+        setSendPurpose(nextSnapshot?.purpose ?? "");
     };
 
     const createSend = async () => {
         const snapshotVersion = Number(sendSnapshot);
         const messageId = Number(sendMessageId);
         const messageVersion = Number(sendVersion);
-        if (!snapshotVersion || !messageId || !messageVersion) return;
+        if (!snapshotVersion || !messageId || !messageVersion
+                || chosenSnapshot === null || sendMessage === null) return;
+        if (chosenSnapshot.channel !== sendMessage.channel) {
+            toastError(st("channelMismatch", {
+                snapshotChannel: channelLabel(chosenSnapshot.channel),
+                messageChannel: channelLabel(sendMessage.channel),
+            }));
+            return;
+        }
+        if (purposeMismatch) {
+            toastError(st("purposeMismatch", { purpose: chosenSnapshot.purpose }));
+            return;
+        }
         setIsCreatingSend(true);
         try {
             const created = await createCampaignSend(campaignId, {
@@ -543,12 +588,12 @@ export default function CampaignDelivery({
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                                 <div className="grid gap-1.5">
                                     <Label htmlFor="send-snapshot">{st("snapshot")}</Label>
-                                    <Select value={sendSnapshot} onValueChange={setSendSnapshot}>
+                                    <Select value={sendSnapshot} onValueChange={changeSendSnapshot}>
                                         <SelectTrigger id="send-snapshot" className="w-full">
                                             <SelectValue placeholder={st("snapshotPlaceholder")} />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {snapshots.map((snapshot) => (
+                                            {compatibleSnapshots.map((snapshot) => (
                                                 <SelectItem
                                                     key={snapshot.version}
                                                     value={String(snapshot.version)}
@@ -556,11 +601,20 @@ export default function CampaignDelivery({
                                                     {st("snapshotOption", {
                                                         version: snapshot.version,
                                                         count: snapshot.estimatedIncluded.toLocaleString(locale),
+                                                        channel: channelLabel(snapshot.channel),
+                                                        purpose: snapshot.purpose,
                                                     })}
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>
                                     </Select>
+                                    {sendMessage !== null && compatibleSnapshots.length === 0 && (
+                                        <p className="text-xs text-muted-foreground">
+                                            {st("noCompatibleSnapshots", {
+                                                channel: channelLabel(sendMessage.channel),
+                                            })}
+                                        </p>
+                                    )}
                                 </div>
                                 <div className="grid gap-1.5">
                                     <Label htmlFor="send-message">{st("message")}</Label>
@@ -611,7 +665,14 @@ export default function CampaignDelivery({
                                         onChange={(e) => setSendPurpose(e.target.value)}
                                         placeholder={st("purposePlaceholder")}
                                         maxLength={32}
+                                        aria-invalid={purposeMismatch}
+                                        aria-describedby={purposeMismatch ? "send-purpose-error" : undefined}
                                     />
+                                    {purposeMismatch && chosenSnapshot !== null && (
+                                        <p id="send-purpose-error" className="text-xs text-destructive">
+                                            {st("purposeMismatch", { purpose: chosenSnapshot.purpose })}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
 
@@ -641,6 +702,7 @@ export default function CampaignDelivery({
                                     onClick={createSend}
                                     disabled={
                                         isCreatingSend || !sendSnapshot || !sendMessageId || !sendVersion
+                                        || purposeMismatch
                                     }
                                 >
                                     {isCreatingSend ? (

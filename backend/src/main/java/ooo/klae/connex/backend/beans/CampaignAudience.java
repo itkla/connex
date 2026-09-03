@@ -15,5 +15,7 @@ public class CampaignAudience {
     private String recordType;
     private String definitionJson;
     private String mode;
+    private String channel;
+    private String purpose;
     private LocalDateTime updatedAt;
 }

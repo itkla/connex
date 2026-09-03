@@ -140,6 +140,172 @@ catalog may be synthesized only while the workspace mutex is held. First-edit ma
 the same mutex, so it cannot commit between a lifecycle miss and the row-less check. Persist the code
 returned by the locked resolution, never a separately compared caller value.
 
+## Campaign mutations
+
+Campaign update, live-audience replacement, snapshot creation, and send creation acquire current
+authorization before the exact campaign row. The permission read locks the actor's user row while
+checking its account-deletion reservation, then the active workspace, exact membership, custom-role
+root, and permission rows. These are locking reads and do not establish a consistent-read snapshot.
+Final authorization is derived from those locked rows, then the campaign row is the per-campaign
+mutex and the first aggregate row lock.
+
+These mutations keep the default `REPEATABLE_READ` isolation. No consistent, non-locking read may
+run inside the transaction before the campaign mutex is acquired. The first ordinary read after the
+mutex establishes one snapshot newer than every campaign change that previously committed under
+that mutex, and every later segment-condition and eligibility query shares it. Missing audience or
+snapshot-version rows are ordinary reads, not locking reads, so unrelated campaigns' first child-row
+inserts do not acquire conflicting index-gap locks.
+
+- Campaign update performs any membership, parent-campaign, and other ordinary validation reads
+  only after the campaign mutex.
+- Live-audience replacement reads the previous audience ordinarily after the mutex, then upserts
+  and audits the transition under the same mutex.
+- Snapshot creation ordinarily reads the live audience and next snapshot version after the mutex,
+  then evaluates every segment condition and eligibility source in that same consistent snapshot.
+  The campaign mutex serializes allocation of the unique campaign-local snapshot version.
+- Send creation reads its message, immutable revision, and immutable snapshot `FOR SHARE` after the
+  mutex. `authService.getCurrentUser()` then refreshes `app_user` with the ordinary read that
+  establishes the transaction's consistent snapshot. Snapshot members are subsequently read
+  `FOR SHARE`, and the later person/address reads share that post-mutex snapshot while the immutable
+  inputs remain locked.
+
+Audience export uses three transactions around provider egress. Transaction A locks and revalidates
+the actor's `CAMPAIGN_MANAGE` and `CONSENT_MANAGE` authority, locks the campaign mutex, classifies
+the snapshot members, and persists the export with that exact member-id set and a bounded running
+lease. Outside locks, the complete provider destination (endpoint, credential, and external list) is
+then resolved from one connector-configuration row together with that row's id and generation.
+
+Transaction B is the last database work before egress. It repeats locked authorization and the
+campaign mutex, reloads the persisted member set, rechecks restrictions, channel suppressions,
+consent, and addressability, records the exact ids that will be placed in the provider request,
+refreshes the lease, and finally rechecks the connector row id/generation with a current locking read.
+No application database
+work occurs between B's commit and the connector invocation. Authorization or eligibility changes
+that commit before B starts affect this export. More precisely, an eligibility change must commit
+before B's first consistent read, the restriction read, to enter B's repeatable-read snapshot;
+connector changes that commit before the final locking fence abort the export before egress.
+
+The provider push runs only after B commits. Its idempotency key binds the snapshot/version, a stable
+hash of the fenced connector configuration identity and external list, a stable hash of the final
+ordered member ids and outbound member fields, and the persisted attempt. B allocates attempt one plus
+the count of prior requests for the same snapshot, connector, and external list while holding the
+campaign mutex. A retry of the same ambiguous export row therefore retains its request key, while a
+replacement after a definite failure advances the attempt. Transaction C records the confirmed
+outcome. It locks current authorization, the campaign mutex, and the export row in that order before
+its guarded write. Current `CONSENT_MANAGE` authority decides whether its response may include
+detailed counts.
+
+| Connector or operator observation | Provider outcome | Persisted classification | Export state |
+|---|---|---|---|
+| Final revalidation leaves no eligible member to send | `DEFINITE_NO_SIDE_EFFECT` | `no_eligible_members` | `failed` |
+| Local validation, serialization, DNS, or connection refusal before the request body can be sent | `DEFINITE_NO_SIDE_EFFECT` | `definite_no_side_effect` | `failed` |
+| Provider-specific response whose documented atomic contract proves non-acceptance | `DEFINITE_NO_SIDE_EFFECT` | `definite_no_side_effect` | `failed` |
+| Any generic non-2xx response after the request body was sent | `AMBIGUOUS` | `ambiguous` | `running` with `reconciliation_required_at` set |
+| Hard wall-clock deadline abort after the request started | `AMBIGUOUS` | `ambiguous` | `running` with `reconciliation_required_at` set |
+| Post-send transport failure or incomplete/inconsistent 2xx counters | `AMBIGUOUS` | `ambiguous` | `running` with `reconciliation_required_at` set |
+| Complete, consistent 2xx counters with any accepted member | `CONFIRMED` | `confirmed_delivery` | `completed` |
+| Complete, consistent 2xx counters with no accepted member | `CONFIRMED` | `confirmed_no_delivery` | `failed` |
+| Operator confirms delivery | N/A | `operator_delivered` | `completed` |
+| Operator confirms no delivery | N/A | `operator_not_delivered` | `failed` |
+
+The generic HTTP list connector has no provider-specific atomic non-acceptance contract. Its
+`400`, `401`, `403`, `404`, and `422` responses therefore remain ambiguous even when their bodies do
+not report acceptance; receiving an HTTP response does not prove that the provider applied none of
+the submitted members.
+
+Provider/network I/O must not be moved under B's locks.
+That prohibition leaves an inherent final-revalidation-to-provider-acceptance window. For locked
+authorization and the connector generation it starts when B commits; for eligibility it starts at
+B's first consistent read, the restriction read. The later address, suppression, and consent reads
+share that snapshot, so a change committed after the restriction read is outside B even if it commits
+before the corresponding later query. The remaining in-process reads, stage write, fence, commit, and
+handoff are normally milliseconds. Immediately before B refreshes the lease, the service captures one
+monotonic provider-budget anchor and passes its absolute deadline unchanged through the connector
+handoff, so payload hashing, B's remaining work and commit, request serialization, DNS, connect, TLS,
+request, and bounded response reading all consume the same budget, 18 seconds by default. The initial
+lease and every refresh are written as
+`DATE_ADD(UTC_TIMESTAMP(6), INTERVAL #{leaseMicros} MICROSECOND)`, and lease expiry is evaluated only in
+SQL against `UTC_TIMESTAMP(6)`. The application never derives a lease timestamp from its wall clock.
+The monotonic budget duration is the hard provider deadline and is strictly shorter than the
+database-clock lease by the configured safety margin. The guarantee that SQL cannot classify the
+lease as expired while the monotonic provider budget remains live holds only while forward database-
+clock adjustments during the lease stay below that margin. Configure
+`connex.delivery.audience-export-lease-safety-margin-ms` (environment variable
+`CONNEX_DELIVERY_AUDIENCE_EXPORT_LEASE_SAFETY_MARGIN_MS`) above its 30-second default and enforced
+floor if the database host's clock discipline cannot meet that bound. Production database hosts must
+use NTP slewing and must not apply forward clock steps while leases are active. The connector derives
+remaining time from the original absolute anchor at every stage and never re-anchors it. If it is
+exhausted before egress, the connector returns a definite no-side-effect failure without resolving or
+contacting the provider. A
+scheduled abort sets Apache hard cancellation on a started request, cancels it, and immediately closes
+its client/socket at the deadline; the connection and response timeouts (3 and 15 seconds by default)
+remain subordinate inactivity bounds, not duration claims. Timed-out DNS futures are canceled and
+run on a fixed two-thread executor. Each active resolver owns one of two permits until its task returns,
+including when it ignores cancellation; a caller waits at most 50 milliseconds for a permit before a
+definite pre-send resolver-saturated failure. Two resolver tasks that never return retain both permits
+for the process lifetime, so all subsequent audience exports on that instance fail closed with
+`failure_reason=resolver_saturated` until the process restarts. If either timed-out task eventually
+returns, its permit restores capacity without a restart. Saturation emits the fixed WARN marker
+`AUDIENCE_EXPORT_RESOLVER_SATURATED` and increments
+`connex.delivery.audience_export.resolver_saturated`. A restart discards the stuck executor and
+permits; the usual readiness and connector checks then govern recovery. Automatic connector retries
+are disabled. The running lease is the hard provider deadline plus the configurable clock-adjustment,
+handoff, and persistence margin. Startup refuses a margin below 30 seconds, nonpositive transport
+bounds, either inactivity timeout longer than the hard deadline, or a deadline plus margin beyond the
+five-minute maximum. An
+authorization, eligibility, or connector-generation change committed inside its respective window
+cannot retract an already-started request. It is honored on the next export; provider-side unsubscribe
+synchronization is the immediate removal path for an in-flight disclosure. Rotation inside the window
+is the same residual class and must not be described as an unconditional pre-egress abort.
+
+Every export written by the current backend carries a lease while `running`. Ambiguous outcomes and
+expired nonnull leases stay `running` and set `reconciliation_required_at` while clearing the lease.
+The same write classifies an expired lease as `ambiguous`. Only a `running` row with a null lease may
+carry the reconciliation flag, and `ambiguous` is legal only on that flagged running shape. This shape
+remains visible to the previous backend's
+`draft|running|completed` duplicate fence after an application rollback. The current backend projects
+the separate flag as the “needs reconciliation” history label and continues to block silent re-export.
+A `running` row with both a null lease and a null reconciliation timestamp is a legacy in-flight write
+left possible for application rollback compatibility; it is never treated as stale, is presented as
+in flight, and remains active for duplicate prevention. V199 leaves every pre-existing `running` row
+and every pre-existing `failed` row unchanged. Ambiguity in legacy failures is pre-existing data and
+outside this migration's scope. A null classification is permitted for a draft/running row with no
+outcome and for a migrated legacy terminal row whose two member-identity fields are both null. A new
+terminal row has recorded member identities and must carry one of the terminal classifications in the
+outcome table.
+Transaction B persists the exact idempotency key with the attempt before egress. If transaction C's
+guarded outcome update affects no row, the locked row is an idempotent replay only when its attempt,
+persisted, supplied, and attempted idempotency keys, status, total/pushed/failed counts, and bounded
+outcome classification code exactly equal this attempt's reported outcome; C then returns the
+persisted state without another marker or audit. The classification code is one of
+`no_eligible_members`, `confirmed_delivery`, `confirmed_no_delivery`,
+`definite_no_side_effect`, `ambiguous`, `operator_delivered`, or `operator_not_delivered`. The bounded
+failure reason remains diagnostic metadata and is not part of replay identity. Any different
+persisted state is a late outcome unless the row is terminal with an operator classification and the
+provider status and total/pushed/failed counts exactly agree. Agreement appends the strict
+`campaign.audience_export.late_outcome` audit event with `agreement=true` and does not persist a
+late-outcome marker because no operator attention is required. A disagreement persists the provider
+classification in `late_outcome` and appends the same strict audit event with `agreement=false`, the
+export id, attempt, idempotency key, provider outcome, and current persisted state. Confirmed results
+distinguish `confirmed_delivery` from `confirmed_no_delivery` in history. The history DTO exposes the
+marker without member identities or recipient data, so a provider result that arrived after operator
+action cannot disappear.
+
+An operator holding locked `CAMPAIGN_MANAGE` and `CONSENT_MANAGE` authority can resolve a flagged
+`running` export or a legacy null-lease, unflagged `running` export only after provider confirmation.
+Delivered preserves trustworthy recorded request identities/counts and completes the export; legacy
+running placeholders become unknown counts because those rows predate request-identity recording. Not
+delivered records a definite zero-push failure and unblocks a replacement export. The same compare-
+and-set persists `operator_delivered` or `operator_not_delivered` together with the terminal status
+and counts. All source states use the same audited, idempotent compare-and-set, and no resolution
+retries the provider request.
+Historical rows whose exact prepared or pushed identities were not recorded retain null member-id sets
+rather than fabricated empty arrays. Callers without `CONSENT_MANAGE` may read only the stable prepared
+total; known final pushed/not-pushed counts remain consent-gated.
+
+Do not move the campaign mutex ahead of authorization roots, add a consistent read before it, or
+use a missing child-row locking read as a substitute for the campaign mutex.
+
 ## Duplicate review, record mutation, and imports
 
 `DuplicateDecisionLockService` serializes candidate-affecting mutations across the same-organization visibility domain.

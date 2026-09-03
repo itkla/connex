@@ -183,6 +183,8 @@ class DeliveryUnsubscribeIntegrationTest {
         snapshot.setVersion(1);
         snapshot.setRecordType("person");
         snapshot.setDefinitionJson("{\"match\":\"all\",\"conditions\":[]}");
+        snapshot.setChannel("email");
+        snapshot.setPurpose("marketing");
         snapshot.setEstimatedIncluded(1);
         campaignMapper.insertSnapshot(snapshot);
         return snapshot;

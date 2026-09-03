@@ -16,6 +16,9 @@ public interface CampaignMessageMapper {
 
     CampaignMessage getMessage(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
+    /** Returns a current campaign message under a shared lock. */
+    CampaignMessage getMessageForShare(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
     void insertMessage(CampaignMessage message);
 
     int updateMessage(CampaignMessage message);
@@ -29,6 +32,12 @@ public interface CampaignMessageMapper {
             @Param("messageId") int messageId);
 
     CampaignMessageRevision getRevision(
+            @Param("workspaceId") int workspaceId,
+            @Param("messageId") int messageId,
+            @Param("version") int version);
+
+    /** Returns a current immutable message revision under a shared lock. */
+    CampaignMessageRevision getRevisionForShare(
             @Param("workspaceId") int workspaceId,
             @Param("messageId") int messageId,
             @Param("version") int version);

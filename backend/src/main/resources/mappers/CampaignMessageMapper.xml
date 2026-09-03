@@ -22,6 +22,12 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
+  <select id="getMessageForShare" resultType="CampaignMessage">
+    SELECT <include refid="messageColumns"/> FROM campaign_message
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR SHARE
+  </select>
+
   <insert id="insertMessage" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO campaign_message
       (workspace_id, campaign_id, channel, name, status, created_by_id)
@@ -57,6 +63,12 @@
   <select id="getRevision" resultType="CampaignMessageRevision">
     SELECT <include refid="revisionColumns"/> FROM campaign_message_revision
     WHERE workspace_id = #{workspaceId} AND message_id = #{messageId} AND version = #{version}
+  </select>
+
+  <select id="getRevisionForShare" resultType="CampaignMessageRevision">
+    SELECT <include refid="revisionColumns"/> FROM campaign_message_revision
+    WHERE workspace_id = #{workspaceId} AND message_id = #{messageId} AND version = #{version}
+    FOR SHARE
   </select>
 
 </mapper>

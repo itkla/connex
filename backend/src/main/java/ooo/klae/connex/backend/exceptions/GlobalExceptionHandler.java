@@ -13,9 +13,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.validation.BindException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
-import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -178,8 +178,9 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", ex.getMessage()));
     }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    public ResponseEntity<Map<String, Object>> validation(MethodArgumentNotValidException ex) {
+    /** Maps body and explicit service binding failures to the stable field-error envelope. */
+    @ExceptionHandler(BindException.class)
+    public ResponseEntity<Map<String, Object>> validation(BindException ex) {
         Map<String, String> fieldErrors = new LinkedHashMap<>();
         ex.getBindingResult().getFieldErrors().forEach(err ->
             fieldErrors.put(err.getField(), Objects.requireNonNullElse(
@@ -193,9 +194,8 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Maps method-parameter constraint violations (annotated path variables and
-     * request params under {@code @Validated}) to the same 400 shape as body
-     * validation, instead of surfacing them as a 500.
+     * Maps method-parameter constraint violations from annotated path variables and
+     * request parameters to their established flat field map instead of a 500.
      */
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<Map<String, String>> parameterValidation(ConstraintViolationException ex) {

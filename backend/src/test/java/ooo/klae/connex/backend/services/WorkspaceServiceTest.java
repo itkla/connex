@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Set;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -87,6 +89,13 @@ class WorkspaceServiceTest extends AbstractServiceTest {
         assertDoesNotThrow(() -> workspaceService.lockAndRequireMember(ws.getId(), member.getId()));
         assertThrows(ForbiddenException.class,
             () -> workspaceService.lockAndRequireMember(ws.getId(), outsider.getId()));
+    }
+
+    @Test
+    void lockedMemberPermissionsFailClosedWhenTheUserRowIsAbsent() {
+        assertEquals(
+                Set.of(),
+                workspaceService.lockedMemberPermissionsFor(workspace.getId(), Integer.MAX_VALUE));
     }
 
     @Test

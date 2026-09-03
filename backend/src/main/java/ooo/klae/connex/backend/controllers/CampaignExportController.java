@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.controllers;
 import java.util.List;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.validation.BindException;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -17,6 +18,7 @@ import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.CampaignAudienceExportDto;
+import ooo.klae.connex.backend.dto.CampaignAudienceExportReconciliationRequest;
 import ooo.klae.connex.backend.dto.CampaignAudienceExportRequest;
 import ooo.klae.connex.backend.services.AudienceExportService;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -52,5 +54,14 @@ public class CampaignExportController {
             @Positive @PathVariable int id,
             @Positive @PathVariable int exportId) {
         return audienceExportService.getExport(id, exportId);
+    }
+
+    @PostMapping("/{exportId}/reconcile")
+    @RequirePermission(Permission.CAMPAIGN_MANAGE)
+    public CampaignAudienceExportDto reconcile(
+            @Positive @PathVariable int id,
+            @Positive @PathVariable int exportId,
+            @RequestBody CampaignAudienceExportReconciliationRequest request) throws BindException {
+        return audienceExportService.reconcileExport(id, exportId, request);
     }
 }
