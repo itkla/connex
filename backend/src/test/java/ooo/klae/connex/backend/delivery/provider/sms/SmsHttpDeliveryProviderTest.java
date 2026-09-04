@@ -1,7 +1,9 @@
 package ooo.klae.connex.backend.delivery.provider.sms;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mockStatic;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
@@ -59,6 +61,17 @@ class SmsHttpDeliveryProviderTest {
     }
 
     @Test
+    void genericAdapterDoesNotPromiseEndpointIdempotency() {
+        SmsHttpDeliveryProvider provider =
+                new SmsHttpDeliveryProvider(RestClient.create(), 1024, objectMapper);
+        try {
+            assertFalse(provider.capabilities().idempotentSubmission());
+        } finally {
+            provider.shutdown();
+        }
+    }
+
+    @Test
     void dispatch_mapsSuccessResponseToSentReceiptWithProviderMessageId() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
@@ -66,6 +79,7 @@ class SmsHttpDeliveryProviderTest {
         server.expect(requestTo(ENDPOINT))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(header("Authorization", "Bearer " + API_KEY))
+                .andExpect(header("Idempotency-Key", "send:1:2"))
                 .andRespond(withSuccess("{\"messageId\":\"sms-777\"}", MediaType.APPLICATION_JSON));
 
         try (MockedStatic<AiEgressGuard> guard = mockStatic(AiEgressGuard.class)) {

@@ -106,6 +106,12 @@
         WHERE workspace_id = #{workspaceId}
           AND won IS NULL
           AND company_id IS NOT NULL
+        <if test="candidateIds != null">
+          AND company_id IN
+          <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+            #{candidateId}
+          </foreach>
+        </if>
     </select>
 
     <select id="companyIdsNoActivitySince" resultType="int">
@@ -113,6 +119,12 @@
         FROM company c
         WHERE c.workspace_id = #{workspaceId}
           AND c.archived_at IS NULL
+          <if test="candidateIds != null">
+            AND c.id IN
+            <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+              #{candidateId}
+            </foreach>
+          </if>
           AND NOT EXISTS (
               SELECT 1 FROM activity a
               WHERE a.workspace_id = #{workspaceId}
@@ -152,6 +164,12 @@
           AND p.provision_ceased_at IS NULL
           AND p.archived_at IS NULL
           AND p.company_id IS NOT NULL
+          <if test="candidateIds != null">
+            AND p.company_id IN
+            <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+              #{candidateId}
+            </foreach>
+          </if>
           AND p.id IN
           <foreach item="pid" collection="personIds" open="(" separator="," close=")">#{pid}</foreach>
           AND NOT EXISTS (
@@ -185,6 +203,92 @@
                           AND p2.archived_at IS NULL)
                     OR a.deal_id IN (SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId} AND d.company_id = p.company_id)
                 )
+          )
+    </select>
+
+    <select id="companyIdsWithWarmIntro" resultType="int">
+        SELECT DISTINCT candidate.company_id
+        FROM person_edge edge
+        JOIN person candidate
+          ON (candidate.id = edge.source_person_id OR candidate.id = edge.target_person_id)
+         AND candidate.workspace_id = #{workspaceId}
+         AND candidate.suspended_at IS NULL
+         AND candidate.provision_ceased_at IS NULL
+         AND candidate.archived_at IS NULL
+         AND candidate.company_id IN
+          <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+            #{candidateId}
+          </foreach>
+        JOIN person engaged
+          ON engaged.id = IF(candidate.id = edge.source_person_id,
+                             edge.target_person_id, edge.source_person_id)
+         AND engaged.archived_at IS NULL
+         AND engaged.suspended_at IS NULL
+         AND (engaged.workspace_id = #{workspaceId}
+           OR EXISTS (
+             SELECT 1 FROM person_share engaged_share
+             JOIN workspace viewer_workspace
+               ON viewer_workspace.id = engaged_share.workspace_id
+             JOIN workspace owner_workspace
+               ON owner_workspace.id = engaged.workspace_id
+              AND owner_workspace.org_id = viewer_workspace.org_id
+             WHERE engaged_share.person_id = engaged.id
+               AND engaged_share.workspace_id = #{workspaceId}
+           ))
+        WHERE edge.workspace_id = #{workspaceId}
+          AND edge.strength &gt;= #{strongEdge}
+          AND edge.source_person_id &lt;&gt; edge.target_person_id
+          AND EXISTS (
+            SELECT 1 FROM activity engaged_activity
+            WHERE engaged_activity.workspace_id = #{workspaceId}
+              AND engaged_activity.person_id = engaged.id
+            UNION ALL
+            SELECT 1 FROM note engaged_note
+            WHERE engaged_note.workspace_id = #{workspaceId}
+              AND engaged_note.visibility = 'workspace'
+              AND engaged_note.person_id = engaged.id
+            UNION ALL
+            SELECT 1 FROM task engaged_task
+            WHERE engaged_task.workspace_id = #{workspaceId}
+              AND engaged_task.person_id = engaged.id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM activity user_activity
+            WHERE user_activity.workspace_id = #{workspaceId}
+              AND user_activity.created_by_id = #{userId}
+              AND (user_activity.person_id IS NULL OR EXISTS (
+                SELECT 1 FROM person processable
+                WHERE processable.id = user_activity.person_id
+                  AND processable.suspended_at IS NULL
+                  AND processable.provision_ceased_at IS NULL
+                  AND processable.archived_at IS NULL
+                  AND (processable.workspace_id = #{workspaceId}
+                    OR EXISTS (
+                      SELECT 1 FROM person_share processable_share
+                      JOIN workspace processable_viewer_workspace
+                        ON processable_viewer_workspace.id = processable_share.workspace_id
+                      JOIN workspace processable_owner_workspace
+                        ON processable_owner_workspace.id = processable.workspace_id
+                       AND processable_owner_workspace.org_id = processable_viewer_workspace.org_id
+                      WHERE processable_share.person_id = processable.id
+                        AND processable_share.workspace_id = #{workspaceId}
+                    ))
+              ))
+              AND (
+                user_activity.person_id IN (
+                  SELECT company_person.id FROM person company_person
+                  WHERE company_person.workspace_id = #{workspaceId}
+                    AND company_person.company_id = candidate.company_id
+                    AND company_person.suspended_at IS NULL
+                    AND company_person.provision_ceased_at IS NULL
+                    AND company_person.archived_at IS NULL
+                )
+                OR user_activity.deal_id IN (
+                  SELECT company_deal.id FROM deal company_deal
+                  WHERE company_deal.workspace_id = #{workspaceId}
+                    AND company_deal.company_id = candidate.company_id
+                )
+              )
           )
     </select>
 
@@ -250,6 +354,12 @@
 
     <select id="companyIdsMatching" resultType="int">
         SELECT id FROM company WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
+        <if test="candidateIds != null">
+          AND id IN
+          <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+            #{candidateId}
+          </foreach>
+        </if>
         <choose>
             <when test="field == 'industry'"><include refid="stringOp"><property name="col" value="industry"/></include></when>
             <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
@@ -276,6 +386,12 @@
         SELECT id FROM person
         WHERE workspace_id = #{workspaceId} AND suspended_at IS NULL
           AND provision_ceased_at IS NULL AND archived_at IS NULL
+        <if test="candidateIds != null">
+          AND id IN
+          <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+            #{candidateId}
+          </foreach>
+        </if>
         <choose>
             <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
             <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
@@ -302,6 +418,12 @@
     <select id="personIdsMatchingIncludingRestricted" resultType="int">
         SELECT id FROM person
         WHERE workspace_id = #{workspaceId} AND archived_at IS NULL
+        <if test="candidateIds != null">
+          AND id IN
+          <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+            #{candidateId}
+          </foreach>
+        </if>
         <choose>
             <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
             <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
@@ -327,6 +449,12 @@
 
     <select id="dealIdsMatching" resultType="int">
         SELECT id FROM deal WHERE workspace_id = #{workspaceId}
+        <if test="candidateIds != null">
+          AND id IN
+          <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+            #{candidateId}
+          </foreach>
+        </if>
         <choose>
             <when test="field == 'name'"><include refid="stringOp"><property name="col" value="name"/></include></when>
             <when test="field == 'value'"><include refid="numberOp"><property name="col" value="value"/></include></when>
@@ -391,6 +519,12 @@
     <select id="companyExistence" resultType="int">
         SELECT c.id FROM company c
         WHERE c.workspace_id = #{workspaceId} AND c.archived_at IS NULL
+        <if test="candidateIds != null">
+          AND c.id IN
+          <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+            #{candidateId}
+          </foreach>
+        </if>
         <choose>
             <when test="predicate == 'has_attachment'">
                 AND EXISTS (SELECT 1 FROM attachment att
@@ -404,6 +538,12 @@
     <select id="personExistence" resultType="int">
         SELECT p.id FROM person p
         WHERE p.workspace_id = #{workspaceId} AND p.archived_at IS NULL
+        <if test="candidateIds != null">
+          AND p.id IN
+          <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+            #{candidateId}
+          </foreach>
+        </if>
         <if test="!includeRestrictedPeople">
             AND p.suspended_at IS NULL AND p.provision_ceased_at IS NULL
         </if>
@@ -416,6 +556,12 @@
 
     <select id="dealExistence" resultType="int">
         SELECT d.id FROM deal d WHERE d.workspace_id = #{workspaceId}
+        <if test="candidateIds != null">
+          AND d.id IN
+          <foreach item="candidateId" collection="candidateIds" open="(" separator="," close=")">
+            #{candidateId}
+          </foreach>
+        </if>
         <include refid="existencePredicate">
             <property name="alias" value="d"/>
             <property name="fk" value="deal_id"/>

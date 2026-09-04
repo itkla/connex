@@ -271,6 +271,61 @@ class DeliveryProviderConfigServiceTest {
         assertEquals(HttpEspDeliveryProvider.PROVIDER_ID, resolved.providerId());
         assertEquals(ENDPOINT, resolved.endpoint());
         assertEquals(API_KEY, resolved.credentials().require("apiKey"));
+        assertFalse(resolved.idempotentSubmission());
+    }
+
+    @Test
+    void connectorIdempotencyIsDisabledByDefaultAndMustBeExplicitlyEnabled() {
+        currentWorkspaceAndActor();
+        when(endpointValidator.isFetchable("esp.example.com", false)).thenReturn(true);
+        when(cipher.encryptCredential(WORKSPACE, API_KEY)).thenReturn("secret:v1:55");
+        DeliveryProviderConfig stored = enabledEsp();
+        stored.setIdempotentSubmission(true);
+        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(null, stored);
+        DeliveryProviderConfigRequest request = espRequest();
+
+        assertFalse(request.isIdempotentSubmission());
+        request.setIdempotentSubmission(true);
+        service().save(request);
+
+        ArgumentCaptor<DeliveryProviderConfig> captor =
+                ArgumentCaptor.forClass(DeliveryProviderConfig.class);
+        verify(mapper).upsert(captor.capture());
+        assertTrue(captor.getValue().isIdempotentSubmission());
+        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(stored);
+        when(cipher.decryptCredential(WORKSPACE, "secret:v1:55")).thenReturn(API_KEY);
+        assertTrue(service().resolveForWorkspace(
+                WORKSPACE, DeliveryChannel.EMAIL).idempotentSubmission());
+    }
+
+    @Test
+    void attemptFingerprintChangesWithConfigurationGenerationEndpointOrCredentialReference() {
+        DeliveryProviderConfig first = enabledEsp();
+        DeliveryProviderConfig generationChanged = enabledEsp();
+        generationChanged.setConfigGeneration(first.getConfigGeneration() + 1);
+        DeliveryProviderConfig endpointChanged = enabledEsp();
+        endpointChanged.setEndpoint("https://esp-b.example.com/v1/send");
+        DeliveryProviderConfig credentialChanged = enabledEsp();
+        credentialChanged.setCredentialRef("secret:v1:99");
+        when(mapper.findByWorkspaceChannel(WORKSPACE, "email"))
+                .thenReturn(first, generationChanged, endpointChanged, credentialChanged);
+        when(cipher.decryptCredential(eq(WORKSPACE), any()))
+                .thenReturn(API_KEY);
+
+        String firstFingerprint = service().resolveForWorkspace(
+                WORKSPACE, DeliveryChannel.EMAIL).attemptTargetFingerprint();
+        String generationFingerprint = service().resolveForWorkspace(
+                WORKSPACE, DeliveryChannel.EMAIL).attemptTargetFingerprint();
+        String endpointFingerprint = service().resolveForWorkspace(
+                WORKSPACE, DeliveryChannel.EMAIL).attemptTargetFingerprint();
+        String credentialFingerprint = service().resolveForWorkspace(
+                WORKSPACE, DeliveryChannel.EMAIL).attemptTargetFingerprint();
+
+        assertTrue(firstFingerprint.matches("[a-f0-9]{64}"));
+        assertNotEquals(firstFingerprint, generationFingerprint);
+        assertNotEquals(firstFingerprint, endpointFingerprint);
+        assertNotEquals(firstFingerprint, credentialFingerprint);
+        assertFalse(firstFingerprint.contains(API_KEY));
     }
 
     @Test
@@ -282,6 +337,8 @@ class DeliveryProviderConfigServiceTest {
         ResolvedDeliveryProvider resolved = service().resolveForWorkspace(WORKSPACE, DeliveryChannel.EMAIL);
 
         assertEquals("smtp", resolved.providerId());
+        assertEquals(mail, resolved.mailConfig());
+        assertTrue(resolved.attemptTargetFingerprint().matches("[a-f0-9]{64}"));
     }
 
     @Test
@@ -350,6 +407,7 @@ class DeliveryProviderConfigServiceTest {
 
     private DeliveryProviderConfig enabledSms() {
         DeliveryProviderConfig config = new DeliveryProviderConfig();
+        config.setId(77);
         config.setWorkspaceId(WORKSPACE);
         config.setChannel("sms");
         config.setProvider(SmsHttpDeliveryProvider.PROVIDER_ID);
@@ -358,11 +416,13 @@ class DeliveryProviderConfigServiceTest {
         config.setCredentialRef("secret:v1:77");
         config.setCreatedById(ACTOR);
         config.setEnabled(true);
+        config.setConfigGeneration(1);
         return config;
     }
 
     private DeliveryProviderConfig enabledEsp() {
         DeliveryProviderConfig config = new DeliveryProviderConfig();
+        config.setId(55);
         config.setWorkspaceId(WORKSPACE);
         config.setChannel("email");
         config.setProvider(HttpEspDeliveryProvider.PROVIDER_ID);
@@ -371,12 +431,14 @@ class DeliveryProviderConfigServiceTest {
         config.setCredentialRef("secret:v1:55");
         config.setCreatedById(ACTOR);
         config.setEnabled(true);
+        config.setConfigGeneration(1);
         return config;
     }
 
     private static ResolvedMailConfig usableMail() {
         return new ResolvedMailConfig("smtp.test", 587, "user", "pw", "no-reply@sender.test",
-                "Connex", true, false, true, 10000, 10000, 10000, true);
+                "Connex", true, false, true, 10000, 10000, 10000, true,
+                "workspace-smtp:7:2026-09-03T00:00:00", "secret:v1:44");
     }
 
     private static String sha256Hex(String value) {

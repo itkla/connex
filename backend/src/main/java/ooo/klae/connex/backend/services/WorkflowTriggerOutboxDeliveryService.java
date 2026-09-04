@@ -3,8 +3,6 @@ package ooo.klae.connex.backend.services;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -13,17 +11,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
-import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.WorkflowNode;
-import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
-import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.WorkflowRuntimeClaimService.ScheduleEnrollment;
 
 /** Converts one owned durable trigger target into legacy effects or queued canonical runs. */
@@ -34,8 +29,6 @@ public class WorkflowTriggerOutboxDeliveryService {
     private final WorkflowTriggerOutboxMapper outboxMapper;
     private final WorkflowMapper workflowMapper;
     private final WorkflowVersionMapper versionMapper;
-    private final RuleMapper ruleMapper;
-    private final WorkspaceMapper workspaceMapper;
     private final SegmentMapper segmentMapper;
     private final SegmentService segmentService;
     private final WorkflowRuntimeClaimService claimService;
@@ -49,19 +42,23 @@ public class WorkflowTriggerOutboxDeliveryService {
         propagation = Propagation.REQUIRES_NEW,
         isolation = Isolation.READ_COMMITTED)
     public DeliveryResult deliver(int workspaceId, long outboxId, String leaseOwner) {
+        WorkflowTriggerOutbox discoveredOutbox = outboxMapper.getById(workspaceId, outboxId);
+        if (discoveredOutbox == null) {
+            return DeliveryResult.STALE;
+        }
+        Workflow discovered = workflowMapper.getById(
+            workspaceId, discoveredOutbox.getWorkflowId());
+        WorkflowExecutionPrincipal principal = lockDispatchPrincipal(discoveredOutbox);
         outboxMapper.ensureWorkspaceGate(workspaceId);
         WorkflowTriggerOutbox outbox = outboxMapper.getOwnedForUpdate(
             workspaceId, outboxId, leaseOwner);
         if (outbox == null) {
             return DeliveryResult.STALE;
         }
-        Workflow discovered = workflowMapper.getById(
-            workspaceId, outbox.getWorkflowId());
-        if (!stateMatches(discovered, outbox)) {
+        if (!sameTarget(discoveredOutbox, outbox) || !stateMatches(discovered, outbox)) {
             requireUpdated(outboxMapper.invalidate(workspaceId, outboxId, leaseOwner));
             return DeliveryResult.INVALIDATED;
         }
-        lockDispatchPrincipals(outbox, discovered);
         Workflow workflow = workflowMapper.getByIdForUpdate(
             workspaceId, outbox.getWorkflowId());
         if (!stateMatches(workflow, outbox)) {
@@ -69,12 +66,12 @@ public class WorkflowTriggerOutboxDeliveryService {
             return DeliveryResult.INVALIDATED;
         }
         if ("entity_change".equals(outbox.getTriggerType())) {
-            deliverEntity(outbox);
+            deliverEntity(outbox, principal);
             requireUpdated(outboxMapper.complete(workspaceId, outboxId, leaseOwner));
             return DeliveryResult.COMPLETED;
         }
         if ("schedule".equals(outbox.getTriggerType())) {
-            deliverSchedule(outbox, leaseOwner);
+            deliverSchedule(outbox, leaseOwner, principal);
             return DeliveryResult.COMPLETED;
         }
         throw new WorkflowExecutionException(
@@ -83,7 +80,8 @@ public class WorkflowTriggerOutboxDeliveryService {
             true);
     }
 
-    private void deliverEntity(WorkflowTriggerOutbox outbox) {
+    private void deliverEntity(
+            WorkflowTriggerOutbox outbox, WorkflowExecutionPrincipal principal) {
         Integer recordId = outbox.getRecordId();
         if (recordId == null || outbox.getOccurredAt() == null) {
             throw new WorkflowExecutionException(
@@ -99,19 +97,23 @@ public class WorkflowTriggerOutboxDeliveryService {
                 outbox.getTriggerEvent(),
                 outbox.getTriggerKey(),
                 outbox.getOccurredAt().toInstant(ZoneOffset.UTC));
-        ruleEngineService.onEntityChangeForWorkflow(outbox.getWorkflowId(), dispatch);
+        ruleEngineService.onEntityChangeForWorkflow(
+            outbox.getWorkflowId(), dispatch, principal);
         claimService.claimOutbox(outbox, recordId);
-        ruleEngineService.onEntityChangeForWorkflow(outbox.getWorkflowId(), dispatch);
+        ruleEngineService.onEntityChangeForWorkflow(
+            outbox.getWorkflowId(), dispatch, principal);
     }
 
-    private void deliverSchedule(WorkflowTriggerOutbox outbox, String leaseOwner) {
+    private void deliverSchedule(
+            WorkflowTriggerOutbox outbox,
+            String leaseOwner,
+            WorkflowExecutionPrincipal principal) {
         ScheduleEnrollment enrollment = claimService.outboxScheduleEnrollment(outbox);
         if (enrollment == null) {
             requireUpdated(outboxMapper.invalidate(
                 outbox.getWorkspaceId(), outbox.getId(), leaseOwner));
             return;
         }
-        principalService.resolve(outbox.getWorkspaceId(), enrollment.version());
         List<Integer> recordIds = segmentMapper.entityIdsPage(
             outbox.getWorkspaceId(),
             outbox.getRecordType(),
@@ -149,10 +151,10 @@ public class WorkflowTriggerOutboxDeliveryService {
                 return;
             }
             ruleEngineService.runScheduleRecordForWorkflow(
-                outbox.getWorkflowId(), dispatch, recordId);
+                outbox.getWorkflowId(), dispatch, recordId, principal);
             claimService.claimOutbox(outbox, recordId);
             ruleEngineService.runScheduleRecordForWorkflow(
-                outbox.getWorkflowId(), dispatch, recordId);
+                outbox.getWorkflowId(), dispatch, recordId, principal);
             if (triggeredSend) {
                 matchedCount++;
             }
@@ -186,8 +188,8 @@ public class WorkflowTriggerOutboxDeliveryService {
                 "code", "triggered_send_recipient_limit"));
     }
 
-    private void lockDispatchPrincipals(
-            WorkflowTriggerOutbox outbox, Workflow workflow) {
+    private WorkflowExecutionPrincipal lockDispatchPrincipal(
+            WorkflowTriggerOutbox outbox) {
         WorkflowVersion version = versionMapper.getById(
             outbox.getWorkspaceId(), outbox.getWorkflowId(), outbox.getWorkflowVersionId());
         if (version == null) {
@@ -196,39 +198,15 @@ public class WorkflowTriggerOutboxDeliveryService {
                 "The pinned workflow version is unavailable.",
                 true);
         }
-        TreeSet<Integer> memberIds = new TreeSet<>();
-        addExecutionMember(
-            memberIds,
-            version.getExecutionMode(),
-            version.getRunAsUserId(),
-            version.getCreatedById());
-        if (workflow.getLegacyRuleId() != null) {
-            Rule rule = ruleMapper.getById(
-                outbox.getWorkspaceId(), workflow.getLegacyRuleId());
-            if (rule != null) {
-                addExecutionMember(
-                    memberIds,
-                    rule.getExecutionMode(),
-                    rule.getRunAsUserId(),
-                    rule.getCreatedById());
-            }
-        }
-        for (int memberId : memberIds) {
-            workspaceMapper.lockAuthorizationMembership(
-                outbox.getWorkspaceId(), memberId);
-        }
+        return principalService.resolveLocked(outbox.getWorkspaceId(), version);
     }
 
-    private static void addExecutionMember(
-            Set<Integer> memberIds,
-            String executionMode,
-            Integer runAsUserId,
-            Integer createdById) {
-        Integer memberId = "system".equals(executionMode)
-            ? createdById : runAsUserId;
-        if (memberId != null) {
-            memberIds.add(memberId);
-        }
+    private static boolean sameTarget(
+            WorkflowTriggerOutbox discovered, WorkflowTriggerOutbox locked) {
+        return discovered.getWorkflowId() == locked.getWorkflowId()
+            && discovered.getWorkflowVersionId() == locked.getWorkflowVersionId()
+            && discovered.getWorkflowRuntimeGeneration()
+                == locked.getWorkflowRuntimeGeneration();
     }
 
     private static boolean stateMatches(

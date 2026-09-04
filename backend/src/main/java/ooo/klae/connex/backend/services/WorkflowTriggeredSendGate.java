@@ -1,10 +1,10 @@
 package ooo.klae.connex.backend.services;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-/** Rolling-deployment fence for the {@code send_message} automation action. */
+/** Startup-bound deployment fence for the {@code send_message} automation action. */
 @Component
 public class WorkflowTriggeredSendGate {
 
@@ -13,9 +13,9 @@ public class WorkflowTriggeredSendGate {
     private final int dispatchPageSize;
 
     /**
-     * Reads the deployment fence.
+     * Captures the deployment fence at application startup.
      *
-     * @param enabled whether every deployed node understands triggered sends
+     * @param enabled whether this backend instance starts open for triggered sends
      * @param recipientLimit maximum recipients enrolled by one scheduled send-message run
      * @param dispatchPageSize maximum pending deliveries selected by one worker page
      */
@@ -63,6 +63,6 @@ public class WorkflowTriggeredSendGate {
      * @return whether validation may accept the token
      */
     public boolean permits(String actionType) {
-        return enabled || !"send_message".equals(actionType);
+        return enabled() || !"send_message".equals(actionType);
     }
 }

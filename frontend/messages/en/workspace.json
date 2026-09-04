@@ -681,9 +681,10 @@
             "failureAtNode": "This step failed.",
             "stepFailure": "Failure attributed to this step",
             "actionOutcome": {
-                "delivery_queued": "Delivery #{id} queued",
-                "delivery_dedup_skipped": "Delivery #{id} was already queued",
-                "delivery_capped": "Delivery #{id} was capped"
+                "delivery_queued": "Message queued for delivery",
+                "delivery_dedup_skipped": "Message was already queued",
+                "delivery_capped": "Message was not queued because the delivery limit was reached",
+                "delivery_reconciliation_required": "Message outcome needs provider confirmation"
             },
             "status": {
                 "queued": "Queued",
@@ -778,7 +779,8 @@
             "action_ready": "This action would be ready to run.",
             "delay_wait": "The path would wait here, so preview stops.",
             "end_reached": "The path would complete here."
-        }
+        },
+        "diagnosticFallback": "This check could not be described."
     },
     "WorkspaceCustomFields": {
         "newField": "Add field",
@@ -889,6 +891,8 @@
         "apiKey": "API key",
         "apiKeyConfigured": "•••• {last4} (unchanged)",
         "apiKeyHint": "Leave blank to keep the stored key. Stored encrypted; never shown.",
+        "idempotentSubmissionTitle": "Provider safely handles repeated requests",
+        "idempotentSubmissionDescription": "Turn this on only when your provider guarantees that retrying the same request delivers no more than once. Connex may automatically retry interrupted deliveries when enabled.",
         "webhookTitle": "Delivery webhook",
         "webhookDescription": "Your email service provider reports deliveries, bounces, and complaints back to this URL. Generate the URL and secret below, then add both to your provider's settings.",
         "webhookUrlLabel": "Webhook URL",

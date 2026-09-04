@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.delivery;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.function.LongSupplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,6 +47,12 @@ public class CampaignDispatchService {
     private static final int QUIET_START_HOUR = -1;
     private static final int QUIET_END_HOUR = -1;
     private static final int ERROR_LIMIT = 512;
+    private static final String EXPIRED_NON_IDEMPOTENT_CLAIM =
+            "AMBIGUOUS: Worker claim expired on a transport without idempotent submission";
+    private static final String EXPIRED_CHANGED_TARGET_CLAIM =
+            "AMBIGUOUS: Worker claim expired after the delivery target changed";
+    private static final String RECOVERED_CHANGED_TARGET_CLAIM =
+            "AMBIGUOUS: Delivery target changed before a recovered attempt could resume";
 
     private final CampaignSendMapper campaignSendMapper;
     private final CampaignDeliveryMapper campaignDeliveryMapper;
@@ -56,17 +64,20 @@ public class CampaignDispatchService {
     private final CapabilityRegistry capabilityRegistry;
     private final WorkflowTriggeredSendGate triggeredSendGate;
     private final WorkflowRunMapper workflowRunMapper;
+    private final CampaignDispatchClaimBoundary claimBoundary;
+    private LongSupplier nanoTimeSource = System::nanoTime;
 
     /** Processes every queued send in the workspace. Never throws. */
     public int processWorkspace(int workspaceId) {
         if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
             return 0;
         }
+        recoverExpiredTriggeredClaims(workspaceId);
         int failed = 0;
         for (int sendId : campaignSendMapper.queuedSendIds(
                 workspaceId, triggeredSendGate.enabled())) {
             try {
-                if (!processSend(workspaceId, sendId)) {
+                if (!processSendReady(workspaceId, sendId)) {
                     failed++;
                 }
             } catch (Exception exception) {
@@ -93,6 +104,11 @@ public class CampaignDispatchService {
         if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
             return true;
         }
+        recoverExpiredTriggeredClaims(workspaceId);
+        return processSendReady(workspaceId, sendId);
+    }
+
+    private boolean processSendReady(int workspaceId, int sendId) {
         CampaignSend send = campaignSendMapper.getSend(workspaceId, sendId);
         if (send == null || !dispatchable(send)) {
             return true;
@@ -132,12 +148,7 @@ public class CampaignDispatchService {
                     || (triggered(current) && !triggeredSendGate.enabled())) {
                 break;
             }
-            try {
-                dispatchOne(workspaceId, send, channel, target, dispatcher, revision, deliveryId);
-            } catch (Exception exception) {
-                campaignDeliveryMapper.markFailed(workspaceId, deliveryId, bounded(exception.getMessage()));
-                log.warn("Campaign delivery {} dispatch failed: {}", deliveryId, exception.getMessage());
-            }
+            dispatchOne(workspaceId, send, channel, target, dispatcher, revision, deliveryId);
         }
         campaignSendMapper.refreshCounters(workspaceId, sendId);
         CampaignSend settled = campaignSendMapper.getSend(workspaceId, sendId);
@@ -152,11 +163,63 @@ public class CampaignDispatchService {
     private void dispatchOne(int workspaceId, CampaignSend send, DeliveryChannel channel,
             ResolvedDeliveryProvider target, MessageDispatcher dispatcher,
             CampaignMessageRevision revision, int deliveryId) {
-        if (campaignDeliveryMapper.claim(workspaceId, deliveryId) != 1) {
+        boolean triggered = triggered(send);
+        String leaseOwner = triggered ? UUID.randomUUID().toString() : null;
+        int claimed = triggered
+            ? campaignDeliveryMapper.claimTriggered(
+                workspaceId,
+                deliveryId,
+                leaseOwner,
+                dispatchLeaseMicros(),
+                target.providerId(),
+                target.attemptTargetFingerprint())
+            : campaignDeliveryMapper.claim(workspaceId, deliveryId);
+        if (claimed != 1) {
+            if (triggered && campaignDeliveryMapper.markPendingTriggeredTargetMismatchAmbiguous(
+                    workspaceId,
+                    deliveryId,
+                    target.attemptTargetFingerprint(),
+                    RECOVERED_CHANGED_TARGET_CLAIM,
+                    CampaignDeliveryFailureReason.DELIVERY_TARGET_CHANGED.token()) == 1) {
+                try {
+                    appendEvent(
+                            workspaceId,
+                            deliveryId,
+                            "failed",
+                            RECOVERED_CHANGED_TARGET_CLAIM);
+                } catch (RuntimeException exception) {
+                    log.warn("Campaign delivery {} target-change event could not be appended", deliveryId);
+                }
+            }
             return;
         }
-        if (triggered(send) && !triggeredSendGate.enabled()) {
-            campaignDeliveryMapper.releaseClaim(workspaceId, deliveryId);
+        try {
+            claimBoundary.afterClaim(workspaceId, deliveryId);
+            dispatchClaimed(
+                workspaceId, send, channel, target, dispatcher, revision, deliveryId,
+                leaseOwner);
+        } catch (AmbiguousDispatchException exception) {
+            recordAmbiguous(workspaceId, deliveryId, leaseOwner,
+                    "AMBIGUOUS: Provider outcome could not be persisted definitively",
+                    CampaignDeliveryFailureReason.RELAY_ERROR.token());
+            log.warn("Campaign delivery {} requires provider reconciliation", deliveryId);
+        } catch (Exception exception) {
+            String lastError = bounded(exception.getMessage());
+            markFailed(
+                    workspaceId,
+                    deliveryId,
+                    leaseOwner,
+                    lastError,
+                    CampaignDeliveryFailureReason.classify(lastError, false).token());
+            log.warn("Campaign delivery {} dispatch failed: {}", deliveryId, exception.getMessage());
+        }
+    }
+
+    private void dispatchClaimed(int workspaceId, CampaignSend send, DeliveryChannel channel,
+            ResolvedDeliveryProvider target, MessageDispatcher dispatcher,
+            CampaignMessageRevision revision, int deliveryId, String leaseOwner) {
+        if (leaseOwner != null && !triggeredSendGate.enabled()) {
+            campaignDeliveryMapper.releaseTriggeredClaim(workspaceId, deliveryId, leaseOwner);
             return;
         }
         CampaignDelivery identity = campaignDeliveryMapper.getDeliveryIdentity(workspaceId, deliveryId);
@@ -167,7 +230,7 @@ public class CampaignDispatchService {
         if (personId != null
                 && !audienceEligibilityService.restrictedIds(
                         workspaceId, List.of(personId)).isEmpty()) {
-            campaignDeliveryMapper.markSkipped(workspaceId, deliveryId, "restricted");
+            markSkipped(workspaceId, deliveryId, leaseOwner, "restricted");
             return;
         }
         CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(workspaceId, deliveryId);
@@ -176,29 +239,200 @@ public class CampaignDispatchService {
         }
         String skipReason = evaluate(workspaceId, send, channel, delivery);
         if (skipReason != null) {
-            campaignDeliveryMapper.markSkipped(workspaceId, deliveryId, skipReason);
-            if ("frequency_capped".equals(skipReason)) {
+            int updated = markSkipped(workspaceId, deliveryId, leaseOwner, skipReason);
+            if (updated == 1 && "frequency_capped".equals(skipReason)) {
                 workflowRunMapper.markActionDeliveryCapped(workspaceId, deliveryId);
             }
             return;
         }
         RenderedMessage content = render(channel, revision, delivery);
-        DeliveryRequest request = new DeliveryRequest(
-                channel, delivery.getAddress(), content, delivery.getPersonId(),
-                "send:" + send.getId() + ":" + deliveryId);
-        if (triggered(send) && !triggeredSendGate.enabled()) {
-            campaignDeliveryMapper.releaseClaim(workspaceId, deliveryId);
+        long providerDeadlineNanos = providerDeadlineNanos();
+        if (leaseOwner != null) {
+            claimBoundary.beforeProviderLeaseRenewal(workspaceId, deliveryId);
+            if (campaignDeliveryMapper.renewTriggeredClaim(
+                    workspaceId, deliveryId, leaseOwner, dispatchLeaseMicros()) != 1) {
+                return;
+            }
+            if (!triggeredSendGate.enabled()) {
+                campaignDeliveryMapper.releaseTriggeredClaim(workspaceId, deliveryId, leaseOwner);
+                return;
+            }
+        }
+        if (providerDeadlineNanos - nanoTimeSource.getAsLong() <= 0) {
+            markFailed(workspaceId, deliveryId, leaseOwner,
+                    "Provider deadline expired before egress",
+                    CampaignDeliveryFailureReason.PROVIDER_TIMEOUT.token());
             return;
         }
-        DispatchReceipt receipt = dispatcher.dispatch(target, request);
-        if (receipt.status() == DispatchStatus.SENT) {
-            campaignDeliveryMapper.markDispatched(
-                    workspaceId, deliveryId, target.providerId(), receipt.providerMessageId());
-            appendEvent(workspaceId, deliveryId, "dispatched", receipt.detail());
-        } else {
-            campaignDeliveryMapper.markFailed(workspaceId, deliveryId, bounded(receipt.detail()));
-            appendEvent(workspaceId, deliveryId, "failed", receipt.detail());
+        DeliveryRequest request = new DeliveryRequest(
+                channel, delivery.getAddress(), content, delivery.getPersonId(),
+                "send:" + send.getId() + ":" + deliveryId, providerDeadlineNanos);
+        DispatchReceipt receipt;
+        try {
+            receipt = dispatcher.dispatch(target, request);
+        } catch (RuntimeException exception) {
+            receipt = DispatchReceipt.ambiguous(
+                    "Provider dispatch outcome is ambiguous and requires reconciliation");
         }
+        if (receipt.status() == DispatchStatus.SENT) {
+            int updated;
+            try {
+                updated = leaseOwner == null
+                    ? campaignDeliveryMapper.markDispatched(
+                        workspaceId, deliveryId, target.providerId(), receipt.providerMessageId())
+                    : campaignDeliveryMapper.markTriggeredDispatched(
+                        workspaceId, deliveryId, leaseOwner, target.providerId(),
+                        receipt.providerMessageId());
+            } catch (RuntimeException exception) {
+                throw new AmbiguousDispatchException(exception);
+            }
+            if (updated == 1) {
+                appendEvent(workspaceId, deliveryId, "dispatched", receipt.detail());
+            }
+        } else {
+            String failure = receipt.status() == DispatchStatus.AMBIGUOUS
+                    ? "AMBIGUOUS: " + receipt.detail()
+                    : receipt.detail();
+            String failureCode = CampaignDeliveryFailureReason.classify(
+                    failure, receipt.status() == DispatchStatus.AMBIGUOUS).token();
+            int updated = receipt.status() == DispatchStatus.AMBIGUOUS
+                    ? markAmbiguousOrThrow(
+                            workspaceId, deliveryId, leaseOwner, bounded(failure), failureCode)
+                    : markFailed(
+                            workspaceId, deliveryId, leaseOwner, bounded(failure), failureCode);
+            if (updated == 1) {
+                appendEvent(workspaceId, deliveryId, "failed", failure);
+            }
+        }
+    }
+
+    private int markSkipped(
+            int workspaceId, int deliveryId, String leaseOwner, String skipReason) {
+        return leaseOwner == null
+                ? campaignDeliveryMapper.markSkipped(workspaceId, deliveryId, skipReason)
+                : campaignDeliveryMapper.markTriggeredSkipped(
+                    workspaceId, deliveryId, leaseOwner, skipReason);
+    }
+
+    private int markFailed(
+            int workspaceId,
+            int deliveryId,
+            String leaseOwner,
+            String lastError,
+            String lastErrorCode) {
+        return leaseOwner == null
+            ? campaignDeliveryMapper.markFailed(
+                    workspaceId, deliveryId, lastError, lastErrorCode)
+            : campaignDeliveryMapper.markTriggeredFailed(
+                    workspaceId, deliveryId, leaseOwner, lastError, lastErrorCode);
+    }
+
+    private int markAmbiguous(
+            int workspaceId,
+            int deliveryId,
+            String leaseOwner,
+            String lastError,
+            String lastErrorCode) {
+        return leaseOwner == null
+            ? campaignDeliveryMapper.markAmbiguous(
+                    workspaceId, deliveryId, lastError, lastErrorCode)
+            : campaignDeliveryMapper.markTriggeredAmbiguous(
+                    workspaceId, deliveryId, leaseOwner, lastError, lastErrorCode);
+    }
+
+    private int markAmbiguousOrThrow(
+            int workspaceId,
+            int deliveryId,
+            String leaseOwner,
+            String lastError,
+            String lastErrorCode) {
+        try {
+            return markAmbiguous(
+                    workspaceId, deliveryId, leaseOwner, lastError, lastErrorCode);
+        } catch (RuntimeException exception) {
+            throw new AmbiguousDispatchException(exception);
+        }
+    }
+
+    private void recordAmbiguous(
+            int workspaceId,
+            int deliveryId,
+            String leaseOwner,
+            String lastError,
+            String lastErrorCode) {
+        int updated;
+        try {
+            updated = markAmbiguous(
+                    workspaceId, deliveryId, leaseOwner, lastError, lastErrorCode);
+        } catch (RuntimeException firstFailure) {
+            try {
+                updated = markAmbiguous(
+                        workspaceId, deliveryId, leaseOwner, lastError, lastErrorCode);
+            } catch (RuntimeException secondFailure) {
+                log.warn("Campaign delivery {} ambiguous outcome remains claim-owned for recovery",
+                        deliveryId);
+                return;
+            }
+        }
+        if (updated == 1) {
+            try {
+                appendEvent(workspaceId, deliveryId, "failed", lastError);
+            } catch (RuntimeException exception) {
+                log.warn("Campaign delivery {} ambiguous event could not be appended", deliveryId);
+            }
+        }
+    }
+
+    private void recoverExpiredTriggeredClaims(int workspaceId) {
+        for (CampaignDelivery claim : campaignDeliveryMapper.expiredTriggeredClaimsPage(
+                workspaceId, triggeredSendGate.dispatchPageSize())) {
+            boolean replaySafe = false;
+            boolean targetChanged = false;
+            try {
+                DeliveryChannel channel = DeliveryChannel.fromToken(claim.getChannel());
+                ResolvedDeliveryProvider current =
+                        deliveryProviderConfigService.resolveForWorkspace(workspaceId, channel);
+                targetChanged = !current.providerId().equals(claim.getProviderId())
+                        || !current.attemptTargetFingerprint().equals(
+                                claim.getAttemptTargetFingerprint());
+                replaySafe = !targetChanged
+                        && current.idempotentSubmission();
+            } catch (RuntimeException exception) {
+                log.warn("Expired campaign delivery {} has no replay-safe transport capability",
+                        claim.getId());
+            }
+            if (replaySafe) {
+                campaignDeliveryMapper.recoverExpiredTriggeredClaim(
+                        workspaceId, claim.getId(), claim.getAttemptTargetFingerprint());
+            } else if (campaignDeliveryMapper.markExpiredTriggeredClaimAmbiguous(
+                    workspaceId,
+                    claim.getId(),
+                    targetChanged ? EXPIRED_CHANGED_TARGET_CLAIM : EXPIRED_NON_IDEMPOTENT_CLAIM,
+                    targetChanged
+                            ? CampaignDeliveryFailureReason.DELIVERY_TARGET_CHANGED.token()
+                            : CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) == 1) {
+                try {
+                    appendEvent(
+                            workspaceId,
+                            claim.getId(),
+                            "failed",
+                            targetChanged
+                                    ? EXPIRED_CHANGED_TARGET_CLAIM
+                                    : EXPIRED_NON_IDEMPOTENT_CLAIM);
+                } catch (RuntimeException exception) {
+                    log.warn("Campaign delivery {} recovery event could not be appended", claim.getId());
+                }
+            }
+        }
+    }
+
+    private long dispatchLeaseMicros() {
+        return deliveryProperties.providerCallLeaseDuration().toNanos() / 1_000L;
+    }
+
+    private long providerDeadlineNanos() {
+        return Math.addExact(
+                nanoTimeSource.getAsLong(), deliveryProperties.providerCallDeadline().toNanos());
     }
 
     private String evaluate(int workspaceId, CampaignSend send, DeliveryChannel channel, CampaignDelivery delivery) {
@@ -326,5 +560,12 @@ public class CampaignDispatchService {
         }
         String trimmed = message.trim();
         return trimmed.length() > ERROR_LIMIT ? trimmed.substring(0, ERROR_LIMIT) : trimmed;
+    }
+
+    private static final class AmbiguousDispatchException extends RuntimeException {
+
+        private AmbiguousDispatchException(Throwable cause) {
+            super(cause);
+        }
     }
 }

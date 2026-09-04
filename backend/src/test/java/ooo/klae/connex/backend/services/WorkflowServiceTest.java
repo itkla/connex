@@ -110,6 +110,8 @@ class WorkflowServiceTest {
         lenient().when(workspaceService.isBuiltInAdmin(7, 41)).thenReturn(true);
         lenient().when(workflowDefinitionValidator.validateForMutation(
             any(), any(), any())).thenReturn(Set.of());
+        lenient().when(workflowDefinitionValidator.validateDraftActionsForMutation(
+            any(), any(), any())).thenReturn(Set.of());
     }
 
     @Test
@@ -202,7 +204,7 @@ class WorkflowServiceTest {
         when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41)))
             .thenReturn(new LockedPrincipals(
                 Set.of(41), Set.of(41), Set.of(Permission.RULE_MANAGE)));
-        when(workflowDefinitionValidator.validateForMutation(any(), any(), any()))
+        when(workflowDefinitionValidator.validateDraftActionsForMutation(any(), any(), any()))
             .thenReturn(Set.of(
                 Permission.CAMPAIGN_MANAGE,
                 Permission.CAMPAIGN_SEND,
@@ -260,7 +262,7 @@ class WorkflowServiceTest {
             7, 41, Set.of(41, 999), Set.of(999)))
             .thenReturn(new LockedPrincipals(
                 Set.of(41, 999), Set.of(41, 999), Set.of(Permission.RULE_MANAGE)));
-        when(workflowDefinitionValidator.validateForMutation(any(), any(), any()))
+        when(workflowDefinitionValidator.validateDraftActionsForMutation(any(), any(), any()))
             .thenReturn(Set.of(
                 Permission.CAMPAIGN_MANAGE,
                 Permission.CAMPAIGN_SEND,

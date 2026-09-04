@@ -6602,6 +6602,18 @@ export function getCampaignRecipients(
     );
 }
 
+/** Records a provider-confirmed delivery outcome without sending the message again. */
+export function reconcileCampaignRecipient(
+    campaignId: number,
+    deliveryId: number,
+    payload: Types.CampaignDeliveryReconciliationPayload,
+) {
+    return postJson<Types.CampaignDeliveryReconciliation>(
+        `/api/campaigns/${campaignId}/recipients/${deliveryId}/reconcile`,
+        payload,
+    );
+}
+
 /**
  * Fetches the public unsubscribe preview for a delivery token. Deliberately bypasses the workspace
  * and CSRF machinery: the route is unauthenticated and resolves the tenant from the token alone.

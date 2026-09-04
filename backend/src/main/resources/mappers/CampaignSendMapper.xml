@@ -97,11 +97,13 @@
   <select id="workspaceIdsWithQueuedSends" resultType="int">
     SELECT DISTINCT workspace_id FROM campaign_send
     WHERE status IN ('queued', 'running')
-      OR (#{triggeredSendEnabled} AND status = 'triggered' AND EXISTS (
+      OR (status = 'triggered' AND EXISTS (
         SELECT 1 FROM campaign_delivery d
         WHERE d.workspace_id = campaign_send.workspace_id
           AND d.send_id = campaign_send.id
-          AND d.status = 'pending'))
+          AND ((#{triggeredSendEnabled} AND d.status = 'pending')
+            OR (d.status = 'dispatching'
+              AND d.dispatch_lease_until &lt; UTC_TIMESTAMP(6)))))
   </select>
 
 </mapper>

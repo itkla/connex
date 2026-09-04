@@ -39,4 +39,6 @@ public class DeliveryProviderConfigRequest {
     private String apiKey;
 
     private boolean enabled;
+
+    private boolean idempotentSubmission;
 }

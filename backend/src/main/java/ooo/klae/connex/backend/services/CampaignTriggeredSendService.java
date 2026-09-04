@@ -25,6 +25,8 @@ import ooo.klae.connex.backend.delivery.ChannelAddressNormalizer;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
 import ooo.klae.connex.backend.delivery.DeliveryProviderException;
+import ooo.klae.connex.backend.dto.CampaignDeliveryReconciliationDto;
+import ooo.klae.connex.backend.dto.CampaignDeliveryReconciliationRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -37,17 +39,21 @@ import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
-/** Enrols one contact idempotently into a rollback-isolated triggered campaign send. */
+/** Enrols triggered deliveries and reconciles ambiguous campaign-delivery outcomes. */
 @Service
 @RequiredArgsConstructor
 public class CampaignTriggeredSendService {
 
     private static final String PURPOSE = "marketing";
+    private static final String ROLLBACK_SNAPSHOT_LABEL = "Triggered (system)";
     private static final int TOKEN_BYTES = 32;
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final List<Permission> REQUIRED_PERMISSIONS = List.of(
             Permission.CAMPAIGN_MANAGE,
             Permission.CAMPAIGN_SEND,
+            Permission.CONSENT_MANAGE);
+    private static final List<Permission> RECONCILIATION_PERMISSIONS = List.of(
+            Permission.CAMPAIGN_MANAGE,
             Permission.CONSENT_MANAGE);
 
     private final CampaignMapper campaignMapper;
@@ -81,6 +87,88 @@ public class CampaignTriggeredSendService {
         int actorId = workspaceService.getCurrentUserId();
         Set<Permission> permissions = workspaceService.lockedPermissionsFor(workspaceId, actorId);
         return enrollLocked(workspaceId, actorId, permissions, request, discovered);
+    }
+
+    /**
+     * Persists an operator-confirmed outcome for an ambiguous campaign delivery. Authorization is
+     * revalidated from locked membership rows before campaign, send, and delivery rows are locked.
+     * Repeating the same resolution is an idempotent read of the already-confirmed result.
+     *
+     * @param campaignId owning campaign
+     * @param deliveryId reconciliation-required delivery
+     * @param request provider-confirmed resolution
+     * @return the confirmed terminal delivery state
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.CAMPAIGN_MANAGE)
+    public CampaignDeliveryReconciliationDto reconcile(
+            int campaignId,
+            int deliveryId,
+            CampaignDeliveryReconciliationRequest request) {
+        if (campaignId <= 0 || deliveryId <= 0 || request == null) {
+            throw new BadRequestException("Campaign delivery reconciliation is required");
+        }
+        String resolution = requireResolution(request.resolution());
+        int workspaceId = requireResolvedWorkspaceId();
+        int actorId = workspaceService.getCurrentUserId();
+        requirePermissions(
+                workspaceService.lockedMemberPermissionsFor(workspaceId, actorId),
+                RECONCILIATION_PERMISSIONS);
+        Campaign campaign = campaignMapper.getCampaignForUpdate(workspaceId, campaignId);
+        if (campaign == null) {
+            throw new ResourceNotFoundException("Campaign not found with id: " + campaignId);
+        }
+        CampaignDelivery identity = campaignDeliveryMapper.getDeliveryIdentity(
+                workspaceId, deliveryId);
+        if (identity == null) {
+            throw deliveryNotFound(deliveryId);
+        }
+        CampaignSend send = campaignSendMapper.getSendForUpdate(workspaceId, identity.getSendId());
+        if (send == null || send.getCampaignId() != campaignId) {
+            throw deliveryNotFound(deliveryId);
+        }
+        CampaignDelivery delivery = campaignDeliveryMapper.getDeliveryForUpdate(
+                workspaceId, deliveryId);
+        if (delivery == null || delivery.getSendId() != send.getId()) {
+            throw deliveryNotFound(deliveryId);
+        }
+        String outcome = "operator_" + resolution;
+        if (outcome.equals(delivery.getReconciliationOutcome())) {
+            return reconciliationDto(delivery);
+        }
+        if (delivery.getReconciliationOutcome() != null) {
+            throw new BadRequestException(
+                    "This delivery was already reconciled with a different resolution");
+        }
+        if (!"failed".equals(delivery.getStatus())
+                || delivery.getReconciliationRequiredAt() == null) {
+            throw new BadRequestException(
+                    "Only a campaign delivery that needs reconciliation can be resolved");
+        }
+        String toStatus = "delivered".equals(resolution) ? "dispatched" : "failed";
+        String lastError = "delivered".equals(resolution)
+                ? null
+                : "Operator confirmed the provider did not deliver this message";
+        if (campaignDeliveryMapper.resolveReconciliation(
+                workspaceId, campaignId, deliveryId, toStatus, outcome, lastError) != 1) {
+            throw deliveryNotFound(deliveryId);
+        }
+        campaignSendMapper.refreshCounters(workspaceId, send.getId());
+        auditService.recordStrict(
+                "campaign.delivery.reconcile",
+                "campaign",
+                campaignId,
+                campaign.getName(),
+                "Reconciled campaign delivery",
+                Map.of(
+                        "sendId", send.getId(),
+                        "deliveryId", deliveryId,
+                        "resolution", resolution));
+        CampaignDelivery resolved = campaignDeliveryMapper.getDelivery(workspaceId, deliveryId);
+        if (resolved == null) {
+            throw deliveryNotFound(deliveryId);
+        }
+        return reconciliationDto(resolved);
     }
 
     /**
@@ -207,6 +295,9 @@ public class CampaignTriggeredSendService {
     }
 
     private static EnrollmentResult replay(int sendId, CampaignDelivery delivery) {
+        if (delivery.getReconciliationRequiredAt() != null) {
+            return EnrollmentResult.reconciliationRequired(sendId, delivery.getId());
+        }
         if ("skipped".equals(delivery.getStatus())
                 && "frequency_capped".equals(delivery.getSkipReason())) {
             return EnrollmentResult.capped(sendId, delivery.getId());
@@ -232,7 +323,7 @@ public class CampaignTriggeredSendService {
         snapshot.setRecordType("person");
         snapshot.setDefinitionJson("{}");
         snapshot.setChannel(message.getChannel());
-        snapshot.setPurpose(PURPOSE);
+        snapshot.setPurpose(ROLLBACK_SNAPSHOT_LABEL);
         snapshot.setOrigin("triggered");
         snapshot.setTriggeredMessageId(message.getId());
         snapshot.setTriggeredMessageVersion(revision.getVersion());
@@ -343,12 +434,39 @@ public class CampaignTriggeredSendService {
     }
 
     private static void requirePermissions(Set<Permission> permissions) {
-        for (Permission permission : REQUIRED_PERMISSIONS) {
+        requirePermissions(permissions, REQUIRED_PERMISSIONS);
+    }
+
+    private static void requirePermissions(
+            Set<Permission> permissions, List<Permission> requiredPermissions) {
+        for (Permission permission : requiredPermissions) {
             if (!permissions.contains(permission)) {
                 throw new ForbiddenException(
                         "Requires the " + permission.name() + " permission in this workspace");
             }
         }
+    }
+
+    private static String requireResolution(String resolution) {
+        if (!"delivered".equals(resolution) && !"not_delivered".equals(resolution)) {
+            throw new BadRequestException(
+                    "Campaign delivery resolution must be delivered or not_delivered");
+        }
+        return resolution;
+    }
+
+    private static ResourceNotFoundException deliveryNotFound(int deliveryId) {
+        return new ResourceNotFoundException(
+                "Campaign delivery not found with id: " + deliveryId);
+    }
+
+    private static CampaignDeliveryReconciliationDto reconciliationDto(
+            CampaignDelivery delivery) {
+        return new CampaignDeliveryReconciliationDto(
+                delivery.getId(),
+                delivery.getStatus(),
+                delivery.getReconciliationRequiredAt() != null,
+                delivery.getLastErrorCode());
     }
 
     private int requireResolvedWorkspaceId() {
@@ -389,6 +507,11 @@ public class CampaignTriggeredSendService {
 
         static EnrollmentResult capped(int sendId, int deliveryId) {
             return new EnrollmentResult(sendId, deliveryId, "delivery_capped", null);
+        }
+
+        static EnrollmentResult reconciliationRequired(int sendId, int deliveryId) {
+            return new EnrollmentResult(
+                    sendId, deliveryId, "delivery_reconciliation_required", null);
         }
 
         static EnrollmentResult excluded(String reason) {

@@ -3,11 +3,14 @@ package ooo.klae.connex.backend.mail;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.util.concurrent.ConcurrentHashMap;
+
+import jakarta.mail.MessagingException;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
@@ -66,6 +69,38 @@ class JavaMailSenderFactoryTest {
         assertEquals("true", sender.getJavaMailProperties().get("mail.smtp.starttls.required"));
         assertEquals("true", sender.getJavaMailProperties().get("mail.smtp.ssl.checkserveridentity"));
         assertTrue(Boolean.parseBoolean(sender.getJavaMailProperties().getProperty("mail.smtp.starttls.enable")));
+    }
+
+    @Test
+    void instanceDeadlineSenderPreservesHostnameAndBoundsEverySocketTimeout() {
+        JavaMailSenderFactory factory = new JavaMailSenderFactory();
+
+        JavaMailSenderImpl sender = assertInstanceOf(
+                JavaMailSenderImpl.class,
+                factory.deadlineBoundForConfig(config(null), null, 250_000_000L).sender());
+
+        assertEquals("smtp.example.com", sender.getHost());
+        assertInstanceOf(TrackingSocketFactory.class,
+                sender.getJavaMailProperties().get("mail.smtp.socketFactory"));
+        assertEquals("false", sender.getJavaMailProperties().get("mail.smtp.socketFactory.fallback"));
+        assertEquals("250", sender.getJavaMailProperties().getProperty("mail.smtp.connectiontimeout"));
+        assertEquals("250", sender.getJavaMailProperties().getProperty("mail.smtp.timeout"));
+        assertEquals("250", sender.getJavaMailProperties().getProperty("mail.smtp.writetimeout"));
+    }
+
+    @Test
+    void deadlineBeforeTransportCreationFailsWithoutReturningAConnectableTransport() {
+        JavaMailSenderFactory factory = new JavaMailSenderFactory();
+        JavaMailSenderFactory.DeadlineBoundSender deadlineBound =
+                factory.deadlineBoundForConfig(config(null), null, 250_000_000L);
+        JavaMailSenderImpl sender = assertInstanceOf(
+                JavaMailSenderImpl.class, deadlineBound.sender());
+
+        deadlineBound.abort().run();
+        MessagingException failure = assertThrows(
+                MessagingException.class, sender::testConnection);
+
+        assertTrue(JavaMailSenderFactory.isDeadlineBeforeTransport(failure));
     }
 
     private static ResolvedMailConfig config(String password) {

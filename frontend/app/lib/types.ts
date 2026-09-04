@@ -2551,8 +2551,30 @@ export type CampaignRecipient = {
     personLabel?: string;
     status: string;
     skipReason?: string;
+    reconciliationRequired: boolean;
+    reasonCode: CampaignDeliveryFailureReason | null;
     createdAt?: string;
     updatedAt?: string;
+};
+
+export type CampaignDeliveryFailureReason =
+    | "provider_timeout"
+    | "provider_rejected"
+    | "deadline_ambiguous"
+    | "delivery_target_changed"
+    | "relay_error";
+
+export type CampaignDeliveryResolution = "delivered" | "not_delivered";
+
+export type CampaignDeliveryReconciliation = {
+    deliveryId: number;
+    status: string;
+    reconciliationRequired: boolean;
+    reasonCode: CampaignDeliveryFailureReason | null;
+};
+
+export type CampaignDeliveryReconciliationPayload = {
+    resolution: CampaignDeliveryResolution;
 };
 
 /** Which population of a campaign's deliveries a recipient page is drawn from. */
@@ -4801,7 +4823,12 @@ export type WorkflowStepRun = {
     selectedOutcome: WorkflowEdgeOutcome | null;
     selectedEdgeId: string | null;
     nextNodeId: string | null;
-    actionOutcome: "delivery_queued" | "delivery_dedup_skipped" | "delivery_capped" | null;
+    actionOutcome:
+        | "delivery_queued"
+        | "delivery_dedup_skipped"
+        | "delivery_capped"
+        | "delivery_reconciliation_required"
+        | null;
     actionReferenceId: number | null;
     startedAt: string;
     finishedAt: string | null;
@@ -5218,6 +5245,7 @@ export type DeliveryProviderConfig = {
     credentialLast4: string | null;
     webhookConfigured: boolean;
     enabled: boolean;
+    idempotentSubmission: boolean;
     updatedAt: string | null;
 };
 
@@ -5229,6 +5257,7 @@ export type DeliveryProviderConfigPayload = {
     fromName?: string | null;
     apiKey?: string | null;
     enabled: boolean;
+    idempotentSubmission: boolean;
 };
 
 export type DeliveryWebhookToken = {

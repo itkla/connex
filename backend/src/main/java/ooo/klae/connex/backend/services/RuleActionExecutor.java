@@ -71,6 +71,14 @@ public class RuleActionExecutor {
                         action.getCampaignMessageVersion(),
                         workflowContext.actorUserId(),
                         workflowContext.lockedPermissions())
+                    : ctx instanceof RuleFireContext ruleContext
+                            && ruleContext.hasLockedAuthorization()
+                        ? campaignTriggeredSendService.enrollWithLockedAuthorization(
+                            ctx.entityId(),
+                            action.getCampaignMessageId(),
+                            action.getCampaignMessageVersion(),
+                            ruleContext.lockedActorUserId(),
+                            ruleContext.lockedPermissions())
                     : campaignTriggeredSendService.enroll(
                         ctx.entityId(),
                         action.getCampaignMessageId(),

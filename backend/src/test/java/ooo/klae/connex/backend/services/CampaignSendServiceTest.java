@@ -740,6 +740,10 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
             return requests;
         }
 
+        void returnAmbiguous() {
+            status = DispatchStatus.AMBIGUOUS;
+        }
+
         @Override
         public String providerId() {
             return ID;
@@ -752,16 +756,18 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
 
         @Override
         public DeliveryCapabilities capabilities() {
-            return new DeliveryCapabilities(true, false, false, 1);
+            return new DeliveryCapabilities(true, false, false, true, 1);
         }
 
         @Override
         public DispatchReceipt dispatch(ResolvedDeliveryProvider target, DeliveryRequest request) {
             dispatches.incrementAndGet();
             requests.add(request);
-            return status == DispatchStatus.SENT
-                    ? DispatchReceipt.sent("fake-" + dispatches.get(), "ok")
-                    : DispatchReceipt.rejected("rejected");
+            return switch (status) {
+                case SENT -> DispatchReceipt.sent("fake-" + dispatches.get(), "ok");
+                case REJECTED -> DispatchReceipt.rejected("rejected");
+                case AMBIGUOUS -> DispatchReceipt.ambiguous("provider outcome needs reconciliation");
+            };
         }
     }
 }

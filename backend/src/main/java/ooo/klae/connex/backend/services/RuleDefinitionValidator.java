@@ -172,6 +172,32 @@ public class RuleDefinitionValidator {
             executionMode);
     }
 
+    Set<Permission> validateDraftActionsForMutation(
+            String recordTypeValue,
+            List<WorkflowNode> nodes,
+            String executionMode) {
+        String recordType = normalize(recordTypeValue);
+        String mode = normalize(executionMode);
+        boolean found = false;
+        for (WorkflowNode node : nodes) {
+            if (!(node instanceof WorkflowNode.Action actionNode)
+                    || actionNode.config() == null
+                    || !"send_message".equals(normalize(actionNode.config().getType()))) {
+                continue;
+            }
+            Configured<RuleAction> configured = new Configured<>(actionNode.id(), actionNode.config());
+            requireStructurallyValid(configured);
+            validateSendMessageAction(configured, recordType);
+            found = true;
+        }
+        if (!found) {
+            return Set.of();
+        }
+        Set<Permission> permissions = actionPermissions("send_message", recordType);
+        requireSystemPermissions(mode, permissions);
+        return permissions;
+    }
+
     Set<Permission> validateDefinitionForMutation(
             String recordTypeValue,
             RuleTrigger trigger,
@@ -290,20 +316,25 @@ public class RuleDefinitionValidator {
         validateTrigger(trigger, recordType, !conditions.isEmpty());
         validateActions(actions, recordType);
         Set<Permission> permissions = actionPermissions(actions, recordType);
-        if ("system".equals(mode)) {
-            Permission missing = permissions.stream()
-                    .filter(permission -> !systemActor.permissions().contains(permission))
-                    .sorted()
-                    .findFirst()
-                    .orElse(null);
-            if (missing != null) {
-                throw invalid(
-                    WorkflowDiagnosticCode.ACTION_SYSTEM_PERMISSION_MISSING,
-                    "The system automation actor cannot perform this action",
-                    null, "executionMode", Map.of("permission", missing.name()));
-            }
-        }
+        requireSystemPermissions(mode, permissions);
         return permissions;
+    }
+
+    private void requireSystemPermissions(String mode, Set<Permission> permissions) {
+        if (!"system".equals(mode)) {
+            return;
+        }
+        Permission missing = permissions.stream()
+            .filter(permission -> !systemActor.permissions().contains(permission))
+            .sorted()
+            .findFirst()
+            .orElse(null);
+        if (missing != null) {
+            throw invalid(
+                WorkflowDiagnosticCode.ACTION_SYSTEM_PERMISSION_MISSING,
+                "The system automation actor cannot perform this action",
+                null, "executionMode", Map.of("permission", missing.name()));
+        }
     }
 
     private <T> void requireStructurallyValid(Configured<T> configured) {
@@ -504,25 +535,41 @@ public class RuleDefinitionValidator {
                             configured.nodeId(), "targetStageId");
                     }
                 }
-                case "send_message" -> {
-                    if (action.getCampaignMessageId() == null
-                            || action.getCampaignMessageId() < 1) {
-                        throw requiredActionField(
-                            "A send_message action requires a campaignMessageId",
-                            configured.nodeId(), "campaignMessageId");
-                    }
-                    if (action.getCampaignMessageVersion() == null
-                            || action.getCampaignMessageVersion() < 1) {
-                        throw requiredActionField(
-                            "A send_message action requires a positive campaignMessageVersion",
-                            configured.nodeId(), "campaignMessageVersion");
-                    }
-                }
+                case "send_message" -> validateSendMessageAction(configured, recordType);
                 default -> throw invalid(
                     WorkflowDiagnosticCode.ACTION_TYPE_INVALID,
                     "Invalid action type: " + action.getType(),
                     configured.nodeId(), "config.type", Map.of());
             }
+        }
+    }
+
+    private void validateSendMessageAction(
+            Configured<RuleAction> configured, String recordType) {
+        if (!triggeredSendGate.permits("send_message")) {
+            throw invalid(
+                WorkflowDiagnosticCode.ACTION_TYPE_INVALID,
+                "Invalid action type: " + configured.value().getType(),
+                configured.nodeId(), "config.type", Map.of());
+        }
+        if (!ACTION_RECORD_TYPES.get("send_message").contains(recordType)) {
+            throw invalid(
+                WorkflowDiagnosticCode.ACTION_RECORD_TYPE_UNSUPPORTED,
+                "'send_message' actions are not supported for " + recordType + " rules",
+                configured.nodeId(), "config.type",
+                Map.of("actionType", "send_message", "recordType", String.valueOf(recordType)));
+        }
+        RuleAction action = configured.value();
+        if (action.getCampaignMessageId() == null || action.getCampaignMessageId() < 1) {
+            throw requiredActionField(
+                "A send_message action requires a campaignMessageId",
+                configured.nodeId(), "campaignMessageId");
+        }
+        if (action.getCampaignMessageVersion() == null
+                || action.getCampaignMessageVersion() < 1) {
+            throw requiredActionField(
+                "A send_message action requires a positive campaignMessageVersion",
+                configured.nodeId(), "campaignMessageVersion");
         }
     }
 

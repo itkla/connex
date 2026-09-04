@@ -5,5 +5,6 @@ package ooo.klae.connex.backend.delivery;
  */
 public enum DispatchStatus {
     SENT,
-    REJECTED
+    REJECTED,
+    AMBIGUOUS
 }

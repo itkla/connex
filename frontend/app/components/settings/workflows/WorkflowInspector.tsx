@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import {
     BoltIcon,
@@ -74,7 +74,7 @@ export default function WorkflowInspector({
     canRunAsSystem: boolean;
     focusFieldPath: string | null;
     focusRequestId: number;
-    diagnosticMessage: (diagnostic: WorkflowDiagnostic) => string;
+    diagnosticMessage: (diagnostic: WorkflowDiagnostic) => ReactNode;
     onNodeChange: (node: WorkflowNode, mode: ChangeMode) => void;
     onMetadataChange: (
         field: "description" | "recordType" | "executionMode",

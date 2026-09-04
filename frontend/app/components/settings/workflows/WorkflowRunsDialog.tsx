@@ -278,9 +278,7 @@ function RunDetail({
                             {step.selectedOutcome ? <Badge variant="secondary">{t(`branch.${step.selectedOutcome}`)}</Badge> : null}
                             {step.actionOutcome ? (
                                 <Badge variant="secondary">
-                                    {t(`runs.actionOutcome.${step.actionOutcome}`, {
-                                        id: step.actionReferenceId ?? "",
-                                    })}
+                                    {t(`runs.actionOutcome.${step.actionOutcome}`)}
                                 </Badge>
                             ) : null}
                             <span className="ml-auto text-xs text-muted-foreground">

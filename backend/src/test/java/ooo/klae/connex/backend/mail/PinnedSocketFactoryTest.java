@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.mail;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.InetAddress;
 import java.net.ServerSocket;
@@ -21,6 +22,18 @@ class PinnedSocketFactoryTest {
                 assertEquals(loopback, accepted.getLocalAddress());
                 assertEquals(server.getLocalPort(), client.getPort());
             }
+        }
+    }
+
+    @Test
+    void abortImmediatelyClosesEveryPinnedSocket() throws Exception {
+        InetAddress loopback = InetAddress.getLoopbackAddress();
+        PinnedSocketFactory factory = new PinnedSocketFactory(loopback, 2525);
+
+        try (Socket client = factory.createSocket()) {
+            factory.abort();
+
+            assertTrue(client.isClosed());
         }
     }
 

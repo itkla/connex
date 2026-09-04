@@ -121,7 +121,7 @@ public class WorkflowService {
             draft.executionMode(),
             new TreeSet<>(List.of(actorId, runAsUserId)),
             "user".equals(draft.executionMode()) ? Set.of(runAsUserId) : Set.of());
-        Set<Permission> requiredPermissions = workflowDefinitionValidator.validateForMutation(
+        Set<Permission> requiredPermissions = workflowDefinitionValidator.validateDraftActionsForMutation(
             draft.recordType(),
             draft.executionMode(),
             canonicalizer.parseDefinition(draft.definitionJson()));
@@ -192,7 +192,7 @@ public class WorkflowService {
             "user".equals(draft.executionMode())
                 ? Set.of(discoveredRunAsUserId)
                 : Set.of());
-        Set<Permission> requiredPermissions = workflowDefinitionValidator.validateForMutation(
+        Set<Permission> requiredPermissions = workflowDefinitionValidator.validateDraftActionsForMutation(
             draft.recordType(),
             draft.executionMode(),
             canonicalizer.parseDefinition(draft.definitionJson()));

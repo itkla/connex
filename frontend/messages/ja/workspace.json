@@ -681,9 +681,10 @@
             "failureAtNode": "このステップが失敗しました。",
             "stepFailure": "このステップに起因する失敗",
             "actionOutcome": {
-                "delivery_queued": "配信 #{id} を待機中にしました",
-                "delivery_dedup_skipped": "配信 #{id} はすでに待機中です",
-                "delivery_capped": "配信 #{id} は上限により停止しました"
+                "delivery_queued": "メッセージを配信待ちにしました",
+                "delivery_dedup_skipped": "メッセージはすでに配信待ちです",
+                "delivery_capped": "配信上限に達したため、メッセージは配信待ちになりませんでした",
+                "delivery_reconciliation_required": "メッセージの結果をプロバイダーで確認する必要があります"
             },
             "status": {
                 "queued": "順番待ち",
@@ -778,7 +779,8 @@
             "action_ready": "このアクションは実行可能になる見込みです。",
             "delay_wait": "この位置で待機するため、プレビューを停止します。",
             "end_reached": "この位置で経路が完了する見込みです。"
-        }
+        },
+        "diagnosticFallback": "この確認内容を説明できませんでした。"
     },
     "WorkspaceCustomFields": {
         "newField": "フィールドを追加",
@@ -889,6 +891,8 @@
         "apiKey": "APIキー",
         "apiKeyConfigured": "•••• {last4}（変更なし）",
         "apiKeyHint": "保存済みのキーを保持するには空欄のままにします。暗号化して保存され、表示されません。",
+        "idempotentSubmissionTitle": "同じリクエストの再送を安全に処理できる",
+        "idempotentSubmissionDescription": "同じリクエストを再送しても配信が1回だけになることをプロバイダーが保証している場合にのみ有効にしてください。有効にすると、中断した配信をConnexが自動的に再試行することがあります。",
         "webhookTitle": "配信Webhook",
         "webhookDescription": "メール配信サービスは、配信・バウンス・苦情の結果をこのURLに送信します。以下でURLとシークレットを生成し、両方を配信サービス側の設定に登録してください。",
         "webhookUrlLabel": "Webhook URL",

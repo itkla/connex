@@ -6,6 +6,7 @@ import java.time.temporal.IsoFields;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -91,11 +92,19 @@ public class RuleEngineService {
     /** Runs the legacy side of one generation-pinned durable entity target. */
     public void onEntityChangeForWorkflow(
             int workflowId, WorkflowTriggerDispatch.EntityChange dispatch) {
+        onEntityChangeForWorkflow(workflowId, dispatch, null);
+    }
+
+    /** Runs the legacy side with authorization roots already locked by durable outbox delivery. */
+    public void onEntityChangeForWorkflow(
+            int workflowId,
+            WorkflowTriggerDispatch.EntityChange dispatch,
+            WorkflowExecutionPrincipal lockedPrincipal) {
         Rule rule = linkedRule(dispatch.workspaceId(), workflowId);
         if (rule == null) {
             return;
         }
-        processEntityRule(rule, dispatch);
+        processEntityRule(rule, dispatch, lockedPrincipal);
     }
 
     /** Evaluates every enabled schedule rule of this cadence over the workspace's records. */
@@ -135,6 +144,15 @@ public class RuleEngineService {
             int workflowId,
             WorkflowTriggerDispatch.ScheduleTick dispatch,
             int recordId) {
+        runScheduleRecordForWorkflow(workflowId, dispatch, recordId, null);
+    }
+
+    /** Runs one legacy schedule record with authorization roots held by durable outbox delivery. */
+    public void runScheduleRecordForWorkflow(
+            int workflowId,
+            WorkflowTriggerDispatch.ScheduleTick dispatch,
+            int recordId,
+            WorkflowExecutionPrincipal lockedPrincipal) {
         Rule rule = linkedRule(dispatch.workspaceId(), workflowId);
         if (rule == null) {
             return;
@@ -145,11 +163,18 @@ public class RuleEngineService {
                 || !dispatch.cadence().equalsIgnoreCase(trigger.getCadence().trim())) {
             return;
         }
-        fireSchedule(rule, dispatch, recordId);
+        fireSchedule(rule, dispatch, recordId, lockedPrincipal);
     }
 
     private void processEntityRule(
             Rule rule, WorkflowTriggerDispatch.EntityChange dispatch) {
+        processEntityRule(rule, dispatch, null);
+    }
+
+    private void processEntityRule(
+            Rule rule,
+            WorkflowTriggerDispatch.EntityChange dispatch,
+            WorkflowExecutionPrincipal lockedPrincipal) {
         if (!dispatch.recordType().equals(rule.getRecordType())) {
             return;
         }
@@ -188,7 +213,8 @@ public class RuleEngineService {
             dispatch.workspaceId(),
             dispatch.recordType(),
             dispatch.recordId(),
-            claim);
+            claim,
+            lockedPrincipal);
     }
 
     private Rule linkedRule(int workspaceId, int workflowId) {
@@ -287,9 +313,23 @@ public class RuleEngineService {
             Rule rule,
             WorkflowTriggerDispatch.ScheduleTick dispatch,
             int entityId) {
+        fireSchedule(rule, dispatch, entityId, null);
+    }
+
+    private void fireSchedule(
+            Rule rule,
+            WorkflowTriggerDispatch.ScheduleTick dispatch,
+            int entityId,
+            WorkflowExecutionPrincipal lockedPrincipal) {
         WorkflowRuntimeClaimService.LegacyClaim claim =
             workflowRuntimeClaimService.claimLegacySchedule(rule, dispatch, entityId);
-        fireClaimed(rule, dispatch.workspaceId(), rule.getRecordType(), entityId, claim);
+        fireClaimed(
+            rule,
+            dispatch.workspaceId(),
+            rule.getRecordType(),
+            entityId,
+            claim,
+            lockedPrincipal);
     }
 
     private void fireClaimed(
@@ -297,12 +337,15 @@ public class RuleEngineService {
             int workspaceId,
             String recordType,
             int entityId,
-            WorkflowRuntimeClaimService.LegacyClaim claim) {
+            WorkflowRuntimeClaimService.LegacyClaim claim,
+            WorkflowExecutionPrincipal lockedPrincipal) {
         if (!claim.started() || claim.execution() == null) {
             return;
         }
         RuleExecution execution = claim.execution();
-        Principal principal = resolvePrincipal(rule, workspaceId);
+        Principal principal = lockedPrincipal == null
+            ? resolvePrincipal(rule, workspaceId)
+            : lockedPrincipal(rule, lockedPrincipal);
         if (principal == null) {
             finishExecution(
                 execution,
@@ -318,7 +361,9 @@ public class RuleEngineService {
             recordType,
             entityId,
             principal.targetUserId(),
-            claim.dedupeKey());
+            claim.dedupeKey(),
+            lockedPrincipal == null ? null : lockedPrincipal.actorUserId(),
+            lockedPrincipal == null ? Set.of() : lockedPrincipal.lockedPermissions());
         List<String> failures = new ArrayList<>();
         try {
             automationExecutor.runAs(workspaceId, principal.user(), principal.role(), () -> {
@@ -382,6 +427,21 @@ public class RuleEngineService {
         }
         User user = userMapper.getUserById(runAs);
         return user == null ? null : new Principal(user, role, runAs);
+    }
+
+    private static Principal lockedPrincipal(
+            Rule rule, WorkflowExecutionPrincipal principal) {
+        boolean matches = "system".equals(rule.getExecutionMode())
+            ? "system".equals(principal.role())
+                && rule.getCreatedById() != null
+                && rule.getCreatedById() == principal.attributionUserId()
+            : !"system".equals(principal.role())
+                && rule.getRunAsUserId() != null
+                && rule.getRunAsUserId() == principal.actorUserId();
+        return matches
+            ? new Principal(
+                principal.principal(), principal.role(), principal.attributionUserId())
+            : null;
     }
 
     private <T> T read(String json, Class<T> type) {

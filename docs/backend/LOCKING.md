@@ -111,6 +111,14 @@ Canonical execution pins an immutable `workflow_version` per run. Node effects/c
 
 `runtime_owner` and the opposite runtime ledger are checked under the same workflow root lock. Preserve the outbox/lease/wait/attempt/cancellation architecture; do not reconstruct traversal from flattened metadata.
 
+Durable outbox delivery performs non-locking discovery of the outbox target, workflow, and pinned
+version, then locks the pinned actor's authorization roots before any runtime or tenant-record root:
+actor user → workspace → membership → custom role/permissions → workflow runtime workspace gate →
+outbox row → workflow row. The locked principal and exact permission snapshot are passed through the
+legacy compatibility execution path; `send_message` enrollment consumes that snapshot and must not
+reacquire authorization after the outbox/workflow locks. This order is shared with canonical step
+execution and prevents offboarding's user-before-workflow order from forming a cycle.
+
 ## Task board mutations
 
 Task creation/full update lock the requested active membership first. Mutations that can change board positions run at `READ_COMMITTED` and acquire the exact tenant-plane `task_board_lock` workspace root through the atomic insert-or-update mapper statement.
@@ -329,6 +337,56 @@ and finally creates the synthetic snapshot, triggered send, and delivery. The ca
 serializes cooperating writers. The unique triggered-send key and catch-and-re-read remain the final
 race defense across mixed-version writers. Missing child-row locking reads never substitute for the
 campaign mutex. No provider dispatch occurs in this transaction.
+
+Triggered delivery dispatch uses a separate, short owner-fenced claim update. The claim stores a UUID
+owner and a database-clock expiry whose duration is the bounded provider deadline plus its safety
+margin. Provider I/O runs outside database locks. Immediately before provider egress the
+worker captures one absolute monotonic deadline, renews its still-live owned lease, and checks the
+startup-bound rollout fence again; a closed instance releases the claim to `pending`. Every provider
+receives that same absolute deadline. HTTP hard cancellation closes the request client. SMTP hard
+cancellation first closes every tracked raw socket, then closes the active JavaMail transport.
+Workspace-supplied destinations track the validated pinned-address socket; instance-default SMTP
+tracks a normal hostname-resolving socket without pinning. Closing the raw socket interrupts a blocked
+Angus `sendMessage` even while its synchronized transport monitor prevents `Transport.close()` from
+entering; remaining-budget connect, read, and write timeouts stay subordinate inactivity bounds. A pre-egress
+deadline is definitive; a post-egress abort is persisted as ambiguous failed-delivery evidence with
+`reconciliation_required_at`, requires reconciliation, and is not automatically replayed. Each HTTP
+ESP or SMS connector has an `idempotentSubmission` setting that defaults to false and may be enabled
+only when that endpoint guarantees deduplication of the stable key sent as `Idempotency-Key`.
+The generic adapters do not infer that guarantee. SMTP cannot declare it: its stable `Message-ID` and
+`Idempotency-Key` headers are correlation metadata, not an equivalent provider-side deduplication
+contract, and a relay may accept the same `DATA` more than once. Terminal writes require the same
+owner and clear the lease. The claim persists a SHA-256 attempt-target fingerprint over the provider
+id, configuration id/generation, and a hash of the endpoint/account identity plus opaque credential
+reference; credential values never enter it. A workspace sweep may change an expired `dispatching`
+row back to `pending` only when the currently resolved target has that exact fingerprint and its
+connector configuration explicitly declares idempotent submission. Recovery preserves the fingerprint on `pending`, and the
+next claim compare-and-set refuses a newly changed target and records it as ambiguous. Expired SMTP,
+changed-target, or unknown-provider claims become terminal ambiguous `failed` rows with
+`reconciliation_required_at`; scheduler discovery includes workspaces whose only work is either
+expired shape. This prevents replay on a non-idempotent transport while an obsolete owner cannot
+complete a replacement claim. SMTP is consequently a best-effort campaign transport. Because the
+fence is captured at startup, rollback must follow the quiescence procedure in
+`docs/backend/AUTOMATION.md`; editing an environment file does not close a running instance.
+
+Operator reconciliation takes locked membership permission roots first and requires both
+`CAMPAIGN_MANAGE` and `CONSENT_MANAGE`, then locks campaign, send, and delivery in that
+order. Audience and triggered deliveries use the same compare-and-set, which accepts only `failed`
+rows carrying `reconciliation_required_at` and no
+prior resolution. The same resolution is idempotent; the opposite resolution conflicts. Confirmed
+`delivered` becomes `dispatched`. Confirmed `not_delivered` remains failed with
+`operator_not_delivered`, which preserves the evidence while excluding that historical row from the
+active send/person uniqueness key; only triggered enrollment uses that state to create a replacement. The reconciliation
+write and strict audit share one transaction, and no resolution invokes a provider. Recipient and
+reconciliation DTOs expose only the bounded reason-code set `provider_timeout`, `provider_rejected`,
+`deadline_ambiguous`, `delivery_target_changed`, and `relay_error`; raw provider failure text remains
+internal evidence.
+
+The rollback-readable triggered snapshot deliberately has zero members and purpose label
+`Triggered (system)`. A pre-feature UI therefore shows a labelled zero-member audience and may create
+only a zero-recipient draft/export from it; its old send badge may render the raw `triggered` token.
+Those display limitations are accepted during rollback because no data is lost and no provider send
+can result from the synthetic snapshot.
 
 ## Duplicate review, record mutation, and imports
 

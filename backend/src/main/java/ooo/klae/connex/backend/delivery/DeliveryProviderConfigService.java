@@ -89,7 +89,16 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
             throw new DeliveryProviderException("No usable mail transport is configured for delivery");
         }
         return ResolvedDeliveryProvider.of(
-                SmtpDeliveryProvider.PROVIDER_ID, DeliveryChannel.EMAIL, workspaceId, DeliveryCredentials.none());
+                SmtpDeliveryProvider.PROVIDER_ID,
+                DeliveryChannel.EMAIL,
+                workspaceId,
+                DeliveryCredentials.none(),
+                DeliveryTargetFingerprint.create(
+                        SmtpDeliveryProvider.PROVIDER_ID,
+                        mail.configurationVersion(),
+                        smtpEndpointIdentity(mail),
+                        mail.credentialReference()),
+                mail);
     }
 
     @Override
@@ -212,6 +221,9 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
             config.setCredentialRef(deliveryProviderSecretCipher.encryptCredential(workspaceId, newCredential));
         }
         config.setEnabled(request.isEnabled());
+        config.setIdempotentSubmission(
+                !SmtpDeliveryProvider.PROVIDER_ID.equals(provider)
+                        && request.isIdempotentSubmission());
 
         deliveryProviderConfigMapper.upsert(config);
         deleteReplacedCredential(workspaceId, existing, config, sameProvider);
@@ -296,7 +308,10 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
                 config.getEndpoint(),
                 config.getFromAddress(),
                 config.getFromName(),
-                DeliveryCredentials.of(Map.of(CREDENTIAL_KEY_API, apiKey)));
+                DeliveryCredentials.of(Map.of(CREDENTIAL_KEY_API, apiKey)),
+                config.isIdempotentSubmission(),
+                targetFingerprint(config),
+                null);
     }
 
     private ResolvedDeliveryProvider resolveSms(DeliveryProviderConfig config) {
@@ -318,7 +333,28 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
                 config.getEndpoint(),
                 config.getFromAddress(),
                 config.getFromName(),
-                DeliveryCredentials.of(Map.of(CREDENTIAL_KEY_API, apiKey)));
+                DeliveryCredentials.of(Map.of(CREDENTIAL_KEY_API, apiKey)),
+                config.isIdempotentSubmission(),
+                targetFingerprint(config),
+                null);
+    }
+
+    private static String targetFingerprint(DeliveryProviderConfig config) {
+        return DeliveryTargetFingerprint.create(
+                config.getProvider(),
+                "delivery-provider:" + config.getId() + ":" + config.getConfigGeneration(),
+                String.valueOf(config.getEndpoint())
+                        + "|account=" + String.valueOf(config.getFromAddress()),
+                config.getCredentialRef());
+    }
+
+    private static String smtpEndpointIdentity(ResolvedMailConfig config) {
+        return "smtp://" + config.host() + ":" + config.port()
+                + "|username=" + String.valueOf(config.username())
+                + "|from=" + String.valueOf(config.fromAddress())
+                + "|starttls=" + config.starttls()
+                + "|ssl=" + config.ssl()
+                + "|auth=" + config.auth();
     }
 
     private String validateAndPopulateSmsHttp(DeliveryProviderConfigRequest request, DeliveryProviderConfig config) {

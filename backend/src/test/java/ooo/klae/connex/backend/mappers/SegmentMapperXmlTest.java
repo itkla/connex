@@ -104,6 +104,24 @@ class SegmentMapperXmlTest {
             "SELECT 1 FROM deal_document WHERE workspace_id = ? AND id = ?"));
     }
 
+    @Test
+    void boundedWarmIntroScopesTheGraphToCandidateCompanies() throws Exception {
+        Configuration configuration = configuration();
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("workspaceId", 11);
+        parameters.put("userId", 17);
+        parameters.put("candidateIds", List.of(23, 29));
+        parameters.put("strongEdge", 2);
+
+        String rendered = sql(configuration, "companyIdsWithWarmIntro", parameters);
+
+        assertTrue(rendered.contains("candidate.company_id IN ( ? , ? )"));
+        assertTrue(rendered.contains("edge.workspace_id = ?"));
+        assertTrue(rendered.contains("edge.strength >= ?"));
+        assertTrue(rendered.contains("engaged_activity.person_id = engaged.id"));
+        assertTrue(rendered.contains("user_activity.created_by_id = ?"));
+    }
+
     private static String sql(Configuration configuration, String statement, String predicate) {
         Map<String, Object> parameters = new HashMap<>();
         parameters.put("workspaceId", 11);

@@ -60,6 +60,21 @@ public class WorkflowDefinitionValidator {
             recordType, executionMode, definition).requiredPermissions();
     }
 
+    /**
+     * Validates only egress-sensitive actions that an incomplete draft is not allowed to persist.
+     * Graph completeness remains a publication concern.
+     */
+    public Set<Permission> validateDraftActionsForMutation(
+            String recordType,
+            String executionMode,
+            WorkflowDefinition definition) {
+        List<WorkflowNode> nodes = definition == null || definition.nodes() == null
+            ? List.of()
+            : definition.nodes();
+        return ruleDefinitionValidator.validateDraftActionsForMutation(
+            recordType, nodes, executionMode);
+    }
+
     public ValidatedWorkflow validateForMutationAndCompile(
             String recordType,
             String executionMode,

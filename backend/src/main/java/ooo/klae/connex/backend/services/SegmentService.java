@@ -92,9 +92,43 @@ public class SegmentService {
         if (limit < 1) {
             throw new IllegalArgumentException("Segment evaluation limit must be positive");
         }
-        return evaluate(workspaceId, userId, recordType, definition, false).stream()
-            .limit(limit)
-            .toList();
+        String type = requireSupported(recordType);
+        if (definition == null) {
+            return List.of();
+        }
+        int total = countConditions(definition, 1);
+        if (total > catalog.maxConditions()) {
+            throw new BadRequestException(
+                "A rule may reference at most " + catalog.maxConditions() + " conditions");
+        }
+        Integer upperId = segmentMapper.maximumEntityId(workspaceId, type);
+        if (upperId == null || upperId < 1) {
+            return List.of();
+        }
+        List<Integer> result = new ArrayList<>(limit);
+        int afterId = 0;
+        while (afterId < upperId && result.size() < limit) {
+            List<Integer> candidates = segmentMapper.entityIdsPage(
+                workspaceId, type, afterId, upperId, limit);
+            if (candidates.isEmpty()) {
+                break;
+            }
+            Set<Integer> matched = evaluateGroup(
+                definition,
+                new EvalContext(
+                    workspaceId, userId, type, false, new HashSet<>(candidates)),
+                1);
+            for (int candidate : candidates) {
+                if (matched.contains(candidate)) {
+                    result.add(candidate);
+                    if (result.size() == limit) {
+                        break;
+                    }
+                }
+            }
+            afterId = candidates.getLast();
+        }
+        return result;
     }
 
     /**
@@ -472,11 +506,12 @@ public class SegmentService {
         }
         int workspaceId = ctx.workspaceId();
         return switch (key) {
-            case "open_deal" -> new HashSet<>(segmentMapper.companyIdsWithOpenDeal(workspaceId));
+            case "open_deal" -> new HashSet<>(segmentMapper.companyIdsWithOpenDeal(
+                workspaceId, ctx.candidateIds()));
             case "no_activity" -> new HashSet<>(segmentMapper.companyIdsNoActivitySince(
-                workspaceId, catalog.clampDays(condition.getDays())));
+                workspaceId, catalog.clampDays(condition.getDays()), ctx.candidateIds()));
             case "cooling" -> coolingCompanyIds(ctx);
-            case "warm_intro_available" -> warmIntroCompanyIds(workspaceId, ctx.userId());
+            case "warm_intro_available" -> warmIntroCompanyIds(ctx);
             case "has_open_task", "overdue_task", "recent_meeting", "has_note", "has_attachment" ->
                 existencePredicate(key, condition, ctx);
             case "warmth_hot" -> warmthBand(ctx, "hot");
@@ -560,6 +595,7 @@ public class SegmentService {
         params.put("predicate", key);
         params.put("days", catalog.clampDays(condition.getDays()));
         params.put("includeRestrictedPeople", ctx.includeRestrictedPeople());
+        params.put("candidateIds", ctx.candidateIds());
         return new HashSet<>(switch (ctx.recordType()) {
             case "person" -> segmentMapper.personExistence(params);
             case "deal" -> segmentMapper.dealExistence(params);
@@ -583,6 +619,7 @@ public class SegmentService {
         params.put("field", field);
         params.put("op", op);
         params.put("includeRestrictedPeople", ctx.includeRestrictedPeople());
+        params.put("candidateIds", ctx.candidateIds());
         bindValue(kind, op, condition, params);
         return new HashSet<>(runFieldQuery(ctx.recordType(), params));
     }
@@ -660,7 +697,13 @@ public class SegmentService {
         return ids;
     }
 
-    private Set<Integer> warmIntroCompanyIds(int workspaceId, int userId) {
+    private Set<Integer> warmIntroCompanyIds(EvalContext ctx) {
+        int workspaceId = ctx.workspaceId();
+        List<Integer> candidateIds = ctx.candidateIds();
+        if (candidateIds != null) {
+            return new HashSet<>(segmentMapper.companyIdsWithWarmIntro(
+                    workspaceId, ctx.userId(), candidateIds, STRONG_EDGE));
+        }
         Set<Integer> engaged = new HashSet<>(personMapper.getEngagedPersonIds(workspaceId));
         if (engaged.isEmpty()) {
             return new HashSet<>();
@@ -681,7 +724,7 @@ public class SegmentService {
             return new HashSet<>();
         }
         return new HashSet<>(segmentMapper.companyIdsForPersonsWithoutUserActivity(
-            workspaceId, userId, new ArrayList<>(warmlyConnected)));
+            workspaceId, ctx.userId(), new ArrayList<>(warmlyConnected), null));
     }
 
     private String requireSupported(String recordType) {
@@ -821,16 +864,20 @@ public class SegmentService {
             return includeRestrictedPeople;
         }
 
+        private List<Integer> candidateIds() {
+            return candidateIds == null ? null : new ArrayList<>(candidateIds);
+        }
+
         private Set<Integer> universe(SegmentMapper mapper) {
             if (universe == null) {
-                universe = new HashSet<>(switch (recordType) {
+                universe = candidateIds == null ? new HashSet<>(switch (recordType) {
                     case "company" -> mapper.companyIdsInWorkspace(workspaceId);
                     case "person" -> includeRestrictedPeople
                             ? mapper.personIdsInWorkspaceIncludingRestricted(workspaceId)
                             : mapper.personIdsInWorkspace(workspaceId);
                     case "deal" -> mapper.dealIdsInWorkspace(workspaceId);
                     default -> List.<Integer>of();
-                });
+                }) : new HashSet<>(candidateIds);
             }
             return universe;
         }

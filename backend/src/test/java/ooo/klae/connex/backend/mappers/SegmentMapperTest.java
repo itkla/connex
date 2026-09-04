@@ -83,9 +83,9 @@ class SegmentMapperTest extends AbstractMapperTest {
             "op", "equals",
             "value", suspended.getName())).contains(suspended.getId()));
         assertTrue(segmentMapper.companyIdsForPersonsWithoutUserActivity(
-            workspace.getId(), actor.getId(), List.of(processable.getId(), suspended.getId()))
+            workspace.getId(), actor.getId(), List.of(processable.getId(), suspended.getId()), null)
             .contains(company.getId()));
-        assertTrue(segmentMapper.companyIdsNoActivitySince(workspace.getId(), 365_000)
+        assertTrue(segmentMapper.companyIdsNoActivitySince(workspace.getId(), 365_000, null)
             .contains(company.getId()));
         assertTrue(segmentMapper.personLabels(
             workspace.getId(), List.of(suspended.getId())).stream()
@@ -128,16 +128,16 @@ class SegmentMapperTest extends AbstractMapperTest {
         activity.setTimestamp("2999-01-01 00:00:00");
         activityMapper.insert(activity);
         assertFalse(segmentMapper.companyIdsNoActivitySince(
-            workspace.getId(), 365_000).contains(company.getId()));
+            workspace.getId(), 365_000, null).contains(company.getId()));
         assertFalse(segmentMapper.companyIdsForPersonsWithoutUserActivity(
-            workspace.getId(), actor.getId(), List.of(target.getId()))
+            workspace.getId(), actor.getId(), List.of(target.getId()), null)
             .contains(company.getId()));
 
         assertTrue(shareMapper.unsharePerson(shared.getId(), sibling.getId(), workspace.getId()) > 0);
-        assertTrue(segmentMapper.companyIdsNoActivitySince(workspace.getId(), 365_000)
+        assertTrue(segmentMapper.companyIdsNoActivitySince(workspace.getId(), 365_000, null)
             .contains(company.getId()));
         assertTrue(segmentMapper.companyIdsForPersonsWithoutUserActivity(
-            workspace.getId(), actor.getId(), List.of(target.getId()))
+            workspace.getId(), actor.getId(), List.of(target.getId()), null)
             .contains(company.getId()));
     }
 

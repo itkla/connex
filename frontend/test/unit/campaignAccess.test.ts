@@ -8,6 +8,7 @@ import {
     canCreateSend,
     canEstimateAudience,
     canFreezeSnapshot,
+    canReconcileRecipients,
     resolveCampaignAccess,
 } from '@/app/lib/campaignAccess';
 import { NO_NAV_ACCESS, resolveNavAccess } from '@/app/lib/navAccess';
@@ -96,9 +97,10 @@ describe('the built-in member role is offered no campaign control that would 403
         expect(canFreezeSnapshot(member, 'company')).toBe(false);
     });
 
-    it('cannot materialize a send or push an export', () => {
+    it('cannot materialize a send, push an export, or reconcile a delivery', () => {
         expect(canCreateSend(member)).toBe(false);
         expect(canCreateExport(member)).toBe(false);
+        expect(canReconcileRecipients(member)).toBe(false);
     });
 });
 
@@ -109,11 +111,12 @@ describe('the built-in admin role is offered every campaign control', () => {
         expect(admin).toEqual({ manage: true, send: true, consent: true });
     });
 
-    it('may estimate, freeze, send and export', () => {
+    it('may estimate, freeze, send, export and reconcile', () => {
         expect(canEstimateAudience(admin, 'person')).toBe(true);
         expect(canFreezeSnapshot(admin, 'person')).toBe(true);
         expect(canCreateSend(admin)).toBe(true);
         expect(canCreateExport(admin)).toBe(true);
+        expect(canReconcileRecipients(admin)).toBe(true);
     });
 });
 
@@ -126,6 +129,7 @@ describe('a custom role with campaign management but no consent is still held ba
         expect(canFreezeSnapshot(manager, 'person')).toBe(false);
         expect(canCreateSend(manager)).toBe(false);
         expect(canCreateExport(manager)).toBe(false);
+        expect(canReconcileRecipients(manager)).toBe(false);
     });
 
     it('may still work an audience that never reaches person data', () => {

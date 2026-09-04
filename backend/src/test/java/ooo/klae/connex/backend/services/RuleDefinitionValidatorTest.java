@@ -28,6 +28,7 @@ import ooo.klae.connex.backend.dto.RuleRequest;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
@@ -511,6 +512,20 @@ class RuleDefinitionValidatorTest {
             WorkflowDefinitionValidationException.class,
             () -> validator.validateForMutation(request(
                 "person", entityChange("person.updated"), "system", action("send_message"))));
+
+        assertEquals(
+            ooo.klae.connex.backend.dto.WorkflowDiagnosticCode.ACTION_SYSTEM_PERMISSION_MISSING,
+            exception.diagnostic().code());
+    }
+
+    @Test
+    void systemModeCannotSaveSendMessageDraftWithoutSystemActorPermissions() {
+        WorkflowDefinitionValidationException exception = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> validator.validateDraftActionsForMutation(
+                "person",
+                List.of(new WorkflowNode.Action("send", action("send_message"))),
+                "system"));
 
         assertEquals(
             ooo.klae.connex.backend.dto.WorkflowDiagnosticCode.ACTION_SYSTEM_PERMISSION_MISSING,

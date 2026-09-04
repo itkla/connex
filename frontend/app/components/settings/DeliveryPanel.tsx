@@ -55,6 +55,7 @@ type FormState = {
     fromName: string;
     apiKey: string;
     enabled: boolean;
+    idempotentSubmission: boolean;
 };
 
 const EMPTY: FormState = {
@@ -64,6 +65,7 @@ const EMPTY: FormState = {
     fromName: "",
     apiKey: "",
     enabled: false,
+    idempotentSubmission: false,
 };
 
 function toForm(config: DeliveryProviderConfig): FormState {
@@ -74,6 +76,7 @@ function toForm(config: DeliveryProviderConfig): FormState {
         fromName: config.fromName ?? "",
         apiKey: "",
         enabled: config.enabled,
+        idempotentSubmission: config.idempotentSubmission,
     };
 }
 
@@ -188,6 +191,7 @@ export default function DeliveryPanel({
             fromName: httpEsp ? form.fromName.trim() || null : null,
             apiKey: httpEsp && form.apiKey ? form.apiKey : null,
             enabled: form.enabled,
+            idempotentSubmission: httpEsp && form.idempotentSubmission,
         };
     };
 
@@ -369,6 +373,23 @@ export default function DeliveryPanel({
                                         />
                                         <p className="text-xs text-muted-foreground">{t("apiKeyHint")}</p>
                                     </div>
+
+                                    <div className="flex items-start gap-4 rounded-lg border border-border p-3">
+                                        <div className="min-w-0 flex-1">
+                                            <Label htmlFor="delivery-idempotent-submission">
+                                                {t("idempotentSubmissionTitle")}
+                                            </Label>
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                {t("idempotentSubmissionDescription")}
+                                            </p>
+                                        </div>
+                                        <Switch
+                                            id="delivery-idempotent-submission"
+                                            checked={form.idempotentSubmission}
+                                            onCheckedChange={(value) => set("idempotentSubmission", value)}
+                                            aria-label={t("idempotentSubmissionTitle")}
+                                        />
+                                    </div>
                                 </div>
                             ) : (
                                 <p className="text-sm text-muted-foreground">{t("smtpNote")}</p>
@@ -478,6 +499,7 @@ type SmsFormState = {
     fromAddress: string;
     apiKey: string;
     enabled: boolean;
+    idempotentSubmission: boolean;
 };
 
 const EMPTY_SMS: SmsFormState = {
@@ -485,6 +507,7 @@ const EMPTY_SMS: SmsFormState = {
     fromAddress: "",
     apiKey: "",
     enabled: false,
+    idempotentSubmission: false,
 };
 
 function toSmsForm(config: DeliveryProviderConfig): SmsFormState {
@@ -493,6 +516,7 @@ function toSmsForm(config: DeliveryProviderConfig): SmsFormState {
         fromAddress: config.fromAddress ?? "",
         apiKey: "",
         enabled: config.enabled,
+        idempotentSubmission: config.idempotentSubmission,
     };
 }
 
@@ -575,6 +599,7 @@ function SmsSection({ headingLevel }: { headingLevel: 2 | 3 }) {
         fromName: null,
         apiKey: form.apiKey ? form.apiKey : null,
         enabled: form.enabled,
+        idempotentSubmission: form.idempotentSubmission,
     });
 
     const save = async () => {
@@ -710,6 +735,23 @@ function SmsSection({ headingLevel }: { headingLevel: 2 | 3 }) {
                                     onChange={(e) => set("apiKey", e.target.value)}
                                 />
                                 <p className="text-xs text-muted-foreground">{t("apiKeyHint")}</p>
+                            </div>
+
+                            <div className="flex items-start gap-4 rounded-lg border border-border p-3">
+                                <div className="min-w-0 flex-1">
+                                    <Label htmlFor="sms-idempotent-submission">
+                                        {t("idempotentSubmissionTitle")}
+                                    </Label>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        {t("idempotentSubmissionDescription")}
+                                    </p>
+                                </div>
+                                <Switch
+                                    id="sms-idempotent-submission"
+                                    checked={form.idempotentSubmission}
+                                    onCheckedChange={(value) => set("idempotentSubmission", value)}
+                                    aria-label={t("idempotentSubmissionTitle")}
+                                />
                             </div>
                         </fieldset>
                     )}

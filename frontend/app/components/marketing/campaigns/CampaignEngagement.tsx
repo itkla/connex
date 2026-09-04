@@ -22,6 +22,7 @@ const SEND_STATUSES: readonly CampaignSendStatus[] = [
     "completed",
     "failed",
     "cancelled",
+    "triggered",
 ];
 
 const SKIP_REASON_KEYS = new Set([
@@ -162,15 +163,18 @@ function RateTiles({
  *
  * @param campaignId - the campaign the counts belong to
  * @param canReadRecipients - whether the reader may open the contacts behind a count
+ * @param canReconcileRecipients - whether the reader may confirm ambiguous provider outcomes
  */
 export default function CampaignEngagement({
     campaignId,
     engagement,
     canReadRecipients,
+    canReconcileRecipients,
 }: {
     campaignId: number;
     engagement: CampaignEngagementData | null;
     canReadRecipients: boolean;
+    canReconcileRecipients: boolean;
 }) {
     const t = useTranslations("CampaignEngagement");
     const locale = useLocale();
@@ -362,6 +366,7 @@ export default function CampaignEngagement({
                     counter={openCounter.key}
                     counterLabel={openCounter.label}
                     open
+                    canReconcile={canReconcileRecipients}
                     onOpenChange={(next) => {
                         if (!next) setOpenCounter(null);
                     }}
