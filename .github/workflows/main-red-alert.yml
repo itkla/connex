@@ -48,7 +48,10 @@ jobs:
     name: Open or update the red-main report
     # workflow_run branch filters match the *triggering* workflow's branch, and the monitored
     # workflows also run on pull_request — so a fork branch merely named "main" would otherwise
-    # report the repository's main as red. Requiring a push settles it.
+    # report the repository's main as red. Requiring a push or a schedule settles it: both run on
+    # the repository's own main. Scheduled runs are watched because the Security workflow's weekly
+    # scan gates main on its open alert set, and a query update that surfaces a new High turns a
+    # scheduled run red on an unchanged tree (#1244).
     #
     # failure, timed_out, cancelled and startup_failure are the terminal conclusions in which the
     # workflow did not succeed: explicit time limits can expire, a required run can be cancelled,
@@ -58,7 +61,7 @@ jobs:
     # a superseded run whose replacement reports for itself. The step then filters to runs that
     # actually reflect current main, which a coarse conclusion check here cannot do.
     if: >-
-      github.event.workflow_run.event == 'push'
+      contains(fromJSON('["push", "schedule"]'), github.event.workflow_run.event)
       && contains(fromJSON('["failure", "timed_out", "cancelled", "startup_failure"]'),
                   github.event.workflow_run.conclusion)
     runs-on: ubuntu-latest
@@ -71,6 +74,7 @@ jobs:
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           RUN_NAME: ${{ github.event.workflow_run.name }}
           RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
           WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
@@ -102,11 +106,16 @@ jobs:
               echo "Run $RUN_ID is now $live (re-run or still running); not reporting."
               exit 0 ;;
           esac
+          # Supersession is keyed on the triggering event: a later push run supersedes a push run
+          # and a later scheduled run supersedes a scheduled one. A scheduled run must not be marked
+          # superseded by a push run of the same head (or the reverse), because each event's newest
+          # run is the current verdict for that event and the schedule re-evaluates main's alert
+          # set on an unchanged tree.
           latest="$(gh api \
-            "repos/$REPO/actions/workflows/$WORKFLOW_ID/runs?head_sha=$HEAD_SHA&event=push&per_page=100" \
+            "repos/$REPO/actions/workflows/$WORKFLOW_ID/runs?head_sha=$HEAD_SHA&event=$RUN_EVENT&per_page=100" \
             --jq '[.workflow_runs[].id] | max // empty' 2>/dev/null || true)"
           if [ -n "$latest" ] && [ "$RUN_ID" != "$latest" ]; then
-            echo "Run $RUN_ID is superseded by push run $latest for this commit; not reporting."
+            echo "Run $RUN_ID is superseded by $RUN_EVENT run $latest for this commit; not reporting."
             exit 0
           fi
 

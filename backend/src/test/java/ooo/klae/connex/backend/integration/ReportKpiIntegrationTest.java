@@ -276,6 +276,33 @@ class ReportKpiIntegrationTest {
     }
 
     @Test
+    void widgetKpiWritesNoAuditOrCacheRows() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
+        User member = newReportMember(workspace, "REPORT_CREATE", "REPORT_READ");
+        MockHttpSession session = login(member.getUsername());
+        int pipeline = insertPipeline(workspace.getId(), "KPI read-only");
+        int stage = insertStage(workspace.getId(), pipeline, "Won");
+        insertWonRevenue(workspace.getId(), pipeline, stage, member.getId(),
+                "Current revenue", "125.50", "USD", "2026-01-15 09:00:00");
+        int reportId = createReport(session, workspace, commercialReportBody(List.of(
+                new CommercialWidget("revenue", "deals", "won_revenue", "none", "kpi"))));
+        Integer auditBefore = countWorkspaceRows("audit_log", workspace.getId());
+        Integer cacheBefore = countWorkspaceRows("ai_output_cache", workspace.getId());
+
+        mockMvc.perform(get("/api/reports/{id}/widgets/{widgetId}/kpi", reportId, "revenue")
+                .param("start", "2026-01-01")
+                .param("end", "2026-01-31")
+                .header("X-Workspace-Id", workspace.getId())
+                .session(session))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.available").value(true));
+
+        assertEquals(auditBefore, countWorkspaceRows("audit_log", workspace.getId()));
+        assertEquals(cacheBefore, countWorkspaceRows("ai_output_cache", workspace.getId()));
+    }
+
+    @Test
     void widgetKpiExplainsUnavailableScalarsWithoutChangingGeneratedFigures() throws Exception {
         RequestContextHolder.resetRequestAttributes();
         Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
@@ -854,6 +881,11 @@ class ReportKpiIntegrationTest {
                         + "owner_id, closed_at, won, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 workspaceId, name, actualValue, actualValue, currency, pipelineId, stageId,
                 ownerId, closedAt, true, "2026-06-01 00:00:00");
+    }
+
+    private Integer countWorkspaceRows(String table, int workspaceId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM " + table + " WHERE workspace_id = ?", Integer.class, workspaceId);
     }
 
     private record CommercialWidget(

@@ -33,7 +33,7 @@ def load_alerts(path: Path) -> list[dict[str, object]]:
 
 def alert_fields(
     alert: dict[str, object],
-) -> tuple[int, str, str, str | None, str, str, str]:
+) -> tuple[int, str, str, str | None, str, str, str, str]:
     number = alert.get("number")
     state = alert.get("state")
     url = alert.get("html_url")
@@ -54,6 +54,8 @@ def alert_fields(
     severity = rule.get("severity")
     security_severity = rule.get("security_severity_level")
     category = most_recent_instance.get("category")
+    instance_ref = most_recent_instance.get("ref")
+    instance_state = most_recent_instance.get("state")
     if not isinstance(rule_id, str) or not rule_id:
         raise ValueError(f"alert {number} has an invalid rule id")
     if severity not in VALID_SEVERITIES:
@@ -64,49 +66,100 @@ def alert_fields(
         )
     if not isinstance(category, str) or not category:
         raise ValueError(f"alert {number} has an invalid analysis category")
-    return number, rule_id, severity, security_severity, state, url, category
+    if not isinstance(instance_ref, str) or not instance_ref:
+        raise ValueError(f"alert {number} has an invalid instance ref")
+    if instance_state != "open":
+        raise ValueError(
+            f"alert {number} has a most recent instance that is not open: {instance_state!r}"
+        )
+    return number, rule_id, severity, security_severity, state, url, category, instance_ref
+
+
+def require_ref(number: int, instance_ref: str, expected_ref: str, role: str) -> None:
+    if instance_ref != expected_ref:
+        raise ValueError(
+            f"alert {number} was analysed on {instance_ref}, not the {role} {expected_ref}"
+        )
+
+
+def baseline_numbers(alerts: list[dict[str, object]], baseline_ref: str) -> set[int]:
+    if not baseline_ref:
+        raise ValueError("the baseline ref must not be empty")
+    numbers: set[int] = set()
+    for alert in alerts:
+        number, _, _, _, _, _, _, instance_ref = alert_fields(alert)
+        require_ref(number, instance_ref, baseline_ref, "baseline ref")
+        numbers.add(number)
+    return numbers
 
 
 def blocking_alerts(
-    alerts: list[dict[str, object]], expected_category: str
-) -> list[tuple[int, str, str, str]]:
+    alerts: list[dict[str, object]],
+    expected_category: str,
+    expected_ref: str,
+    baseline: set[int] | None = None,
+) -> tuple[list[tuple[int, str, str, str]], int]:
     if not expected_category:
         raise ValueError("the expected analysis category must not be empty")
+    if not expected_ref:
+        raise ValueError("the analysed ref must not be empty")
 
     blocking: list[tuple[int, str, str, str]] = []
+    pre_existing = 0
     for alert in alerts:
-        number, rule_id, severity, security_severity, _, url, category = alert_fields(
-            alert
+        number, rule_id, severity, security_severity, _, url, category, instance_ref = (
+            alert_fields(alert)
         )
+        require_ref(number, instance_ref, expected_ref, "analysed ref")
         if category != expected_category:
             continue
         if security_severity in BLOCKING_SECURITY_SEVERITIES or severity == "error":
+            if baseline is not None and number in baseline:
+                pre_existing += 1
+                continue
             effective_severity = security_severity or severity
             blocking.append((number, rule_id, effective_severity, url))
-    return blocking
+    return blocking, pre_existing
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Fail on scoped CodeQL Critical, High, or error-severity alerts"
+        description=(
+            "Fail on CodeQL Critical, High, or error-severity alerts open on the analysed ref "
+            "that are not already open on the base ref"
+        )
     )
     parser.add_argument("alerts", type=Path)
     parser.add_argument("category")
-    return parser.parse_args()
+    parser.add_argument("--ref", required=True)
+    parser.add_argument("--baseline", type=Path)
+    parser.add_argument("--baseline-ref")
+    args = parser.parse_args()
+    if (args.baseline is None) != (args.baseline_ref is None):
+        parser.error("--baseline and --baseline-ref must be given together")
+    return args
 
 
 def main() -> int:
     args = parse_args()
     try:
         alerts = load_alerts(args.alerts)
-        blocking = blocking_alerts(alerts, args.category)
+        baseline = None
+        if args.baseline is not None:
+            baseline = baseline_numbers(load_alerts(args.baseline), args.baseline_ref)
+        blocking, pre_existing = blocking_alerts(alerts, args.category, args.ref, baseline)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
         print(f"::error::CodeQL alert response was invalid: {error}", file=sys.stderr)
         return 2
 
+    if baseline is not None:
+        print(
+            f"{pre_existing} pre-existing alert(s) on {args.baseline_ref} ignored "
+            f"({len(baseline)} open there in total)"
+        )
     if not blocking:
         print(
-            f"CodeQL alert check passed: {len(alerts)} queried open alert(s), "
+            f"CodeQL alert check passed: {len(alerts)} queried open alert(s) on {args.ref}, "
             f"none in {args.category} at the blocking threshold"
         )
         return 0
@@ -117,7 +170,7 @@ def main() -> int:
             file=sys.stderr,
         )
     print(
-        f"CodeQL alert check failed: {len(blocking)} blocking alert(s)",
+        f"CodeQL alert check failed: {len(blocking)} blocking alert(s) on {args.ref}",
         file=sys.stderr,
     )
     return 1
