@@ -83,7 +83,8 @@ public interface CampaignDeliveryMapper {
 
     CampaignDelivery getDelivery(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
-    CampaignDelivery getByToken(@Param("token") String token);
+    /** Resolves one delivery by the SHA-256 digest of its unsubscribe token, unrouted. */
+    CampaignDelivery getByTokenHash(@Param("tokenHash") String tokenHash);
 
     CampaignDelivery findByProviderMessage(
             @Param("workspaceId") int workspaceId,

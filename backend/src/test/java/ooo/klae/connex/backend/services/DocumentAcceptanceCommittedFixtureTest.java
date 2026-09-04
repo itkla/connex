@@ -53,19 +53,17 @@ class DocumentAcceptanceCommittedFixtureTest
         String token = installToken(viewerRecipientId);
 
         DocumentAcceptancePreviewDto preview =
-            acceptanceService.preview(token, "192.0.2.17");
+            acceptanceService.preview(link(token), "192.0.2.17");
         DocumentAcceptancePreviewDto viewed =
-            acceptanceService.markViewed(token, "192.0.2.17");
+            acceptanceService.markViewed(link(token), "192.0.2.17");
 
         assertFalse(preview.actionable());
         assertFalse(viewed.actionable());
-        assertThrows(ResourceNotFoundException.class, () -> acceptanceService.accept(
-            token,
+        assertThrows(ResourceNotFoundException.class, () -> acceptanceService.accept(link(token),
             new AcceptDocumentRequest("Viewer"),
             "192.0.2.17",
             "viewer-agent"));
-        assertThrows(ResourceNotFoundException.class, () -> acceptanceService.decline(
-            token,
+        assertThrows(ResourceNotFoundException.class, () -> acceptanceService.decline(link(token),
             new DeclineDocumentRequest("Viewer cannot decide"),
             "192.0.2.17",
             "viewer-agent"));
@@ -78,13 +76,11 @@ class DocumentAcceptanceCommittedFixtureTest
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
 
-        DocumentAcceptanceDecisionDto first = acceptanceService.decline(
-            token,
+        DocumentAcceptanceDecisionDto first = acceptanceService.decline(link(token),
             new DeclineDocumentRequest("Commercial terms were not accepted"),
             "192.0.2.18",
             "decline-agent");
-        DocumentAcceptanceDecisionDto second = acceptanceService.decline(
-            token,
+        DocumentAcceptanceDecisionDto second = acceptanceService.decline(link(token),
             new DeclineDocumentRequest("Changed reason"),
             "198.51.100.18",
             "changed-agent");
@@ -106,11 +102,9 @@ class DocumentAcceptanceCommittedFixtureTest
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
 
-        DocumentAcceptancePreviewDto first = acceptanceService.markViewed(
-            token,
+        DocumentAcceptancePreviewDto first = acceptanceService.markViewed(link(token),
             "192.0.2.19");
-        DocumentAcceptancePreviewDto second = acceptanceService.markViewed(
-            token,
+        DocumentAcceptancePreviewDto second = acceptanceService.markViewed(link(token),
             "198.51.100.19");
 
         assertEquals(first, second);
@@ -129,13 +123,11 @@ class DocumentAcceptanceCommittedFixtureTest
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
 
-        DocumentAcceptanceDecisionDto first = acceptanceService.accept(
-            token,
+        DocumentAcceptanceDecisionDto first = acceptanceService.accept(link(token),
             new AcceptDocumentRequest("Committed Signer"),
             "192.0.2.20",
             "accept-agent");
-        DocumentAcceptanceDecisionDto second = acceptanceService.accept(
-            token,
+        DocumentAcceptanceDecisionDto second = acceptanceService.accept(link(token),
             new AcceptDocumentRequest("Changed Signer"),
             "198.51.100.20",
             "changed-agent");
@@ -165,10 +157,9 @@ class DocumentAcceptanceCommittedFixtureTest
             .getBytes(StandardCharsets.UTF_8);
         String expectedSignedDocumentSha256 = sha256(frozenContent);
 
-        acceptanceService.preview(token, "192.0.2.30");
-        acceptanceService.markViewed(token, "192.0.2.30");
-        acceptanceService.accept(
-            token,
+        acceptanceService.preview(link(token), "192.0.2.30");
+        acceptanceService.markViewed(link(token), "192.0.2.30");
+        acceptanceService.accept(link(token),
             new AcceptDocumentRequest("External Signer"),
             "192.0.2.30",
             "artifact-preservation-agent");

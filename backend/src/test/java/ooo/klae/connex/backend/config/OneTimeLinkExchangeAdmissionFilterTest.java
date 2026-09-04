@@ -38,6 +38,24 @@ class OneTimeLinkExchangeAdmissionFilterTest {
     }
 
     @Test
+    void unsubscribeExchangeIsBudgetedLikeOtherExchanges() throws Exception {
+        LoginRateLimiter rateLimiter = new LoginRateLimiter(1, 100, 5000, 900);
+        ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);
+        OneTimeLinkExchangeAdmissionFilter filter =
+            new OneTimeLinkExchangeAdmissionFilter(rateLimiter, clientIpResolver);
+        when(clientIpResolver.resolveWithProvenance(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(new ResolvedClientIp("203.0.113.11", false));
+
+        MockHttpServletResponse firstResponse = invoke(filter, "/api/delivery/unsubscribe/exchange");
+        MockHttpServletResponse secondResponse = invoke(filter, "/api/delivery/unsubscribe/exchange");
+        MockHttpServletResponse previewResponse = invoke(filter, "/api/delivery/unsubscribe");
+
+        assertEquals(200, firstResponse.getStatus());
+        assertEquals(429, secondResponse.getStatus());
+        assertEquals(200, previewResponse.getStatus());
+    }
+
+    @Test
     void rejectsAnExchangeAfterTheExistingIpBudgetIsExhausted() throws Exception {
         LoginRateLimiter rateLimiter = new LoginRateLimiter(1, 100, 5000, 900);
         ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);

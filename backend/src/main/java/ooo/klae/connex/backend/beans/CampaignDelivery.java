@@ -21,6 +21,7 @@ public class CampaignDelivery {
     private int attemptCount;
     private String lastError;
     private String unsubscribeToken;
+    private String unsubscribeTokenHash;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

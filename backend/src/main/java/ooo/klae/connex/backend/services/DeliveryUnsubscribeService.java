@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -19,11 +20,14 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.util.ContactMask;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
- * Handles the public unsubscribe endpoints. The signed token alone identifies a single
- * {@code campaign_delivery} row; the workspace is resolved from that row and never trusted from the
- * request, so no caller-supplied id is honored. The whole operation is idempotent.
+ * Handles the public unsubscribe endpoints. The raw emailed token is seen once, by
+ * {@link #exchange}, which turns it into the SHA-256 digest the generated
+ * {@code campaign_delivery.unsubscribe_token_hash} column is keyed on; that digest alone identifies
+ * a single {@code campaign_delivery} row, the workspace is resolved from that row and never trusted
+ * from the request, so no caller-supplied id is honored. The whole operation is idempotent.
  *
  * <p>The only caller these endpoints have is an email recipient with no session, so
  * {@code TenantResolutionInterceptor} leaves the request thread unresolved and every
@@ -50,6 +54,8 @@ import ooo.klae.connex.backend.util.ContactMask;
 public class DeliveryUnsubscribeService {
 
     private static final String EVENT_UNSUBSCRIBED = "unsubscribed";
+    private static final Pattern TOKEN_SHAPE = Pattern.compile("[a-f0-9]{64}");
+    private static final String INVALID_LINK = "Unsubscribe link is not valid";
 
     private final CampaignDeliveryMapper campaignDeliveryMapper;
     private final CampaignSendMapper campaignSendMapper;
@@ -59,9 +65,22 @@ public class DeliveryUnsubscribeService {
     private final AutomationExecutor automationExecutor;
     private final TransactionTemplate transactionTemplate;
 
-    /** Returns the confirmation payload for an unsubscribe link. */
-    public DeliveryUnsubscribeDto preview(String token) {
-        CampaignDelivery delivery = requireDelivery(token);
+    /**
+     * Validates the raw emailed token once and returns the digest a browser grant is issued for.
+     * Malformed and unknown tokens share one not-found response so nothing is enumerable.
+     */
+    public String exchange(String rawToken) {
+        if (rawToken == null || !TOKEN_SHAPE.matcher(rawToken).matches()) {
+            throw new ResourceNotFoundException(INVALID_LINK);
+        }
+        String tokenHash = OneTimeTokenDigest.sha256(rawToken);
+        requireDelivery(tokenHash);
+        return tokenHash;
+    }
+
+    /** Returns the confirmation payload for an exchanged unsubscribe digest. */
+    public DeliveryUnsubscribeDto preview(String tokenHash) {
+        CampaignDelivery delivery = requireDelivery(tokenHash);
         return inDeliveryWorkspace(delivery, () -> {
             CampaignSend send = requireSend(delivery);
             boolean unsubscribed = campaignDeliveryMapper.hasEvent(
@@ -72,8 +91,8 @@ public class DeliveryUnsubscribeService {
     }
 
     /** Performs the unsubscribe: idempotent suppression, consent revocation, and an event. */
-    public DeliveryUnsubscribeDto unsubscribe(String token) {
-        CampaignDelivery delivery = requireDelivery(token);
+    public DeliveryUnsubscribeDto unsubscribe(String tokenHash) {
+        CampaignDelivery delivery = requireDelivery(tokenHash);
         DeliveryUnsubscribeDto result = inDeliveryWorkspace(delivery,
                 () -> transactionTemplate.execute(status -> apply(delivery)));
         return Objects.requireNonNull(result, "unsubscribe result");
@@ -109,10 +128,12 @@ public class DeliveryUnsubscribeService {
                 delivery.getWorkspaceId(), systemActor.user(), "system", work);
     }
 
-    private CampaignDelivery requireDelivery(String token) {
-        CampaignDelivery delivery = token == null ? null : campaignDeliveryMapper.getByToken(token);
+    private CampaignDelivery requireDelivery(String tokenHash) {
+        CampaignDelivery delivery = tokenHash == null
+                ? null
+                : campaignDeliveryMapper.getByTokenHash(tokenHash);
         if (delivery == null) {
-            throw new ResourceNotFoundException("Unsubscribe link is not valid");
+            throw new ResourceNotFoundException(INVALID_LINK);
         }
         return delivery;
     }
@@ -120,7 +141,7 @@ public class DeliveryUnsubscribeService {
     private CampaignSend requireSend(CampaignDelivery delivery) {
         CampaignSend send = campaignSendMapper.getSend(delivery.getWorkspaceId(), delivery.getSendId());
         if (send == null) {
-            throw new ResourceNotFoundException("Unsubscribe link is not valid");
+            throw new ResourceNotFoundException(INVALID_LINK);
         }
         return send;
     }

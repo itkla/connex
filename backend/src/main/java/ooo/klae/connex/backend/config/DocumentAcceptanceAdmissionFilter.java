@@ -2,26 +2,37 @@ package ooo.klae.connex.backend.config;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.regex.Pattern;
 
 import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.WebUtils;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
-import ooo.klae.connex.backend.services.DocumentAcceptanceAdmissionService;
 import ooo.klae.connex.backend.signature.DocumentAcceptanceRateLimiter;
 import ooo.klae.connex.backend.signature.DocumentAcceptanceToken;
 import ooo.klae.connex.backend.util.ClientIpResolver;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
-/** Admits public document-link requests before any request-body buffering or deserialization. */
+/**
+ * Admits token-free document-link requests before any request-body buffering or deserialization.
+ * The credential is the purpose-bound grant cookie; a missing or malformed grant gets the uniform
+ * unavailable response and only consumes the shared sentinel and source budgets. The exchange
+ * endpoint is excluded because its bearer travels in the JSON body, which this filter must not
+ * read; the service applies the same per-token and per-source throttle after parsing it.
+ */
 @RequiredArgsConstructor
 public class DocumentAcceptanceAdmissionFilter extends OncePerRequestFilter {
-    private static final String PATH_PREFIX = "/api/document-acceptance/";
+    private static final String PATH = "/api/document-acceptance";
+    private static final String EXCHANGE_PATH = PATH + "/exchange";
+    private static final Pattern GRANT_PATTERN = Pattern.compile("[0-9a-f]{64}");
     private static final String UNAVAILABLE = "Document link is no longer available";
     private static final String UNAVAILABLE_BODY = "{\"code\":\""
         + ResourceNotFoundException.CODE
@@ -33,11 +44,12 @@ public class DocumentAcceptanceAdmissionFilter extends OncePerRequestFilter {
 
     private final DocumentAcceptanceRateLimiter rateLimiter;
     private final ClientIpResolver clientIpResolver;
-    private final DocumentAcceptanceAdmissionService admissionService;
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !apiPath(request).startsWith(PATH_PREFIX);
+        String path = apiPath(request);
+        boolean acceptancePath = path.equals(PATH) || path.startsWith(PATH + "/");
+        return !acceptancePath || path.equals(EXCHANGE_PATH);
     }
 
     @Override
@@ -45,23 +57,29 @@ public class DocumentAcceptanceAdmissionFilter extends OncePerRequestFilter {
             HttpServletRequest request,
             HttpServletResponse response,
             FilterChain chain) throws ServletException, IOException {
-        String token = tokenFrom(apiPath(request));
+        String grant = grantFrom(request);
         String sourceAddress = clientIpResolver.resolve(request);
-        boolean malformed = !DocumentAcceptanceToken.hasValidShape(token);
+        boolean malformed = grant == null || !GRANT_PATTERN.matcher(grant).matches();
         try {
             rateLimiter.acquire(
-                DocumentAcceptanceToken.hashForAdmission(token),
+                malformed
+                    ? DocumentAcceptanceToken.hashForAdmission(null)
+                    : OneTimeTokenDigest.sha256(grant),
                 sourceAddress);
         } catch (TooManyRequestsException exception) {
             reject(response, 429, RATE_LIMITED);
             return;
         }
         if (malformed) {
-            admissionService.lookup(token);
             rejectUnavailable(response);
             return;
         }
         chain.doFilter(request, response);
+    }
+
+    private static String grantFrom(HttpServletRequest request) {
+        Cookie cookie = WebUtils.getCookie(request, OneTimeLinkFlowCookie.DOCUMENT_ACCEPTANCE);
+        return cookie == null ? null : cookie.getValue();
     }
 
     private static String apiPath(HttpServletRequest request) {
@@ -71,12 +89,6 @@ public class DocumentAcceptanceAdmissionFilter extends OncePerRequestFilter {
             return uri.substring(contextPath.length());
         }
         return uri;
-    }
-
-    private static String tokenFrom(String path) {
-        String suffix = path.substring(PATH_PREFIX.length());
-        int nextSeparator = suffix.indexOf('/');
-        return nextSeparator < 0 ? suffix : suffix.substring(0, nextSeparator);
     }
 
     private static void reject(HttpServletResponse response, int status, String message)

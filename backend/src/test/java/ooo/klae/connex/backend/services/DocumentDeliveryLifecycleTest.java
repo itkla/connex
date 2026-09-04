@@ -582,8 +582,7 @@ class DocumentDeliveryLifecycleTest extends AbstractDocumentDeliveryServiceTest 
         DocumentFixture fixture = finalDocument();
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
-        acceptanceService.accept(
-            token,
+        acceptanceService.accept(link(token),
             new AcceptDocumentRequest("Signer"),
             "192.0.2.20",
             "lifecycle-agent");

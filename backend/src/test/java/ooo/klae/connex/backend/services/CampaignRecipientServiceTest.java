@@ -31,6 +31,7 @@ import ooo.klae.connex.backend.mappers.CampaignMapper;
 import ooo.klae.connex.backend.mappers.CampaignMessageMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.mappers.RoleMapper;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /** Recipient lists behind campaign engagement counters: filters, gating, and isolation. */
 class CampaignRecipientServiceTest extends AbstractServiceTest {
@@ -286,7 +287,8 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
         delivery.setUnsubscribeToken(
                 UUID.randomUUID().toString().replace("-", "") + UUID.randomUUID().toString().replace("-", ""));
         campaignDeliveryMapper.insertDeliveries(workspace.getId(), List.of(delivery));
-        CampaignDelivery stored = campaignDeliveryMapper.getByToken(delivery.getUnsubscribeToken());
+        CampaignDelivery stored = campaignDeliveryMapper.getByTokenHash(
+                OneTimeTokenDigest.sha256(delivery.getUnsubscribeToken()));
         if (!"pending".equals(status)) {
             campaignDeliveryMapper.claim(workspace.getId(), stored.getId());
             if ("skipped".equals(status)) {

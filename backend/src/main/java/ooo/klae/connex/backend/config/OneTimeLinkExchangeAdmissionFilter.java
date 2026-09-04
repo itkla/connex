@@ -24,6 +24,7 @@ public class OneTimeLinkExchangeAdmissionFilter extends OncePerRequestFilter {
         "/api/auth/webauthn/register/confirmation/exchange",
         "/api/invites/exchange",
         "/api/invite-links/exchange",
+        "/api/delivery/unsubscribe/exchange",
         "/api/account/connections/native/prepare",
         "/api/account/connections/native/complete");
 

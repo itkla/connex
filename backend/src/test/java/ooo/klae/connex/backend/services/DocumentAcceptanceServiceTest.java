@@ -26,6 +26,10 @@ import ooo.klae.connex.backend.dto.DocumentAcceptanceDecisionDto;
 import ooo.klae.connex.backend.dto.DocumentAcceptancePreviewDto;
 import ooo.klae.connex.backend.dto.DocumentDeliveryDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
+import ooo.klae.connex.backend.services.DocumentAcceptanceService.Link;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest {
     @Autowired Validator validator;
@@ -37,9 +41,9 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         String token = installToken(delivery.recipients().getFirst().id());
 
         DocumentAcceptancePreviewDto first =
-            acceptanceService.preview(token, "192.0.2.10");
+            acceptanceService.preview(link(token), "192.0.2.10");
         DocumentAcceptancePreviewDto second =
-            acceptanceService.preview(token, "192.0.2.10");
+            acceptanceService.preview(link(token), "192.0.2.10");
 
         assertEquals(0, countEvents(delivery.id(), "viewed"));
         assertEquals(0, jdbcTemplate.queryForObject(
@@ -50,7 +54,7 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
             delivery.id()));
 
         DocumentAcceptancePreviewDto firstViewed =
-            acceptanceService.markViewed(token, "192.0.2.10");
+            acceptanceService.markViewed(link(token), "192.0.2.10");
         LocalDateTime firstViewedAt = jdbcTemplate.queryForObject(
             "SELECT first_viewed_at FROM document_delivery_recipient "
                 + "WHERE workspace_id = ? AND id = ?",
@@ -58,7 +62,7 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
             workspace.getId(),
             delivery.recipients().getFirst().id());
         DocumentAcceptancePreviewDto secondViewed =
-            acceptanceService.markViewed(token, "192.0.2.10");
+            acceptanceService.markViewed(link(token), "192.0.2.10");
         LocalDateTime secondViewedAt = jdbcTemplate.queryForObject(
             "SELECT first_viewed_at FROM document_delivery_recipient "
                 + "WHERE workspace_id = ? AND id = ?",
@@ -101,12 +105,11 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         String token = installToken(delivery.recipients().getFirst().id());
 
         DocumentAcceptancePreviewDto preview =
-            acceptanceService.preview(token, "192.0.2.11");
+            acceptanceService.preview(link(token), "192.0.2.11");
         DocumentAcceptancePreviewDto viewed =
-            acceptanceService.markViewed(token, "192.0.2.11");
+            acceptanceService.markViewed(link(token), "192.0.2.11");
 
-        DocumentAcceptanceDecisionDto result = acceptanceService.accept(
-            token,
+        DocumentAcceptanceDecisionDto result = acceptanceService.accept(link(token),
             new AcceptDocumentRequest("External Signer"),
             "192.0.2.11",
             "Acceptance test agent");
@@ -180,14 +183,12 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         installToken(delivery.recipients().get(1).id());
         String second = installToken(delivery.recipients().get(2).id());
 
-        DocumentAcceptanceDecisionDto pending = acceptanceService.accept(
-            first, new AcceptDocumentRequest("Signer One"), "192.0.2.12", "agent-one");
+        DocumentAcceptanceDecisionDto pending = acceptanceService.accept(link(first), new AcceptDocumentRequest("Signer One"), "192.0.2.12", "agent-one");
         assertFalse(pending.completed());
         assertEquals("sent", documentService.getOne(
             fixture.deal().getId(), fixture.document().id()).status());
 
-        DocumentAcceptanceDecisionDto complete = acceptanceService.accept(
-            second, new AcceptDocumentRequest("Signer Two"), "192.0.2.13", "agent-two");
+        DocumentAcceptanceDecisionDto complete = acceptanceService.accept(link(second), new AcceptDocumentRequest("Signer Two"), "192.0.2.13", "agent-two");
         assertTrue(complete.completed());
         assertEquals("completed", jdbcTemplate.queryForObject(
             "SELECT status FROM document_delivery_recipient WHERE workspace_id = ? AND id = ?",
@@ -206,8 +207,7 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         String first = installToken(delivery.recipients().getFirst().id());
         String second = installToken(delivery.recipients().getLast().id());
 
-        DocumentAcceptanceDecisionDto declined = acceptanceService.decline(
-            first,
+        DocumentAcceptanceDecisionDto declined = acceptanceService.decline(link(first),
             new DeclineDocumentRequest("Commercial terms were not accepted"),
             "192.0.2.14",
             "decline-agent");
@@ -216,8 +216,7 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         assertEquals("final", documentService.getOne(
             fixture.deal().getId(), fixture.document().id()).status());
         assertEquals(1, activityCount(fixture, "declined"));
-        assertThrows(ResourceNotFoundException.class, () -> acceptanceService.accept(
-            second, new AcceptDocumentRequest("Too Late"), "192.0.2.15", "late-agent"));
+        assertThrows(ResourceNotFoundException.class, () -> acceptanceService.accept(link(second), new AcceptDocumentRequest("Too Late"), "192.0.2.15", "late-agent"));
     }
 
     @Test
@@ -226,8 +225,7 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         DocumentDeliveryDto completedDelivery = send(
             completedFixture, signer("completed@example.test", 1));
         String completedToken = installToken(completedDelivery.recipients().getFirst().id());
-        acceptanceService.accept(
-            completedToken,
+        acceptanceService.accept(link(completedToken),
             new AcceptDocumentRequest("Completed Signer"),
             "192.0.2.18",
             "completed-agent");
@@ -236,8 +234,7 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         DocumentDeliveryDto declinedDelivery = send(
             declinedFixture, signer("declined@example.test", 1));
         String declinedToken = installToken(declinedDelivery.recipients().getFirst().id());
-        acceptanceService.decline(
-            declinedToken,
+        acceptanceService.decline(link(declinedToken),
             new DeclineDocumentRequest("Declined for this test"),
             "192.0.2.19",
             "declined-agent");
@@ -261,10 +258,8 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
 
-        DocumentAcceptanceDecisionDto first = acceptanceService.accept(
-            token, new AcceptDocumentRequest("Signer"), "192.0.2.16", "agent");
-        DocumentAcceptanceDecisionDto second = acceptanceService.accept(
-            token, new AcceptDocumentRequest("Changed Name"), "198.51.100.2", "changed-agent");
+        DocumentAcceptanceDecisionDto first = acceptanceService.accept(link(token), new AcceptDocumentRequest("Signer"), "192.0.2.16", "agent");
+        DocumentAcceptanceDecisionDto second = acceptanceService.accept(link(token), new AcceptDocumentRequest("Changed Name"), "198.51.100.2", "changed-agent");
 
         assertEquals(first, second);
         assertEquals(1, countEvents(delivery.id(), "completed"));
@@ -324,12 +319,15 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
     @Test
     void publicEntryPointsAreNotTransactional() throws Exception {
         List<Method> entries = List.of(
-            DocumentAcceptanceService.class.getMethod("preview", String.class, String.class),
-            DocumentAcceptanceService.class.getMethod("markViewed", String.class, String.class),
+            DocumentAcceptanceService.class.getMethod("exchange", String.class, String.class),
             DocumentAcceptanceService.class.getMethod(
-                "accept", String.class, AcceptDocumentRequest.class, String.class, String.class),
+                "admitGrant", HttpServletRequest.class, String.class),
+            DocumentAcceptanceService.class.getMethod("preview", Link.class, String.class),
+            DocumentAcceptanceService.class.getMethod("markViewed", Link.class, String.class),
             DocumentAcceptanceService.class.getMethod(
-                "decline", String.class, DeclineDocumentRequest.class, String.class, String.class));
+                "accept", Link.class, AcceptDocumentRequest.class, String.class, String.class),
+            DocumentAcceptanceService.class.getMethod(
+                "decline", Link.class, DeclineDocumentRequest.class, String.class, String.class));
 
         for (Method method : entries) {
             assertFalse(method.isAnnotationPresent(Transactional.class), method.getName());
@@ -337,10 +335,102 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         assertFalse(DocumentAcceptanceService.class.isAnnotationPresent(Transactional.class));
     }
 
+    @Test
+    void exchangeReturnsTheRoutedLinkAndRecordsNoEventOrAudit() {
+        DocumentFixture fixture = finalDocument();
+        DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
+        String token = installToken(delivery.recipients().getFirst().id());
+        int auditBefore = auditCount();
+
+        Link exchanged = acceptanceService.exchange(token, "203.0.113.40");
+        Link again = acceptanceService.exchange(token, "203.0.113.40");
+
+        assertEquals(new Link(workspace.getId(), sha256(token)), exchanged);
+        assertEquals(exchanged, again);
+        assertEquals(0, countEvents(delivery.id(), "viewed"));
+        assertEquals(auditBefore, auditCount());
+        assertEquals("pending", jdbcTemplate.queryForObject(
+            "SELECT status FROM document_delivery_recipient WHERE workspace_id = ? AND id = ?",
+            String.class,
+            workspace.getId(),
+            delivery.recipients().getFirst().id()));
+    }
+
+    @Test
+    void exchangeRejectsMalformedUnknownDecidedExpiredAndVoidedUniformly() {
+        String malformed = exchangeFailure("not-a-token");
+        assertEquals(malformed, exchangeFailure("w2147483646-" + "a".repeat(64)));
+
+        String decidedToken = installToken(deliveryOf("decided@example.test").getFirst().id());
+        acceptanceService.accept(
+            link(decidedToken), new AcceptDocumentRequest("Signer"), "203.0.113.41", "agent");
+        assertEquals(malformed, exchangeFailure(decidedToken));
+
+        String unknownToken = installToken(deliveryOf("unknown@example.test").getFirst().id());
+        char replacement = unknownToken.endsWith("a") ? 'b' : 'a';
+        assertEquals(malformed, exchangeFailure(
+            unknownToken.substring(0, unknownToken.length() - 1) + replacement));
+
+        List<DocumentDeliveryDto.Recipient> expiredRecipients = deliveryOf("expired@example.test");
+        String expiredToken = installToken(expiredRecipients.getFirst().id());
+        jdbcTemplate.update(
+            "UPDATE document_delivery_recipient SET token_expires_at = ? "
+                + "WHERE workspace_id = ? AND id = ?",
+            LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1),
+            workspace.getId(),
+            expiredRecipients.getFirst().id());
+        assertEquals(malformed, exchangeFailure(expiredToken));
+
+        DocumentFixture voidedFixture = finalDocument();
+        DocumentDeliveryDto voidedDelivery = send(voidedFixture, signer("void@example.test", 1));
+        String voidedToken = installToken(voidedDelivery.recipients().getFirst().id());
+        deliveryService.voidDelivery(
+            voidedFixture.deal().getId(),
+            voidedFixture.document().id(),
+            voidedDelivery.id(),
+            "Withdrawn");
+        assertEquals(malformed, exchangeFailure(voidedToken));
+    }
+
+    private List<DocumentDeliveryDto.Recipient> deliveryOf(String email) {
+        return send(finalDocument(), signer(email, 1)).recipients();
+    }
+
+    @Test
+    void exchangeIsThrottledPerTokenBeforeAnyLookup() {
+        DocumentFixture fixture = finalDocument();
+        DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
+        String token = installToken(delivery.recipients().getFirst().id());
+        int previousLimit = signatureProperties.getMaxRequestsPerToken();
+        signatureProperties.setMaxRequestsPerToken(1);
+        try {
+            acceptanceService.exchange(token, "203.0.113.42");
+            assertThrows(
+                TooManyRequestsException.class,
+                () -> acceptanceService.exchange(token, "203.0.113.43"));
+        } finally {
+            signatureProperties.setMaxRequestsPerToken(previousLimit);
+        }
+    }
+
+    private String exchangeFailure(String token) {
+        ResourceNotFoundException exception = assertThrows(
+            ResourceNotFoundException.class,
+            () -> acceptanceService.exchange(token, "203.0.113.6"));
+        return exception.getMessage();
+    }
+
+    private int auditCount() {
+        return jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ?",
+            Integer.class,
+            workspace.getId());
+    }
+
     private String unavailableMessage(String token) {
         ResourceNotFoundException exception = assertThrows(
             ResourceNotFoundException.class,
-            () -> acceptanceService.preview(token, "203.0.113.5"));
+            () -> acceptanceService.preview(link(token), "203.0.113.5"));
         return exception.getMessage();
     }
 
