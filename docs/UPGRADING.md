@@ -182,6 +182,40 @@ than grandfathered, and V192 repeats V191's sweep so none remain to refuse. Any 
 across both migrations has already run V191's sweep; the repeat covers only databases sitting at
 exactly V191 — staging and developer clones. Anonymous sessions are spared, as in V191.
 
+### V201/V202 emailed-link fragment cutover (document acceptance, campaign unsubscribe)
+
+`V201__campaign_delivery_unsubscribe_token_hash.sql` and
+`V202__one_time_link_flow_routing_workspace.sql` are both expand-only and rolling-deploy safe: an old
+binary neither reads nor writes `campaign_delivery.unsubscribe_token_hash` (a STORED generated column)
+or `one_time_link_flow.routing_workspace_id`.
+
+The **link contract** is what breaks. Emailed document-acceptance links change from
+`/document-acceptance/{token}` to `/document-acceptance#token={token}`, and emailed campaign
+unsubscribe links change from `/api/delivery/unsubscribe/{token}` to `/unsubscribe#token={token}`.
+The browser exchanges the fragment bearer once at `POST /api/document-acceptance/exchange` or
+`POST /api/delivery/unsubscribe/exchange` for a purpose-bound `HttpOnly` grant cookie, and every
+other endpoint reads only that cookie. Following the V170 precedent there is **no compatibility
+shim**: the old `/document-acceptance/{token}` page and the old `/api/delivery/unsubscribe/{token}`
+API answer 404 with no lookup and no state change.
+
+Operator actions after the target deployment is healthy:
+
+- **Re-send outstanding document deliveries.** A document-acceptance token stays valid until its
+  delivery's `expiresAt`, which is nullable and may never expire, so the outstanding population can be
+  arbitrarily old. Use the existing per-recipient resend, which regenerates the token and the email.
+- **Campaign unsubscribe links in already-delivered mail stop working.** They never expire and are
+  legally load-bearing, so honour any opt-out request that arrives through support and re-send the
+  affected campaigns so recipients get a working link. Suppression state itself is unaffected.
+- **Update the Cloudflare skip and rate-limit expressions** per
+  [EDGE_DEFENCE.md](EDGE_DEFENCE.md): the HTML routes `/document-acceptance` and `/unsubscribe` no
+  longer carry a credential, and the API prefixes to exclude are `/api/document-acceptance` and
+  `/api/delivery/unsubscribe` with no trailing-slash requirement.
+- **Reverse proxies** must route the bare `/document-acceptance` path; the bundled Caddyfile matcher
+  covers both the bare path and the retired subtree.
+
+Both API prefixes are now CSRF-protected because the grant cookie is the authority. Any custom client
+calling them must bootstrap `GET /api/auth/csrf` and echo the CSRF header on every mutation.
+
 ## On-prem upgrade runbook
 
 1. **Preflight legacy media before any recreate** — if the installed version predates private object
@@ -300,7 +334,11 @@ exactly V191 — staging and developer clones. Anonymous sessions are spared, as
    unlimited uses. Registration-verification links remain valid for 24 hours in the previous version;
    affected registrants must request a fresh verification email. Password-reset links last only 30
    minutes, so there is effectively no outstanding population to migrate and no operator action is
-   needed; a user with a rare in-flight reset must request a fresh link.
+   needed; a user with a rare in-flight reset must request a fresh link. Upgrades that cross V201/V202
+   must additionally re-send every outstanding document delivery (acceptance tokens stay valid until
+   each delivery's `expiresAt`, which may be unset), re-send campaigns whose unsubscribe links are
+   still in recipients' inboxes because those links never expire and now 404, and update the
+   Cloudflare skip and rate-limit expressions — see the V201/V202 cutover section above.
 11. **On pre-ingress failure** — keep Caddy and upstream ingress closed and stop the target application
    containers. Remove the target deployment directory, re-verify and extract the exact prior signed
    deploy archive, restore the prior mode-0600 `.env` byte-for-byte, and confirm both recorded hashes.

@@ -429,7 +429,7 @@ jobs:
             "frame-ancestors 'none'" \
             'text/html'
           probe_edge_headers \
-            http://localhost:18099/document-acceptance/not-a-bearer \
+            http://localhost:18099/document-acceptance \
             200 \
             "frame-ancestors 'none'" \
             'text/html' \
