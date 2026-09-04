@@ -1,0 +1,221 @@
+name: SAST canary proof
+
+# Proves the CodeQL merge gate still blocks a real vulnerability, on the real workflow.
+#
+# `canary/sast-gate-proof` is a permanent, never-merged pull request carrying one deliberately
+# vulnerable fixture per analysed language. This workflow re-runs that pull request's own Security
+# run and asserts the whole chain: CodeQL reported both fixtures, GitHub attributed them to the pull
+# request (which only holds while result paths are repository-relative), each analysis stored the
+# base commit's result count plus exactly one (which only holds while nothing prunes pull-request
+# results), both SAST jobs failed at the gate step rather than at the tooling, `Security — required`
+# failed, branch protection still requires the three contexts, and the pull request is BLOCKED.
+#
+# There is no push trigger on purpose: `test_main_red_alert.py` requires every workflow that runs on
+# a push to main to be watched by the red-main alert, and a proof failure has its own issue.
+
+on:
+  schedule:
+    # After the Security workflow's Sunday 19:23 UTC scan, so main's analyses are fresh.
+    - cron: '37 21 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sast-canary-proof
+  cancel-in-progress: false
+
+jobs:
+  prove:
+    name: Prove the CodeQL gate blocks the canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: write
+      checks: read
+      pull-requests: read
+      security-events: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      CANARY_BRANCH: canary/sast-gate-proof
+      CANARY_LABEL: sast-canary
+      BACKEND_CATEGORY: /language:java-kotlin
+      FRONTEND_CATEGORY: /language:javascript-typescript
+      BACKEND_FIXTURE: backend/src/test/java/ooo/klae/connex/backend/codeqlfixture/IntentionalCommandInjectionFixture.java
+      FRONTEND_FIXTURE: frontend/test/fixtures/codeql/intentional-command-injection.mjs
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Discover the canary pull request
+        id: canary
+        run: |
+          set -euo pipefail
+          pulls="$(gh pr list --repo "$REPO" --head "$CANARY_BRANCH" --base main \
+            --state open --label "$CANARY_LABEL" --json number,isDraft)"
+          count="$(printf '%s' "$pulls" | jq 'length')"
+          if [ "$count" != "1" ]; then
+            echo "::error::expected exactly one open $CANARY_LABEL pull request from $CANARY_BRANCH, found $count"
+            exit 1
+          fi
+          number="$(printf '%s' "$pulls" | jq -r '.[0].number')"
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "Canary pull request #$number"
+      - name: Assert the canary carries the current gate
+        id: freshness
+        env:
+          CANARY_NUMBER: ${{ steps.canary.outputs.number }}
+        run: |
+          set -euo pipefail
+          analyses="$(gh api "repos/$REPO/code-scanning/analyses?ref=refs/pull/$CANARY_NUMBER/merge&per_page=20")"
+          merge_shas="$(printf '%s' "$analyses" \
+            | jq -r --arg backend "$BACKEND_CATEGORY" --arg frontend "$FRONTEND_CATEGORY" \
+              '[.[] | select(.category == $backend or .category == $frontend)]
+               | group_by(.category) | map(sort_by(.created_at) | last | .commit_sha) | unique | .[]')"
+          if [ "$(printf '%s\n' "$merge_shas" | grep -c .)" != "1" ]; then
+            echo "::error::the canary's two CodeQL categories were analysed at different commits: $merge_shas"
+            exit 1
+          fi
+          merge_sha="$merge_shas"
+          echo "merge_sha=$merge_sha" >> "$GITHUB_OUTPUT"
+          # A re-run reuses the original merge commit, so a gate change on main is not exercised
+          # until someone rebases the canary. Compare each gate file's blob id instead of trusting
+          # the branch date.
+          stale=0
+          for file in .github/workflows/security.yml .github/scripts/check-codeql-alerts.py \
+                      .github/scripts/classify-ci-changes.py .github/codeql/backend.yml \
+                      .github/codeql/frontend.yml; do
+            on_main="$(gh api "repos/$REPO/contents/$file?ref=main" --jq '.sha')"
+            on_canary="$(gh api "repos/$REPO/contents/$file?ref=$merge_sha" --jq '.sha' 2>/dev/null || echo missing)"
+            if [ "$on_main" != "$on_canary" ]; then
+              echo "::error::canary is stale at $file ($on_main on main, $on_canary on the canary): rebase canary/sast-gate-proof onto main and force-push"
+              stale=1
+            fi
+          done
+          # The fixtures must never be reachable from the default branch.
+          for fixture in "$BACKEND_FIXTURE" "$FRONTEND_FIXTURE"; do
+            if gh api "repos/$REPO/contents/$fixture?ref=main" >/dev/null 2>&1; then
+              echo "::error::$fixture exists on main; the canary fixtures must never be merged"
+              stale=1
+            fi
+          done
+          exit "$stale"
+      - name: Re-run the canary's Security workflow
+        id: rerun
+        env:
+          CANARY_NUMBER: ${{ steps.canary.outputs.number }}
+        run: |
+          set -euo pipefail
+          run_id="$(gh api \
+            "repos/$REPO/actions/workflows/security.yml/runs?event=pull_request&branch=$CANARY_BRANCH&per_page=1" \
+            --jq '.workflow_runs[0].id // empty')"
+          if [ -z "$run_id" ]; then
+            echo "::error::no Security run found for $CANARY_BRANCH; push the canary branch first"
+            exit 1
+          fi
+          # A re-run keeps the run id and bumps run_attempt. Record the attempt first: for the
+          # first seconds after the POST the run is still reported as the previous, completed
+          # attempt, and a poll that only reads `status` would accept that stale verdict.
+          attempt_before="$(gh api "repos/$REPO/actions/runs/$run_id" --jq '.run_attempt')"
+          gh api --method POST "repos/$REPO/actions/runs/$run_id/rerun" >/dev/null
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "Re-running Security run $run_id (attempt $attempt_before) for pull request #$CANARY_NUMBER"
+          for _ in $(seq 1 45); do
+            sleep 60
+            state="$(gh api "repos/$REPO/actions/runs/$run_id" --jq '.status + ":" + (.run_attempt|tostring)')"
+            echo "run $run_id is $state"
+            if [ "$state" = "completed:$((attempt_before + 1))" ]; then
+              exit 0
+            fi
+          done
+          echo "::error::Security run $run_id did not complete within 45 minutes"
+          exit 1
+      - name: Collect evidence
+        id: evidence
+        env:
+          CANARY_NUMBER: ${{ steps.canary.outputs.number }}
+          MERGE_SHA: ${{ steps.freshness.outputs.merge_sha }}
+          RUN_ID: ${{ steps.rerun.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/canary"
+          gh api "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/canary/jobs.json"
+          gh api --method GET --paginate --slurp \
+            -f tool_name=CodeQL -f state=open -f per_page=100 \
+            -f "ref=refs/pull/$CANARY_NUMBER/merge" \
+            "repos/$REPO/code-scanning/alerts" > "$RUNNER_TEMP/canary/ref-alerts.json"
+          gh api --method GET --paginate --slurp \
+            -f tool_name=CodeQL -f state=open -f per_page=100 \
+            -f "pr=$CANARY_NUMBER" \
+            "repos/$REPO/code-scanning/alerts" > "$RUNNER_TEMP/canary/pr-alerts.json"
+          gh api "repos/$REPO/code-scanning/analyses?ref=refs/pull/$CANARY_NUMBER/merge&per_page=20" \
+            > "$RUNNER_TEMP/canary/ref-analyses.json"
+          gh api "repos/$REPO/code-scanning/analyses?ref=refs/heads/main&per_page=50" \
+            > "$RUNNER_TEMP/canary/main-analyses.json"
+          gh api "repos/$REPO/commits/$MERGE_SHA" > "$RUNNER_TEMP/canary/merge-commit.json"
+          gh api "repos/$REPO/branches/main" > "$RUNNER_TEMP/canary/branch.json"
+          gh api graphql -f query='
+            query($owner:String!,$name:String!,$number:Int!){
+              repository(owner:$owner,name:$name){
+                pullRequest(number:$number){
+                  number
+                  isDraft
+                  mergeStateStatus
+                  commits(last:1){nodes{commit{
+                    oid
+                    statusCheckRollup{contexts(first:100){nodes{
+                      __typename
+                      ... on CheckRun{name conclusion}
+                    }}}
+                  }}}
+                }
+              }
+            }' \
+            -F owner="${REPO%/*}" -F name="${REPO#*/}" -F number="$CANARY_NUMBER" \
+            --jq '.data.repository.pullRequest' > "$RUNNER_TEMP/canary/pull-request.json"
+      - name: Verify the proof
+        env:
+          CANARY_NUMBER: ${{ steps.canary.outputs.number }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/verify-sast-canary.py \
+            --jobs "$RUNNER_TEMP/canary/jobs.json" \
+            --ref-alerts "$RUNNER_TEMP/canary/ref-alerts.json" \
+            --pr-alerts "$RUNNER_TEMP/canary/pr-alerts.json" \
+            --ref-analyses "$RUNNER_TEMP/canary/ref-analyses.json" \
+            --main-analyses "$RUNNER_TEMP/canary/main-analyses.json" \
+            --merge-commit "$RUNNER_TEMP/canary/merge-commit.json" \
+            --branch "$RUNNER_TEMP/canary/branch.json" \
+            --pull-request "$RUNNER_TEMP/canary/pull-request.json" \
+            --canary-number "$CANARY_NUMBER" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --require-admin-enforcement
+      - name: Report a failed proof
+        if: failure()
+        env:
+          CANARY_NUMBER: ${{ steps.canary.outputs.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title='SAST gate canary proof failed'
+          body="$(printf '%s\n' \
+            "The weekly CodeQL gate canary proof failed for pull request #$CANARY_NUMBER." \
+            "" \
+            "$RUN_URL" \
+            "" \
+            "Read the failed step's annotations and the run's step summary: they name the exact" \
+            "assertion that did not hold. Until it is resolved, the merge gate is unproven." \
+            "" \
+            "Close this issue once the proof is green again.")"
+          gh label create "$CANARY_LABEL-failed" --repo "$REPO" --color B60205 \
+            --description "The SAST gate canary proof failed" 2>/dev/null || true
+          existing="$(gh issue list --repo "$REPO" --state open --label "$CANARY_LABEL-failed" \
+            --limit 100 --json number --jq 'sort_by(.number) | .[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$title" \
+              --label "$CANARY_LABEL-failed" --body "$body"
+          fi

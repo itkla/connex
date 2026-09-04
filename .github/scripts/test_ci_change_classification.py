@@ -138,6 +138,26 @@ class CiChangeClassificationTest(unittest.TestCase):
                 self.assertTrue(categories["action_pins"])
                 self.assertFalse(categories["backend_sast"])
                 self.assertFalse(categories["frontend_sast"])
+    def test_codeql_canary_fixture_paths_select_their_language_sast(self) -> None:
+        """The canary fixtures must be analysed by exactly the job whose language they target.
+
+        The permanent canary pull request (docs/STATIC_ANALYSIS.md) only proves the gate if the
+        classifier selects both SAST jobs for it. The backend fixture is test source, so it must not
+        drag the deployment-profile boot along with it.
+        """
+        frontend = self.classify(
+            "frontend/test/fixtures/codeql/intentional-command-injection.mjs"
+        )
+        self.assertTrue(frontend["frontend_sast"])
+        self.assertFalse(frontend["backend_sast"])
+
+        backend = self.classify(
+            "backend/src/test/java/ooo/klae/connex/backend/codeqlfixture/"
+            "IntentionalCommandInjectionFixture.java"
+        )
+        self.assertTrue(backend["backend_sast"])
+        self.assertFalse(backend["frontend_sast"])
+        self.assertFalse(backend["profile_boot"])
 
     def test_ci_policy_change_forces_every_category(self) -> None:
         categories = self.classify(".github/workflows/ci.yml")
