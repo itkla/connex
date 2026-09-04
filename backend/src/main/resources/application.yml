@@ -180,6 +180,7 @@ connex:
         upload-max-body-bytes: ${CONNEX_UPLOAD_MAX_BODY_BYTES:28311552}
         business-card-max-body-bytes: ${CONNEX_BUSINESS_CARD_MAX_BODY_BYTES:12582912}
         client-errors-max-body-bytes: ${CONNEX_CLIENT_ERRORS_MAX_BODY_BYTES:16384}
+        csp-reports-max-body-bytes: ${CONNEX_CSP_REPORTS_MAX_BODY_BYTES:16384}
         webauthn-max-body-bytes: ${CONNEX_WEBAUTHN_MAX_BODY_BYTES:65536}
         workflow-max-body-bytes: ${CONNEX_WORKFLOW_MAX_BODY_BYTES:98304}
         form-max-body-bytes: ${CONNEX_FORM_MAX_BODY_BYTES:1048576}
@@ -274,6 +275,10 @@ connex:
         max-reports-per-window: ${CONNEX_CLIENT_ERRORS_MAX_REPORTS_PER_WINDOW:20}
         window-seconds: ${CONNEX_CLIENT_ERRORS_WINDOW_SECONDS:300}
         eviction-delay-ms: ${CONNEX_CLIENT_ERRORS_EVICTION_DELAY_MS:300000}
+    csp-reports:
+        max-reports-per-window: ${CONNEX_CSP_REPORTS_MAX_REPORTS_PER_WINDOW:60}
+        window-seconds: ${CONNEX_CSP_REPORTS_WINDOW_SECONDS:60}
+        eviction-delay-ms: ${CONNEX_CSP_REPORTS_EVICTION_DELAY_MS:300000}
     webauthn:
         # Passkey / WebAuthn relying-party config (#295). rp-id is the site's registrable domain
         # (no scheme/port); allowed-origins (CSV) must list every origin the SPA is served from.
