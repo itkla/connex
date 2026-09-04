@@ -122,11 +122,15 @@ class DocumentAcceptanceLinkExchangeIntegrationTest
     }
 
     @Test
-    void queryAndPathTokensAreIgnoredWithoutAGrant() throws Exception {
+    void queryAndPathTokensAreIgnoredWithAndWithoutAGrant() throws Exception {
         DocumentFixture fixture = finalDocument();
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
-        MockHttpSession session = bootstrapBrowser().session();
+        DocumentFixture otherFixture = finalDocument();
+        DocumentDeliveryDto otherDelivery = send(otherFixture, signer("other@example.test", 1));
+        String otherToken = installToken(otherDelivery.recipients().getFirst().id());
+        Browser browser = bootstrapBrowser();
+        MockHttpSession session = browser.session();
 
         MvcResult queryToken = mockMvc.perform(get("/api/document-acceptance")
                 .session(session)
@@ -157,6 +161,14 @@ class DocumentAcceptanceLinkExchangeIntegrationTest
             assertEquals("no-store", result.getResponse().getHeader("Cache-Control"));
             assertResponseSecretFree(result, token);
         }
+        Cookie grant = flowCookie(exchange(otherToken, 303, browser));
+        mockMvc.perform(get("/api/document-acceptance")
+                .session(session)
+                .cookie(grant, browser.bindingCookie())
+                .queryParam("token", token))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.dealName").value(otherFixture.deal().getName()));
+
         assertEquals("pending", recipientStatus(delivery));
         assertEquals(0, countEvents(delivery.id(), "viewed"));
         assertEquals(0, countEvents(delivery.id(), "completed"));
