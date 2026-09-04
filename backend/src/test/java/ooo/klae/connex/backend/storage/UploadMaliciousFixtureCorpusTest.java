@@ -28,8 +28,9 @@ import tools.jackson.databind.ObjectMapper;
  * the named guard is removed from the current inspector, and {@code G} methods hold in both
  * states as regression guards.
  *
- * <p>Confirmed red set against the pre-fix inspector (recorded from the JUnit report of the
- * mutation run): {@code rejectsOdfPictureDeclaredSvgWhateverItsName},
+ * <p>Confirmed red set against the pre-fix inspector, recorded from the JUnit report of the
+ * mutation run (27 of 47 cases failed; the signed-package method is parameterized over DOCX,
+ * XLSX, and PPTX): {@code rejectsOdfPictureDeclaredSvgWhateverItsName},
  * {@code rejectsOdfPictureWhoseBytesAreSvgDespitePngNameAndType},
  * {@code rejectsOdfPictureWhoseBytesAreHtmlDespiteJpegType},
  * {@code rejectsOdfRasterWhoseManifestTypeMismatchesItsMagic},
@@ -37,8 +38,6 @@ import tools.jackson.databind.ObjectMapper;
  * {@code rejectsOdfMetadataManifestWithDoctypeOrForeignVocabulary},
  * {@code rejectsEncryptedOdfManifest}, {@code rejectsNonEmptyConfigurations2Members},
  * {@code rejectsOdfStarViewMetafilePictures}, {@code rejectsDirectoryEntriesWithContent},
- * {@code acceptsOdfMetafileAndUncompressedRasterPictures},
- * {@code acceptsOdfLayoutCacheWithinItsBound},
  * {@code rejectsPngHtmlAndGifJavaScriptPolyglotsInMediaParts},
  * {@code rejectsSvgDeclaredAsPngInMediaPart}, {@code rejectsHtmlDeclaredAsJpegInMediaPart},
  * {@code rejectsMediaPartDeclaredSvgWhateverItsName}, {@code rejectsMediaPartWithoutContentType},
@@ -49,8 +48,20 @@ import tools.jackson.databind.ObjectMapper;
  * {@code acceptsObfuscatedFontsWithinBoundAndRejectsOversized},
  * {@code acceptsMetafileMediaPartsAndRejectsMismatchedDeclarations},
  * {@code acceptsDigitallySignedOoxmlPackages},
- * {@code acceptsSignedOoxmlWithSignatureLineImagesAndXades},
+ * {@code acceptsSignedOoxmlWithSignatureLineImagesAndXades} and
  * {@code acceptsLegacyInspectionOfSignedDocx}.
+ *
+ * <p>The signature-refusal methods pass in both states because the pre-fix inspector refused every
+ * signature part outright, so each was confirmed instead by removing the single guard it names
+ * from the current inspector: {@code rejectsUnreferencedSignaturePart} fails without the
+ * origin-and-signature relationship binding, {@code rejectsSignatureDeclaredWithWrongContentType}
+ * without the signature content-type binding,
+ * {@code rejectsSignatureManifestReferencingVbaProjectOrMissingPart} without the manifest
+ * reference content-type rule, and {@code rejectsScriptSmuggledIntoSignaturePart} without the
+ * signature element vocabulary. {@code rejectsSignaturePartOutsideXmlSignaturesFolder} stays green
+ * even without the misplaced-content-type check, because signature markup outside
+ * {@code _xmlsignatures/} still meets the ordinary active-element blocklist; it is recorded as a
+ * defence-in-depth guard rather than the sole control.
  */
 class UploadMaliciousFixtureCorpusTest {
     private static final String SVG_PAYLOAD =
@@ -550,6 +561,14 @@ class UploadMaliciousFixtureCorpusTest {
             UploadFormat.DOCX,
             PackageFixtures.officeSignatureXml(
                 "/word/missing.xml?ContentType=application/xml", false, false, "")));
+        refused(UploadFormat.DOCX, PackageFixtures.signedOoxml(
+            UploadFormat.DOCX,
+            PackageFixtures.officeSignatureXml(
+                "/word/document.xml?ContentType=application/vnd.ms-word.document"
+                    + ".macroEnabled.main+xml",
+                false,
+                false,
+                "")));
     }
 
     @Test
