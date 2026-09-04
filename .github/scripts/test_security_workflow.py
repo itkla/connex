@@ -5,17 +5,21 @@ import yaml
 
 
 WORKFLOW_PATH = Path(__file__).parents[1] / "workflows" / "security.yml"
-CODEQL_CONFIG_PATH = Path(__file__).parents[1] / "codeql" / "codeql-config.yml"
+BACKEND_CODEQL_CONFIG = Path(__file__).parents[1] / "codeql" / "backend.yml"
+FRONTEND_CODEQL_CONFIG = Path(__file__).parents[1] / "codeql" / "frontend.yml"
 CODEQL_REVISION = "ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd"
-CODEQL_CONFIG_INPUT = "./.github/codeql/codeql-config.yml"
+BACKEND_CODEQL_CONFIG_INPUT = "./.github/codeql/backend.yml"
+FRONTEND_CODEQL_CONFIG_INPUT = "./.github/codeql/frontend.yml"
 
 
 class SecurityWorkflowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
-        cls.codeql_config_text = CODEQL_CONFIG_PATH.read_text(encoding="utf-8")
-        cls.codeql_config = yaml.safe_load(cls.codeql_config_text)
+        cls.codeql_configs = {
+            "backend": yaml.safe_load(BACKEND_CODEQL_CONFIG.read_text(encoding="utf-8")),
+            "frontend": yaml.safe_load(FRONTEND_CODEQL_CONFIG.read_text(encoding="utf-8")),
+        }
 
     def job(self, name: str) -> dict[str, object]:
         return self.workflow["jobs"][name]
@@ -45,11 +49,26 @@ class SecurityWorkflowTest(unittest.TestCase):
         finding belongs in a dismissal, which is scoped to its location and carries the same
         accountability metadata; this keeps the filter list empty so the trade cannot be made again
         by adding an entry (#1464).
+
+        Each per-language file also scopes the analysis with a repository-relative `paths` entry.
+        That is the only sanctioned way to narrow CodeQL to one tree: `source-root` relativises
+        SARIF locations to the subtree, which blinded the pull-request gate from 2026-08-26 until the
+        path restoration on #1244.
         """
-        self.assertEqual([], self.codeql_config["query-filters"])
-        self.assertNotIn("paths-ignore", self.codeql_config)
+        for surface, config in self.codeql_configs.items():
+            with self.subTest(surface=surface):
+                self.assertEqual([], config["query-filters"])
+                self.assertNotIn("paths-ignore", config)
+                self.assertEqual([surface], config["paths"])
 
     def test_backend_codeql_uses_manual_java_26_build(self) -> None:
+        """The backend analysis is scoped by its config file's `paths`, never by `source-root`.
+
+        `source-root` makes CodeQL emit SARIF locations relative to `backend/`. The codeql-action's
+        diff-range filter compares those against repository-relative diff paths, nothing matches,
+        and every pull-request upload carries zero results — which is how the gate ran blind from
+        2026-08-26 (PR #1294) until #1244 restored the per-language `paths` configuration.
+        """
         job = self.job("backend-sast")
         self.assertEqual("needs.classify.outputs.backend_sast == 'true'", job["if"])
         setup = next(
@@ -63,8 +82,8 @@ class SecurityWorkflowTest(unittest.TestCase):
         self.assertEqual("java-kotlin", initialize["with"]["languages"])
         self.assertEqual("manual", initialize["with"]["build-mode"])
         self.assertEqual("security-extended", initialize["with"]["queries"])
-        self.assertEqual(CODEQL_CONFIG_INPUT, initialize["with"]["config-file"])
-        self.assertEqual("backend", initialize["with"]["source-root"])
+        self.assertEqual(BACKEND_CODEQL_CONFIG_INPUT, initialize["with"]["config-file"])
+        self.assertNotIn("source-root", initialize["with"])
         self.assertNotIn("config", initialize["with"])
         build = self.named_step("backend-sast", "Compile backend for CodeQL extraction")
         self.assertEqual("backend", build["working-directory"])
@@ -72,6 +91,11 @@ class SecurityWorkflowTest(unittest.TestCase):
         self.assertTrue(build["run"].endswith("compileTestJava"))
 
     def test_frontend_codeql_is_buildless_and_scoped(self) -> None:
+        """The frontend analysis is scoped by its config file's `paths`, never by `source-root`.
+
+        See the backend test above: relativised SARIF locations defeat diff attribution and blinded
+        the gate from 2026-08-26 until #1244.
+        """
         job = self.job("frontend-sast")
         self.assertEqual("needs.classify.outputs.frontend_sast == 'true'", job["if"])
         initialize = self.named_step("frontend-sast", "Initialize frontend CodeQL database")
@@ -79,9 +103,13 @@ class SecurityWorkflowTest(unittest.TestCase):
         self.assertEqual("javascript-typescript", initialize["with"]["languages"])
         self.assertEqual("none", initialize["with"]["build-mode"])
         self.assertEqual("security-extended", initialize["with"]["queries"])
-        self.assertEqual(CODEQL_CONFIG_INPUT, initialize["with"]["config-file"])
-        self.assertEqual("frontend", initialize["with"]["source-root"])
+        self.assertEqual(FRONTEND_CODEQL_CONFIG_INPUT, initialize["with"]["config-file"])
+        self.assertNotIn("source-root", initialize["with"])
         self.assertNotIn("config", initialize["with"])
+
+    def test_dismissal_replay_is_regression_tested_in_the_pin_policy_job(self) -> None:
+        runs = [step.get("run", "") for step in self.steps("action-pins")]
+        self.assertIn("python .github/scripts/test_replay_codeql_dismissals.py", runs)
 
     def test_pr_alert_gate_waits_for_analysis_and_filters_by_pr(self) -> None:
         for job_name, language in (

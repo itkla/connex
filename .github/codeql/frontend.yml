@@ -1,0 +1,15 @@
+# Frontend (javascript-typescript) CodeQL configuration.
+#
+# `paths` scopes the analysis to the frontend tree from the repository root. It must stay a
+# repository-relative path and the workflow must NOT pass `source-root`: from 2026-08-26 until the
+# path restoration on #1244, `source-root: frontend` made CodeQL emit SARIF locations relative to
+# `frontend/` (`app/...`), which the codeql-action's diff-range filter then compared against
+# repository-relative diff paths. Nothing matched, every pull-request analysis uploaded zero results,
+# and the alert gate passed blind. `test_security_workflow.py` asserts both halves of this contract.
+#
+# No query filters. See backend.yml and #1464 for why the list must stay empty: a query filter is
+# repository-wide and can never be narrowed to one finding; an accepted finding is a dismissal.
+
+paths:
+  - frontend
+query-filters: []
