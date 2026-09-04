@@ -7,6 +7,7 @@ import nextConfig from "@/next.config";
 import { isProtectedPath } from "@/app/lib/protectedRoutes";
 import { config as proxyConfig, proxy } from "@/proxy";
 import {
+    contentSecurityPolicyReportingEndpoint,
     createFrontendContentSecurityPolicy,
     FRONTEND_CONTENT_SECURITY_POLICY,
     resolveContentSecurityPolicyMode,
@@ -225,10 +226,82 @@ describe("frontend security headers", () => {
         expect(policy).not.toContain("wss://stream.example;script-src");
     });
 
-    it("defaults absent and invalid modes to Report-Only", () => {
-        expect(resolveContentSecurityPolicyMode(undefined)).toBe("report-only");
-        expect(resolveContentSecurityPolicyMode("invalid")).toBe("report-only");
+    it("defaults absent and unknown modes to enforce; only report-only opts out", () => {
+        expect(resolveContentSecurityPolicyMode(undefined)).toBe("enforce");
+        expect(resolveContentSecurityPolicyMode("")).toBe("enforce");
+        expect(resolveContentSecurityPolicyMode("invalid")).toBe("enforce");
+        expect(resolveContentSecurityPolicyMode("Report-Only")).toBe("enforce");
         expect(resolveContentSecurityPolicyMode("enforce")).toBe("enforce");
+        expect(resolveContentSecurityPolicyMode("report-only")).toBe("report-only");
+    });
+
+    it("appends report-uri always and report-to only with a trustworthy reporting endpoint", () => {
+        const trustworthy = createFrontendContentSecurityPolicy({
+            nonce: "reporting-nonce",
+            requestUrl: "https://connex.example.com",
+            isDevelopment: false,
+            reportingEndpointUrl: "https://connex.example.com/api/csp-reports",
+        });
+        const untrustworthy = createFrontendContentSecurityPolicy({
+            nonce: "reporting-nonce",
+            requestUrl: "http://192.0.2.10:3000",
+            isDevelopment: false,
+            reportingEndpointUrl: null,
+        });
+
+        expect(trustworthy.endsWith(
+            "worker-src 'none'; report-uri /api/csp-reports; report-to csp-endpoint",
+        )).toBe(true);
+        expect(untrustworthy.endsWith("worker-src 'none'; report-uri /api/csp-reports")).toBe(true);
+        expect(untrustworthy).not.toContain("report-to");
+    });
+
+    it("resolves the reporting endpoint for HTTPS and loopback origins only", () => {
+        expect(contentSecurityPolicyReportingEndpoint("https://connex.example.com"))
+            .toBe("https://connex.example.com/api/csp-reports");
+        expect(contentSecurityPolicyReportingEndpoint("http://localhost:3000"))
+            .toBe("http://localhost:3000/api/csp-reports");
+        expect(contentSecurityPolicyReportingEndpoint("http://127.0.0.1:3000"))
+            .toBe("http://127.0.0.1:3000/api/csp-reports");
+        expect(contentSecurityPolicyReportingEndpoint("http://192.0.2.10:3000")).toBeNull();
+        expect(contentSecurityPolicyReportingEndpoint("https://connex.example;report-uri")).toBeNull();
+        expect(contentSecurityPolicyReportingEndpoint("https://*.example.com")).toBeNull();
+        expect(contentSecurityPolicyReportingEndpoint("not a url")).toBeNull();
+    });
+
+    it("emits Reporting-Endpoints for the browser-facing origin in both modes", () => {
+        vi.stubEnv("CONNEX_CSP_MODE", undefined);
+        vi.stubEnv("NEXT_PUBLIC_WS_URL", "");
+        const proxied = new NextRequest("http://0.0.0.0:3000/auth/login", {
+            headers: { host: "connex.example.com", "x-forwarded-proto": "https" },
+        });
+
+        const enforced = proxy(proxied);
+        expect(enforced.headers.get("content-security-policy"))
+            .toContain("report-uri /api/csp-reports; report-to csp-endpoint");
+        expect(enforced.headers.has("content-security-policy-report-only")).toBe(false);
+        expect(enforced.headers.get("reporting-endpoints"))
+            .toBe('csp-endpoint="https://connex.example.com/api/csp-reports"');
+
+        vi.stubEnv("CONNEX_CSP_MODE", "report-only");
+        const rolledBack = proxy(proxied);
+        expect(rolledBack.headers.get("content-security-policy-report-only"))
+            .toContain("report-uri /api/csp-reports; report-to csp-endpoint");
+        expect(rolledBack.headers.get("reporting-endpoints"))
+            .toBe('csp-endpoint="https://connex.example.com/api/csp-reports"');
+    });
+
+    it("omits Reporting-Endpoints and report-to for an untrustworthy browser-facing origin", () => {
+        vi.stubEnv("CONNEX_CSP_MODE", undefined);
+        vi.stubEnv("NEXT_PUBLIC_WS_URL", "");
+        const response = proxy(new NextRequest("http://0.0.0.0:3000/auth/login", {
+            headers: { host: "192.0.2.10:3000", "x-forwarded-proto": "http" },
+        }));
+
+        expect(response.headers.get("reporting-endpoints")).toBeNull();
+        expect(response.headers.get("content-security-policy"))
+            .toContain("report-uri /api/csp-reports");
+        expect(response.headers.get("content-security-policy")).not.toContain("report-to");
     });
 
     it("emits a fresh nonce and propagates the enforcement policy upstream", () => {
