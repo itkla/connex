@@ -89,6 +89,12 @@ export default function DocumentAcceptanceEntry() {
         };
     }, []);
 
+    useEffect(() => {
+        const reopen = () => window.location.reload();
+        window.addEventListener("hashchange", reopen);
+        return () => window.removeEventListener("hashchange", reopen);
+    }, []);
+
     if (state.status === "loading") {
         return (
             <main className="grid min-h-dvh place-items-center bg-muted/30 px-5 py-12">

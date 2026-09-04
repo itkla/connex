@@ -48,6 +48,12 @@ export default function UnsubscribeEntry() {
         };
     }, []);
 
+    useEffect(() => {
+        const reopen = () => window.location.reload();
+        window.addEventListener("hashchange", reopen);
+        return () => window.removeEventListener("hashchange", reopen);
+    }, []);
+
     return (
         <main className="grid min-h-dvh place-items-center bg-background px-6 py-12">
             <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 shadow-sm">

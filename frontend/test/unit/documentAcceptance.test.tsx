@@ -110,9 +110,10 @@ function deferred<T>() {
 
 let restoreLocation: (() => void) | null = null;
 
-function stubLocationReplace(): ReturnType<typeof vi.fn> {
+function stubLocation(): { replace: ReturnType<typeof vi.fn>; reload: ReturnType<typeof vi.fn> } {
     const real = window.location;
     const replace = vi.fn();
+    const reload = vi.fn();
     Object.defineProperty(window, "location", {
         configurable: true,
         value: {
@@ -122,13 +123,14 @@ function stubLocationReplace(): ReturnType<typeof vi.fn> {
             get search() { return real.search; },
             get hash() { return real.hash; },
             replace,
+            reload,
         },
     });
     restoreLocation = () => Object.defineProperty(window, "location", {
         configurable: true,
         value: real,
     });
-    return replace;
+    return { replace, reload };
 }
 
 async function renderEntry() {
@@ -241,7 +243,7 @@ afterEach(() => {
 describe("document acceptance entry", () => {
     it("strips the fragment before the exchange request", async () => {
         window.history.replaceState({}, "", `/document-acceptance#token=${TOKEN}`);
-        const replace = stubLocationReplace();
+        const { replace } = stubLocation();
 
         const rendered = await renderEntry();
 
@@ -250,6 +252,22 @@ describe("document acceptance entry", () => {
         expect(window.location.pathname).toBe("/document-acceptance");
         expect(replace).toHaveBeenCalledWith("/document-acceptance");
         expect(api.preview).not.toHaveBeenCalled();
+
+        await unmount(rendered.root);
+    });
+
+    it("re-opens a second emailed link that lands in the same tab", async () => {
+        const { reload } = stubLocation();
+        const rendered = await renderEntry();
+        expect(reload).not.toHaveBeenCalled();
+
+        await act(async () => {
+            window.history.replaceState({}, "", `/document-acceptance#token=${TOKEN}`);
+            window.dispatchEvent(new HashChangeEvent("hashchange"));
+            await Promise.resolve();
+        });
+
+        expect(reload).toHaveBeenCalledTimes(1);
 
         await unmount(rendered.root);
     });
