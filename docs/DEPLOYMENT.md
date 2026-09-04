@@ -25,7 +25,12 @@ assets, downloads, backend JSON, and Caddy-generated error responses. Caddy norm
 `/document-acceptance/*` frontend handle also defers an explicit `no-referrer` override so the
 credential-bearing page keeps that stricter value after proxying. It supplies
 `Content-Security-Policy: frame-ancestors 'none'` only when an upstream did not already set CSP,
-preserving the backend's stricter API policy without emitting a second value. Next.js carries the
+preserving the backend's stricter API policy without emitting a second value. Frontend HTML also
+carries the full nonce-based policy, enforced by default, ending in `report-uri /api/csp-reports`
+plus — on an HTTPS or loopback origin — `report-to csp-endpoint` and a matching
+`Reporting-Endpoints` header. Caddy passes `/api/csp-reports` to the backend under a 16 KiB
+`CONNEX_CSP_REPORTS_MAX_BODY_BYTES` ceiling; `CONNEX_CSP_MODE=report-only` is the only rollback
+value (see [CONTENT_SECURITY_POLICY.md](CONTENT_SECURITY_POLICY.md)). Next.js carries the
 same browser-facing defaults for local, standalone, and non-Caddy deployments; its later attachment
 rule retains `default-src 'none'; sandbox; frame-ancestors 'none'` and `Content-Disposition:
 attachment`. Connex currently has no frame-embedded workflow. Any future framing exception must

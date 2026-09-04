@@ -104,6 +104,8 @@ Minimum frontend loop for a material change:
 6. For visual changes, check representative desktop/mobile widths and light/dark. For motion changes, also verify reduced motion and complete the focused animation review.
 7. Self-review the exact diff. Material/high-risk changes receive the root-required independent review; auth, sharing, permissions, cross-workspace state, or other security-sensitive UI also gets security-focused review.
 
+The Content Security Policy is **enforced** by default (`CONNEX_CSP_MODE=report-only` is the only rollback value). Any new third-party origin, inline `<script>`, `eval`, frame, worker, or non-`'self'` `connect-src`/`img-src`/`font-src` target must be reflected in `security-headers.ts` and pass `test/e2e/csp-enforcement.spec.ts`; a change the policy blocks will fail that spec in CI rather than degrading silently in production. See `../docs/CONTENT_SECURITY_POLICY.md`.
+
 If browser tooling is unavailable, report that explicitly rather than pretending browser verification happened.
 
 ## Commands
