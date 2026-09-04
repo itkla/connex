@@ -130,3 +130,78 @@ test("email change remains reachable with a session and removes its fragment bea
     await expect(page.getByRole("heading", { name: "Confirm your new email" })).toBeVisible();
     expect(requestedUrls.every((url) => !url.includes(rawToken))).toBe(true);
 });
+
+test("document acceptance removes its fragment bearer before exchange navigation", async ({ context, page }) => {
+    const rawToken = `w42-${"a".repeat(64)}`;
+    const requestedUrls: string[] = [];
+    page.on("request", (request) => requestedUrls.push(request.url()));
+
+    await mockCsrf(page);
+    await page.route("**/api/document-acceptance/exchange", async (route) => {
+        expect(route.request().postDataJSON()).toEqual({ token: rawToken });
+        await route.fulfill({
+            status: 303,
+            headers: {
+                Location: "/document-acceptance",
+                "Set-Cookie": "connex_document_acceptance_flow=grant; Path=/api/document-acceptance; HttpOnly; SameSite=Strict",
+            },
+        });
+    });
+    await page.route(
+        (url) => url.pathname === "/api/document-acceptance",
+        async (route) => {
+            await route.fulfill({
+                status: 404,
+                contentType: "application/json",
+                body: JSON.stringify({
+                    code: "RESOURCE_NOT_FOUND",
+                    message: "Document link is no longer available",
+                }),
+            });
+        },
+    );
+
+    await page.goto(`/document-acceptance#token=${rawToken}`);
+    await expect(page).toHaveURL(/\/document-acceptance$/);
+    await expect(page.getByRole("heading", { name: "Link unavailable" })).toBeVisible();
+    expect(requestedUrls.every((url) => !url.includes(rawToken))).toBe(true);
+    expect((await context.cookies()).some((cookie) => cookie.value.includes(rawToken))).toBe(false);
+});
+
+test("unsubscribe removes its fragment bearer before exchange navigation", async ({ context, page }) => {
+    const rawToken = "b".repeat(64);
+    const requestedUrls: string[] = [];
+    page.on("request", (request) => requestedUrls.push(request.url()));
+
+    await mockCsrf(page);
+    await page.route("**/api/delivery/unsubscribe/exchange", async (route) => {
+        expect(route.request().postDataJSON()).toEqual({ token: rawToken });
+        await route.fulfill({
+            status: 303,
+            headers: {
+                Location: "/unsubscribe",
+                "Set-Cookie": "connex_delivery_unsubscribe_flow=grant; Path=/api/delivery/unsubscribe; HttpOnly; SameSite=Strict",
+            },
+        });
+    });
+    await page.route(
+        (url) => url.pathname === "/api/delivery/unsubscribe",
+        async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: "application/json",
+                body: JSON.stringify({
+                    channel: "email",
+                    address: "r***@dest.test",
+                    unsubscribed: false,
+                }),
+            });
+        },
+    );
+
+    await page.goto(`/unsubscribe#token=${rawToken}`);
+    await expect(page).toHaveURL(/\/unsubscribe$/);
+    await expect(page.getByRole("heading", { name: "Unsubscribe" })).toBeVisible();
+    expect(requestedUrls.every((url) => !url.includes(rawToken))).toBe(true);
+    expect((await context.cookies()).some((cookie) => cookie.value.includes(rawToken))).toBe(false);
+});

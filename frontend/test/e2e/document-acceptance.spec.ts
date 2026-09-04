@@ -1,8 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { createServer, type Server, type ServerResponse } from "node:http";
 import { createServer as createTcpServer, type Server as TcpServer, type Socket } from "node:net";
-import path from "node:path";
 
 import {
     expect,
@@ -21,10 +18,7 @@ import {
 } from "./support/api";
 import { message } from "./support/messages";
 
-const SIGNER_TOKEN = `w42-${"a".repeat(64)}`;
-const VIEWER_TOKEN = `w42-${"b".repeat(64)}`;
-const UNAVAILABLE_TOKEN = `w42-${"c".repeat(64)}`;
-const JAPANESE_TOKEN = `w42-${"d".repeat(64)}`;
+const MOCK_GRANT = "e".repeat(64);
 const SMTP_CAPTURE_PORT = 2525;
 const THEMES: readonly ("light" | "dark")[] = ["light", "dark"];
 
@@ -32,7 +26,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
 }
 
-function listeningPort(server: Server | TcpServer): number {
+function listeningPort(server: TcpServer): number {
     const address = server.address();
     if (address === null || typeof address === "string") {
         throw new Error("Test server did not bind to a TCP port");
@@ -104,131 +98,58 @@ function preview(actionable: boolean, documentLocale: "en" | "ja" = "en"): Docum
     };
 }
 
-const SIGNER_PREVIEW = preview(true);
-const VIEWER_PREVIEW = preview(false);
-const JAPANESE_PREVIEW = preview(true, "ja");
-
-function json(serverResponse: ServerResponse, status: number, body: unknown) {
-    serverResponse.writeHead(status, { "Content-Type": "application/json" });
-    serverResponse.end(JSON.stringify(body));
+function jsonRoute(body: unknown): { status: number; contentType: string; body: string } {
+    return { status: 200, contentType: "application/json", body: JSON.stringify(body) };
 }
 
-async function startPreviewServer(): Promise<{
-    server: Server;
-    origin: string;
-    requestCount: (token: string) => number;
-    forwardedFor: (token: string) => string | null;
-}> {
-    const requestCounts = new Map<string, number>();
-    const forwardedAddresses = new Map<string, string | null>();
-    const server = createServer((request, response) => {
-        const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
-        const match = /^\/api\/document-acceptance\/([^/]+)$/.exec(requestUrl.pathname);
-        const token = match ? decodeURIComponent(match[1]) : null;
-        if (request.method === "GET" && token) {
-            requestCounts.set(token, (requestCounts.get(token) ?? 0) + 1);
-            const forwardedFor = request.headers["x-forwarded-for"];
-            forwardedAddresses.set(
-                token,
-                Array.isArray(forwardedFor) ? forwardedFor.join(",") : forwardedFor ?? null,
-            );
-        }
-        if (request.method === "GET" && token === SIGNER_TOKEN) {
-            json(response, 200, SIGNER_PREVIEW);
-            return;
-        }
-        if (request.method === "GET" && token === VIEWER_TOKEN) {
-            json(response, 200, VIEWER_PREVIEW);
-            return;
-        }
-        if (request.method === "GET" && token === JAPANESE_TOKEN) {
-            json(response, 200, JAPANESE_PREVIEW);
-            return;
-        }
-        json(response, 404, {
-            code: "RESOURCE_NOT_FOUND",
-            message: "Document link is no longer available",
-        });
-    });
-    await new Promise<void>((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(0, "127.0.0.1", resolve);
-    });
-    return {
-        server,
-        origin: `http://127.0.0.1:${listeningPort(server)}`,
-        requestCount: (token) => requestCounts.get(token) ?? 0,
-        forwardedFor: (token) => forwardedAddresses.get(token) ?? null,
-    };
-}
-
-async function availablePort(): Promise<number> {
-    const server = createServer();
-    await new Promise<void>((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(0, "127.0.0.1", resolve);
-    });
-    const port = listeningPort(server);
-    await closeServer(server);
-    return port;
-}
-
-async function closeServer(server: Server): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-        server.close((error) => error ? reject(error) : resolve());
-    });
-}
-
-async function startAcceptanceApp(apiOrigin: string): Promise<{
-    process: ChildProcess;
-    origin: string;
-    output: () => string;
-}> {
-    const port = await availablePort();
-    const frontendRoot = process.cwd();
-    const nextBin = path.join(frontendRoot, "node_modules", "next", "dist", "bin", "next");
-    const nextProcess = spawn(
-        process.execPath,
-        [nextBin, "start", "--hostname", "127.0.0.1", "--port", String(port)],
-        {
-            cwd: frontendRoot,
-            env: {
-                ...process.env,
-                API_URL: apiOrigin,
-            },
-            stdio: ["ignore", "pipe", "pipe"],
-        },
+/**
+ * Routes the whole recipient contract in the browser: the CSRF bootstrap, the fragment exchange
+ * that answers with the grant cookie, and the three token-free endpoints the granted page calls.
+ */
+async function mockAcceptanceFlow(
+    page: Page,
+    state: { preview: DocumentAcceptancePreview },
+): Promise<void> {
+    await page.route(
+        (url) => url.pathname === "/api/auth/csrf",
+        (route) => route.fulfill(jsonRoute({
+            token: "csrf-token",
+            headerName: "X-CSRF-TOKEN",
+            parameterName: "_csrf",
+            requestIdentity: null,
+        })),
     );
-    let output = "";
-    const appendOutput = (chunk: Buffer) => {
-        output = `${output}${chunk.toString()}`.slice(-8_000);
-    };
-    nextProcess.stdout?.on("data", appendOutput);
-    nextProcess.stderr?.on("data", appendOutput);
-    const origin = `http://127.0.0.1:${port}`;
-    const deadline = Date.now() + 60_000;
-    while (Date.now() < deadline) {
-        if (nextProcess.exitCode != null) {
-            throw new Error(`Acceptance fixture app exited during startup\n${output}`);
-        }
-        try {
-            const response = await fetch(`${origin}/document-acceptance/${UNAVAILABLE_TOKEN}`);
-            if (response.ok) return { process: nextProcess, origin, output: () => output };
-        } catch {}
-        await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-    await stopProcess(nextProcess);
-    throw new Error(`Acceptance fixture app did not start\n${output}`);
-}
-
-async function stopProcess(child: ChildProcess): Promise<void> {
-    if (child.exitCode != null) return;
-    child.kill("SIGTERM");
-    await Promise.race([
-        new Promise<void>((resolve) => child.once("exit", () => resolve())),
-        new Promise<void>((resolve) => setTimeout(resolve, 5_000)),
-    ]);
-    if (child.exitCode == null) child.kill("SIGKILL");
+    await page.route(
+        (url) => url.pathname === "/api/document-acceptance/exchange",
+        (route) => route.fulfill({
+            status: 303,
+            headers: {
+                Location: "/document-acceptance",
+                "Set-Cookie": `connex_document_acceptance_flow=${MOCK_GRANT};`
+                    + " Path=/api/document-acceptance; HttpOnly; SameSite=Strict",
+            },
+        }),
+    );
+    await page.route(
+        (url) => url.pathname === "/api/document-acceptance",
+        (route) => route.fulfill(jsonRoute(state.preview)),
+    );
+    await page.route(
+        (url) => url.pathname === "/api/document-acceptance/viewed",
+        (route) => route.fulfill(jsonRoute({
+            ...state.preview,
+            deliveryStatus: "viewed",
+            recipientStatus: "viewed",
+        })),
+    );
+    await page.route(
+        (url) => url.pathname === "/api/document-acceptance/accept",
+        (route) => route.fulfill(jsonRoute({
+            deliveryStatus: "completed",
+            recipientStatus: "completed",
+            completed: true,
+        })),
+    );
 }
 
 async function expectResponsiveDocument(page: Page, mobile: boolean) {
@@ -384,7 +305,7 @@ async function startSmtpCapture(
             const recipientKey = recipientAddress?.toLowerCase();
             if (!recipientKey || !recipientKeys.has(recipientKey)) return;
             const decoded = decodedSmtpMessage(body);
-            const match = /\/document-acceptance\/w\d+-[a-f0-9]{64}/.exec(decoded);
+            const match = /\/document-acceptance#token=w\d+-[a-f0-9]{64}/.exec(decoded);
             const acceptancePath = match?.[0];
             if (!acceptancePath) {
                 capturedPaths.reject(new Error("Document acceptance URL was absent from SMTP message"));
@@ -464,64 +385,36 @@ async function authenticatedWriteHeaders(
 test.describe("anonymous and presentation document acceptance", () => {
     test.use({ storageState: { cookies: [], origins: [] } });
 
-    test("document acceptance reaches the running frontend and backend without authentication", async ({ page }) => {
-        const response = await page.goto("/document-acceptance/not-a-bearer");
+    test("the bare acceptance route stays public, credential-free, and referrer-free", async ({ page }) => {
+        const response = await page.goto("/document-acceptance#token=not-a-bearer");
 
         expect(response?.status()).toBe(200);
         expect(await response?.headerValue("referrer-policy")).toBe("no-referrer");
-        await expect(page).toHaveURL(/\/document-acceptance\/not-a-bearer$/);
+        await expect(page).toHaveURL(/\/document-acceptance$/);
         await expect(page.getByRole("heading", {
             name: message("en", "document-acceptance", "DocumentAcceptance.unavailableTitle"),
         })).toBeVisible();
     });
 
+    test("the legacy path bearer no longer resolves to a page", async ({ page }) => {
+        const response = await page.goto(`/document-acceptance/w42-${"a".repeat(64)}`);
+
+        expect(response?.status()).toBe(404);
+    });
+
     test("document acceptance renders signer, viewer, and unavailable states across themes @mobile", async ({ page }, testInfo) => {
         test.setTimeout(180_000);
-        const fixture = await startPreviewServer();
         const mobile = testInfo.project.name === "mobile-chromium";
-        let app: Awaited<ReturnType<typeof startAcceptanceApp>> | null = null;
+        const state = { preview: preview(true) };
+        await mockAcceptanceFlow(page, state);
 
-        try {
-            app = await startAcceptanceApp(fixture.origin);
-        await page.setExtraHTTPHeaders({ "X-Forwarded-For": "203.0.113.44" });
-        await page.route(/\/api\/document-acceptance\/[^/]+\/viewed$/, async (route) => {
-            const requestUrl = route.request().url();
-            const token = requestUrl.includes(VIEWER_TOKEN)
-                ? VIEWER_TOKEN
-                : requestUrl.includes(JAPANESE_TOKEN)
-                    ? JAPANESE_TOKEN
-                    : SIGNER_TOKEN;
-            const viewed = {
-                ...(token === VIEWER_TOKEN
-                    ? VIEWER_PREVIEW
-                    : token === JAPANESE_TOKEN
-                        ? JAPANESE_PREVIEW
-                        : SIGNER_PREVIEW),
-                deliveryStatus: "viewed",
-                recipientStatus: "viewed",
-            };
-            await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(viewed) });
-        });
-        await page.route(/\/api\/document-acceptance\/[^/]+\/accept$/, async (route) => {
-            await route.fulfill({
-                status: 200,
-                contentType: "application/json",
-                body: JSON.stringify({
-                    deliveryStatus: "completed",
-                    recipientStatus: "completed",
-                    completed: true,
-                }),
-            });
-        });
-        await page.goto(`${app.origin}/document-acceptance/${UNAVAILABLE_TOKEN}`);
         for (const theme of THEMES) {
+            await page.goto("/document-acceptance");
             await page.evaluate((value) => window.localStorage.setItem("theme", value), theme);
             await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
 
-            const requestsBeforeRender = fixture.requestCount(SIGNER_TOKEN);
-            await page.goto(`${app.origin}/document-acceptance/${SIGNER_TOKEN}`);
-            expect(fixture.requestCount(SIGNER_TOKEN)).toBe(requestsBeforeRender + 1);
-            expect(fixture.forwardedFor(SIGNER_TOKEN)).toBe("203.0.113.44");
+            state.preview = preview(true);
+            await page.goto("/document-acceptance");
             await expect(page.locator("html")).toHaveClass(new RegExp(`(?:^|\\s)${theme}(?:\\s|$)`));
             await expect(page.getByRole("heading", { name: "Frozen acceptance agreement" })).toBeVisible();
             await expect(page.getByRole("button", {
@@ -551,7 +444,8 @@ test.describe("anonymous and presentation document acceptance", () => {
                 name: message("en", "document-acceptance", "DocumentAcceptance.acceptedTitle"),
             })).toBeVisible();
 
-            await page.goto(`${app.origin}/document-acceptance/${VIEWER_TOKEN}`);
+            state.preview = preview(false);
+            await page.goto("/document-acceptance");
             await expect(page.locator("html")).toHaveClass(new RegExp(`(?:^|\\s)${theme}(?:\\s|$)`));
             await expect(page.getByRole("heading", {
                 name: message("en", "document-acceptance", "DocumentAcceptance.viewerTitle"),
@@ -565,17 +459,10 @@ test.describe("anonymous and presentation document acceptance", () => {
                 exact: true,
             })).toHaveCount(0);
             await expectResponsiveDocument(page, mobile);
-
-            await page.goto(`${app.origin}/document-acceptance/${UNAVAILABLE_TOKEN}`);
-            await expect(page.locator("html")).toHaveClass(new RegExp(`(?:^|\\s)${theme}(?:\\s|$)`));
-            await expect(page.getByRole("heading", {
-                name: message("en", "document-acceptance", "DocumentAcceptance.unavailableTitle"),
-            })).toBeVisible();
-            expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
-                .toBe(true);
         }
 
-        await page.goto(`${app.origin}/document-acceptance/${JAPANESE_TOKEN}`);
+        state.preview = preview(true, "ja");
+        await page.goto("/document-acceptance");
         await expect(page).toHaveTitle(
             `${message("ja", "document-acceptance", "DocumentAcceptance.metaTitle")} | Connex`,
         );
@@ -589,13 +476,6 @@ test.describe("anonymous and presentation document acceptance", () => {
         );
         await expect(lineItems.getByText("導入支援サービス", { exact: true })).toBeVisible();
         await expectResponsiveDocument(page, mobile);
-        } catch (error) {
-            const appOutput = app?.output() ?? "Acceptance fixture app did not start";
-            throw new Error(`${error instanceof Error ? error.message : String(error)}\n${appOutput}`);
-        } finally {
-            if (app) await stopProcess(app.process);
-            await closeServer(fixture.server);
-        }
     });
 });
 
@@ -809,18 +689,20 @@ test("authenticated setup completes through a cookie-less public bearer", async 
             reducedMotion: "reduce",
             storageState: { cookies: [], origins: [] },
         });
-        const bearerRequests: PlaywrightRequest[] = [];
+        const observedRequests: PlaywrightRequest[] = [];
         const anonymousPage = await anonymousContext.newPage();
-        anonymousPage.on("request", (request) => {
-            const pathname = new URL(request.url()).pathname;
-            if (pathname.startsWith("/document-acceptance/")
-                    || pathname.startsWith("/api/document-acceptance/")) {
-                bearerRequests.push(request);
-            }
-        });
+        anonymousPage.on("request", (request) => observedRequests.push(request));
         expect(await anonymousContext.cookies()).toEqual([]);
+        const bearerOf = (link: string): string => {
+            const bearer = /#token=(w\d+-[a-f0-9]{64})$/.exec(link)?.[1];
+            if (!bearer) throw new Error(`Acceptance link carried no fragment bearer: ${link}`);
+            return bearer;
+        };
+        const emptyBearer = bearerOf(acceptanceWithoutItemsPath);
+        const populatedBearer = bearerOf(acceptanceWithItemsPath);
 
         await anonymousPage.goto(acceptanceWithoutItemsPath);
+        await expect(anonymousPage).toHaveURL(/\/document-acceptance$/);
         await expect(anonymousPage.getByRole("heading", {
             name: "Full-stack acceptance agreement",
         })).toBeVisible();
@@ -832,6 +714,7 @@ test("authenticated setup completes through a cookie-less public bearer", async 
         })).toBeEnabled();
 
         await anonymousPage.goto(acceptanceWithItemsPath);
+        await expect(anonymousPage).toHaveURL(/\/document-acceptance$/);
         await expect(anonymousPage.getByRole("heading", {
             name: "Full-stack acceptance agreement",
         })).toBeVisible();
@@ -860,15 +743,44 @@ test("authenticated setup completes through a cookie-less public bearer", async 
             name: message("en", "document-acceptance", "DocumentAcceptance.acceptedTitle"),
         })).toBeVisible();
 
-        expect(bearerRequests.length).toBeGreaterThanOrEqual(5);
-        for (const request of bearerRequests) {
-            const requestHeaders = await request.allHeaders();
-            expect(requestHeaders.cookie).toBeUndefined();
-            expect(requestHeaders.authorization).toBeUndefined();
-            expect(requestHeaders["x-workspace-id"]).toBeUndefined();
-            expect(Object.keys(requestHeaders).some((name) => name.includes("csrf"))).toBe(false);
+        expect(observedRequests.length).toBeGreaterThanOrEqual(5);
+        for (const bearer of [emptyBearer, populatedBearer]) {
+            expect(observedRequests.every((request) => !request.url().includes(bearer))).toBe(true);
+            const carriers = observedRequests.filter((request) => (
+                request.method() === "POST"
+                && new URL(request.url()).pathname === "/api/document-acceptance/exchange"
+                && (request.postData() ?? "").includes(bearer)
+            ));
+            expect(carriers).toHaveLength(1);
+            expect(carriers[0].postDataJSON()).toEqual({ token: bearer });
         }
-        expect(await anonymousContext.cookies()).toEqual([]);
+        const grantCookies = (await anonymousContext.cookies())
+            .filter((cookie) => cookie.name === "connex_document_acceptance_flow");
+        expect(grantCookies).toHaveLength(1);
+        expect(grantCookies[0].httpOnly).toBe(true);
+        expect(grantCookies[0].path).toBe("/api/document-acceptance");
+        expect(grantCookies[0].sameSite).toBe("Strict");
+        for (const cookie of await anonymousContext.cookies()) {
+            expect(cookie.value).not.toContain(emptyBearer);
+            expect(cookie.value).not.toContain(populatedBearer);
+        }
+
+        const decidedContext = await browser.newContext({
+            baseURL,
+            locale: "en-US",
+            timezoneId: "UTC",
+            reducedMotion: "reduce",
+            storageState: { cookies: [], origins: [] },
+        });
+        try {
+            const decidedPage = await decidedContext.newPage();
+            await decidedPage.goto(acceptanceWithItemsPath);
+            await expect(decidedPage.getByRole("heading", {
+                name: message("en", "document-acceptance", "DocumentAcceptance.unavailableTitle"),
+            })).toBeVisible();
+        } finally {
+            await decidedContext.close();
+        }
 
         const deliveriesResponse = await authenticatedApi.get(
             `/api/deals/${dealWithItemsId}/documents/${documentWithItemsId}/delivery`,

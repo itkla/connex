@@ -10,7 +10,7 @@ import {
 } from '@/security-headers';
 
 const SESSION_COOKIE = 'JSESSIONID';
-const DOCUMENT_ACCEPTANCE_PATH = /^\/document-acceptance\/[^/]+\/?$/;
+const DOCUMENT_ACCEPTANCE_PATH = /^\/document-acceptance\/?$/;
 const DOCUMENT_ACCEPTANCE_CREDENTIAL_HEADERS = [
     'authorization',
     'cookie',

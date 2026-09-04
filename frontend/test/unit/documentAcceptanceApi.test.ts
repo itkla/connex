@@ -8,8 +8,6 @@ import {
 } from "@/app/lib/api";
 import type { DocumentAcceptancePreview } from "@/app/lib/types";
 
-const TOKEN = `w42-${"a".repeat(64)}`;
-
 function validPreview(): DocumentAcceptancePreview {
     return {
         content: {
@@ -49,10 +47,16 @@ function validPreview(): DocumentAcceptancePreview {
 }
 
 function stubPublicResponse(body: unknown): void {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-    })));
+    stubJsonResponses(JSON.stringify(body));
+}
+
+function stubJsonResponses(body: string): void {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(
+        new Response(body, {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+        }),
+    )));
 }
 
 afterEach(() => {
@@ -61,14 +65,9 @@ afterEach(() => {
 
 describe("document acceptance public response boundary", () => {
     it("rejects a successful preview with a malformed shape as unavailable", async () => {
-        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
-            actionable: "yes",
-        }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-        })));
+        stubJsonResponses(JSON.stringify({ actionable: "yes" }));
 
-        const request = getDocumentAcceptancePreview(TOKEN);
+        const request = getDocumentAcceptancePreview();
 
         await expect(request).rejects.toMatchObject({
             status: 502,
@@ -80,16 +79,13 @@ describe("document acceptance public response boundary", () => {
     });
 
     it("rejects malformed decision JSON instead of producing a terminal receipt", async () => {
-        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        stubJsonResponses(JSON.stringify({
             deliveryStatus: "completed",
             recipientStatus: "completed",
             completed: "yes",
-        }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-        })));
+        }));
 
-        const request = acceptDocument(TOKEN, { typedName: "Rina Sato" });
+        const request = acceptDocument({ typedName: "Rina Sato" });
 
         await expect(request).rejects.toBeInstanceOf(ApiError);
         await request.catch((error: unknown) => {
@@ -98,12 +94,9 @@ describe("document acceptance public response boundary", () => {
     });
 
     it("rejects a malformed successful JSON body before rendering it", async () => {
-        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{not-json", {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-        })));
+        stubJsonResponses("{not-json");
 
-        await expect(getDocumentAcceptancePreview(TOKEN)).rejects.toMatchObject({
+        await expect(getDocumentAcceptancePreview()).rejects.toMatchObject({
             status: 502,
             code: "INVALID_PUBLIC_RESPONSE",
         });
@@ -114,7 +107,7 @@ describe("document acceptance public response boundary", () => {
         response.expiresAt = "not-a-date";
         stubPublicResponse(response);
 
-        await expect(getDocumentAcceptancePreview(TOKEN)).rejects.toMatchObject({
+        await expect(getDocumentAcceptancePreview()).rejects.toMatchObject({
             status: 502,
             code: "INVALID_PUBLIC_RESPONSE",
         });
@@ -125,7 +118,7 @@ describe("document acceptance public response boundary", () => {
         response.expiresAt = "2026-02-30T10:30:00Z";
         stubPublicResponse(response);
 
-        await expect(getDocumentAcceptancePreview(TOKEN)).rejects.toMatchObject({
+        await expect(getDocumentAcceptancePreview()).rejects.toMatchObject({
             status: 502,
             code: "INVALID_PUBLIC_RESPONSE",
         });
@@ -136,7 +129,7 @@ describe("document acceptance public response boundary", () => {
         response.content.generatedAt = "2026-09-01 10:30:00";
         stubPublicResponse(response);
 
-        await expect(getDocumentAcceptancePreview(TOKEN)).rejects.toMatchObject({
+        await expect(getDocumentAcceptancePreview()).rejects.toMatchObject({
             status: 502,
             code: "INVALID_PUBLIC_RESPONSE",
         });
@@ -150,7 +143,7 @@ describe("document acceptance public response boundary", () => {
         response.content.generatedAt = generatedAt;
         stubPublicResponse(response);
 
-        await expect(getDocumentAcceptancePreview(TOKEN)).resolves.toEqual(response);
+        await expect(getDocumentAcceptancePreview()).resolves.toEqual(response);
     });
 
     it("accepts a permitted unsupported persisted locale", async () => {
@@ -158,7 +151,7 @@ describe("document acceptance public response boundary", () => {
         response.documentLocale = "fr";
         stubPublicResponse(response);
 
-        await expect(getDocumentAcceptancePreview(TOKEN)).resolves.toEqual(response);
+        await expect(getDocumentAcceptancePreview()).resolves.toEqual(response);
     });
 
     it.each([
@@ -173,7 +166,7 @@ describe("document acceptance public response boundary", () => {
         mutate(response);
         stubPublicResponse(response);
 
-        await expect(getDocumentAcceptancePreview(TOKEN)).rejects.toMatchObject({
+        await expect(getDocumentAcceptancePreview()).rejects.toMatchObject({
             status: 502,
             code: "INVALID_PUBLIC_RESPONSE",
         });
@@ -186,7 +179,7 @@ describe("document acceptance public response boundary", () => {
             response.content.totals.currency = currency;
             stubPublicResponse(response);
 
-            await expect(getDocumentAcceptancePreview(TOKEN)).resolves.toEqual(response);
+            await expect(getDocumentAcceptancePreview()).resolves.toEqual(response);
         },
     );
 
@@ -220,7 +213,7 @@ describe("document acceptance public response boundary", () => {
         delete response.content.totals.currency;
         stubPublicResponse(response);
 
-        await expect(getDocumentAcceptancePreview(TOKEN)).resolves.toEqual(response);
+        await expect(getDocumentAcceptancePreview()).resolves.toEqual(response);
     });
 
     it("accepts product currency codes up to eight non-blank characters", async () => {
@@ -260,6 +253,6 @@ describe("document acceptance public response boundary", () => {
         };
         stubPublicResponse(response);
 
-        await expect(getDocumentAcceptancePreview(TOKEN)).resolves.toEqual(response);
+        await expect(getDocumentAcceptancePreview()).resolves.toEqual(response);
     });
 });

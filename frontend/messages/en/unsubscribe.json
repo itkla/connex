@@ -1,6 +1,7 @@
 {
     "Unsubscribe": {
         "title": "Unsubscribe",
+        "loading": "Opening your unsubscribe link…",
         "description": "Confirm that you no longer want to receive these messages.",
         "channelLabel": "Channel",
         "addressLabel": "Address",

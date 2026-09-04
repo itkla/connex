@@ -1,6 +1,7 @@
 {
     "Unsubscribe": {
         "title": "配信停止",
+        "loading": "配信停止リンクを開いています…",
         "description": "これらのメッセージの受信を停止することを確認してください。",
         "channelLabel": "チャネル",
         "addressLabel": "アドレス",

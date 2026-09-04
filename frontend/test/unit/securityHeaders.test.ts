@@ -95,14 +95,14 @@ describe("frontend security headers", () => {
 
     it("sets no-referrer on document-acceptance HTML and nowhere else", async () => {
         expectFrontendSecurityHeaders(
-            await headersForPath(`/document-acceptance/w12-${"a".repeat(64)}`),
+            await headersForPath("/document-acceptance"),
             "no-referrer",
         );
         expectFrontendSecurityHeaders(await headersForPath("/records/deals/42"));
     });
 
     it("keeps document acceptance public while applying the runtime no-referrer override", () => {
-        const path = `/document-acceptance/w12-${"a".repeat(64)}`;
+        const path = "/document-acceptance";
         const { response } = reportOnlyPolicy(path);
 
         expect(isProtectedPath(path)).toBe(false);
@@ -124,7 +124,7 @@ describe("frontend security headers", () => {
             "x-workspace-id": "42",
         };
         const acceptance = proxy(new NextRequest(
-            `http://localhost:3000/document-acceptance/w12-${"a".repeat(64)}`,
+            "http://localhost:3000/document-acceptance",
             { headers: requestHeaders },
         ));
 

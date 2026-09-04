@@ -15,10 +15,7 @@ import {
     documentAcceptanceFailureKind,
     markDocumentAcceptanceViewed,
 } from "@/app/lib/api";
-import {
-    documentAcceptanceTokenFromLocation,
-    documentAcceptanceViewFailure,
-} from "@/app/components/marketing/campaigns/documentAcceptance";
+import { documentAcceptanceViewFailure } from "@/app/components/marketing/campaigns/documentAcceptance";
 import type {
     DocumentAcceptanceFailureKind,
     DocumentAcceptancePreview,
@@ -58,12 +55,7 @@ export default function DocumentAcceptance({
     useEffect(() => {
         if (viewRequested.current) return;
         viewRequested.current = true;
-        const token = documentAcceptanceTokenFromLocation();
-        if (!token) {
-            void Promise.resolve().then(() => setFailure("unavailable"));
-            return;
-        }
-        void markDocumentAcceptanceViewed(token)
+        void markDocumentAcceptanceViewed()
             .then((viewed) => {
                 if (receiptRef.current) return;
                 setPreview(viewed);
@@ -127,12 +119,7 @@ export default function DocumentAcceptance({
         setRequestError(false);
         setIsSubmitting(true);
         try {
-            const token = documentAcceptanceTokenFromLocation();
-            if (!token) {
-                setFailure("unavailable");
-                return;
-            }
-            await acceptDocument(token, { typedName: normalizedName });
+            await acceptDocument({ typedName: normalizedName });
             receiptRef.current = "accepted";
             setReceipt("accepted");
             setMode(null);
@@ -158,12 +145,7 @@ export default function DocumentAcceptance({
         setRequestError(false);
         setIsSubmitting(true);
         try {
-            const token = documentAcceptanceTokenFromLocation();
-            if (!token) {
-                setFailure("unavailable");
-                return;
-            }
-            await declineDocument(token, { reason: normalizedReason });
+            await declineDocument({ reason: normalizedReason });
             receiptRef.current = "declined";
             setReceipt("declined");
             setMode(null);
