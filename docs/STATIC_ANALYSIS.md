@@ -144,12 +144,14 @@ to describe the gate as absent:
   be up to date with `main`, so a pull request analysed against an older base can merge. The `main`
   gate above is the compensating detection: the merge commit's own push run re-evaluates the
   combined tree and turns `main` red if the combination introduced a blocking alert.
-- **Administrator bypass — closed on #1244.** `enforce_admins` is enabled, so an administrator can
-  no longer merge past a failed required check. Verify with
-  `gh api repos/itkla/connex/branches/main/protection --jq .enforce_admins.enabled` (`true`) or,
-  unauthenticated, `curl -s https://api.github.com/repos/itkla/connex/branches/main | jq
-  '.protection.required_status_checks.enforcement_level'` (`"everyone"`). The canary proof asserts
-  it every week under `--require-admin-enforcement`, so silently turning it off turns the proof red.
+- **Administrator bypass — closed 2026-09-05 on #1244.** `enforce_admins` was enabled on
+  2026-09-05 and verified the same day, so an administrator can no longer merge past a failed
+  required check: `gh api repos/itkla/connex/branches/main/protection --jq
+  .enforce_admins.enabled` returned `true`, and the unauthenticated
+  `curl -s https://api.github.com/repos/itkla/connex/branches/main | jq
+  '.protection.required_status_checks.enforcement_level'` returned `"everyone"` (it read
+  `"non_admins"` on 2026-09-02). Re-verify with the same two commands. The canary proof asserts it
+  every week under `--require-admin-enforcement`, so silently turning it off turns the proof red.
   **Emergency path**, for a CI outage that leaves a required check unable to pass at all:
   `gh api -X DELETE repos/itkla/connex/branches/main/protection/enforce_admins`, land the fix, and
   `gh api -X POST .../enforce_admins` again **within the same incident**. Both calls appear in the
@@ -204,15 +206,20 @@ snapshot by `.github/scripts/replay-codeql-dismissals.py`; the gate re-scoped fr
 to a base-vs-merge alert-identity comparison with diff-informed analysis disabled; the same step
 extended to gate `main` itself.
 
-**What keeps it closed.** Four independent assertions, each of which fails loudly:
+**What keeps it closed.** Five independent assertions, each of which fails loudly:
 
 1. `test_security_workflow.py` requires `paths:` in both configuration files and forbids
    `source-root` on either `init` step.
 2. `test_security_workflow.py` requires `CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'` on both SAST
    jobs, so no result is pruned before upload.
-3. The gate compares alert identities across refs, so it no longer depends on GitHub's diff
+3. The gate step refuses, within the same run, an analysis of the analysed commit that stored zero
+   results while the base ref's newest analysis of the same category stored some
+   (`check-codeql-alerts.py --analyses`, exit `2`). The failure class itself — a processed, empty
+   upload — fails the pull request on the spot instead of reading as a pass. A pruned but non-empty
+   upload is outside its reach; that is what assertion 5 is for.
+4. The gate compares alert identities across refs, so it no longer depends on GitHub's diff
    attribution being correct at all.
-4. The weekly canary proof measures the outcome end to end: it asserts each analysis carries the
+5. The weekly canary proof measures the outcome end to end: it asserts each analysis carries the
    base commit's result count **plus exactly one**, and that both fixture alerts are attributed
    under `pr=<n>` — which is only true while result paths are repository-relative. A silent
    regression of this class turns the proof red within a week.
