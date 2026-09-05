@@ -48,9 +48,12 @@ open on the analysed ref but **not** open on the base ref. Because alert numbers
 identities shared across refs, this compares findings rather than diff lines: a finding the pull
 request introduces indirectly, whose result location is outside the diff, blocks exactly like one
 inside it, while a finding already open on `main` under the same number does not fail an unrelated
-pull request. A frontend alert cannot be attributed to the backend job, or the reverse. Dismissing
-the alert through the procedure below is the sanctioned way to unblock; a finding that is `fixed` on
-`main` and reappears on a pull request blocks again as a regression.
+pull request. A pull request whose base branch has never been analysed has an empty base set, so
+every open Critical/High on its merge ref blocks: a stacked pull request against a feature branch
+is stricter than one against `main`, never looser. A frontend alert cannot be attributed to the
+backend job, or the reverse. Dismissing the alert through the procedure below is the sanctioned way
+to unblock; a finding that is `fixed` on `main` and reappears on a pull request blocks again as a
+regression.
 
 Pushes to `main` run both analyses to maintain the base-branch result used by that comparison and
 are gated themselves (see below). The existing Sunday schedule runs both full-directory analyses for
@@ -73,6 +76,19 @@ security severity `critical` or `high`, or generic SARIF severity `error`, that 
 base ref's open set. Pagination is mandatory and every response is structurally validated; a ref
 mismatch is an invalid response, not a pass.
 
+**An empty analysis is refused, not passed.** Before it reads a single alert, the same step fetches
+the newest code-scanning analyses of the analysed ref and, on pull-request and merge-group runs, of
+the base ref, and hands them to the checker (`--analyses`/`--commit`, `--baseline-analyses`). The
+checker requires an analysis of the analysed commit (`github.sha`) in the job's category and refuses
+one that stored `results_count: 0` while the base ref's newest analysis of the same category stored
+results (exit `2`, `CodeQL analysis cannot be gated`). That is what every pull-request analysis
+looked like from 2026-08-26: processed successfully, zero results, and an empty alert set that read
+as a pass — `wait-for-processing` cannot tell the two apart, and after the alert inventory was
+brought to zero a blind run and a clean run print the same line. On `push`, `schedule` and
+`workflow_dispatch` runs there is no reference analysis, so only the analysis's existence is
+checked; a pruned-but-non-empty upload is outside this step's reach and is left to the end-to-end
+proof under *Workflow failure proof and independent retest*.
+
 **The same step gates `main`.** On `push`, `schedule`, and `workflow_dispatch` runs the step queries
 the analysed ref (`refs/heads/main` for the first two) with no baseline, so any open Critical, High,
 or error-severity alert on `main` in the job's category fails `Backend SAST (CodeQL)` or
@@ -92,7 +108,10 @@ Within a selected workflow run, this alert check is fail-closed:
 - CodeQL initialization, build, analysis, or upload failure fails the selected SAST job;
 - a timeout cancels that job and produces a non-success result;
 - an unavailable or unauthorized code-scanning API makes the `gh api` command fail;
-- malformed, incomplete, unknown-severity, or non-open API results make the checker fail; and
+- malformed, incomplete, unknown-severity, or non-open API results make the checker fail;
+- an analysis of the analysed commit that is missing, or that stored zero results while the base
+  ref's newest analysis of the same category stored some, makes the checker refuse the run — a
+  processed upload carrying zero results is the 2026-08-26 failure class, not a pass; and
 - the final `Security — required` job rejects every failed or cancelled dependency and separately
   requires an exact `selected → success` or `not selected → skipped` result for each SAST job.
 

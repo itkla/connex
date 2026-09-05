@@ -12,6 +12,8 @@ BACKEND_CATEGORY = "/language:java-kotlin"
 FRONTEND_CATEGORY = "/language:javascript-typescript"
 MERGE_REF = "refs/pull/9/merge"
 MAIN_REF = "refs/heads/main"
+MERGE_SHA = "1111111111111111111111111111111111111111"
+MAIN_SHA = "2222222222222222222222222222222222222222"
 SPEC = importlib.util.spec_from_file_location("check_codeql_alerts", SCRIPT)
 if SPEC is None or SPEC.loader is None:
     raise RuntimeError("Could not load the CodeQL alert checker")
@@ -47,6 +49,10 @@ def alert(
     }
 
 
+def analysis(category: str, commit_sha: str, results_count: int) -> dict[str, object]:
+    return {"category": category, "commit_sha": commit_sha, "results_count": results_count}
+
+
 class CodeqlAlertCheckerTest(unittest.TestCase):
     def write_pages(self, pages: object) -> Path:
         temporary = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False)
@@ -56,9 +62,23 @@ class CodeqlAlertCheckerTest(unittest.TestCase):
         self.addCleanup(path.unlink, missing_ok=True)
         return path
 
-    def run_checker(self, path: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    def run_checker(
+        self, path: Path, *arguments: str, analyses: Path | None = None, commit: str = MERGE_SHA
+    ) -> subprocess.CompletedProcess[str]:
+        if analyses is None:
+            analyses = self.write_pages([analysis(FRONTEND_CATEGORY, commit, 8)])
         return subprocess.run(
-            [sys.executable, str(SCRIPT), str(path), FRONTEND_CATEGORY, *arguments],
+            [
+                sys.executable,
+                str(SCRIPT),
+                str(path),
+                FRONTEND_CATEGORY,
+                "--analyses",
+                str(analyses),
+                "--commit",
+                commit,
+                *arguments,
+            ],
             check=False,
             capture_output=True,
             text=True,
@@ -155,6 +175,87 @@ class CodeqlAlertCheckerTest(unittest.TestCase):
                 [alert(5, "warning", "high", ref=MAIN_REF, instance_state="dismissed")], MAIN_REF
             )
 
+    def test_an_empty_analysis_beside_a_populated_base_ref_fails_closed(self) -> None:
+        """A processed upload that stored zero results is refused, not passed.
+
+        From 2026-08-26 every pull-request analysis was processed successfully with
+        `results_count: 0`, so `wait-for-processing` saw nothing wrong and the empty alert set
+        read as a pass. The base ref's newest analysis of the same category is the reference: if
+        it stored results and the analysed commit stored none, results were pruned before upload
+        or the upload was empty, and an empty alert set proves nothing.
+        """
+        with self.assertRaisesRegex(CHECKER.BlindAnalysisError, "stored 0 results while"):
+            CHECKER.require_live_analysis(
+                [analysis(FRONTEND_CATEGORY, MERGE_SHA, 0)],
+                FRONTEND_CATEGORY,
+                MERGE_SHA,
+                MERGE_REF,
+                [
+                    analysis(BACKEND_CATEGORY, MAIN_SHA, 58),
+                    analysis(FRONTEND_CATEGORY, MAIN_SHA, 8),
+                ],
+                MAIN_REF,
+            )
+
+    def test_an_empty_analysis_passes_when_the_base_ref_stored_nothing_either(self) -> None:
+        both_empty = CHECKER.require_live_analysis(
+            [analysis(FRONTEND_CATEGORY, MERGE_SHA, 0)],
+            FRONTEND_CATEGORY,
+            MERGE_SHA,
+            MERGE_REF,
+            [analysis(FRONTEND_CATEGORY, MAIN_SHA, 0)],
+            MAIN_REF,
+        )
+        self.assertIn("stored 0 result(s) against 0 on refs/heads/main", both_empty)
+        no_reference = CHECKER.require_live_analysis(
+            [analysis(FRONTEND_CATEGORY, MERGE_SHA, 0)],
+            FRONTEND_CATEGORY,
+            MERGE_SHA,
+            MERGE_REF,
+            [analysis(BACKEND_CATEGORY, MAIN_SHA, 58)],
+            MAIN_REF,
+        )
+        self.assertIn("has no /language:javascript-typescript analysis to compare", no_reference)
+        without_baseline = CHECKER.require_live_analysis(
+            [analysis(FRONTEND_CATEGORY, MAIN_SHA, 0)], FRONTEND_CATEGORY, MAIN_SHA, MAIN_REF, None, None
+        )
+        self.assertEqual(
+            "/language:javascript-typescript analysis of 222222222 on refs/heads/main stored 0 result(s)",
+            without_baseline,
+        )
+
+    def test_the_analysed_commit_must_have_an_analysis_in_the_category(self) -> None:
+        with self.assertRaisesRegex(CHECKER.BlindAnalysisError, "no /language:javascript-typescript analysis of 111111111"):
+            CHECKER.require_live_analysis(
+                [analysis(FRONTEND_CATEGORY, MAIN_SHA, 8), analysis(BACKEND_CATEGORY, MERGE_SHA, 58)],
+                FRONTEND_CATEGORY,
+                MERGE_SHA,
+                MERGE_REF,
+                None,
+                None,
+            )
+        with self.assertRaisesRegex(ValueError, "invalid results count"):
+            CHECKER.require_live_analysis(
+                [{"category": FRONTEND_CATEGORY, "commit_sha": MERGE_SHA, "results_count": "8"}],
+                FRONTEND_CATEGORY,
+                MERGE_SHA,
+                MERGE_REF,
+                None,
+                None,
+            )
+
+    def test_the_newest_analysis_of_the_category_is_the_reference(self) -> None:
+        reference = CHECKER.newest_analysis(
+            [
+                analysis(BACKEND_CATEGORY, MAIN_SHA, 58),
+                analysis(FRONTEND_CATEGORY, MAIN_SHA, 8),
+                analysis(FRONTEND_CATEGORY, "3" * 40, 9),
+            ],
+            FRONTEND_CATEGORY,
+            None,
+        )
+        self.assertEqual((MAIN_SHA, 8), reference)
+
     def test_malformed_or_non_open_results_fail_closed(self) -> None:
         with self.assertRaisesRegex(ValueError, "page 1"):
             CHECKER.load_alerts(self.write_pages([{"not": "a page"}]))
@@ -176,34 +277,61 @@ class CodeqlAlertCheckerTest(unittest.TestCase):
         new_high = self.write_pages([[alert(8, "warning", "critical")]])
         main_high = self.write_pages([[alert(8, "warning", "critical", ref=MAIN_REF)]])
         main_other = self.write_pages([[alert(9, "warning", "critical", ref=MAIN_REF)]])
+        main_analyses = self.write_pages(
+            [analysis(BACKEND_CATEGORY, MAIN_SHA, 58), analysis(FRONTEND_CATEGORY, MAIN_SHA, 8)]
+        )
+        blind_analyses = self.write_pages([analysis(FRONTEND_CATEGORY, MERGE_SHA, 0)])
+        baseline = ("--baseline-analyses", str(main_analyses))
 
         passing = self.run_checker(empty, "--ref", MERGE_REF)
         blocking = self.run_checker(new_high, "--ref", MERGE_REF)
         blocking_with_baseline = self.run_checker(
-            new_high, "--ref", MERGE_REF, "--baseline", str(main_other), "--baseline-ref", MAIN_REF
+            new_high, "--ref", MERGE_REF, "--baseline", str(main_other), "--baseline-ref", MAIN_REF, *baseline
         )
         pre_existing = self.run_checker(
-            new_high, "--ref", MERGE_REF, "--baseline", str(main_high), "--baseline-ref", MAIN_REF
+            new_high, "--ref", MERGE_REF, "--baseline", str(main_high), "--baseline-ref", MAIN_REF, *baseline
         )
-        main_gate = self.run_checker(main_high, "--ref", MAIN_REF)
+        main_gate = self.run_checker(main_high, "--ref", MAIN_REF, commit=MAIN_SHA)
         malformed = self.run_checker(self.write_pages({"not": "paginated"}), "--ref", MERGE_REF)
         wrong_ref = self.run_checker(new_high, "--ref", MAIN_REF)
         missing_ref = self.run_checker(empty)
         missing_baseline_ref = self.run_checker(
-            new_high, "--ref", MERGE_REF, "--baseline", str(main_high)
+            new_high, "--ref", MERGE_REF, "--baseline", str(main_high), *baseline
+        )
+        missing_baseline_analyses = self.run_checker(
+            new_high, "--ref", MERGE_REF, "--baseline", str(main_high), "--baseline-ref", MAIN_REF
+        )
+        blind = self.run_checker(
+            empty, "--ref", MERGE_REF, "--baseline", str(empty), "--baseline-ref", MAIN_REF, *baseline,
+            analyses=blind_analyses,
+        )
+        unanalysed = self.run_checker(empty, "--ref", MERGE_REF, analyses=self.write_pages([]))
+        missing_analyses = subprocess.run(
+            [sys.executable, str(SCRIPT), str(empty), FRONTEND_CATEGORY, "--ref", MERGE_REF],
+            check=False,
+            capture_output=True,
+            text=True,
         )
 
         self.assertEqual(0, passing.returncode, passing.stderr)
+        self.assertIn("stored 8 result(s)", passing.stdout)
         self.assertEqual(1, blocking.returncode, blocking.stderr)
         self.assertEqual(1, blocking_with_baseline.returncode, blocking_with_baseline.stderr)
         self.assertEqual(0, pre_existing.returncode, pre_existing.stderr)
         self.assertIn("1 pre-existing alert(s) on refs/heads/main ignored", pre_existing.stdout)
+        self.assertIn("against 8 on refs/heads/main", pre_existing.stdout)
         self.assertEqual(1, main_gate.returncode, main_gate.stderr)
         self.assertEqual(2, malformed.returncode, malformed.stderr)
         self.assertEqual(2, wrong_ref.returncode, wrong_ref.stderr)
         self.assertEqual(2, missing_ref.returncode, missing_ref.stderr)
         self.assertEqual(2, missing_baseline_ref.returncode, missing_baseline_ref.stderr)
-
+        self.assertEqual(2, missing_baseline_analyses.returncode, missing_baseline_analyses.stderr)
+        self.assertEqual(2, blind.returncode, blind.stdout)
+        self.assertIn("CodeQL analysis cannot be gated", blind.stderr)
+        self.assertIn("stored 0 results while the newest on refs/heads/main", blind.stderr)
+        self.assertEqual(2, unanalysed.returncode, unanalysed.stdout)
+        self.assertIn("no /language:javascript-typescript analysis of 111111111", unanalysed.stderr)
+        self.assertEqual(2, missing_analyses.returncode, missing_analyses.stdout)
 
 if __name__ == "__main__":
     unittest.main()

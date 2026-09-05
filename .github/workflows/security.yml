@@ -215,6 +215,7 @@ jobs:
         env:
           ANALYSIS_CATEGORY: /language:java-kotlin
           ANALYSIS_REF: ${{ github.ref }}
+          ANALYSIS_SHA: ${{ github.sha }}
           BASE_REF: ${{ github.event.merge_group.base_ref || format('refs/heads/{0}', github.event.pull_request.base.ref) }}
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REPO_FORK: ${{ github.event.pull_request.head.repo.fork }}
@@ -223,6 +224,8 @@ jobs:
           set -euo pipefail
           alerts_file="$RUNNER_TEMP/codeql-backend-alerts.json"
           baseline_file="$RUNNER_TEMP/codeql-backend-baseline.json"
+          analyses_file="$RUNNER_TEMP/codeql-backend-analyses.json"
+          baseline_analyses_file="$RUNNER_TEMP/codeql-backend-baseline-analyses.json"
           fetch_open_alerts() {
             gh api --method GET --paginate --slurp \
               -H "Accept: application/vnd.github+json" \
@@ -233,6 +236,18 @@ jobs:
               -f "ref=$1" \
               "repos/$GITHUB_REPOSITORY/code-scanning/alerts"
           }
+          # The newest analyses of a ref, so the checker can refuse an upload that was processed
+          # but stored no results: that is what every pull-request analysis looked like from
+          # 2026-08-26 (#1244), and an empty alert set is indistinguishable from a clean one.
+          fetch_analyses() {
+            gh api --method GET \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              -f tool_name=CodeQL \
+              -f per_page=20 \
+              -f "ref=$1" \
+              "repos/$GITHUB_REPOSITORY/code-scanning/analyses"
+          }
           case "$EVENT_NAME" in
             pull_request|merge_group)
               if [ "$HEAD_REPO_FORK" = "true" ]; then
@@ -240,11 +255,17 @@ jobs:
               fi
               fetch_open_alerts "$ANALYSIS_REF" > "$alerts_file"
               fetch_open_alerts "$BASE_REF" > "$baseline_file"
+              fetch_analyses "$ANALYSIS_REF" > "$analyses_file"
+              fetch_analyses "$BASE_REF" > "$baseline_analyses_file"
               python3 .github/scripts/check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY" \
-                --ref "$ANALYSIS_REF" --baseline "$baseline_file" --baseline-ref "$BASE_REF" ;;
+                --analyses "$analyses_file" --commit "$ANALYSIS_SHA" \
+                --ref "$ANALYSIS_REF" --baseline "$baseline_file" --baseline-ref "$BASE_REF" \
+                --baseline-analyses "$baseline_analyses_file" ;;
             push|schedule|workflow_dispatch)
               fetch_open_alerts "$ANALYSIS_REF" > "$alerts_file"
+              fetch_analyses "$ANALYSIS_REF" > "$analyses_file"
               python3 .github/scripts/check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY" \
+                --analyses "$analyses_file" --commit "$ANALYSIS_SHA" \
                 --ref "$ANALYSIS_REF" ;;
             *) echo "::error::Unsupported CodeQL gate event: $EVENT_NAME"; exit 1 ;;
           esac
@@ -283,6 +304,7 @@ jobs:
         env:
           ANALYSIS_CATEGORY: /language:javascript-typescript
           ANALYSIS_REF: ${{ github.ref }}
+          ANALYSIS_SHA: ${{ github.sha }}
           BASE_REF: ${{ github.event.merge_group.base_ref || format('refs/heads/{0}', github.event.pull_request.base.ref) }}
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REPO_FORK: ${{ github.event.pull_request.head.repo.fork }}
@@ -291,6 +313,8 @@ jobs:
           set -euo pipefail
           alerts_file="$RUNNER_TEMP/codeql-frontend-alerts.json"
           baseline_file="$RUNNER_TEMP/codeql-frontend-baseline.json"
+          analyses_file="$RUNNER_TEMP/codeql-frontend-analyses.json"
+          baseline_analyses_file="$RUNNER_TEMP/codeql-frontend-baseline-analyses.json"
           fetch_open_alerts() {
             gh api --method GET --paginate --slurp \
               -H "Accept: application/vnd.github+json" \
@@ -301,6 +325,18 @@ jobs:
               -f "ref=$1" \
               "repos/$GITHUB_REPOSITORY/code-scanning/alerts"
           }
+          # The newest analyses of a ref, so the checker can refuse an upload that was processed
+          # but stored no results: that is what every pull-request analysis looked like from
+          # 2026-08-26 (#1244), and an empty alert set is indistinguishable from a clean one.
+          fetch_analyses() {
+            gh api --method GET \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              -f tool_name=CodeQL \
+              -f per_page=20 \
+              -f "ref=$1" \
+              "repos/$GITHUB_REPOSITORY/code-scanning/analyses"
+          }
           case "$EVENT_NAME" in
             pull_request|merge_group)
               if [ "$HEAD_REPO_FORK" = "true" ]; then
@@ -308,11 +344,17 @@ jobs:
               fi
               fetch_open_alerts "$ANALYSIS_REF" > "$alerts_file"
               fetch_open_alerts "$BASE_REF" > "$baseline_file"
+              fetch_analyses "$ANALYSIS_REF" > "$analyses_file"
+              fetch_analyses "$BASE_REF" > "$baseline_analyses_file"
               python3 .github/scripts/check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY" \
-                --ref "$ANALYSIS_REF" --baseline "$baseline_file" --baseline-ref "$BASE_REF" ;;
+                --analyses "$analyses_file" --commit "$ANALYSIS_SHA" \
+                --ref "$ANALYSIS_REF" --baseline "$baseline_file" --baseline-ref "$BASE_REF" \
+                --baseline-analyses "$baseline_analyses_file" ;;
             push|schedule|workflow_dispatch)
               fetch_open_alerts "$ANALYSIS_REF" > "$alerts_file"
+              fetch_analyses "$ANALYSIS_REF" > "$analyses_file"
               python3 .github/scripts/check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY" \
+                --analyses "$analyses_file" --commit "$ANALYSIS_SHA" \
                 --ref "$ANALYSIS_REF" ;;
             *) echo "::error::Unsupported CodeQL gate event: $EVENT_NAME"; exit 1 ;;
           esac

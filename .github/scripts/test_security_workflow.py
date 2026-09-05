@@ -155,13 +155,21 @@ class SecurityWorkflowTest(unittest.TestCase):
                 self.assertEqual(
                     2, gate["run"].count('check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY"')
                 )
+                self.assertEqual(
+                    2, gate["run"].count('--analyses "$analyses_file" --commit "$ANALYSIS_SHA"')
+                )
+                self.assertIn('"repos/$GITHUB_REPOSITORY/code-scanning/analyses"', gate["run"])
+                self.assertIn('fetch_analyses "$ANALYSIS_REF" > "$analyses_file"', gate["run"])
+                self.assertIn('fetch_analyses "$BASE_REF" > "$baseline_analyses_file"', gate["run"])
                 self.assertIn(
-                    '--ref "$ANALYSIS_REF" --baseline "$baseline_file" --baseline-ref "$BASE_REF" ;;',
+                    '--ref "$ANALYSIS_REF" --baseline "$baseline_file" --baseline-ref "$BASE_REF" \\\n'
+                    '      --baseline-analyses "$baseline_analyses_file" ;;',
                     gate["run"],
                 )
                 self.assertIn('--ref "$ANALYSIS_REF" ;;', gate["run"])
                 self.assertEqual(f"/language:{language}", gate["env"]["ANALYSIS_CATEGORY"])
                 self.assertEqual("${{ github.ref }}", gate["env"]["ANALYSIS_REF"])
+                self.assertEqual("${{ github.sha }}", gate["env"]["ANALYSIS_SHA"])
                 self.assertEqual(
                     "${{ github.event.merge_group.base_ref || "
                     "format('refs/heads/{0}', github.event.pull_request.base.ref) }}",
