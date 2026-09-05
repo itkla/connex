@@ -815,16 +815,19 @@ afterwards; `widgetKpiMatchesGeneratedWidgetForTheSamePeriodWithoutUsingAi` alre
 mutation check — an `auditService.record(...)` added at the top of `ReportService.widgetKpi` —
 turns the new test red.
 
-**Disposition: false positive.** Tracking issue #<TRACKING-ISSUE>; owner Hunter Nakagawa; approver
+**Disposition: false positive.** Tracking issue
+[#1584](https://github.com/itkla/connex/issues/1584); owner Hunter Nakagawa; approver
 Security Owner role ([#1230](https://github.com/itkla/connex/issues/1230)); expiry **2027-02-14**,
 re-review **2027-01-14**. Reassess if `widgetKpi` or `generationInputs` gains a write, or if the
-query's dispatch modelling changes. Dismissed with the following comment on #153 before the
-snapshot, and copied verbatim onto its third-generation twin #<TWIN>
+query's dispatch modelling changes. Dismissed on 2026-09-05T01:43Z with the following comment on
+#153 before the snapshot, and copied verbatim onto its third-generation twin #<TWIN>
 (`backend/src/main/java/ooo/klae/connex/backend/controllers/ReportController.java:126`) by the
 replay:
 
 > False positive: GET reaches select mappers and read-only scoring; no audit_log/ai_output_cache
 > write (ReportKpiIntegrationTest.widgetKpiWritesNoAuditOrCacheRows). CodeQL linked AI writes via
-> lambda dispatch. Owner Hunter Nakagawa. Expiry 2027-02-14, re-review 2027-01-14. #<TRACKING-ISSUE>
+> lambda dispatch. Owner Hunter Nakagawa. Expiry 2027-02-14, re-review 2027-01-14. #1584
 
-(277 characters with a four-digit issue number; the API cap is 280.)
+(277 characters; the API cap is 280. Verified after the dismissal with
+`gh api repos/itkla/connex/code-scanning/alerts/153 --jq '{state,dismissed_at,dismissed_reason,dismissed_comment}'`
+→ `dismissed`, `2026-09-05T01:43:26Z`, `false positive`, the comment above.)
