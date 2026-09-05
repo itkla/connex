@@ -10,6 +10,12 @@ name: SAST canary proof
 # results), both SAST jobs failed at the gate step rather than at the tooling, `Security — required`
 # failed, branch protection still requires the three contexts, and the pull request is BLOCKED.
 #
+# A re-run reuses the original merge commit, so the canary ages: GitHub refuses to re-run a workflow
+# run more than 30 days after its initial run, and the base commit's analyses drift down main's
+# analysis list. The proof therefore refuses a canary run older than MAX_RUN_AGE_DAYS and walks at
+# most MAIN_ANALYSES_PAGE_BUDGET pages of main's analyses, and fails each case with the same remedy:
+# rebase canary/sast-gate-proof onto main and force-push.
+#
 # There is no push trigger on purpose: `test_main_red_alert.py` requires every workflow that runs on
 # a push to main to be watched by the red-main alert, and a proof failure has its own issue.
 
@@ -47,6 +53,8 @@ jobs:
       FRONTEND_CATEGORY: /language:javascript-typescript
       BACKEND_FIXTURE: backend/src/test/java/ooo/klae/connex/backend/codeqlfixture/IntentionalCommandInjectionFixture.java
       FRONTEND_FIXTURE: frontend/test/fixtures/codeql/intentional-command-injection.mjs
+      MAX_RUN_AGE_DAYS: '28'
+      MAIN_ANALYSES_PAGE_BUDGET: '20'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Discover the canary pull request
@@ -94,10 +102,15 @@ jobs:
               stale=1
             fi
           done
-          # The fixtures must never be reachable from the default branch.
+          # The fixtures must never be reachable from the default branch. Only an explicit 404
+          # proves absence: a rate limit, a 5xx or a token-scope failure is reported as such rather
+          # than read as "absent".
           for fixture in "$BACKEND_FIXTURE" "$FRONTEND_FIXTURE"; do
-            if gh api "repos/$REPO/contents/$fixture?ref=main" >/dev/null 2>&1; then
+            if probe="$(gh api "repos/$REPO/contents/$fixture?ref=main" 2>&1)"; then
               echo "::error::$fixture exists on main; the canary fixtures must never be merged"
+              stale=1
+            elif ! printf '%s' "$probe" | grep -q 'HTTP 404'; then
+              echo "::error::could not prove $fixture is absent from main: $probe"
               stale=1
             fi
           done
@@ -118,7 +131,17 @@ jobs:
           # A re-run keeps the run id and bumps run_attempt. Record the attempt first: for the
           # first seconds after the POST the run is still reported as the previous, completed
           # attempt, and a poll that only reads `status` would accept that stale verdict.
-          attempt_before="$(gh api "repos/$REPO/actions/runs/$run_id" --jq '.run_attempt')"
+          run="$(gh api "repos/$REPO/actions/runs/$run_id" --jq '(.run_attempt|tostring) + " " + .created_at')"
+          attempt_before="${run%% *}"
+          created_at="${run##* }"
+          # GitHub refuses to re-run a run more than 30 days after its initial run, and the base
+          # commit of an old merge commit falls out of the analyses the proof fetches. Refuse the
+          # aged run here, with the remedy, instead of surfacing a raw API error from the POST.
+          age_days="$(( ( $(date -u +%s) - $(date -u -d "$created_at" +%s) ) / 86400 ))"
+          if [ "$age_days" -gt "$MAX_RUN_AGE_DAYS" ]; then
+            echo "::error::the canary's Security run $run_id was created $age_days days ago (limit $MAX_RUN_AGE_DAYS days): rebase canary/sast-gate-proof onto main and force-push so a fresh run exists"
+            exit 1
+          fi
           gh api --method POST "repos/$REPO/actions/runs/$run_id/rerun" >/dev/null
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
           echo "Re-running Security run $run_id (attempt $attempt_before) for pull request #$CANARY_NUMBER"
@@ -152,9 +175,27 @@ jobs:
             "repos/$REPO/code-scanning/alerts" > "$RUNNER_TEMP/canary/pr-alerts.json"
           gh api "repos/$REPO/code-scanning/analyses?ref=refs/pull/$CANARY_NUMBER/merge&per_page=20" \
             > "$RUNNER_TEMP/canary/ref-analyses.json"
-          gh api "repos/$REPO/code-scanning/analyses?ref=refs/heads/main&per_page=50" \
-            > "$RUNNER_TEMP/canary/main-analyses.json"
           gh api "repos/$REPO/commits/$MERGE_SHA" > "$RUNNER_TEMP/canary/merge-commit.json"
+          # The count invariant needs main's analyses of the merge commit's first parent. One page
+          # of 100 covers about a week of main at the 2026-09 merge rate, so walk newest-first until
+          # both categories of that commit are found, the list ends, or the page budget runs out.
+          # The verifier names the rebase remedy when the base commit is not in what was fetched.
+          base_sha="$(jq -r '.parents[0].sha' "$RUNNER_TEMP/canary/merge-commit.json")"
+          page_files=()
+          for page in $(seq 1 "$MAIN_ANALYSES_PAGE_BUDGET"); do
+            page_file="$RUNNER_TEMP/canary/main-analyses-page-$page.json"
+            gh api "repos/$REPO/code-scanning/analyses?ref=refs/heads/main&per_page=100&page=$page" \
+              > "$page_file"
+            page_files+=("$page_file")
+            jq -s 'add' "${page_files[@]}" > "$RUNNER_TEMP/canary/main-analyses.json"
+            found="$(jq --arg sha "$base_sha" --arg backend "$BACKEND_CATEGORY" --arg frontend "$FRONTEND_CATEGORY" \
+              '[.[] | select(.commit_sha == $sha) | .category | select(. == $backend or . == $frontend)]
+               | unique | length' "$RUNNER_TEMP/canary/main-analyses.json")"
+            echo "main analyses page $page: $found of 2 categories analysed at base commit ${base_sha:0:9}"
+            if [ "$found" = "2" ] || [ "$(jq 'length' "$page_file")" -lt 100 ]; then
+              break
+            fi
+          done
           gh api "repos/$REPO/branches/main" > "$RUNNER_TEMP/canary/branch.json"
           gh api graphql -f query='
             query($owner:String!,$name:String!,$number:Int!){
@@ -193,15 +234,19 @@ jobs:
             --summary "$GITHUB_STEP_SUMMARY" \
             --require-admin-enforcement
       - name: Report a failed proof
-        if: failure()
+        # cancelled() covers the job's own timeout-minutes (GitHub cancels the job) and a manual
+        # cancellation; failure() alone would leave both silent. A workflow-file error concludes
+        # startup_failure without running any step and is visible only in the Actions tab.
+        if: failure() || cancelled()
         env:
           CANARY_NUMBER: ${{ steps.canary.outputs.number }}
+          JOB_STATUS: ${{ job.status }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           title='SAST gate canary proof failed'
           body="$(printf '%s\n' \
-            "The weekly CodeQL gate canary proof failed for pull request #$CANARY_NUMBER." \
+            "The weekly CodeQL gate canary proof did not pass for pull request #$CANARY_NUMBER (job status: $JOB_STATUS)." \
             "" \
             "$RUN_URL" \
             "" \

@@ -223,6 +223,23 @@ class VerifySastCanaryTest(unittest.TestCase):
 
         self.assert_fails(mutate, "the evidence is stale")
 
+    def test_a_base_commit_missing_from_the_main_analyses_names_the_rebase_remedy(self) -> None:
+        """An aged canary is reported as an aged canary, not as a violated count invariant.
+
+        `main` produces about a hundred analyses a week, so a base commit older than the pages the
+        workflow fetches is an operational condition with one remedy — rebase the canary — and must
+        be distinguishable from results being pruned.
+        """
+        def mutate(pack: dict[str, object]) -> None:
+            for entry in pack["main-analyses"]:
+                entry["commit_sha"] = "5" * 40
+
+        self.assert_fails(mutate, "rebase canary/sast-gate-proof onto main and force-push")
+        pack = evidence()
+        mutate(pack)
+        result, _ = self.run_verifier(pack)
+        self.assertNotIn("must add exactly one", result.stderr)
+
     def test_a_missing_required_context_fails_the_proof(self) -> None:
         def mutate(pack: dict[str, object]) -> None:
             contexts = pack["branch"]["protection"]["required_status_checks"]["contexts"]

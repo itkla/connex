@@ -259,8 +259,10 @@ def check_analyses(
             )
         if main_analysis is None:
             failures.append(
-                f"no {fixture.category} analysis of the base commit {base_sha[:9]} on main; "
-                "the count invariant cannot be measured"
+                f"no {fixture.category} analysis of the base commit {base_sha[:9]} is among the "
+                "fetched main analyses, so the canary has aged past the proof's page budget: rebase "
+                "canary/sast-gate-proof onto main and force-push so the proof compares against a "
+                "recent base"
             )
         if ref_analysis is None or main_analysis is None:
             lines.append(f"| {fixture.category} | — | — | — |")

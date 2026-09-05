@@ -325,21 +325,32 @@ reaches `main` — the proof asserts that both paths return 404 on `?ref=main`.
 - the same two alert numbers appear under `alerts?pr=<n>` — attribution only works while result
   paths are repository-relative, so this re-proves the incident above stays closed;
 - each category's analysis of the merge commit carries exactly one result more than `main`'s
-  analysis of that merge commit's first parent — the invariant that nothing is being pruned;
+  analysis of that merge commit's first parent — the invariant that nothing is being pruned. The
+  workflow walks `main`'s analysis list newest-first, up to 20 pages of 100, until it finds that
+  parent; a parent it cannot find is reported as an aged canary with the rebase remedy, never as a
+  count violation;
 - branch protection still requires `Security — required`, `Backend SAST (CodeQL)` and
   `Frontend SAST (CodeQL)`, with `enforcement_level` `everyone`;
 - the pull request's `mergeStateStatus` is `BLOCKED` and all three check runs are `FAILURE`.
 
 It writes those tables to the run's step summary, and a failed proof opens or comments on a
-`sast-canary-failed` issue.
+`sast-canary-failed` issue. The reporting step runs on `failure() || cancelled()`, so a proof that
+is cancelled or hits its 60-minute job timeout reports too, with the job status in the body; a
+workflow-file error that concludes `startup_failure` runs no step at all and is visible only in the
+Actions tab.
 
 **Refresh rule.** A re-run reuses the original merge commit, so a gate change on `main` is not
 exercised until the canary is rebased. Whenever `.github/workflows/security.yml`,
 `.github/scripts/check-codeql-alerts.py`, `.github/scripts/classify-ci-changes.py` or
-`.github/codeql/*.yml` changes on `main`, rebase `canary/sast-gate-proof` onto `origin/main` and
-`git push --force-with-lease`. This is the repository's single documented force-push exception: a
-single-purpose branch that is never merged. The proof compares each gate file's blob id between
-`main` and the analysed merge commit and fails with an explicit rebase instruction otherwise.
+`.github/codeql/*.yml` changes on `main`, **and in any case at least every 28 days**, rebase
+`canary/sast-gate-proof` onto `origin/main` and `git push --force-with-lease`. This is the
+repository's single documented force-push exception: a single-purpose branch that is never merged.
+The time bound exists because GitHub refuses to re-run a workflow run more than 30 days after its
+initial run, and because the base commit of an old merge commit drifts down `main`'s analysis list
+(about a hundred analyses a week at the 2026-09 merge rate, against the proof's 20-page budget).
+The proof compares each gate file's blob id between `main` and the analysed merge commit, refuses a
+canary Security run older than 28 days before it re-runs anything, and fails each case with the
+same explicit rebase instruction.
 
 **Honest limits.** The proof covers detection, gate-step failure, required-check failure,
 attribution, full-result upload, protection settings and mergeability. It does not exercise every

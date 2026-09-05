@@ -122,9 +122,50 @@ class SastCanaryProofWorkflowTest(unittest.TestCase):
         self.assertIn("rebase canary/sast-gate-proof onto main", run)
 
     def test_the_fixtures_are_asserted_absent_from_main(self) -> None:
+        """Only an explicit 404 proves a fixture is absent from main.
+
+        A probe that treats every failure as absence would pass on a rate limit or a 5xx, so the
+        one assertion that the vulnerable fixtures never reached the default branch could pass for
+        the wrong reason.
+        """
         run = self.named_step("Assert the canary carries the current gate")["run"]
         self.assertIn('"$BACKEND_FIXTURE" "$FRONTEND_FIXTURE"', run)
         self.assertIn("the canary fixtures must never be merged", run)
+        self.assertIn("grep -q 'HTTP 404'", run)
+        self.assertIn("could not prove $fixture is absent from main", run)
+        self.assertNotIn("?ref=main\" >/dev/null 2>&1", run)
+
+    def test_an_aged_canary_run_is_refused_before_the_rerun(self) -> None:
+        """GitHub refuses to re-run a workflow run more than 30 days after its initial run.
+
+        Nothing else bounds the canary's age once the gate files stop changing, so the proof must
+        refuse an old run with the rebase remedy rather than surface a raw 403 from the POST.
+        """
+        limit = int(self.job["env"]["MAX_RUN_AGE_DAYS"])
+        self.assertLess(limit, 30)
+        self.assertGreaterEqual(limit, 7)
+        run = self.named_step("Re-run the canary's Security workflow")["run"]
+        self.assertIn(".created_at", run)
+        self.assertIn('"$age_days" -gt "$MAX_RUN_AGE_DAYS"', run)
+        self.assertIn("rebase canary/sast-gate-proof onto main and force-push", run)
+        self.assertLess(run.index('-gt "$MAX_RUN_AGE_DAYS"'), run.index("/rerun"))
+
+    def test_main_analyses_are_walked_page_by_page_until_the_base_commit(self) -> None:
+        """A single page of main's analyses covers under a week, so the base commit must be sought.
+
+        The count invariant compares the canary's merge commit with main's analysis of its first
+        parent. With one page of 50 the base commit fell out of the window about two days after a
+        rebase, and every scheduled proof failed for a reason unrelated to the gate.
+        """
+        self.assertGreaterEqual(int(self.job["env"]["MAIN_ANALYSES_PAGE_BUDGET"]), 5)
+        run = self.named_step("Collect evidence")["run"]
+        self.assertIn('for page in $(seq 1 "$MAIN_ANALYSES_PAGE_BUDGET")', run)
+        self.assertIn("analyses?ref=refs/heads/main&per_page=100&page=$page", run)
+        self.assertIn("jq -r '.parents[0].sha'", run)
+        self.assertIn("jq -s 'add'", run)
+        self.assertIn('if [ "$found" = "2" ]', run)
+        self.assertLess(run.index("merge-commit.json"), run.index("main-analyses-page-"))
+        self.assertNotIn("per_page=50", run)
 
     def test_the_workflow_and_the_verifier_name_the_same_fixtures(self) -> None:
         job_env = self.job["env"]
@@ -172,8 +213,11 @@ class SastCanaryProofWorkflowTest(unittest.TestCase):
                 self.assertIn(artefact, run)
 
     def test_a_failed_proof_reports_itself(self) -> None:
+        """A cancelled or timed-out proof must report too; `failure()` alone would stay silent."""
         step = self.named_step("Report a failed proof")
-        self.assertEqual("failure()", step["if"])
+        self.assertEqual("failure() || cancelled()", step["if"])
+        self.assertEqual("${{ job.status }}", step["env"]["JOB_STATUS"])
+        self.assertIn("$JOB_STATUS", step["run"])
         self.assertIn("$CANARY_LABEL-failed", step["run"])
         self.assertIn("SAST gate canary proof failed", step["run"])
 
