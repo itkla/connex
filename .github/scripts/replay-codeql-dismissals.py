@@ -14,6 +14,7 @@ had no snapshotted dismissal or a PATCH failed; 2 malformed input or a comment o
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import subprocess
 import sys
@@ -61,7 +62,11 @@ def strip_prefix(path: str) -> str:
 
 
 def load_alerts(path: Path) -> list[dict[str, object]]:
-    document = json.loads(path.read_text(encoding="utf-8"))
+    if path.name.endswith(".gz"):
+        with gzip.open(path, "rt", encoding="utf-8") as handle:
+            document = json.load(handle)
+    else:
+        document = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(document, list):
         raise ValueError(f"{path}: the alert document must be a JSON array")
     alerts: list[dict[str, object]] = []

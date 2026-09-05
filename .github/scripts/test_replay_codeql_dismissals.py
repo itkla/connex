@@ -6,6 +6,7 @@ dry run never mutates anything and an apply issues exactly one PATCH per match w
 reason and comment untouched.
 """
 
+import gzip
 import importlib.util
 import json
 import os
@@ -144,6 +145,14 @@ class ReplayPlanTest(unittest.TestCase):
 
             self.assertEqual([1, 2], [a["number"] for a in REPLAY.load_alerts(flat)])
             self.assertEqual([1, 2], [a["number"] for a in REPLAY.load_alerts(paged)])
+
+    def test_accepts_a_gzip_compressed_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            compressed = pathlib.Path(tmp) / "snapshot.json.gz"
+            with gzip.open(compressed, "wt", encoding="utf-8") as handle:
+                json.dump([[alert(1, "a")], [alert(2, "b")]], handle)
+
+            self.assertEqual([1, 2], [a["number"] for a in REPLAY.load_alerts(compressed)])
 
     def test_malformed_input_fails_closed(self) -> None:
         with self.assertRaisesRegex(ValueError, "not open"):

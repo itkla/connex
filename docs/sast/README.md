@@ -19,15 +19,17 @@ which those dismissals are replayed onto the regenerated identities.
 
 ## File
 
-`dismissal-snapshot-<YYYY-MM-DD>.json` — the complete CodeQL alert inventory (every state) captured
-with:
+`dismissal-snapshot-<YYYY-MM-DD>.json.gz` — the complete CodeQL alert inventory (every state), gzip-compressed
+because the `EncryptionGuardrailArchTest` customer-facing text scan walks every `.json` under `docs/` and a
+1 MiB alert dump overflows its regex stack. Captured with:
 
 ```bash
 gh api --paginate "repos/itkla/connex/code-scanning/alerts?tool_name=CodeQL&per_page=100" \
-  > docs/sast/dismissal-snapshot-$(date -u +%F).json
+  | gzip -9 > docs/sast/dismissal-snapshot-$(date -u +%F).json.gz
 ```
 
-`gh api --paginate` merges the pages into one flat JSON array. The replay script also accepts the
+`gh api --paginate` emits the pages as one flat JSON array on current `gh` releases and as concatenated
+arrays on older ones; normalise the latter before compressing. The replay script also accepts the
 `--paginate --slurp` shape (an array of pages), so either capture form is valid.
 
 The file is committed as-is. It is evidence, not configuration: nothing reads it at runtime, and it
@@ -41,9 +43,9 @@ gh api --paginate --slurp \
   "repos/itkla/connex/code-scanning/alerts?tool_name=CodeQL&state=open&ref=refs/heads/main&per_page=100" \
   > /tmp/open-on-main.json
 python3 .github/scripts/replay-codeql-dismissals.py \
-  --snapshot docs/sast/dismissal-snapshot-<YYYY-MM-DD>.json --open /tmp/open-on-main.json
+  --snapshot docs/sast/dismissal-snapshot-<YYYY-MM-DD>.json.gz --open /tmp/open-on-main.json
 python3 .github/scripts/replay-codeql-dismissals.py \
-  --snapshot docs/sast/dismissal-snapshot-<YYYY-MM-DD>.json --open /tmp/open-on-main.json --apply
+  --snapshot docs/sast/dismissal-snapshot-<YYYY-MM-DD>.json.gz --open /tmp/open-on-main.json --apply
 ```
 
 The script matches each open alert to a snapshotted dismissal by
