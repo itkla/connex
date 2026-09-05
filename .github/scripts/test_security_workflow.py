@@ -111,6 +111,11 @@ class SecurityWorkflowTest(unittest.TestCase):
         runs = [step.get("run", "") for step in self.steps("action-pins")]
         self.assertIn("python .github/scripts/test_replay_codeql_dismissals.py", runs)
 
+    def test_the_compliance_documents_are_guarded_against_unfilled_placeholders(self) -> None:
+        runs = [step.get("run", "") for step in self.steps("action-pins")]
+        self.assertIn("python .github/scripts/check-doc-placeholders.py", runs)
+        self.assertIn("python .github/scripts/test_doc_placeholders.py", runs)
+
     def test_pull_request_analysis_is_not_diff_informed(self) -> None:
         """Every analysis uploads its complete result set, including on pull requests.
 

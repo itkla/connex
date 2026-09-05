@@ -74,6 +74,10 @@ jobs:
         run: python .github/scripts/test_codeql_alerts.py
       - name: Regression-test CodeQL dismissal replay
         run: python .github/scripts/test_replay_codeql_dismissals.py
+      - name: Require the SAST compliance documents to carry no unfilled placeholder
+        run: python .github/scripts/check-doc-placeholders.py
+      - name: Regression-test the placeholder guard
+        run: python .github/scripts/test_doc_placeholders.py
       - name: Regression-test candidate soak evidence
         run: python .github/scripts/test_candidate_soak.py
       - name: Regression-test security workflow gates
