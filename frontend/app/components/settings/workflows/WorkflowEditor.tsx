@@ -199,6 +199,7 @@ function WorkflowEditorBody({
     useEffect(() => {
         if (!activeWorkspaceId || !canConfigureTriggeredSend) return;
         const workspaceId = activeWorkspaceId;
+        let active = true;
         const controller = new AbortController();
         const workspaceHeaders = { "X-Workspace-Id": String(workspaceId) };
         void getCampaigns({ signal: controller.signal, headers: workspaceHeaders })
@@ -210,22 +211,23 @@ function WorkflowEditorBody({
                         headers: workspaceHeaders,
                     }),
                 })));
-                if (!controller.signal.aborted) {
-                    setCampaignMessageOptions({
+                if (!active || controller.signal.aborted) return;
+                setCampaignMessageOptions({
                         workspaceId,
                         status: "ready",
                         items: messages.flatMap(({ campaign, messages: campaignMessages }) => (
                             campaignMessages.map((message) => ({ campaignName: campaign.name, message }))
                         )),
                     });
-                }
             })
             .catch(() => {
-                if (!controller.signal.aborted) {
-                    setCampaignMessageOptions({ workspaceId, status: "failed", items: [] });
-                }
+                if (!active || controller.signal.aborted) return;
+                setCampaignMessageOptions({ workspaceId, status: "failed", items: [] });
             });
-        return () => controller.abort();
+        return () => {
+            active = false;
+            controller.abort();
+        };
     }, [activeWorkspaceId, canConfigureTriggeredSend]);
 
     const availableCampaignMessages = campaignMessageOptions?.workspaceId === activeWorkspaceId
