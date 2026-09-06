@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.BufferedReader;
 import java.nio.charset.StandardCharsets;
@@ -18,6 +20,9 @@ import org.springframework.mock.web.MockPart;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletRequest;
 import jakarta.servlet.ServletResponse;
+import ooo.klae.connex.backend.publicapi.PublicApiPaths;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 class ApiRequestBodySizeFilterTest {
     private ApiRequestBodySizeFilter filter;
@@ -50,6 +55,76 @@ class ApiRequestBodySizeFilterTest {
         assertEquals(SecurityResponseHeaders.CONTENT_SECURITY_POLICY,
             response.getHeader("Content-Security-Policy"));
         assertNull(chain.getRequest());
+    }
+
+    @Test
+    void publicV1OversizeRejectionUsesTheStableErrorEnvelope() throws Exception {
+        MockHttpServletRequest request = jsonRequest("POST", "/api/v1/import", "123456789");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        JsonNode body = new ObjectMapper().readTree(response.getContentAsByteArray());
+        assertEquals(413, response.getStatus());
+        assertEquals("application/json", response.getContentType());
+        assertEquals("request_too_large", body.path("error").path("code").textValue());
+        assertEquals(
+            "Request body exceeds the allowed size",
+            body.path("error").path("message").textValue());
+        assertTrue(body.path("error").path("request_id").isTextual());
+        assertNull(chain.getRequest());
+    }
+
+    @Test
+    void malformedPublicNamespaceShapesUseTheOversizeEnvelope() throws Exception {
+        for (String path : List.of(
+                "/api/v1;blocked/me",
+                "/api/v1%2Fme",
+                "/api/v1/%zz")) {
+            MockHttpServletRequest request = jsonRequest("POST", path, "123456789");
+            request.setSecure(true);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+
+            filter.doFilter(request, response, chain);
+
+            JsonNode body = new ObjectMapper().readTree(response.getContentAsByteArray());
+            assertTrue(PublicApiPaths.isPublicRequest(request), path);
+            assertEquals(413, response.getStatus(), path);
+            assertEquals("request_too_large", body.path("error").path("code").textValue(), path);
+            assertEquals(SecurityResponseHeaders.CONTENT_SECURITY_POLICY,
+                response.getHeader("Content-Security-Policy"), path);
+            assertEquals("no-store", response.getHeader("Cache-Control"), path);
+            assertEquals("nosniff", response.getHeader("X-Content-Type-Options"), path);
+            assertEquals("DENY", response.getHeader("X-Frame-Options"), path);
+            assertEquals("no-referrer", response.getHeader("Referrer-Policy"), path);
+            assertTrue(response.containsHeader("Strict-Transport-Security"), path);
+            assertNull(chain.getRequest(), path);
+        }
+    }
+
+    @Test
+    void encodedAndLiteralBrowserNamespacesKeepTheBrowserOversizeResponse() throws Exception {
+        for (String path : List.of(
+                "/api/v1%30/me",
+                "/api/v1%78/me",
+                "/api/v1%zz/me",
+                "/api/v1%252Fme",
+                "/api/v1x/me",
+                "/api/v10/me")) {
+            MockHttpServletRequest request = jsonRequest("POST", path, "123456789");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+
+            filter.doFilter(request, response, chain);
+
+            assertFalse(PublicApiPaths.isPublicRequest(request), path);
+            assertEquals(413, response.getStatus(), path);
+            assertEquals("", response.getContentAsString(), path);
+            assertEquals("strict-origin-when-cross-origin", response.getHeader("Referrer-Policy"), path);
+            assertNull(chain.getRequest(), path);
+        }
     }
 
     @Test

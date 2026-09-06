@@ -132,6 +132,15 @@ read-only, and the Paddle runtime never downloads models or calls an external OC
 
 ## Configure
 
+### Public API ingress
+
+`CONNEX_PUBLIC_API_ENABLED` defaults to `false`. Before enabling it, terminate TLS at an ingress
+that routes `/api/v1/**` intentionally, enforce a deployment-wide pre-authentication request
+ceiling, configure trusted proxy addresses so client IP resolution cannot be spoofed, verify every
+tenant catalog placement is reachable, and verify privileged passkey enrollment and recovery. The
+`silo` deployment profile refuses this dormant flag. Per-process limits multiply with replica count;
+see `docs/PUBLIC_API.md` for the authentication, scope, and limiter contracts.
+
 Install the template as a mode-0600 `deploy/.env`:
 
 ```bash

@@ -5,6 +5,8 @@ import java.util.Map;
 import java.util.Objects;
 
 import org.springframework.context.i18n.LocaleContextHolder;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +38,8 @@ import ooo.klae.connex.backend.observability.ErrorReporter;
 import ooo.klae.connex.backend.services.SupportBundleService;
 import ooo.klae.connex.backend.observability.ReportedError;
 import ooo.klae.connex.backend.observability.ReportedError.Source;
+import ooo.klae.connex.backend.publicapi.PublicApiErrorAdvice;
+import ooo.klae.connex.backend.publicapi.PublicApiPaths;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
@@ -48,6 +52,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
  */
 @RestControllerAdvice
 @RequiredArgsConstructor
+@Order(Ordered.LOWEST_PRECEDENCE)
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
@@ -293,13 +298,32 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<?> methodNotSupported(
+            HttpRequestMethodNotSupportedException ex, HttpServletRequest request) {
+        if (PublicApiPaths.isPublicRequest(request)) {
+            return ResponseEntity.status(ex.getStatusCode())
+                .headers(ex.getHeaders())
+                .body(PublicApiErrorAdvice.envelope(
+                    "method_not_allowed", "Request method is not supported"));
+        }
+        return methodNotSupported(ex);
+    }
+
     public ResponseEntity<String> methodNotSupported(HttpRequestMethodNotSupportedException ex) {
         return ResponseEntity.status(ex.getStatusCode())
-                .headers(ex.getHeaders())
-                .body("Request method is not supported");
+            .headers(ex.getHeaders())
+            .body("Request method is not supported");
     }
 
     @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<?> resourceNotFound(NoResourceFoundException ex, HttpServletRequest request) {
+        if (PublicApiPaths.isPublicRequest(request)) {
+            return ResponseEntity.status(ex.getStatusCode())
+                .body(PublicApiErrorAdvice.envelope("not_found", "Resource not found"));
+        }
+        return resourceNotFound(ex);
+    }
+
     public ResponseEntity<String> resourceNotFound(NoResourceFoundException ex) {
         return ResponseEntity.status(ex.getStatusCode()).body("Resource not found");
     }

@@ -1,7 +1,5 @@
 package ooo.klae.connex.backend.config;
 
-import static org.springframework.security.config.Customizer.withDefaults;
-
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -9,6 +7,7 @@ import org.springframework.boot.servlet.filter.OrderedFormContentFilter;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
@@ -31,7 +30,6 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -45,7 +43,9 @@ import org.springframework.session.FindByIndexNameSessionRepository;
 import org.springframework.session.Session;
 import org.springframework.session.security.SpringSessionBackedSessionRegistry;
 import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.filter.CorsFilter;
 import org.springframework.web.util.pattern.PathPatternParser;
 
 import jakarta.servlet.http.HttpServletResponse;
@@ -55,6 +55,9 @@ import ooo.klae.connex.backend.businesscard.BusinessCardRateLimiter;
 import ooo.klae.connex.backend.capability.CapabilityEntitlement;
 import ooo.klae.connex.backend.observability.CorrelationIdFilter;
 import ooo.klae.connex.backend.observability.MetricsScrapeTokenFilter;
+import ooo.klae.connex.backend.publicapi.PublicApiErrorAdvice;
+import ooo.klae.connex.backend.publicapi.PublicApiCorsProcessor;
+import ooo.klae.connex.backend.publicapi.PublicApiPaths;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -103,6 +106,7 @@ public class SecurityConfig {
 
     private static final List<String> API_CORS_ALLOWED_METHODS = List.of(
         "GET",
+        "HEAD",
         "POST",
         "PUT",
         "DELETE",
@@ -118,6 +122,16 @@ public class SecurityConfig {
     @Bean
     UrlBasedCorsConfigurationSource corsConfigurationSource(
             @Value("${connex.cors.allowed-origins}") String[] allowedOrigins) {
+        CorsConfiguration publicApi = new CorsConfiguration();
+        publicApi.setAllowedOrigins(List.of(allowedOrigins));
+        publicApi.setAllowedMethods(API_CORS_ALLOWED_METHODS);
+        publicApi.setAllowedHeaders(List.of(
+            "Accept", "Accept-Language", "Authorization", "Content-Type", "X-Correlation-Id"));
+        publicApi.setExposedHeaders(List.of(
+            "Retry-After", "X-Correlation-Id", "X-RateLimit-Limit", "X-RateLimit-Remaining",
+            "X-RateLimit-Reset"));
+        publicApi.setAllowCredentials(false);
+
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(List.of(allowedOrigins));
         configuration.setAllowedMethods(API_CORS_ALLOWED_METHODS);
@@ -125,6 +139,7 @@ public class SecurityConfig {
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource(PathPatternParser.defaultInstance);
+        source.registerCorsConfiguration("/api/v1/**", publicApi);
         source.registerCorsConfiguration("/api/**", configuration);
         return source;
     }
@@ -178,6 +193,7 @@ public class SecurityConfig {
      * @return the configured filter chain
      */
     @Bean
+    @Order(2)
     SecurityFilterChain chain(HttpSecurity http,
             SessionRegistry sessionRegistry,
             CompositeClientRegistrationRepository compositeClientRegistrationRepository,
@@ -200,6 +216,8 @@ public class SecurityConfig {
             LogoutAuditHandler logoutAuditHandler,
             LoginRateLimiter loginRateLimiter,
             ClientIpResolver clientIpResolver,
+            tools.jackson.databind.ObjectMapper objectMapper,
+            CorsConfigurationSource corsConfigurationSource,
             @Value("${connex.metrics.scrape-token:}") String metricsScrapeToken,
             @Value("${connex.sso.enabled:false}") boolean ssoEnabled,
             @Value("${connex.cors.allowed-origins}") String[] corsAllowedOrigins) throws Exception {
@@ -230,7 +248,10 @@ public class SecurityConfig {
                 sessionSecurityService,
                 auditService),
             AuthorizationFilter.class);
-        http.cors(withDefaults());
+        CorsFilter corsFilter = new CorsFilter(corsConfigurationSource);
+        corsFilter.setCorsProcessor(new PublicApiCorsProcessor(objectMapper));
+        http.addFilterBefore(corsFilter, CsrfFilter.class);
+        http.cors(org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer::disable);
         http.csrf(csrf -> {
             csrf.csrfTokenRequestHandler(new HeaderOnlyCsrfTokenRequestHandler())
                 .ignoringRequestMatchers(
@@ -249,7 +270,8 @@ public class SecurityConfig {
         });
         http
             .authorizeHttpRequests(auth -> {
-                auth.requestMatchers(HttpMethod.GET, "/api/health/ready").permitAll()
+                auth.requestMatchers("/api/v1/**").denyAll()
+                    .requestMatchers(HttpMethod.GET, "/api/health/ready").permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/health").permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/version").permitAll()
                     .requestMatchers("/api/metrics")
@@ -313,7 +335,32 @@ public class SecurityConfig {
                 })
             )
             .exceptionHandling(ex -> ex
-                .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
+                .authenticationEntryPoint((request, response, exception) -> {
+                    if (PublicApiPaths.isPublicRequest(request)) {
+                        PublicApiErrorAdvice.write(
+                            objectMapper,
+                            request,
+                            response,
+                            HttpStatus.SERVICE_UNAVAILABLE,
+                            "public_api_unavailable",
+                            "Public API is unavailable");
+                    } else {
+                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    }
+                })
+                .accessDeniedHandler((request, response, exception) -> {
+                    if (PublicApiPaths.isPublicRequest(request)) {
+                        PublicApiErrorAdvice.write(
+                            objectMapper,
+                            request,
+                            response,
+                            HttpStatus.SERVICE_UNAVAILABLE,
+                            "public_api_unavailable",
+                            "Public API is unavailable");
+                    } else {
+                        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                    }
+                })
             )
             .requestCache(RequestCacheConfigurer::disable);
         if (oauthEnabled) {
@@ -348,9 +395,11 @@ public class SecurityConfig {
 
     @Bean
     FilterRegistrationBean<ApiRequestBodySizeFilter> apiRequestBodySizeFilterRegistration(
-            RequestBodySizeProperties requestBodySizeProperties) {
+            RequestBodySizeProperties requestBodySizeProperties,
+            tools.jackson.databind.ObjectMapper objectMapper) {
         FilterRegistrationBean<ApiRequestBodySizeFilter> registration =
-            new FilterRegistrationBean<>(new ApiRequestBodySizeFilter(requestBodySizeProperties));
+            new FilterRegistrationBean<>(
+                new ApiRequestBodySizeFilter(requestBodySizeProperties, objectMapper));
         registration.setOrder(OrderedFormContentFilter.DEFAULT_ORDER - 1);
         return registration;
     }

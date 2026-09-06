@@ -1,6 +1,10 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,6 +59,15 @@ public class OrgMemberService {
      * transaction. They must transfer ownership first.
      */
     public void assertNotSoleOwnerOfAnyOrg(int userId) {
+        assertNotSoleOwnerOfAnyOrg(userId, List.of());
+    }
+
+    /**
+     * Locks the ascending union of owned organization roots exclusively and referenced roots for
+     * share before checking the owned organizations' final owner rows.
+     */
+    public void assertNotSoleOwnerOfAnyOrg(
+            int userId, Collection<Integer> sharedOrgIds) {
         if (userMapper.lockById(userId) == null) {
             throw new ResourceNotFoundException("User not found: " + userId);
         }
@@ -62,8 +75,15 @@ public class OrgMemberService {
                 .distinct()
                 .sorted()
                 .toList();
-        for (int orgId : ownedOrgIds) {
-            organizationMapper.lockById(orgId);
+        Set<Integer> owned = new HashSet<>(ownedOrgIds);
+        TreeSet<Integer> ordered = new TreeSet<>(ownedOrgIds);
+        ordered.addAll(sharedOrgIds);
+        for (int orgId : ordered) {
+            if (owned.contains(orgId)) {
+                organizationMapper.lockById(orgId);
+            } else {
+                organizationMapper.lockByIdForShare(orgId);
+            }
         }
         for (int orgId : ownedOrgIds) {
             if (orgMemberMapper.lockOwnerIds(orgId).size() <= 1) {

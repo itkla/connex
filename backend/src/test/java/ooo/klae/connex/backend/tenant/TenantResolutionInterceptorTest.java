@@ -16,9 +16,13 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDateTime;
+import java.util.Set;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.servlet.AsyncHandlerInterceptor;
@@ -27,6 +31,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
+import ooo.klae.connex.backend.publicapi.ApiCredentialAuthenticationFilter;
+import ooo.klae.connex.backend.publicapi.ApiCredentialAuthenticationFilter.TenantBinding;
+import ooo.klae.connex.backend.publicapi.ApiCredentialPrincipal;
+import ooo.klae.connex.backend.publicapi.ApiScope;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 class TenantResolutionInterceptorTest {
@@ -102,6 +110,42 @@ class TenantResolutionInterceptorTest {
         assertEquals(11, liveContext.getWorkspaceId());
         assertEquals(7, liveContext.getUserId());
         assertEquals("owner", liveContext.getRole());
+    }
+
+    @Test
+    void publicCredentialRequestRetainsTheFilterBindingWithoutResolvingPlacementAgain() {
+        MockHttpServletRequest request =
+            new MockHttpServletRequest("GET", "/api/v1/me");
+        User user = new User();
+        user.setId(7);
+        ApiCredentialPrincipal credential = new ApiCredentialPrincipal(
+            5,
+            7,
+            11,
+            3,
+            "Tenant binding",
+            Set.of(ApiScope.CRM_READ),
+            Set.of(ApiScope.CRM_READ),
+            LocalDateTime.now().plusDays(1));
+        Authentication authentication = mock(Authentication.class);
+        when(authentication.getPrincipal()).thenReturn(user);
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        when(requestResolver.isPublicApiRequest(request)).thenReturn(true);
+        when(requestResolver.resolvePublicApiCredential(request, authentication, 7))
+            .thenReturn(credential);
+        when(catalogResolver.resolveCatalog(3)).thenReturn("catalog-b");
+        liveContext.set(11, 3, 7, "public_api", "catalog-a");
+        request.setAttribute(
+            ApiCredentialAuthenticationFilter.TENANT_BINDING_ATTRIBUTE,
+            new TenantBinding(5, 11, 3, 7, "catalog-a"));
+
+        assertTrue(liveInterceptor.preHandle(request, response, handler));
+
+        assertEquals(11, liveContext.getWorkspaceId());
+        assertEquals(3, liveContext.getOrgId());
+        assertEquals("catalog-a", liveContext.getScopeCatalog());
+        verify(catalogResolver, never()).resolveCatalog(anyInt());
+        verifyNoInteractions(workspaceService);
     }
 
     /**

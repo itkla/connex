@@ -154,6 +154,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "AllowedDomainMapper",
         MAPPERS + "AiOrganizationBudgetMapper",
         MAPPERS + "AiProviderConfigMapper",
+        MAPPERS + "ApiCredentialMapper",
         MAPPERS + "AppiIncidentMapper",
         MAPPERS + "AuditIntegrityMapper",
         MAPPERS + "ClientErrorMapper",

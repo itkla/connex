@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -21,17 +22,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,6 +59,7 @@ import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Team;
 import ooo.klae.connex.backend.beans.TeamMember;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.TenantResidualReport;
 import ooo.klae.connex.backend.dto.WorkspaceLifecycleRef;
@@ -66,9 +75,11 @@ import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldValueMapper;
+import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.TeamMapper;
+import ooo.klae.connex.backend.services.TenantLifecycleControlOperations.AcquiredWorkspace;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ScannedUpload;
@@ -92,8 +103,10 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
 
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private OrgMemberService orgMemberService;
-    @Autowired private TenantLifecycleControlMapper controlMapper;
+    @MockitoSpyBean private TenantLifecycleControlMapper controlMapper;
+    @MockitoSpyBean private NotificationMapper notificationMapperSpy;
     @Autowired private TenantLifecycleControlOperations controlOperations;
+    @Autowired private WorkspaceService workspaceService;
     @Autowired private TenantExportService exportService;
     @Autowired private TenantTeardownService teardownService;
     @Autowired private ManagedObjectService managedObjectService;
@@ -111,11 +124,13 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     @Autowired private TeamMapper teamMapper;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private SqlSessionTemplate sqlSessionTemplate;
 
     private Organization drillOrganization;
     private Organization otherOrganization;
     private Workspace drillWorkspace;
     private Workspace otherWorkspace;
+    private User concurrentLeaver;
 
     @AfterEach
     void cleanCommittedDrillRoots() {
@@ -169,6 +184,14 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             jdbcTemplate.update(
                 "DELETE FROM app_user WHERE id = ?",
                 currentUser.getId());
+        }
+        if (concurrentLeaver != null) {
+            jdbcTemplate.update(
+                "DELETE FROM workspace_member WHERE user_id = ?",
+                concurrentLeaver.getId());
+            jdbcTemplate.update(
+                "DELETE FROM app_user WHERE id = ?",
+                concurrentLeaver.getId());
         }
     }
 
@@ -412,6 +435,63 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
     }
 
     @Test
+    void memberLeaveAndWorkspaceTeardownCompleteWithoutCredentialDeadlock() throws Exception {
+        createDedicatedDrillRoots();
+        concurrentLeaver = newUser();
+        int orgId = drillOrganization.getId();
+        int workspaceId = drillWorkspace.getId();
+        int leaverId = concurrentLeaver.getId();
+        insertApiCredential(orgId, workspaceId, leaverId, "Leave versus teardown");
+        NotificationMapper realNotificationMapper =
+            sqlSessionTemplate.getMapper(NotificationMapper.class);
+        CountDownLatch leaveInsideTransaction = new CountDownLatch(1);
+        CountDownLatch teardownMarkCommitted = new CountDownLatch(1);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            leaveInsideTransaction.countDown();
+            if (!teardownMarkCommitted.await(10, TimeUnit.SECONDS)) {
+                throw new AssertionError("Teardown lifecycle mark did not commit");
+            }
+            return realNotificationMapper.lockRecipientMemberships(leaverId);
+        }).when(notificationMapperSpy).lockRecipientMemberships(leaverId);
+
+        Throwable leaveFailure;
+        AcquiredWorkspace acquired;
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            Future<Throwable> leave = executor.submit(() -> captureFailure(() ->
+                workspaceService.leaveWorkspace(workspaceId, leaverId)));
+            assertTrue(leaveInsideTransaction.await(10, TimeUnit.SECONDS));
+            try {
+                acquired = controlOperations.acquireWorkspaceTeardown(
+                    orgId, workspaceId, currentUser.getId());
+            } finally {
+                teardownMarkCommitted.countDown();
+            }
+            leaveFailure = leave.get(20, TimeUnit.SECONDS);
+        }
+
+        assertFalse(hasDeadlockCause(leaveFailure));
+        assertNull(leaveFailure);
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM api_credential WHERE workspace_id = ?",
+            Integer.class,
+            workspaceId));
+        assertEquals(1, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM audit_log"
+                + " WHERE workspace_id = ?"
+                + " AND action = 'api_credential.membership_removed'",
+            Integer.class,
+            workspaceId));
+        controlOperations.deleteWorkspaceRoot(
+            orgId, workspaceId, currentUser.getId(), acquired.lease());
+        controlOperations.completeWorkspaceCleanup(
+            orgId, workspaceId, currentUser.getId(), acquired.lease());
+        assertEquals(0, jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM workspace WHERE id = ?",
+            Integer.class,
+            workspaceId));
+    }
+
+    @Test
     void persistedExportLeasesNeverAgeOutAndRemainFailClosed() {
         createDedicatedDrillRoots();
         int orgId = drillOrganization.getId();
@@ -482,6 +562,51 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             leaseToken);
         assertNotNull(count);
         return count == 1;
+    }
+
+    private void insertApiCredential(
+            int orgId, int workspaceId, int userId, String name) {
+        Long membershipId = jdbcTemplate.queryForObject(
+            "SELECT membership_id FROM workspace_member WHERE workspace_id = ? AND user_id = ?",
+            Long.class,
+            workspaceId,
+            userId);
+        assertNotNull(membershipId);
+        String tokenHash = UUID.randomUUID().toString().replace("-", "")
+            + UUID.randomUUID().toString().replace("-", "");
+        jdbcTemplate.update(
+            "INSERT INTO api_credential"
+                + " (workspace_id, organization_id, created_by_id, membership_id, name,"
+                + " token_hash, token_last4, expires_at)"
+                + " VALUES (?, ?, ?, ?, ?, ?, '562x', UTC_TIMESTAMP(6) + INTERVAL 1 DAY)",
+            workspaceId,
+            orgId,
+            userId,
+            membershipId,
+            name,
+            tokenHash);
+    }
+
+    private static Throwable captureFailure(FailingAction action) {
+        try {
+            action.run();
+            return null;
+        } catch (Throwable failure) {
+            return failure;
+        }
+    }
+
+    private static boolean hasDeadlockCause(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SQLException sqlException && sqlException.getErrorCode() == 1213) {
+                return true;
+            }
+            if (cause.getMessage() != null
+                    && cause.getMessage().toLowerCase(java.util.Locale.ROOT).contains("deadlock")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private long insertOpenSubjectRequest(int orgId, int workspaceId, int personId) {
@@ -747,5 +872,10 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
             int templateRootId,
             String templateName,
             String teamName) {
+    }
+
+    @FunctionalInterface
+    private interface FailingAction {
+        void run() throws Exception;
     }
 }
