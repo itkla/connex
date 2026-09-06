@@ -2447,13 +2447,15 @@ export type CampaignSendStatus =
     | "paused"
     | "completed"
     | "failed"
-    | "cancelled";
+    | "cancelled"
+    | "triggered";
 
-/** A campaign send bound to a frozen audience snapshot and a message revision. */
+/** An audience-backed or triggered campaign send for one message revision. */
 export type CampaignSend = {
     id: number;
     campaignId: number;
     snapshotId: number;
+    origin: "audience" | "triggered";
     messageId: number;
     messageVersion: number;
     channel: string;
@@ -2549,8 +2551,30 @@ export type CampaignRecipient = {
     personLabel?: string;
     status: string;
     skipReason?: string;
+    reconciliationRequired: boolean;
+    reasonCode: CampaignDeliveryFailureReason | null;
     createdAt?: string;
     updatedAt?: string;
+};
+
+export type CampaignDeliveryFailureReason =
+    | "provider_timeout"
+    | "provider_rejected"
+    | "deadline_ambiguous"
+    | "delivery_target_changed"
+    | "relay_error";
+
+export type CampaignDeliveryResolution = "delivered" | "not_delivered";
+
+export type CampaignDeliveryReconciliation = {
+    deliveryId: number;
+    status: string;
+    reconciliationRequired: boolean;
+    reasonCode: CampaignDeliveryFailureReason | null;
+};
+
+export type CampaignDeliveryReconciliationPayload = {
+    resolution: CampaignDeliveryResolution;
 };
 
 /** Which population of a campaign's deliveries a recipient page is drawn from. */
@@ -4413,6 +4437,20 @@ export type RuleAction = {
     severity?: string;
     targetUserId?: number;
     targetStageId?: number;
+    campaignMessageId?: number;
+    campaignMessageVersion?: number;
+};
+
+/** A campaign message labeled with its owning campaign for workflow authoring. */
+export type WorkflowCampaignMessageOption = {
+    campaignName: string;
+    message: CampaignMessage;
+};
+
+/** Load state for the workflow inspector's campaign-message picker. */
+export type WorkflowCampaignMessageOptions = {
+    status: "loading" | "ready" | "failed";
+    items: WorkflowCampaignMessageOption[];
 };
 
 export type RuleNamedOption = {
@@ -4682,7 +4720,14 @@ export type WorkflowDiagnosticCode =
     | "record_unavailable"
     | "trigger_filter_not_matched"
     | "action_permission_missing"
+    | "action_system_permission_missing"
     | "action_tag_unavailable"
+    | "action_campaign_message_unavailable"
+    | "action_campaign_message_revision_unavailable"
+    | "action_delivery_capability_unavailable"
+    | "action_delivery_transport_unavailable"
+    | "action_recipient_address_unavailable"
+    | "action_triggered_send_unavailable"
     | "action_target_member_unavailable"
     | "action_stage_unavailable"
     | "action_stage_pipeline_mismatch"
@@ -4792,6 +4837,13 @@ export type WorkflowStepRun = {
     selectedOutcome: WorkflowEdgeOutcome | null;
     selectedEdgeId: string | null;
     nextNodeId: string | null;
+    actionOutcome:
+        | "delivery_queued"
+        | "delivery_dedup_skipped"
+        | "delivery_capped"
+        | "delivery_reconciliation_required"
+        | null;
+    actionReferenceId: number | null;
     startedAt: string;
     finishedAt: string | null;
     durationMs: number | null;
@@ -5207,6 +5259,7 @@ export type DeliveryProviderConfig = {
     credentialLast4: string | null;
     webhookConfigured: boolean;
     enabled: boolean;
+    idempotentSubmission: boolean;
     updatedAt: string | null;
 };
 
@@ -5218,6 +5271,7 @@ export type DeliveryProviderConfigPayload = {
     fromName?: string | null;
     apiKey?: string | null;
     enabled: boolean;
+    idempotentSubmission: boolean;
 };
 
 export type DeliveryWebhookToken = {
@@ -5254,6 +5308,7 @@ export type InstanceCapabilities = {
     businessCardScanning: boolean;
     businessCardImport: boolean;
     campaignDelivery: boolean;
+    workflowTriggeredSend?: boolean;
     privilegedMfaEnforced: boolean;
 };
 

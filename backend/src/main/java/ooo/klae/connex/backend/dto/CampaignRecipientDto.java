@@ -17,6 +17,8 @@ import java.time.LocalDateTime;
  * @param personLabel the contact's display name, or null when it is no longer resolvable
  * @param status the current delivery status
  * @param skipReason the ordered skip reason when the delivery was skipped
+ * @param reconciliationRequired whether an operator must confirm the provider outcome
+ * @param reasonCode bounded failure reason safe for a product surface, or null
  * @param createdAt when the delivery was materialized
  * @param updatedAt when the delivery last changed
  */
@@ -28,6 +30,8 @@ public record CampaignRecipientDto(
         String personLabel,
         String status,
         String skipReason,
+        boolean reconciliationRequired,
+        String reasonCode,
         LocalDateTime createdAt,
         LocalDateTime updatedAt) {
 }

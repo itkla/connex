@@ -18,8 +18,13 @@ public class CampaignDelivery {
     private String skipReason;
     private String providerMessageId;
     private String providerId;
+    private String attemptTargetFingerprint;
     private int attemptCount;
     private String lastError;
+    private String lastErrorCode;
+    private LocalDateTime reconciliationRequiredAt;
+    private String channel;
+    private String reconciliationOutcome;
     private String unsubscribeToken;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

@@ -16,6 +16,8 @@
     <result property="webhookTokenHash" column="webhook_token_hash"/>
     <result property="webhookSecretRef" column="webhook_secret_ref"/>
     <result property="enabled" column="enabled"/>
+    <result property="configGeneration" column="config_generation"/>
+    <result property="idempotentSubmission" column="idempotent_submission"/>
     <result property="createdById" column="created_by_id"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
@@ -24,7 +26,7 @@
   <sql id="columns">
     id, workspace_id, channel, provider, endpoint, from_address, from_name,
     credential_ref, credential_last4, webhook_token_hash, webhook_secret_ref,
-    enabled, created_by_id, created_at, updated_at
+    enabled, config_generation, idempotent_submission, created_by_id, created_at, updated_at
   </sql>
 
   <select id="listByWorkspace" resultMap="DeliveryProviderConfigResult">
@@ -50,12 +52,30 @@
     INSERT INTO delivery_provider_config
       (workspace_id, channel, provider, endpoint, from_address, from_name,
        credential_ref, credential_last4, webhook_token_hash, webhook_secret_ref,
-       enabled, created_by_id)
+       enabled, idempotent_submission, created_by_id)
     VALUES
-      (#{workspaceId}, #{channel}, #{provider}, #{endpoint}, #{fromAddress}, #{fromName},
-       #{credentialRef}, #{credentialLast4}, #{webhookTokenHash}, #{webhookSecretRef},
-       #{enabled}, #{createdById})
+      (#{config.workspaceId}, #{config.channel}, #{config.provider}, #{config.endpoint},
+       #{config.fromAddress}, #{config.fromName},
+       #{config.credentialRef}, #{config.credentialLast4}, #{config.webhookTokenHash},
+       #{config.webhookSecretRef},
+       #{config.enabled}, #{config.idempotentSubmission}, #{config.createdById})
+    <!-- credentialRotated is the only signal that a new send credential was written. The central
+         secret store keeps one row per scope and purpose, so rotating an API key overwrites that
+         row and returns the same credential_ref, leaving every compared column unchanged; without
+         this flag an expired idempotent claim taken before a rotation would still match the
+         delivery target fingerprint and replay under the new credential. Webhook token and secret
+         rotation passes false so recovery identity survives it. -->
     ON DUPLICATE KEY UPDATE
+      config_generation = config_generation + IF(
+        #{credentialRotated}
+        OR NOT (provider &lt;=> VALUES(provider))
+        OR NOT (endpoint &lt;=> VALUES(endpoint))
+        OR NOT (from_address &lt;=> VALUES(from_address))
+        OR NOT (credential_ref &lt;=> VALUES(credential_ref))
+        OR NOT (enabled &lt;=> VALUES(enabled))
+        OR NOT (idempotent_submission &lt;=> VALUES(idempotent_submission)),
+        1,
+        0),
       provider = VALUES(provider),
       endpoint = VALUES(endpoint),
       from_address = VALUES(from_address),
@@ -64,7 +84,8 @@
       credential_last4 = VALUES(credential_last4),
       webhook_token_hash = VALUES(webhook_token_hash),
       webhook_secret_ref = VALUES(webhook_secret_ref),
-      enabled = VALUES(enabled)
+      enabled = VALUES(enabled),
+      idempotent_submission = VALUES(idempotent_submission)
   </insert>
 
   <delete id="delete">

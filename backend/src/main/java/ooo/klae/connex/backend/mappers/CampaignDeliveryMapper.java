@@ -83,6 +83,16 @@ public interface CampaignDeliveryMapper {
 
     CampaignDelivery getDelivery(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
+    CampaignDelivery getDeliveryForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    /** Returns only identifiers so restriction can be checked before the address column is read. */
+    CampaignDelivery getDeliveryIdentity(@Param("workspaceId") int workspaceId, @Param("id") int id);
+
+    CampaignDelivery getBySendAndPerson(
+            @Param("workspaceId") int workspaceId,
+            @Param("sendId") int sendId,
+            @Param("personId") int personId);
+
     CampaignDelivery getByToken(@Param("token") String token);
 
     CampaignDelivery findByProviderMessage(
@@ -94,13 +104,74 @@ public interface CampaignDeliveryMapper {
             @Param("workspaceId") int workspaceId,
             @Param("sendId") int sendId);
 
+    /** Returns one ordered, bounded page for a worker sweep. */
+    List<Integer> pendingDeliveryIdsPage(
+            @Param("workspaceId") int workspaceId,
+            @Param("sendId") int sendId,
+            @Param("limit") int limit);
+
     int countPending(@Param("workspaceId") int workspaceId, @Param("sendId") int sendId);
 
     int claim(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
+    /** Claims one triggered delivery under an owner-fenced database-clock lease. */
+    int claimTriggered(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("leaseOwner") String leaseOwner,
+            @Param("leaseMicros") long leaseMicros,
+            @Param("providerId") String providerId,
+            @Param("attemptTargetFingerprint") String attemptTargetFingerprint);
+
+    /** Marks a recovered pending attempt ambiguous when its exact target is no longer current. */
+    int markPendingTriggeredTargetMismatchAmbiguous(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("attemptTargetFingerprint") String attemptTargetFingerprint,
+            @Param("lastError") String lastError,
+            @Param("lastErrorCode") String lastErrorCode);
+
+    /** Extends a live triggered-delivery claim immediately before provider egress. */
+    int renewTriggeredClaim(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("leaseOwner") String leaseOwner,
+            @Param("leaseMicros") long leaseMicros);
+
+    /** Releases an owned triggered-delivery claim before provider egress. */
+    int releaseTriggeredClaim(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("leaseOwner") String leaseOwner);
+
+    /** Returns one bounded page of expired triggered claims and their exact attempted transports. */
+    List<CampaignDelivery> expiredTriggeredClaimsPage(
+            @Param("workspaceId") int workspaceId,
+            @Param("limit") int limit);
+
+    /** Restores one expired claim only when its transport makes stable-key replay safe. */
+    int recoverExpiredTriggeredClaim(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("attemptTargetFingerprint") String attemptTargetFingerprint);
+
+    /** Marks one expired non-idempotent claim as requiring operator reconciliation. */
+    int markExpiredTriggeredClaimAmbiguous(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("lastError") String lastError,
+            @Param("lastErrorCode") String lastErrorCode);
+
     int markDispatched(
             @Param("workspaceId") int workspaceId,
             @Param("id") int id,
+            @Param("providerId") String providerId,
+            @Param("providerMessageId") String providerMessageId);
+
+    int markTriggeredDispatched(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("leaseOwner") String leaseOwner,
             @Param("providerId") String providerId,
             @Param("providerMessageId") String providerMessageId);
 
@@ -115,9 +186,47 @@ public interface CampaignDeliveryMapper {
             @Param("id") int id,
             @Param("skipReason") String skipReason);
 
+    int markTriggeredSkipped(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("leaseOwner") String leaseOwner,
+            @Param("skipReason") String skipReason);
+
     int markFailed(
             @Param("workspaceId") int workspaceId,
             @Param("id") int id,
+            @Param("lastError") String lastError,
+            @Param("lastErrorCode") String lastErrorCode);
+
+    int markTriggeredFailed(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("leaseOwner") String leaseOwner,
+            @Param("lastError") String lastError,
+            @Param("lastErrorCode") String lastErrorCode);
+
+    /** Persists a terminal ambiguous outcome for a non-leased delivery attempt. */
+    int markAmbiguous(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("lastError") String lastError,
+            @Param("lastErrorCode") String lastErrorCode);
+
+    /** Persists a terminal ambiguous outcome only for the current triggered-claim owner. */
+    int markTriggeredAmbiguous(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("leaseOwner") String leaseOwner,
+            @Param("lastError") String lastError,
+            @Param("lastErrorCode") String lastErrorCode);
+
+    /** Applies one operator-confirmed terminal outcome to an ambiguous campaign delivery. */
+    int resolveReconciliation(
+            @Param("workspaceId") int workspaceId,
+            @Param("campaignId") int campaignId,
+            @Param("id") int id,
+            @Param("toStatus") String toStatus,
+            @Param("outcome") String outcome,
             @Param("lastError") String lastError);
 
     int recentDispatchCount(

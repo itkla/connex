@@ -96,6 +96,8 @@ public interface WorkflowRunMapper {
         @Param("selectedOutcome") String selectedOutcome,
         @Param("selectedEdgeId") String selectedEdgeId,
         @Param("nextNodeId") String nextNodeId,
+        @Param("actionOutcome") String actionOutcome,
+        @Param("actionReferenceId") Long actionReferenceId,
         @Param("finishedAt") LocalDateTime finishedAt);
 
     int succeedWaitingDelayStep(
@@ -260,4 +262,9 @@ public interface WorkflowRunMapper {
     List<WorkflowStepRun> getSteps(
         @Param("workspaceId") int workspaceId,
         @Param("workflowRunId") long workflowRunId);
+
+    /** Reclassifies workflow steps whose queued delivery was skipped by the frequency cap. */
+    int markActionDeliveryCapped(
+        @Param("workspaceId") int workspaceId,
+        @Param("deliveryId") long deliveryId);
 }

@@ -75,8 +75,10 @@ class WorkflowTriggerOutboxMapperXmlTest {
             "id", 31L,
             "leaseOwner", "owner",
             "recordScanAfterId", 100,
+            "scheduleMatchCount", 3,
             "completed", false));
         assertTrue(schedulePage.contains("delivery_attempt_count = 0"));
+        assertTrue(schedulePage.contains("schedule_match_count = ?"));
         assertTrue(schedulePage.contains("lease_until >= CURRENT_TIMESTAMP(6)"));
         String dead = sql(configuration, "deadLetter", Map.of(
             "workspaceId", 7,

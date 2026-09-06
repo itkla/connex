@@ -276,6 +276,11 @@ function RunDetail({
                                 {t(`runs.status.${step.status}`)}
                             </Badge>
                             {step.selectedOutcome ? <Badge variant="secondary">{t(`branch.${step.selectedOutcome}`)}</Badge> : null}
+                            {step.actionOutcome ? (
+                                <Badge variant="secondary">
+                                    {t(`runs.actionOutcome.${step.actionOutcome}`)}
+                                </Badge>
+                            ) : null}
                             <span className="ml-auto text-xs text-muted-foreground">
                                 {step.durationMs == null ? t("runs.durationPending") : t("runs.durationMs", { value: step.durationMs })}
                             </span>

@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountMode;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
+import ooo.klae.connex.backend.services.WorkflowTriggeredSendGate;
 
 @ExtendWith(MockitoExtension.class)
 class CapabilitiesControllerTest {
@@ -29,6 +30,7 @@ class CapabilitiesControllerTest {
     @Mock private CapabilityRegistry capabilityRegistry;
     @Mock private PrivilegedMfaProperties privilegedMfaProperties;
     @Mock private ConnectedAccountProviders connectedAccountProviders;
+    @Mock private WorkflowTriggeredSendGate workflowTriggeredSendGate;
 
     private MockMvc mockMvc;
 
@@ -39,7 +41,10 @@ class CapabilitiesControllerTest {
         lenient().when(connectedAccountProviders.mode(ConnectedAccountProviders.MICROSOFT))
                 .thenReturn(ConnectedAccountMode.CUSTOM);
         mockMvc = MockMvcBuilders.standaloneSetup(new CapabilitiesController(
-                capabilityRegistry, privilegedMfaProperties, connectedAccountProviders)).build();
+                capabilityRegistry,
+                privilegedMfaProperties,
+                connectedAccountProviders,
+                workflowTriggeredSendGate)).build();
     }
 
     @AfterEach
@@ -63,6 +68,7 @@ class CapabilitiesControllerTest {
         when(connectedAccountProviders.mode(ConnectedAccountProviders.GOOGLE))
                 .thenReturn(ConnectedAccountMode.MANAGED);
         when(capabilityRegistry.isAvailable(Capability.DOCUMENT_SIGNATURE)).thenReturn(true);
+        when(workflowTriggeredSendGate.enabled()).thenReturn(true);
         when(privilegedMfaProperties.isEnforced()).thenReturn(true);
 
         mockMvc.perform(get("/api/capabilities"))
@@ -81,6 +87,7 @@ class CapabilitiesControllerTest {
                 .andExpect(jsonPath("$.businessCardImport").value(true))
                 .andExpect(jsonPath("$.campaignDelivery").value(true))
                 .andExpect(jsonPath("$.documentSignature").value(true))
+                .andExpect(jsonPath("$.workflowTriggeredSend").value(true))
                 .andExpect(jsonPath("$.privilegedMfaEnforced").value(true));
     }
 
@@ -88,9 +95,11 @@ class CapabilitiesControllerTest {
     void capabilitiesReportsCampaignDeliveryWhenUnavailable() throws Exception {
         mockMvc.perform(get("/api/capabilities"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.campaignDelivery").value(false));
+                .andExpect(jsonPath("$.campaignDelivery").value(false))
+                .andExpect(jsonPath("$.workflowTriggeredSend").value(false));
 
         verify(capabilityRegistry).isAvailable(Capability.CAMPAIGN_DELIVERY);
         verify(capabilityRegistry).isAvailable(Capability.DOCUMENT_SIGNATURE);
+        verify(workflowTriggeredSendGate).enabled();
     }
 }

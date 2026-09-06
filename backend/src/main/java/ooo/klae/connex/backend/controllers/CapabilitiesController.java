@@ -11,6 +11,7 @@ import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
+import ooo.klae.connex.backend.services.WorkflowTriggeredSendGate;
 
 /**
  * Public instance-level product capability endpoint.
@@ -23,6 +24,7 @@ public class CapabilitiesController {
     private final CapabilityRegistry capabilityRegistry;
     private final PrivilegedMfaProperties privilegedMfaProperties;
     private final ConnectedAccountProviders connectedAccountProviders;
+    private final WorkflowTriggeredSendGate workflowTriggeredSendGate;
 
     /**
      * Returns the instance capabilities available to the current client.
@@ -50,6 +52,7 @@ public class CapabilitiesController {
                 capabilityRegistry.isAvailable(Capability.BUSINESS_CARD_IMPORT),
                 capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY),
                 capabilityRegistry.isAvailable(Capability.DOCUMENT_SIGNATURE),
+                workflowTriggeredSendGate.enabled(),
                 privilegedMfaProperties.isEnforced());
     }
 
@@ -70,6 +73,7 @@ public class CapabilitiesController {
      * @param businessCardImport whether reviewed source-image import and retention are ready
      * @param campaignDelivery whether native email campaign delivery is available
      * @param documentSignature whether commercial-document signature delivery is available
+     * @param workflowTriggeredSend whether triggered workflow delivery is enabled
      * @param privilegedMfaEnforced whether privileged accounts are subject to mandatory MFA
      */
     public record CapabilitiesResponse(
@@ -83,6 +87,7 @@ public class CapabilitiesController {
             boolean businessCardImport,
             boolean campaignDelivery,
             boolean documentSignature,
+            boolean workflowTriggeredSend,
             boolean privilegedMfaEnforced) {
     }
 

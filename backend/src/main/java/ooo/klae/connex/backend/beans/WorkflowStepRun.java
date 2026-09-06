@@ -21,6 +21,8 @@ public class WorkflowStepRun {
     private String selectedOutcome;
     private String selectedEdgeId;
     private String nextNodeId;
+    private String actionOutcome;
+    private Long actionReferenceId;
     private String failureCode;
     private String failureMessage;
     private LocalDateTime startedAt;

@@ -5,7 +5,7 @@ import java.time.LocalDateTime;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/** A campaign send bound to a frozen audience snapshot and a chosen message version. */
+/** A snapshot-backed audience send or rollback-isolated triggered send for one message revision. */
 @Data
 @NoArgsConstructor
 public class CampaignSend {
@@ -13,6 +13,7 @@ public class CampaignSend {
     private int workspaceId;
     private int campaignId;
     private int snapshotId;
+    private String origin;
     private int messageId;
     private int messageVersion;
     private String channel;

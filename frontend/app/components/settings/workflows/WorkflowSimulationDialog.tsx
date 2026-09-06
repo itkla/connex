@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { BeakerIcon } from "@heroicons/react/24/outline";
 import { Loader2Icon } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -37,7 +37,7 @@ export default function WorkflowSimulationDialog({
     loading: boolean;
     supported: boolean;
     result: WorkflowSimulation | null;
-    diagnosticMessage: (diagnostic: { code: WorkflowDiagnosticCode; params: Record<string, string> }) => string;
+    diagnosticMessage: (diagnostic: { code: WorkflowDiagnosticCode; params: Record<string, string> }) => ReactNode;
     onOpenChange: (open: boolean) => void;
     onSearch: (query: string) => void;
     onClear: () => void;
@@ -124,7 +124,7 @@ export function WorkflowSimulationEvidence({
     diagnosticMessage,
 }: {
     result: WorkflowSimulation;
-    diagnosticMessage: (diagnostic: { code: WorkflowDiagnosticCode; params: Record<string, string> }) => string;
+    diagnosticMessage: (diagnostic: { code: WorkflowDiagnosticCode; params: Record<string, string> }) => ReactNode;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const tr = useTranslations("WorkflowAuthoring");

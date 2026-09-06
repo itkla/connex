@@ -10,6 +10,7 @@ const STATUS_CLASS: Record<CampaignSendStatus, string> = {
     completed: "bg-secondary text-secondary-foreground ring-border",
     failed: "bg-destructive/15 text-destructive ring-destructive/30",
     cancelled: "bg-muted text-muted-foreground/70 ring-border",
+    triggered: "bg-secondary text-secondary-foreground ring-border",
 };
 
 /** A workspace-consistent status pill for a campaign send's dispatch lifecycle. */

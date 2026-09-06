@@ -5,25 +5,42 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketAddress;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.net.SocketFactory;
 
 /**
- * Opens SMTP sockets only to the address resolved and approved by {@link SmtpDestinationGuard}.
+ * Opens SMTP sockets only to the address resolved and approved by {@link SmtpDestinationGuard}, and
+ * keeps every socket it opened reachable so an absolute deadline can close it immediately.
+ *
+ * <p>The sockets are always plain TCP sockets, including for TLS transports: the mail library
+ * layers TLS over the connected socket itself. Keeping the raw socket is what makes the deadline
+ * abort effective, because closing the raw socket fails a write parked inside the TLS record layer
+ * while closing the TLS layer would first have to take the record lock that parked write holds.
  */
 final class PinnedSocketFactory extends SocketFactory {
 
     private final InetAddress address;
     private final int port;
+    private final Set<Socket> sockets = ConcurrentHashMap.newKeySet();
+    private final AtomicBoolean aborted = new AtomicBoolean();
 
     PinnedSocketFactory(InetAddress address, int port) {
-        this.address = address;
+        this.address = Objects.requireNonNull(address, "address");
         this.port = port;
     }
 
     @Override
     public Socket createSocket() {
-        return new PinnedSocket(address, port);
+        Socket socket = new PinnedSocket(address, port);
+        sockets.add(socket);
+        if (aborted.get()) {
+            close(socket);
+        }
+        return socket;
     }
 
     @Override
@@ -60,7 +77,20 @@ final class PinnedSocketFactory extends SocketFactory {
         return socket;
     }
 
-    private static final class PinnedSocket extends Socket {
+    void abort() {
+        aborted.set(true);
+        sockets.forEach(PinnedSocketFactory::close);
+    }
+
+    private static void close(Socket socket) {
+        try {
+            socket.close();
+        } catch (IOException exception) {
+            return;
+        }
+    }
+
+    private final class PinnedSocket extends Socket {
 
         private final SocketAddress destination;
 
@@ -76,6 +106,15 @@ final class PinnedSocketFactory extends SocketFactory {
         @Override
         public void connect(SocketAddress ignoredEndpoint, int timeout) throws IOException {
             super.connect(destination, timeout);
+        }
+
+        @Override
+        public void close() throws IOException {
+            try {
+                super.close();
+            } finally {
+                sockets.remove(this);
+            }
         }
     }
 }

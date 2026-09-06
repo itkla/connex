@@ -1,4 +1,5 @@
-import type { RuleAction } from "@/app/lib/types";
+import { resolveCampaignAccess } from "@/app/lib/campaignAccess";
+import type { CampaignMessage, RuleAction, WorkflowExecutionMode } from "@/app/lib/types";
 
 /**
  * The authoring vocabulary shared by every workflow surface, so the editor, the inspector, and
@@ -18,7 +19,7 @@ export const EVENTS: Record<string, string[]> = {
 export const ACTIONS: Record<string, string[]> = {
     deal: ["create_task", "log_activity", "add_tag", "remove_tag", "create_note", "assign_owner", "change_stage", "notify"],
     company: ["add_tag", "remove_tag", "notify"],
-    person: ["create_task", "log_activity", "add_tag", "remove_tag", "create_note", "assign_owner", "set_response_due", "notify"],
+    person: ["create_task", "log_activity", "add_tag", "remove_tag", "create_note", "assign_owner", "set_response_due", "send_message", "notify"],
     task: ["notify"],
     document: ["notify", "create_task", "log_activity", "create_note"],
 };
@@ -66,6 +67,28 @@ export function actionsFor(recordType: string): string[] {
     return ACTIONS[recordType] ?? ["notify"];
 }
 
+/** Whether the current workflow and viewer can author the user-context campaign action. */
+export function canAuthorTriggeredSend(
+    recordType: string | null,
+    executionMode: WorkflowExecutionMode,
+    grantedPermissions: ReadonlySet<string>,
+    deploymentEnabled: boolean,
+): boolean {
+    const campaignAccess = resolveCampaignAccess([...grantedPermissions]);
+    return deploymentEnabled
+        && recordType === "person"
+        && executionMode === "user"
+        && grantedPermissions.has("CAMPAIGN_VIEW")
+        && campaignAccess.manage
+        && campaignAccess.send
+        && campaignAccess.consent;
+}
+
+/** Actions the inspector may offer, preserving backend vocabulary while gating triggered sends. */
+export function authorableActions(recordType: string, allowTriggeredSend: boolean): string[] {
+    return actionsFor(recordType).filter((type) => type !== "send_message" || allowTriggeredSend);
+}
+
 /** Hours a new first-response SLA action asks for until the author changes it. */
 export const DEFAULT_RESPONSE_DUE_HOURS = 4;
 
@@ -80,6 +103,15 @@ export function actionWithDefaults(type: string): RuleAction {
     return type === "set_response_due"
         ? { type, dueInHours: DEFAULT_RESPONSE_DUE_HOURS }
         : { type };
+}
+
+/** Selects a campaign message and clears any revision that belonged to the previous message. */
+export function actionWithCampaignMessage(action: RuleAction, message: CampaignMessage): RuleAction {
+    return {
+        ...action,
+        campaignMessageId: message.id,
+        campaignMessageVersion: undefined,
+    };
 }
 
 /** The default action appended when a step is added for a record type. */

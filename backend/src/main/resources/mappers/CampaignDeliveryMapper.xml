@@ -5,7 +5,8 @@
 
   <sql id="deliveryColumns">
     id, workspace_id, send_id, person_id, address, status, skip_reason, provider_message_id,
-    provider_id, attempt_count, last_error, unsubscribe_token, created_at, updated_at
+    provider_id, attempt_target_fingerprint, attempt_count, last_error, last_error_code,
+    reconciliation_required_at, reconciliation_outcome, unsubscribe_token, created_at, updated_at
   </sql>
 
   <insert id="insertDeliveries">
@@ -43,6 +44,7 @@
 
   <select id="listRecipients" resultType="ooo.klae.connex.backend.dto.CampaignRecipientRow">
     SELECT d.id AS delivery_id, d.send_id, s.channel, d.person_id, d.status, d.skip_reason,
+           d.reconciliation_required_at, d.last_error_code AS reason_code,
            d.created_at, d.updated_at
     FROM campaign_delivery d
     JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
@@ -83,6 +85,23 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
+  <select id="getDeliveryForUpdate" resultType="CampaignDelivery">
+    SELECT <include refid="deliveryColumns"/> FROM campaign_delivery
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getDeliveryIdentity" resultType="CampaignDelivery">
+    SELECT id, workspace_id, send_id, person_id FROM campaign_delivery
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="getBySendAndPerson" resultType="CampaignDelivery">
+    SELECT <include refid="deliveryColumns"/> FROM campaign_delivery
+    WHERE workspace_id = #{workspaceId} AND send_id = #{sendId}
+      AND person_id = #{personId} AND dedupe_active = 1
+  </select>
+
   <select id="getByToken" resultType="CampaignDelivery">
     SELECT <include refid="deliveryColumns"/> FROM campaign_delivery
     WHERE unsubscribe_token = #{token}
@@ -101,6 +120,13 @@
     ORDER BY id
   </select>
 
+  <select id="pendingDeliveryIdsPage" resultType="int">
+    SELECT id FROM campaign_delivery
+    WHERE workspace_id = #{workspaceId} AND send_id = #{sendId} AND status = 'pending'
+    ORDER BY id
+    LIMIT #{limit}
+  </select>
+
   <select id="countPending" resultType="int">
     SELECT COUNT(*) FROM campaign_delivery
     WHERE workspace_id = #{workspaceId} AND send_id = #{sendId} AND status = 'pending'
@@ -112,33 +138,180 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'pending'
   </update>
 
+  <update id="claimTriggered">
+    UPDATE campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    SET d.status = 'dispatching', d.attempt_count = d.attempt_count + 1,
+        d.provider_id = #{providerId},
+        d.attempt_target_fingerprint = #{attemptTargetFingerprint},
+        d.dispatch_lease_owner = #{leaseOwner},
+        d.dispatch_lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL #{leaseMicros} MICROSECOND)
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'pending'
+      AND (d.attempt_target_fingerprint IS NULL
+        OR d.attempt_target_fingerprint = #{attemptTargetFingerprint})
+      AND s.origin = 'triggered' AND s.status = 'triggered'
+  </update>
+
+  <update id="markPendingTriggeredTargetMismatchAmbiguous">
+    UPDATE campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    SET d.status = 'failed', d.skip_reason = NULL, d.last_error = #{lastError},
+        d.last_error_code = #{lastErrorCode},
+        d.reconciliation_required_at = UTC_TIMESTAMP(6),
+        d.reconciliation_outcome = NULL
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'pending'
+      AND d.attempt_target_fingerprint IS NOT NULL
+      AND d.attempt_target_fingerprint &lt;&gt; #{attemptTargetFingerprint}
+      AND s.origin = 'triggered' AND s.status = 'triggered'
+  </update>
+
+  <update id="renewTriggeredClaim">
+    UPDATE campaign_delivery
+    SET dispatch_lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL #{leaseMicros} MICROSECOND)
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+      AND dispatch_lease_owner = #{leaseOwner}
+      AND dispatch_lease_until >= UTC_TIMESTAMP(6)
+  </update>
+
+  <update id="releaseTriggeredClaim">
+    UPDATE campaign_delivery
+    SET status = 'pending', provider_id = NULL,
+        attempt_target_fingerprint = NULL,
+        dispatch_lease_owner = NULL, dispatch_lease_until = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+      AND dispatch_lease_owner = #{leaseOwner}
+  </update>
+
+  <select id="expiredTriggeredClaimsPage" resultType="CampaignDelivery">
+    SELECT d.id, d.provider_id, d.attempt_target_fingerprint, s.channel
+    FROM campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    WHERE d.workspace_id = #{workspaceId} AND d.status = 'dispatching'
+      AND d.dispatch_lease_until &lt; UTC_TIMESTAMP(6)
+      AND s.origin = 'triggered' AND s.status = 'triggered'
+    ORDER BY d.id
+    LIMIT #{limit}
+  </select>
+
+  <update id="recoverExpiredTriggeredClaim">
+    UPDATE campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    SET d.status = 'pending',
+        d.dispatch_lease_owner = NULL, d.dispatch_lease_until = NULL
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'dispatching'
+      AND d.dispatch_lease_until &lt; UTC_TIMESTAMP(6)
+      AND d.attempt_target_fingerprint = #{attemptTargetFingerprint}
+      AND s.origin = 'triggered' AND s.status = 'triggered'
+  </update>
+
+  <update id="markExpiredTriggeredClaimAmbiguous">
+    UPDATE campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    SET d.status = 'failed', d.skip_reason = NULL, d.last_error = #{lastError},
+        d.last_error_code = #{lastErrorCode},
+        d.reconciliation_required_at = UTC_TIMESTAMP(6),
+        d.reconciliation_outcome = NULL,
+        d.dispatch_lease_owner = NULL, d.dispatch_lease_until = NULL
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'dispatching'
+      AND d.dispatch_lease_until &lt; UTC_TIMESTAMP(6)
+      AND s.origin = 'triggered' AND s.status = 'triggered'
+  </update>
+
   <update id="markDispatched">
     UPDATE campaign_delivery
     SET status = 'dispatched', skip_reason = NULL, provider_id = #{providerId},
-        provider_message_id = #{providerMessageId}, last_error = NULL
+        provider_message_id = #{providerMessageId}, last_error = NULL, last_error_code = NULL,
+        reconciliation_required_at = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+  </update>
+
+  <update id="markTriggeredDispatched">
+    UPDATE campaign_delivery
+    SET status = 'dispatched', skip_reason = NULL, provider_id = #{providerId},
+        provider_message_id = #{providerMessageId}, last_error = NULL, last_error_code = NULL,
+        reconciliation_required_at = NULL,
+        dispatch_lease_owner = NULL, dispatch_lease_until = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+      AND dispatch_lease_owner = #{leaseOwner}
   </update>
 
   <update id="applyProviderStatus">
     UPDATE campaign_delivery
-    SET status = #{toStatus}
+    SET status = #{toStatus}, last_error = NULL, last_error_code = NULL,
+        reconciliation_required_at = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id}
       AND status IN
       <foreach item="from" collection="fromStatuses" open="(" separator="," close=")">
         #{from}
       </foreach>
+      AND (status != 'failed' OR reconciliation_required_at IS NOT NULL)
   </update>
 
   <update id="markSkipped">
     UPDATE campaign_delivery
-    SET status = 'skipped', skip_reason = #{skipReason}
+    SET status = 'skipped', skip_reason = #{skipReason}, last_error_code = NULL,
+        reconciliation_required_at = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+  </update>
+
+  <update id="markTriggeredSkipped">
+    UPDATE campaign_delivery
+    SET status = 'skipped', skip_reason = #{skipReason},
+        last_error_code = NULL, reconciliation_required_at = NULL,
+        dispatch_lease_owner = NULL, dispatch_lease_until = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+      AND dispatch_lease_owner = #{leaseOwner}
   </update>
 
   <update id="markFailed">
     UPDATE campaign_delivery
-    SET status = 'failed', skip_reason = NULL, last_error = #{lastError}
+    SET status = 'failed', skip_reason = NULL, last_error = #{lastError},
+        last_error_code = #{lastErrorCode}
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+      AND reconciliation_required_at IS NULL
+  </update>
+
+  <update id="markTriggeredFailed">
+    UPDATE campaign_delivery
+    SET status = 'failed', skip_reason = NULL, last_error = #{lastError},
+        last_error_code = #{lastErrorCode},
+        dispatch_lease_owner = NULL, dispatch_lease_until = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+      AND dispatch_lease_owner = #{leaseOwner}
+      AND reconciliation_required_at IS NULL
+  </update>
+
+  <update id="markAmbiguous">
+    UPDATE campaign_delivery
+    SET status = 'failed', skip_reason = NULL, last_error = #{lastError},
+        last_error_code = #{lastErrorCode},
+        reconciliation_required_at = UTC_TIMESTAMP(6), reconciliation_outcome = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+  </update>
+
+  <update id="markTriggeredAmbiguous">
+    UPDATE campaign_delivery
+    SET status = 'failed', skip_reason = NULL, last_error = #{lastError},
+        last_error_code = #{lastErrorCode},
+        reconciliation_required_at = UTC_TIMESTAMP(6),
+        reconciliation_outcome = NULL,
+        dispatch_lease_owner = NULL, dispatch_lease_until = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
+      AND dispatch_lease_owner = #{leaseOwner}
+  </update>
+
+  <update id="resolveReconciliation">
+    UPDATE campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    SET d.status = #{toStatus}, d.skip_reason = NULL,
+        d.last_error = #{lastError}, d.last_error_code = NULL,
+        d.reconciliation_required_at = NULL,
+        d.reconciliation_outcome = #{outcome},
+        d.dispatch_lease_owner = NULL, d.dispatch_lease_until = NULL
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id}
+      AND s.campaign_id = #{campaignId}
+      AND d.status = 'failed' AND d.reconciliation_required_at IS NOT NULL
+      AND d.reconciliation_outcome IS NULL
   </update>
 
   <select id="recentDispatchCount" resultType="int">

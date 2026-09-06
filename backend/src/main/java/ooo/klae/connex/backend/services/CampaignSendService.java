@@ -214,6 +214,7 @@ public class CampaignSendService {
         send.setWorkspaceId(workspaceId);
         send.setCampaignId(campaignId);
         send.setSnapshotId(snapshot.getId());
+        send.setOrigin("audience");
         send.setMessageId(message.getId());
         send.setMessageVersion(revision.getVersion());
         send.setChannel(message.getChannel());
@@ -243,6 +244,7 @@ public class CampaignSendService {
             throw new ForbiddenException("Campaign delivery is not enabled on this instance");
         }
         CampaignSend send = requireSend(workspaceId, campaignId, sendId);
+        requireAudienceSend(send);
         DeliveryChannel channel = resolveDispatchableChannel(send.getChannel());
         if (!deliveryProviderConfigService.isReady(workspaceId, channel)) {
             throw new BadRequestException(
@@ -263,6 +265,7 @@ public class CampaignSendService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Campaign campaign = requireCampaign(workspaceId, campaignId);
         CampaignSend send = requireSend(workspaceId, campaignId, sendId);
+        requireAudienceSend(send);
         if (campaignSendMapper.transitionStatus(workspaceId, sendId, "queued", "paused") == 0
                 && campaignSendMapper.transitionStatus(workspaceId, sendId, "running", "paused") == 0) {
             throw new BadRequestException("Only a queued or running send can be paused");
@@ -279,6 +282,7 @@ public class CampaignSendService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Campaign campaign = requireCampaign(workspaceId, campaignId);
         CampaignSend send = requireSend(workspaceId, campaignId, sendId);
+        requireAudienceSend(send);
         boolean cancelled = campaignSendMapper.transitionStatus(workspaceId, sendId, "draft", "cancelled") > 0
                 || campaignSendMapper.transitionStatus(workspaceId, sendId, "queued", "cancelled") > 0
                 || campaignSendMapper.transitionStatus(workspaceId, sendId, "running", "cancelled") > 0
@@ -407,6 +411,12 @@ public class CampaignSendService {
         return send;
     }
 
+    private static void requireAudienceSend(CampaignSend send) {
+        if (!"audience".equals(send.getOrigin())) {
+            throw new BadRequestException("Workflow-managed sends cannot be changed here");
+        }
+    }
+
     private CampaignMessageDto toMessageDto(int workspaceId, CampaignMessage message) {
         List<CampaignMessageRevisionDto> revisions =
                 campaignMessageMapper.getRevisions(workspaceId, message.getId()).stream()
@@ -422,7 +432,7 @@ public class CampaignSendService {
 
     private static CampaignSendDto toSendDto(CampaignSend send) {
         return new CampaignSendDto(
-                send.getId(), send.getCampaignId(), send.getSnapshotId(), send.getMessageId(),
+                send.getId(), send.getCampaignId(), send.getSnapshotId(), send.getOrigin(), send.getMessageId(),
                 send.getMessageVersion(), send.getChannel(), send.getPurpose(), send.getProviderId(),
                 send.getStatus(), send.getScheduledAt(), send.getStartedAt(), send.getCompletedAt(),
                 send.getTotalRecipients(), send.getDispatchedCount(), send.getSkippedCount(),

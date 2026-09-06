@@ -110,6 +110,8 @@ class WorkflowServiceTest {
         lenient().when(workspaceService.isBuiltInAdmin(7, 41)).thenReturn(true);
         lenient().when(workflowDefinitionValidator.validateForMutation(
             any(), any(), any())).thenReturn(Set.of());
+        lenient().when(workflowDefinitionValidator.validateDraftActionsForMutation(
+            any(), any(), any())).thenReturn(Set.of());
     }
 
     @Test
@@ -198,6 +200,22 @@ class WorkflowServiceTest {
     }
 
     @Test
+    void createRejectsActionPermissionsAgainstTheLockedAuthorizationSnapshot() throws Exception {
+        when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41)))
+            .thenReturn(new LockedPrincipals(
+                Set.of(41), Set.of(41), Set.of(Permission.RULE_MANAGE)));
+        when(workflowDefinitionValidator.validateDraftActionsForMutation(any(), any(), any()))
+            .thenReturn(Set.of(
+                Permission.CAMPAIGN_MANAGE,
+                Permission.CAMPAIGN_SEND,
+                Permission.CONSENT_MANAGE));
+
+        assertThrows(ForbiddenException.class, () -> service.create(createRequest("user")));
+
+        verify(workflowMapper, never()).insert(any());
+    }
+
+    @Test
     void systemAuthoringRequiresAdminAndNeverAcceptsRunAsInput() throws Exception {
         stubSystemMutation(Set.of(41));
         doAnswer(invocation -> {
@@ -234,6 +252,28 @@ class WorkflowServiceTest {
         verify(auditService).record(
             eq("workflow.draft.save"), eq("workflow"), eq(101), eq("Workflow 101"),
             eq("Workflow draft saved"), any());
+    }
+
+    @Test
+    void draftSaveRejectsActionPermissionsBeforeLockingOrUpdatingTheWorkflow() throws Exception {
+        Workflow discovered = workflow("Workflow", "user", 3, 999, null, null, false);
+        when(workflowMapper.getById(7, 101)).thenReturn(discovered);
+        when(principalLockService.lockUserMutation(
+            7, 41, Set.of(41, 999), Set.of(999)))
+            .thenReturn(new LockedPrincipals(
+                Set.of(41, 999), Set.of(41, 999), Set.of(Permission.RULE_MANAGE)));
+        when(workflowDefinitionValidator.validateDraftActionsForMutation(any(), any(), any()))
+            .thenReturn(Set.of(
+                Permission.CAMPAIGN_MANAGE,
+                Permission.CAMPAIGN_SEND,
+                Permission.CONSENT_MANAGE));
+
+        assertThrows(
+            ForbiddenException.class,
+            () -> service.saveDraft(101, draftRequest("Changed", "user", 3)));
+
+        verify(workflowMapper, never()).getByIdForUpdate(7, 101);
+        verify(workflowMapper, never()).updateDraft(any(), eq(3));
     }
 
     @Test

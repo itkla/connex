@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -20,6 +21,8 @@ import ooo.klae.connex.backend.beans.CampaignSend;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
+import ooo.klae.connex.backend.dto.CampaignDeliveryReconciliationDto;
+import ooo.klae.connex.backend.dto.CampaignDeliveryReconciliationRequest;
 import ooo.klae.connex.backend.dto.CampaignRecipientDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.PersonCampaignTouchDto;
@@ -40,6 +43,7 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
     @Autowired private CampaignMessageMapper campaignMessageMapper;
     @Autowired private CampaignSendMapper campaignSendMapper;
     @Autowired private CampaignDeliveryMapper campaignDeliveryMapper;
+    @Autowired private CampaignTriggeredSendService triggeredSendService;
     @Autowired private ContactMarketingService contactMarketingService;
     @Autowired private RoleMapper roleMapper;
 
@@ -88,6 +92,68 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
                 campaign.getId(), null, List.of("skipped"), null, 25, 0);
 
         assertEquals("suppressed", page.items().getFirst().skipReason());
+    }
+
+    @Test
+    void ambiguousRecipientsExposeOnlyACuratedReasonCode() {
+        Campaign campaign = newCampaign();
+        CampaignSend send = newSend(campaign);
+        CampaignDelivery delivery = newDelivery(send, newPerson(newCompany()), "pending", null);
+        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId());
+        campaignDeliveryMapper.markAmbiguous(
+                workspace.getId(),
+                delivery.getId(),
+                "AMBIGUOUS: relay diagnostics for private@example.com",
+                "deadline_ambiguous");
+
+        PageResponse<CampaignRecipientDto> page = recipientService.getRecipients(
+                campaign.getId(), null, List.of("failed"), null, 25, 0);
+
+        CampaignRecipientDto row = page.items().getFirst();
+        assertTrue(row.reconciliationRequired());
+        assertEquals("deadline_ambiguous", row.reasonCode());
+    }
+
+    @Test
+    void audienceDeliveryCanBeReconciledWithoutTriggeredReenrollmentSemantics() {
+        Campaign campaign = newCampaign();
+        CampaignSend send = newSend(campaign);
+        CampaignDelivery delivery = newDelivery(
+                send, newPerson(newCompany()), "pending", null);
+        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId());
+        campaignDeliveryMapper.markAmbiguous(
+                workspace.getId(), delivery.getId(),
+                "AMBIGUOUS: provider result unknown", "relay_error");
+
+        CampaignDeliveryReconciliationDto resolved = triggeredSendService.reconcile(
+                campaign.getId(),
+                delivery.getId(),
+                new CampaignDeliveryReconciliationRequest("not_delivered"));
+
+        assertEquals("failed", resolved.status());
+        assertFalse(resolved.reconciliationRequired());
+        assertEquals("operator_not_delivered", campaignDeliveryMapper.getDelivery(
+                workspace.getId(), delivery.getId()).getReconciliationOutcome());
+    }
+
+    @Test
+    void definitiveProviderEventResolvesAnAmbiguousFailedDelivery() {
+        Campaign campaign = newCampaign();
+        CampaignSend send = newSend(campaign);
+        CampaignDelivery delivery = newDelivery(send, newPerson(newCompany()), "pending", null);
+        campaignDeliveryMapper.claim(workspace.getId(), delivery.getId());
+        campaignDeliveryMapper.markAmbiguous(
+                workspace.getId(), delivery.getId(),
+                "AMBIGUOUS: provider result unknown", "relay_error");
+
+        assertEquals(1, campaignDeliveryMapper.applyProviderStatus(
+                workspace.getId(), delivery.getId(), "delivered", List.of("failed")));
+
+        CampaignDelivery resolved = campaignDeliveryMapper.getDelivery(
+                workspace.getId(), delivery.getId());
+        assertEquals("delivered", resolved.getStatus());
+        assertNull(resolved.getReconciliationRequiredAt());
+        assertNull(resolved.getLastError());
     }
 
     @Test
@@ -292,7 +358,8 @@ class CampaignRecipientServiceTest extends AbstractServiceTest {
             if ("skipped".equals(status)) {
                 campaignDeliveryMapper.markSkipped(workspace.getId(), stored.getId(), skipReason);
             } else if ("failed".equals(status)) {
-                campaignDeliveryMapper.markFailed(workspace.getId(), stored.getId(), "fixture");
+                campaignDeliveryMapper.markFailed(
+                        workspace.getId(), stored.getId(), "fixture", "relay_error");
             } else {
                 campaignDeliveryMapper.markDispatched(
                         workspace.getId(), stored.getId(), "smtp", "msg-" + unique());

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.mail;
 
+import java.util.UUID;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -7,6 +9,7 @@ import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
 import ooo.klae.connex.backend.mappers.MailConfigMapper;
+import ooo.klae.connex.backend.secrets.SecretReference;
 
 /**
  * Resolves the effective SMTP settings for a send. Account-level mail uses the
@@ -24,6 +27,7 @@ public class MailConfigResolver {
     private final MailProperties properties;
     private final MailConfigMapper mailConfigMapper;
     private final SecretCipher secretCipher;
+    private final String instanceConfigurationVersion = "instance:" + UUID.randomUUID();
 
     /**
      * The instance default sender, or {@code null} when mail is disabled or unconfigured.
@@ -116,7 +120,9 @@ public class MailConfigResolver {
                 properties.getConnectionTimeoutMs(),
                 properties.getTimeoutMs(),
                 properties.getWriteTimeoutMs(),
-                false);
+                false,
+                instanceConfigurationVersion,
+                "instance-smtp:" + String.valueOf(properties.getUsername()));
     }
 
     private ResolvedMailConfig fromWorkspace(WorkspaceMailConfig ws) {
@@ -140,6 +146,17 @@ public class MailConfigResolver {
                 properties.getConnectionTimeoutMs(),
                 properties.getTimeoutMs(),
                 properties.getWriteTimeoutMs(),
-                true);
+                true,
+                "workspace-smtp:" + ws.getWorkspaceId() + ":" + String.valueOf(ws.getUpdatedAt()),
+                workspaceCredentialReference(ws));
+    }
+
+    private static String workspaceCredentialReference(WorkspaceMailConfig config) {
+        String stored = config.getPasswordEnc();
+        if (SecretReference.isReference(stored)) {
+            return stored;
+        }
+        return "workspace-smtp:" + config.getWorkspaceId() + ":"
+                + String.valueOf(config.getUsername());
     }
 }

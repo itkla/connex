@@ -340,6 +340,16 @@
         "pickOwner": "メンバーを選択",
         "actionStage": "ステージ",
         "pickStage": "ステージを選択",
+        "campaignMessage": "キャンペーンメッセージ",
+        "campaignMessagePlaceholder": "キャンペーンメッセージを選択",
+        "campaignMessageLoading": "キャンペーンメッセージを読み込んでいます…",
+        "campaignMessageLoadFailed": "キャンペーンメッセージを読み込めませんでした。ワークフローを開き直して再試行してください。",
+        "campaignMessageEmpty": "リビジョンがあるキャンペーンメッセージはありません。",
+        "campaignMessageNoRevisions": "このキャンペーンメッセージにはリビジョンがありません。",
+        "campaignMessageRevision": "メッセージのバージョン",
+        "campaignMessageRevisionPlaceholder": "バージョンを選択",
+        "sendMessageDeploymentUnavailable": "この環境では、ワークフローからのキャンペーンメッセージ送信は有効になっていません。",
+        "sendMessageUnavailable": "現在の実行者設定またはワークスペースのアクセス権では、このアクションを利用できません。",
         "summaryEntity": "{record}が{events}のとき",
         "record": {
             "deal": "案件",
@@ -397,6 +407,7 @@
             "create_note": "メモを追加",
             "assign_owner": "担当者を割り当て",
             "set_response_due": "初回応答期限を設定",
+            "send_message": "キャンペーンメッセージを送信",
             "change_stage": "ステージを移動"
         },
         "runAs": {
@@ -680,6 +691,12 @@
             "durationMs": "{value} ミリ秒",
             "failureAtNode": "このステップが失敗しました。",
             "stepFailure": "このステップに起因する失敗",
+            "actionOutcome": {
+                "delivery_queued": "メッセージを配信待ちにしました",
+                "delivery_dedup_skipped": "メッセージはすでに配信待ちです",
+                "delivery_capped": "配信上限に達したため、メッセージは配信待ちになりませんでした",
+                "delivery_reconciliation_required": "メッセージの結果をプロバイダーで確認する必要があります"
+            },
             "status": {
                 "queued": "順番待ち",
                 "running": "実行中",
@@ -753,7 +770,14 @@
             "record_unavailable": "選択したレコードを利用できないか、表示権限がありません。",
             "trigger_filter_not_matched": "選択したレコードはトリガーフィルターに一致しません。",
             "action_permission_missing": "設定された実行者にはこのアクションの権限がありません。",
+            "action_system_permission_missing": "システム実行のワークフローでは、このアクションに必要な権限を利用できません。",
             "action_tag_unavailable": "選択したタグを利用できません。",
+            "action_campaign_message_unavailable": "選択したキャンペーンメッセージを利用できません。",
+            "action_campaign_message_revision_unavailable": "選択したキャンペーンメッセージのバージョンを利用できません。",
+            "action_delivery_capability_unavailable": "現在、キャンペーン配信を利用できません。",
+            "action_delivery_transport_unavailable": "このメッセージに利用できる配信手段が設定されていません。",
+            "action_recipient_address_unavailable": "この連絡先にはメッセージを届けられる宛先がありません。",
+            "action_triggered_send_unavailable": "現在、このワークフロー管理の配信を利用できません。",
             "action_target_member_unavailable": "選択したメンバーを利用できません。",
             "action_stage_unavailable": "選択したステージを利用できません。",
             "action_stage_pipeline_mismatch": "選択したステージはレコードのパイプラインに属していません。",
@@ -766,7 +790,8 @@
             "action_ready": "このアクションは実行可能になる見込みです。",
             "delay_wait": "この位置で待機するため、プレビューを停止します。",
             "end_reached": "この位置で経路が完了する見込みです。"
-        }
+        },
+        "diagnosticFallback": "この確認内容を説明できませんでした。"
     },
     "WorkspaceCustomFields": {
         "newField": "フィールドを追加",
@@ -877,6 +902,8 @@
         "apiKey": "APIキー",
         "apiKeyConfigured": "•••• {last4}（変更なし）",
         "apiKeyHint": "保存済みのキーを保持するには空欄のままにします。暗号化して保存され、表示されません。",
+        "idempotentSubmissionTitle": "同じリクエストの再送を安全に処理できる",
+        "idempotentSubmissionDescription": "同じリクエストを再送しても配信が1回だけになることをプロバイダーが保証している場合にのみ有効にしてください。有効にすると、中断した配信をConnexが自動的に再試行することがあります。",
         "webhookTitle": "配信Webhook",
         "webhookDescription": "メール配信サービスは、配信・バウンス・苦情の結果をこのURLに送信します。以下でURLとシークレットを生成し、両方を配信サービス側の設定に登録してください。",
         "webhookUrlLabel": "Webhook URL",

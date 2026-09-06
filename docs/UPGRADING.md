@@ -182,6 +182,15 @@ than grandfathered, and V192 repeats V191's sweep so none remain to refuse. Any 
 across both migrations has already run V191's sweep; the repeat covers only databases sitting at
 exactly V191 — staging and developer clones. Anonymous sessions are spared, as in V191.
 
+## Triggered-send rollback quiescence
+
+The triggered-send fence is captured at backend startup; changing an environment file does not close
+running replicas. Before replacing binaries with a version that does not understand triggered sends,
+set `CONNEX_WORKFLOWS_TRIGGERED_SEND_ENABLED=false`, drain and restart or recreate every
+current-version backend replica, verify no running instance remains enabled, and wait one full claim
+lease plus one provider-deadline interval. The authoritative provider-boundary and reconciliation
+contract is [Automation: triggered campaign delivery](backend/AUTOMATION.md#triggered-campaign-delivery).
+
 ## On-prem upgrade runbook
 
 1. **Preflight legacy media before any recreate** — if the installed version predates private object

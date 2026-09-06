@@ -27,6 +27,8 @@ public class DeliveryProviderConfig {
     private String webhookTokenHash;
     private String webhookSecretRef;
     private boolean enabled;
+    private long configGeneration;
+    private boolean idempotentSubmission;
     private Integer createdById;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

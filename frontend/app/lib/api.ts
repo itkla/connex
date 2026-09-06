@@ -1872,8 +1872,9 @@ export function deletePasskey(credentialId: string) {
 
 /**
  * Fetches the instance capability flags that gate optional UI: enterprise SSO, consumer social
- * login, instance-managed mail, business-card scanning, source-image import, and native campaign
- * delivery. Consolidates the former per-feature `/enabled` endpoints.
+ * login, instance-managed mail, business-card scanning, source-image import, native campaign
+ * delivery, and workflow-triggered delivery. Consolidates the former per-feature `/enabled`
+ * endpoints.
  * @param init optional fetch overrides
  * @returns the resolved instance capabilities
  */
@@ -1899,6 +1900,7 @@ export const DEFAULT_CAPABILITIES: Types.InstanceCapabilities = {
     businessCardScanning: false,
     businessCardImport: false,
     campaignDelivery: false,
+    workflowTriggeredSend: false,
     privilegedMfaEnforced: true,
 };
 
@@ -6599,6 +6601,18 @@ export function getCampaignRecipients(
     return getJson<Types.Page<Types.CampaignRecipient>>(
         `/api/campaigns/${id}/recipients${buildQuery(params)}`,
         init,
+    );
+}
+
+/** Records a provider-confirmed delivery outcome without sending the message again. */
+export function reconcileCampaignRecipient(
+    campaignId: number,
+    deliveryId: number,
+    payload: Types.CampaignDeliveryReconciliationPayload,
+) {
+    return postJson<Types.CampaignDeliveryReconciliation>(
+        `/api/campaigns/${campaignId}/recipients/${deliveryId}/reconcile`,
+        payload,
     );
 }
 

@@ -340,6 +340,16 @@
         "pickOwner": "Choose a member",
         "actionStage": "Stage",
         "pickStage": "Choose a stage",
+        "campaignMessage": "Campaign message",
+        "campaignMessagePlaceholder": "Choose a campaign message",
+        "campaignMessageLoading": "Loading campaign messages…",
+        "campaignMessageLoadFailed": "Couldn't load campaign messages. Reopen this workflow to try again.",
+        "campaignMessageEmpty": "No campaign messages have a revision yet.",
+        "campaignMessageNoRevisions": "This campaign message has no revisions.",
+        "campaignMessageRevision": "Message version",
+        "campaignMessageRevisionPlaceholder": "Choose a version",
+        "sendMessageDeploymentUnavailable": "Sending campaign messages from workflows is not enabled for this deployment.",
+        "sendMessageUnavailable": "This action is unavailable with the current run-as setting or your workspace access.",
         "summaryEntity": "When a {record} — {events}",
         "record": {
             "deal": "deal",
@@ -397,6 +407,7 @@
             "create_note": "add a note",
             "assign_owner": "assign an owner",
             "set_response_due": "set a first-response deadline",
+            "send_message": "send a campaign message",
             "change_stage": "move to a stage"
         },
         "runAs": {
@@ -680,6 +691,12 @@
             "durationMs": "{value, number} ms",
             "failureAtNode": "This step failed.",
             "stepFailure": "Failure attributed to this step",
+            "actionOutcome": {
+                "delivery_queued": "Message queued for delivery",
+                "delivery_dedup_skipped": "Message was already queued",
+                "delivery_capped": "Message was not queued because the delivery limit was reached",
+                "delivery_reconciliation_required": "Message outcome needs provider confirmation"
+            },
             "status": {
                 "queued": "Queued",
                 "running": "Running",
@@ -753,7 +770,14 @@
             "record_unavailable": "The selected record is unavailable or not visible.",
             "trigger_filter_not_matched": "The selected record does not match the trigger filter.",
             "action_permission_missing": "The configured actor does not have permission for this action.",
+            "action_system_permission_missing": "System-run workflows cannot use the permissions required by this action.",
             "action_tag_unavailable": "The selected tag is no longer available.",
+            "action_campaign_message_unavailable": "The selected campaign message is no longer available.",
+            "action_campaign_message_revision_unavailable": "The selected campaign message version is no longer available.",
+            "action_delivery_capability_unavailable": "Campaign delivery isn't available right now.",
+            "action_delivery_transport_unavailable": "No usable delivery transport is configured for this message.",
+            "action_recipient_address_unavailable": "The contact has no usable address for this message.",
+            "action_triggered_send_unavailable": "This workflow-managed delivery isn't available right now.",
             "action_target_member_unavailable": "The selected member is no longer available.",
             "action_stage_unavailable": "The selected stage is no longer available.",
             "action_stage_pipeline_mismatch": "The selected stage does not belong to the record's pipeline.",
@@ -766,7 +790,8 @@
             "action_ready": "This action would be ready to run.",
             "delay_wait": "The path would wait here, so preview stops.",
             "end_reached": "The path would complete here."
-        }
+        },
+        "diagnosticFallback": "This check could not be described."
     },
     "WorkspaceCustomFields": {
         "newField": "Add field",
@@ -877,6 +902,8 @@
         "apiKey": "API key",
         "apiKeyConfigured": "•••• {last4} (unchanged)",
         "apiKeyHint": "Leave blank to keep the stored key. Stored encrypted; never shown.",
+        "idempotentSubmissionTitle": "Provider safely handles repeated requests",
+        "idempotentSubmissionDescription": "Turn this on only when your provider guarantees that retrying the same request delivers no more than once. Connex may automatically retry interrupted deliveries when enabled.",
         "webhookTitle": "Delivery webhook",
         "webhookDescription": "Your email service provider reports deliveries, bounces, and complaints back to this URL. Generate the URL and secret below, then add both to your provider's settings.",
         "webhookUrlLabel": "Webhook URL",

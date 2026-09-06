@@ -21,6 +21,7 @@ public class DeliveryProviderConfigDto {
     private String credentialLast4;
     private boolean webhookConfigured;
     private boolean enabled;
+    private boolean idempotentSubmission;
     private LocalDateTime updatedAt;
 
     /**
@@ -39,6 +40,7 @@ public class DeliveryProviderConfigDto {
         dto.setCredentialLast4(config.getCredentialLast4());
         dto.setWebhookConfigured(config.getWebhookTokenHash() != null && !config.getWebhookTokenHash().isBlank());
         dto.setEnabled(config.isEnabled());
+        dto.setIdempotentSubmission(config.isIdempotentSubmission());
         dto.setUpdatedAt(config.getUpdatedAt());
         return dto;
     }

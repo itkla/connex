@@ -3,27 +3,20 @@ package ooo.klae.connex.backend.delivery.provider.sms;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.InetAddress;
 import java.net.URI;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.hc.client5.http.config.ConnectionConfig;
-import org.apache.hc.client5.http.config.RequestConfig;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
-import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
-import org.apache.hc.core5.util.Timeout;
+import jakarta.annotation.PreDestroy;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
-import ooo.klae.connex.backend.ai.egress.PinnedHostDnsResolver;
 import ooo.klae.connex.backend.delivery.DeliveryCapabilities;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryProperties;
@@ -32,13 +25,15 @@ import ooo.klae.connex.backend.delivery.DeliveryRequest;
 import ooo.klae.connex.backend.delivery.DispatchReceipt;
 import ooo.klae.connex.backend.delivery.MessageDispatcher;
 import ooo.klae.connex.backend.delivery.ResolvedDeliveryProvider;
+import ooo.klae.connex.backend.delivery.provider.http.DeadlineBoundHttpTransport;
+import ooo.klae.connex.backend.delivery.provider.http.DeadlineBoundHttpTransport.TransportException;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
  * A receipt-capable HTTP SMS gateway adapter. It dispatches a rendered text message to a generic JSON
- * send API ({@code {to, from, text}} in, {@code {messageId}} out) over a hardened {@link RestClient}
+ * send API ({@code {to, from, text}} in, {@code {messageId}} out) over a deadline-bound transport
  * that never follows redirects, bounds the response, and re-vets and pins the destination host
  * immediately before the send, so a rebinding attack cannot redirect the outbound request after
  * validation. SMS is text-only: the rendered subject and HTML body are ignored.
@@ -54,7 +49,7 @@ public class SmsHttpDeliveryProvider implements MessageDispatcher {
     public static final String PROVIDER_ID = "sms_http";
 
     private static final DeliveryCapabilities CAPABILITIES =
-            new DeliveryCapabilities(true, false, false, 1);
+            new DeliveryCapabilities(true, false, false, false, 1);
     private static final String CREDENTIAL_KEY_API = "apiKey";
     private static final int DETAIL_LIMIT = 512;
     private static final int BUFFER_BYTES = 8192;
@@ -69,6 +64,8 @@ public class SmsHttpDeliveryProvider implements MessageDispatcher {
     private final Duration requestTimeout;
     private final int maxResponseBytes;
     private final ObjectMapper objectMapper;
+    private final DeadlineBoundHttpTransport transport;
+    private final boolean requireHttps;
 
     /**
      * Builds the production adapter. Because the destination address is validated and pinned per send,
@@ -83,6 +80,10 @@ public class SmsHttpDeliveryProvider implements MessageDispatcher {
         this.requestTimeout = duration(deliveryProperties.getEspRequestTimeoutMs(), "request timeout");
         this.maxResponseBytes = positiveInt(deliveryProperties.getEspMaxResponseBytes(), "max response bytes");
         this.objectMapper = objectMapper;
+        this.transport = new DeadlineBoundHttpTransport(
+                connectTimeout, requestTimeout, maxResponseBytes,
+                host -> AiEgressGuard.resolveFetchableHost(host, false), System::nanoTime);
+        this.requireHttps = true;
     }
 
     SmsHttpDeliveryProvider(RestClient restClient, int maxResponseBytes, ObjectMapper objectMapper) {
@@ -91,6 +92,8 @@ public class SmsHttpDeliveryProvider implements MessageDispatcher {
         this.requestTimeout = null;
         this.maxResponseBytes = positiveInt(maxResponseBytes, "max response bytes");
         this.objectMapper = objectMapper;
+        this.transport = null;
+        this.requireHttps = true;
     }
 
     @Override
@@ -110,7 +113,10 @@ public class SmsHttpDeliveryProvider implements MessageDispatcher {
 
     @Override
     public DispatchReceipt dispatch(ResolvedDeliveryProvider target, DeliveryRequest request) {
-        URI endpoint = parseHttpsEndpoint(target.endpoint());
+        if (transport != null && request.providerDeadlineNanos() == null) {
+            return DispatchReceipt.rejected("SMS request has no provider deadline");
+        }
+        URI endpoint = parseEndpoint(target.endpoint(), requireHttps);
         if (endpoint == null) {
             return DispatchReceipt.rejected("No usable SMS endpoint is configured");
         }
@@ -130,7 +136,12 @@ public class SmsHttpDeliveryProvider implements MessageDispatcher {
         }
         SmsResponse response;
         try {
-            response = send(endpoint, apiKey, body);
+            response = send(endpoint, apiKey, request.dedupeKey(), body,
+                    request.providerDeadlineNanos());
+        } catch (TransportException exception) {
+            return exception.ambiguous()
+                    ? DispatchReceipt.ambiguous(bounded(exception.getMessage()))
+                    : DispatchReceipt.rejected(bounded(exception.getMessage()));
         } catch (RuntimeException exception) {
             return DispatchReceipt.rejected(bounded(exception.getMessage()));
         }
@@ -138,6 +149,13 @@ public class SmsHttpDeliveryProvider implements MessageDispatcher {
             return DispatchReceipt.rejected("sms gateway rejected with status " + response.statusCode());
         }
         return DispatchReceipt.sent(parseMessageId(response.body()), "sms accepted");
+    }
+
+    @PreDestroy
+    void shutdown() {
+        if (transport != null) {
+            transport.close();
+        }
     }
 
     private Map<String, Object> sendPayload(ResolvedDeliveryProvider target, DeliveryRequest request, String text) {
@@ -161,53 +179,35 @@ public class SmsHttpDeliveryProvider implements MessageDispatcher {
         return null;
     }
 
-    private SmsResponse send(URI endpoint, String apiKey, byte[] body) {
-        String host = endpoint.getHost();
-        InetAddress pinnedAddress = AiEgressGuard.resolveFetchableHost(host, false);
+    private SmsResponse send(
+            URI endpoint, String apiKey, String dedupeKey, byte[] body, Long deadlineNanos) {
         if (restClient != null) {
-            return exchange(restClient, endpoint, apiKey, body);
+            AiEgressGuard.resolveFetchableHost(endpoint.getHost(), false);
+            return exchange(restClient, endpoint, apiKey, dedupeKey, body);
         }
-        try (CloseableHttpClient httpClient = pinnedHttpClient(host, pinnedAddress)) {
-            RestClient pinned = RestClient.builder()
-                    .requestFactory(new HttpComponentsClientHttpRequestFactory(httpClient))
-                    .build();
-            return exchange(pinned, endpoint, apiKey, body);
-        } catch (IOException exception) {
-            throw new DeliveryProviderException("SMS transport could not be closed");
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put("Authorization", "Bearer " + apiKey);
+        if (dedupeKey != null) {
+            headers.put("Idempotency-Key", dedupeKey);
         }
+        DeadlineBoundHttpTransport.Response response =
+                transport.post(endpoint, headers, body, deadlineNanos);
+        return new SmsResponse(response.statusCode(), response.body());
     }
 
-    private SmsResponse exchange(RestClient client, URI endpoint, String apiKey, byte[] body) {
-        return client.post()
+    private SmsResponse exchange(
+            RestClient client, URI endpoint, String apiKey, String dedupeKey, byte[] body) {
+        RestClient.RequestBodySpec spec = client.post()
                 .uri(endpoint)
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.APPLICATION_JSON)
-                .header("Authorization", "Bearer " + apiKey)
-                .body(body)
+                .header("Authorization", "Bearer " + apiKey);
+        if (dedupeKey != null) {
+            spec.header("Idempotency-Key", dedupeKey);
+        }
+        return spec.body(body)
                 .exchange((httpRequest, httpResponse) -> new SmsResponse(
                         httpResponse.getStatusCode().value(), readBounded(httpResponse.getBody())));
-    }
-
-    private CloseableHttpClient pinnedHttpClient(String host, InetAddress address) {
-        ConnectionConfig connectionConfig = ConnectionConfig.custom()
-                .setConnectTimeout(Timeout.of(connectTimeout))
-                .setSocketTimeout(Timeout.of(requestTimeout))
-                .build();
-        RequestConfig requestConfig = RequestConfig.custom()
-                .setResponseTimeout(Timeout.of(requestTimeout))
-                .build();
-        PoolingHttpClientConnectionManagerBuilder connectionManager =
-                PoolingHttpClientConnectionManagerBuilder.create()
-                        .setDnsResolver(new PinnedHostDnsResolver(host, address))
-                        .setDefaultConnectionConfig(connectionConfig)
-                        .setMaxConnPerRoute(1)
-                        .setMaxConnTotal(1);
-        return HttpClients.custom()
-                .setConnectionManager(connectionManager.build())
-                .setDefaultRequestConfig(requestConfig)
-                .disableAutomaticRetries()
-                .disableRedirectHandling()
-                .build();
     }
 
     private byte[] readBounded(InputStream input) throws IOException {
@@ -225,13 +225,15 @@ public class SmsHttpDeliveryProvider implements MessageDispatcher {
         return output.toByteArray();
     }
 
-    private static URI parseHttpsEndpoint(String endpoint) {
+    private static URI parseEndpoint(String endpoint, boolean requireHttps) {
         if (endpoint == null || endpoint.isBlank()) {
             return null;
         }
         try {
             URI uri = URI.create(endpoint.trim());
-            if (!uri.isAbsolute() || !"https".equalsIgnoreCase(uri.getScheme())
+            boolean acceptedScheme = "https".equalsIgnoreCase(uri.getScheme())
+                    || !requireHttps && "http".equalsIgnoreCase(uri.getScheme());
+            if (!uri.isAbsolute() || !acceptedScheme
                     || uri.getHost() == null || uri.getHost().isBlank()
                     || uri.getUserInfo() != null || uri.getFragment() != null || uri.getRawQuery() != null) {
                 return null;

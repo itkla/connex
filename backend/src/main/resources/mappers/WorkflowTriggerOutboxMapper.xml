@@ -6,7 +6,7 @@
   <sql id="outboxColumns">
     id, workspace_id, workflow_id, workflow_version_id, workflow_runtime_generation,
     trigger_type, trigger_event, trigger_key, record_type, record_id, occurred_at,
-    record_scan_after_id, record_scan_upper_id, dedupe_key, status, available_at,
+    record_scan_after_id, record_scan_upper_id, schedule_match_count, dedupe_key, status, available_at,
     lease_owner, lease_until, delivery_attempt_count, last_error_code, completed_at,
     created_at, updated_at
   </sql>
@@ -207,6 +207,7 @@
   <update id="saveSchedulePage">
     UPDATE workflow_trigger_outbox
     SET record_scan_after_id = #{recordScanAfterId},
+        schedule_match_count = #{scheduleMatchCount},
         delivery_attempt_count = 0,
         status = CASE WHEN #{completed} THEN 'completed' ELSE 'pending' END,
         available_at = CURRENT_TIMESTAMP(6),
