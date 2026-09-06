@@ -22,7 +22,9 @@ public interface DeliveryProviderConfigMapper {
 
     DeliveryProviderConfig findByWebhookTokenHash(@Param("webhookTokenHash") String webhookTokenHash);
 
-    int upsert(DeliveryProviderConfig config);
+    int upsert(
+            @Param("config") DeliveryProviderConfig config,
+            @Param("credentialRotated") boolean credentialRotated);
 
     int delete(@Param("workspaceId") int workspaceId, @Param("channel") String channel);
 }

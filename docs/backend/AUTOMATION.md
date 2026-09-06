@@ -114,18 +114,27 @@ do not observe later environment-file edits. Roll forward with every instance st
 restart or recreate every replica with the fence open only after all replicas understand
 `send_message`. Open means new triggered-delivery claims are allowed. A closed instance does not
 select triggered sends and releases an owned claim that has not crossed its final provider-egress
-check.
+check. `/api/capabilities.workflowTriggeredSend` exposes that same startup-bound value; workflow
+authoring fails closed and does not offer the action when the capability cannot be resolved or the
+fence is closed.
 
 Every triggered claim has an owner-fenced database-clock lease. Immediately before renewing that
 lease, the worker captures one absolute monotonic provider deadline and passes that exact value
 through the dispatcher. The lease is the provider deadline plus its configured safety margin.
 HTTP providers schedule hard request cancellation and immediate connection closure at the deadline.
-SMTP tracks every raw socket and closes it before closing the active JavaMail transport at the
-deadline. Workspace-supplied destinations use the validated pinned-address factory; instance-default
-SMTP uses a tracking factory that connects through the configured hostname normally and does not pin
-DNS. The raw close can interrupt Angus Mail while `sendMessage` owns the transport monitor; the
-remaining-budget connect, read, and write timeouts remain subordinate inactivity bounds. A deadline
-exhausted before egress is a definitive failure. A deadline or transport failure after egress begins is
+SMTP tracks every transport socket and closes it before closing the active JavaMail transport at the
+deadline. Workspace-supplied destinations use the validated pinned-address factory unless internal
+relays are explicitly allowed; that opt-in and instance-default SMTP use the tracked non-pinned path
+after deadline-bounded hostname resolution. Admission control on that resolution covers
+workspace-supplied hosts only, and the resolver pool reserves a thread for the exempt
+instance-default path. The tracked socket is always the raw TCP socket and the mail library layers
+TLS over it, because closing a TLS layer must first take the record lock a parked TLS write already
+holds, while closing the raw socket fails that write immediately; closing the socket first is also
+what lets the abort proceed while `sendMessage` owns the transport monitor. Remaining-budget connect
+and read timeouts stay subordinate inactivity bounds; the raw close is the only bound on a body
+write on this deadline-bound path, which is why Angus's separate write-timeout wrapper — and the
+per-send scheduled executor it allocates — is left off here. DNS, TCP, TLS, and authentication must complete before submission begins, so a
+failure in any of those phases is definitive. A deadline or transport failure after submission begins is
 recorded as `AMBIGUOUS` failed delivery evidence with `reconciliation_required_at`; it requires
 provider reconciliation and is never automatically replayed. HTTP ESP and SMS connector
 configuration exposes `idempotentSubmission`, which defaults to false. An administrator may enable
@@ -135,7 +144,9 @@ correlation, but a conforming relay may accept repeated `DATA` submissions and n
 provider-side deduplication. SMTP campaign submission is therefore best-effort. Before egress, the
 claim persists an attempt-target fingerprint that binds the provider id and configuration id/generation
 to a SHA-256 of the endpoint/account identity and opaque credential reference; credential values never
-enter it. SMTP carries the exact resolved mail configuration from claim selection into dispatch. A
+enter it. Because the secret store keeps one row per workspace and purpose, rotating a send credential
+returns the same opaque reference, so the save path reports the rotation to the configuration upsert
+and the generation advances; rotating an inbound webhook token deliberately does not advance it. SMTP carries the exact resolved mail configuration from claim selection into dispatch. A
 workspace sweep returns an expired claim to `pending` only when the currently resolved target has the
 same fingerprint and that exact connector configuration has `idempotentSubmission=true`. A changed target, SMTP target, or
 unknown provider instead becomes terminal `failed` evidence with `reconciliation_required_at`, and

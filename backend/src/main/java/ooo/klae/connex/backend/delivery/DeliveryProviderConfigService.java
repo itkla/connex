@@ -225,7 +225,7 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
                 !SmtpDeliveryProvider.PROVIDER_ID.equals(provider)
                         && request.isIdempotentSubmission());
 
-        deliveryProviderConfigMapper.upsert(config);
+        deliveryProviderConfigMapper.upsert(config, newCredential != null);
         deleteReplacedCredential(workspaceId, existing, config, sameProvider);
         auditService.record("workspace.delivery_provider.save", "workspace", workspaceId, provider,
                 "Updated delivery provider settings", null);
@@ -257,7 +257,7 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
         String rawSecret = randomHex();
         config.setWebhookTokenHash(sha256Hex(rawToken));
         config.setWebhookSecretRef(deliveryProviderSecretCipher.encryptWebhookSecret(workspaceId, rawSecret));
-        deliveryProviderConfigMapper.upsert(config);
+        deliveryProviderConfigMapper.upsert(config, false);
         if (!isBlank(previousSecretRef) && !previousSecretRef.equals(config.getWebhookSecretRef())) {
             deliveryProviderSecretCipher.deleteWebhookSecretReference(workspaceId, previousSecretRef);
         }
@@ -339,7 +339,19 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
                 null);
     }
 
-    private static String targetFingerprint(DeliveryProviderConfig config) {
+    /**
+     * Derives the delivery target fingerprint an attempt is claimed against.
+     *
+     * <p>The inputs are the adapter id, the configuration id and generation, the endpoint and
+     * non-secret account identity, and the opaque credential reference. No credential material is
+     * hashed, so the value is safe to persist next to the delivery row. Rotating a send credential
+     * advances the configuration generation even when the store returns the same reference, which
+     * is what stops an expired claim from replaying under a new credential.
+     *
+     * @param config the stored provider configuration
+     * @return the lowercase SHA-256 fingerprint
+     */
+    public static String targetFingerprint(DeliveryProviderConfig config) {
         return DeliveryTargetFingerprint.create(
                 config.getProvider(),
                 "delivery-provider:" + config.getId() + ":" + config.getConfigGeneration(),

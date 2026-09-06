@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
     reconcileCampaignRecipient: vi.fn(),
     showApiError: vi.fn(),
     toastSuccess: vi.fn(),
+    refresh: vi.fn(),
 }));
 
 vi.mock('@/app/lib/api', () => ({
@@ -22,6 +23,7 @@ vi.mock('@/app/hooks/useApiErrorToast', () => ({
     useApiErrorToast: () => api.showApiError,
 }));
 vi.mock('@/app/lib/toast', () => ({ toastSuccess: api.toastSuccess }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: api.refresh }) }));
 
 declare global {
     var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -177,6 +179,7 @@ describe('campaign recipient delivery reconciliation', () => {
 
         expect(document.body.textContent).not.toContain('Delivered consequence');
         expect(api.reconcileCampaignRecipient).not.toHaveBeenCalled();
+        expect(api.refresh).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -188,5 +191,16 @@ describe('campaign recipient delivery reconciliation', () => {
 
         expect(api.reconcileCampaignRecipient).toHaveBeenCalledTimes(1);
         expect(api.reconcileCampaignRecipient).toHaveBeenCalledWith(7, 13, { resolution });
+        expect(api.refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps parent data unchanged when reconciliation fails', async () => {
+        api.reconcileCampaignRecipient.mockRejectedValueOnce(new Error('failed'));
+
+        await click(button('Mark as delivered'));
+        await click(button('Confirm delivered action'));
+
+        expect(api.showApiError).toHaveBeenCalledTimes(1);
+        expect(api.refresh).not.toHaveBeenCalled();
     });
 });

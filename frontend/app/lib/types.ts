@@ -4437,6 +4437,20 @@ export type RuleAction = {
     severity?: string;
     targetUserId?: number;
     targetStageId?: number;
+    campaignMessageId?: number;
+    campaignMessageVersion?: number;
+};
+
+/** A campaign message labeled with its owning campaign for workflow authoring. */
+export type WorkflowCampaignMessageOption = {
+    campaignName: string;
+    message: CampaignMessage;
+};
+
+/** Load state for the workflow inspector's campaign-message picker. */
+export type WorkflowCampaignMessageOptions = {
+    status: "loading" | "ready" | "failed";
+    items: WorkflowCampaignMessageOption[];
 };
 
 export type RuleNamedOption = {
@@ -5294,6 +5308,7 @@ export type InstanceCapabilities = {
     businessCardScanning: boolean;
     businessCardImport: boolean;
     campaignDelivery: boolean;
+    workflowTriggeredSend?: boolean;
     privilegedMfaEnforced: boolean;
 };
 

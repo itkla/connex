@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -109,7 +110,7 @@ class DeliveryProviderConfigServiceTest {
         service().save(smsRequest());
 
         ArgumentCaptor<DeliveryProviderConfig> captor = ArgumentCaptor.forClass(DeliveryProviderConfig.class);
-        verify(mapper).upsert(captor.capture());
+        verify(mapper).upsert(captor.capture(), anyBoolean());
         DeliveryProviderConfig saved = captor.getValue();
         assertEquals(SmsHttpDeliveryProvider.PROVIDER_ID, saved.getProvider());
         assertEquals("sms", saved.getChannel());
@@ -126,7 +127,7 @@ class DeliveryProviderConfigServiceTest {
         request.setFromAddress("no-reply@sender.test");
 
         assertThrows(BadRequestException.class, () -> service().save(request));
-        verify(mapper, never()).upsert(any());
+        verify(mapper, never()).upsert(any(), anyBoolean());
     }
 
     @Test
@@ -136,7 +137,7 @@ class DeliveryProviderConfigServiceTest {
         request.setChannel("sms");
 
         assertThrows(BadRequestException.class, () -> service().save(request));
-        verify(mapper, never()).upsert(any());
+        verify(mapper, never()).upsert(any(), anyBoolean());
     }
 
     @Test
@@ -149,7 +150,7 @@ class DeliveryProviderConfigServiceTest {
             assertThrows(BadRequestException.class, () -> service().save(request),
                     "expected " + malformed + " to be rejected as a from address");
         }
-        verify(mapper, never()).upsert(any());
+        verify(mapper, never()).upsert(any(), anyBoolean());
     }
 
     @Test
@@ -164,8 +165,34 @@ class DeliveryProviderConfigServiceTest {
         service().save(request);
 
         ArgumentCaptor<DeliveryProviderConfig> captor = ArgumentCaptor.forClass(DeliveryProviderConfig.class);
-        verify(mapper).upsert(captor.capture());
+        verify(mapper).upsert(captor.capture(), anyBoolean());
         assertEquals("no-reply+campaigns@mail.sender.test", captor.getValue().getFromAddress());
+    }
+
+    @Test
+    void save_flagsACredentialRotationOnlyWhenANewSecretWasSubmitted() {
+        currentWorkspaceAndActor();
+        when(endpointValidator.isFetchable("esp.example.com", false)).thenReturn(true);
+        when(cipher.encryptCredential(WORKSPACE, API_KEY)).thenReturn("secret:v1:55");
+        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(enabledEsp());
+
+        service().save(espRequest());
+
+        verify(mapper).upsert(any(), eq(true));
+    }
+
+    @Test
+    void save_doesNotFlagARotationWhenTheStoredCredentialIsReused() {
+        currentWorkspaceAndActor();
+        when(endpointValidator.isFetchable("esp.example.com", false)).thenReturn(true);
+        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(enabledEsp());
+        DeliveryProviderConfigRequest request = espRequest();
+        request.setApiKey(null);
+
+        service().save(request);
+
+        verify(mapper).upsert(any(), eq(false));
+        verify(cipher, never()).encryptCredential(eq(WORKSPACE), any());
     }
 
     @Test
@@ -176,7 +203,7 @@ class DeliveryProviderConfigServiceTest {
         request.setFromAddress("bad/sender!");
 
         assertThrows(BadRequestException.class, () -> service().save(request));
-        verify(mapper, never()).upsert(any());
+        verify(mapper, never()).upsert(any(), anyBoolean());
     }
 
     @Test
@@ -228,7 +255,7 @@ class DeliveryProviderConfigServiceTest {
         service().save(espRequest());
 
         ArgumentCaptor<DeliveryProviderConfig> captor = ArgumentCaptor.forClass(DeliveryProviderConfig.class);
-        verify(mapper).upsert(captor.capture());
+        verify(mapper).upsert(captor.capture(), anyBoolean());
         DeliveryProviderConfig saved = captor.getValue();
         assertEquals("secret:v1:55", saved.getCredentialRef());
         assertEquals("1234", saved.getCredentialLast4());
@@ -257,7 +284,7 @@ class DeliveryProviderConfigServiceTest {
         request.setEndpoint("https://evil.example.com/v1/send");
 
         assertThrows(BadRequestException.class, () -> service().save(request));
-        verify(mapper, never()).upsert(any());
+        verify(mapper, never()).upsert(any(), anyBoolean());
     }
 
     @Test
@@ -290,7 +317,7 @@ class DeliveryProviderConfigServiceTest {
 
         ArgumentCaptor<DeliveryProviderConfig> captor =
                 ArgumentCaptor.forClass(DeliveryProviderConfig.class);
-        verify(mapper).upsert(captor.capture());
+        verify(mapper).upsert(captor.capture(), anyBoolean());
         assertTrue(captor.getValue().isIdempotentSubmission());
         when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(stored);
         when(cipher.decryptCredential(WORKSPACE, "secret:v1:55")).thenReturn(API_KEY);
@@ -363,10 +390,11 @@ class DeliveryProviderConfigServiceTest {
         assertTrue(reveal.token().matches("[a-f0-9]{64}"));
         assertTrue(reveal.secret().matches("[a-f0-9]{64}"));
         ArgumentCaptor<DeliveryProviderConfig> captor = ArgumentCaptor.forClass(DeliveryProviderConfig.class);
-        verify(mapper).upsert(captor.capture());
+        verify(mapper).upsert(captor.capture(), anyBoolean());
         assertEquals(sha256Hex(reveal.token()), captor.getValue().getWebhookTokenHash());
         assertEquals("secret:v1:88", captor.getValue().getWebhookSecretRef());
         assertNotEquals(reveal.secret(), captor.getValue().getWebhookSecretRef());
+        verify(mapper).upsert(any(), eq(false));
     }
 
     @Test

@@ -17,8 +17,9 @@ import {
     CADENCES,
     RECORD_TYPES,
     SCHEDULE_RECORD_TYPES,
-    actionsFor,
+    actionWithCampaignMessage,
     actionWithDefaults,
+    authorableActions,
     DEFAULT_RESPONSE_DUE_HOURS,
     eventsFor,
 } from "@/app/components/settings/workflows/vocabulary";
@@ -29,6 +30,7 @@ import type {
     SegmentFields,
     WorkflowDiagnostic,
     WorkflowExecutionMode,
+    WorkflowCampaignMessageOptions,
     WorkflowNode,
 } from "@/app/lib/types";
 import { Input } from "@/components/ui/input";
@@ -58,6 +60,9 @@ export default function WorkflowInspector({
     diagnostics,
     readOnly,
     canRunAsSystem,
+    triggeredSendEnabled,
+    canConfigureTriggeredSend,
+    campaignMessageOptions,
     focusFieldPath,
     focusRequestId,
     diagnosticMessage,
@@ -72,6 +77,9 @@ export default function WorkflowInspector({
     diagnostics: WorkflowDiagnostic[];
     readOnly: boolean;
     canRunAsSystem: boolean;
+    triggeredSendEnabled: boolean;
+    canConfigureTriggeredSend: boolean;
+    campaignMessageOptions: WorkflowCampaignMessageOptions | null;
     focusFieldPath: string | null;
     focusRequestId: number;
     diagnosticMessage: (diagnostic: WorkflowDiagnostic) => ReactNode;
@@ -187,6 +195,9 @@ export default function WorkflowInspector({
                     fields={fields}
                     options={options}
                     readOnly={readOnly}
+                    triggeredSendEnabled={triggeredSendEnabled}
+                    canConfigureTriggeredSend={canConfigureTriggeredSend}
+                    campaignMessageOptions={campaignMessageOptions}
                     fieldProps={fieldProps}
                     onNodeChange={onNodeChange}
                     onCommitTransient={onCommitTransient}
@@ -434,6 +445,9 @@ function ActionFields({
     fields,
     options,
     readOnly,
+    triggeredSendEnabled,
+    canConfigureTriggeredSend,
+    campaignMessageOptions,
     fieldProps,
     onNodeChange,
     onCommitTransient,
@@ -443,12 +457,22 @@ function ActionFields({
     fields: SegmentFields | null;
     options: RuleBuilderOptions | null;
     readOnly: boolean;
+    triggeredSendEnabled: boolean;
+    canConfigureTriggeredSend: boolean;
+    campaignMessageOptions: WorkflowCampaignMessageOptions | null;
     fieldProps: FieldProps;
     onNodeChange: (node: WorkflowNode, mode: ChangeMode) => void;
     onCommitTransient: () => void;
 }) {
     const tr = useTranslations("WorkflowAuthoring");
     const update = (config: RuleAction, mode: ChangeMode) => onNodeChange({ ...node, config }, mode);
+    const selectedMessage = campaignMessageOptions?.items.find(
+        ({ message }) => message.id === node.config.campaignMessageId,
+    )?.message;
+    const actionTypes = authorableActions(recordType, canConfigureTriggeredSend);
+    const visibleActionTypes = node.config.type === "send_message" && !actionTypes.includes("send_message")
+        ? ["send_message", ...actionTypes]
+        : actionTypes;
     const textInput = (field: "title" | "body" | "activityType", placeholder: string, maximum: number) => (
         <Input
             value={node.config[field] ?? ""}
@@ -466,10 +490,92 @@ function ActionFields({
                 <Select value={node.config.type} onValueChange={(type) => update(actionWithDefaults(type), "commit")} disabled={readOnly}>
                     <SelectTrigger size="sm" {...fieldProps("config.type")}><SelectValue /></SelectTrigger>
                     <SelectContent>
-                        {actionsFor(recordType).map((type) => <SelectItem key={type} value={type}>{tr(`action.${type}`)}</SelectItem>)}
+                        {visibleActionTypes.map((type) => (
+                            <SelectItem
+                                key={type}
+                                value={type}
+                                disabled={type === "send_message" && !canConfigureTriggeredSend}
+                            >
+                                {tr(`action.${type}`)}
+                            </SelectItem>
+                        ))}
                     </SelectContent>
                 </Select>
             </LabeledField>
+            {node.config.type === "send_message" ? (
+                <>
+                    <LabeledField label={tr("campaignMessage")}>
+                        <Select
+                            value={node.config.campaignMessageId
+                                ? String(node.config.campaignMessageId)
+                                : undefined}
+                            onValueChange={(value) => {
+                                const selected = campaignMessageOptions?.items.find(
+                                    ({ message }) => message.id === Number(value),
+                                );
+                                if (selected) update(actionWithCampaignMessage(node.config, selected.message), "commit");
+                            }}
+                            disabled={readOnly
+                                || !canConfigureTriggeredSend
+                                || campaignMessageOptions?.status !== "ready"}
+                        >
+                            <SelectTrigger size="sm" {...fieldProps("config.campaignMessageId")}>
+                                <SelectValue placeholder={campaignMessageOptions?.status === "loading"
+                                    ? tr("campaignMessageLoading")
+                                    : tr("campaignMessagePlaceholder")} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {(campaignMessageOptions?.items ?? []).map(({ campaignName, message }) => (
+                                    <SelectItem
+                                        key={message.id}
+                                        value={String(message.id)}
+                                        disabled={message.revisions.length === 0}
+                                    >
+                                        {campaignName} / {message.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </LabeledField>
+                    <LabeledField label={tr("campaignMessageRevision")}>
+                        <Select
+                            value={node.config.campaignMessageVersion
+                                ? String(node.config.campaignMessageVersion)
+                                : undefined}
+                            onValueChange={(value) => update({
+                                ...node.config,
+                                campaignMessageVersion: Number(value),
+                            }, "commit")}
+                            disabled={readOnly || !canConfigureTriggeredSend || !selectedMessage}
+                        >
+                            <SelectTrigger size="sm" {...fieldProps("config.campaignMessageVersion")}>
+                                <SelectValue placeholder={tr("campaignMessageRevisionPlaceholder")} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {(selectedMessage?.revisions ?? []).map((revision) => (
+                                    <SelectItem key={revision.version} value={String(revision.version)}>
+                                        v{revision.version} · {revision.locale}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </LabeledField>
+                    {!triggeredSendEnabled ? (
+                        <p className="text-xs text-muted-foreground">
+                            {tr("sendMessageDeploymentUnavailable")}
+                        </p>
+                    ) : !canConfigureTriggeredSend ? (
+                        <p className="text-xs text-muted-foreground">{tr("sendMessageUnavailable")}</p>
+                    ) : campaignMessageOptions?.status === "failed" ? (
+                        <p className="text-xs text-destructive">{tr("campaignMessageLoadFailed")}</p>
+                    ) : campaignMessageOptions?.status === "ready"
+                        && campaignMessageOptions.items.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">{tr("campaignMessageEmpty")}</p>
+                        ) : selectedMessage?.revisions.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">{tr("campaignMessageNoRevisions")}</p>
+                        ) : null}
+                </>
+            ) : null}
             {(node.config.type === "create_task" || node.config.type === "notify")
                 ? <LabeledField label={tr("actionTitlePlaceholder")}>{textInput("title", tr("actionTitlePlaceholder"), 255)}</LabeledField>
                 : null}

@@ -22,7 +22,13 @@ import {
     workflowEditorReducer,
     type WorkflowEditorDocument,
 } from "@/app/components/settings/workflows/workflowEditorReducer";
-import type { WorkflowCanvas, WorkflowDefinition } from "@/app/lib/types";
+import {
+    ACTIONS,
+    actionWithCampaignMessage,
+    authorableActions,
+    canAuthorTriggeredSend,
+} from "@/app/components/settings/workflows/vocabulary";
+import type { CampaignMessage, WorkflowCanvas, WorkflowDefinition } from "@/app/lib/types";
 
 const migratedDefinition: WorkflowDefinition = {
     schemaVersion: 1,
@@ -79,6 +85,68 @@ function diagnosticMessageKeys(locale: "en" | "ja"): string[] {
 }
 
 describe("canonical workflow graph editing", () => {
+    it("offers and configures campaign sends only for authorized user-context person workflows", () => {
+        const permissions = new Set([
+            "CAMPAIGN_VIEW",
+            "CAMPAIGN_MANAGE",
+            "CAMPAIGN_SEND",
+            "CONSENT_MANAGE",
+        ]);
+        const message: CampaignMessage = {
+            id: 41,
+            campaignId: 17,
+            channel: "email",
+            name: "Welcome",
+            status: "draft",
+            createdById: 3,
+            createdAt: "2026-09-04T00:00:00Z",
+            updatedAt: "2026-09-04T00:00:00Z",
+            revisions: [
+                {
+                    version: 3,
+                    locale: "en",
+                    subject: "Hello",
+                    bodyHtml: "<p>Hello</p>",
+                    bodyText: null,
+                    createdAt: "2026-09-04T00:00:00Z",
+                },
+                {
+                    version: 2,
+                    locale: "ja",
+                    subject: "こんにちは",
+                    bodyHtml: "<p>こんにちは</p>",
+                    bodyText: null,
+                    createdAt: "2026-09-03T00:00:00Z",
+                },
+            ],
+        };
+
+        expect(ACTIONS.person).toContain("send_message");
+        expect(ACTIONS.company).not.toContain("send_message");
+        expect(canAuthorTriggeredSend("person", "user", permissions, true)).toBe(true);
+        expect(authorableActions("person", true)).toContain("send_message");
+        expect(canAuthorTriggeredSend("person", "user", permissions, false)).toBe(false);
+        expect(canAuthorTriggeredSend("person", "system", permissions, true)).toBe(false);
+        expect(authorableActions("person", false)).not.toContain("send_message");
+        expect(canAuthorTriggeredSend(
+            "person",
+            "user",
+            new Set(["CAMPAIGN_VIEW", "CAMPAIGN_MANAGE", "CAMPAIGN_SEND"]),
+            true,
+        )).toBe(false);
+        const selectedMessage = actionWithCampaignMessage({ type: "send_message" }, message);
+        expect(selectedMessage).toEqual({
+            type: "send_message",
+            campaignMessageId: 41,
+            campaignMessageVersion: undefined,
+        });
+        expect({ ...selectedMessage, campaignMessageVersion: 2 }).toEqual({
+            type: "send_message",
+            campaignMessageId: 41,
+            campaignMessageVersion: 2,
+        });
+    });
+
     it("hydrates a migrated linear workflow without changing its wire model", () => {
         const source = document();
         const history = createWorkflowEditorHistory(source);

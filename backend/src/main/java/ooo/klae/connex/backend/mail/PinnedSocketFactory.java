@@ -13,7 +13,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.SocketFactory;
 
 /**
- * Opens SMTP sockets only to the address resolved and approved by {@link SmtpDestinationGuard}.
+ * Opens SMTP sockets only to the address resolved and approved by {@link SmtpDestinationGuard}, and
+ * keeps every socket it opened reachable so an absolute deadline can close it immediately.
+ *
+ * <p>The sockets are always plain TCP sockets, including for TLS transports: the mail library
+ * layers TLS over the connected socket itself. Keeping the raw socket is what makes the deadline
+ * abort effective, because closing the raw socket fails a write parked inside the TLS record layer
+ * while closing the TLS layer would first have to take the record lock that parked write holds.
  */
 final class PinnedSocketFactory extends SocketFactory {
 

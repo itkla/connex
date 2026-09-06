@@ -54,10 +54,28 @@
        credential_ref, credential_last4, webhook_token_hash, webhook_secret_ref,
        enabled, idempotent_submission, created_by_id)
     VALUES
-      (#{workspaceId}, #{channel}, #{provider}, #{endpoint}, #{fromAddress}, #{fromName},
-       #{credentialRef}, #{credentialLast4}, #{webhookTokenHash}, #{webhookSecretRef},
-       #{enabled}, #{idempotentSubmission}, #{createdById})
+      (#{config.workspaceId}, #{config.channel}, #{config.provider}, #{config.endpoint},
+       #{config.fromAddress}, #{config.fromName},
+       #{config.credentialRef}, #{config.credentialLast4}, #{config.webhookTokenHash},
+       #{config.webhookSecretRef},
+       #{config.enabled}, #{config.idempotentSubmission}, #{config.createdById})
+    <!-- credentialRotated is the only signal that a new send credential was written. The central
+         secret store keeps one row per scope and purpose, so rotating an API key overwrites that
+         row and returns the same credential_ref, leaving every compared column unchanged; without
+         this flag an expired idempotent claim taken before a rotation would still match the
+         delivery target fingerprint and replay under the new credential. Webhook token and secret
+         rotation passes false so recovery identity survives it. -->
     ON DUPLICATE KEY UPDATE
+      config_generation = config_generation + IF(
+        #{credentialRotated}
+        OR NOT (provider &lt;=> VALUES(provider))
+        OR NOT (endpoint &lt;=> VALUES(endpoint))
+        OR NOT (from_address &lt;=> VALUES(from_address))
+        OR NOT (credential_ref &lt;=> VALUES(credential_ref))
+        OR NOT (enabled &lt;=> VALUES(enabled))
+        OR NOT (idempotent_submission &lt;=> VALUES(idempotent_submission)),
+        1,
+        0),
       provider = VALUES(provider),
       endpoint = VALUES(endpoint),
       from_address = VALUES(from_address),
@@ -67,8 +85,7 @@
       webhook_token_hash = VALUES(webhook_token_hash),
       webhook_secret_ref = VALUES(webhook_secret_ref),
       enabled = VALUES(enabled),
-      idempotent_submission = VALUES(idempotent_submission),
-      config_generation = config_generation + 1
+      idempotent_submission = VALUES(idempotent_submission)
   </insert>
 
   <delete id="delete">

@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.beans.CampaignDelivery;
 import ooo.klae.connex.backend.beans.CampaignMessageRevision;
@@ -172,6 +174,73 @@ class CampaignDispatchServiceTest {
         verify(deliveryMapper, never()).markTriggeredFailed(
                 anyInt(), anyInt(), anyString(), anyString(), anyString());
         verify(deliveryMapper, never()).markFailed(
+                anyInt(), anyInt(), anyString(), anyString());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"TLS certificate identity mismatch", "Connection refused"})
+    void preSubmissionRejectionsAreFailedWithoutAReconciliationMarker(String rejectionDetail) {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        CampaignMessageMapper messageMapper = mock(CampaignMessageMapper.class);
+        AudienceEligibilityService eligibilityService = mock(AudienceEligibilityService.class);
+        DeliveryProviderConfigService providerConfigService = mock(DeliveryProviderConfigService.class);
+        DeliveryProviderRouter providerRouter = mock(DeliveryProviderRouter.class);
+        CapabilityRegistry capabilityRegistry = mock(CapabilityRegistry.class);
+        WorkflowRunMapper workflowRunMapper = mock(WorkflowRunMapper.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        CampaignDispatchClaimBoundary boundary = mock(CampaignDispatchClaimBoundary.class);
+        MessageDispatcher dispatcher = mock(MessageDispatcher.class);
+        CampaignSend send = triggeredSend();
+        CampaignDelivery delivery = delivery();
+        ResolvedDeliveryProvider target = ResolvedDeliveryProvider.of(
+                "smtp", DeliveryChannel.EMAIL, 7, DeliveryCredentials.of(java.util.Map.of()));
+        when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)).thenReturn(true);
+        when(gate.enabled()).thenReturn(true);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(sendMapper.getSend(7, 11)).thenReturn(send);
+        when(messageMapper.getRevision(7, 12, 3)).thenReturn(revision());
+        when(providerConfigService.resolveForWorkspace(7, DeliveryChannel.EMAIL)).thenReturn(target);
+        when(providerRouter.dispatcherFor("smtp")).thenReturn(dispatcher);
+        when(deliveryMapper.pendingDeliveryIdsPage(7, 11, 200)).thenReturn(List.of(13));
+        when(deliveryMapper.claimTriggered(
+                eq(7), eq(13), anyString(), anyLong(), eq("smtp"), anyString())).thenReturn(1);
+        when(deliveryMapper.renewTriggeredClaim(
+                eq(7), eq(13), anyString(), anyLong())).thenReturn(1);
+        when(deliveryMapper.getDeliveryIdentity(7, 13)).thenReturn(delivery);
+        when(deliveryMapper.getDelivery(7, 13)).thenReturn(delivery);
+        when(eligibilityService.restrictedIds(7, List.of(17))).thenReturn(Set.of());
+        when(eligibilityService.suppressedAddresses(eq(7), eq("email"), any())).thenReturn(Set.of());
+        when(eligibilityService.suppressedPersonRefIds(7, List.of(17), "email"))
+                .thenReturn(Set.of());
+        when(eligibilityService.consentBlocks(7, 17, "email", "marketing"))
+                .thenReturn(false);
+        when(deliveryMapper.recentDispatchCount(
+                eq(7), eq(17), eq("email"), eq(11), any())).thenReturn(0);
+        when(dispatcher.dispatch(eq(target), any())).thenReturn(
+                DispatchReceipt.rejected(rejectionDetail));
+        when(deliveryMapper.markTriggeredFailed(
+                eq(7), eq(13), anyString(), anyString(), anyString())).thenReturn(1);
+        CampaignDispatchService service = new CampaignDispatchService(
+                sendMapper,
+                deliveryMapper,
+                messageMapper,
+                eligibilityService,
+                providerConfigService,
+                providerRouter,
+                new DeliveryProperties(),
+                capabilityRegistry,
+                gate,
+                workflowRunMapper,
+                boundary);
+
+        assertTrue(service.processSend(7, 11));
+
+        verify(deliveryMapper).markTriggeredFailed(
+                eq(7), eq(13), anyString(), eq(rejectionDetail), anyString());
+        verify(deliveryMapper, never()).markTriggeredAmbiguous(
+                anyInt(), anyInt(), anyString(), anyString(), anyString());
+        verify(deliveryMapper, never()).markAmbiguous(
                 anyInt(), anyInt(), anyString(), anyString());
     }
 

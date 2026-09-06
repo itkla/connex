@@ -31,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 import ooo.klae.connex.backend.beans.CampaignDelivery;
 import ooo.klae.connex.backend.beans.CampaignSend;
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.DeliveryProviderConfig;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.capability.Capability;
@@ -60,6 +61,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignMessageMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
+import ooo.klae.connex.backend.mappers.DeliveryProviderConfigMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -81,6 +83,7 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
     @Autowired private CampaignDeliveryMapper campaignDeliveryMapper;
     @Autowired private CampaignMessageMapper campaignMessageMapper;
     @Autowired private CampaignSendMapper campaignSendMapper;
+    @Autowired private DeliveryProviderConfigMapper deliveryProviderConfigMapper;
     @Autowired private AudienceEligibilityService audienceEligibilityService;
     @Autowired private DeliveryProviderRouter deliveryProviderRouter;
     @Autowired private DeliveryProperties deliveryProperties;
@@ -439,6 +442,108 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
     }
 
     @Test
+    void webhookRotationPreservesRecoveryIdentityWhileEgressChangesDoNot() {
+        String prefix = "webhook-generation-" + unique();
+        Person person = person(prefix, prefix + "@example.com");
+        CampaignMessageDto message = message(prefix);
+        CampaignTriggeredSendService.EnrollmentResult result = triggeredSendService.enroll(
+                person.getId(), message.id(), 1);
+        DeliveryProviderConfig config = deliveryConfig(
+                "https://account-a.example.test/send", "credential-a");
+        deliveryProviderConfigMapper.upsert(config, false);
+        DeliveryProviderConfig original = deliveryProviderConfigMapper.findByWorkspaceChannel(
+                workspace.getId(), DeliveryChannel.EMAIL.token());
+        String originalFingerprint = deliveryTargetFingerprint(original);
+        when(deliveryProviderConfigService.resolveForWorkspace(
+                workspace.getId(), DeliveryChannel.EMAIL)).thenAnswer(invocation -> {
+                    DeliveryProviderConfig current = deliveryProviderConfigMapper.findByWorkspaceChannel(
+                            workspace.getId(), DeliveryChannel.EMAIL.token());
+                    return resolvedTargetFor(current);
+                });
+
+        assertEquals(1, campaignDeliveryMapper.claimTriggered(
+                workspace.getId(), result.deliveryId(), "webhook-worker", 1_000_000L,
+                original.getProvider(), originalFingerprint));
+        expireClaim(result.deliveryId());
+        original.setWebhookTokenHash("a".repeat(64));
+        original.setWebhookSecretRef("webhook-secret-b");
+        deliveryProviderConfigMapper.upsert(original, false);
+        DeliveryProviderConfig rotated = deliveryProviderConfigMapper.findByWorkspaceChannel(
+                workspace.getId(), DeliveryChannel.EMAIL.token());
+
+        assertEquals(original.getConfigGeneration(), rotated.getConfigGeneration());
+        assertEquals(originalFingerprint, deliveryTargetFingerprint(rotated));
+        assertTrue(dispatchService(false).processSend(workspace.getId(), result.sendId()));
+        assertEquals("pending", campaignDeliveryMapper.getDelivery(
+                workspace.getId(), result.deliveryId()).getStatus());
+
+        assertEquals(1, campaignDeliveryMapper.claimTriggered(
+                workspace.getId(), result.deliveryId(), "changed-target-worker", 1_000_000L,
+                rotated.getProvider(), deliveryTargetFingerprint(rotated)));
+        expireClaim(result.deliveryId());
+        String rotatedFingerprint = deliveryTargetFingerprint(rotated);
+        rotated.setEndpoint("https://account-b.example.test/send");
+        deliveryProviderConfigMapper.upsert(rotated, false);
+        DeliveryProviderConfig endpointChanged = deliveryProviderConfigMapper.findByWorkspaceChannel(
+                workspace.getId(), DeliveryChannel.EMAIL.token());
+
+        assertEquals(rotated.getConfigGeneration() + 1, endpointChanged.getConfigGeneration());
+        assertFalse(rotatedFingerprint.equals(deliveryTargetFingerprint(endpointChanged)));
+        String endpointFingerprint = deliveryTargetFingerprint(endpointChanged);
+        endpointChanged.setCredentialRef("credential-b");
+        deliveryProviderConfigMapper.upsert(endpointChanged, false);
+        DeliveryProviderConfig credentialChanged = deliveryProviderConfigMapper.findByWorkspaceChannel(
+                workspace.getId(), DeliveryChannel.EMAIL.token());
+
+        assertEquals(endpointChanged.getConfigGeneration() + 1, credentialChanged.getConfigGeneration());
+        assertFalse(endpointFingerprint.equals(deliveryTargetFingerprint(credentialChanged)));
+        assertTrue(dispatchService(false).processSend(workspace.getId(), result.sendId()));
+        CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(
+                workspace.getId(), result.deliveryId());
+        assertEquals("failed", delivery.getStatus());
+        assertEquals("delivery_target_changed", delivery.getLastErrorCode());
+        assertEquals(0, fakeDispatcher.count());
+    }
+
+    @Test
+    void sendCredentialRotationAdvancesGenerationAndStopsAnExpiredClaimFromReplaying() {
+        String prefix = "credential-rotation-" + unique();
+        Person person = person(prefix, prefix + "@example.com");
+        CampaignMessageDto message = message(prefix);
+        CampaignTriggeredSendService.EnrollmentResult result = triggeredSendService.enroll(
+                person.getId(), message.id(), 1);
+        deliveryProviderConfigMapper.upsert(
+                deliveryConfig("https://account-a.example.test/send", "credential-a"), false);
+        DeliveryProviderConfig original = deliveryProviderConfigMapper.findByWorkspaceChannel(
+                workspace.getId(), DeliveryChannel.EMAIL.token());
+        String originalFingerprint = deliveryTargetFingerprint(original);
+        when(deliveryProviderConfigService.resolveForWorkspace(
+                workspace.getId(), DeliveryChannel.EMAIL)).thenAnswer(invocation -> resolvedTargetFor(
+                        deliveryProviderConfigMapper.findByWorkspaceChannel(
+                                workspace.getId(), DeliveryChannel.EMAIL.token())));
+
+        assertEquals(1, campaignDeliveryMapper.claimTriggered(
+                workspace.getId(), result.deliveryId(), "pre-rotation-worker", 1_000_000L,
+                original.getProvider(), originalFingerprint));
+        expireClaim(result.deliveryId());
+        deliveryProviderConfigMapper.upsert(original, true);
+        DeliveryProviderConfig rotated = deliveryProviderConfigMapper.findByWorkspaceChannel(
+                workspace.getId(), DeliveryChannel.EMAIL.token());
+
+        assertEquals(original.getEndpoint(), rotated.getEndpoint());
+        assertEquals(original.getCredentialRef(), rotated.getCredentialRef());
+        assertEquals(original.getCredentialLast4(), rotated.getCredentialLast4());
+        assertEquals(original.getConfigGeneration() + 1, rotated.getConfigGeneration());
+        assertFalse(originalFingerprint.equals(deliveryTargetFingerprint(rotated)));
+        assertTrue(dispatchService(false).processSend(workspace.getId(), result.sendId()));
+        CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(
+                workspace.getId(), result.deliveryId());
+        assertEquals("failed", delivery.getStatus());
+        assertEquals("delivery_target_changed", delivery.getLastErrorCode());
+        assertEquals(0, fakeDispatcher.count());
+    }
+
+    @Test
     void expiredClaimWithChangedConnectorBecomesAmbiguousWithoutProviderEgress() {
         String prefix = "expired-changed-target-" + unique();
         Person person = person(prefix, prefix + "@example.com");
@@ -768,6 +873,48 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
                 new WorkflowTriggeredSendGate(enabled, 200, 200),
                 workflowRunMapper,
                 new CampaignDispatchClaimBoundary());
+    }
+
+    private DeliveryProviderConfig deliveryConfig(String endpoint, String credentialRef) {
+        DeliveryProviderConfig config = new DeliveryProviderConfig();
+        config.setWorkspaceId(workspace.getId());
+        config.setChannel(DeliveryChannel.EMAIL.token());
+        config.setProvider("http_esp");
+        config.setEndpoint(endpoint);
+        config.setFromAddress("sender@example.test");
+        config.setFromName("Campaign sender");
+        config.setCredentialRef(credentialRef);
+        config.setCredentialLast4("last");
+        config.setEnabled(true);
+        config.setIdempotentSubmission(true);
+        config.setCreatedById(currentUser.getId());
+        return config;
+    }
+
+    private void expireClaim(int deliveryId) {
+        jdbcTemplate.update(
+                "UPDATE campaign_delivery SET dispatch_lease_until = "
+                        + "DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND) "
+                        + "WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), deliveryId);
+    }
+
+    private static ResolvedDeliveryProvider resolvedTargetFor(DeliveryProviderConfig config) {
+        return new ResolvedDeliveryProvider(
+                config.getProvider(),
+                DeliveryChannel.fromToken(config.getChannel()),
+                config.getWorkspaceId(),
+                config.getEndpoint(),
+                config.getFromAddress(),
+                config.getFromName(),
+                DeliveryCredentials.of(Map.of("apiKey", "test-key")),
+                config.isIdempotentSubmission(),
+                deliveryTargetFingerprint(config),
+                null);
+    }
+
+    private static String deliveryTargetFingerprint(DeliveryProviderConfig config) {
+        return DeliveryProviderConfigService.targetFingerprint(config);
     }
 
     private ResolvedDeliveryProvider resolvedTarget(int workspaceId) {

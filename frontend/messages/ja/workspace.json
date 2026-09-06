@@ -340,6 +340,16 @@
         "pickOwner": "メンバーを選択",
         "actionStage": "ステージ",
         "pickStage": "ステージを選択",
+        "campaignMessage": "キャンペーンメッセージ",
+        "campaignMessagePlaceholder": "キャンペーンメッセージを選択",
+        "campaignMessageLoading": "キャンペーンメッセージを読み込んでいます…",
+        "campaignMessageLoadFailed": "キャンペーンメッセージを読み込めませんでした。ワークフローを開き直して再試行してください。",
+        "campaignMessageEmpty": "リビジョンがあるキャンペーンメッセージはありません。",
+        "campaignMessageNoRevisions": "このキャンペーンメッセージにはリビジョンがありません。",
+        "campaignMessageRevision": "メッセージのバージョン",
+        "campaignMessageRevisionPlaceholder": "バージョンを選択",
+        "sendMessageDeploymentUnavailable": "この環境では、ワークフローからのキャンペーンメッセージ送信は有効になっていません。",
+        "sendMessageUnavailable": "現在の実行者設定またはワークスペースのアクセス権では、このアクションを利用できません。",
         "summaryEntity": "{record}が{events}のとき",
         "record": {
             "deal": "案件",
@@ -397,6 +407,7 @@
             "create_note": "メモを追加",
             "assign_owner": "担当者を割り当て",
             "set_response_due": "初回応答期限を設定",
+            "send_message": "キャンペーンメッセージを送信",
             "change_stage": "ステージを移動"
         },
         "runAs": {

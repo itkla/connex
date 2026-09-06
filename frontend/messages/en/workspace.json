@@ -340,6 +340,16 @@
         "pickOwner": "Choose a member",
         "actionStage": "Stage",
         "pickStage": "Choose a stage",
+        "campaignMessage": "Campaign message",
+        "campaignMessagePlaceholder": "Choose a campaign message",
+        "campaignMessageLoading": "Loading campaign messages…",
+        "campaignMessageLoadFailed": "Couldn't load campaign messages. Reopen this workflow to try again.",
+        "campaignMessageEmpty": "No campaign messages have a revision yet.",
+        "campaignMessageNoRevisions": "This campaign message has no revisions.",
+        "campaignMessageRevision": "Message version",
+        "campaignMessageRevisionPlaceholder": "Choose a version",
+        "sendMessageDeploymentUnavailable": "Sending campaign messages from workflows is not enabled for this deployment.",
+        "sendMessageUnavailable": "This action is unavailable with the current run-as setting or your workspace access.",
         "summaryEntity": "When a {record} — {events}",
         "record": {
             "deal": "deal",
@@ -397,6 +407,7 @@
             "create_note": "add a note",
             "assign_owner": "assign an owner",
             "set_response_due": "set a first-response deadline",
+            "send_message": "send a campaign message",
             "change_stage": "move to a stage"
         },
         "runAs": {

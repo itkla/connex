@@ -45,6 +45,7 @@ abstract class CampaignRealDbTestSupport extends AbstractServiceTest {
         for (int index = workspaceIds.size() - 1; index >= 0; index--) {
             int workspaceId = workspaceIds.get(index);
             jdbcTemplate.update("DELETE FROM connector_config WHERE workspace_id = ?", workspaceId);
+            jdbcTemplate.update("DELETE FROM delivery_provider_config WHERE workspace_id = ?", workspaceId);
             jdbcTemplate.update("DELETE FROM campaign_delivery_event WHERE workspace_id = ?", workspaceId);
             jdbcTemplate.update("DELETE FROM campaign_delivery WHERE workspace_id = ?", workspaceId);
             jdbcTemplate.update("DELETE FROM campaign_audience_export WHERE workspace_id = ?", workspaceId);

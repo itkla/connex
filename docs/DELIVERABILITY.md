@@ -178,11 +178,30 @@ never rejects anything.
 `SmtpDestinationGuard` resolves the SMTP host and `PinnedSocketFactory` connects to that exact
 address, so the name cannot be re-resolved to a different host between check and connect.
 
-Campaign sends track the raw SMTP socket for hard deadline cancellation. A workspace-supplied host
-uses the same pinned socket factory. The trusted instance transport uses a separate tracking factory
-that passes the configured hostname to normal socket resolution, so tracking does not pin it. At the
-deadline Connex closes the raw socket before the synchronized JavaMail transport; this interrupts a
-relay that continues slow-drip activity after `DATA`, which inactivity timeouts alone cannot bound.
+Campaign sends track the SMTP transport socket for hard deadline cancellation. A workspace-supplied
+host uses the pinned socket factory when the destination guard returns an approved address. When
+internal workspace relays are explicitly allowed, and for the trusted instance transport, Connex
+resolves the configured hostname within the same absolute deadline and uses the tracked non-pinned
+factory. At the deadline Connex closes the socket before the synchronized JavaMail transport; this
+interrupts a relay that continues slow-drip activity after `DATA`, which inactivity timeouts alone
+cannot bound.
+
+**The tracked socket is always the raw TCP socket, including on TLS transports.** Connex publishes
+only a plain socket factory and lets the mail library layer TLS over the socket it opened, for
+implicit TLS (port 465) as much as for STARTTLS. Two properties depend on this. Publishing an SSL
+socket factory instead would make the mail library ignore the plain factory and open its own socket
+to the configured hostname, discarding the approved destination pin. And a TLS write that fills the
+network buffers parks inside the TLS record layer while holding that layer's record lock, so closing
+the TLS layer would wait for exactly the write it is trying to interrupt, whereas closing the raw
+socket underneath fails that write immediately. **The absolute deadline is therefore the only bound
+on a campaign body write**; the socket read timeout bounds reads only, and the deadline path
+deliberately does not set a per-write timeout, which the mail library would implement with an extra
+scheduled executor per send.
+
+Host resolution is admitted through a small bounded resolver. Admission control covers
+workspace-supplied hosts, whose destinations an operator can edit; a trusted instance default is
+exempt and the resolver pool reserves a thread for it, so a busy resolver cannot turn an
+instance-default send into a rejection earlier than its own deadline requires.
 
 **The guard governs workspace-supplied hosts only.** `resolveForSend` returns `null` immediately when
 `config.workspaceSupplied()` is false, so **the instance relay is trusted and never checked** — not at
@@ -306,7 +325,13 @@ the configured endpoint guarantees repeated requests carrying the same `Idempote
 more than once; enabling it incorrectly can cause duplicate delivery. Connex returns an expired claim to the queue only if
 the current connector has the exact provider/configuration/endpoint/credential-reference fingerprint
 persisted before the original egress; changing an account or endpoint makes the result ambiguous
-instead of replaying the key in a different provider namespace.
+instead of replaying the key in a different provider namespace. **Rotating a send credential counts
+as a configuration change even though nothing visible moves.** The central secret store keeps one
+row per workspace and purpose, so saving a new API key overwrites that row and returns the same
+opaque reference; the save path therefore tells the configuration upsert that a new secret was
+written, the configuration generation advances, and the fingerprint changes. Issuing or rotating an
+inbound webhook token deliberately does not advance it, so an in-flight claim survives a webhook
+rotation.
 
 ## 4. DNS records per deployment shape
 

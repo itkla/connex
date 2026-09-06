@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useLocale, useTranslations } from 'next-intl';
 import { UsersIcon } from '@heroicons/react/24/outline';
 import { Loader2Icon } from 'lucide-react';
@@ -106,6 +107,7 @@ export default function CampaignRecipientsDialog({
     onOpenChange: (next: boolean) => void;
 }) {
     const t = useTranslations('CampaignRecipients');
+    const router = useRouter();
     const showApiError = useApiErrorToast('CampaignRecipients');
     const locale = useLocale();
     const [page, setPage] = useState(1);
@@ -163,6 +165,7 @@ export default function CampaignRecipientsDialog({
             toastSuccess(pendingReconciliation.resolution === 'delivered'
                 ? t('markedDelivered')
                 : t('markedNotDelivered'));
+            router.refresh();
             setPendingReconciliation(null);
         } catch (error) {
             showApiError(error, 'reconcileFailed');

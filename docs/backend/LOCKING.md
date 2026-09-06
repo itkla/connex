@@ -345,11 +345,14 @@ worker captures one absolute monotonic deadline, renews its still-live owned lea
 startup-bound rollout fence again; a closed instance releases the claim to `pending`. Every provider
 receives that same absolute deadline. HTTP hard cancellation closes the request client. SMTP hard
 cancellation first closes every tracked raw socket, then closes the active JavaMail transport.
-Workspace-supplied destinations track the validated pinned-address socket; instance-default SMTP
-tracks a normal hostname-resolving socket without pinning. Closing the raw socket interrupts a blocked
-Angus `sendMessage` even while its synchronized transport monitor prevents `Transport.close()` from
-entering; remaining-budget connect, read, and write timeouts stay subordinate inactivity bounds. A pre-egress
-deadline is definitive; a post-egress abort is persisted as ambiguous failed-delivery evidence with
+Workspace-supplied destinations track the validated pinned-address socket unless internal relays are
+explicitly allowed; that opt-in and instance-default SMTP resolve within the absolute budget and use
+the tracked non-pinned socket path. Closing the tracked socket interrupts a blocked Angus
+`sendMessage` even while its synchronized transport monitor prevents `Transport.close()` from
+entering. Remaining-budget connect and read timeouts stay subordinate inactivity bounds; the hard
+socket close replaces Angus's write-timeout wrapper on this path. DNS, TCP connection, TLS handshake,
+and authentication precede the submission boundary and therefore fail definitively. An error after
+SMTP message submission starts is persisted as ambiguous failed-delivery evidence with
 `reconciliation_required_at`, requires reconciliation, and is not automatically replayed. Each HTTP
 ESP or SMS connector has an `idempotentSubmission` setting that defaults to false and may be enabled
 only when that endpoint guarantees deduplication of the stable key sent as `Idempotency-Key`.
