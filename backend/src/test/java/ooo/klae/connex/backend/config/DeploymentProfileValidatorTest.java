@@ -124,6 +124,27 @@ class DeploymentProfileValidatorTest {
     }
 
     @Test
+    void rejectsSiloWhenDormantPublicApiIsEnabled() {
+        MockEnvironment environment = new MockEnvironment()
+            .withProperty("connex.public-api.enabled", "true");
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+            () -> validator(DeploymentProperties.PROFILE_SILO, environment).run(null));
+
+        assertEquals("connex.deployment.profile=silo forbids: connex.public-api.enabled=true",
+            exception.getMessage());
+    }
+
+    @Test
+    void siloPublicApiRefusalUsesRelaxedBinding() {
+        MockEnvironment environment = new MockEnvironment()
+            .withProperty("connex.public-api.ENABLED", "true");
+
+        assertThrows(IllegalStateException.class,
+            () -> validator(DeploymentProperties.PROFILE_SILO, environment).run(null));
+    }
+
+    @Test
     void allowsBootstrapForOnPrem() {
         MockEnvironment environment = new MockEnvironment()
             .withProperty("connex.bootstrap.enabled", "true");

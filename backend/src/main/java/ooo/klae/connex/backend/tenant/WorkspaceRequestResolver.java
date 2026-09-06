@@ -1,11 +1,14 @@
 package ooo.klae.connex.backend.tenant;
 
 import org.springframework.stereotype.Component;
+import org.springframework.security.core.Authentication;
 
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.publicapi.ApiCredentialPrincipal;
+import ooo.klae.connex.backend.publicapi.PublicApiPaths;
 
 /**
  * Resolves the requested workspace candidate from the header, cookie, or remembered membership.
@@ -27,6 +30,26 @@ public class WorkspaceRequestResolver {
             return fromCookie;
         }
         return workspaceService.defaultWorkspaceIdFor(userId);
+    }
+
+    /**
+     * Returns the server-authenticated credential binding for a public API request.
+     * Browser workspace headers and cookies are intentionally not consulted.
+     */
+    public ApiCredentialPrincipal resolvePublicApiCredential(
+            HttpServletRequest request, Authentication authentication, int userId) {
+        if (!isPublicApiRequest(request)
+                || authentication == null
+                || !(authentication.getDetails() instanceof ApiCredentialPrincipal credential)
+                || credential.userId() != userId) {
+            return null;
+        }
+        return credential;
+    }
+
+    /** Returns whether the context-path-adjusted request targets the versioned public API. */
+    public boolean isPublicApiRequest(HttpServletRequest request) {
+        return PublicApiPaths.isPublicRequest(request);
     }
 
     /**

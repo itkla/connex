@@ -77,6 +77,149 @@ transaction. The locked authorization recheck remains inside the transaction. Ac
 pending-invitation decline, and leave all use this boundary so audit attribution and tenant-plane
 cleanup cannot inherit the active-header workspace.
 
+### Public API credentials
+
+#### Canonical class order
+
+Every transaction that touches an `api_credential` row acquires locks in this class order, and never
+acquires a lock from an earlier class after one from a later class:
+
+1. `app_user` — target `FOR UPDATE`, actor `FOR SHARE`.
+2. `workspace` roots, ascending id (exclusive wins on overlap).
+3. `workspace_member` / workspace owner rows.
+4. `organization` roots, ascending id (exclusive wins on overlap).
+5. `org_member` owner rows.
+6. `api_credential` rows, ordered by `(workspace_id, id)`.
+7. `audit_log_integrity_head` rows, ordered by chain-scope type rank (workspace 0, organization 1,
+   system 2) then scope id.
+8. The audit inserts and head advances themselves.
+9. The `app_user` cascade delete.
+
+Class 7 exists because `AuditIntegrityService.appendChained` locks the head after its foreign-key
+parents. Ordinary transactions append into exactly one chain scope and therefore take exactly one
+head, so only a transaction with two or more heads can cross with another. Account erasure is the
+only such transaction on this plane: membership cleanup audits into the workspace it was given, and
+the fresh-membership paths never reach an audit at all, because `fk_api_credential_membership
+(workspace_id, created_by_id, membership_id) ... ON DELETE CASCADE` (V202) means a missing
+`workspace_member` row has already cascaded every credential for that pair away, so
+`deleteForMembership` finds nothing to delete or audit. `PublicApiCredentialMigrationArchTest`
+pins that foreign key: narrowing it to `(workspace_id, created_by_id)` would make fresh membership
+a second multi-head transaction and reintroduce the crossed-head deadlock.
+
+#### Management paths
+
+Issuance and revocation reach `api_credential` only through `WorkspaceService`'s locked member
+authorization, which takes the account root `FOR SHARE`, the workspace root `FOR SHARE`, then the
+organization root `FOR SHARE`, and only then the `workspace_member` row and the custom role. The
+organization root is taken there because both paths request it again later — issuance through the
+`fk_api_credential_organization` check on its `INSERT`, both through the audit's foreign-key
+parents — and a transaction must never hold a credential row while waiting for a root.
+
+`ApiCredentialService.recordSuccessfulUse` is a deliberate, tested exception: it takes one
+credential row `FOR UPDATE` to stamp `last_used_at` and then acquires nothing at all, so it can
+only wait, never close a cycle. Taxing the hottest path in the plane with two root locks buys no
+ordering. If a future change adds an audit or any root acquisition there, it immediately becomes a
+root-first path and must take both roots first.
+
+#### Membership cleanup
+
+Membership credential cleanup preserves each path's existing user, workspace, and membership lock
+order. At the end of member removal, invitation decline, leave, and fresh-membership cleanup it
+acquires the workspace root `FOR SHARE` in any lifecycle state, then that workspace's organization
+root `FOR SHARE`, immediately before locking `api_credential` children `FOR UPDATE` in ascending
+credential id, then deletes and audits them. Both root locks are unconditional: taking them only
+when credentials exist would place them after the credential rows and defeat the ordering. This is
+safe in the reverted-territory transactions it runs inside — member removal, decline, leave, invite,
+invite link, and SSO just-in-time membership — because every one of those callers already takes the
+same organization root `FOR SHARE` through its own trailing audit's foreign-key parents, after the
+same set of tenant-plane child locks. Cleanup returns without locking children when either root row
+is already gone, because the workspace foreign key has then already cascaded the credential children
+away. A `tearing_down` root still owns live credentials, which are deleted and audited normally, so
+the workspace lock used here carries no `lifecycle_state` predicate.
+
+`notificationMapper.lockRecipientMemberships` X-locks the departing user's `workspace_member` rows
+in every workspace before `detachMemberContent` reaches credential cleanup, so the new organization
+root request sits behind cross-workspace member locks. That is safe today only because every caller
+of `detachMemberContent` first takes the target `app_user` row `FOR UPDATE`;
+`prepareFreshMembershipInWorkspace` is the one caller with no `app_user` lock, and it never reaches
+an audit for the reason given above.
+
+#### Account erasure
+
+Account erasure locks the account root, discovers credential-referenced `(workspace_id,
+organization_id)` pairs without locks, then takes exactly one ascending workspace-root pass over
+owned roots, referenced roots, and the current tenant workspace when resolved. Owned workspace
+roots are exclusive; referenced-only and current-only roots are shared. It next takes one ascending
+organization-root pass over owned, referenced, and current tenant organizations with the same mode
+rule before locking owner rows. Credential cleanup acquires no roots itself. It locks exact
+credential children in `(workspace_id, credential_id)` order and deletes them, and returns the
+retained audits unemitted. Nothing is re-checked afterwards.
+
+Because the erasure appends into one chain scope per credential workspace plus the scope of its own
+`user.delete` row, all of those appends are emitted in one pass sorted by class 7's order rather than
+in deletion order. Two concurrent erasures therefore request the same heads in the same sequence and
+cannot cross. The `user.delete` audit uses the explicit tenant-context scope so the emitting call
+site knows which head it will take. No runtime check enforces the sorting: converting a rare,
+retryable deadlock into a deterministic abort of a compliance-critical erasure would be a worse
+trade. `UserDeletionAuditOrderTest` captures the emitted scope sequence instead.
+
+The price of that is a widened audit-write freeze: between its first credential audit and commit —
+across the whole `app_user` cascade — the erasure holds an exclusive `audit_log_integrity_head` row
+for every workspace in which the erased account created or revoked a credential, so audit writes in
+each of those workspaces wait, where on `origin/main` the same transaction froze exactly one chain
+scope.
+
+There is no residual reference count, and re-adding one would be a defect rather than a belt. A
+count issued after the deletions is a consistent read, so it still counts every planned row another
+transaction deleted after this transaction's read view was created, and it aborts the erasure in
+exactly the case the loop is built to tolerate — two erasures that plan the same credential, one
+account having revoked the other account's credential, meet that case on every run. A locking count
+is worse still: an equality scan of the non-unique creator and revoker indexes takes next-key locks
+on neighbouring rows in workspaces the erasure holds no root for.
+
+The plan needs no re-check because the reservation already closes it. `reserve` commits in its own
+transaction — `UserService.delete` runs the catalog fan-out with `Propagation.NOT_SUPPORTED` — and
+its `app_user` update waits behind the `FOR SHARE` that `lockedMemberAuthorization` holds on that
+row for every in-flight issuance and revocation, so each of those has committed before the
+reservation becomes visible. Once it is visible, `lockedMemberAuthorization` refuses the flagged
+account, so no further `created_by_id` or `revoked_by_id` reference can be born. The erasure's read
+view is created after the reservation committed, so `listByAccountReference` observes every
+reference that will ever exist. A row that vanishes between that read and its `FOR UPDATE` was
+deleted by another transaction — membership cleanup, a workspace or organization cascade, or
+another account erasure — and needs no action here. Both account foreign keys (`ON DELETE CASCADE`
+on the creator, `ON DELETE SET NULL` on the revoker) mean a stray row could not block the
+`app_user` delete in any case.
+
+Account erasure deletes every credential row the account created **or revoked**, so a revoked
+credential created by somebody else is destroyed when its revoker is erased. The revoker foreign key
+keeps `ON DELETE SET NULL` purely as the rollback backstop for an older binary that never ran the
+service-level cleanup.
+
+#### Ordering rules recorded here so round 17 does not reopen them
+
+- **No path may take an `organization` root EXCLUSIVELY and then lock a `workspace_member` row.** The one carve-out is the `app_user` cascade at the end of account erasure, which X-locks `workspace_member` rows after the owned organization roots were taken exclusively; that path is identical on `origin/main`, is invisible to the file-scoped `OrganizationRootLockOrderArchTest`, and is tracked under #1582 rather than by this rule.
+  Management takes the organization root before the membership row, while member detachment takes
+  membership rows before the organization root its trailing audit acquires. That inversion is inert
+  only while every organization root involved is shared. `OrganizationRootLockOrderArchTest`
+  enforces the rule.
+- The pre-existing `workspace_member` ordering inconsistencies are tracked in GitHub issue #1582 and
+
+  were deliberately not changed by the public API credential increment. Specifically:
+  the organization-root inversion inside `removeMemberInTransaction`, which takes the workspace root
+  exclusively first (`lockRoleMutation` → `lockWorkspaceMutationRoot`,
+  `WorkspaceService.java:1296`) and therefore does not invert on the workspace root at all, but
+  reaches the organization root only after X-locking active owner rows (`lockOwnerIds`, `:1454`)
+  and entering credential cleanup, whose `lockWorkspaceOrgIdForShare` and `lockByIdForShare` pair
+  consequently runs after those owner rows — the reverse of the erasure's
+  organization-roots-then-owner-rows pass; the
+  actor-versus-target erasure cycle created by `lockForeignKeyParents` taking the actor's `app_user`
+  row `FOR SHARE` after the roots; `ensureHead`'s `INSERT ... ON DUPLICATE KEY UPDATE` deadlock on a
+  first-ever concurrent head for one scope; and `lockRecipientMemberships`' cross-workspace
+  `workspace_member` X-locks preceding credential cleanup. Every one of these shapes already
+  exists on `main` through the same transactions' trailing audits; credential cleanup only makes
+  the last two explicit, and none of them is introduced or worsened here.
+- Membership-first record mutations (`lockAndRequireMember` → audit) racing a member's leave (`lockById` → `lockRecipientMemberships` → membership delete): the ordering is `origin/main`'s and unchanged here; this branch only appends the shared-root credential tail to the leave. A dedicated drill for that race was retired from this branch because it asserted a root-first leave design that was reverted; it belongs with #1582.
+
 ## Lifecycle, APPI requests, and organization SSO
 
 Control writes share this root order:

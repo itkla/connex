@@ -110,16 +110,20 @@ class OrgMemberServiceLockOrderTest {
         when(orgMemberMapper.orgIdsOwnedBy(9)).thenReturn(List.of(7, 3, 7));
         when(organizationMapper.lockById(3)).thenReturn(3);
         when(organizationMapper.lockById(7)).thenReturn(7);
+        when(organizationMapper.lockByIdForShare(5)).thenReturn(5);
+        when(organizationMapper.lockByIdForShare(11)).thenReturn(11);
         when(orgMemberMapper.lockOwnerIds(3)).thenReturn(List.of(9, 11));
         when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(9, 12));
 
-        service.assertNotSoleOwnerOfAnyOrg(9);
+        service.assertNotSoleOwnerOfAnyOrg(9, List.of(11, 5, 3));
 
         InOrder order = inOrder(userMapper, organizationMapper, orgMemberMapper);
         order.verify(userMapper).lockById(9);
         order.verify(orgMemberMapper).orgIdsOwnedBy(9);
         order.verify(organizationMapper).lockById(3);
+        order.verify(organizationMapper).lockByIdForShare(5);
         order.verify(organizationMapper).lockById(7);
+        order.verify(organizationMapper).lockByIdForShare(11);
         order.verify(orgMemberMapper).lockOwnerIds(3);
         order.verify(orgMemberMapper).lockOwnerIds(7);
     }

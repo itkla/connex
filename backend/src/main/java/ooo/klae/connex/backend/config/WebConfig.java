@@ -16,7 +16,7 @@ import ooo.klae.connex.backend.tenant.TenantResolutionInterceptor;
 /**
  * Spring MVC configuration.
  * Registers the tenant-resolution interceptor that pins the active workspace
- * for each authenticated request.
+ * for each authenticated request, including post-security credential binding for {@code /api/v1}.
  */
 
 @Configuration

@@ -29,18 +29,33 @@ import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
+import ooo.klae.connex.backend.publicapi.PublicApiErrorAdvice;
+import ooo.klae.connex.backend.publicapi.PublicApiPaths;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Bounds API request bodies before Spring MVC or Jackson materializes them.
  */
-@RequiredArgsConstructor
 public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
     private static final Set<String> BODY_METHODS = Set.of("POST", "PUT", "PATCH", "DELETE");
     private static final int MAX_FORM_PARAMETERS = 1_000;
 
     private final RequestBodySizeProperties properties;
+    private final ObjectMapper objectMapper;
+
+    /** Creates the production filter with the application's configured JSON mapper. */
+    public ApiRequestBodySizeFilter(
+            RequestBodySizeProperties properties,
+            ObjectMapper objectMapper) {
+        this.properties = properties;
+        this.objectMapper = objectMapper;
+    }
+
+    /** Creates a standalone filter for focused tests. */
+    public ApiRequestBodySizeFilter(RequestBodySizeProperties properties) {
+        this(properties, new ObjectMapper());
+    }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -53,7 +68,7 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         long limitBytes = limitFor(request);
         if (request.getContentLengthLong() > limitBytes) {
-            reject(response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+            reject(request, response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
             return;
         }
         BufferedRequestWrapper bufferedRequest = null;
@@ -61,7 +76,7 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
             boolean unknownLength = request.getContentLengthLong() < 0
                 || request.getHeader("Transfer-Encoding") != null;
             if (unknownLength && usesContainerBodyParsing(request)) {
-                reject(response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+                reject(request, response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
                 return;
             }
             HttpServletRequest boundedRequest;
@@ -74,15 +89,15 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
             chain.doFilter(boundedRequest, response);
         } catch (MalformedFormBodyException ex) {
             if (!response.isCommitted()) {
-                reject(response, HttpServletResponse.SC_BAD_REQUEST);
+                reject(request, response, HttpServletResponse.SC_BAD_REQUEST);
             }
         } catch (RequestBodyTooLargeException ex) {
             if (!response.isCommitted()) {
-                reject(response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+                reject(request, response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
             }
         } catch (ServletException ex) {
             if (hasRequestBodyTooLargeCause(ex) && !response.isCommitted()) {
-                reject(response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
+                reject(request, response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE);
                 return;
             }
             throw ex;
@@ -93,9 +108,22 @@ public class ApiRequestBodySizeFilter extends OncePerRequestFilter {
         }
     }
 
-    private static void reject(HttpServletResponse response, int status) {
-        SecurityResponseHeaders.apply(response);
-        response.setStatus(status);
+    private void reject(HttpServletRequest request, HttpServletResponse response, int status)
+            throws IOException {
+        if (PublicApiPaths.isPublicRequest(request)) {
+            boolean tooLarge = status == HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE;
+            PublicApiErrorAdvice.write(
+                objectMapper,
+                request,
+                response,
+                tooLarge ? org.springframework.http.HttpStatus.PAYLOAD_TOO_LARGE
+                    : org.springframework.http.HttpStatus.BAD_REQUEST,
+                tooLarge ? "request_too_large" : "invalid_request",
+                tooLarge ? "Request body exceeds the allowed size" : "Invalid request");
+        } else {
+            SecurityResponseHeaders.apply(request, response);
+            response.setStatus(status);
+        }
     }
 
     private long limitFor(HttpServletRequest request) {

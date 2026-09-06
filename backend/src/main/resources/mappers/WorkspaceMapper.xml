@@ -111,6 +111,21 @@
     FOR UPDATE
   </select>
 
+  <select id="getAuthorizationMembership" resultType="WorkspaceMember">
+    SELECT wm.workspace_id, wm.user_id, wm.role, wm.role_id, wm.status, wm.created_at
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id
+    JOIN organization o ON o.id = w.org_id
+    WHERE wm.workspace_id = #{workspaceId} AND wm.user_id = #{userId}
+      AND w.lifecycle_state = 'active' AND o.lifecycle_state = 'active'
+  </select>
+
+  <select id="getMembershipGenerationId" resultType="java.lang.Long">
+    SELECT membership_id
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+  </select>
+
   <select id="isMemberIncludingPending" resultType="boolean">
     SELECT EXISTS(
       SELECT 1
@@ -217,6 +232,12 @@
     FROM workspace
     WHERE id = #{workspaceId} AND lifecycle_state = 'active'
     FOR SHARE
+  </select>
+
+  <!-- Deliberately lifecycle-state independent: membership credential cleanup must still take the
+       workspace root and its organization while the workspace is tearing down. -->
+  <select id="lockWorkspaceOrgIdForShare" resultType="java.lang.Integer">
+    SELECT org_id FROM workspace WHERE id = #{workspaceId} FOR SHARE
   </select>
 
   <select id="lockOwnerIds" resultType="int">
