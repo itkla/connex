@@ -178,10 +178,12 @@ because a producer may write `[Content_Types].xml` or `META-INF/manifest.xml` la
   and XAdES 1.3.2/1.4.1 element vocabularies. OOXML signature parts must additionally be declared
   with the OPC signature content type, be targeted from `_xmlsignatures/_rels/origin.sigs.rels`,
   and have an empty `_xmlsignatures/origin.sigs` reached by the root `digital-signature/origin`
-  relationship. Signature manifest references may only address a fragment or `/part?ContentType=…`
-  where the part exists and its declared type is not macro, OLE, ActiveX, control, or package
-  content. `<Object>` remains refused everywhere outside a signature part, and macro signatures
-  stay refused. **A signed macro is still a macro.**
+  relationship. Signature `Reference` and `RetrievalMethod` URIs may only address a fragment or
+  `/part?ContentType=…` where the part exists and its declared type is not macro, OLE, ActiveX,
+  control, or package content; URL-bearing signature text (XAdES `SPURI`, Office
+  `SignatureProviderUrl`) must meet the same rule or be an ordinary `http`, `https`, `mailto`, or
+  `tel` hyperlink. `<Object>` remains refused everywhere outside a signature part, and macro
+  signatures stay refused. **A signed macro is still a macro.**
 
 ## 7. What #1122 and every later pipeline MUST do
 
@@ -227,5 +229,11 @@ accident:
 - Signing tools whose XAdES or Office signature markup falls outside the enumerated schemas are
   refused by absence. That is the intended fail-closed posture; widen the vocabulary from the
   published schema, never by relaxing the allowlist.
+- ODF `META-INF/documentsignatures.xml` references (`Reference`, `RetrievalMethod`) are admitted
+  by vocabulary only; their URIs are not bound to package members the way OOXML signature
+  references are. Pre-existing, unchanged here.
+- LibreOffice-saved `.xlsx` workbooks are refused because Calc writes `showFormulas="false"` on
+  `sheetView` and the attribute rule refuses any attribute name containing `formula`.
+  Pre-existing and independent of package-member inspection; a follow-up outside this change.
 
 [#1122]: https://github.com/itkla/connex/issues/1122

