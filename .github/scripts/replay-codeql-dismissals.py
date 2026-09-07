@@ -208,6 +208,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    sys.stdout.reconfigure(line_buffering=True)
     args = parse_args()
     try:
         dismissals = snapshot_dismissals(load_alerts(args.snapshot))
