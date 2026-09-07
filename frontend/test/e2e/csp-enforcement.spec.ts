@@ -1,6 +1,7 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
 import { CSP_REPORT_PATH } from "@/security-headers";
+import { activeWorkspaceId, registerUser } from "./support/api";
 import { runFixture } from "./support/fixtures";
 import { message } from "./support/messages";
 
@@ -26,7 +27,8 @@ type ViolationCapture = {
 
 const CSP_CONSOLE_PATTERN = /Content Security Policy|Refused to/;
 const NONCED_SCRIPT_SRC = /script-src 'self' 'nonce-[^']+' 'strict-dynamic'/;
-const PROBE_SCRIPT = "document.documentElement.dataset.cspProbe = 'ran'";
+const PROBE_MARKUP =
+    "<img data-csp-probe src=\"/csp-probe-missing.png\" onerror=\"document.documentElement.dataset.cspProbe = 'ran'\">";
 const PIXEL_PNG =
     "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAADklEQVR4XmNgGAWDEwAAAZoAAWA5V18AAAAASUVORK5CYII=";
 
@@ -76,8 +78,14 @@ function expectNoViolations(capture: ViolationCapture): void {
     expect(capture.consoleRefusals).toEqual([]);
 }
 
-function reportingEndpointFor(baseURL: string): string {
-    return `csp-endpoint="${new URL(baseURL).origin}${CSP_REPORT_PATH}"`;
+/**
+ * The `Reporting-Endpoints` value the proxy must emit for the suite's base URL, or null when the
+ * browser-facing origin is not HTTPS: Chromium discards non-cryptographic reporting endpoints, so
+ * the proxy then relies on `report-uri` alone.
+ */
+function reportingEndpointFor(baseURL: string): string | null {
+    const origin = new URL(baseURL);
+    return origin.protocol === "https:" ? `csp-endpoint="${origin.origin}${CSP_REPORT_PATH}"` : null;
 }
 
 function baseUrlOf(projectBaseURL: string | undefined): string {
@@ -86,23 +94,29 @@ function baseUrlOf(projectBaseURL: string | undefined): string {
 }
 
 async function expectEnforcedPolicyHeaders(page: Page, url: string, baseURL: string): Promise<void> {
-    const response = await page.goto(url);
+    const response = await page.goto(url, { waitUntil: "domcontentloaded" });
     expect(response, `no response for ${url}`).not.toBeNull();
     const headers = response === null ? {} : response.headers();
     const policy = headers["content-security-policy"];
     expect(policy, `no enforced policy on ${url}`).toBeDefined();
     expect(policy).toMatch(NONCED_SCRIPT_SRC);
     expect(policy).toContain(`report-uri ${CSP_REPORT_PATH}`);
-    expect(policy).toContain("report-to csp-endpoint");
+    const reportingEndpoint = reportingEndpointFor(baseURL);
+    if (reportingEndpoint === null) {
+        expect(policy).not.toContain("report-to");
+        expect(headers["reporting-endpoints"]).toBeUndefined();
+    } else {
+        expect(policy).toContain("report-to csp-endpoint");
+        expect(headers["reporting-endpoints"]).toBe(reportingEndpoint);
+    }
     expect(policy).toContain("default-src 'self'");
     expect(policy).toContain("object-src 'none'");
     expect(policy).toContain("frame-ancestors 'none'");
     expect(headers["content-security-policy-report-only"]).toBeUndefined();
-    expect(headers["reporting-endpoints"]).toBe(reportingEndpointFor(baseURL));
 }
 
 test.describe("frontend CSP enforcement", () => {
-    test("HTML responses carry the enforced full policy and a reporting endpoint", async ({ page }, testInfo) => {
+    test("HTML responses carry the enforced full policy and its report-uri", async ({ page }, testInfo) => {
         const baseURL = baseUrlOf(testInfo.project.use.baseURL);
 
         await expectEnforcedPolicyHeaders(page, "/dashboard", baseURL);
@@ -113,22 +127,24 @@ test.describe("frontend CSP enforcement", () => {
         const fixture = runFixture(testInfo.project.name);
         const capture = await armViolationCapture(context);
 
-        await page.goto("/dashboard");
+        await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
         await expect(page.locator("[data-app-main]")).toBeVisible();
 
-        await page.goto("/insights/analytics");
+        await page.goto("/insights/analytics", { waitUntil: "domcontentloaded" });
         await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
         await expect(page.getByRole("heading", { name: "Trends" })).toBeVisible();
         await expect(page.locator("svg.recharts-surface").first()).toBeVisible();
         expect(await page.locator("svg.recharts-surface").count()).toBeGreaterThan(0);
 
-        await page.goto("/records/contacts?view=table&sort=name&dir=asc&page=1&size=10");
+        await page.goto("/records/contacts?view=table&sort=name&dir=asc&page=1&size=10", {
+            waitUntil: "domcontentloaded",
+        });
         await expect(page.locator(`[data-record-row-id="${fixture.contacts.peek.id}"]`)).toBeVisible();
 
-        await page.goto(`/records/contacts/${fixture.contacts.peek.id}`);
+        await page.goto(`/records/contacts/${fixture.contacts.peek.id}`, { waitUntil: "domcontentloaded" });
         await expect(page.getByRole("heading", { name: fixture.contacts.peek.name }).first()).toBeVisible();
 
-        await page.goto("/library/documents");
+        await page.goto("/library/documents", { waitUntil: "domcontentloaded" });
         await expect(page.locator("[data-app-main]")).toBeVisible();
 
         await page.getByRole("button", { name: message("en", "common", "AskConnex.title"), exact: true }).click();
@@ -143,7 +159,7 @@ test.describe("frontend CSP enforcement", () => {
         const capture = await armViolationCapture(context);
         const fileName = `csp-proof-${Date.now().toString(36)}.png`;
 
-        await page.goto(`/records/contacts/${fixture.contacts.edit.id}`);
+        await page.goto(`/records/contacts/${fixture.contacts.edit.id}`, { waitUntil: "domcontentloaded" });
         const attachmentsHeading = page.getByRole("heading", {
             level: 2,
             name: new RegExp(`^${message("en", "attachments", "Attachments.title")} · \\d+$`),
@@ -158,7 +174,7 @@ test.describe("frontend CSP enforcement", () => {
             });
         await expect(page.getByRole("link", { name: fileName })).toBeVisible({ timeout: 30_000 });
 
-        await page.goto("/library/files");
+        await page.goto("/library/files", { waitUntil: "domcontentloaded" });
         await page.getByText(fileName).first().click();
         const preview = page.locator('img[src*="/api/attachments/content/"]').first();
         await expect(preview).toBeVisible();
@@ -185,11 +201,13 @@ test.describe("frontend CSP enforcement", () => {
             await expectEnforcedPolicyHeaders(page, "/auth/login", baseURL);
             await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
 
-            await page.goto("/auth/register");
+            await page.goto("/auth/register", { waitUntil: "domcontentloaded" });
             await expect(page.getByRole("button", { name: "Create account" })).toBeVisible();
 
-            await page.goto(`/document-acceptance/w42-${"c".repeat(64)}`);
-            await expect(page.locator("body")).toBeVisible();
+            await page.goto(`/document-acceptance/w42-${"c".repeat(64)}`, { waitUntil: "domcontentloaded" });
+            await expect(page.getByRole("heading", {
+                name: message("en", "document-acceptance", "DocumentAcceptance.unavailableTitle"),
+            })).toBeVisible();
 
             expectNoViolations(capture);
         } finally {
@@ -197,28 +215,30 @@ test.describe("frontend CSP enforcement", () => {
         }
     });
 
-    test("an un-nonced inline script is blocked and reported", async ({ page, context }) => {
-        test.setTimeout(120_000);
+    test("an injected inline event handler is blocked and reported", async ({ page, context }) => {
+        test.setTimeout(90_000);
         const capture = await armViolationCapture(context);
-        await page.goto("/dashboard");
+        await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
         await expect(page.locator("[data-app-main]")).toBeVisible();
 
         const delivery = page.waitForRequest(
             (request) => request.method() === "POST"
                 && new URL(request.url()).pathname === CSP_REPORT_PATH,
-            { timeout: 80_000 },
+            { timeout: 30_000 },
         );
-        await page.evaluate((source) => {
-            const script = document.createElement("script");
-            script.textContent = source;
-            document.head.append(script);
-        }, PROBE_SCRIPT);
+        await page.evaluate((markup) => {
+            document.body.insertAdjacentHTML("beforeend", markup);
+        }, PROBE_MARKUP);
+        const probe = page.locator("img[data-csp-probe]");
+        await expect.poll(() => probe.evaluate((image: HTMLImageElement) => image.complete)).toBe(true);
 
         await expect.poll(() => capture.violations.length).toBeGreaterThan(0);
         expect(capture.violations).toHaveLength(1);
-        expect(capture.violations[0].blocked).toBe("inline");
-        expect(capture.violations[0].disposition).toBe("enforce");
-        expect(capture.violations[0].directive).toBe("script-src-elem");
+        expect(capture.violations[0]).toMatchObject({
+            directive: "script-src-attr",
+            blocked: "inline",
+            disposition: "enforce",
+        });
         expect(await page.evaluate(() => document.documentElement.dataset.cspProbe)).toBeUndefined();
 
         const request = await delivery;
@@ -255,9 +275,9 @@ test.describe("frontend CSP enforcement", () => {
             const capture = await armViolationCapture(context);
             const page = await context.newPage();
 
-            await page.goto("/dashboard");
+            await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
             await expect(page.locator("[data-app-main]")).toBeVisible();
-            await page.goto("/insights/analytics");
+            await page.goto("/insights/analytics", { waitUntil: "domcontentloaded" });
             await expect(page.locator("svg.recharts-surface").first()).toBeVisible();
 
             expectNoViolations(capture);
@@ -266,30 +286,63 @@ test.describe("frontend CSP enforcement", () => {
         }
     });
 
-    test("the passkey enrollment ceremony completes under enforcement", async ({ page, context }) => {
-        test.setTimeout(90_000);
-        const capture = await armViolationCapture(context);
-        const cdp = await context.newCDPSession(page);
-        await cdp.send("WebAuthn.enable");
-        await cdp.send("WebAuthn.addVirtualAuthenticator", {
-            options: {
-                protocol: "ctap2",
-                transport: "internal",
-                hasResidentKey: true,
-                hasUserVerification: true,
-                isUserVerified: true,
-                automaticPresenceSimulation: true,
-            },
+    test("passkey enrollment and passkey sign-in complete under enforcement", async ({ browser }, testInfo) => {
+        test.setTimeout(120_000);
+        const baseURL = baseUrlOf(testInfo.project.use.baseURL);
+        const runId = `csp${Date.now().toString(36)}${testInfo.retry}`;
+        const password = `CspPasskey!${runId}A1`;
+        const context = await browser.newContext({
+            baseURL,
+            locale: "en-US",
+            timezoneId: "UTC",
+            reducedMotion: "reduce",
+            storageState: { cookies: [], origins: [] },
         });
+        try {
+            await registerUser(context.request, {
+                username: runId,
+                password,
+                email: `${runId}@example.com`,
+            });
+            await activeWorkspaceId(context.request);
+            const capture = await armViolationCapture(context);
+            const page = await context.newPage();
+            const cdp = await context.newCDPSession(page);
+            await cdp.send("WebAuthn.enable");
+            await cdp.send("WebAuthn.addVirtualAuthenticator", {
+                options: {
+                    protocol: "ctap2",
+                    ctap2Version: "ctap2_1",
+                    transport: "internal",
+                    hasResidentKey: true,
+                    hasUserVerification: true,
+                    isUserVerified: true,
+                    automaticPresenceSimulation: true,
+                },
+            });
 
-        await page.goto("/settings/personal/security");
-        await expect(page.getByRole("heading", { name: message("en", "account", "AccountSecurity.title") }))
-            .toBeVisible();
-        await page.getByRole("button", { name: message("en", "account", "AccountSecurity.add") }).click();
-        await expect(page.getByText(message("en", "account", "AccountSecurity.emptyTitle"))).toBeHidden({
-            timeout: 30_000,
-        });
+            await page.goto("/settings/personal/security", { waitUntil: "domcontentloaded" });
+            await page.getByRole("button", { name: message("en", "account", "AccountSecurity.add") }).first().click();
+            const passwordDialog = page.getByRole("dialog", {
+                name: message("en", "account", "AccountSecurity.passwordTitle"),
+            });
+            await passwordDialog.getByLabel(message("en", "account", "AccountSecurity.passwordLabel")).fill(password);
+            await passwordDialog
+                .getByRole("button", { name: message("en", "account", "AccountSecurity.continue"), exact: true })
+                .click();
+            await expect(page.getByText(message("en", "account", "AccountSecurity.added"), { exact: true }))
+                .toBeVisible();
+            await expect(page.getByText(message("en", "account", "AccountSecurity.emptyTitle"))).toBeHidden();
 
-        expectNoViolations(capture);
+            await context.clearCookies();
+            await page.goto("/auth/login", { waitUntil: "domcontentloaded" });
+            await page.getByRole("button", { name: message("en", "auth", "AuthLogin.passkeyButton") }).click();
+            await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
+            await expect(page.locator("[data-app-main]")).toBeVisible();
+
+            expectNoViolations(capture);
+        } finally {
+            await context.close();
+        }
     });
 });

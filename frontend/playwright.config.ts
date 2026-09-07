@@ -56,7 +56,6 @@ export default defineConfig({
         locale: "en-US",
         timezoneId: "UTC",
         contextOptions: { reducedMotion: "reduce" },
-        launchOptions: { args: ["--short-reporting-delay"] },
     },
     projects: [
         {

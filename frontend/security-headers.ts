@@ -138,9 +138,11 @@ export function createFrontendContentSecurityPolicy(options: ContentSecurityPoli
 /**
  * Resolves the absolute report collector for a browser-facing origin.
  *
- * <p>Browsers ignore a `Reporting-Endpoints` URL that is not potentially trustworthy, and a
- * Chromium that sees `report-to` stops honouring `report-uri` entirely. Returning null for a
- * plain-HTTP LAN origin therefore keeps the relative `report-uri` fallback working there.
+ * <p>Chromium registers a `Reporting-Endpoints` URL only when its scheme is cryptographic
+ * (`SchemeIsCryptographic()` in `net/reporting/reporting_header_parser.cc`): `http://localhost` is
+ * discarded even though it is potentially trustworthy, and a Chromium that sees `report-to` stops
+ * honouring `report-uri` entirely. Returning null for every non-HTTPS origin therefore keeps the
+ * relative `report-uri` fallback working on localhost, in CI, and on plain-HTTP LAN deployments.
  */
 export function contentSecurityPolicyReportingEndpoint(requestOrigin: string): string | null {
   try {
@@ -148,7 +150,7 @@ export function contentSecurityPolicyReportingEndpoint(requestOrigin: string): s
     if (url.username || url.password || !isSafeContentSecurityPolicySource(url.origin)) {
       return null;
     }
-    if (url.protocol !== "https:" && url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+    if (url.protocol !== "https:") {
       return null;
     }
     return `${url.origin}${CSP_REPORT_PATH}`;
