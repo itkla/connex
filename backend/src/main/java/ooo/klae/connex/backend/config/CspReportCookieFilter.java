@@ -38,6 +38,15 @@ public class CspReportCookieFilter extends OncePerRequestFilter {
 
     private final RequestMatcher matcher;
 
+    /**
+     * Creates the filter.
+     *
+     * @param matcher the collector's request matcher; it must be the same matcher
+     *     {@link CspReportSecurityConfig}'s chain is built with, because a request one matches and
+     *     the other does not is exactly the gap this filter exists to close — a broader matcher
+     *     would hide cookies from requests the application chain serves, turning an authenticated
+     *     caller's response into a 401
+     */
     public CspReportCookieFilter(RequestMatcher matcher) {
         this.matcher = matcher;
     }
