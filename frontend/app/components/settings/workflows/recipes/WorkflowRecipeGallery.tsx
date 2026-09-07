@@ -16,6 +16,8 @@ import { EmptyState } from "@/app/components/EmptyState";
 import { PageHeader } from "@/app/components/PageHeader";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import { CrumbLabel } from "@/app/hooks/useNavTrail";
+import RecordSelect from "@/app/components/records/RecordSelect";
+import { useWorkflowRecordSearch } from "@/app/components/settings/workflows/useWorkflowRecordSearch";
 import { WorkflowSimulationEvidence } from "@/app/components/settings/workflows/WorkflowSimulationDialog";
 import {
     ApiError,
@@ -84,6 +86,7 @@ export function WorkflowRecipeGallery() {
             <PageHeader
                 title={t("recipes.title")}
                 description={t("recipes.description")}
+                actions={<Button variant="outline" asChild><Link href="/workflows/new">{t("recipes.startBlank")}</Link></Button>}
             />
             {error === "load" ? (
                 <RecipeError onRetry={() => setAttempt((value) => value + 1)} />
@@ -126,7 +129,7 @@ export function WorkflowRecipeGallery() {
 }
 
 /** Recipe disclosure, read-only preview, and disabled-workflow installation flow. */
-export function WorkflowRecipeDetail({ recipeKey }: { recipeKey: string }) {
+export function WorkflowRecipeDetail({ recipeKey, definitionAuthoringEnabled = false }: { recipeKey: string; definitionAuthoringEnabled?: boolean }) {
     const t = useTranslations("WorkflowOperations");
     const tw = useTranslations("WorkspaceWorkflows");
     const router = useRouter();
@@ -145,6 +148,9 @@ export function WorkflowRecipeDetail({ recipeKey }: { recipeKey: string }) {
         () => activeWorkspaceId == null ? undefined : { "X-Workspace-Id": String(activeWorkspaceId) },
         [activeWorkspaceId],
     );
+    const requestInit = useMemo(() => ({ headers }), [headers]);
+    const recordType = recipeKey === "cooling-company-review" ? "company" : recipeKey === "deal-won-handoff" ? "deal" : "person";
+    const recordSearch = useWorkflowRecordSearch(recordType, requestInit, Boolean(headers) && !switching);
 
     useEffect(() => {
         if (!activeWorkspaceId || !headers || switching) return;
@@ -217,6 +223,7 @@ export function WorkflowRecipeDetail({ recipeKey }: { recipeKey: string }) {
 
     const messageKey = recipeMessageKey(recipe.recipeKey);
     const canInstall = preview?.writesCreated === false
+        && (preview.definition.schemaVersion !== 2 || definitionAuthoringEnabled)
         && preview.unresolvedParameters.length === 0
         && preview.validation.canPublish;
 
@@ -257,12 +264,17 @@ export function WorkflowRecipeDetail({ recipeKey }: { recipeKey: string }) {
                         ))}
                         <div className="space-y-2">
                             <Label htmlFor="recipe-example-record">{t("recipes.exampleRecordLabel")}</Label>
-                            <Input
+                            <RecordSelect
                                 id="recipe-example-record"
-                                inputMode="numeric"
+                                options={recordSearch.records}
                                 value={exampleRecordId}
-                                onChange={(event) => setExampleRecordId(event.target.value)}
+                                onValueChange={(value) => { setExampleRecordId(value); setPreview(null); }}
+                                onInputValueChange={recordSearch.searchRecords}
+                                placeholder={t("manual.recordPlaceholder")}
+                                emptyLabel={t("manual.recordEmpty")}
+                                disabled={pending !== null}
                             />
+                            {recordSearch.failed ? <p role="alert" className="text-sm text-destructive">{t("manual.errors.recordSearch")}</p> : null}
                             <p className="text-xs text-muted-foreground">{t("recipes.exampleRecordHelp")}</p>
                         </div>
                     </section>

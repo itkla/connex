@@ -403,7 +403,9 @@ function RunPath({ run }: { run: WorkflowRunDetail }) {
                                 </span>
                                 <div className="min-w-0 space-y-1">
                                     <p className="text-sm font-medium text-foreground">{t(`nodeType.${step.nodeType}`)}</p>
-                                    <p className="font-mono text-xs text-muted-foreground">{step.nodeId}</p>
+                                    {typeof step.actionOutputs?.taskId === "number" && Number.isSafeInteger(step.actionOutputs.taskId) && step.actionOutputs.taskId > 0 ? (
+                                        <Link href={`/activity/tasks?task=${step.actionOutputs.taskId}`} className="text-sm font-medium text-brand-dark underline underline-offset-4">{t("path.createdTask")}</Link>
+                                    ) : null}
                                     {step.selectedOutcome ? (
                                         <p className="text-xs text-muted-foreground">{t("path.outcome", { outcome: tw(`branch.${step.selectedOutcome}`) })}</p>
                                     ) : null}

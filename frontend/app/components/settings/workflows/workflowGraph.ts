@@ -2,12 +2,14 @@ import {
     actionsFor,
     defaultAction,
     eventsFor,
+    supportsManualRun,
     SCHEDULE_RECORD_TYPES,
     SEGMENT_RECORD_TYPES,
 } from "@/app/components/settings/workflows/vocabulary";
 import type {
     RuleTrigger,
     WorkflowCanvas,
+    WorkflowCatalog,
     WorkflowConditionNode,
     WorkflowDefinition,
     WorkflowDiagnostic,
@@ -91,11 +93,16 @@ export function createWorkflowNode(type: WorkflowNodeType, recordType: string): 
 }
 
 /** Creates the smallest saveable workflow document and its separate canvas presentation. */
-export function createEmptyWorkflowGraph(recordType = "deal"): {
+export function createEmptyWorkflowGraph(recordType = "deal", schemaVersion: 1 | 2 = 1, start: "manual" | "entity_change" | "schedule" = "entity_change"): {
     definition: WorkflowDefinition;
     canvas: WorkflowCanvas;
 } {
     const trigger = createWorkflowNode("TRIGGER", recordType);
+    if (trigger.type === "TRIGGER" && schemaVersion === 2) {
+        trigger.config = start === "manual" ? { type: "manual" }
+            : start === "schedule" ? { type: "schedule", cadence: "daily", allowManualRuns: false }
+                : { type: "entity_change", events: [], allowManualRuns: false };
+    }
     const end = createWorkflowNode("END", recordType);
     const edge: WorkflowEdge = {
         id: newOpaqueId("e"),
@@ -105,7 +112,7 @@ export function createEmptyWorkflowGraph(recordType = "deal"): {
     };
     return {
         definition: {
-            schemaVersion: 1,
+            schemaVersion,
             entryNodeId: trigger.id,
             nodes: [trigger, end],
             edges: [edge],
@@ -331,6 +338,9 @@ export function insertWorkflowNode(
     const edgesRemoved = previousEdge ? 1 : 0;
     if (definition.edges.length - edgesRemoved + edgesAdded > WORKFLOW_EDGE_LIMIT) return null;
     const node = createWorkflowNode(type, recordType);
+    if (node.type === "ACTION" && definition.schemaVersion === 2 && supportsManualRun(recordType)) {
+        node.config = { type: "create_task", title: "", dueInDays: 3 };
+    }
     let nextDefinition: WorkflowDefinition = {
         ...cloneDefinition(definition),
         nodes: [...cloneDefinition(definition).nodes, node],
@@ -444,13 +454,16 @@ function pruneUnreachable(
 }
 
 function retypedTrigger(trigger: WorkflowTriggerNode, recordType: string): WorkflowTriggerNode {
+    if (trigger.config.type === "manual" && supportsManualRun(recordType)) return { ...trigger, config: { type: "manual" } };
+    const manualPolicy = trigger.config.allowManualRuns === undefined ? {} : { allowManualRuns: trigger.config.allowManualRuns };
     if (SCHEDULE_RECORD_TYPES.includes(recordType) && trigger.config.type === "schedule") {
-        return { ...trigger, config: { type: "schedule", cadence: trigger.config.cadence ?? "daily" } };
+        return { ...trigger, config: { type: "schedule", cadence: trigger.config.cadence ?? "daily", ...manualPolicy } };
     }
     const supportedEvents = eventsFor(recordType);
     const config: RuleTrigger = {
         type: "entity_change",
         events: (trigger.config.events ?? []).filter((event) => supportedEvents.includes(event)),
+        ...manualPolicy,
     };
     if (trigger.config.throttleMinutes !== undefined) config.throttleMinutes = trigger.config.throttleMinutes;
     if (recordType === "deal" && trigger.config.targetStageId !== undefined) {
@@ -476,11 +489,12 @@ export function normalizeWorkflowForRecordType(
     definition: WorkflowDefinition,
     canvas: WorkflowCanvas,
     recordType: string,
+    catalog?: WorkflowCatalog | null,
 ): { definition: WorkflowDefinition; canvas: WorkflowCanvas } {
     const entry = definition.nodes.find((node) => node.id === definition.entryNodeId);
     if (!entry || entry.type !== "TRIGGER") return { definition, canvas };
     const trigger = retypedTrigger(entry, recordType);
-    const supportedActions = actionsFor(recordType);
+    const supportedActions = actionsFor(recordType, catalog);
     let next: WorkflowDefinition = {
         ...definition,
         nodes: definition.nodes.map((node) => {

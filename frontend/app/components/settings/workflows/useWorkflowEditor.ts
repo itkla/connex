@@ -40,6 +40,9 @@ import {
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import type {
     WorkflowDiagnostic,
+    WorkflowCatalog,
+    WorkflowInputDefinition,
+    WorkflowInputValue,
     WorkflowDto,
     WorkflowEdgeOutcome,
     WorkflowNode,
@@ -49,6 +52,7 @@ import type {
     WorkflowValidation,
     WorkflowVersion,
 } from "@/app/lib/types";
+import type { WorkflowSetupValue } from "@/app/components/settings/workflows/WorkflowSetup";
 
 type Inspection =
     | { kind: "version"; version: WorkflowVersion }
@@ -90,11 +94,15 @@ export function useWorkflowEditor({
     activeWorkspaceId,
     switching,
     canRunAsSystem,
+    catalog,
+    returnTo,
 }: {
     workflowId?: number;
     activeWorkspaceId: number | null;
     switching: boolean;
     canRunAsSystem: boolean;
+    catalog?: WorkflowCatalog | null;
+    returnTo?: string | null;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const router = useRouter();
@@ -362,11 +370,38 @@ export function useWorkflowEditor({
     ) => {
         let document = { ...history.present, [field]: value };
         if (field === "recordType" && typeof value === "string" && value !== history.present.recordType) {
-            const normalized = normalizeWorkflowForRecordType(document.definition, document.canvas, value);
+            const normalized = normalizeWorkflowForRecordType(document.definition, document.canvas, value, document.definition.schemaVersion === 2 ? catalog : null);
             document = { ...document, definition: normalized.definition, canvas: normalized.canvas };
         }
         updateDocument(document, mode);
+    }, [catalog, history.present, updateDocument]);
+
+    const configureNewWorkflow = useCallback((value: WorkflowSetupValue) => {
+        const graph = createEmptyWorkflowGraph(value.recordType, 2, value.start);
+        const readyGraph = value.start === "schedule" ? ensureScheduleEnrollment(graph.definition, graph.canvas, value.recordType) : graph;
+        updateDocument({ name: value.name, description: value.purpose || null, recordType: value.recordType, executionMode: "user", definition: readyGraph.definition, canvas: readyGraph.canvas }, "commit");
+        setSelectedNodeId(readyGraph.definition.entryNodeId);
+    }, [updateDocument]);
+
+    const changeInputs = useCallback((inputs: WorkflowInputDefinition[], mode: "transient" | "commit") => {
+        updateDocument({ ...history.present, definition: { ...history.present.definition, inputs } }, mode);
     }, [history.present, updateDocument]);
+
+    const upgradeDefinition = useCallback(() => {
+        const actor = workflow?.runAsUserId ?? workflow?.createdById;
+        const definition = history.present.definition;
+        updateDocument({ ...history.present, definition: {
+            ...definition,
+            schemaVersion: 2,
+            nodes: definition.nodes.map((node) => {
+                if (node.type === "TRIGGER") return { ...node, config: { ...node.config, allowManualRuns: true } };
+                if (node.type === "ACTION" && (node.config.type === "create_task" || node.config.type === "notify")) {
+                    return { ...node, config: { ...node.config, targetUserId: actor ?? node.config.targetUserId, ...(node.config.type === "create_task" ? { dueInDays: node.config.dueInDays ?? 3 } : {}) } };
+                }
+                return node;
+            }),
+        } }, "commit");
+    }, [history.present, updateDocument, workflow]);
 
     const changeName = useCallback((name: string) => {
         updateDocument({ ...history.present, name }, "transient");
@@ -504,7 +539,7 @@ export function useWorkflowEditor({
                 conflictRecoveryGenerationRef.current += 1;
                 setWorkflow(created);
                 dispatch({ type: "markSaved", submittedDocument, document: savedDocument });
-                router.replace(`/workflows/${created.id}`);
+                router.replace(`/workflows/${created.id}${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`);
                 toastSuccess(t("created"));
             } else {
                 const saved = await saveWorkflowDraft(workflow.id, {
@@ -535,7 +570,7 @@ export function useWorkflowEditor({
                 : isCurrentWorkspace(workspaceId) && creationContinuationCurrent;
             if (currentScope && actionGeneration === busyActionGenerationRef.current) setBusyAction(null);
         }
-    }, [activeWorkspaceId, beginConflictRecovery, conflict, dispatch, history.present, isCurrentWorkflow, isCurrentWorkspace, router, scopeReady, t, workflow]);
+    }, [activeWorkspaceId, beginConflictRecovery, conflict, dispatch, history.present, isCurrentWorkflow, isCurrentWorkspace, returnTo, router, scopeReady, t, workflow]);
 
     const validate = useCallback(async () => {
         const workspaceId = activeWorkspaceId;
@@ -633,7 +668,7 @@ export function useWorkflowEditor({
         }
     }, [activeWorkspaceId, isCurrentWorkflow, reconcileServerWorkflow, scopeReady, t, workflow]);
 
-    const runSimulation = useCallback(async (recordId: number) => {
+    const runSimulation = useCallback(async (recordId: number, inputs?: Record<string, WorkflowInputValue>) => {
         const workspaceId = activeWorkspaceId;
         if (!workflow || dirty || workspaceId == null || !scopeReady) return;
         const id = workflow.id;
@@ -645,7 +680,7 @@ export function useWorkflowEditor({
         try {
             const result = await simulateWorkflow(id, workflow.draftRevision, recordId, {
                 headers: { "X-Workspace-Id": String(workspaceId) },
-            });
+            }, inputs);
             if (documentGeneration === documentGenerationRef.current
                 && simulationGeneration === simulationGenerationRef.current
                 && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setSimulation(result);
@@ -784,6 +819,9 @@ export function useWorkflowEditor({
         setFocusFieldPath,
         changeNode,
         changeMetadata,
+        configureNewWorkflow,
+        changeInputs,
+        upgradeDefinition,
         changeName,
         commitTransient,
         undo,
