@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -52,6 +53,36 @@ class OneTimeLinkExchangeAdmissionFilterTest {
 
         assertEquals(200, firstResponse.getStatus());
         assertEquals(429, secondResponse.getStatus());
+        assertEquals(200, previewResponse.getStatus());
+    }
+
+    /**
+     * The document-acceptance admission filter deliberately skips its exchange path because the
+     * bearer lives in the JSON body; this per-source budget is therefore the only throttle applied
+     * before that body is read and validated.
+     */
+    @Test
+    void documentAcceptanceExchangeIsBudgetedBeforeTheBodyIsRead() throws Exception {
+        LoginRateLimiter rateLimiter = new LoginRateLimiter(1, 100, 5000, 900);
+        ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);
+        OneTimeLinkExchangeAdmissionFilter filter =
+            new OneTimeLinkExchangeAdmissionFilter(rateLimiter, clientIpResolver);
+        when(clientIpResolver.resolveWithProvenance(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(new ResolvedClientIp("203.0.113.12", false));
+        MockHttpServletRequest throttled = new MockHttpServletRequest(
+            "POST", "/api/document-acceptance/exchange");
+        throttled.setServletPath("/api/document-acceptance/exchange");
+        throttled.setContent("{\"token\":\"".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        MockHttpServletResponse throttledResponse = new MockHttpServletResponse();
+        MockFilterChain throttledChain = new MockFilterChain();
+
+        MockHttpServletResponse firstResponse = invoke(filter, "/api/document-acceptance/exchange");
+        filter.doFilter(throttled, throttledResponse, throttledChain);
+        MockHttpServletResponse previewResponse = invoke(filter, "/api/document-acceptance");
+
+        assertEquals(200, firstResponse.getStatus());
+        assertEquals(429, throttledResponse.getStatus());
+        assertNull(throttledChain.getRequest());
         assertEquals(200, previewResponse.getStatus());
     }
 
