@@ -446,6 +446,25 @@ describe("document acceptance", () => {
         await unmount(rendered.root);
     });
 
+    it("refuses a viewed receipt rendered from another tab's grant", async () => {
+        const initial = preview();
+        api.markViewed.mockResolvedValueOnce({
+            ...initial,
+            flowId: "e".repeat(64),
+            dealName: "Another deal",
+            deliveryStatus: "viewed",
+            recipientStatus: "viewed",
+        });
+        const rendered = await renderAcceptance(initial);
+
+        expect(rendered.container.textContent).toContain("Link unavailable");
+        expect(rendered.container.textContent).not.toContain("Another deal");
+        expect(rendered.container.textContent).not.toContain("Confirm acceptance");
+        expect(api.accept).not.toHaveBeenCalled();
+
+        await unmount(rendered.root);
+    });
+
     it("shows the unavailable state when the grant no longer matches the rendered flow", async () => {
         api.accept.mockRejectedValueOnce(
             new ApiError("Document link is no longer available", 404),

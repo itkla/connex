@@ -42,6 +42,7 @@ export default function DocumentAcceptance({
     const viewRequested = useRef(false);
     const receiptRef = useRef<DecisionReceipt>(null);
     const [preview, setPreview] = useState(initialPreview);
+    const renderedFlowId = useRef(initialPreview.flowId);
     const [viewState, setViewState] = useState<ViewState>("pending");
     const [failure, setFailure] = useState<DocumentAcceptanceFailureKind | null>(null);
     const [mode, setMode] = useState<DecisionMode>(null);
@@ -58,6 +59,10 @@ export default function DocumentAcceptance({
         void markDocumentAcceptanceViewed()
             .then((viewed) => {
                 if (receiptRef.current) return;
+                if (viewed.flowId !== renderedFlowId.current) {
+                    setFailure("unavailable");
+                    return;
+                }
                 setPreview(viewed);
                 setViewState("recorded");
             })
