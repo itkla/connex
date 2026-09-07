@@ -99,7 +99,7 @@ refused**, rather than stored uninspected.
 | `SIGNATURE_ORIGIN` | `_xmlsignatures/origin.sigs` | Must be empty and bound by the origin relationship |
 | `MIMETYPE` | ODF `mimetype` | STORED at offset 0 and equal to the format's media type |
 | `RASTER` | `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.webp` | Walked by the same structural inspectors used for direct image uploads; bytes are not decoded or re-encoded |
-| `SNIFFED_OPAQUE` | `*.emf`, `*.wmf`, `*.tif`, `*.tiff`, `*.bmp` | Magic plus an internal length that agrees with the member length |
+| `SNIFFED_OPAQUE` | `*.emf`, `*.wmf`, `*.tif`, `*.tiff`, `*.bmp` | Magic plus an internal length that agrees with the member length: the EMF header byte count, the WMF header word count (after the placeable header when present), the TIFF first-directory offset, and the BMP file size |
 | `DECLARED_OPAQUE` | `(word\|xl\|ppt)/fonts/*.odttf\|*.fntdata`, `(word\|xl\|ppt)/printerSettings/printerSettingsN.bin`, ODF `layout-cache` | Declared type, size bound, and a negative header sniff that refuses executables, archives, compound files, documents, and markup |
 | `DIRECTORY` | names ending `/` | Must be empty |
 | `REFUSED` | everything else | Refused before any bytes are retained |
@@ -138,7 +138,7 @@ because a producer may write `[Content_Types].xml` or `META-INF/manifest.xml` la
 | Expanded package | 64 MiB |
 | Compression ratio | 100:1 (per entry and overall) |
 | XML or signature part | 4 MiB |
-| Raster, EMF/WMF/TIFF/BMP member | 32 MiB |
+| Raster, EMF/WMF/TIFF/BMP member | 16 MiB |
 | Embedded font member | 16 MiB |
 | Printer settings, ODF layout cache | 1 MiB |
 | XML depth / attributes | 128 / 256 |
@@ -167,7 +167,8 @@ because a producer may write `[Content_Types].xml` or `META-INF/manifest.xml` la
   refused; `office:binary-data` is excluded, so inline base64 images cannot dodge inspection.
   `META-INF/manifest.xml` admits only `manifest` and `file-entry`, so `manifest:encryption-data` is
   refused by absence and an encrypted ODF fails closed. `manifest.rdf` has its own closed RDF/ODF
-  metadata vocabulary.
+  metadata vocabulary, and every `rdf:about` / `rdf:resource` value must be empty, an ODF metadata
+  vocabulary URI, or a member of the package; external URIs and absent members refuse.
 - **PresentationML actions** — the `action` attribute of `a:hlinkClick`, `a:hlinkHover`, and
   `a:hlinkMouseOver` must be one of `ppaction://noaction`, `ppaction://media`,
   `ppaction://hlinksldjump`, `ppaction://hlinkshowjump?jump=…`, or

@@ -62,6 +62,14 @@ import tools.jackson.databind.ObjectMapper;
  * even without the misplaced-content-type check, because signature markup outside
  * {@code _xmlsignatures/} still meets the ordinary active-element blocklist; it is recorded as a
  * defence-in-depth guard rather than the sole control.
+ *
+ * <p>Cases added while applying review findings were measured the same way:
+ * {@code rejectsOdfMetadataManifestReferencingExternalOrAbsentMembers} and
+ * {@code rejectsRasterMemberOverTheMemberCeiling} are red against the pre-fix inspector; {@code rejectsExternalRetrievalMethodInSignaturePart} fails when the
+ * signature reference binding is removed; the internal-length cases in
+ * {@code acceptsMetafileMediaPartsAndRejectsMismatchedDeclarations} fail when the EMF and WMF
+ * length rule is removed; and {@code rejectsRasterMemberOverTheMemberCeiling} also fails when the
+ * member ceiling is raised back to 32 MiB.
  */
 class UploadMaliciousFixtureCorpusTest {
     private static final String SVG_PAYLOAD =
@@ -489,6 +497,48 @@ class UploadMaliciousFixtureCorpusTest {
             "",
             PackageFixtures.members(
                 "word/media/image1.emf", PackageFixtures.ascii(HTML_PAYLOAD))));
+        refused(UploadFormat.DOCX, PackageFixtures.ooxml(
+            UploadFormat.DOCX,
+            PackageFixtures.defaultType("emf", "image/x-emf"),
+            "",
+            PackageFixtures.members("word/media/image1.emf", PackageFixtures.emf(64))));
+        assertEquals(UploadFormat.DOCX, accepted(UploadFormat.DOCX, PackageFixtures.ooxml(
+            UploadFormat.DOCX,
+            PackageFixtures.defaultType("wmf", "image/x-wmf"),
+            "",
+            PackageFixtures.members("word/media/image1.wmf", PackageFixtures.wmf()))));
+        assertEquals(UploadFormat.DOCX, accepted(UploadFormat.DOCX, PackageFixtures.ooxml(
+            UploadFormat.DOCX,
+            PackageFixtures.defaultType("wmf", "image/x-wmf"),
+            "",
+            PackageFixtures.members(
+                "word/media/image1.wmf", PackageFixtures.standardWmf()))));
+        refused(UploadFormat.DOCX, PackageFixtures.ooxml(
+            UploadFormat.DOCX,
+            PackageFixtures.defaultType("wmf", "image/x-wmf"),
+            "",
+            PackageFixtures.members("word/media/image1.wmf", PackageFixtures.wmf(52))));
+    }
+
+    @Test
+    void rejectsRasterMemberOverTheMemberCeiling() throws Exception {
+        int ceiling = 16 * 1024 * 1024;
+        String declaration = PackageFixtures.defaultType("png", "image/png");
+
+        assertEquals(UploadFormat.DOCX, accepted(UploadFormat.DOCX, PackageFixtures.ooxml(
+            UploadFormat.DOCX,
+            PackageFixtures.defaultMainXml(UploadFormat.DOCX),
+            declaration,
+            "",
+            PackageFixtures.members("word/media/image1.png", PackageFixtures.png(ceiling)),
+            true)));
+        refused(UploadFormat.DOCX, PackageFixtures.ooxml(
+            UploadFormat.DOCX,
+            PackageFixtures.defaultMainXml(UploadFormat.DOCX),
+            declaration,
+            "",
+            PackageFixtures.members("word/media/image1.png", PackageFixtures.png(ceiling + 1)),
+            true));
     }
 
     @ParameterizedTest

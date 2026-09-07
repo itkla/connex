@@ -96,10 +96,11 @@ import tools.jackson.databind.ObjectMapper;
  * re-encoded, so document bytes reach storage unchanged and any signature over them keeps
  * verifying. XML, VML, and signature parts are parsed; raster members are walked by the same
  * structural inspectors used for direct image uploads; EMF, WMF, TIFF, and BMP members are bound
- * by magic and their own declared media type; embedded fonts and
+ * by magic, an internal length that must agree with the member length, and their own declared
+ * media type; embedded fonts and
  * {@code printerSettings[0-9]+.bin} are admitted as declared-opaque bytes with a negative header
  * sniff; directory and signature-origin entries must be empty. A member matching no class is
- * refused rather than stored uninspected. Members are bounded at 32 MiB each, embedded fonts at
+ * refused rather than stored uninspected. Members are bounded at 16 MiB each, embedded fonts at
  * 16 MiB, and printer settings and the ODF layout cache at 1 MiB, inside the unchanged 64 MiB
  * expanded-package bound.
  *
@@ -132,7 +133,7 @@ public class UploadContentInspector implements AutoCloseable {
     private static final int MAX_XML_DEPTH = 128;
     private static final int MAX_XML_ATTRIBUTES = 256;
     private static final int MAX_IMAGE_METADATA_BYTES = 1024 * 1024;
-    private static final long MAX_PACKAGE_MEMBER_BYTES = 32L * 1024L * 1024L;
+    private static final long MAX_PACKAGE_MEMBER_BYTES = 16L * 1024L * 1024L;
     private static final long MAX_OPAQUE_FONT_BYTES = 16L * 1024L * 1024L;
     private static final long MAX_OPAQUE_SETTINGS_BYTES = 1024L * 1024L;
     private static final int OPAQUE_SNIFF_BYTES = 64;
@@ -1432,27 +1433,30 @@ public class UploadContentInspector implements AutoCloseable {
      *
      * <p>These formats have no in-repository structural validator, so they are admitted as opaque
      * bytes bound by magic, an internal length that must agree with the member length, and the
-     * package's own declared media type. Anything whose header is not one of these families is
-     * refused.
+     * package's own declared media type: the EMF header byte count, the WMF header word count
+     * (after the placeable header when present), the TIFF first-directory offset, and the BMP
+     * file size. Anything whose header is not one of these families is refused.
      *
      * @param head leading member bytes
      * @param length exact member length
      * @return canonical media type proven by the member header
      */
     private static String sniffOpaqueMember(byte[] head, long length) {
-        if (head.length >= 44
+        if (head.length >= 52
                 && littleEndianUnsignedInt(head, 0) == 1L
-                && asciiEquals(head, 40, " EMF")) {
+                && asciiEquals(head, 40, " EMF")
+                && littleEndianUnsignedInt(head, 48) == length) {
             return "image/x-emf";
         }
-        if (head.length >= 4
-                && (unsigned(head[0]) == 0xd7
-                        && unsigned(head[1]) == 0xcd
-                        && unsigned(head[2]) == 0xc6
-                        && unsigned(head[3]) == 0x9a
-                    || (littleEndianUnsignedShort(head, 0) == 1
-                            || littleEndianUnsignedShort(head, 0) == 2)
-                        && littleEndianUnsignedShort(head, 2) == 9)) {
+        if (head.length >= 40
+                && unsigned(head[0]) == 0xd7
+                && unsigned(head[1]) == 0xcd
+                && unsigned(head[2]) == 0xc6
+                && unsigned(head[3]) == 0x9a
+                && wmfHeaderCoversMember(head, 22, length - 22)) {
+            return "image/x-wmf";
+        }
+        if (head.length >= 18 && wmfHeaderCoversMember(head, 0, length)) {
             return "image/x-wmf";
         }
         if (head.length >= 8
@@ -1476,6 +1480,13 @@ public class UploadContentInspector implements AutoCloseable {
             return "image/bmp";
         }
         throw UnsupportedUploadMediaTypeException.unsupported();
+    }
+
+    private static boolean wmfHeaderCoversMember(byte[] head, int offset, long length) {
+        int type = littleEndianUnsignedShort(head, offset);
+        return (type == 1 || type == 2)
+            && littleEndianUnsignedShort(head, offset + 2) == 9
+            && littleEndianUnsignedInt(head, offset + 6) * 2L == length;
     }
 
     /**

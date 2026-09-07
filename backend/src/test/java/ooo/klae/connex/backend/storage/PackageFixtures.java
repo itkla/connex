@@ -138,6 +138,21 @@ final class PackageFixtures {
             String extraContentTypes,
             String extraRootRelationships,
             Map<String, byte[]> extraParts) throws IOException {
+        return ooxml(format, mainXml, extraContentTypes, extraRootRelationships, extraParts, false);
+    }
+
+    /**
+     * Builds an OOXML package, optionally writing the extra parts STORED rather than DEFLATED so
+     * that a large incompressible or highly compressible member exercises a size bound without
+     * first tripping the compression-ratio bound.
+     */
+    static byte[] ooxml(
+            UploadFormat format,
+            String mainXml,
+            String extraContentTypes,
+            String extraRootRelationships,
+            Map<String, byte[]> extraParts,
+            boolean storeExtraParts) throws IOException {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
             put(zip, "_rels/.rels", ascii("<Relationships xmlns=\"" + RELATIONSHIPS_NAMESPACE
@@ -146,7 +161,11 @@ final class PackageFixtures {
                 + mainPart(format) + "\"/>" + extraRootRelationships + "</Relationships>"));
             put(zip, mainPart(format), ascii(mainXml));
             for (Map.Entry<String, byte[]> part : extraParts.entrySet()) {
-                put(zip, part.getKey(), part.getValue());
+                if (storeExtraParts) {
+                    stored(zip, part.getKey(), part.getValue());
+                } else {
+                    put(zip, part.getKey(), part.getValue());
+                }
             }
             put(zip, "[Content_Types].xml", ascii("<Types xmlns=\"http://schemas.openxmlformats"
                 + ".org/package/2006/content-types\">"
@@ -362,6 +381,23 @@ final class PackageFixtures {
             + "</Signature>";
     }
 
+    /**
+     * Builds a structurally valid PNG of exactly the requested length by padding one IDAT chunk,
+     * so a member size bound is exercised by bytes the raster walker would otherwise accept.
+     *
+     * @param length exact PNG length, at least 57 bytes
+     * @return PNG bytes
+     */
+    static byte[] png(int length) {
+        byte[] content = new byte[length];
+        ByteBuffer buffer = ByteBuffer.wrap(content);
+        buffer.put(new byte[] {(byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'});
+        pngChunk(buffer, "IHDR", new byte[] {0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0});
+        pngChunk(buffer, "IDAT", new byte[length - 57]);
+        pngChunk(buffer, "IEND", new byte[0]);
+        return content;
+    }
+
     static byte[] png() throws IOException {
         return raster("png");
     }
@@ -376,6 +412,14 @@ final class PackageFixtures {
 
     /** @return an EMF header whose record type and signature identify an enhanced metafile */
     static byte[] emf() {
+        return emf(128);
+    }
+
+    /**
+     * @param claimedLength byte count written into the EMF header's file-size field
+     * @return a 128-byte EMF header claiming the given metafile length
+     */
+    static byte[] emf(int claimedLength) {
         byte[] content = new byte[128];
         littleEndianInt(content, 0, 1);
         littleEndianInt(content, 4, content.length);
@@ -383,16 +427,37 @@ final class PackageFixtures {
         content[41] = 'E';
         content[42] = 'M';
         content[43] = 'F';
+        littleEndianInt(content, 48, claimedLength);
         return content;
     }
 
-    /** @return a placeable WMF header */
+    /** @return a placeable WMF whose metafile word count covers the bytes after the placeable header */
     static byte[] wmf() {
+        return wmf(53);
+    }
+
+    /**
+     * @param claimedWords 16-bit word count written into the standard WMF header
+     * @return a 128-byte placeable WMF claiming the given metafile size
+     */
+    static byte[] wmf(int claimedWords) {
         byte[] content = new byte[128];
         content[0] = (byte) 0xd7;
         content[1] = (byte) 0xcd;
         content[2] = (byte) 0xc6;
         content[3] = (byte) 0x9a;
+        content[22] = 1;
+        content[24] = 9;
+        littleEndianInt(content, 28, claimedWords);
+        return content;
+    }
+
+    /** @return a 128-byte WMF with a standard header only, whose word count covers the member */
+    static byte[] standardWmf() {
+        byte[] content = new byte[128];
+        content[0] = 1;
+        content[2] = 9;
+        littleEndianInt(content, 6, 64);
         return content;
     }
 
@@ -470,6 +535,14 @@ final class PackageFixtures {
             throw new IOException("Unsupported raster fixture format: " + format);
         }
         return output.toByteArray();
+    }
+
+    private static void pngChunk(ByteBuffer buffer, String type, byte[] data) {
+        byte[] typeBytes = type.getBytes(StandardCharsets.US_ASCII);
+        CRC32 crc = new CRC32();
+        crc.update(typeBytes);
+        crc.update(data);
+        buffer.putInt(data.length).put(typeBytes).put(data).putInt((int) crc.getValue());
     }
 
     private static void littleEndianInt(byte[] content, int offset, int value) {
