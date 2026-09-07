@@ -25,12 +25,11 @@ API. Before enabling any environment, verify a usable mail transport and the Clo
 for the `/api/document-acceptance` prefix. Configure `connex.security.trusted-proxies` so source
 throttling resolves the recipient address instead of collapsing all recipients behind the Next.js
 server. The published bundle trusts the `caddy` and `frontend` service names through Docker DNS.
-Caddy replaces the browser-supplied forwarding header with one validated client address; for SSR,
-the frontend passes that value to the backend over the private app network. The backend accepts it
-only from the resolved frontend socket peer reached through the app-network-only `backend-app`
-alias. A compromised frontend can spoof this SSR source value; this accepted boundary does not let
-a recipient supply a trusted forwarding value through Caddy. Metadata and page rendering share one
-request-scoped preview fetch, so one frontend render consumes one backend admission.
+Every acceptance request — the exchange, the preview, `viewed`, `accept` and `decline` — is issued by
+the recipient's browser and reaches the backend through Caddy like any other `/api/*` call; the page
+itself fetches nothing server-side. Caddy replaces the browser-supplied forwarding header with one
+validated client address, so the trusted-proxy configuration is the only source-address boundary and
+each browser request consumes one backend admission.
 Whether preview staging should enable the flag is an operator decision; the checked-in deployment
 examples remain disabled.
 
@@ -71,6 +70,11 @@ Every other endpoint — `GET /api/document-acceptance`, `POST /api/document-acc
 `/accept` and `/decline` — reads only that cookie. A token in a path or query is ignored, and the legacy
 `/api/document-acceptance/{token}` shapes answer the uniform 404. Because the cookie is now the
 authority, both prefixes are CSRF-protected: the recipient page sends the CSRF header on every mutation.
+The cookie is shared by every tab of one browser, so a later exchange silently replaces the grant an
+earlier tab rendered; the preview therefore carries a non-authorizing `flowId` (the digest of the grant)
+and `accept`/`decline` must echo it, otherwise the request answers the uniform 404 and no recipient row
+changes. The exchange itself is budgeted per source address before its body is read, by the same
+per-IP exchange budget every other one-time link shares.
 The application still stores only the token hash, never writes the token to application or audit logs,
 uses a uniform unavailable response, and applies the per-token and trusted-source admission — at the
 exchange for the emailed bearer, and keyed on the grant cookie for every later request.

@@ -340,8 +340,10 @@ count look comprehensive.
   `/api/delivery/unsubscribe` remain unchallenged and idempotent; the emailed bearer travels in the
   fragment and then in the exchange body, so it never appears in an exported path.
 - **Document acceptance:** POST `/api/document-acceptance/exchange` and the token-free
-  `/api/document-acceptance*` endpoints remain unchallenged; API requests are application-throttled,
-  and no bearer appears in any exported path.
+  `/api/document-acceptance*` endpoints remain unchallenged; API requests are application-throttled
+  (the exchange by the shared per-source one-time-link budget before its body is read, then by the
+  per-token and per-source acceptance limiter; every other request by the grant-keyed admission
+  filter), and no bearer appears in any exported path.
 - **File upload/download:** the 27 MiB multipart envelope preserves the 25 MiB stored-object limit,
   imports retain 64 MiB, and Business-plan upload capacity exceeds both. Downloads are not body
   capped and authenticated responses are not cached.
