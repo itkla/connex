@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.boot.web.servlet.RegistrationBean;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -32,7 +33,6 @@ import org.springframework.security.web.context.HttpSessionSecurityContextReposi
 import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
 import org.springframework.session.web.http.CookieSerializer;
-import org.springframework.session.web.http.SessionRepositoryFilter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
@@ -50,6 +50,11 @@ import ooo.klae.connex.backend.support.AuthenticatedSessions;
  * session, because the property under test is that the collector never resolves the session at
  * all: Spring Session rewrites the last-accessed time the moment anything does, and a mock session
  * attached directly to the request would bypass the resolution being guarded.
+ *
+ * <p>The cookie filter and Spring Session's filter are assembled in the order their registrations
+ * give them rather than in a hand-written order, so a change to either registration — including
+ * {@code spring.session.servlet.filter-order} — moves this suite with the running application
+ * instead of leaving it green against an order production no longer uses.
  */
 @SpringBootTest
 class CspReportEndpointSecurityTest {
@@ -65,6 +70,8 @@ class CspReportEndpointSecurityTest {
     @Autowired private SessionRepository<? extends Session> sessionRepository;
     @Autowired private CookieSerializer cookieSerializer;
     @Autowired private FilterRegistrationBean<CspReportCookieFilter> cspReportCookieFilterRegistration;
+    @Autowired @Qualifier("sessionRepositoryFilterRegistration")
+    private RegistrationBean sessionRepositoryFilterRegistration;
     @Autowired @Qualifier("springSessionRepositoryFilter") private Filter springSessionRepositoryFilter;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
 
@@ -74,8 +81,8 @@ class CspReportEndpointSecurityTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
-                .addFilters(cspReportCookieFilterRegistration.getFilter(),
-                        springSessionRepositoryFilter, springSecurityFilterChain)
+                .addFilters(sessionFiltersInRegisteredOrder())
+                .addFilters(springSecurityFilterChain)
                 .build();
         account = AuthenticatedSessions.account(userMapper, "csp-report");
     }
@@ -129,13 +136,14 @@ class CspReportEndpointSecurityTest {
     }
 
     /**
-     * The ordering the collector's session-neutrality rests on, which the assembled MockMvc chain
-     * above states rather than proves: in the running application the cookie filter is only ahead
-     * of Spring Session because its registration says so.
+     * The ordering the collector's session-neutrality rests on: in the running application the
+     * cookie filter is only ahead of Spring Session because the two registrations say so, and
+     * Spring Session's order is a configurable property rather than the library constant.
      */
     @Test
     void theCookieFilterRunsBeforeSpringSession() {
-        assertTrue(cspReportCookieFilterRegistration.getOrder() < SessionRepositoryFilter.DEFAULT_ORDER);
+        assertTrue(cspReportCookieFilterRegistration.getOrder()
+                < sessionRepositoryFilterRegistration.getOrder());
     }
 
     @Test
@@ -158,6 +166,17 @@ class CspReportEndpointSecurityTest {
     void otherContentTypesAreRefused() throws Exception {
         mockMvc.perform(post("/api/csp-reports").contentType(MediaType.TEXT_PLAIN).content("x"))
                 .andExpect(status().isUnsupportedMediaType());
+    }
+
+    /**
+     * The cookie filter and Spring Session's filter, in the order the application registers them.
+     */
+    private Filter[] sessionFiltersInRegisteredOrder() {
+        Filter cookieFilter = cspReportCookieFilterRegistration.getFilter();
+        return cspReportCookieFilterRegistration.getOrder()
+                < sessionRepositoryFilterRegistration.getOrder()
+                ? new Filter[] {cookieFilter, springSessionRepositoryFilter}
+                : new Filter[] {springSessionRepositoryFilter, cookieFilter};
     }
 
     private String storedAuthenticatedSession() {
