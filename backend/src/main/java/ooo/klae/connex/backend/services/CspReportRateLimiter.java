@@ -19,6 +19,15 @@ import org.springframework.stereotype.Component;
  * the window map without bound between evictions. The number of tracked addresses is capped: once
  * the cap is reached an address that has no window is refused until {@link #evictStale()} frees
  * capacity, while addresses already tracked keep their allowance.
+ *
+ * <p>That cap bounds memory; it is deliberately not an exact ceiling. The admission check reads the
+ * map size while {@code compute} holds only the incoming key's bin, so first sightings of distinct
+ * addresses that race can each observe the last free slot. The overshoot is bounded by the number
+ * of requests admitted concurrently — the container's request-thread count — and each entry is one
+ * address string and a two-field record, so the worst case stays within a few percent of the cap.
+ * Reserving capacity atomically across keys would trade that for a counter that has to stay exactly
+ * in step with the map through every eviction; leaking a reservation there fails closed and refuses
+ * every new address until restart, which is a worse outcome than a slightly soft bound.
  */
 @Component
 public class CspReportRateLimiter {
@@ -47,7 +56,8 @@ public class CspReportRateLimiter {
      *
      * @param key the resolved client address
      * @return whether the current window still had an allowance and, for an address not yet
-     *     tracked, whether the tracked-address cap left room for it
+     *     tracked, whether the tracked-address cap left room for it (approximately — see the class
+     *     documentation)
      */
     public boolean tryAcquire(String key) {
         long now = clock.millis();
