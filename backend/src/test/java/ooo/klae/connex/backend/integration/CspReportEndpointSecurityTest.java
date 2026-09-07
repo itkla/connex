@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -12,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.Instant;
+import java.util.List;
 
 import jakarta.servlet.Filter;
 import jakarta.servlet.http.Cookie;
@@ -36,12 +38,17 @@ import org.springframework.session.web.http.CookieSerializer;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
+import org.springframework.web.servlet.HandlerExecutionChain;
+import org.springframework.web.servlet.HandlerInterceptor;
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
+import org.springframework.web.util.ServletRequestPathUtils;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.CspReportCookieFilter;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.support.AuthenticatedSessions;
+import ooo.klae.connex.backend.tenant.TenantResolutionInterceptor;
 
 /**
  * Drives the collector over the real Spring Session and Spring Security filter chains.
@@ -73,6 +80,7 @@ class CspReportEndpointSecurityTest {
     @Autowired @Qualifier("sessionRepositoryFilterRegistration")
     private RegistrationBean sessionRepositoryFilterRegistration;
     @Autowired @Qualifier("springSessionRepositoryFilter") private Filter springSessionRepositoryFilter;
+    @Autowired private RequestMappingHandlerMapping requestMappingHandlerMapping;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter springSecurityFilterChain;
 
     private MockMvc mockMvc;
@@ -96,7 +104,7 @@ class CspReportEndpointSecurityTest {
     }
 
     @Test
-    void sessionBearingReportsAreAcceptedWithoutCsrfAndDespiteAStaleWorkspacePin() throws Exception {
+    void cookieBearingReportsAreAcceptedWithoutCsrfOrAWorkspace() throws Exception {
         Cookie sessionCookie = sessionCookie(storedAuthenticatedSession());
 
         mockMvc.perform(post("/api/csp-reports").cookie(sessionCookie)
@@ -146,6 +154,23 @@ class CspReportEndpointSecurityTest {
                 < sessionRepositoryFilterRegistration.getOrder());
     }
 
+    /**
+     * Tenant resolution runs in the {@code DispatcherServlet}, after whichever chain served the
+     * request, so no security chain can keep it off the collector — only {@code WebConfig}'s
+     * exclusion can. A cookie-bearing report reaches the interceptor anonymous today, which makes
+     * the 403 the exclusion prevents unobservable through the endpoint; assert the mapping instead.
+     */
+    @Test
+    void tenantResolutionIsNotMappedOntoTheCollectorPath() throws Exception {
+        MockHttpServletRequest report = new MockHttpServletRequest("POST", "/api/csp-reports");
+        report.setContentType(CSP_REPORT.toString());
+
+        assertTrue(interceptorsFor(new MockHttpServletRequest("GET", "/api/deals")).stream()
+                .anyMatch(TenantResolutionInterceptor.class::isInstance));
+        assertFalse(interceptorsFor(report).stream()
+                .anyMatch(TenantResolutionInterceptor.class::isInstance));
+    }
+
     @Test
     void garbageBodiesStillAnswerNoContent() throws Exception {
         mockMvc.perform(post("/api/csp-reports").contentType(CSP_REPORT).content("not json"))
@@ -177,6 +202,13 @@ class CspReportEndpointSecurityTest {
                 < sessionRepositoryFilterRegistration.getOrder()
                 ? new Filter[] {cookieFilter, springSessionRepositoryFilter}
                 : new Filter[] {springSessionRepositoryFilter, cookieFilter};
+    }
+
+    private List<HandlerInterceptor> interceptorsFor(MockHttpServletRequest request) throws Exception {
+        ServletRequestPathUtils.parseAndCache(request);
+        HandlerExecutionChain chain = requestMappingHandlerMapping.getHandler(request);
+        assertNotNull(chain);
+        return chain.getInterceptorList();
     }
 
     private String storedAuthenticatedSession() {
