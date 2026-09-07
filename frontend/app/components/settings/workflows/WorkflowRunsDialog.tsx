@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ClockIcon } from "@heroicons/react/24/outline";
 import { useLocale, useTranslations } from "next-intl";
 
+import WorkflowRunProcessEvidence from "@/app/components/settings/workflows/WorkflowRunProcessEvidence";
+import WorkflowWaitEvidence from "@/app/components/settings/workflows/WorkflowWaitEvidence";
 import { getWorkflowRun, getWorkflowRuns } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
 import type { WorkflowRunDetail, WorkflowRunSummary } from "@/app/lib/types";
@@ -266,6 +268,7 @@ function RunDetail({
                     </Button>
                 ) : null}
             </div>
+            <WorkflowRunProcessEvidence run={run} />
             <ol className="space-y-2" aria-label={t("runs.pathLabel")}>
                 {run.path.map((step) => (
                     <li key={`${step.sequence}-${step.nodeId}`} className="rounded-xl border border-border bg-muted/25 p-3">
@@ -285,6 +288,7 @@ function RunDetail({
                                 {step.durationMs == null ? t("runs.durationPending") : t("runs.durationMs", { value: step.durationMs })}
                             </span>
                         </div>
+                        <WorkflowWaitEvidence step={step} />
                         {step.failure ? (
                             <p className="mt-2 text-xs text-destructive">{t("runs.failureAtNode")}</p>
                         ) : null}

@@ -22,6 +22,8 @@ import { WorkflowSimulationEvidence } from "@/app/components/settings/workflows/
 import {
     ApiError,
     getUsers,
+    getAllStages,
+    getPipelines,
     getWorkflowRecipe,
     getWorkflowRecipes,
     installWorkflowRecipe,
@@ -29,6 +31,8 @@ import {
 } from "@/app/lib/api";
 import type {
     User,
+    Pipeline,
+    Stage,
     WorkflowRecipe,
     WorkflowRecipeParameters,
     WorkflowRecipePreview,
@@ -136,6 +140,8 @@ export function WorkflowRecipeDetail({ recipeKey, definitionAuthoringEnabled = f
     const { activeWorkspaceId, switching } = useWorkspace();
     const [recipe, setRecipe] = useState<WorkflowRecipe | null>(null);
     const [users, setUsers] = useState<User[]>([]);
+    const [stages, setStages] = useState<Stage[]>([]);
+    const [pipelines, setPipelines] = useState<Pipeline[]>([]);
     const [parameters, setParameters] = useState<WorkflowRecipeParameters>({});
     const [name, setName] = useState("");
     const [exampleRecordId, setExampleRecordId] = useState("");
@@ -158,11 +164,15 @@ export function WorkflowRecipeDetail({ recipeKey, definitionAuthoringEnabled = f
         void Promise.all([
             getWorkflowRecipe(recipeKey, { signal: controller.signal, headers }),
             getUsers({ signal: controller.signal, headers }).catch(() => []),
-        ]).then(([loadedRecipe, loadedUsers]) => {
+        ]).then(async ([loadedRecipe, loadedUsers]) => {
+            const [loadedStages, loadedPipelines] = loadedRecipe.requiredParameters.some((parameter) => parameter === "targetStageId" || parameter === "stageId")
+                ? await Promise.all([getAllStages({ signal: controller.signal, headers }), getPipelines({ signal: controller.signal, headers })]) : [[], []];
             if (controller.signal.aborted) return;
             setError(null);
             setRecipe(loadedRecipe);
             setUsers(loadedUsers);
+            setStages(loadedStages);
+            setPipelines(loadedPipelines);
             setParameters(Object.fromEntries(loadedRecipe.requiredParameters.map((parameter) => [parameter, ""])));
         }).catch((loadError: unknown) => {
             if (controller.signal.aborted) return;
@@ -259,6 +269,8 @@ export function WorkflowRecipeDetail({ recipeKey, definitionAuthoringEnabled = f
                                 parameter={parameter}
                                 value={parameters[parameter]}
                                 users={users}
+                                stages={stages}
+                                pipelines={pipelines}
                                 onChange={(value) => updateParameter(parameter, value)}
                             />
                         ))}
@@ -315,6 +327,7 @@ export function WorkflowRecipeDetail({ recipeKey, definitionAuthoringEnabled = f
                             </dl>
                             {preview.exampleResult ? (
                                 <WorkflowSimulationEvidence
+                                    definition={preview.definition}
                                     result={preview.exampleResult}
                                     diagnosticMessage={(diagnostic) => tw(`diagnostics.${diagnostic.code}`, diagnostic.params)}
                                 />
@@ -379,11 +392,15 @@ function ParameterField({
     parameter,
     value,
     users,
+    stages,
+    pipelines,
     onChange,
 }: {
     parameter: string;
     value: string | number | boolean | null | undefined;
     users: User[];
+    stages: Stage[];
+    pipelines: Pipeline[];
     onChange: (value: string) => void;
 }) {
     const t = useTranslations("WorkflowOperations");
@@ -400,6 +417,11 @@ function ParameterField({
                     <SelectContent>
                         {users.map((user) => <SelectItem key={user.id} value={String(user.id)}>{user.displayName}</SelectItem>)}
                     </SelectContent>
+                </Select>
+            ) : parameter === "targetStageId" || parameter === "stageId" ? (
+                <Select value={stringValue} onValueChange={onChange}>
+                    <SelectTrigger id={`recipe-${parameter}`} className="w-full"><SelectValue placeholder={t("parameter.stagePlaceholder")} /></SelectTrigger>
+                    <SelectContent>{stages.map((stage) => <SelectItem key={stage.id} value={String(stage.id)}>{pipelines.find((pipeline) => pipeline.id === stage.pipeline)?.name} · {stage.name}</SelectItem>)}</SelectContent>
                 </Select>
             ) : (
                 <Input

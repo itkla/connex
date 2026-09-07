@@ -19,6 +19,7 @@ export const WORKFLOW_RUN_STATUS_CLASS: Record<WorkflowRunStatus, string> = {
     waiting: "border-risk-low/40 bg-risk-low/15 text-foreground",
     succeeded: "border-border bg-secondary text-secondary-foreground",
     failed: "border-destructive/30 bg-destructive/10 text-destructive",
+    stopped: "border-border bg-muted text-muted-foreground",
     cancelled: "border-border bg-muted/60 text-muted-foreground opacity-80",
     skipped: "border-border bg-transparent text-muted-foreground",
     intervention_required: "border-risk-high/50 bg-risk-high/15 text-foreground",
@@ -31,6 +32,7 @@ const STATUS_ICON = {
     succeeded: CheckCircleIcon,
     failed: XCircleIcon,
     cancelled: MinusCircleIcon,
+    stopped: PauseCircleIcon,
     skipped: PauseCircleIcon,
     intervention_required: ExclamationTriangleIcon,
 } satisfies Record<WorkflowRunStatus, typeof ClockIcon>;

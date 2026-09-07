@@ -408,7 +408,8 @@
             "assign_owner": "担当者を割り当て",
             "set_response_due": "初回応答期限を設定",
             "send_message": "キャンペーンメッセージを送信",
-            "change_stage": "ステージを移動"
+            "change_stage": "ステージを移動",
+            "update_field": "受注予定日を更新"
         },
         "runAs": {
             "user": {
@@ -512,7 +513,8 @@
             "DEAL_UPDATE": "案件更新",
             "COMPANY_UPDATE": "会社更新",
             "PERSON_UPDATE": "連絡先更新",
-            "additional": "追加のワークスペース権限"
+            "additional": "追加のワークスペース権限",
+            "TASK_READ": "タスクを閲覧"
         },
         "validationReady": "確認が完了しました。この下書きは公開できます。",
         "validationErrorTitle": "公開前に問題を {count} 件修正してください",
@@ -553,19 +555,23 @@
             "condition": "条件",
             "action": "アクション",
             "delay": "待機",
-            "end": "終了"
+            "end": "終了",
+            "wait": "タスクの完了を待つ"
         },
         "inspectorHint": {
             "trigger": "このワークフローが始まるきっかけと、使用する権限を設定します。",
             "condition": "このステップで確認する内容と、それぞれの結果の進み先を設定します。",
             "action": "アクションを1つ選び、必要な項目を入力します。",
             "delay": "この経路を決めた時間だけ一時停止します。",
-            "end": "この経路をここで終了します。"
+            "end": "この経路をここで終了します。",
+            "wait": "前のステップで作成したタスクが完了したら続行し、期限を過ぎたらタイムアウトの経路へ進みます。"
         },
         "branch": {
             "next": "次へ",
             "yes": "はい",
-            "no": "いいえ"
+            "no": "いいえ",
+            "completed": "完了",
+            "timeout": "タイムアウト"
         },
         "canvasA11y": {
             "nodeDescription": "Enterキーでステップを選択します。編集できる場合は矢印キーで移動できます。",
@@ -707,7 +713,8 @@
                 "failed": "失敗",
                 "skipped": "スキップ",
                 "cancelled": "キャンセル済み",
-                "intervention_required": "対応が必要"
+                "intervention_required": "対応が必要",
+                "stopped": "停止"
             },
             "reference": "実行 #{run}",
             "legacyReference": "以前の実行 #{run}",
@@ -838,6 +845,10 @@
                 "schedule": {
                     "title": "スケジュールで実行",
                     "body": "条件に合うレコードを見つけ、定期的な作業を進めます。"
+                },
+                "date": {
+                    "title": "商談の日付を基準に開始",
+                    "body": "商談の受注予定日の前後に、指定した現地時刻で開始します。"
                 }
             },
             "recordQuestion": "各実行で対象にするレコードは？",
@@ -880,7 +891,8 @@
             "allowManual": "手動実行を許可",
             "allowManualHelp": "レコードの「ワークフローを実行」からも利用できるようにします。手動実行でも権限と業務上の条件を確認します。",
             "publishDisclosure": "実行時の入力は{count}項目です。公開して有効にすると、選択した開始方法を利用できます。",
-            "returnToRecord": "レコードに戻ってワークフローを実行"
+            "returnToRecord": "レコードに戻ってワークフローを実行",
+            "automaticDefaultRequired": "自動開始できるように、この必須入力の既定値を設定してください。"
         },
         "values": {
             "input": "入力 · {name}",
@@ -915,6 +927,65 @@
             "insertInto": "{field}に値を挿入",
             "assigneeValue": "担当者の値",
             "recipientValue": "受信者の値"
+        },
+        "end": {
+            "outcome": "プロセスの結果",
+            "completed": "完了",
+            "stopped": "停止",
+            "reason": "停止理由",
+            "reasonHelp": "任意です。英小文字から始め、英小文字・数字・アンダースコアで短い理由を入力してください。"
+        },
+        "policies": {
+            "title": "開始と停止の条件",
+            "help": "このレコードの手動開始と自動開始の両方に適用されます。",
+            "oneActive": "レコードごとに同時実行は1件まで",
+            "cooldown": "再開始までの時間（分）",
+            "cooldownHelp": "最後に受け付けた開始から計算します。0にするとすぐに再開始できます。",
+            "entry": "条件に一致する場合のみ開始",
+            "stop": "条件に一致したら停止",
+            "stopHelp": "操作の前と待機の再開時に再確認します。一致すると、失敗にはせず実行を停止します。",
+            "compatibilityEnrollment": "既存のスケジュールでは最初の条件ステップで対象を選びます。開始条件はそのステップで編集してください。",
+            "stopAllWarning": "空の停止条件はすべてのレコードに一致します。公開前に条件を追加するか、このルールを無効にしてください。"
+        },
+        "date": {
+            "fieldHelp": "この商談の受注予定日を使います。日付が未設定の商談は対象になりません。",
+            "offset": "受注予定日からの日数",
+            "offsetHelp": "前なら負の数、当日なら0、後なら正の数を入力してください。",
+            "localTime": "開始する現地時刻",
+            "timezone": "タイムゾーン",
+            "timezoneEmpty": "一致するタイムゾーンがありません",
+            "catchupHelp": "新しいスケジュールは当日分から対象にします。停止後の再開時は、計画済みの前日分も実行できます。それ以前は未実行として記録します。夏時間の切替時は最初の有効な時刻、時刻が重複する場合は早い方を使います。",
+            "summary": "受注予定日から{offset, number}日 · {time} {timezone}",
+            "updateFieldHelp": "この商談の受注予定日のみを更新します。",
+            "newDate": "新しい受注予定日",
+            "statusTitle": "日付スケジュール",
+            "status": {
+                "planned": "計画済み",
+                "queued": "待機中",
+                "missed": "未実行"
+            },
+            "nextDue": "次回の予定: {date}",
+            "lastReconciled": "最終確認: {date}",
+            "missedHelp": "未実行の予定は対象期間を過ぎていたため、実行を作成しませんでした。"
+        },
+        "wait": {
+            "source": "完了を待つタスク",
+            "pickTask": "前のステップのタスクを選択",
+            "noTask": "このステップの前にタスク作成を追加してください。この待機に至るすべての経路で実行される必要があります。",
+            "timeoutMinutes": "待機の上限（分）",
+            "branchesHelp": "タスクが完了すると「完了」の経路へ進みます。期限を過ぎると「タイムアウト」の経路へ進みます。",
+            "summary": "タスクの完了 · 最大{minutes, number}分",
+            "previewPending": "タスクの完了待ちです。プレビューでは、どちらの経路へ進むかを判断できません。",
+            "resolution": {
+                "pending": "タスクの完了待ち",
+                "completed": "タスクの完了を確認",
+                "timeout": "タスクの完了期限を超過",
+                "cancelled": "待機をキャンセル",
+                "stopped": "待機中にプロセスを停止"
+            },
+            "deadline": "期限: {date}",
+            "resolvedAt": "確定: {date}",
+            "viewTask": "タスクを表示"
         }
     },
     "WorkspaceCustomFields": {

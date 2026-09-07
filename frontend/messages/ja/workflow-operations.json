@@ -86,7 +86,8 @@
       "condition": "条件",
       "action": "アクション",
       "delay": "待機",
-      "end": "終了"
+      "end": "終了",
+      "wait": "タスクの完了を待つ"
     },
     "health": {
       "title": "ワークフローの状態",
@@ -153,7 +154,10 @@
       "retry_exhausted": "許可された回数まで再試行しました。",
       "retry_not_safe": "このステップは単独で安全に再試行できません。",
       "execution_failed": "このステップを完了できませんでした。",
-      "unknown": "このバージョンの Connex では、失敗の内容を説明できません。ページを再読み込みし、それでも続く場合はサポートにご連絡ください。"
+      "unknown": "このバージョンの Connex では、失敗の内容を説明できません。ページを再読み込みし、それでも続く場合はサポートにご連絡ください。",
+      "condition_matched": "レコードが停止条件に一致しました。",
+      "date_superseded": "商談の受注予定日が変更されました。",
+      "task_wait_timeout": "期限までにタスクが完了しませんでした。"
     },
     "retrySafety": {
       "transactional": "安全に再試行できます",
@@ -234,7 +238,10 @@
         "caller_permission_missing": "ワークフローの一部の操作に必要な権限がありません。",
         "actor_permission_missing": "実行メンバーに一部の操作の権限がありません。",
         "record_unavailable": "このレコードはワークフローで利用できなくなりました。",
-        "configuration_unavailable": "実行前にワークフローの設定を確認してください。"
+        "configuration_unavailable": "実行前にワークフローの設定を確認してください。",
+        "entry_condition_not_matched": "レコードが開始条件に一致しませんでした。",
+        "active_run_exists": "このレコードはすでに実行中です。",
+        "cooldown_active": "再開始までの時間が経過していません。"
       },
       "unavailable": "利用できません",
       "runsAs": "{actor}として実行します。担当者と通知先は別に選択します。",
@@ -253,7 +260,8 @@
       "failed": "失敗",
       "intervention_required": "対応が必要",
       "cancelled": "キャンセル済み",
-      "skipped": "スキップ"
+      "skipped": "スキップ",
+      "stopped": "停止"
     },
     "expectedSkip": {
       "permission": "権限",
@@ -281,7 +289,10 @@
       "actor_unavailable": "このワークフローの実行者となるメンバーが見つかりません。",
       "actor_inactive": "このワークフローの実行者となるメンバーは現在無効です。",
       "configuration_missing": "このワークフローに必要な設定が不足しています。",
-      "definition_invalid": "公開中のワークフローに問題があります。開いて問題を解消してから実行してください。"
+      "definition_invalid": "公開中のワークフローに問題があります。開いて問題を解消してから実行してください。",
+      "entry_condition_not_matched": "レコードが開始条件に一致しませんでした。",
+      "active_run_exists": "このレコードはすでに実行中です。",
+      "cooldown_active": "再開始までの時間が経過していません。"
     },
     "recipes": {
       "title": "ワークフローのレシピ",
@@ -383,7 +394,8 @@
       "assign_owner": "担当者を割り当て",
       "set_response_due": "初回応答期限を設定",
       "change_stage": "ステージを変更",
-      "notify": "通知を作成"
+      "notify": "通知を作成",
+      "update_field": "受注予定日を更新"
     },
     "recipeField": {
       "sourceEvent": "開始のきっかけ",
@@ -404,7 +416,8 @@
       "activityNote": "アクティビティの内容",
       "dueInDays": "期限までの日数",
       "coolingDays": "連絡がない日数",
-      "userPlaceholder": "ワークスペースメンバーを選択"
+      "userPlaceholder": "ワークスペースメンバーを選択",
+      "stagePlaceholder": "パイプラインのステージを選択"
     },
     "permission": {
       "TASK_CREATE": "タスクを作成",
@@ -412,7 +425,22 @@
       "NOTE_CREATE": "メモを作成",
       "DEAL_UPDATE": "案件を更新",
       "COMPANY_UPDATE": "会社を更新",
-      "PERSON_UPDATE": "連絡先を更新"
+      "PERSON_UPDATE": "連絡先を更新",
+      "TASK_READ": "タスクを閲覧"
+    },
+    "runReason": {
+      "entry_condition_not_matched": "レコードが開始条件に一致しませんでした。",
+      "active_run_exists": "このレコードはすでに実行中です。",
+      "cooldown_active": "再開始までの時間が経過していません。",
+      "condition_matched": "レコードが停止条件に一致しました。",
+      "date_superseded": "商談の受注予定日が変更されました。",
+      "custom": "停止: {reason}",
+      "task_wait_timeout": "期限までにタスクが完了しませんでした。"
+    },
+    "dateSchedule": {
+      "sourceDate": "受注予定日: {date}",
+      "scheduled": "予定された現地の日付: {date}",
+      "dueAt": "予定時刻: {date}"
     }
   }
 }

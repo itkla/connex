@@ -37,6 +37,7 @@ const NODE_ICON = {
     CONDITION: FunnelIcon,
     ACTION: BoltIcon,
     DELAY: ClockIcon,
+    WAIT: ClockIcon,
     END: FlagIcon,
 } satisfies Record<WorkflowNodeType, typeof PlayIcon>;
 
@@ -45,6 +46,7 @@ function WorkflowNodeImpl({ data }: NodeProps<WorkflowFlowNode>) {
     const Icon = NODE_ICON[data.nodeType];
     const outcomes: WorkflowEdgeOutcome[] = data.nodeType === "CONDITION"
         ? ["yes", "no"]
+        : data.nodeType === "WAIT" ? ["completed", "timeout"]
         : data.nodeType === "END"
             ? []
             : ["next"];

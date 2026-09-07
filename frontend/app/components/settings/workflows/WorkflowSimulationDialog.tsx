@@ -6,7 +6,7 @@ import { Loader2Icon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import RecordSelect, { type RecordSelectOption } from "@/app/components/records/RecordSelect";
-import type { WorkflowDiagnosticCode, WorkflowInputDefinition, WorkflowInputValue, WorkflowSimulation } from "@/app/lib/types";
+import type { WorkflowDiagnosticCode, WorkflowInputDefinition, WorkflowInputValue, WorkflowDefinition, WorkflowSimulation } from "@/app/lib/types";
 import WorkflowLaunchInputs from "@/app/components/settings/workflows/WorkflowLaunchInputs";
 import { workflowInputsComplete } from "@/app/components/settings/workflows/workflowValues";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +35,7 @@ export default function WorkflowSimulationDialog({
     onSimulate,
     inputDefinitions,
     members,
+    definition,
 }: {
     open: boolean;
     records: RecordSelectOption[];
@@ -48,6 +49,7 @@ export default function WorkflowSimulationDialog({
     onSimulate: (recordId: number, inputs: Record<string, WorkflowInputValue>) => void;
     inputDefinitions: WorkflowInputDefinition[];
     members: Array<{ id: number; name: string }>;
+    definition: WorkflowDefinition;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const [recordId, setRecordId] = useState("");
@@ -104,7 +106,7 @@ export default function WorkflowSimulationDialog({
                         </div>
                     )}
                     {supported && result ? (
-                        <WorkflowSimulationEvidence result={result} diagnosticMessage={diagnosticMessage} />
+                        <WorkflowSimulationEvidence definition={definition} result={result} diagnosticMessage={diagnosticMessage} />
                     ) : null}
                 </div>
                 <ResponsiveDialogFooter className="border-t border-border px-4 py-4 sm:border-0 sm:px-0 sm:py-0">
@@ -132,8 +134,10 @@ export default function WorkflowSimulationDialog({
 export function WorkflowSimulationEvidence({
     result,
     diagnosticMessage,
+    definition,
 }: {
     result: WorkflowSimulation;
+    definition?: WorkflowDefinition;
     diagnosticMessage: (diagnostic: { code: WorkflowDiagnosticCode; params: Record<string, string> }) => ReactNode;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
@@ -151,6 +155,16 @@ export function WorkflowSimulationEvidence({
                                 {step.outcome ? <Badge variant="secondary">{t(`branch.${step.outcome}`)}</Badge> : null}
                                 <span className="text-muted-foreground">{diagnosticMessage({ code: step.code, params: {} })}</span>
                             </div>
+                            {step.nodeType === "wait" && step.outcome === null ? (
+                                <div className="mt-2 space-y-2 text-sm text-muted-foreground">
+                                    <p>{t("wait.previewPending")}</p>
+                                    <ul className="space-y-1">{(["completed", "timeout"] as const).map((outcome) => {
+                                        const edge = definition?.edges.find((edge) => edge.sourceNodeId === step.nodeId && edge.outcome === outcome);
+                                        const target = definition?.nodes.find((node) => node.id === edge?.targetNodeId);
+                                        return <li key={outcome}>{t(`branch.${outcome}`)}{target ? ` → ${target.type === "ACTION" ? tr(`action.${target.config.type}`) : target.type === "END" ? t(`end.${target.config?.outcome ?? "completed"}`) : t(`nodeType.${target.type.toLowerCase()}`)}` : ""}</li>;
+                                    })}</ul>
+                                </div>
+                            ) : null}
                         </li>
                     ))}
                 </ol>

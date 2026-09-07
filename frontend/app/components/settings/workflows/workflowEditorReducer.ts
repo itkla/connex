@@ -25,8 +25,8 @@ export type WorkflowMergeConflict =
     | {
         kind: "definitionSettings";
         key: "definitionSettings";
-        localValue: Pick<WorkflowDefinition, "schemaVersion" | "inputs">;
-        serverValue: Pick<WorkflowDefinition, "schemaVersion" | "inputs">;
+        localValue: Pick<WorkflowDefinition, "schemaVersion" | "inputs" | "enrollment" | "stopConditions">;
+        serverValue: Pick<WorkflowDefinition, "schemaVersion" | "inputs" | "enrollment" | "stopConditions">;
     }
     | {
         kind: "node";
@@ -276,7 +276,7 @@ export function mergeWorkflowDocuments(
     const executionMode = mergeField("executionMode", base.executionMode, local.executionMode, server.executionMode);
     document.executionMode = executionMode === "system" ? "system" : "user";
 
-    const settings = (definition: WorkflowDefinition) => ({ schemaVersion: definition.schemaVersion, inputs: definition.inputs });
+    const settings = (definition: WorkflowDefinition) => ({ schemaVersion: definition.schemaVersion, inputs: definition.inputs, enrollment: definition.enrollment, stopConditions: definition.stopConditions });
     const baseSettings = settings(base.definition);
     const localSettings = settings(local.definition);
     const serverSettings = settings(server.definition);

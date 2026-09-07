@@ -39,6 +39,8 @@ import type {
     WorkflowRunDetail,
 } from "@/app/lib/types";
 import { offeredWorkflowRetryStep } from "@/app/lib/workflowOperations";
+import WorkflowRunProcessEvidence from "@/app/components/settings/workflows/WorkflowRunProcessEvidence";
+import WorkflowWaitEvidence from "@/app/components/settings/workflows/WorkflowWaitEvidence";
 import WorkflowRunReference from "@/app/components/settings/workflows/WorkflowRunReference";
 import {
     formatWorkflowRunDateTime,
@@ -236,6 +238,7 @@ export default function WorkflowRunOperationsDetail({ workflowId, runKey }: { wo
                             <WorkflowRunReference runKey={run.runKey} />
                         </div>
                         <h1 className="text-3xl font-bold tracking-tight text-foreground">{workflow.name}</h1>
+                        <WorkflowRunProcessEvidence run={run} />
                         <p className="text-sm text-muted-foreground">
                             {t("detail.started", { date: formatWorkflowRunDateTime(run.startedAt, locale) })}
                         </p>
@@ -406,6 +409,7 @@ function RunPath({ run }: { run: WorkflowRunDetail }) {
                                     {typeof step.actionOutputs?.taskId === "number" && Number.isSafeInteger(step.actionOutputs.taskId) && step.actionOutputs.taskId > 0 ? (
                                         <Link href={`/activity/tasks?task=${step.actionOutputs.taskId}`} className="text-sm font-medium text-brand-dark underline underline-offset-4">{t("path.createdTask")}</Link>
                                     ) : null}
+                                    <WorkflowWaitEvidence step={step} />
                                     {step.selectedOutcome ? (
                                         <p className="text-xs text-muted-foreground">{t("path.outcome", { outcome: tw(`branch.${step.selectedOutcome}`) })}</p>
                                     ) : null}

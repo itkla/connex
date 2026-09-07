@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
+import { workflowDiagnosticTargetsEntry } from "@/app/components/settings/workflows/workflowDiagnosticFields";
 import type { RecordSelectOption } from "@/app/components/records/RecordSelect";
 import { supportsSimulation } from "@/app/components/settings/workflows/vocabulary";
 import {
@@ -52,6 +53,7 @@ import type {
     WorkflowValidation,
     WorkflowVersion,
 } from "@/app/lib/types";
+import type { WorkflowPolicies } from "@/app/components/settings/workflows/WorkflowPolicyEditor";
 import type { WorkflowSetupValue } from "@/app/components/settings/workflows/WorkflowSetup";
 
 type Inspection =
@@ -352,7 +354,7 @@ export function useWorkflowEditor({
                 nodes: history.present.definition.nodes.map((candidate) => candidate.id === node.id ? node : candidate),
             },
         };
-        if (node.type === "TRIGGER" && node.config.type === "schedule") {
+        if (node.type === "TRIGGER" && node.config.type === "schedule" && document.definition.schemaVersion === 1) {
             const enrollment = ensureScheduleEnrollment(
                 document.definition,
                 document.canvas,
@@ -381,13 +383,16 @@ export function useWorkflowEditor({
         const graph = legacyRecordType
             ? createEmptyWorkflowGraph(value.recordType)
             : createEmptyWorkflowGraph(value.recordType, 2, value.start);
-        const readyGraph = !legacyRecordType && value.start === "schedule" ? ensureScheduleEnrollment(graph.definition, graph.canvas, value.recordType) : graph;
-        updateDocument({ name: value.name, description: value.purpose || null, recordType: value.recordType, executionMode: "user", definition: readyGraph.definition, canvas: readyGraph.canvas }, "commit");
-        setSelectedNodeId(readyGraph.definition.entryNodeId);
+        updateDocument({ name: value.name, description: value.purpose || null, recordType: value.recordType, executionMode: "user", definition: graph.definition, canvas: graph.canvas }, "commit");
+        setSelectedNodeId(graph.definition.entryNodeId);
     }, [updateDocument]);
 
     const changeInputs = useCallback((inputs: WorkflowInputDefinition[], mode: "transient" | "commit") => {
         updateDocument({ ...history.present, definition: { ...history.present.definition, inputs } }, mode);
+    }, [history.present, updateDocument]);
+
+    const changePolicies = useCallback((policies: WorkflowPolicies, mode: "transient" | "commit") => {
+        updateDocument({ ...history.present, definition: { ...history.present.definition, ...policies } }, mode);
     }, [history.present, updateDocument]);
 
     const upgradeDefinition = useCallback(() => {
@@ -746,12 +751,13 @@ export function useWorkflowEditor({
     }, [activeWorkspaceId, history.present.recordType, isCurrentWorkflow, scopeReady, workflow]);
 
     const selectDiagnostic = useCallback((diagnostic: WorkflowDiagnostic) => {
-        if (!diagnostic.nodeId) return;
+        const nodeId = diagnostic.nodeId ?? (workflowDiagnosticTargetsEntry(diagnostic) ? history.present.definition.entryNodeId : null);
+        if (!nodeId) return;
         setInspection(null);
-        setSelectedNodeId(diagnostic.nodeId);
+        setSelectedNodeId(nodeId);
         setFocusFieldPath(diagnostic.fieldPath);
         setFocusRequestId((current) => current + 1);
-    }, []);
+    }, [history.present.definition.entryNodeId]);
 
     const resolveConflict = useCallback((document: WorkflowEditorDocument) => {
         if (!conflict) return;
@@ -824,6 +830,7 @@ export function useWorkflowEditor({
         changeMetadata,
         configureNewWorkflow,
         changeInputs,
+        changePolicies,
         upgradeDefinition,
         changeName,
         commitTransient,

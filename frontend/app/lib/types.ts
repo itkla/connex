@@ -4428,6 +4428,10 @@ export type RuleTrigger = {
     throttleMinutes?: number;
     cadence?: string;
     allowManualRuns?: boolean;
+    dateField?: string;
+    offsetDays?: number;
+    localTime?: string;
+    timezone?: string;
 };
 
 export type WorkflowInputType = "text" | "user" | "date";
@@ -4466,6 +4470,9 @@ export type RuleAction = {
     dueDateRef?: WorkflowValueRef;
     titleTemplate?: WorkflowTextTemplate;
     bodyTemplate?: WorkflowTextTemplate;
+    field?: string;
+    value?: WorkflowInputValue;
+    valueRef?: WorkflowValueRef;
 };
 
 /** A campaign message labeled with its owning campaign for workflow authoring. */
@@ -4561,11 +4568,11 @@ export type WorkflowRetrySafety = "transactional" | "deduplicated" | "none";
 
 export type WorkflowExecutionMode = "user" | "system";
 
-export type WorkflowNodeType = "TRIGGER" | "CONDITION" | "ACTION" | "DELAY" | "END";
+export type WorkflowNodeType = "TRIGGER" | "CONDITION" | "ACTION" | "DELAY" | "WAIT" | "END";
 
 export type WorkflowRuntimeNodeType = Lowercase<WorkflowNodeType>;
 
-export type WorkflowEdgeOutcome = "next" | "yes" | "no";
+export type WorkflowEdgeOutcome = "next" | "yes" | "no" | "completed" | "timeout";
 
 export type WorkflowTriggerNode = {
     id: string;
@@ -4593,9 +4600,21 @@ export type WorkflowDelayNode = {
     };
 };
 
+export type WorkflowWaitNode = {
+    id: string;
+    type: "WAIT";
+    config: {
+        kind: "event";
+        event: "task.completed";
+        source: { nodeId: string; output: "taskId" };
+        timeoutSeconds: number;
+    };
+};
+
 export type WorkflowEndNode = {
     id: string;
     type: "END";
+    config?: { outcome: "completed" | "stopped"; reason?: string };
 };
 
 export type WorkflowNode =
@@ -4603,6 +4622,7 @@ export type WorkflowNode =
     | WorkflowConditionNode
     | WorkflowActionNode
     | WorkflowDelayNode
+    | WorkflowWaitNode
     | WorkflowEndNode;
 
 export type WorkflowEdge = {
@@ -4615,12 +4635,16 @@ export type WorkflowEdge = {
 export type WorkflowDefinition = {
     schemaVersion: 1 | 2;
     inputs?: WorkflowInputDefinition[];
+    enrollment?: { condition?: SegmentDefinition; oneActiveRun: boolean; cooldownMinutes: number };
+    stopConditions?: SegmentDefinition;
     entryNodeId: string;
     nodes: WorkflowNode[];
     edges: WorkflowEdge[];
 };
 
 export type WorkflowCatalog = {
+    catchupPolicy?: "latest_occurrence";
+    supportedDateFields?: Array<{ recordType: string; field: string }>;
     capabilityVersion: number;
     definitionSchemaVersions: number[];
     authoringSchemaVersion: number;
@@ -4644,6 +4668,7 @@ export type WorkflowCanvas = {
 };
 
 export type WorkflowDto = {
+    dateScheduleStatus?: { plannedCount: number; queuedCount: number; missedCount: number; nextDueAt: string | null; lastReconciledAt: string | null } | null;
     trigger?: RuleTrigger;
     id: number;
     name: string;
@@ -4671,6 +4696,7 @@ export type WorkflowRunStatus =
     | "running"
     | "waiting"
     | "succeeded"
+    | "stopped"
     | "failed"
     | "skipped"
     | "cancelled"
@@ -4855,6 +4881,8 @@ export type WorkflowRunFailure = {
 };
 
 export type WorkflowRunSummary = {
+    statusReason?: string | null;
+    dateSchedule?: { dateField: string; sourceDate: string; scheduledLocalDate: string; dueAt: string } | null;
     runKey: string;
     source: "canonical" | "legacy";
     status: WorkflowRunWireStatus;
@@ -4866,7 +4894,7 @@ export type WorkflowRunSummary = {
         publishedAt: string;
     } | null;
     trigger: {
-        type: "entity_change" | "schedule" | "manual";
+        type: "entity_change" | "schedule" | "manual" | "date";
         event: string | null;
         recordType: string | null;
         recordId: number | null;
@@ -4884,6 +4912,17 @@ export type WorkflowRunSummary = {
 };
 
 export type WorkflowStepRun = {
+    wait?: {
+        kind: "event";
+        event: "task.completed";
+        sourceNodeId: string;
+        sourceOutput: "taskId";
+        sourceTaskId: number;
+        timeoutAt: string;
+        resolution: "completed" | "timeout" | "cancelled" | "stopped" | null;
+        matchedEventId: number | null;
+        resolvedAt: string | null;
+    } | null;
     actionOutputs?: Record<string, number | string> | null;
     sequence: number;
     nodeId: string;

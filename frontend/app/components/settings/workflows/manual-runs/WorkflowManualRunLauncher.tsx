@@ -582,7 +582,7 @@ function InvocationSummary({
                                         ?? t("manual.recordLabelNotIncluded")}
                                 </span>
                                 <span className="text-foreground">
-                                    {record.reasonCode ? <ManualReason code={record.reasonCode} /> : t(`status.${record.status}`)}
+                                    {record.reasonCode ? <ManualReason code={record.reasonCode} stopped={record.status === "stopped"} /> : t(`status.${record.status}`)}
                                 </span>
                                 {record.runKey ? (
                                     <Link className="text-brand hover:text-brand-hover" href={`/workflows/${preparation.workflowId}/runs/${encodeURIComponent(record.runKey)}`}>
@@ -601,9 +601,9 @@ function InvocationSummary({
     );
 }
 
-function ManualReason({ code }: { code: string }) {
+function ManualReason({ code, stopped }: { code: string; stopped: boolean }) {
     const t = useTranslations("WorkflowOperations");
     if (t.has(`blocker.${code}`)) return t(`blocker.${code}`);
     if (t.has(`reason.${code}`)) return t(`reason.${code}`);
-    return t("reason.unknown");
+    return stopped ? t("runReason.custom", { reason: code.replaceAll("_", " ") }) : t("reason.unknown");
 }

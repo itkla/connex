@@ -70,12 +70,12 @@ import {
 const NODE_TYPES = { workflowNode: WorkflowNode };
 type InsertNodeType = Exclude<WorkflowNodeType, "TRIGGER">;
 
-const INSERT_TYPES: InsertNodeType[] = ["CONDITION", "ACTION", "DELAY", "END"];
+const INSERT_TYPES: InsertNodeType[] = ["CONDITION", "ACTION", "DELAY", "WAIT", "END"];
 const FIT_VIEW_DURATION_MS = 200;
 const CONTEXT_MENU_DRAG_THRESHOLD = 8;
 
 function isOutcome(value: string | null | undefined): value is WorkflowEdgeOutcome {
-    return value === "next" || value === "yes" || value === "no";
+    return value === "next" || value === "yes" || value === "no" || value === "completed" || value === "timeout";
 }
 
 function isWorkflowPaneTarget(target: EventTarget | null): boolean {
@@ -276,11 +276,9 @@ export default function WorkflowCanvasEditor({
     const selectedNode = document.definition.nodes.find((node) => node.id === selectedNodeId);
     const selectedOutcomes = selectedNode ? workflowNodeOutcomes(selectedNode) : [];
     const fitViewOnOpen = shouldFitWorkflowCanvasOnOpen(document.definition, document.canvas);
-    const insertTypes = selectedNode?.id === document.definition.entryNodeId
-        && selectedNode.type === "TRIGGER"
-        && selectedNode.config.type === "schedule"
-            ? INSERT_TYPES.filter((type) => type === "CONDITION")
-            : INSERT_TYPES;
+    const supportedInsertTypes = INSERT_TYPES.filter((type) => type !== "WAIT" || document.definition.schemaVersion === 2);
+    const insertTypes = selectedNode && isScheduleEnrollmentBranch(document.definition, selectedNode.id, "next")
+        ? supportedInsertTypes.filter((type) => type === "CONDITION") : supportedInsertTypes;
     const nodes = useMemo<WorkflowFlowNode[]>(() => document.definition.nodes.map((node) => {
         const runStep = runSteps.get(node.id);
         return {
@@ -303,6 +301,8 @@ export default function WorkflowCanvasEditor({
                     next: branchLabel("next"),
                     yes: branchLabel("yes"),
                     no: branchLabel("no"),
+                    completed: branchLabel("completed"),
+                    timeout: branchLabel("timeout"),
                 },
                 inputHandleLabel: t("canvasA11y.inputHandle"),
                 runStep,

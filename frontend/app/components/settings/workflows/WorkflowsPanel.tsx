@@ -405,6 +405,7 @@ export default function WorkflowsPanel() {
                                             {tr(`record.${workflow.recordType ?? "deal"}`)}
                                             {workflow.trigger ? ` · ${workflow.trigger.type === "manual"
                                                 ? t("setup.start.manual.title")
+                                                : workflow.trigger.type === "date" ? t("date.summary", { offset: workflow.trigger.offsetDays ?? -30, time: workflow.trigger.localTime ?? "09:00", timezone: workflow.trigger.timezone ?? "UTC" })
                                                 : workflow.trigger.type === "schedule" ? t("summary.schedule", { cadence: tr(`cadence.${workflow.trigger.cadence ?? "daily"}`) })
                                                     : workflow.trigger.events?.map((event) => tr(`event.${event}`)).join(", ") || t("summary.anyChange")}` : ""}
                                         </span>

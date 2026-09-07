@@ -408,7 +408,8 @@
             "assign_owner": "assign an owner",
             "set_response_due": "set a first-response deadline",
             "send_message": "send a campaign message",
-            "change_stage": "move to a stage"
+            "change_stage": "move to a stage",
+            "update_field": "update expected close date"
         },
         "runAs": {
             "user": {
@@ -512,7 +513,8 @@
             "DEAL_UPDATE": "update deals",
             "COMPANY_UPDATE": "update companies",
             "PERSON_UPDATE": "update contacts",
-            "additional": "an additional workspace permission"
+            "additional": "an additional workspace permission",
+            "TASK_READ": "read tasks"
         },
         "validationReady": "All checks passed. This saved draft is ready to publish.",
         "validationErrorTitle": "Fix {count, plural, one {# issue} other {# issues}} before publishing",
@@ -553,19 +555,23 @@
             "condition": "Condition",
             "action": "Action",
             "delay": "Delay",
-            "end": "End"
+            "end": "End",
+            "wait": "Wait for task"
         },
         "inspectorHint": {
             "trigger": "Choose what starts this workflow, and whose permissions it uses.",
             "condition": "Set the test this step makes, and where each answer goes.",
             "action": "Choose one action and fill in what it needs.",
             "delay": "Pause this path for a set amount of time.",
-            "end": "Finish this path here."
+            "end": "Finish this path here.",
+            "wait": "Continue when a task created earlier in this workflow is completed, or follow the timeout path."
         },
         "branch": {
             "next": "Next",
             "yes": "Yes",
-            "no": "No"
+            "no": "No",
+            "completed": "Completed",
+            "timeout": "Timed out"
         },
         "canvasA11y": {
             "nodeDescription": "Select a step with Enter. Move it with the arrow keys when editing is available.",
@@ -707,7 +713,8 @@
                 "failed": "Failed",
                 "skipped": "Skipped",
                 "cancelled": "Cancelled",
-                "intervention_required": "Needs a person"
+                "intervention_required": "Needs a person",
+                "stopped": "Stopped"
             },
             "reference": "Run #{run}",
             "legacyReference": "Earlier run #{run}",
@@ -838,6 +845,10 @@
                 "schedule": {
                     "title": "On a schedule",
                     "body": "Find qualifying records and coordinate recurring work."
+                },
+                "date": {
+                    "title": "Around a deal date",
+                    "body": "Start before or after the deal’s expected close date, at a chosen local time."
                 }
             },
             "recordQuestion": "Which record does each run work on?",
@@ -880,7 +891,8 @@
             "allowManual": "Allow manual runs",
             "allowManualHelp": "Also make this workflow available from the record’s Run workflow action. Manual runs still check permissions and business conditions.",
             "publishDisclosure": "{count, plural, =0 {No launch inputs.} one {# launch input.} other {# launch inputs.}} Publish and enable to make the chosen start method available.",
-            "returnToRecord": "Return to record to run workflow"
+            "returnToRecord": "Return to record to run workflow",
+            "automaticDefaultRequired": "Add a default for this required input so automatic starts can run."
         },
         "values": {
             "input": "Input · {name}",
@@ -915,6 +927,65 @@
             "insertInto": "Insert a value into {field}",
             "assigneeValue": "Assignee value",
             "recipientValue": "Recipient value"
+        },
+        "end": {
+            "outcome": "Process outcome",
+            "completed": "Completed",
+            "stopped": "Stopped",
+            "reason": "Stop reason",
+            "reasonHelp": "Optional: use a short reason with lowercase letters, numbers, and underscores, starting with a letter."
+        },
+        "policies": {
+            "title": "Enrollment and stopping",
+            "help": "These rules apply to manual and automatic starts for this primary record.",
+            "oneActive": "Only one active run per record",
+            "cooldown": "Time before starting again (minutes)",
+            "cooldownHelp": "Measured from the last accepted start. Enter 0 to allow another start immediately.",
+            "entry": "Only start when conditions match",
+            "stop": "Stop when conditions match",
+            "stopHelp": "Rechecked before actions and when a waiting run resumes. Matching stops the run without marking it as failed.",
+            "compatibilityEnrollment": "The first Condition step selects records for this existing schedule. Edit that step to change enrollment.",
+            "stopAllWarning": "An empty stop condition matches every record. Add a condition before publishing, or turn this rule off."
+        },
+        "date": {
+            "fieldHelp": "Uses this deal’s expected close date. A deal without that date cannot enter this schedule.",
+            "offset": "Days from expected close date",
+            "offsetHelp": "Use a negative number for days before, 0 for the same day, or a positive number for days after.",
+            "localTime": "Local start time",
+            "timezone": "Time zone",
+            "timezoneEmpty": "No matching time zones",
+            "catchupHelp": "New schedules pick up starts due today. After downtime, a previously planned start can also run from the previous local day; older starts are marked missed. Clock changes use the first valid time or the earlier repeated time.",
+            "summary": "Expected close date {offset, number} days · {time} {timezone}",
+            "updateFieldHelp": "Update only this deal’s expected close date.",
+            "newDate": "New expected close date",
+            "statusTitle": "Date schedule",
+            "status": {
+                "planned": "Planned",
+                "queued": "Queued",
+                "missed": "Missed"
+            },
+            "nextDue": "Next due: {date}",
+            "lastReconciled": "Last checked: {date}",
+            "missedHelp": "Missed starts were outside the catch-up window and did not create a run."
+        },
+        "wait": {
+            "source": "Task to wait for",
+            "pickTask": "Choose a task from an earlier step",
+            "noTask": "Add a Create task action before this step. It must run on every path that reaches this wait.",
+            "timeoutMinutes": "Wait up to (minutes)",
+            "branchesHelp": "Completed continues after the task is marked complete. Timed out follows a separate path when the deadline passes.",
+            "summary": "Task completion · up to {minutes, number} minutes",
+            "previewPending": "Task completion is still pending. The preview cannot know which of these paths will run.",
+            "resolution": {
+                "pending": "Waiting for the task to be completed",
+                "completed": "Task completion observed",
+                "timeout": "Task completion deadline passed",
+                "cancelled": "Wait cancelled",
+                "stopped": "Process stopped while waiting"
+            },
+            "deadline": "Deadline: {date}",
+            "resolvedAt": "Resolved: {date}",
+            "viewTask": "View the task"
         }
     },
     "WorkspaceCustomFields": {
