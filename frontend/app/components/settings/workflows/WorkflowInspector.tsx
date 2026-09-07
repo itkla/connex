@@ -9,6 +9,9 @@ import {
 } from "@heroicons/react/24/outline";
 
 import SegmentBuilder from "@/app/components/records/SegmentBuilder";
+import WorkflowInputEditor from "@/app/components/settings/workflows/WorkflowInputEditor";
+import { useWorkflowValueOptions, WorkflowTextValue, WorkflowValuePicker } from "@/app/components/settings/workflows/WorkflowValuePicker";
+import { workflowReferenceKey } from "@/app/components/settings/workflows/workflowValues";
 import {
     WORKFLOW_DELAY_MAX_SECONDS,
     WORKFLOW_DELAY_MIN_SECONDS,
@@ -22,6 +25,7 @@ import {
     authorableActions,
     DEFAULT_RESPONSE_DUE_HOURS,
     eventsFor,
+    supportsManualRun,
 } from "@/app/components/settings/workflows/vocabulary";
 import type { WorkflowEditorDocument } from "@/app/components/settings/workflows/workflowEditorReducer";
 import type {
@@ -32,7 +36,12 @@ import type {
     WorkflowExecutionMode,
     WorkflowCampaignMessageOptions,
     WorkflowNode,
+    WorkflowCatalog,
+    WorkflowDefinition,
+    WorkflowInputDefinition,
 } from "@/app/lib/types";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -69,6 +78,10 @@ export default function WorkflowInspector({
     onNodeChange,
     onMetadataChange,
     onCommitTransient,
+    catalog,
+    canUpgrade,
+    onUpgrade,
+    onInputsChange,
 }: {
     document: WorkflowEditorDocument;
     selectedNodeId: string | null;
@@ -90,6 +103,10 @@ export default function WorkflowInspector({
         mode: ChangeMode,
     ) => void;
     onCommitTransient: () => void;
+    catalog: WorkflowCatalog | null;
+    canUpgrade: boolean;
+    onUpgrade: () => void;
+    onInputsChange: (inputs: WorkflowInputDefinition[], mode: ChangeMode) => void;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const inspectorRef = useRef<HTMLDivElement>(null);
@@ -160,6 +177,10 @@ export default function WorkflowInspector({
                     onNodeChange={onNodeChange}
                     onMetadataChange={onMetadataChange}
                     onCommitTransient={onCommitTransient}
+                    catalog={catalog}
+                    canUpgrade={canUpgrade}
+                    onUpgrade={onUpgrade}
+                    onInputsChange={onInputsChange}
                 />
             ) : null}
             {node.type === "CONDITION" ? (
@@ -190,6 +211,7 @@ export default function WorkflowInspector({
             ) : null}
             {node.type === "ACTION" ? (
                 <ActionFields
+                    key={node.id}
                     node={node}
                     recordType={document.recordType ?? "deal"}
                     fields={fields}
@@ -201,6 +223,8 @@ export default function WorkflowInspector({
                     fieldProps={fieldProps}
                     onNodeChange={onNodeChange}
                     onCommitTransient={onCommitTransient}
+                    catalog={catalog}
+                    definition={document.definition}
                 />
             ) : null}
             {node.type === "DELAY" ? (
@@ -254,6 +278,10 @@ function TriggerFields({
     onNodeChange,
     onMetadataChange,
     onCommitTransient,
+    catalog,
+    canUpgrade,
+    onUpgrade,
+    onInputsChange,
 }: {
     node: Extract<WorkflowNode, { type: "TRIGGER" }>;
     document: WorkflowEditorDocument;
@@ -268,23 +296,35 @@ function TriggerFields({
         mode: ChangeMode,
     ) => void;
     onCommitTransient: () => void;
+    catalog: WorkflowCatalog | null;
+    canUpgrade: boolean;
+    onUpgrade: () => void;
+    onInputsChange: (inputs: WorkflowInputDefinition[], mode: ChangeMode) => void;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const tr = useTranslations("WorkflowAuthoring");
     const isSchedule = node.config.type === "schedule";
+    const isManual = node.config.type === "manual";
+    const isV2 = document.definition.schemaVersion === 2;
     const recordType = document.recordType ?? "deal";
     const selectedEvents = new Set(node.config.events ?? []);
     return (
         <div className="space-y-4">
+            {!isV2 && canUpgrade ? (
+                <div className="space-y-2 border-b border-border pb-4">
+                    <p className="text-sm text-muted-foreground">{t("inputs.upgradeHelp")}</p>
+                    <Button variant="outline" size="toolbar" disabled={readOnly} onClick={onUpgrade}>{t("inputs.upgrade")}</Button>
+                </div>
+            ) : null}
             <LabeledField label={tr("recordType")}>
                 <Select
                     value={recordType}
                     onValueChange={(value) => onMetadataChange("recordType", value, "commit")}
                     disabled={readOnly}
                 >
-                    <SelectTrigger size="sm" {...fieldProps("recordType")}><SelectValue /></SelectTrigger>
+                    <SelectTrigger size="sm" aria-label={tr("recordType")} {...fieldProps("recordType")}><SelectValue /></SelectTrigger>
                     <SelectContent>
-                        {RECORD_TYPES.map((type) => <SelectItem key={type} value={type}>{tr(`record.${type}`)}</SelectItem>)}
+                        {(isV2 && catalog ? catalog.recordTypes.map((record) => record.type) : RECORD_TYPES).map((type) => <SelectItem key={type} value={type}>{tr(`record.${type}`)}</SelectItem>)}
                     </SelectContent>
                 </Select>
             </LabeledField>
@@ -293,16 +333,17 @@ function TriggerFields({
                     value={node.config.type}
                     onValueChange={(type) => onNodeChange({
                         ...node,
-                        config: type === "schedule"
-                            ? { type, cadence: node.config.cadence ?? "daily" }
-                            : { type: "entity_change", events: node.config.events ?? [] },
+                        config: type === "manual" ? { type: "manual" } : type === "schedule"
+                            ? { type, cadence: node.config.cadence ?? "daily", ...(isV2 ? { allowManualRuns: node.config.allowManualRuns ?? false } : {}) }
+                            : { type: "entity_change", events: node.config.events ?? [], ...(isV2 ? { allowManualRuns: node.config.allowManualRuns ?? false } : {}) },
                     }, "commit")}
                     disabled={readOnly}
                 >
-                    <SelectTrigger size="sm" {...fieldProps("config.type")}><SelectValue /></SelectTrigger>
+                    <SelectTrigger size="sm" aria-label={tr("triggerKind")} {...fieldProps("config.type")}><SelectValue /></SelectTrigger>
                     <SelectContent>
-                        <SelectItem value="entity_change">{tr("kindEntityChange")}</SelectItem>
-                        {SCHEDULE_RECORD_TYPES.includes(recordType) ? (
+                        {isV2 && catalog?.recordTypes.some((record) => record.type === recordType && record.manual) ? <SelectItem value="manual">{t("setup.start.manual.title")}</SelectItem> : null}
+                        {(!isV2 || catalog?.recordTypes.some((record) => record.type === recordType && record.event)) ? <SelectItem value="entity_change">{tr("kindEntityChange")}</SelectItem> : null}
+                        {(isV2 ? catalog?.recordTypes.some((record) => record.type === recordType && record.schedule) : SCHEDULE_RECORD_TYPES.includes(recordType)) ? (
                             <SelectItem value="schedule">{tr("kindSchedule")}</SelectItem>
                         ) : null}
                     </SelectContent>
@@ -321,7 +362,7 @@ function TriggerFields({
                         </SelectContent>
                     </Select>
                 </LabeledField>
-            ) : (
+            ) : !isManual ? (
                 <div className="space-y-2">
                     <Label>{tr("eventsLabel")}</Label>
                     <div className="flex flex-wrap gap-1.5" {...fieldProps("config.events")} tabIndex={-1}>
@@ -354,8 +395,18 @@ function TriggerFields({
                         })}
                     </div>
                 </div>
-            )}
-            {!isSchedule ? (
+            ) : <p className="text-sm text-muted-foreground">{t("inputs.manualOnlyHelp")}</p>}
+            {isV2 && !isManual && supportsManualRun(recordType) ? (
+                <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                        <Label htmlFor="workflow-allow-manual">{t("inputs.allowManual")}</Label>
+                        <Switch id="workflow-allow-manual" checked={node.config.allowManualRuns === true} disabled={readOnly}
+                            onCheckedChange={(allowManualRuns) => onNodeChange({ ...node, config: { ...node.config, allowManualRuns } }, "commit")} />
+                    </div>
+                    <p className="text-sm text-muted-foreground">{t("inputs.allowManualHelp")}</p>
+                </div>
+            ) : null}
+            {!isSchedule && !isManual ? (
                 <LabeledField label={tr("throttleLabel")}>
                     <Input
                         type="number"
@@ -374,7 +425,7 @@ function TriggerFields({
                     />
                 </LabeledField>
             ) : null}
-            {recordType === "deal" && !isSchedule ? (
+            {recordType === "deal" && !isSchedule && !isManual ? (
                 <LabeledField label={tr("stageFilterLabel")}>
                     <Select
                         value={node.config.targetStageId ? String(node.config.targetStageId) : "any"}
@@ -404,6 +455,8 @@ function TriggerFields({
                     {...fieldProps("description")}
                 />
             </LabeledField>
+            {isV2 ? <WorkflowInputEditor inputs={document.definition.inputs ?? []} members={options?.owners ?? []}
+                disabled={readOnly} onChange={onInputsChange} onCommit={onCommitTransient} /> : null}
             <div className="space-y-2 border-t border-border pt-4">
                 <Label>{tr("runAsLabel")}</Label>
                 <div role="radiogroup" aria-label={tr("runAsLabel")} className="grid gap-2">
@@ -451,6 +504,8 @@ function ActionFields({
     fieldProps,
     onNodeChange,
     onCommitTransient,
+    catalog,
+    definition,
 }: {
     node: Extract<WorkflowNode, { type: "ACTION" }>;
     recordType: string;
@@ -463,17 +518,33 @@ function ActionFields({
     fieldProps: FieldProps;
     onNodeChange: (node: WorkflowNode, mode: ChangeMode) => void;
     onCommitTransient: () => void;
+    catalog: WorkflowCatalog | null;
+    definition: WorkflowDefinition;
 }) {
     const tr = useTranslations("WorkflowAuthoring");
+    const t = useTranslations("WorkspaceWorkflows");
+    const isV2 = definition.schemaVersion === 2;
+    const valueOptions = useWorkflowValueOptions(definition, catalog, recordType, node.id);
+    const capability = catalog?.actions.find((action) => action.type === node.config.type && action.recordTypes.includes(recordType));
+    const valuesForField = (key: string) => {
+        const field = capability?.fields.find((field) => field.key === key);
+        return valueOptions.filter((option) => field?.bindingSources.includes(option.ref.source));
+    };
+    const userValues = valuesForField("targetUser").filter((option) => option.valueType === "user");
+    const dateValues = valuesForField("dueDate").filter((option) => option.valueType === "date");
     const update = (config: RuleAction, mode: ChangeMode) => onNodeChange({ ...node, config }, mode);
     const selectedMessage = campaignMessageOptions?.items.find(
         ({ message }) => message.id === node.config.campaignMessageId,
     )?.message;
-    const actionTypes = authorableActions(recordType, canConfigureTriggeredSend);
-    const visibleActionTypes = node.config.type === "send_message" && !actionTypes.includes("send_message")
-        ? ["send_message", ...actionTypes]
+    const actionTypes = isV2 && !catalog ? [] : authorableActions(recordType, canConfigureTriggeredSend, catalog);
+    const visibleActionTypes = !actionTypes.includes(node.config.type)
+        ? [node.config.type, ...actionTypes]
         : actionTypes;
-    const textInput = (field: "title" | "body" | "activityType", placeholder: string, maximum: number) => (
+    const textInput = (field: "title" | "body" | "activityType", placeholder: string, maximum: number) => isV2 && field !== "activityType" ? (
+        <WorkflowTextValue value={node.config[field]} template={field === "title" ? node.config.titleTemplate : node.config.bodyTemplate}
+            options={valuesForField(field)} disabled={readOnly} maximum={maximum} label={placeholder} onCommit={onCommitTransient}
+            onChange={(value, template, mode) => update({ ...node.config, [field]: value, [field === "title" ? "titleTemplate" : "bodyTemplate"]: template }, mode)} />
+    ) : (
         <Input
             value={node.config[field] ?? ""}
             onChange={(event) => update({ ...node.config, [field]: event.target.value }, "transient")}
@@ -488,7 +559,7 @@ function ActionFields({
         <div className="space-y-4">
             <LabeledField label={tr("actionType")}>
                 <Select value={node.config.type} onValueChange={(type) => update(actionWithDefaults(type), "commit")} disabled={readOnly}>
-                    <SelectTrigger size="sm" {...fieldProps("config.type")}><SelectValue /></SelectTrigger>
+                    <SelectTrigger size="sm" aria-label={tr("actionType")} {...fieldProps("config.type")}><SelectValue /></SelectTrigger>
                     <SelectContent>
                         {visibleActionTypes.map((type) => (
                             <SelectItem
@@ -585,11 +656,24 @@ function ActionFields({
             {node.config.type === "create_note"
                 ? <LabeledField label={tr("actionNotePlaceholder")}>{textInput("body", tr("actionNotePlaceholder"), 2_000)}</LabeledField>
                 : null}
-            {node.config.type === "create_task" ? (
+            {node.config.type === "create_task" && isV2 ? (
+                <LabeledField label={t("values.dueSource")}>
+                    <Select value={node.config.dueDateRef ? workflowReferenceKey(node.config.dueDateRef) : "relative"} disabled={readOnly} onValueChange={(key) => {
+                        const option = dateValues.find((option) => workflowReferenceKey(option.ref) === key);
+                        update({ ...node.config, dueDateRef: option?.ref, dueInDays: option ? undefined : 3 }, "commit");
+                    }}>
+                        <SelectTrigger className="w-full" aria-label={t("values.dueSource")}><SelectValue /></SelectTrigger>
+                        <SelectContent><SelectItem value="relative">{t("values.relativeDays")}</SelectItem>{dateValues.map((option) => <SelectItem key={workflowReferenceKey(option.ref)} value={workflowReferenceKey(option.ref)}>{option.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                </LabeledField>
+            ) : null}
+            {node.config.type === "create_task" && !node.config.dueDateRef ? (
                 <LabeledField label={tr("dueIn")}>
                     <Input
                         type="number"
-                        min={1}
+                        aria-label={tr("dueIn")}
+                        min={isV2 ? 0 : 1}
+                        max={365}
                         value={node.config.dueInDays ?? 3}
                         onChange={(event) => update({ ...node.config, dueInDays: Number(event.target.value) }, "transient")}
                         onBlur={onCommitTransient}
@@ -636,18 +720,21 @@ function ActionFields({
                     />
                 </LabeledField>
             ) : null}
-            {node.config.type === "assign_owner" ? (
-                <LabeledField label={tr("actionOwner")}>
+            {node.config.type === "assign_owner" || (isV2 && (node.config.type === "create_task" || node.config.type === "notify")) ? (
+                <LabeledField label={node.config.type === "create_task" ? t("values.assignee") : node.config.type === "notify" ? t("values.recipient") : tr("actionOwner")}>
                     <Select
-                        value={node.config.targetUserId ? String(node.config.targetUserId) : undefined}
-                        onValueChange={(value) => update({ ...node.config, targetUserId: Number(value) }, "commit")}
+                        value={node.config.targetUserRef ? "reference" : node.config.targetUserId ? String(node.config.targetUserId) : undefined}
+                        onValueChange={(value) => update({ ...node.config, targetUserId: value === "reference" ? undefined : Number(value), targetUserRef: value === "reference" ? userValues[0]?.ref : undefined }, "commit")}
                         disabled={readOnly}
                     >
-                        <SelectTrigger size="sm" {...fieldProps("config.targetUserId")}><SelectValue placeholder={tr("pickOwner")} /></SelectTrigger>
+                        <SelectTrigger size="sm" aria-label={node.config.type === "create_task" ? t("values.assignee") : node.config.type === "notify" ? t("values.recipient") : tr("actionOwner")} {...fieldProps("config.targetUserId")}><SelectValue placeholder={tr("pickOwner")} /></SelectTrigger>
                         <SelectContent>
+                            {isV2 && userValues.length > 0 ? <SelectItem value="reference">{t("values.useValue")}</SelectItem> : null}
                             {(options?.owners ?? []).map((owner) => <SelectItem key={owner.id} value={String(owner.id)}>{owner.name}</SelectItem>)}
                         </SelectContent>
                     </Select>
+                    {node.config.targetUserRef ? <WorkflowValuePicker options={userValues} value={node.config.targetUserRef} label={node.config.type === "create_task" ? t("values.assigneeValue") : t("values.recipientValue")} disabled={readOnly}
+                        onChange={(targetUserRef) => update({ ...node.config, targetUserId: undefined, targetUserRef }, "commit")} /> : null}
                 </LabeledField>
             ) : null}
             {node.config.type === "change_stage" ? (

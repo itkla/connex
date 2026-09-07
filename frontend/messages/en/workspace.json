@@ -588,7 +588,8 @@
             "delayHours": "Wait {value, plural, one {# hour} other {# hours}}",
             "delayDays": "Wait {value, plural, one {# day} other {# days}}",
             "delaySeconds": "Wait {value, number} seconds",
-            "end": "Complete this branch"
+            "end": "Complete this branch",
+            "manual": "Run manually on a {record}"
         },
         "inspection": {
             "run": "Run #{run}",
@@ -620,7 +621,8 @@
                 "node": "Step",
                 "edge": "Branch connection",
                 "position": "Canvas position",
-                "viewport": "Canvas viewport"
+                "viewport": "Canvas viewport",
+                "definitionSettings": "Launch inputs and start settings"
             }
         },
         "simulation": {
@@ -789,9 +791,129 @@
             "enrollment_not_matched": "The record would not be enrolled.",
             "action_ready": "This action would be ready to run.",
             "delay_wait": "The path would wait here, so preview stops.",
-            "end_reached": "The path would complete here."
+            "end_reached": "The path would complete here.",
+            "manual_entry_invalid": "Choose whether this automatic workflow may also run manually.",
+            "manual_entry_disabled": "Manual runs are turned off for this workflow.",
+            "input_definition_invalid": "Check the input names, types, and defaults.",
+            "input_required": "Complete the required launch input.",
+            "input_unknown": "A supplied input is no longer part of this workflow.",
+            "input_type_invalid": "Supply a value matching the input type.",
+            "binding_invalid": "Choose a supported value for this action field.",
+            "binding_unresolved": "A value needed by this action is unavailable.",
+            "step_output_not_dominating": "Choose an earlier step that runs on every path to this action."
         },
-        "diagnosticFallback": "This check could not be described."
+        "diagnosticFallback": "This check could not be described.",
+        "register": {
+            "search": "Search workflows by name or purpose",
+            "recordFilter": "Primary record",
+            "allRecords": "All record types",
+            "stateFilter": "Workflow state",
+            "state": {
+                "all": "All states",
+                "draft": "Draft",
+                "enabled": "Enabled",
+                "disabled": "Disabled",
+                "paused": "Paused",
+                "attention": "Needs attention"
+            },
+            "noMatchesTitle": "No matching workflows",
+            "noMatchesBody": "Try another search or clear the filters to see your workflows.",
+            "clearFilters": "Clear filters",
+            "noPurpose": "Add a purpose to explain what this workflow accomplishes."
+        },
+        "setup": {
+            "title": "Create a workflow",
+            "description": "Choose a starting point and a clear outcome, then build the steps that get you there.",
+            "browseRecipes": "Start from a recipe",
+            "startQuestion": "How does this workflow start?",
+            "start": {
+                "manual": {
+                    "title": "Manually from a record",
+                    "body": "Prepare follow-up, company reviews, or handoffs when you need them."
+                },
+                "entity_change": {
+                    "title": "When a record changes",
+                    "body": "React to a new contact, a changed owner, or a deal reaching a stage."
+                },
+                "schedule": {
+                    "title": "On a schedule",
+                    "body": "Find qualifying records and coordinate recurring work."
+                }
+            },
+            "recordQuestion": "Which record does each run work on?",
+            "recordHelp": "Each run has one primary record. Its context is available throughout your steps.",
+            "namePlaceholder": "For example, Prepare a company review",
+            "purposeLabel": "What should this workflow accomplish?",
+            "purposePlaceholder": "Describe the result your team should be able to see.",
+            "purposeHelp": "This purpose appears in the workflow register so your team knows when to use it.",
+            "nextTitle": "Build, preview, then publish",
+            "nextBody": "Add tasks, assign owners, use record values, and define branches in the editor. Preview on a real record before enabling the workflow.",
+            "continue": "Continue to editor",
+            "catalogFailed": "Could not load workflow building blocks. Retry to keep creating your workflow.",
+            "catalogUnavailable": "New workflow building blocks are unavailable on this deployment."
+        },
+        "inputs": {
+            "launchTitle": "Inputs for this run",
+            "launchHelp": "These values are frozen when you prepare the run. Change them before reviewing the effects.",
+            "pickMember": "Choose a member",
+            "noValue": "No value",
+            "editorTitle": "Launch inputs",
+            "editorHelp": "Ask for information before a manual run. Automatic runs use defaults, so give required inputs a default when automatic starts are enabled.",
+            "label": "Input label",
+            "typeLabel": "Value type",
+            "type": {
+                "text": "Text",
+                "user": "Member",
+                "date": "Date"
+            },
+            "required": "Required",
+            "defaultLabel": "Default value (optional)",
+            "noDefault": "No default",
+            "newInput": "New input",
+            "remove": "Remove {name}",
+            "add": "Add input",
+            "upgrade": "Enable new building blocks in this draft",
+            "upgradeHelp": "Keep the published workflow unchanged and upgrade this draft to use manual starts and named values. Review its assignees and recipients before publishing.",
+            "manualOnlyHelp": "After publishing and enabling, this workflow appears in this record type’s Run workflow action. Record changes and schedules do not start it.",
+            "allowManual": "Allow manual runs",
+            "allowManualHelp": "Also make this workflow available from the record’s Run workflow action. Manual runs still check permissions and business conditions.",
+            "publishDisclosure": "{count, plural, =0 {No launch inputs.} one {# launch input.} other {# launch inputs.}} Publish and enable to make the chosen start method available.",
+            "returnToRecord": "Return to record to run workflow"
+        },
+        "values": {
+            "input": "Input · {name}",
+            "record": "Record · {name}",
+            "output": "Created task · {name}",
+            "createdTask": "Task from a prior step",
+            "insert": "Insert a value",
+            "text": "Text",
+            "unavailable": "Value no longer available",
+            "remove": "Remove this part",
+            "addText": "Add text",
+            "missingLabel": "When a value is missing",
+            "missingFail": "Stop and request attention",
+            "missingEmpty": "Leave optional text empty",
+            "dueSource": "Task due date",
+            "relativeDays": "Days after this step runs",
+            "assignee": "Assignee",
+            "recipient": "Notification recipient",
+            "useValue": "Use an input or record value",
+            "field": {
+                "id": "Record ID",
+                "name": "Name",
+                "ownerId": "Owner",
+                "email": "Email",
+                "title": "Job title",
+                "companyId": "Company ID",
+                "companyName": "Company name",
+                "industry": "Industry",
+                "status": "Status",
+                "expectedCloseDate": "Expected close date"
+            },
+            "insertInto": "Insert a value into {field}",
+            "assigneeValue": "Assignee value",
+            "recipientValue": "Recipient value"
+        }
     },
     "WorkspaceCustomFields": {
         "newField": "Add field",

@@ -134,7 +134,7 @@ function stubAppShellReads(
         if (url.endsWith("/api/permissions/effective")) {
             return Promise.resolve(json([]));
         }
-        if (["/api/tasks/page", "/api/persons/page", "/api/deals/page"].includes(pathname)) {
+        if (["/api/tasks/page", "/api/persons/page", "/api/deals/page", "/api/companies/page"].includes(pathname)) {
             return Promise.resolve(json({ items: [], total: 0 }));
         }
         if (pathname === "/api/users") {

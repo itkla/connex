@@ -9,19 +9,25 @@ import {
     cancelWorkflowManualRun,
     confirmWorkflowManualRun,
     getWorkflowManualRun,
-    getWorkflows,
+    getWorkflowManualOptions,
+    getUsers,
     prepareWorkflowManualRun,
 } from "@/app/lib/api";
 import type {
     WorkflowInvocationResult,
-    WorkflowListItem,
+    WorkflowManualOptions,
+    WorkflowInputValue,
     WorkflowManualPreparation,
     WorkflowManualScope,
     WorkflowManualSourceSurface,
 } from "@/app/lib/types";
 import type { RecordType } from "@/app/lib/actions/types";
+import RecordSelect from "@/app/components/records/RecordSelect";
+import { useWorkflowRecordSearch } from "@/app/components/settings/workflows/useWorkflowRecordSearch";
+import WorkflowLaunchInputs from "@/app/components/settings/workflows/WorkflowLaunchInputs";
+import { workflowInputsComplete } from "@/app/components/settings/workflows/workflowValues";
 import { isWorkflowManualScopeValid } from "@/app/lib/workflowOperations";
-import { supportsManualRun } from "@/app/components/settings/workflows/vocabulary";
+import { MANUAL_RUN_RECORD_TYPES } from "@/app/components/settings/workflows/vocabulary";
 import {
     formatWorkflowRunDateTime,
     normalizeWorkflowRunDateTime,
@@ -29,7 +35,6 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
     ResponsiveDialog,
@@ -63,18 +68,10 @@ function scopeCount(scope: WorkflowManualScope | null): number | null {
     return null;
 }
 
-/**
- * Whether a launcher may offer a workflow. The record-type allowlist is not made redundant by the
- * caller's filter: search, the command palette, and the Operations "new run" action all pass a null
- * record type, while `WorkflowManualRunService` refuses every record type outside these three, so
- * offering one of those would guarantee a failed request.
- */
-function isRunnableWorkflow(workflow: WorkflowListItem, recordType: RecordType | null): boolean {
-    return workflow.activeVersion !== null
-        && workflow.runtimeOwner === "canonical"
-        && workflow.archivedAt === null
-        && supportsManualRun(workflow.recordType)
-        && (recordType === null || workflow.recordType === recordType);
+/** Extracts an exact single record for discovery without approximating a bulk selection. */
+function singleScopeRecordId(scope: WorkflowManualScope | null): number | null {
+    if (scope?.kind === "command_palette") return singleScopeRecordId(scope.resolvedScope);
+    return scope?.kind === "single_record" ? scope.recordId : null;
 }
 
 /** Exact-scope preparation and confirmation surface shared by record actions and bulk actions. */
@@ -96,37 +93,61 @@ export default function WorkflowManualRunLauncher({
     initialWorkflowId?: number;
 }) {
     const t = useTranslations("WorkflowOperations");
+    const tr = useTranslations("WorkflowAuthoring");
     const [phase, setPhase] = useState<LauncherPhase>("choose");
-    const [workflows, setWorkflows] = useState<WorkflowListItem[] | null>(null);
+    const [manualOptions, setManualOptions] = useState<WorkflowManualOptions | null>(null);
+    const [primaryType, setPrimaryType] = useState<string>(recordType ?? "person");
+    const [members, setMembers] = useState<Array<{ id: number; name: string }>>([]);
+    const [inputs, setInputs] = useState<Record<string, WorkflowInputValue>>({});
     const [workflowId, setWorkflowId] = useState(initialWorkflowId ? String(initialWorkflowId) : "");
     const [recordId, setRecordId] = useState("");
     const [preparation, setPreparation] = useState<WorkflowManualPreparation | null>(null);
     const [result, setResult] = useState<WorkflowInvocationResult | null>(null);
     const [error, setError] = useState<string | null>(null);
     const idempotencyKeyRef = useRef<string | null>(null);
+    const enteredRecordId = /^\d+$/.test(recordId) ? Number(recordId) : null;
+    const discoveryRecordId = singleScopeRecordId(initialScope) ?? enteredRecordId;
 
     useEffect(() => {
         if (!open) return;
         const controller = new AbortController();
-        void getWorkflows(false, { ...requestInit, signal: controller.signal })
-            .then((items) => {
+        void getWorkflowManualOptions(primaryType, discoveryRecordId, { ...requestInit, signal: controller.signal })
+            .then((result) => {
                 if (controller.signal.aborted) return;
-                const runnable = items.filter((item) => isRunnableWorkflow(item, recordType));
-                setWorkflows(runnable);
+                setManualOptions(result);
                 setWorkflowId((current) =>
-                    runnable.some((item) => String(item.id) === current) ? current : "");
+                    result.options.some((item) => String(item.workflowId) === current) ? current : "");
             })
             .catch(() => {
                 if (!controller.signal.aborted) setError(t("manual.errors.workflows"));
             });
         return () => controller.abort();
-    }, [open, recordType, requestInit, t]);
+    }, [discoveryRecordId, open, primaryType, requestInit, t]);
 
+    useEffect(() => {
+        if (!open) return;
+        const controller = new AbortController();
+        void getUsers({ ...requestInit, signal: controller.signal }).then((users) => {
+            if (!controller.signal.aborted) setMembers(users.map((user) => ({ id: user.id, name: user.displayName || user.username })));
+        }).catch(() => {
+            if (!controller.signal.aborted) setError(t("manual.errors.members"));
+        });
+        return () => controller.abort();
+    }, [open, requestInit, t]);
+
+    const workflows = manualOptions?.recordType === primaryType && manualOptions.recordId === discoveryRecordId
+        ? manualOptions.options : null;
     const selectedWorkflow = useMemo(
-        () => workflows?.find((workflow) => String(workflow.id) === workflowId) ?? null,
+        () => workflows?.find((workflow) => String(workflow.workflowId) === workflowId) ?? null,
         [workflowId, workflows],
     );
-    const enteredRecordId = /^\d+$/.test(recordId) ? Number(recordId) : null;
+    const recordSearch = useWorkflowRecordSearch(primaryType, requestInit, open && initialScope === null);
+    const changeWorkflow = (value: string) => {
+        setWorkflowId(value);
+        setPreparation(null);
+        setInputs({});
+        idempotencyKeyRef.current = null;
+    };
     const enteredScope = enteredRecordId && enteredRecordId > 0
         ? { kind: "single_record" as const, recordId: enteredRecordId }
         : null;
@@ -135,13 +156,14 @@ export default function WorkflowManualRunLauncher({
         : enteredScope);
 
     const prepare = async () => {
-        if (!selectedWorkflow || !scope || !isWorkflowManualScopeValid(scope)) return;
+        if (!selectedWorkflow?.available || !scope || !isWorkflowManualScopeValid(scope)
+            || !workflowInputsComplete(selectedWorkflow.inputs, inputs)) return;
         setPhase("preparing");
         setError(null);
         try {
             const prepared = await prepareWorkflowManualRun(
-                selectedWorkflow.id,
-                { sourceSurface, scope },
+                selectedWorkflow.workflowId,
+                { sourceSurface, scope, inputs },
                 requestInit,
             );
             setPreparation(prepared);
@@ -193,6 +215,14 @@ export default function WorkflowManualRunLauncher({
         }
     };
 
+    const reviewAgain = () => {
+        setPreparation(null);
+        setResult(null);
+        setError(null);
+        idempotencyKeyRef.current = null;
+        setPhase("choose");
+    };
+
     return (
         <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
             <ResponsiveDialogContent className="sm:max-w-2xl" showCloseButton={false}>
@@ -218,39 +248,72 @@ export default function WorkflowManualRunLauncher({
 
                     {phase === "choose" || phase === "preparing" ? (
                         <div className="space-y-4">
+                            {recordType === null ? (
+                                <div className="space-y-2">
+                                    <Label htmlFor="manual-record-type">{tr("recordType")}</Label>
+                                    <Select value={primaryType} disabled={phase === "preparing"} onValueChange={(type) => {
+                                        setPrimaryType(type);
+                                        setRecordId("");
+                                        setManualOptions(null);
+                                        changeWorkflow("");
+                                        recordSearch.searchRecords("");
+                                    }}>
+                                        <SelectTrigger id="manual-record-type" className="w-full"><SelectValue /></SelectTrigger>
+                                        <SelectContent>{MANUAL_RUN_RECORD_TYPES.map((type) => <SelectItem key={type} value={type}>{tr(`record.${type}`)}</SelectItem>)}</SelectContent>
+                                    </Select>
+                                </div>
+                            ) : null}
                             <div className="space-y-2">
                                 <Label htmlFor="manual-workflow">{t("manual.workflowLabel")}</Label>
                                 {workflows === null ? (
                                     <Skeleton className="h-9 w-full" />
                                 ) : (
-                                    <Select value={workflowId} onValueChange={setWorkflowId} disabled={phase === "preparing"}>
+                                    <Select value={workflowId} onValueChange={changeWorkflow} disabled={phase === "preparing"}>
                                         <SelectTrigger id="manual-workflow" className="w-full">
                                             <SelectValue placeholder={t("manual.workflowPlaceholder")} />
                                         </SelectTrigger>
                                         <SelectContent>
                                             {workflows.map((workflow) => (
-                                                <SelectItem key={workflow.id} value={String(workflow.id)}>
-                                                    {workflow.name}
+                                                <SelectItem key={workflow.workflowId} value={String(workflow.workflowId)}>
+                                                    {workflow.workflowName}{!workflow.available ? ` · ${t("manual.unavailable")}` : ""}
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>
                                     </Select>
                                 )}
                                 {workflows?.length === 0 ? (
-                                    <p className="text-sm text-muted-foreground">{t("manual.noWorkflows")}</p>
+                                    <div className="space-y-2">
+                                        <p className="text-sm text-muted-foreground">{t("manual.noWorkflows")}</p>
+                                        <Button variant="outline" asChild>
+                                            <Link href={manualOptions?.createHref.startsWith("/workflows/new?")
+                                                ? manualOptions.createHref
+                                                : `/workflows/new?start=manual&recordType=${encodeURIComponent(primaryType)}`}>
+                                                {t("manual.createWorkflow")}
+                                            </Link>
+                                        </Button>
+                                    </div>
                                 ) : null}
                             </div>
 
                             {initialScope === null ? (
                                 <div className="space-y-2">
-                                    <Label htmlFor="manual-record-id">{t("manual.recordIdLabel")}</Label>
-                                    <Input
-                                        id="manual-record-id"
-                                        inputMode="numeric"
+                                    <Label htmlFor="manual-record">{t("manual.recordLabel")}</Label>
+                                    <RecordSelect
+                                        id="manual-record"
+                                        options={recordSearch.records}
                                         value={recordId}
-                                        onChange={(event) => setRecordId(event.target.value)}
+                                        onValueChange={(value) => {
+                                            setRecordId(value);
+                                            setError(null);
+                                            setPreparation(null);
+                                            idempotencyKeyRef.current = null;
+                                        }}
+                                        onInputValueChange={recordSearch.searchRecords}
+                                        placeholder={t("manual.recordPlaceholder")}
+                                        emptyLabel={t("manual.recordEmpty")}
                                         disabled={phase === "preparing"}
                                     />
+                                    {recordSearch.failed ? <p role="alert" className="text-sm text-destructive">{t("manual.errors.recordSearch")}</p> : null}
                                 </div>
                             ) : (
                                 <div className="rounded-xl border border-border bg-muted/35 p-4">
@@ -260,6 +323,33 @@ export default function WorkflowManualRunLauncher({
                                     </p>
                                 </div>
                             )}
+                            {selectedWorkflow ? (
+                                <>
+                                    <div className="space-y-2 border-t border-border pt-4 text-sm">
+                                        <p>{t("manual.runsAs", { actor: selectedWorkflow.execution.mode === "system" ? t("manual.systemActor") : selectedWorkflow.execution.actorLabel ?? t("manual.actorUnavailable") })}</p>
+                                        {!selectedWorkflow.available ? (
+                                            <Alert>
+                                                <ExclamationTriangleIcon />
+                                                <AlertTitle>{t("manual.unavailable")}</AlertTitle>
+                                                <AlertDescription>
+                                                    {selectedWorkflow.reasons.map((reason) => <p key={reason}>{t.has(`manual.availability.${reason}`) ? t(`manual.availability.${reason}`) : t("manual.availability.configuration_unavailable")}</p>)}
+                                                </AlertDescription>
+                                            </Alert>
+                                        ) : null}
+                                    </div>
+                                    <WorkflowLaunchInputs
+                                        definitions={selectedWorkflow.inputs}
+                                        values={inputs}
+                                        members={members}
+                                        disabled={phase === "preparing" || !selectedWorkflow.available}
+                                        onChange={(key, value) => {
+                                            setInputs((current) => ({ ...current, [key]: value }));
+                                            setPreparation(null);
+                                            idempotencyKeyRef.current = null;
+                                        }}
+                                    />
+                                </>
+                            ) : null}
                         </div>
                     ) : null}
 
@@ -279,23 +369,28 @@ export default function WorkflowManualRunLauncher({
                     {phase === "choose" || phase === "preparing" ? (
                         <Button
                             variant="brand"
-                            disabled={!selectedWorkflow || !scope || !isWorkflowManualScopeValid(scope) || phase === "preparing"}
+                            disabled={!selectedWorkflow?.available || !scope || !isWorkflowManualScopeValid(scope)
+                                || !workflowInputsComplete(selectedWorkflow?.inputs ?? [], inputs) || phase === "preparing"}
                             onClick={() => void prepare()}
                         >
                             {t(phase === "preparing" ? "manual.preparing" : "manual.review")}
                         </Button>
                     ) : null}
                     {phase === "prepared" || phase === "confirming" ? (
-                        <Button
-                            variant="brand"
-                            disabled={!preparation?.confirmable || phase === "confirming"}
-                            onClick={() => void confirm()}
-                        >
-                            {t(phase === "confirming" ? "manual.confirming" : "manual.confirm")}
-                        </Button>
+                        <>
+                            <Button variant="outline" disabled={phase === "confirming"} onClick={reviewAgain}>{t("manual.editSelection")}</Button>
+                            <Button
+                                variant="brand"
+                                disabled={!preparation?.confirmable || phase === "confirming"}
+                                onClick={() => void confirm()}
+                            >
+                                {t(phase === "confirming" ? "manual.confirming" : "manual.confirm")}
+                            </Button>
+                        </>
                     ) : null}
                     {phase === "complete" && result ? (
                         <>
+                            <Button variant="outline" onClick={reviewAgain}>{t("manual.newRun")}</Button>
                             <Button variant="outline" onClick={() => void refreshResult()}>{t("manual.refresh")}</Button>
                             {result.status === "prepared" || result.status === "running" ? (
                                 <Button variant="outline" onClick={() => void cancelInvocation()}>{t("manual.cancel")}</Button>
@@ -354,6 +449,32 @@ function PreparationSummary({ preparation }: { preparation: WorkflowManualPrepar
                     </dd>
                 </div>
             </dl>
+            {(preparation.resolvedInputs?.length ?? 0) > 0 ? (
+                <section className="space-y-2">
+                    <h3 className="text-sm font-semibold text-foreground">{t("manual.resolvedInputsTitle")}</h3>
+                    <dl className="divide-y divide-border rounded-xl border border-border px-3">
+                        {preparation.resolvedInputs?.map((input) => <div key={input.key} className="grid gap-1 py-3 sm:grid-cols-2">
+                            <dt className="text-sm text-muted-foreground">{input.label}</dt>
+                            <dd className="break-words text-sm font-medium text-foreground">{input.displayValue}</dd>
+                        </div>)}
+                    </dl>
+                </section>
+            ) : null}
+            {(preparation.effectSamples?.length ?? 0) > 0 ? (
+                <section className="space-y-2">
+                    <h3 className="text-sm font-semibold text-foreground">{t("manual.effectSamplesTitle")}</h3>
+                    <ul className="divide-y divide-border rounded-xl border border-border px-3">
+                        {preparation.effectSamples?.map((effect) => <li key={`${effect.recordId}:${effect.nodeId}`} className="space-y-1 py-3 text-sm">
+                            <p className="font-medium text-foreground">{preparation.samples.find((sample) => sample.recordId === effect.recordId)?.label ?? t("manual.recordLabelNotIncluded")}</p>
+                            {effect.title ? <p className="text-foreground">{effect.title}</p> : null}
+                            {effect.body ? <p className="whitespace-pre-wrap text-muted-foreground">{effect.body}</p> : null}
+                            {effect.targetLabel ? <p className="text-muted-foreground">{t("manual.effectAssignee", { name: effect.targetLabel })}</p> : null}
+                            {effect.dueDate ? <p className="text-muted-foreground">{t("manual.effectDueDate", { date: effect.dueDate })}</p> : null}
+                            {!effect.title && !effect.body && !effect.targetLabel ? <p className="text-muted-foreground">{t("manual.effectUnresolved")}</p> : null}
+                        </li>)}
+                    </ul>
+                </section>
+            ) : null}
             <section className="space-y-2">
                 <h3 className="text-sm font-semibold text-foreground">{t("manual.actionsTitle")}</h3>
                 <ul className="divide-y divide-border rounded-xl border border-border">
@@ -432,12 +553,6 @@ function InvocationSummary({
         ["cancelled", result.cancelledCount],
         ["skipped", result.skippedCount],
     ] as const;
-    const exceptionalRecords = result.records.filter((record) => (
-        record.status === "failed"
-        || record.status === "skipped"
-        || record.status === "cancelled"
-        || record.status === "intervention_required"
-    ));
     return (
         <div className="space-y-4">
             <Alert>
@@ -456,11 +571,11 @@ function InvocationSummary({
             {result.records.some((record) => record.reasonCode) ? (
                 <p className="text-sm text-muted-foreground">{t("manual.partialNote")}</p>
             ) : null}
-            {exceptionalRecords.length > 0 ? (
+            {result.records.length > 0 ? (
                 <section className="space-y-2">
-                    <h3 className="text-sm font-semibold text-foreground">{t("manual.recordIssuesTitle")}</h3>
+                    <h3 className="text-sm font-semibold text-foreground">{t("manual.recordOutcomesTitle")}</h3>
                     <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
-                        {exceptionalRecords.slice(0, 50).map((record) => (
+                        {result.records.slice(0, 50).map((record) => (
                             <li key={record.recordId} className="grid gap-2 px-3 py-2.5 text-sm sm:grid-cols-[auto_minmax(0,1fr)_auto]">
                                 <span className="truncate text-muted-foreground">
                                     {sampledLabels.get(record.recordId)
@@ -477,8 +592,8 @@ function InvocationSummary({
                             </li>
                         ))}
                     </ul>
-                    {exceptionalRecords.length > 50 ? (
-                        <p className="text-xs text-muted-foreground">{t("manual.moreRecordIssues", { count: exceptionalRecords.length - 50 })}</p>
+                    {result.records.length > 50 ? (
+                        <p className="text-xs text-muted-foreground">{t("manual.moreRecordIssues", { count: result.records.length - 50 })}</p>
                     ) : null}
                 </section>
             ) : null}

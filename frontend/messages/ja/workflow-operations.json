@@ -78,7 +78,8 @@
       "legacyTitle": "概要のみ",
       "legacyBody": "この実行は以前の自動化から引き継いだもので、概要だけが残っています。どのステップを通ったかを推測して表示することはありません。",
       "outcome": "{outcome} の分岐に進みました",
-      "attempts": "{count} 回試行"
+      "attempts": "{count} 回試行",
+      "createdTask": "作成されたタスクを表示"
     },
     "nodeType": {
       "trigger": "トリガー",
@@ -211,8 +212,38 @@
         "prepare": "対象のレコードを確定できませんでした。ワークフローと選択内容を確認してから、もう一度お試しください。",
         "confirm": "確認の有効期限が切れたか、対象が変わりました。もう一度確認してから実行してください。",
         "result": "この実行の結果を読み込めませんでした。もう一度お試しください。",
-        "cancel": "残りのレコードをキャンセルできませんでした。もう一度お試しください。"
-      }
+        "cancel": "残りのレコードをキャンセルできませんでした。もう一度お試しください。",
+        "recordSearch": "レコードを検索できませんでした。検索内容を変更して再試行してください。",
+        "members": "メンバーを読み込めませんでした。閉じてから開き直してください。"
+      },
+      "createWorkflow": "このレコードのワークフローを作成",
+      "recordLabel": "実行対象のレコード",
+      "recordPlaceholder": "名前でレコードを検索",
+      "recordEmpty": "2文字以上入力してレコードを検索してください",
+      "editSelection": "選択内容を変更",
+      "newRun": "別の実行を準備",
+      "availability": {
+        "workflow_draft_only": "実行する前にワークフローを公開してください。",
+        "workflow_disabled": "新しい実行を受け付けるにはワークフローを有効にしてください。",
+        "workflow_paused": "新しい実行を受け付けるにはワークフローを再開してください。",
+        "workflow_archived": "実行する前にワークフローを復元してください。",
+        "workflow_not_canonical": "このワークフローは手動実行の準備ができていません。設定を開いて確認してください。",
+        "workflow_runtime_unavailable": "この環境ではワークフローを実行できません。",
+        "manual_entry_disabled": "作成者が手動実行を許可していません。",
+        "actor_unavailable": "実行メンバーを利用できません。ワークスペース管理者に設定の確認を依頼してください。",
+        "caller_permission_missing": "ワークフローの一部の操作に必要な権限がありません。",
+        "actor_permission_missing": "実行メンバーに一部の操作の権限がありません。",
+        "record_unavailable": "このレコードはワークフローで利用できなくなりました。",
+        "configuration_unavailable": "実行前にワークフローの設定を確認してください。"
+      },
+      "unavailable": "利用できません",
+      "runsAs": "{actor}として実行します。担当者と通知先は別に選択します。",
+      "resolvedInputsTitle": "この準備で使う入力値",
+      "effectSamplesTitle": "サンプルレコードで予定される変更",
+      "effectAssignee": "担当者または通知先：{name}",
+      "effectDueDate": "期限：{date}",
+      "effectUnresolved": "一部の値は、前のステップの実行後に確定します。",
+      "recordOutcomesTitle": "レコードごとの結果"
     },
     "status": {
       "queued": "順番待ち",
@@ -271,7 +302,7 @@
       "configureBody": "以下の値を入力してください。トリガーとステップはここでは変更できませんが、ワークフローの作成後に変更できます。",
       "nameLabel": "ワークフロー名",
       "exampleRecordLabel": "サンプルのレコード ID（任意）",
-      "exampleRecordHelp": "レコードを指定すると、そのレコードで何が起きるかを確認できます。実行はされません。",
+      "exampleRecordHelp": "レコードを検索してレシピをプレビューします。プレビューでは変更を行いません。",
       "previewOnlyTitle": "プレビューのみで、実行はされません",
       "previewOnlyBody": "何も作成・変更されません。ワークフローも実行も作られず、タスク・メモ・アクティビティ・タグ・通知も作成されません。",
       "preview": "プレビュー",
@@ -314,7 +345,8 @@
           "title": "温度感が下がった会社の確認",
           "description": "スケジュールに従って、温度感が下がっている会社を見つけ、様子を確認するタスクを作成します。"
         }
-      }
+      },
+      "startBlank": "ワークフローを一から作成"
     },
     "sourceEvent": {
       "person": {

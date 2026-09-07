@@ -6,7 +6,9 @@ import { Loader2Icon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import RecordSelect, { type RecordSelectOption } from "@/app/components/records/RecordSelect";
-import type { WorkflowDiagnosticCode, WorkflowSimulation } from "@/app/lib/types";
+import type { WorkflowDiagnosticCode, WorkflowInputDefinition, WorkflowInputValue, WorkflowSimulation } from "@/app/lib/types";
+import WorkflowLaunchInputs from "@/app/components/settings/workflows/WorkflowLaunchInputs";
+import { workflowInputsComplete } from "@/app/components/settings/workflows/workflowValues";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -31,6 +33,8 @@ export default function WorkflowSimulationDialog({
     onSearch,
     onClear,
     onSimulate,
+    inputDefinitions,
+    members,
 }: {
     open: boolean;
     records: RecordSelectOption[];
@@ -41,14 +45,18 @@ export default function WorkflowSimulationDialog({
     onOpenChange: (open: boolean) => void;
     onSearch: (query: string) => void;
     onClear: () => void;
-    onSimulate: (recordId: number) => void;
+    onSimulate: (recordId: number, inputs: Record<string, WorkflowInputValue>) => void;
+    inputDefinitions: WorkflowInputDefinition[];
+    members: Array<{ id: number; name: string }>;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const [recordId, setRecordId] = useState("");
+    const [inputs, setInputs] = useState<Record<string, WorkflowInputValue>>({});
 
     const changeOpen = (next: boolean) => {
         if (!next) {
             setRecordId("");
+            setInputs({});
             onClear();
         }
         onOpenChange(next);
@@ -71,6 +79,8 @@ export default function WorkflowSimulationDialog({
                                 <p className="font-medium">{t("simulation.previewOnlyTitle")}</p>
                                 <p className="mt-1 text-muted-foreground">{t("simulation.previewOnlyBody")}</p>
                             </div>
+                            <WorkflowLaunchInputs definitions={inputDefinitions} values={inputs} members={members} disabled={loading}
+                                onChange={(key, value) => { setInputs((current) => ({ ...current, [key]: value })); onClear(); }} />
                             <div className="space-y-1.5">
                                 <Label htmlFor="workflow-simulation-record">{t("simulation.recordLabel")}</Label>
                                 <RecordSelect
@@ -102,10 +112,10 @@ export default function WorkflowSimulationDialog({
                     {supported ? (
                         <Button
                             variant="brand"
-                            disabled={!recordId || loading}
+                            disabled={!recordId || loading || !workflowInputsComplete(inputDefinitions, inputs)}
                             onClick={() => {
                                 onClear();
-                                onSimulate(Number(recordId));
+                                onSimulate(Number(recordId), inputs);
                             }}
                         >
                             {loading ? <Loader2Icon className="size-4 animate-spin motion-reduce:animate-none" /> : <BeakerIcon className="size-4" />}

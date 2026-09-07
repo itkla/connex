@@ -5045,6 +5045,16 @@ export function getWorkflows(archived = false, init: RequestInit = {}) {
     return getJson<Types.WorkflowListItem[]>(`/api/workflows?archived=${archived}`, { cache: "no-store", ...init });
 }
 
+export function getWorkflowCatalog(init: RequestInit = {}) {
+    return getJson<Types.WorkflowCatalog>("/api/workflows/catalog", init);
+}
+
+export function getWorkflowManualOptions(recordType: string, recordId: number | null, init: RequestInit = {}) {
+    const params = new URLSearchParams({ recordType });
+    if (recordId !== null) params.set("recordId", String(recordId));
+    return getJson<Types.WorkflowManualOptions>(`/api/workflows/manual-options?${params}`, init);
+}
+
 export function createWorkflow(payload: Types.WorkflowCreateRequest, init: RequestInit = {}) {
     return postJson<Types.WorkflowDto>("/api/workflows", payload, init);
 }
@@ -5061,8 +5071,8 @@ export function validateWorkflow(id: number, init: RequestInit = {}) {
     return postJson<Types.WorkflowValidation>(`/api/workflows/${id}/validate`, {}, init);
 }
 
-export function simulateWorkflow(id: number, expectedRevision: number, recordId: number, init: RequestInit = {}) {
-    return postJson<Types.WorkflowSimulation>(`/api/workflows/${id}/simulate`, { expectedRevision, recordId }, init);
+export function simulateWorkflow(id: number, expectedRevision: number, recordId: number, init: RequestInit = {}, inputs?: Record<string, Types.WorkflowInputValue>) {
+    return postJson<Types.WorkflowSimulation>(`/api/workflows/${id}/simulate`, { expectedRevision, recordId, inputs }, init);
 }
 
 export function publishWorkflow(id: number, expectedRevision: number, init: RequestInit = {}) {

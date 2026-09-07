@@ -9,6 +9,8 @@ import { toastSuccess } from '@/app/lib/toast';
 import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PlusIcon, ChatBubbleLeftRightIcon, DocumentTextIcon, CheckCircleIcon, PaperClipIcon } from '@heroicons/react/24/outline';
 import { BuildingOffice2Icon, NoSymbolIcon, ArchiveBoxIcon, ArchiveBoxArrowDownIcon, ShareIcon, ShieldExclamationIcon, UserCircleIcon } from '@heroicons/react/24/outline';
 
+import RunWorkflowMenuItem from "@/app/components/records/RunWorkflowMenuItem";
+
 import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
 import {
@@ -193,6 +195,7 @@ export default function ContactActionsMenu({
                             </IconButton>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48">
+                            {owned && <RunWorkflowMenuItem record={{ type: "person", id: contact.id, label: contact.name }} />}
                             <DropdownMenuItem
                                 onSelect={(e) => {
                                     e.preventDefault();

@@ -18,6 +18,7 @@ import {
     MagnifyingGlassIcon,
     UserIcon,
     BriefcaseIcon,
+    BuildingOffice2Icon,
     InboxIcon,
     CalendarDaysIcon,
     ExclamationCircleIcon,
@@ -66,13 +67,14 @@ import { toastSuccess } from '@/app/lib/toast';
 import { noteSnippet } from '@/app/lib/noteText';
 import { parseMysqlDateTime } from '@/app/lib/utils';
 import { cn } from '@/lib/utils';
-import type { Contact, Deal, Task, User } from '@/app/lib/types';
+import type { Company, Contact, Deal, Task, User } from '@/app/lib/types';
 
 type Props = {
     tasks: Task[];
     persons: Contact[];
     deals: Deal[];
     users: User[];
+    companies?: Company[];
     currentUserId: number;
     canDeleteTasks: boolean;
     originWorkspaceId: number | null;
@@ -88,6 +90,7 @@ const ACTIVE_QUEUES: Queue[] = ['myOpen', 'dueToday', 'overdue', 'unassigned', '
 const ALL_QUEUES: Queue[] = [...ACTIVE_QUEUES, 'completed'];
 const QUEUE_STORAGE_KEY = 'tasks:queue';
 const VIEW_STORAGE_KEY = 'tasks:view';
+const EMPTY_COMPANIES: Company[] = [];
 const EASE_OUT: [number, number, number, number] = [0.23, 1, 0.32, 1];
 const COMPLETE_LINGER_MS = 230;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -180,6 +183,7 @@ export default function TasksBrowser({
     persons,
     deals,
     users,
+    companies = EMPTY_COMPANIES,
     currentUserId,
     canDeleteTasks,
     originWorkspaceId,
@@ -205,6 +209,7 @@ export default function TasksBrowser({
     const personById = useMemo(() => new Map(persons.map((p) => [p.id, p])), [persons]);
     const dealById = useMemo(() => new Map(deals.map((d) => [d.id, d])), [deals]);
     const userById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
+    const companyById = useMemo(() => new Map(companies.map((company) => [company.id, company])), [companies]);
 
     const [query, setQuery] = useState('');
     const [assigneeFilter, setAssigneeFilter] = useState<Set<string>>(new Set());
@@ -345,11 +350,11 @@ export default function TasksBrowser({
 
     const companyIdForTask = useCallback(
         (task: Task) => {
-            if (task.personId == null) return null;
-            const person = personById.get(task.personId);
-            return person?.company?.id ?? person?.companyId ?? null;
+            if (task.companyId != null) return task.companyId;
+            const person = task.personId != null ? personById.get(task.personId) : undefined;
+            return person?.company?.id ?? person?.companyId ?? (task.dealId != null ? dealById.get(task.dealId)?.company : null) ?? null;
         },
-        [personById],
+        [dealById, personById],
     );
 
     const queueTasks = useMemo(
@@ -375,7 +380,7 @@ export default function TasksBrowser({
             }
             const companyId = companyIdForTask(task);
             if (companyId != null) {
-                const company = task.personId != null ? personById.get(task.personId)?.company : undefined;
+                const company = companyById.get(companyId) ?? (task.personId != null ? personById.get(task.personId)?.company : undefined);
                 if (company) bumpOption(companies, String(companyId), company.name);
             }
         }
@@ -385,7 +390,7 @@ export default function TasksBrowser({
             deals: toOptions(deals_),
             companies: toOptions(companies),
         };
-    }, [queueTasks, userById, personById, dealById, companyIdForTask]);
+    }, [queueTasks, userById, personById, dealById, companyById, companyIdForTask]);
 
     const filtered = useMemo(() => {
         const q = query.trim().toLowerCase();
@@ -591,6 +596,7 @@ export default function TasksBrowser({
                     assignedToId: task.assignedToId,
                     personId: task.personId ?? undefined,
                     dealId: task.dealId ?? undefined,
+                    companyId: task.companyId ?? undefined,
                     completed: next,
                 },
                 {
@@ -670,9 +676,7 @@ export default function TasksBrowser({
         }
     };
 
-    const drawerCompanyId = editingTask?.personId
-        ? personById.get(editingTask.personId)?.companyId ?? null
-        : null;
+    const drawerCompanyId = editingTask ? companyIdForTask(editingTask) : null;
     const visibleDeletingTask = pageCurrent ? deletingTask : null;
 
     const hasAnyTasks = tasks.length > 0;
@@ -783,6 +787,7 @@ export default function TasksBrowser({
                 checked={completing.has(task.id) || task.completed}
                 person={task.personId ? personById.get(task.personId) : undefined}
                 deal={task.dealId ? dealById.get(task.dealId) : undefined}
+                company={task.companyId ? companyById.get(task.companyId) : undefined}
                 assignee={userById.get(task.assignedToId)}
                 bucket={bucket}
                 onToggle={(nextChecked) => handleToggleComplete(task, nextChecked)}
@@ -1212,6 +1217,7 @@ type TaskRowProps = {
     checked: boolean;
     person?: Contact;
     deal?: Deal;
+    company?: Company;
     assignee?: User;
     bucket: Bucket;
     onToggle: (next: boolean) => void;
@@ -1233,6 +1239,7 @@ function TaskRow({
     checked,
     person,
     deal,
+    company,
     assignee,
     bucket,
     onToggle,
@@ -1330,6 +1337,12 @@ function TaskRow({
                 </span>
 
                 <div className="relative z-10 hidden shrink-0 items-center gap-1.5 sm:flex">
+                    {company ? (
+                        <Link href={`/records/companies/${company.id}`} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}
+                            className="inline-flex max-w-40 items-center gap-1 rounded-full bg-card px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-inset ring-border hover:bg-muted" title={company.name}>
+                            <BuildingOffice2Icon className="size-3 shrink-0" /><span className="truncate">{company.name}</span>
+                        </Link>
+                    ) : null}
                     {person && (
                         <Link
                             href={`/records/contacts/${person.id}`}

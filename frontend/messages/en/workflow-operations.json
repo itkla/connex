@@ -78,7 +78,8 @@
       "legacyTitle": "Summary only",
       "legacyBody": "This run was carried over from an earlier automation, so only its summary was kept. Connex won't guess which steps it took.",
       "outcome": "Took the {outcome} branch",
-      "attempts": "{count, plural, one {# attempt} other {# attempts}}"
+      "attempts": "{count, plural, one {# attempt} other {# attempts}}",
+      "createdTask": "View created task"
     },
     "nodeType": {
       "trigger": "Trigger",
@@ -211,8 +212,38 @@
         "prepare": "Couldn't work out which records to run this on. Check the workflow and your selection, then try again.",
         "confirm": "This review expired or the records changed. Review the list again, then start the run.",
         "result": "Couldn't load the result of this run. Try again.",
-        "cancel": "Couldn't cancel the records still to go. Try again."
-      }
+        "cancel": "Couldn't cancel the records still to go. Try again.",
+        "recordSearch": "Could not search records. Change the search to try again.",
+        "members": "Could not load members. Close and reopen to try again."
+      },
+      "createWorkflow": "Create a workflow for this record",
+      "recordLabel": "Record to run on",
+      "recordPlaceholder": "Search records by name",
+      "recordEmpty": "Enter at least two characters to find a record",
+      "editSelection": "Change selection",
+      "newRun": "Prepare another run",
+      "availability": {
+        "workflow_draft_only": "Publish this workflow before running it.",
+        "workflow_disabled": "Enable this workflow to accept new runs.",
+        "workflow_paused": "Resume this workflow to accept new runs.",
+        "workflow_archived": "Restore this workflow before running it.",
+        "workflow_not_canonical": "This workflow is not ready for manual runs. Open it to review its availability.",
+        "workflow_runtime_unavailable": "Workflow execution is not available on this deployment.",
+        "manual_entry_disabled": "The author has not allowed manual runs.",
+        "actor_unavailable": "The configured execution member is unavailable. Ask a workspace administrator to review the workflow.",
+        "caller_permission_missing": "You do not have permission for one or more actions in this workflow.",
+        "actor_permission_missing": "The configured execution member lacks permission for one or more actions.",
+        "record_unavailable": "This record is no longer available for this workflow.",
+        "configuration_unavailable": "Review the workflow configuration before running it."
+      },
+      "unavailable": "Unavailable",
+      "runsAs": "Executes as {actor}. Assignees and recipients are chosen separately.",
+      "resolvedInputsTitle": "Inputs in this preparation",
+      "effectSamplesTitle": "Expected effects on sampled records",
+      "effectAssignee": "Assignee or recipient: {name}",
+      "effectDueDate": "Due: {date}",
+      "effectUnresolved": "Some values are resolved after an earlier step runs.",
+      "recordOutcomesTitle": "Record outcomes"
     },
     "status": {
       "queued": "Queued",
@@ -271,7 +302,7 @@
       "configureBody": "Fill in the values below. The trigger and the steps themselves are fixed here — you can change them once the workflow exists.",
       "nameLabel": "Workflow name",
       "exampleRecordLabel": "Example record ID (optional)",
-      "exampleRecordHelp": "Give a record and the preview shows what would happen to it. Nothing runs.",
+      "exampleRecordHelp": "Search for a visible record to preview the recipe. The preview does not make changes.",
       "previewOnlyTitle": "Preview only — nothing will run",
       "previewOnlyBody": "Nothing is created or changed: no workflow, no run, and no task, note, activity, tag, or notification.",
       "preview": "Preview",
@@ -314,7 +345,8 @@
           "title": "Review a cooling company",
           "description": "On a schedule, find companies whose warmth is cooling and create a task to check in."
         }
-      }
+      },
+      "startBlank": "Build a workflow from scratch"
     },
     "sourceEvent": {
       "person": {

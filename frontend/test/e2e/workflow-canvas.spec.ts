@@ -7,6 +7,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
 }
 
+async function openNewWorkflowEditor(page: Page, name: string): Promise<void> {
+    const capabilitiesResponse = await page.request.get("/api/capabilities");
+    expect(capabilitiesResponse.ok()).toBe(true);
+    const capabilities: unknown = await capabilitiesResponse.json();
+    await page.goto("/workflows/new?recordType=deal&start=entity_change");
+    await page.getByLabel("Workflow name").fill(name);
+    if (isRecord(capabilities) && capabilities.workflowDefinitionSchemaVersion === 2) {
+        await page.getByRole("button", { name: "Continue to editor" }).click();
+    }
+}
+
 function workflowId(value: unknown): number {
     if (!isRecord(value) || typeof value.id !== "number") {
         throw new Error("Workflow response is missing a numeric id");
@@ -193,8 +204,7 @@ test.describe("workflow canvas", () => {
             markNavigationPending = resolve;
         });
 
-        await page.goto("/workflows/new");
-        await page.getByLabel("Workflow name").fill("Create without lost edits");
+        await openNewWorkflowEditor(page, "Create without lost edits");
         await page.route(/\/workflows\/\d+(?:\?.*)?$/, async (route) => {
             const pathname = new URL(route.request().url()).pathname;
             if (!/^\/workflows\/\d+$/.test(pathname)) {
@@ -258,8 +268,7 @@ test.describe("workflow canvas", () => {
             markNavigationPending = resolve;
         });
 
-        await page.goto("/workflows/new");
-        await page.getByLabel("Workflow name").fill("Create after an interrupted pan");
+        await openNewWorkflowEditor(page, "Create after an interrupted pan");
         await page.route(/\/workflows\/\d+(?:\?.*)?$/, async (route) => {
             const pathname = new URL(route.request().url()).pathname;
             if (!/^\/workflows\/\d+$/.test(pathname)) {
@@ -340,8 +349,7 @@ test.describe("workflow canvas", () => {
             await route.fulfill({ response });
         });
 
-        await page.goto("/workflows/new");
-        await page.getByLabel("Workflow name").fill("Leave during creation");
+        await openNewWorkflowEditor(page, "Leave during creation");
         const createResponse = page.waitForResponse((response) => (
             response.request().method() === "POST" && new URL(response.url()).pathname === "/api/workflows"
         ));

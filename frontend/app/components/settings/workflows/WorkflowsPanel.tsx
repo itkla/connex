@@ -14,6 +14,7 @@ import {
     PauseCircleIcon,
     PlayCircleIcon,
     PlusIcon,
+    MagnifyingGlassIcon,
 } from "@heroicons/react/24/outline";
 
 import AccessDenied from "@/app/components/AccessDenied";
@@ -38,6 +39,8 @@ import { formatRelativeTime } from "@/app/lib/utils";
 import WorkflowRunsDialog from "@/app/components/settings/workflows/WorkflowRunsDialog";
 import { useWorkflowDuplication } from "@/app/components/settings/workflows/useWorkflowDuplication";
 import { useWorkflowWorkspaceAccess } from "@/app/components/settings/workflows/useWorkflowWorkspaceAccess";
+import { filterWorkflowRegister } from "@/app/components/settings/workflows/workflowRegister";
+import { RECORD_TYPES } from "@/app/components/settings/workflows/vocabulary";
 import {
     formatWorkflowRunDateTime,
     normalizeWorkflowRunStatus,
@@ -47,6 +50,9 @@ import {
 } from "@/app/components/settings/workflows/workflowRunStatus";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -57,9 +63,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const rowActionTrigger =
-    "flex size-7 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-colors motion-reduce:transition-none hover:bg-muted/70 hover:text-foreground group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100";
-
 type WorkflowsPanelState = {
     archived: boolean;
     workflows: WorkflowListItem[];
@@ -69,6 +72,9 @@ type WorkflowsPanelState = {
     archiveTarget: WorkflowListItem | null;
     runsTarget: WorkflowListItem | null;
     pendingId: number | null;
+    query: string;
+    recordFilter: string;
+    stateFilter: string;
 };
 
 type WorkflowsPanelAction = Partial<WorkflowsPanelState>
@@ -83,6 +89,9 @@ const INITIAL_WORKFLOWS_PANEL_STATE: WorkflowsPanelState = {
     archiveTarget: null,
     runsTarget: null,
     pendingId: null,
+    query: "",
+    recordFilter: "all",
+    stateFilter: "all",
 };
 
 function workflowsPanelReducer(state: WorkflowsPanelState, action: WorkflowsPanelAction): WorkflowsPanelState {
@@ -113,6 +122,9 @@ export default function WorkflowsPanel() {
         archiveTarget,
         runsTarget,
         pendingId,
+        query,
+        recordFilter,
+        stateFilter,
     }, updatePanelState] = useReducer(workflowsPanelReducer, INITIAL_WORKFLOWS_PANEL_STATE);
     const scopeRef = useRef({ activeWorkspaceId, switching });
     const lifetimeRef = useRef(false);
@@ -172,6 +184,7 @@ export default function WorkflowsPanel() {
     }, [activeWorkspaceId, archived, switching, t]);
 
     const visibleWorkflows = loadedWorkspaceId === activeWorkspaceId && !switching ? workflows : [];
+    const filteredWorkflows = filterWorkflowRegister(visibleWorkflows, { query, recordType: recordFilter, state: stateFilter });
 
     const toggleEnabled = async (workflow: WorkflowListItem) => {
         const workspaceId = activeWorkspaceId;
@@ -287,6 +300,35 @@ export default function WorkflowsPanel() {
                     </TabsList>
                 </Tabs>
 
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+                    <div className="relative sm:col-span-2 lg:col-span-1">
+                        <MagnifyingGlassIcon aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                            value={query}
+                            onChange={(event) => updatePanelState({ query: event.target.value })}
+                            placeholder={t("register.search")}
+                            aria-label={t("register.search")}
+                            className="pl-9"
+                            disabled={switching}
+                        />
+                    </div>
+                    <Select value={recordFilter} onValueChange={(recordFilter) => updatePanelState({ recordFilter })} disabled={switching}>
+                        <SelectTrigger className="w-full lg:min-w-40" aria-label={t("register.recordFilter")}><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">{t("register.allRecords")}</SelectItem>
+                            {RECORD_TYPES.map((type) => <SelectItem key={type} value={type}>{tr(`record.${type}`)}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                    <Select value={stateFilter} onValueChange={(stateFilter) => updatePanelState({ stateFilter })} disabled={switching}>
+                        <SelectTrigger className="w-full lg:min-w-40" aria-label={t("register.stateFilter")}><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            {["all", "draft", "enabled", "disabled", "paused", "attention"].map((state) => (
+                                <SelectItem key={state} value={state}>{t(`register.state.${state}`)}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+
                 {loading || switching ? (
                     <WorkflowSkeleton rows={3} />
                 ) : visibleWorkflows.length === 0 ? (
@@ -302,9 +344,17 @@ export default function WorkflowsPanel() {
                             </Button>
                         ) : undefined}
                     />
+                ) : filteredWorkflows.length === 0 ? (
+                    <EmptyState
+                        icon={MagnifyingGlassIcon}
+                        title={t("register.noMatchesTitle")}
+                        body={t("register.noMatchesBody")}
+                        tone="muted"
+                        action={<Button variant="outline" onClick={() => updatePanelState({ query: "", recordFilter: "all", stateFilter: "all" })}>{t("register.clearFilters")}</Button>}
+                    />
                 ) : (
                     <ul className="divide-y divide-border overflow-hidden rounded-2xl border border-border bg-card">
-                        {visibleWorkflows.map((workflow) => {
+                        {filteredWorkflows.map((workflow) => {
                             const busy = pendingId === workflow.id || duplicatingWorkflowId === workflow.id;
                             const latestStatus = workflow.latestRun
                                 ? normalizeWorkflowRunStatus(workflow.latestRun.status)
@@ -348,12 +398,15 @@ export default function WorkflowsPanel() {
                                                 </Badge>
                                             ) : null}
                                         </span>
-                                        <span className="block truncate text-xs text-muted-foreground">
-                                            {t("listSummary", {
-                                                record: tr(`record.${workflow.recordType ?? "deal"}`),
-                                                steps: workflow.nodeCount,
-                                                actions: workflow.actionCount,
-                                            })}
+                                        <span className="block text-sm text-muted-foreground">
+                                            {workflow.description?.trim() || t("register.noPurpose")}
+                                        </span>
+                                        <span className="block text-xs text-muted-foreground">
+                                            {tr(`record.${workflow.recordType ?? "deal"}`)}
+                                            {workflow.trigger ? ` · ${workflow.trigger.type === "manual"
+                                                ? t("setup.start.manual.title")
+                                                : workflow.trigger.type === "schedule" ? t("summary.schedule", { cadence: tr(`cadence.${workflow.trigger.cadence ?? "daily"}`) })
+                                                    : workflow.trigger.events?.map((event) => tr(`event.${event}`)).join(", ") || t("summary.anyChange")}` : ""}
                                         </span>
                                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                                             {workflow.latestRun && latestStatus ? (
@@ -381,9 +434,9 @@ export default function WorkflowsPanel() {
                                     </button>
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
-                                            <button type="button" aria-label={t("rowActions", { name: workflow.name })} className={rowActionTrigger}>
+                                            <IconButton variant="ghost" label={t("rowActions", { name: workflow.name })}>
                                                 <EllipsisHorizontalIcon className="size-5" />
-                                            </button>
+                                            </IconButton>
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent align="end" className="w-44">
                                             <DropdownMenuItem disabled={busy} onSelect={() => router.push(`/workflows/${workflow.id}`)}>

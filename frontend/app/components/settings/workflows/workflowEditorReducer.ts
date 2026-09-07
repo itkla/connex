@@ -23,6 +23,12 @@ export type WorkflowMergeConflict =
         serverValue: string | null;
     }
     | {
+        kind: "definitionSettings";
+        key: "definitionSettings";
+        localValue: Pick<WorkflowDefinition, "schemaVersion" | "inputs">;
+        serverValue: Pick<WorkflowDefinition, "schemaVersion" | "inputs">;
+    }
+    | {
         kind: "node";
         key: string;
         localValue: WorkflowNode | null;
@@ -270,6 +276,17 @@ export function mergeWorkflowDocuments(
     const executionMode = mergeField("executionMode", base.executionMode, local.executionMode, server.executionMode);
     document.executionMode = executionMode === "system" ? "system" : "user";
 
+    const settings = (definition: WorkflowDefinition) => ({ schemaVersion: definition.schemaVersion, inputs: definition.inputs });
+    const baseSettings = settings(base.definition);
+    const localSettings = settings(local.definition);
+    const serverSettings = settings(server.definition);
+    const localSettingsChanged = !equal(baseSettings, localSettings);
+    const serverSettingsChanged = !equal(baseSettings, serverSettings);
+    if (localSettingsChanged && serverSettingsChanged && !equal(localSettings, serverSettings)) {
+        conflicts.push({ kind: "definitionSettings", key: "definitionSettings", localValue: localSettings, serverValue: serverSettings });
+    }
+    if (localSettingsChanged && !serverSettingsChanged) document.definition = { ...document.definition, ...localSettings };
+
     const nodes = mergeEntityMap(
         base.definition.nodes,
         local.definition.nodes,
@@ -312,6 +329,11 @@ export function applyWorkflowMergeChoice(
 ): WorkflowEditorDocument {
     const next = structuredClone(document);
     switch (conflict.kind) {
+        case "definitionSettings": {
+            const value = choice === "local" ? conflict.localValue : conflict.serverValue;
+            next.definition = { ...next.definition, ...value };
+            break;
+        }
         case "name": {
             const value = choice === "local" ? conflict.localValue : conflict.serverValue;
             next.name = value ?? "";

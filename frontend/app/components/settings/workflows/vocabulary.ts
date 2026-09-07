@@ -1,5 +1,5 @@
 import { resolveCampaignAccess } from "@/app/lib/campaignAccess";
-import type { CampaignMessage, RuleAction, WorkflowExecutionMode } from "@/app/lib/types";
+import type { CampaignMessage, RuleAction, WorkflowCatalog, WorkflowExecutionMode } from "@/app/lib/types";
 
 /**
  * The authoring vocabulary shared by every workflow surface, so the editor, the inspector, and
@@ -63,7 +63,8 @@ export function supportsSimulation(recordType: string | null): boolean {
 }
 
 /** Actions available for a record type. */
-export function actionsFor(recordType: string): string[] {
+export function actionsFor(recordType: string, catalog?: WorkflowCatalog | null): string[] {
+    if (catalog) return [...new Set(catalog.actions.filter((action) => action.recordTypes.includes(recordType)).map((action) => action.type))];
     return ACTIONS[recordType] ?? ["notify"];
 }
 
@@ -85,8 +86,8 @@ export function canAuthorTriggeredSend(
 }
 
 /** Actions the inspector may offer, preserving backend vocabulary while gating triggered sends. */
-export function authorableActions(recordType: string, allowTriggeredSend: boolean): string[] {
-    return actionsFor(recordType).filter((type) => type !== "send_message" || allowTriggeredSend);
+export function authorableActions(recordType: string, allowTriggeredSend: boolean, catalog?: WorkflowCatalog | null): string[] {
+    return actionsFor(recordType, catalog).filter((type) => type !== "send_message" || allowTriggeredSend);
 }
 
 /** Hours a new first-response SLA action asks for until the author changes it. */
@@ -100,6 +101,7 @@ export const DEFAULT_RESPONSE_DUE_HOURS = 4;
  * authoring surfaces build their action here so the two cannot disagree about what a new action is.
  */
 export function actionWithDefaults(type: string): RuleAction {
+    if (type === "create_task") return { type, dueInDays: 3 };
     return type === "set_response_due"
         ? { type, dueInHours: DEFAULT_RESPONSE_DUE_HOURS }
         : { type };

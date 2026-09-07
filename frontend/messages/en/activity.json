@@ -331,7 +331,8 @@
     "save": "Save",
     "descriptionRequired": "Description is required",
     "taskUpdated": "Task updated",
-    "updateFailed": "Couldn't update the task"
+    "updateFailed": "Couldn't update the task",
+    "viewLinkedCompany": "View linked company"
   },
   "ActivityLibraryTags": {
     "title": "Tags",
