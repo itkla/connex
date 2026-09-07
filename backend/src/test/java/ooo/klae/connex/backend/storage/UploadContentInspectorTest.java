@@ -213,31 +213,56 @@ class UploadContentInspectorTest {
 
     /**
      * Verifies that real LibreOffice packages carrying pictures, thumbnails, and metadata
-     * manifests still upload once every package member is inspected, and that inspecting them
-     * stays far below the five-second deadline because members are walked rather than decoded.
+     * manifests still upload once every package member is inspected, and that their raster
+     * members are walked structurally rather than handed to the decoding image validator, which
+     * is what keeps photo-heavy documents inside the five-second deadline.
      */
     @Test
     void acceptsRealLibreOfficePicturePackages() throws Exception {
         byte[] odt = fixture("libreoffice-picture-source.odt");
         byte[] docx = fixture("libreoffice-picture-source.docx");
         byte[] pptx = fixture("libreoffice-picture-source.pptx");
+        UploadPolicy policy = new UploadPolicy(properties);
+        ImageUploadValidator refusingValidator = new ImageUploadValidator(
+                properties,
+                policy,
+                new ImageDecodeAdmissionService(properties),
+                imageValidationExecutor) {
+            @Override
+            public ValidatedImage validate(UploadSource source) {
+                throw new AssertionError("Package members must be walked, never decoded");
+            }
 
-        long startedAt = System.nanoTime();
-        assertEquals(UploadFormat.ODT, inspector.inspect(
-            UploadPurpose.ATTACHMENT,
-            UploadSource.from(
-                "picture.odt", "application/vnd.oasis.opendocument.text", odt)).format());
-        assertEquals(UploadFormat.DOCX, inspector.inspect(
-            UploadPurpose.ATTACHMENT,
-            UploadSource.from("picture.docx", docxContentType(), docx)).format());
-        assertEquals(UploadFormat.PPTX, inspector.inspect(
-            UploadPurpose.ATTACHMENT,
-            UploadSource.from("picture.pptx", pptxContentType(), pptx)).format());
-        long elapsedMillis = Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
+            @Override
+            public ValidatedImage validate(UploadSource source, UploadPurpose purpose) {
+                throw new AssertionError("Package members must be walked, never decoded");
+            }
 
-        assertTrue(
-            elapsedMillis < 1000,
-            "Package member inspection took " + elapsedMillis + "ms");
+            @Override
+            public ValidatedAiImage validateForAi(UploadSource source) {
+                throw new AssertionError("Package members must be walked, never decoded");
+            }
+
+            @Override
+            public ValidatedAiImage validateStoredForAi(UploadSource source) {
+                throw new AssertionError("Package members must be walked, never decoded");
+            }
+        };
+
+        try (UploadContentInspector packageInspector =
+                new UploadContentInspector(policy, refusingValidator, new ObjectMapper())) {
+            assertEquals(UploadFormat.ODT, packageInspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "picture.odt", "application/vnd.oasis.opendocument.text", odt)).format());
+            assertEquals(UploadFormat.DOCX, packageInspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from("picture.docx", docxContentType(), docx)).format());
+            assertEquals(UploadFormat.PPTX, packageInspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from("picture.pptx", pptxContentType(), pptx)).format());
+        }
+
         assertTrue(contains(odt, "Thumbnails/thumbnail.png"
             .getBytes(StandardCharsets.US_ASCII)));
         assertTrue(contains(odt, "manifest.rdf".getBytes(StandardCharsets.US_ASCII)));
