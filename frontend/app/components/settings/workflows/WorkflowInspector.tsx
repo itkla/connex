@@ -8,7 +8,11 @@ import {
     UserIcon,
 } from "@heroicons/react/24/outline";
 
+import { workflowDiagnosticTargetsEntry, type WorkflowFieldProps } from "@/app/components/settings/workflows/workflowDiagnosticFields";
 import SegmentBuilder from "@/app/components/records/SegmentBuilder";
+import WorkflowPolicyEditor, { type WorkflowPolicies } from "@/app/components/settings/workflows/WorkflowPolicyEditor";
+import WorkflowWaitFields from "@/app/components/settings/workflows/WorkflowWaitFields";
+import WorkflowDateTriggerFields from "@/app/components/settings/workflows/WorkflowDateTriggerFields";
 import WorkflowInputEditor from "@/app/components/settings/workflows/WorkflowInputEditor";
 import { useWorkflowValueOptions, WorkflowTextValue, WorkflowValuePicker } from "@/app/components/settings/workflows/WorkflowValuePicker";
 import { workflowReferenceKey } from "@/app/components/settings/workflows/workflowValues";
@@ -82,6 +86,7 @@ export default function WorkflowInspector({
     canUpgrade,
     onUpgrade,
     onInputsChange,
+    onPoliciesChange,
 }: {
     document: WorkflowEditorDocument;
     selectedNodeId: string | null;
@@ -107,13 +112,14 @@ export default function WorkflowInspector({
     canUpgrade: boolean;
     onUpgrade: () => void;
     onInputsChange: (inputs: WorkflowInputDefinition[], mode: ChangeMode) => void;
+    onPoliciesChange: (policies: WorkflowPolicies, mode: ChangeMode) => void;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const inspectorRef = useRef<HTMLDivElement>(null);
     const node = document.definition.nodes.find((candidate) => candidate.id === selectedNodeId) ?? null;
     const nodeDiagnostics = useMemo(
-        () => diagnostics.filter((diagnostic) => diagnostic.nodeId === selectedNodeId),
-        [diagnostics, selectedNodeId],
+        () => diagnostics.filter((diagnostic) => diagnostic.nodeId === selectedNodeId || selectedNodeId === document.definition.entryNodeId && workflowDiagnosticTargetsEntry(diagnostic)),
+        [diagnostics, document.definition.entryNodeId, selectedNodeId],
     );
     const indexedDiagnostics = nodeDiagnostics.map((diagnostic, index) => ({ diagnostic, index }));
 
@@ -183,6 +189,10 @@ export default function WorkflowInspector({
                     onInputsChange={onInputsChange}
                 />
             ) : null}
+            {node.type === "TRIGGER" && document.definition.schemaVersion === 2 ? (
+                <WorkflowPolicyEditor definition={document.definition} recordType={document.recordType ?? "deal"} fields={fields} options={options}
+                    disabled={readOnly} fieldProps={fieldProps} onChange={onPoliciesChange} onCommit={onCommitTransient} />
+            ) : null}
             {node.type === "CONDITION" ? (
                 <div
                     inert={readOnly ? true : undefined}
@@ -237,8 +247,27 @@ export default function WorkflowInspector({
                     onCommitTransient={onCommitTransient}
                 />
             ) : null}
+            {node.type === "WAIT" ? <WorkflowWaitFields node={node} definition={document.definition} catalog={catalog} recordType={document.recordType ?? "deal"}
+                disabled={readOnly} fieldProps={fieldProps} onChange={onNodeChange} onCommit={onCommitTransient} /> : null}
             {node.type === "END" ? (
-                <p className="rounded-xl bg-muted/50 p-3 text-sm text-muted-foreground">{t("endExplanation")}</p>
+                <div className="space-y-4">
+                    <p className="rounded-xl bg-muted/50 p-3 text-sm text-muted-foreground">{t("endExplanation")}</p>
+                    {document.definition.schemaVersion === 2 ? <>
+                        <LabeledField label={t("end.outcome")}>
+                            <Select value={node.config?.outcome ?? "completed"} disabled={readOnly} onValueChange={(outcome) => {
+                                if (outcome === "completed" || outcome === "stopped") onNodeChange({ ...node, config: { outcome, ...(outcome === "stopped" && node.config?.reason ? { reason: node.config.reason } : {}) } }, "commit");
+                            }}>
+                                <SelectTrigger aria-label={t("end.outcome")} {...fieldProps("config.outcome")} className="w-full"><SelectValue /></SelectTrigger>
+                                <SelectContent><SelectItem value="completed">{t("end.completed")}</SelectItem><SelectItem value="stopped">{t("end.stopped")}</SelectItem></SelectContent>
+                            </Select>
+                        </LabeledField>
+                        {node.config?.outcome === "stopped" ? <LabeledField label={t("end.reason")}>
+                            <Input aria-label={t("end.reason")} {...fieldProps("config.reason")} value={node.config.reason ?? ""} maxLength={64} pattern="[a-z][a-z0-9_]{0,63}" disabled={readOnly}
+                                onChange={(event) => onNodeChange({ ...node, config: { outcome: "stopped", reason: event.target.value || undefined } }, "transient")} onBlur={onCommitTransient} />
+                            <p className="text-sm text-muted-foreground">{t("end.reasonHelp")}</p>
+                        </LabeledField> : null}
+                    </> : null}
+                </div>
             ) : null}
 
             {nodeDiagnostics.length > 0 ? (
@@ -261,13 +290,6 @@ export default function WorkflowInspector({
     );
 }
 
-type FieldProps = (fieldPath: string) => {
-    "data-workflow-node": string;
-    "data-workflow-field": string;
-    "aria-invalid": boolean;
-    "aria-describedby": string | undefined;
-};
-
 function TriggerFields({
     node,
     document,
@@ -288,7 +310,7 @@ function TriggerFields({
     options: RuleBuilderOptions | null;
     readOnly: boolean;
     canRunAsSystem: boolean;
-    fieldProps: FieldProps;
+    fieldProps: WorkflowFieldProps;
     onNodeChange: (node: WorkflowNode, mode: ChangeMode) => void;
     onMetadataChange: (
         field: "description" | "recordType" | "executionMode",
@@ -305,6 +327,7 @@ function TriggerFields({
     const tr = useTranslations("WorkflowAuthoring");
     const isSchedule = node.config.type === "schedule";
     const isManual = node.config.type === "manual";
+    const isDate = node.config.type === "date";
     const isV2 = document.definition.schemaVersion === 2;
     const recordType = document.recordType ?? "deal";
     const selectedEvents = new Set(node.config.events ?? []);
@@ -333,7 +356,8 @@ function TriggerFields({
                     value={node.config.type}
                     onValueChange={(type) => onNodeChange({
                         ...node,
-                        config: type === "manual" ? { type: "manual" } : type === "schedule"
+                        config: type === "manual" ? { type: "manual" } : type === "date"
+                            ? { type: "date", dateField: "expectedCloseDate", offsetDays: -30, localTime: "09:00", timezone: "UTC", allowManualRuns: node.config.allowManualRuns ?? false } : type === "schedule"
                             ? { type, cadence: node.config.cadence ?? "daily", ...(isV2 ? { allowManualRuns: node.config.allowManualRuns ?? false } : {}) }
                             : { type: "entity_change", events: node.config.events ?? [], ...(isV2 ? { allowManualRuns: node.config.allowManualRuns ?? false } : {}) },
                     }, "commit")}
@@ -341,6 +365,7 @@ function TriggerFields({
                 >
                     <SelectTrigger size="sm" aria-label={tr("triggerKind")} {...fieldProps("config.type")}><SelectValue /></SelectTrigger>
                     <SelectContent>
+                        {isV2 && catalog?.supportedDateFields?.some((field) => field.recordType === recordType) ? <SelectItem value="date">{t("setup.start.date.title")}</SelectItem> : null}
                         {isV2 && catalog?.recordTypes.some((record) => record.type === recordType && record.manual) ? <SelectItem value="manual">{t("setup.start.manual.title")}</SelectItem> : null}
                         {(!isV2 || catalog?.recordTypes.some((record) => record.type === recordType && record.event)) ? <SelectItem value="entity_change">{tr("kindEntityChange")}</SelectItem> : null}
                         {(isV2 ? catalog?.recordTypes.some((record) => record.type === recordType && record.schedule) : SCHEDULE_RECORD_TYPES.includes(recordType)) ? (
@@ -349,7 +374,8 @@ function TriggerFields({
                     </SelectContent>
                 </Select>
             </LabeledField>
-            {isSchedule ? (
+            {isDate ? <WorkflowDateTriggerFields trigger={node.config} disabled={readOnly} fieldProps={fieldProps}
+                onChange={(config, mode) => onNodeChange({ ...node, config }, mode)} onCommit={onCommitTransient} /> : isSchedule ? (
                 <LabeledField label={tr("cadenceLabel")}>
                     <Select
                         value={node.config.cadence ?? "daily"}
@@ -406,7 +432,7 @@ function TriggerFields({
                     <p className="text-sm text-muted-foreground">{t("inputs.allowManualHelp")}</p>
                 </div>
             ) : null}
-            {!isSchedule && !isManual ? (
+            {!isSchedule && !isManual && !isDate ? (
                 <LabeledField label={tr("throttleLabel")}>
                     <Input
                         type="number"
@@ -455,8 +481,8 @@ function TriggerFields({
                     {...fieldProps("description")}
                 />
             </LabeledField>
-            {isV2 ? <WorkflowInputEditor inputs={document.definition.inputs ?? []} members={options?.owners ?? []}
-                disabled={readOnly} onChange={onInputsChange} onCommit={onCommitTransient} /> : null}
+            {isV2 ? <WorkflowInputEditor fieldProps={fieldProps} inputs={document.definition.inputs ?? []} members={options?.owners ?? []}
+                disabled={readOnly} automatic={!isManual} onChange={onInputsChange} onCommit={onCommitTransient} /> : null}
             <div className="space-y-2 border-t border-border pt-4">
                 <Label>{tr("runAsLabel")}</Label>
                 <div role="radiogroup" aria-label={tr("runAsLabel")} className="grid gap-2">
@@ -515,7 +541,7 @@ function ActionFields({
     triggeredSendEnabled: boolean;
     canConfigureTriggeredSend: boolean;
     campaignMessageOptions: WorkflowCampaignMessageOptions | null;
-    fieldProps: FieldProps;
+    fieldProps: WorkflowFieldProps;
     onNodeChange: (node: WorkflowNode, mode: ChangeMode) => void;
     onCommitTransient: () => void;
     catalog: WorkflowCatalog | null;
@@ -573,6 +599,22 @@ function ActionFields({
                     </SelectContent>
                 </Select>
             </LabeledField>
+            {isV2 && node.config.type === "update_field" ? (
+                <div className="space-y-3">
+                    <p className="text-sm text-muted-foreground">{t("date.updateFieldHelp")}</p>
+                    <LabeledField label={t("date.newDate")}>
+                        {node.config.valueRef ? <WorkflowValuePicker options={valuesForField("value").filter((option) => option.valueType === "date")} value={node.config.valueRef}
+                            label={t("date.newDate")} disabled={readOnly} onChange={(valueRef) => update({ ...node.config, field: "expectedCloseDate", value: undefined, valueRef }, "commit")} />
+                            : <Input type="date" aria-label={t("date.newDate")} {...fieldProps("config.value")} value={typeof node.config.value === "string" ? node.config.value : ""} disabled={readOnly}
+                                onChange={(event) => update({ ...node.config, field: "expectedCloseDate", value: event.target.value || undefined, valueRef: undefined }, "transient")} onBlur={onCommitTransient} />}
+                    </LabeledField>
+                    <div className="flex items-center justify-between gap-3">
+                        <Label htmlFor="workflow-update-value">{t("values.useValue")}</Label>
+                        <Switch id="workflow-update-value" checked={node.config.valueRef !== undefined} disabled={readOnly || !valuesForField("value").some((option) => option.valueType === "date")}
+                            onCheckedChange={(checked) => update({ ...node.config, field: "expectedCloseDate", value: undefined, valueRef: checked ? valuesForField("value").find((option) => option.valueType === "date")?.ref : undefined }, "commit")} />
+                    </div>
+                </div>
+            ) : null}
             {node.config.type === "send_message" ? (
                 <>
                     <LabeledField label={tr("campaignMessage")}>
@@ -766,7 +808,7 @@ function DelayFields({
 }: {
     node: Extract<WorkflowNode, { type: "DELAY" }>;
     readOnly: boolean;
-    fieldProps: FieldProps;
+    fieldProps: WorkflowFieldProps;
     onNodeChange: (node: WorkflowNode, mode: ChangeMode) => void;
     onCommitTransient: () => void;
 }) {

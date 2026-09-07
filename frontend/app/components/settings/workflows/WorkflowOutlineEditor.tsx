@@ -54,6 +54,7 @@ const INSERT_TYPES: Array<{
     { type: "CONDITION", icon: FunnelIcon },
     { type: "ACTION", icon: BoltIcon },
     { type: "DELAY", icon: ClockIcon },
+    { type: "WAIT", icon: ClockIcon },
     { type: "END", icon: FlagIcon },
 ];
 
@@ -114,11 +115,9 @@ export default function WorkflowOutlineEditor({
             {ordered.map((node) => {
                 const outcomes = workflowNodeOutcomes(node);
                 const runStep = runSteps.get(node.id);
-                const insertTypes = node.id === document.definition.entryNodeId
-                    && node.type === "TRIGGER"
-                    && node.config.type === "schedule"
-                        ? INSERT_TYPES.filter(({ type }) => type === "CONDITION")
-                        : INSERT_TYPES;
+                const supportedInsertTypes = INSERT_TYPES.filter(({ type }) => type !== "WAIT" || document.definition.schemaVersion === 2);
+                const insertTypes = isScheduleEnrollmentBranch(document.definition, node.id, "next")
+                    ? supportedInsertTypes.filter(({ type }) => type === "CONDITION") : supportedInsertTypes;
                 return (
                     <li
                         key={node.id}

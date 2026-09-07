@@ -16,6 +16,7 @@ import WorkflowRunsDialog from "@/app/components/settings/workflows/WorkflowRuns
 import WorkflowSimulationDialog from "@/app/components/settings/workflows/WorkflowSimulationDialog";
 import WorkflowValidationSummary from "@/app/components/settings/workflows/WorkflowValidationSummary";
 import WorkflowVersionsDialog from "@/app/components/settings/workflows/WorkflowVersionsDialog";
+import WorkflowDateScheduleStatus from "@/app/components/settings/workflows/WorkflowDateScheduleStatus";
 import WorkflowSetup from "@/app/components/settings/workflows/WorkflowSetup";
 import { useWorkflowEditor } from "@/app/components/settings/workflows/useWorkflowEditor";
 import { useWorkflowWorkspaceAccess } from "@/app/components/settings/workflows/useWorkflowWorkspaceAccess";
@@ -340,6 +341,7 @@ function WorkflowEditorBody({
             case "TRIGGER":
                 return node.config.type === "manual"
                     ? t("summary.manual", { record: tr(`record.${editor.document.recordType ?? "deal"}`) })
+                    : node.config.type === "date" ? t("date.summary", { offset: node.config.offsetDays ?? -30, time: node.config.localTime ?? "09:00", timezone: node.config.timezone ?? "UTC" })
                     : node.config.type === "schedule"
                     ? t("summary.schedule", { cadence: tr(`cadence.${node.config.cadence ?? "daily"}`) })
                     : node.config.events?.length
@@ -376,8 +378,10 @@ function WorkflowEditorBody({
                 if (seconds > 0 && seconds % 60 === 0) return t("summary.delayMinutes", { value: seconds / 60 });
                 return t("summary.delaySeconds", { value: seconds });
             }
+            case "WAIT":
+                return t("wait.summary", { minutes: Math.round(node.config.timeoutSeconds / 60) });
             case "END":
-                return t("summary.end");
+                return node.config?.outcome === "stopped" ? t("end.stopped") : t("summary.end");
         }
     }, [editor.document.definition.inputs, editor.document.recordType, nodeById, t, tr]);
     const branchLabel = useCallback((outcome: WorkflowEdgeOutcome) => t(`branch.${outcome}`), [t]);
@@ -462,6 +466,7 @@ function WorkflowEditorBody({
             canUpgrade={definitionAuthoringEnabled && catalog !== null && editor.workflow?.runtimeOwner === "canonical" && ["person", "company", "deal"].includes(editor.document.recordType ?? "")}
             onUpgrade={editor.upgradeDefinition}
             onInputsChange={editor.changeInputs}
+            onPoliciesChange={editor.changePolicies}
         />
     );
 
@@ -508,7 +513,8 @@ function WorkflowEditorBody({
         return <WorkflowSetup
             key={activeWorkspaceId}
             initialRecordType={requestedType === "company" || requestedType === "deal" || requestedType === "task" || requestedType === "document" ? requestedType : "person"}
-            initialStart={requestedStart === "entity_change" || requestedStart === "schedule" ? requestedStart : "manual"}
+            initialStart={requestedStart === "date" && requestedType === "deal" ? "date" : requestedStart === "entity_change" || requestedStart === "schedule" ? requestedStart : "manual"}
+            supportsDateStart={catalog.supportedDateFields?.some((field) => field.recordType === "deal" && field.field === "expectedCloseDate") ?? false}
             onContinue={(value) => {
                 editor.configureNewWorkflow(value);
                 setSetupWorkspaceId(activeWorkspaceId);
@@ -569,6 +575,7 @@ function WorkflowEditorBody({
                 </div>
             ) : null}
 
+            {editor.workflow?.dateScheduleStatus ? <WorkflowDateScheduleStatus status={editor.workflow.dateScheduleStatus} /> : null}
             {visibleValidation ? (
                 <WorkflowValidationSummary
                     validation={visibleValidation}
@@ -689,7 +696,8 @@ function WorkflowEditorBody({
                 onOpenChange={setSimulationOpen}
                 onSearch={editor.searchSimulationRecords}
                 onClear={editor.clearSimulation}
-                inputDefinitions={editor.document.definition.inputs ?? []}
+                definition={editor.history.present.definition}
+                inputDefinitions={editor.history.present.definition.inputs ?? []}
                 members={options?.owners ?? []}
                 onSimulate={(recordId, inputs) => void editor.runSimulation(recordId, inputs)}
             />

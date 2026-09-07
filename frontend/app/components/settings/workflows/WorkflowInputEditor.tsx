@@ -3,6 +3,7 @@
 import { PlusIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 
+import type { WorkflowFieldProps } from "@/app/components/settings/workflows/workflowDiagnosticFields";
 import type { WorkflowInputDefinition, WorkflowInputType, WorkflowInputValue } from "@/app/lib/types";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -12,10 +13,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 
 /** Declares the named, typed values a person supplies before preparing a manual run. */
-export default function WorkflowInputEditor({ inputs, members, disabled, onChange, onCommit }: {
+export default function WorkflowInputEditor({ inputs, members, disabled, fieldProps, automatic = false, onChange, onCommit }: {
     inputs: WorkflowInputDefinition[];
     members: Array<{ id: number; name: string }>;
     disabled: boolean;
+    fieldProps: WorkflowFieldProps;
+    automatic?: boolean;
     onChange: (inputs: WorkflowInputDefinition[], mode: "transient" | "commit") => void;
     onCommit: () => void;
 }) {
@@ -24,13 +27,13 @@ export default function WorkflowInputEditor({ inputs, members, disabled, onChang
         onChange(inputs.map((input) => input.key === key ? { ...input, ...change } : input), mode);
     };
     return (
-        <section className="space-y-4 border-t border-border pt-4">
+        <section className="space-y-4 border-t border-border pt-4" {...fieldProps("inputs")} tabIndex={-1}>
             <div>
                 <h3 className="text-sm font-semibold text-foreground">{t("inputs.editorTitle")}</h3>
                 <p className="mt-1 text-sm text-muted-foreground">{t("inputs.editorHelp")}</p>
             </div>
-            {inputs.map((input) => (
-                <fieldset key={input.key} className="space-y-3 border-b border-border pb-4">
+            {inputs.map((input, index) => (
+                <fieldset key={input.key} {...fieldProps(`inputs[${index}]`)} tabIndex={-1} className="space-y-3 border-b border-border pb-4">
                     <legend className="sr-only">{input.label || t("inputs.newInput")}</legend>
                     <div className="flex items-end gap-2">
                         <div className="min-w-0 flex-1 space-y-2">
@@ -55,6 +58,7 @@ export default function WorkflowInputEditor({ inputs, members, disabled, onChang
                         <Switch id={`input-required-${input.key}`} checked={input.required} disabled={disabled} onCheckedChange={(required) => update(input.key, { required }, "commit")} />
                     </div>
                     <div className="space-y-2">
+                        {automatic && input.required && (input.defaultValue == null || input.defaultValue === "") ? <p role="alert" className="text-sm text-destructive">{t("inputs.automaticDefaultRequired")}</p> : null}
                         <Label htmlFor={`input-default-${input.key}`}>{t("inputs.defaultLabel")}</Label>
                         {input.type === "user" ? (
                             <Select value={input.defaultValue == null ? "none" : String(input.defaultValue)} disabled={disabled}

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { ArrowRightIcon, BoltIcon, CheckCircleIcon, ClockIcon, CursorArrowRaysIcon } from "@heroicons/react/24/outline";
+import { ArrowRightIcon, CalendarDaysIcon, BoltIcon, CheckCircleIcon, ClockIcon, CursorArrowRaysIcon } from "@heroicons/react/24/outline";
 
 import ConfirmDiscardDialog from "@/app/components/ConfirmDiscardDialog";
 import { PageHeader } from "@/app/components/PageHeader";
@@ -19,35 +19,39 @@ export type WorkflowSetupValue = {
     name: string;
     purpose: string;
     recordType: "person" | "company" | "deal" | "task" | "document";
-    start: "manual" | "entity_change" | "schedule";
+    start: "manual" | "entity_change" | "schedule" | "date";
 };
 
 const STARTS = [
     { value: "manual", icon: CursorArrowRaysIcon },
     { value: "entity_change", icon: BoltIcon },
     { value: "schedule", icon: ClockIcon },
+    { value: "date", icon: CalendarDaysIcon },
 ] as const;
 
 /** Defines a new workflow's purpose and primary context before opening its shared graph editor. */
 export default function WorkflowSetup({
     initialRecordType = "person",
     initialStart = "manual",
+    supportsDateStart = false,
     onContinue,
 }: {
     initialRecordType?: WorkflowSetupValue["recordType"];
+    supportsDateStart?: boolean;
     initialStart?: WorkflowSetupValue["start"];
     onContinue: (value: WorkflowSetupValue) => void;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const tr = useTranslations("WorkflowAuthoring");
     const router = useRouter();
+    const startingKind = initialRecordType === "task" || initialRecordType === "document" ? "entity_change" : initialStart === "date" && (!supportsDateStart || initialRecordType !== "deal") ? "manual" : initialStart;
     const [value, setValue] = useState<WorkflowSetupValue>({
-        name: "", purpose: "", recordType: initialRecordType, start: initialRecordType === "task" || initialRecordType === "document" ? "entity_change" : initialStart,
+        name: "", purpose: "", recordType: initialRecordType, start: startingKind,
     });
     const eventOnly = value.recordType === "task" || value.recordType === "document";
     const [destination, setDestination] = useState("/workflows");
     const dirty = value.name.trim().length > 0 || value.purpose.trim().length > 0
-        || value.recordType !== initialRecordType || value.start !== (initialRecordType === "task" || initialRecordType === "document" ? "entity_change" : initialStart);
+        || value.recordType !== initialRecordType || value.start !== startingKind;
     const guard = useUnsavedChangesGuard({
         isDirty: dirty,
         onClose: () => router.push(destination),
@@ -76,7 +80,7 @@ export default function WorkflowSetup({
                     <fieldset className="space-y-3">
                         <legend className="text-base font-semibold text-foreground">{t("setup.startQuestion")}</legend>
                         <div className="flex flex-col gap-2">
-                            {STARTS.filter((start) => !eventOnly || start.value === "entity_change").map(({ value: start, icon: Icon }) => (
+                            {STARTS.filter((start) => (!eventOnly || start.value === "entity_change") && (start.value !== "date" || value.recordType === "deal" && supportsDateStart)).map(({ value: start, icon: Icon }) => (
                                 <div key={start} className="space-y-1.5">
                                     <Button
                                         type="button"
@@ -104,7 +108,7 @@ export default function WorkflowSetup({
                             value={value.recordType}
                             onValueChange={(recordType) => {
                                 if (recordType === "person" || recordType === "company" || recordType === "deal" || recordType === "task" || recordType === "document") {
-                                    setValue((current) => ({ ...current, recordType, start: recordType === "task" || recordType === "document" ? "entity_change" : current.start }));
+                                    setValue((current) => ({ ...current, recordType, start: recordType === "task" || recordType === "document" || current.start === "date" && recordType !== "deal" ? "entity_change" : current.start }));
                                 }
                             }}
                         >

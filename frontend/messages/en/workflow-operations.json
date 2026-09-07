@@ -86,7 +86,8 @@
       "condition": "Condition",
       "action": "Action",
       "delay": "Delay",
-      "end": "End"
+      "end": "End",
+      "wait": "Wait for task"
     },
     "health": {
       "title": "Workflow health",
@@ -153,7 +154,10 @@
       "retry_exhausted": "Connex retried this as many times as it's allowed to.",
       "retry_not_safe": "This step can't be safely retried on its own.",
       "execution_failed": "The step couldn't finish.",
-      "unknown": "This version of Connex can't explain what went wrong. Reload the page, and tell support if it keeps happening."
+      "unknown": "This version of Connex can't explain what went wrong. Reload the page, and tell support if it keeps happening.",
+      "condition_matched": "The record matched the stop conditions.",
+      "date_superseded": "The deal’s expected close date changed.",
+      "task_wait_timeout": "The task was not completed before its deadline."
     },
     "retrySafety": {
       "transactional": "Safe to retry",
@@ -234,7 +238,10 @@
         "caller_permission_missing": "You do not have permission for one or more actions in this workflow.",
         "actor_permission_missing": "The configured execution member lacks permission for one or more actions.",
         "record_unavailable": "This record is no longer available for this workflow.",
-        "configuration_unavailable": "Review the workflow configuration before running it."
+        "configuration_unavailable": "Review the workflow configuration before running it.",
+        "entry_condition_not_matched": "The record did not match the entry conditions.",
+        "active_run_exists": "This record already has an active run.",
+        "cooldown_active": "The time before starting again has not elapsed."
       },
       "unavailable": "Unavailable",
       "runsAs": "Executes as {actor}. Assignees and recipients are chosen separately.",
@@ -253,7 +260,8 @@
       "failed": "Failed",
       "intervention_required": "Needs a person",
       "cancelled": "Cancelled",
-      "skipped": "Skipped"
+      "skipped": "Skipped",
+      "stopped": "Stopped"
     },
     "expectedSkip": {
       "permission": "Permission",
@@ -281,7 +289,10 @@
       "actor_unavailable": "The member this workflow runs as is no longer available.",
       "actor_inactive": "The member this workflow runs as is no longer active.",
       "configuration_missing": "This workflow is missing a setting it needs.",
-      "definition_invalid": "The published version of this workflow has a problem. Open it and fix the issues before running it."
+      "definition_invalid": "The published version of this workflow has a problem. Open it and fix the issues before running it.",
+      "entry_condition_not_matched": "The record did not match the entry conditions.",
+      "active_run_exists": "This record already has an active run.",
+      "cooldown_active": "The time before starting again has not elapsed."
     },
     "recipes": {
       "title": "Workflow recipes",
@@ -383,7 +394,8 @@
       "assign_owner": "Assign owner",
       "set_response_due": "Set first-response deadline",
       "change_stage": "Change stage",
-      "notify": "Create notification"
+      "notify": "Create notification",
+      "update_field": "Update expected close date"
     },
     "recipeField": {
       "sourceEvent": "Starts when",
@@ -404,7 +416,8 @@
       "activityNote": "Activity note",
       "dueInDays": "Due in days",
       "coolingDays": "Days without contact",
-      "userPlaceholder": "Choose a workspace member"
+      "userPlaceholder": "Choose a workspace member",
+      "stagePlaceholder": "Choose a pipeline stage"
     },
     "permission": {
       "TASK_CREATE": "Create tasks",
@@ -412,7 +425,22 @@
       "NOTE_CREATE": "Create notes",
       "DEAL_UPDATE": "Update deals",
       "COMPANY_UPDATE": "Update companies",
-      "PERSON_UPDATE": "Update contacts"
+      "PERSON_UPDATE": "Update contacts",
+      "TASK_READ": "Read tasks"
+    },
+    "runReason": {
+      "entry_condition_not_matched": "The record did not match the entry conditions.",
+      "active_run_exists": "This record already has an active run.",
+      "cooldown_active": "The time before starting again has not elapsed.",
+      "condition_matched": "The record matched the stop conditions.",
+      "date_superseded": "The deal’s expected close date changed.",
+      "custom": "Stopped: {reason}",
+      "task_wait_timeout": "The task was not completed before its deadline."
+    },
+    "dateSchedule": {
+      "sourceDate": "Expected close date: {date}",
+      "scheduled": "Scheduled local date: {date}",
+      "dueAt": "Due: {date}"
     }
   }
 }

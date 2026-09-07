@@ -101,6 +101,7 @@ export const DEFAULT_RESPONSE_DUE_HOURS = 4;
  * authoring surfaces build their action here so the two cannot disagree about what a new action is.
  */
 export function actionWithDefaults(type: string): RuleAction {
+    if (type === "update_field") return { type, field: "expectedCloseDate" };
     if (type === "create_task") return { type, dueInDays: 3 };
     return type === "set_response_due"
         ? { type, dueInHours: DEFAULT_RESPONSE_DUE_HOURS }

@@ -6,6 +6,7 @@ import {
     SCHEDULE_RECORD_TYPES,
     SEGMENT_RECORD_TYPES,
 } from "@/app/components/settings/workflows/vocabulary";
+import { workflowDominatingNodes } from "@/app/components/settings/workflows/workflowValues";
 import type {
     RuleTrigger,
     WorkflowCanvas,
@@ -47,6 +48,8 @@ export function workflowNodeOutcomes(node: WorkflowNode): WorkflowEdgeOutcome[] 
             return ["next"];
         case "CONDITION":
             return ["yes", "no"];
+        case "WAIT":
+            return ["completed", "timeout"];
         case "END":
             return [];
     }
@@ -57,7 +60,8 @@ export function isScheduleEnrollmentNode(definition: WorkflowDefinition, nodeId:
     const trigger = definition.nodes.find(
         (node) => node.id === definition.entryNodeId && node.type === "TRIGGER" && node.config.type === "schedule",
     );
-    return trigger != null && definition.edges.some(
+    return trigger != null && !definition.enrollment?.condition
+        && definition.nodes.some((node) => node.id === nodeId && node.type === "CONDITION") && definition.edges.some(
         (edge) => edge.sourceNodeId === trigger.id && edge.outcome === "next" && edge.targetNodeId === nodeId,
     );
 }
@@ -72,7 +76,8 @@ export function isScheduleEnrollmentBranch(
     return source?.id === definition.entryNodeId
         && source.type === "TRIGGER"
         && source.config.type === "schedule"
-        && outcome === "next";
+        && outcome === "next"
+        && (definition.schemaVersion === 1 || definition.edges.some((edge) => edge.sourceNodeId === sourceNodeId && isScheduleEnrollmentNode(definition, edge.targetNodeId)));
 }
 
 /** Creates a typed workflow node with an incomplete, saveable default configuration. */
@@ -87,19 +92,22 @@ export function createWorkflowNode(type: WorkflowNodeType, recordType: string): 
             return { id, type, config: defaultAction(recordType) };
         case "DELAY":
             return { id, type, config: { durationSeconds: 3_600 } };
+        case "WAIT":
+            return { id, type, config: { kind: "event", event: "task.completed", source: { nodeId: "", output: "taskId" }, timeoutSeconds: 604_800 } };
         case "END":
             return { id, type };
     }
 }
 
 /** Creates the smallest saveable workflow document and its separate canvas presentation. */
-export function createEmptyWorkflowGraph(recordType = "deal", schemaVersion: 1 | 2 = 1, start: "manual" | "entity_change" | "schedule" = "entity_change"): {
+export function createEmptyWorkflowGraph(recordType = "deal", schemaVersion: 1 | 2 = 1, start: "manual" | "entity_change" | "schedule" | "date" = "entity_change"): {
     definition: WorkflowDefinition;
     canvas: WorkflowCanvas;
 } {
     const trigger = createWorkflowNode("TRIGGER", recordType);
     if (trigger.type === "TRIGGER" && schemaVersion === 2) {
         trigger.config = start === "manual" ? { type: "manual" }
+            : start === "date" ? { type: "date", dateField: "expectedCloseDate", offsetDays: -30, localTime: "09:00", timezone: "UTC", allowManualRuns: false }
             : start === "schedule" ? { type: "schedule", cadence: "daily", allowManualRuns: false }
                 : { type: "entity_change", events: [], allowManualRuns: false };
     }
@@ -160,7 +168,7 @@ export function topologicalWorkflowNodes(definition: WorkflowDefinition): Workfl
         if (!node) break;
         ordered.push(node);
         const nextEdges = [...(outgoing.get(node.id) ?? [])].sort((left, right) => {
-            const outcomeOrder = { yes: 0, no: 1, next: 2 } satisfies Record<WorkflowEdgeOutcome, number>;
+            const outcomeOrder = { yes: 0, completed: 0, no: 1, timeout: 1, next: 2 } satisfies Record<WorkflowEdgeOutcome, number>;
             return outcomeOrder[left.outcome] - outcomeOrder[right.outcome]
                 || left.targetNodeId.localeCompare(right.targetNodeId);
         });
@@ -269,8 +277,7 @@ export function canConnectWorkflowBranch(
     const target = definition.nodes.find((node) => node.id === targetNodeId);
     if (!source || !target || source.id === target.id || target.type === "TRIGGER") return false;
     if (!workflowNodeOutcomes(source).includes(outcome)) return false;
-    if (source.id === definition.entryNodeId && source.type === "TRIGGER"
-        && source.config.type === "schedule" && target.type !== "CONDITION") return false;
+    if (isScheduleEnrollmentBranch(definition, sourceNodeId, outcome) && target.type !== "CONDITION") return false;
     const existing = definition.edges.some((edge) => edge.sourceNodeId === sourceNodeId && edge.outcome === outcome);
     if (!existing && definition.edges.length >= WORKFLOW_EDGE_LIMIT) return false;
     return !createsCycle(definition, sourceNodeId, targetNodeId, outcome);
@@ -322,24 +329,29 @@ export function insertWorkflowNode(
     recordType: string,
     position?: { x: number; y: number },
 ): { definition: WorkflowDefinition; canvas: WorkflowCanvas; insertedNodeId: string } | null {
-    if (definition.nodes.length >= WORKFLOW_NODE_LIMIT) return null;
+    if (definition.nodes.length >= WORKFLOW_NODE_LIMIT || (type === "WAIT" && definition.schemaVersion !== 2)) return null;
     if (type === "ACTION" && definition.nodes.filter((node) => node.type === "ACTION").length >= WORKFLOW_ACTION_LIMIT) {
         return null;
     }
     const source = definition.nodes.find((node) => node.id === sourceNodeId);
     if (!source || !workflowNodeOutcomes(source).includes(outcome)) return null;
-    if (source.id === definition.entryNodeId && source.type === "TRIGGER"
-        && source.config.type === "schedule" && type !== "CONDITION") return null;
+    if (isScheduleEnrollmentBranch(definition, sourceNodeId, outcome) && type !== "CONDITION") return null;
     const previousEdge = definition.edges.find(
         (edge) => edge.sourceNodeId === sourceNodeId && edge.outcome === outcome,
     );
-    const addConditionEnd = type === "CONDITION" && definition.nodes.length + 1 < WORKFLOW_NODE_LIMIT;
+    const addConditionEnd = (type === "CONDITION" || type === "WAIT") && definition.nodes.length + 1 < WORKFLOW_NODE_LIMIT;
     const edgesAdded = 1 + (previousEdge && type !== "END" ? 1 : 0) + (addConditionEnd ? 1 : 0);
     const edgesRemoved = previousEdge ? 1 : 0;
     if (definition.edges.length - edgesRemoved + edgesAdded > WORKFLOW_EDGE_LIMIT) return null;
     const node = createWorkflowNode(type, recordType);
     if (node.type === "ACTION" && definition.schemaVersion === 2 && supportsManualRun(recordType)) {
         node.config = { type: "create_task", title: "", dueInDays: 3 };
+    }
+    if (node.type === "WAIT") {
+        const preceding = workflowDominatingNodes(definition, sourceNodeId);
+        preceding.add(sourceNodeId);
+        const task = topologicalWorkflowNodes(definition).findLast((candidate) => preceding.has(candidate.id) && candidate.type === "ACTION" && candidate.config.type === "create_task");
+        node.config.source.nodeId = task?.id ?? "";
     }
     let nextDefinition: WorkflowDefinition = {
         ...cloneDefinition(definition),
@@ -348,16 +360,17 @@ export function insertWorkflowNode(
     };
     nextDefinition = connectWorkflowBranch(nextDefinition, sourceNodeId, outcome, node.id);
     if (previousEdge && type !== "END") {
-        const continuationOutcome: WorkflowEdgeOutcome = type === "CONDITION" ? "yes" : "next";
+        const continuationOutcome: WorkflowEdgeOutcome = type === "CONDITION" ? "yes" : type === "WAIT" ? "completed" : "next";
         nextDefinition = connectWorkflowBranch(nextDefinition, node.id, continuationOutcome, previousEdge.targetNodeId);
     }
     if (addConditionEnd) {
         const noEnd = createWorkflowNode("END", recordType);
+        if (type === "WAIT" && noEnd.type === "END") noEnd.config = { outcome: "stopped", reason: "task_wait_timeout" };
         nextDefinition = {
             ...nextDefinition,
             nodes: [...nextDefinition.nodes, noEnd],
         };
-        nextDefinition = connectWorkflowBranch(nextDefinition, node.id, "no", noEnd.id);
+        nextDefinition = connectWorkflowBranch(nextDefinition, node.id, type === "WAIT" ? "timeout" : "no", noEnd.id);
     }
     const sourcePosition = canvas.positions[sourceNodeId] ?? { x: 80, y: 80 };
     const targetPosition = previousEdge ? canvas.positions[previousEdge.targetNodeId] : undefined;
@@ -454,6 +467,7 @@ function pruneUnreachable(
 }
 
 function retypedTrigger(trigger: WorkflowTriggerNode, recordType: string): WorkflowTriggerNode {
+    if (trigger.config.type === "date" && recordType === "deal") return trigger;
     if (trigger.config.type === "manual" && supportsManualRun(recordType)) return { ...trigger, config: { type: "manual" } };
     const manualPolicy = trigger.config.allowManualRuns === undefined ? {} : { allowManualRuns: trigger.config.allowManualRuns };
     if (SCHEDULE_RECORD_TYPES.includes(recordType) && trigger.config.type === "schedule") {
@@ -512,7 +526,7 @@ export function normalizeWorkflowForRecordType(
         next = pruned.definition;
         nextCanvas = pruned.canvas;
     }
-    if (trigger.config.type === "schedule") {
+    if (trigger.config.type === "schedule" && definition.schemaVersion === 1) {
         const enrollment = ensureScheduleEnrollment(next, nextCanvas, recordType);
         return { definition: enrollment.definition, canvas: enrollment.canvas };
     }
