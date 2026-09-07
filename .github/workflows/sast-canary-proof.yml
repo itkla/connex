@@ -238,10 +238,10 @@ jobs:
             --summary "$GITHUB_STEP_SUMMARY" \
             --require-admin-enforcement
       - name: Report a failed proof
-        # cancelled() covers a manual cancellation; the re-run step's own timeout-minutes turns a
-        # slow re-run into failure() before the job-level bound (75 minutes) could cancel the job. A
-        # cancellation; failure() alone would leave both silent. A workflow-file error concludes
-        # startup_failure without running any step and is visible only in the Actions tab.
+        # The re-run step's own timeout-minutes turns a slow re-run into failure() before the
+        # job-level bound (75 minutes) could cancel the job; cancelled() covers a manual
+        # cancellation. A workflow-file error concludes startup_failure without running any step
+        # and is visible only in the Actions tab.
         if: failure() || cancelled()
         env:
           CANARY_NUMBER: ${{ steps.canary.outputs.number }}

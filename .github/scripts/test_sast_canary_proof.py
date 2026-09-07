@@ -88,7 +88,7 @@ class SastCanaryProofWorkflowTest(unittest.TestCase):
             self.workflow["concurrency"],
         )
         self.assertEqual(75, self.job["timeout-minutes"])
-        rerun = next(step for step in self.job["steps"] if step["name"] == "Re-run the canary's Security workflow")
+        rerun = next(step for step in self.job["steps"] if step.get("name") == "Re-run the canary's Security workflow")
         self.assertLess(rerun["timeout-minutes"], self.job["timeout-minutes"],
                         "the re-run step must time out before the job so the reporting step still runs")
 
