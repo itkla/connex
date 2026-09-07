@@ -6,6 +6,7 @@ import { Loader2Icon } from "lucide-react";
 
 import UnsubscribeConfirm from "@/app/components/marketing/campaigns/UnsubscribeConfirm";
 import {
+    ApiError,
     exchangeUnsubscribeToken,
     getUnsubscribeInfo,
 } from "@/app/lib/api";
@@ -15,7 +16,22 @@ import type { DeliveryUnsubscribeInfo } from "@/app/lib/types";
 type EntryState =
     | { status: "loading" }
     | { status: "invalid" }
+    | { status: "throttled" }
     | { status: "ready"; info: DeliveryUnsubscribeInfo };
+
+/**
+ * Classifies a failed exchange or preview read.
+ *
+ * <p>The exchange shares one per-source budget with every other one-time link, so a recipient
+ * behind a busy NAT can be refused with 429 while their link is perfectly good. Reporting that as
+ * "invalid or expired" would tell them to go and ask the sender instead of simply retrying, so the
+ * throttle keeps its own state. Every other status stays uniform and non-diagnostic.
+ * @param error the rejection from the exchange or preview call
+ * @returns the entry state the failure should render
+ */
+function failureStatus(error: unknown): "invalid" | "throttled" {
+    return error instanceof ApiError && error.status === 429 ? "throttled" : "invalid";
+}
 
 /**
  * Exchanges the emailed unsubscribe fragment bearer for a purpose-bound browser grant and renders
@@ -39,8 +55,8 @@ export default function UnsubscribeEntry() {
             if (active) setState({ status: "ready", info });
         };
 
-        establish().catch(() => {
-            if (active) setState({ status: "invalid" });
+        establish().catch((error: unknown) => {
+            if (active) setState({ status: failureStatus(error) });
         });
 
         return () => {
@@ -70,10 +86,10 @@ export default function UnsubscribeEntry() {
                 ) : (
                     <div className="flex flex-col text-center">
                         <h1 className="text-xl font-semibold tracking-tight text-foreground text-balance">
-                            {t("invalidTitle")}
+                            {t(state.status === "throttled" ? "throttledTitle" : "invalidTitle")}
                         </h1>
                         <p className="mt-2 text-sm text-muted-foreground text-pretty">
-                            {t("invalidBody")}
+                            {t(state.status === "throttled" ? "throttledBody" : "invalidBody")}
                         </p>
                     </div>
                 )}
