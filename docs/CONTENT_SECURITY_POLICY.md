@@ -31,7 +31,14 @@ The `report-to` group and the `Reporting-Endpoints` header are emitted **only** 
 
 ### The collector
 
-`POST /api/csp-reports` on the backend is unauthenticated, CSRF-exempt, exempt from tenant resolution and from privileged-MFA confinement, and always answers `204` for a body the size filters admitted.
+`POST /api/csp-reports` on the backend is served by its own stateless Spring Security chain (`CspReportSecurityConfig`), ordered ahead of the public-API and application chains: no CSRF, and none of the session, epoch, absolute-timeout or privileged-MFA filters the application chain installs. Any other method on the path falls through to the application chain, where it is unauthenticated and therefore refused. The collector always answers `204` for a body the size filters admitted.
+
+**The collector must never refresh a session.** A same-origin report carries the session cookie, and merely resolving that session makes Spring Session rewrite its last-accessed time — so a page that keeps violating the policy would keep an otherwise idle login alive past the 30-minute idle timeout. Two things are needed, because the security chain alone is not enough:
+
+- `CspReportCookieFilter`, registered ahead of Spring Session's own filter, hides **every** cookie from the request. This is the load-bearing part: the remaining `getSession(false)` callers sit outside any chain's reach — Spring Security's `AnonymousAuthenticationFilter` reads the session id into `WebAuthenticationDetails`, and the `DispatcherServlet` retrieves flash maps and publishes a request-handled event. With no cookies there is no session for any of them to resolve, load, save or expire, and the response carries no `Set-Cookie`.
+- The stateless chain keeps the session, epoch, absolute-timeout and privileged-MFA filters off the path structurally, so the endpoint's behaviour cannot drift as those filters change.
+
+Tenant resolution is excluded separately in `WebConfig`: MVC interceptors run in the `DispatcherServlet`, after whichever chain served the request, so a security chain cannot exclude them.
 
 | Request | Response |
 |---|---|
@@ -39,8 +46,8 @@ The `report-to` group and the `Reporting-Endpoints` header are emitted **only** 
 | `application/reports+json` with an array of N reports | 204, at most 10 log lines, each charged to the client's throttle |
 | garbage bytes, wrong shape, or an empty body | 204, no log line |
 | body over 16 KiB (`CONNEX_CSP_REPORTS_MAX_BODY_BYTES`) | 413, at the edge and again in the application |
-| a report carrying a session cookie and no CSRF header | 204 |
-| a report from a privileged account confined pending MFA enrollment | 204 |
+| a report carrying a session cookie and no CSRF header | 204, and the session's last-accessed time does not move |
+| a report from a privileged account confined pending MFA enrollment, or carrying an expired session | 204 |
 | more than 60 records per 60 seconds from one client IP, however they are batched | 204, dropped silently |
 | an address the throttle has never seen while it already tracks 10 000 addresses | 204, dropped silently until eviction frees capacity |
 | `GET`, `PUT`, `DELETE` | 401 — the collector is write-only |

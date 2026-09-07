@@ -102,28 +102,6 @@ class PrivilegedMfaEnforcementFilterTest {
     }
 
     @Test
-    void cspReportPostBypassesEnrollmentConfinement() throws Exception {
-        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
-
-        MockHttpServletResponse response = execute("POST", "/api/csp-reports");
-
-        assertEquals(200, response.getStatus());
-        verify(filterChain).doFilter(any(), any());
-        verify(auditService, never()).recordFailureScoped(
-                any(), any(), any(), any(), any(), any(), any(), any());
-    }
-
-    @Test
-    void cspReportReadsAreStillConfined() throws Exception {
-        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
-
-        MockHttpServletResponse response = execute("GET", "/api/csp-reports");
-
-        assertEquals(403, response.getStatus());
-        verify(filterChain, never()).doFilter(any(), any());
-    }
-
-    @Test
     void nonPrivilegedAccountIsNotConfined() throws Exception {
         when(privilegedAccountService.isPrivileged(7)).thenReturn(false);
 
