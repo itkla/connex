@@ -98,7 +98,7 @@ refused**, rather than stored uninspected.
 | `SIGNATURE` | `META-INF/documentsignatures.xml`, `_xmlsignatures/*.xml` | Parsed against the closed signature vocabulary (§6) |
 | `SIGNATURE_ORIGIN` | `_xmlsignatures/origin.sigs` | Must be empty and bound by the origin relationship |
 | `MIMETYPE` | ODF `mimetype` | STORED at offset 0 and equal to the format's media type |
-| `RASTER` | `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.webp` | Walked by the same structural inspectors used for direct image uploads; bytes are not decoded or re-encoded |
+| `RASTER` | `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.webp` | Walked by the same structural inspectors used for direct image uploads; bytes are not decoded or re-encoded. A GIF member may be animated (several image frames, each walked); a direct GIF upload must be a single frame because it is canonicalised to a still image |
 | `SNIFFED_OPAQUE` | `*.emf`, `*.wmf`, `*.tif`, `*.tiff`, `*.bmp`; ODF `Fonts/*.ttf\|*.otf\|*.ttc` | Magic plus an internal length that agrees with the member length: the EMF header byte count, the WMF header word count (after the placeable header when present), the TIFF first-directory offset, and the BMP file size. ODF embedded fonts must carry an sfnt tag (`00 01 00 00`, `OTTO`, `true`, `ttcf`) whose table or font directory fits the member, and be declared `application/x-font-ttf`, `application/x-font-otf`, `font/ttf`, `font/otf`, or `application/vnd.ms-opentype` |
 | `DECLARED_OPAQUE` | `(word\|xl\|ppt)/fonts/*.odttf\|*.fntdata`, `(word\|xl\|ppt)/printerSettings/printerSettingsN.bin`, ODF `layout-cache` | Declared type, size bound, and a negative header sniff that refuses executables, archives, compound files, documents, and markup |
 | `DIRECTORY` | names ending `/` | Must be empty |

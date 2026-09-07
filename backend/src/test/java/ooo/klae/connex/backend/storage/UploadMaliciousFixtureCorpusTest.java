@@ -66,10 +66,11 @@ import tools.jackson.databind.ObjectMapper;
  * {@code _xmlsignatures/} still meets the ordinary active-element blocklist; it is recorded as a
  * defence-in-depth guard rather than the sole control.
  *
- * <p>Cases added while applying review findings were measured the same way (31 of 52 cases red
+ * <p>Cases added while applying review findings were measured the same way (32 of 53 cases red
  * against the pre-fix inspector): {@code rejectsOdfMetadataManifestReferencingExternalOrAbsentMembers},
  * {@code rejectsRasterMemberOverTheMemberCeiling},
- * {@code acceptsOdfEmbeddedFontsAndRejectsMisdeclaredOrOversizedOnes} and
+ * {@code acceptsOdfEmbeddedFontsAndRejectsMisdeclaredOrOversizedOnes},
+ * {@code acceptsAnimatedGifMediaPartsWhileDirectUploadsStayStill} and
  * {@code rejectsExternalRetrievalMethodInSignaturePart} are red against the pre-fix inspector,
  * the last only because it refused every signed package. Each new guard was then removed on its
  * own from the current inspector and turned exactly one method red:
@@ -80,7 +81,8 @@ import tools.jackson.databind.ObjectMapper;
  * ceiling raised back to 32 MiB; {@code rejectsOdfMetadataManifestReferencingExternalOrAbsentMembers}
  * without the {@code rdf:about} / {@code rdf:resource} binding; and
  * {@code acceptsOdfEmbeddedFontsAndRejectsMisdeclaredOrOversizedOnes} with the sfnt sniff
- * accepting any bytes. {@code acceptsRealLibreOfficeEmbeddedFontPackage} is green in both states
+ * accepting any bytes; and {@code acceptsAnimatedGifMediaPartsWhileDirectUploadsStayStill} with
+ * package GIF members forced back to the single-frame rule. {@code acceptsRealLibreOfficeEmbeddedFontPackage} is green in both states
  * because the pre-fix inspector stored embedded fonts uninspected; it pins the over-refusal an
  * earlier revision of this change introduced.
  */
@@ -459,6 +461,35 @@ class UploadMaliciousFixtureCorpusTest {
             presentationActionPackage("ppaction://hlinkshowjump?jump=nextslide")));
         assertEquals(UploadFormat.PPTX, accepted(
             UploadFormat.PPTX, presentationActionPackage("ppaction://customshow?id=0")));
+    }
+
+    @Test
+    void acceptsAnimatedGifMediaPartsWhileDirectUploadsStayStill() throws Exception {
+        byte[] animated = PackageFixtures.animatedGif(2);
+        String declaration = PackageFixtures.defaultType("gif", "image/gif");
+
+        assertEquals(UploadFormat.PPTX, accepted(UploadFormat.PPTX, PackageFixtures.ooxml(
+            UploadFormat.PPTX,
+            declaration,
+            "",
+            PackageFixtures.members("ppt/media/image1.gif", animated))));
+        assertThrows(
+            UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from("corpus.gif", "image/gif", animated)));
+        refused(UploadFormat.PPTX, PackageFixtures.ooxml(
+            UploadFormat.PPTX,
+            declaration,
+            "",
+            PackageFixtures.members(
+                "ppt/media/image1.gif",
+                PackageFixtures.concatenate(animated, PackageFixtures.ascii(HTML_PAYLOAD)))));
+        refused(UploadFormat.PPTX, PackageFixtures.ooxml(
+            UploadFormat.PPTX,
+            declaration,
+            "",
+            PackageFixtures.members("ppt/media/image1.gif", PackageFixtures.animatedGif(0))));
     }
 
     @Test

@@ -95,7 +95,8 @@ import tools.jackson.databind.ObjectMapper;
  * <p>Every package member is classified into exactly one inspection class and is validated, never
  * re-encoded, so document bytes reach storage unchanged and any signature over them keeps
  * verifying. XML, VML, and signature parts are parsed; raster members are walked by the same
- * structural inspectors used for direct image uploads; EMF, WMF, TIFF, and BMP members are bound
+ * structural inspectors used for direct image uploads, except that a GIF member may be animated;
+ * EMF, WMF, TIFF, and BMP members are bound
  * by magic, an internal length that must agree with the member length, and their own declared
  * media type; ODF {@code Fonts/*.ttf|otf|ttc} members are bound by the sfnt magic, a table
  * directory that fits the member, and a declared font type; OOXML obfuscated fonts and
@@ -657,7 +658,7 @@ public class UploadContentInspector implements AutoCloseable {
         switch (format) {
             case JPEG -> inspectJpeg(content, deadline);
             case PNG -> inspectPng(content, deadline);
-            case GIF -> inspectGif(content, deadline);
+            case GIF -> inspectGif(content, deadline, true);
             case WEBP -> inspectWebp(content, deadline);
             default -> throw UnsupportedUploadMediaTypeException.unsupported();
         }
@@ -820,7 +821,20 @@ public class UploadContentInspector implements AutoCloseable {
         throw UnsupportedUploadMediaTypeException.unsupported();
     }
 
-    private static void inspectGif(byte[] content, Deadline deadline) {
+    /**
+     * Walks a GIF structurally: header, colour tables, every extension and image block, and the
+     * trailer, which must be the last byte.
+     *
+     * <p>A direct raster upload must hold exactly one image because it is canonicalised to a
+     * still image afterwards; a document package member keeps its bytes, so it may carry the
+     * several frames of an animated GIF as long as every frame is walked and the trailer still
+     * ends the member.
+     *
+     * @param content exact GIF bytes
+     * @param deadline shared inspection deadline
+     * @param singleImage whether exactly one image block is required
+     */
+    private static void inspectGif(byte[] content, Deadline deadline, boolean singleImage) {
         if (content.length < 14
                 || !(startsWith(content, "GIF87a".getBytes(StandardCharsets.US_ASCII))
                     || startsWith(content, "GIF89a".getBytes(StandardCharsets.US_ASCII)))) {
@@ -837,7 +851,7 @@ public class UploadContentInspector implements AutoCloseable {
             deadline.check();
             int introducer = unsigned(content[offset++]);
             if (introducer == 0x3b) {
-                if (images != 1 || offset != content.length) {
+                if (images < 1 || singleImage && images > 1 || offset != content.length) {
                     throw UnsupportedUploadMediaTypeException.unsupported();
                 }
                 return;
@@ -1429,7 +1443,7 @@ public class UploadContentInspector implements AutoCloseable {
             return "image/jpeg";
         }
         if (asciiEquals(content, 0, "GIF87a") || asciiEquals(content, 0, "GIF89a")) {
-            inspectGif(content, deadline);
+            inspectGif(content, deadline, false);
             return "image/gif";
         }
         if (asciiEquals(content, 0, "RIFF") && asciiEquals(content, 8, "WEBP")) {

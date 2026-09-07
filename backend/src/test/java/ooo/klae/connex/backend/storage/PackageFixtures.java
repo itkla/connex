@@ -410,6 +410,27 @@ final class PackageFixtures {
         return raster("gif");
     }
 
+    /**
+     * Builds a 1×1 GIF89a by hand with the requested number of image frames, each preceded by a
+     * graphic control extension, so animated members and frameless GIFs can be exercised.
+     *
+     * @param frames image blocks to write
+     * @return GIF bytes ending with the trailer
+     */
+    static byte[] animatedGif(int frames) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        output.writeBytes(ascii("GIF89a"));
+        output.writeBytes(new byte[] {1, 0, 1, 0, (byte) 0x80, 0, 0});
+        output.writeBytes(new byte[] {0, 0, 0, (byte) 0xff, (byte) 0xff, (byte) 0xff});
+        for (int frame = 0; frame < frames; frame++) {
+            output.writeBytes(new byte[] {0x21, (byte) 0xf9, 4, 0, 10, 0, 0, 0});
+            output.writeBytes(new byte[] {0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0});
+            output.writeBytes(new byte[] {2, 2, 0x44, 0x01, 0});
+        }
+        output.write(0x3b);
+        return output.toByteArray();
+    }
+
     /** @return an EMF header whose record type and signature identify an enhanced metafile */
     static byte[] emf() {
         return emf(128);
