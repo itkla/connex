@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.dto.CspViolationRecord;
+import ooo.klae.connex.backend.observability.RequestPathRedactor;
 import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -25,8 +26,10 @@ import tools.jackson.databind.ObjectMapper;
  * <p>Reports arrive unauthenticated from any browser, so nothing here is persisted and only an
  * allowlisted set of fields is read. {@code script-sample}, {@code referrer}, {@code original-policy}
  * and every other free-text or policy-echo field is deliberately ignored: they carry page content
- * and would turn the operator log into an untrusted-content sink. The client address is used solely
- * as the throttle key and is never logged.
+ * and would turn the operator log into an untrusted-content sink. The reporting document's path is
+ * reduced to the server-owned route vocabulary of {@link RequestPathRedactor}, so a path-borne
+ * credential such as a document-acceptance or invite token is never written to the log. The client
+ * address is used solely as the throttle key and is never logged.
  */
 @Service
 @RequiredArgsConstructor
@@ -204,7 +207,7 @@ public class CspReportService {
         }
         try {
             String path = new URI(bounded(value)).getPath();
-            return path == null || path.isEmpty() ? "/" : bounded(path);
+            return RequestPathRedactor.redact(path == null || path.isEmpty() ? "/" : path);
         } catch (URISyntaxException exception) {
             return "invalid";
         }

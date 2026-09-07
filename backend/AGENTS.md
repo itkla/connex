@@ -48,8 +48,9 @@ reference implementation) is only correct once **every** layer knows about it. W
    the matching entries in `.github/scripts/test_edge_security_headers.py`, both
    `deploy/docker-compose.yml` service environments, and the body-limit table in
    `../docs/EDGE_DEFENCE.md`.
-7. Read only allowlisted fields, strip control characters, bound every string, and persist nothing
-   without a retention plan.
+7. Read only allowlisted fields, strip control characters, bound every string, map any reported
+   page path through `RequestPathRedactor` before it is logged or stored (paths carry bearer tokens),
+   and persist nothing without a retention plan.
 
 ## Task routing
 

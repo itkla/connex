@@ -13,6 +13,7 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.dto.CspViolationRecord;
+import ooo.klae.connex.backend.observability.RequestPathRedactor;
 import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 import tools.jackson.databind.ObjectMapper;
 
@@ -119,7 +120,7 @@ class CspReportServiceTest {
                 """, CLIENT);
 
         String rendered = records.getFirst().toString();
-        assertTrue(rendered.contains("/records/contacts/9"), rendered);
+        assertTrue(rendered.contains("/records/contacts/{id}"), rendered);
         for (String secret : List.of("sk-live-secret", "q=secret", "nonce-secret", "original-policy")) {
             assertTrue(!rendered.contains(secret), "record leaked " + secret + ": " + rendered);
         }
@@ -139,10 +140,28 @@ class CspReportServiceTest {
 
         CspViolationRecord record = records.getFirst();
         assertEquals("img-src", record.directive());
-        assertTrue(record.documentPath().startsWith("/aaa"), record.documentPath());
-        assertTrue(record.documentPath().length() <= 256, record.documentPath());
-        assertTrue(record.documentPath().length() < path.length(), record.documentPath());
-        assertTrue(record.documentPath().indexOf('\n') < 0);
+        assertEquals(RequestPathRedactor.UNKNOWN_ROUTE, record.documentPath());
+    }
+
+    @Test
+    void reducesDocumentPathsToRouteTemplatesSoPathBorneTokensNeverReachTheLog() {
+        allowThrottle();
+        String acceptanceToken = "w42-" + "c".repeat(64);
+
+        List<CspViolationRecord> records = service.ingest("""
+                [{"type":"csp-violation","url":"https://connex.example.com/document-acceptance/%s",
+                  "body":{"effectiveDirective":"img-src","blockedURL":"https://cdn.example.invalid/a.png"}},
+                 {"type":"csp-violation","url":"https://connex.example.com/invite/private-token?x=1",
+                  "body":{"effectiveDirective":"img-src","blockedURL":"inline"}},
+                 {"type":"csp-violation","url":"https://connex.example.com/records/contacts/35",
+                  "body":{"effectiveDirective":"img-src","blockedURL":"inline"}}]
+                """.formatted(acceptanceToken), CLIENT);
+
+        assertEquals(3, records.size());
+        assertEquals(RequestPathRedactor.UNKNOWN_ROUTE, records.get(0).documentPath());
+        assertTrue(records.toString().indexOf(acceptanceToken) < 0, records.toString());
+        assertEquals("/invite/{token}", records.get(1).documentPath());
+        assertEquals("/records/contacts/{id}", records.get(2).documentPath());
     }
 
     @Test

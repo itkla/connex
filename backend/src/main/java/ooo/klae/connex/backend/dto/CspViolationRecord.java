@@ -6,7 +6,7 @@ package ooo.klae.connex.backend.dto;
  * @param disposition whether the reporting policy was enforced or report-only
  * @param directive the effective directive that refused the resource
  * @param blockedHost the blocked origin, or the CSP keyword the browser reported instead
- * @param documentPath the path of the reporting document with query and fragment removed
+ * @param documentPath the reporting document's route template from the server-owned vocabulary, or {@code unknown}
  * @param sourceHost the origin of the script that triggered the violation, when reported
  * @param lineNumber the reported source line, or {@code -1} when absent
  * @param statusCode the reported document status code, or {@code -1} when absent
