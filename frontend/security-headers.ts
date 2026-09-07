@@ -18,6 +18,12 @@ export const DOCUMENT_ACCEPTANCE_SECURITY_HEADERS = [
   { key: "Referrer-Policy", value: DOCUMENT_ACCEPTANCE_REFERRER_POLICY },
 ];
 
+/** Path of the backend collector that receives browser violation reports. */
+export const CSP_REPORT_PATH = "/api/csp-reports";
+
+/** Name binding the policy's `report-to` group to the `Reporting-Endpoints` entry. */
+export const CSP_REPORTING_ENDPOINT_NAME = "csp-endpoint";
+
 /** Runtime mode for the frontend's full Content Security Policy. */
 export type ContentSecurityPolicyMode = "enforce" | "report-only";
 
@@ -28,6 +34,7 @@ export type ContentSecurityPolicyOptions = {
   isDevelopment: boolean;
   configuredWebSocketUrl?: string;
   configuredImageOrigins?: string;
+  reportingEndpointUrl?: string | null;
 };
 
 function isSafeContentSecurityPolicySource(value: string): boolean {
@@ -123,12 +130,51 @@ export function createFrontendContentSecurityPolicy(options: ContentSecurityPoli
     FRAME_ANCESTORS_DIRECTIVE,
     "frame-src 'none'",
     "worker-src 'none'",
+    `report-uri ${CSP_REPORT_PATH}`,
+    ...(options.reportingEndpointUrl ? [`report-to ${CSP_REPORTING_ENDPOINT_NAME}`] : []),
   ].join("; ");
 }
 
-/** Resolves an operator-supplied CSP mode, defaulting invalid or absent values to Report-Only. */
+/**
+ * Resolves the absolute report collector for a browser-facing origin.
+ *
+ * <p>Chromium registers a `Reporting-Endpoints` URL only when its scheme is cryptographic
+ * (`SchemeIsCryptographic()` in `net/reporting/reporting_header_parser.cc`): `http://localhost` is
+ * discarded even though it is potentially trustworthy, and a Chromium that sees `report-to` stops
+ * honouring `report-uri` entirely. Returning null for every non-HTTPS origin therefore keeps the
+ * relative `report-uri` fallback working on localhost, in CI, and on plain-HTTP LAN deployments.
+ */
+export function contentSecurityPolicyReportingEndpoint(requestOrigin: string): string | null {
+  try {
+    const url = new URL(requestOrigin);
+    if (url.username || url.password || !isSafeContentSecurityPolicySource(url.origin)) {
+      return null;
+    }
+    if (url.protocol !== "https:") {
+      return null;
+    }
+    return `${url.origin}${CSP_REPORT_PATH}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Builds the `Reporting-Endpoints` value for a resolved collector, or null when none exists. */
+export function createReportingEndpointsHeader(reportingEndpointUrl: string | null): string | null {
+  return reportingEndpointUrl
+    ? `${CSP_REPORTING_ENDPOINT_NAME}="${reportingEndpointUrl}"`
+    : null;
+}
+
+/**
+ * Resolves an operator-supplied CSP mode.
+ *
+ * <p>The literal `report-only` is the single rollback value; absent, misspelled, and unknown
+ * values all enforce, so a deployment cannot silently lose enforcement through a typo. A typo
+ * during a rollback therefore keeps enforcing.
+ */
 export function resolveContentSecurityPolicyMode(value: string | undefined): ContentSecurityPolicyMode {
-  return value === "enforce" ? "enforce" : "report-only";
+  return value === "report-only" ? "report-only" : "enforce";
 }
 
 /** Resolves the referrer policy for a frontend HTML route. */
@@ -160,4 +206,16 @@ export function applyFrontendContentSecurityPolicy(
 
   headers.delete("Content-Security-Policy");
   headers.set("Content-Security-Policy-Report-Only", policy);
+}
+
+/** Applies the reporting-group binding in both modes, or removes it when no collector is usable. */
+export function applyFrontendReportingEndpoints(
+  headers: Headers,
+  reportingEndpointsHeader: string | null,
+): void {
+  if (reportingEndpointsHeader === null) {
+    headers.delete("Reporting-Endpoints");
+    return;
+  }
+  headers.set("Reporting-Endpoints", reportingEndpointsHeader);
 }

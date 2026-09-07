@@ -180,8 +180,8 @@ public class SecurityConfig {
      * session-stored in the default repository and echoed by the SPA in a header it fetches from
      * {@code GET /api/auth/csrf}; a plain (non-XOR) handler keeps that token stable so the client
      * can cache it. Only the pre-session auth handshake, the bearer-grade native connection
-     * handoff, the token-authenticated delivery routes and, when SSO is enabled, the SAML
-     * assertion consumer are exempt.
+     * handoff, the token-authenticated delivery routes, the browser CSP violation collector and,
+     * when SSO is enabled, the SAML assertion consumer are exempt.
      *
      * <p>The request cache is disabled. Nothing here replays a saved request — every
      * post-authentication redirect targets a trusted frontend URL — but the default
@@ -263,7 +263,8 @@ public class SecurityConfig {
                     "/api/delivery/unsubscribe/**",
                     "/api/delivery/webhooks/**",
                     "/api/document-acceptance/**",
-                    "/api/document-signature/webhooks/**");
+                    "/api/document-signature/webhooks/**",
+                    "/api/csp-reports");
             if (ssoEnabled) {
                 csrf.ignoringRequestMatchers("/api/login/saml2/sso/**");
             }
@@ -277,6 +278,7 @@ public class SecurityConfig {
                     .requestMatchers("/api/metrics")
                         .hasAuthority(MetricsScrapeTokenFilter.SCRAPE_AUTHORITY)
                     .requestMatchers(HttpMethod.GET, "/api/capabilities").permitAll()
+                    .requestMatchers(HttpMethod.POST, "/api/csp-reports").permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/mail/managed").permitAll()
                     .requestMatchers("/api/delivery/unsubscribe/**").permitAll()
                     .requestMatchers("/api/delivery/webhooks/**").permitAll()
