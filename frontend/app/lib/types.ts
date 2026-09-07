@@ -5889,8 +5889,12 @@ export type AiCommandCenter = {
     watchLimit: number;
 };
 
-/** A successful, live recipient-link preview. Terminal recipient states are intentionally absent. */
+/**
+ * A successful, live recipient-link preview. Terminal recipient states are intentionally absent.
+ * The flow identity names the grant the preview was rendered from and must be echoed by decisions.
+ */
 export type DocumentAcceptancePreview = {
+    flowId: string;
     content: DocumentContent;
     dealName: string;
     workspaceName: string;
@@ -5912,13 +5916,15 @@ export type DocumentAcceptanceDecision = {
     completed: boolean;
 };
 
-/** Body for a public typed-name acceptance. */
+/** Body for a public typed-name acceptance, bound to the previewed flow identity. */
 export type AcceptDocumentPayload = {
+    flowId: string;
     typedName: string;
 };
 
-/** Body for a public reasoned decline. */
+/** Body for a public reasoned decline, bound to the previewed flow identity. */
 export type DeclineDocumentPayload = {
+    flowId: string;
     reason: string;
 };
 

@@ -1522,6 +1522,8 @@ function isDocumentAcceptancePreview(
     value: unknown,
 ): value is Types.DocumentAcceptancePreview {
     return isObjectRecord(value)
+        && typeof value.flowId === "string"
+        && /^[0-9a-f]{64}$/.test(value.flowId)
         && isDocumentContent(value.content)
         && typeof value.dealName === "string"
         && typeof value.workspaceName === "string"

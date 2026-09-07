@@ -18,10 +18,13 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DocumentTemplate;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.dto.AcceptDocumentRequest;
 import ooo.klae.connex.backend.dto.DealDocumentDto;
+import ooo.klae.connex.backend.dto.DeclineDocumentRequest;
 import ooo.klae.connex.backend.dto.DocumentDeliveryDto;
 import ooo.klae.connex.backend.dto.SendDeliveryRecipientRequest;
 import ooo.klae.connex.backend.dto.SendDeliveryRequest;
+import ooo.klae.connex.backend.services.DocumentAcceptanceService.GrantedLink;
 import ooo.klae.connex.backend.services.DocumentAcceptanceService.Link;
 import ooo.klae.connex.backend.signature.DocumentAcceptanceToken;
 import ooo.klae.connex.backend.signature.SignatureProperties;
@@ -96,8 +99,21 @@ abstract class AbstractDocumentDeliveryServiceTest extends AbstractServiceTest {
         return token;
     }
 
-    protected static Link link(String token) {
-        return new Link(DocumentAcceptanceToken.workspaceId(token), sha256(token));
+    protected static GrantedLink link(String token) {
+        return new GrantedLink(
+            new Link(DocumentAcceptanceToken.workspaceId(token), sha256(token)), flowId(token));
+    }
+
+    protected static String flowId(String token) {
+        return sha256("flow:" + token);
+    }
+
+    protected static AcceptDocumentRequest acceptRequest(String token, String typedName) {
+        return new AcceptDocumentRequest(flowId(token), typedName);
+    }
+
+    protected static DeclineDocumentRequest declineRequest(String token, String reason) {
+        return new DeclineDocumentRequest(flowId(token), reason);
     }
 
     protected static String sha256(String value) {

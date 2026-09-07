@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -11,6 +12,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.Map;
+
+import com.jayway.jsonpath.JsonPath;
 
 import jakarta.servlet.Filter;
 import jakarta.servlet.http.Cookie;
@@ -34,16 +37,20 @@ import org.springframework.web.context.WebApplicationContext;
 
 import ooo.klae.connex.backend.config.DocumentAcceptanceAdmissionFilter;
 import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
+import ooo.klae.connex.backend.config.PrivilegedMfaEnforcementFilter;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.DocumentDeliveryDto;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService.Purpose;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
+import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 /**
  * Drives the fragment exchange and grant-only document-acceptance contract through the real
  * admission filter, security filter chain, and interceptors against committed delivery fixtures:
  * the raw bearer is accepted only in the exchange body, every other request is keyed on the
- * purpose-bound grant cookie, and path or query tokens are ignored.
+ * purpose-bound grant cookie, path or query tokens are ignored, and a decision must echo the flow
+ * identity of the preview it was rendered from.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 class DocumentAcceptanceLinkExchangeIntegrationTest
@@ -57,6 +64,9 @@ class DocumentAcceptanceLinkExchangeIntegrationTest
     @Autowired private FilterRegistrationBean<DocumentAcceptanceAdmissionFilter> admissionFilter;
     @Autowired private OneTimeLinkFlowService flowService;
     @Autowired private PasswordEncoder passwordEncoder;
+    @Autowired private PrivilegedMfaProperties privilegedMfaProperties;
+    @Autowired private PrivilegedAccountService privilegedAccountService;
+    @Autowired private WebAuthnService webAuthnService;
 
     private MockMvc mockMvc;
 
@@ -117,6 +127,8 @@ class DocumentAcceptanceLinkExchangeIntegrationTest
             .andExpect(jsonPath("$.recipientStatus").value("pending"))
             .andReturn();
         assertResponseSecretFree(preview, token);
+        assertNotEquals(grant.getValue(), flowIdOf(preview));
+        assertFalse(flowIdOf(preview).contains(token));
         assertEquals(0, countEvents(delivery.id(), "viewed"));
         assertNoAuditSecret(token);
     }
@@ -235,12 +247,13 @@ class DocumentAcceptanceLinkExchangeIntegrationTest
         Browser browser = bootstrapBrowser();
         Cookie grant = flowCookie(exchange(token, 303, browser));
 
-        mockMvc.perform(post("/api/document-acceptance/viewed")
+        String flowId = flowIdOf(mockMvc.perform(post("/api/document-acceptance/viewed")
                 .session(browser.session())
                 .cookie(grant, browser.bindingCookie())
                 .with(csrf().asHeader()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.recipientStatus").value("viewed"));
+            .andExpect(jsonPath("$.recipientStatus").value("viewed"))
+            .andReturn());
         for (int attempt = 0; attempt < 2; attempt++) {
             MvcResult accepted = mockMvc.perform(post("/api/document-acceptance/accept")
                     .session(browser.session())
@@ -248,7 +261,7 @@ class DocumentAcceptanceLinkExchangeIntegrationTest
                     .with(csrf().asHeader())
                     .header("User-Agent", "acceptance-exchange-agent")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"typedName\":\"Rina Sato\"}"))
+                    .content(acceptBody(flowId, "Rina Sato")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recipientStatus").value("completed"))
                 .andExpect(jsonPath("$.completed").value(true))
@@ -269,18 +282,86 @@ class DocumentAcceptanceLinkExchangeIntegrationTest
     }
 
     @Test
+    void staleAcceptanceTabCannotDecideTheLaterTabsDocument() throws Exception {
+        DocumentFixture fixture = finalDocument();
+        DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
+        String token = installToken(delivery.recipients().getFirst().id());
+        DocumentFixture laterFixture = finalDocument();
+        DocumentDeliveryDto laterDelivery = send(laterFixture, signer("later@example.test", 1));
+        String laterToken = installToken(laterDelivery.recipients().getFirst().id());
+        Browser browser = bootstrapBrowser();
+        Cookie grant = flowCookie(exchange(token, 303, browser));
+        String flowId = flowIdOf(mockMvc.perform(get("/api/document-acceptance")
+                .session(browser.session())
+                .cookie(grant, browser.bindingCookie()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.dealName").value(fixture.deal().getName()))
+            .andReturn());
+        Cookie laterGrant = flowCookie(exchange(laterToken, 303, browser));
+        assertNotEquals(grant.getValue(), laterGrant.getValue());
+        String laterFlowId = flowIdOf(mockMvc.perform(post("/api/document-acceptance/viewed")
+                .session(browser.session())
+                .cookie(laterGrant, browser.bindingCookie())
+                .with(csrf().asHeader()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.dealName").value(laterFixture.deal().getName()))
+            .andReturn());
+        assertNotEquals(flowId, laterFlowId);
+
+        MvcResult staleAccept = mockMvc.perform(post("/api/document-acceptance/accept")
+                .session(browser.session())
+                .cookie(laterGrant, browser.bindingCookie())
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(acceptBody(flowId, "Rina Sato")))
+            .andExpect(status().isNotFound())
+            .andReturn();
+        MvcResult staleDecline = mockMvc.perform(post("/api/document-acceptance/decline")
+                .session(browser.session())
+                .cookie(laterGrant, browser.bindingCookie())
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"flowId\":\"" + flowId + "\",\"reason\":\"Wrong document\"}"))
+            .andExpect(status().isNotFound())
+            .andReturn();
+
+        assertEquals(UNAVAILABLE_BODY, staleAccept.getResponse().getContentAsString());
+        assertEquals(UNAVAILABLE_BODY, staleDecline.getResponse().getContentAsString());
+        assertEquals("pending", recipientStatus(delivery));
+        assertEquals("viewed", recipientStatus(laterDelivery));
+        assertEquals(0, countEvents(delivery.id(), "completed"));
+        assertEquals(0, countEvents(laterDelivery.id(), "completed"));
+
+        mockMvc.perform(post("/api/document-acceptance/accept")
+                .session(browser.session())
+                .cookie(laterGrant, browser.bindingCookie())
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(acceptBody(laterFlowId, "Rina Sato")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.completed").value(true));
+        assertEquals("pending", recipientStatus(delivery));
+        assertEquals("completed", recipientStatus(laterDelivery));
+    }
+
+    @Test
     void acceptWithoutCsrfHeaderIsForbidden() throws Exception {
         DocumentFixture fixture = finalDocument();
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
         Browser browser = bootstrapBrowser();
         Cookie grant = flowCookie(exchange(token, 303, browser));
+        String flowId = flowIdOf(mockMvc.perform(get("/api/document-acceptance")
+                .session(browser.session())
+                .cookie(grant, browser.bindingCookie()))
+            .andExpect(status().isOk())
+            .andReturn());
 
         mockMvc.perform(post("/api/document-acceptance/accept")
                 .session(browser.session())
                 .cookie(grant, browser.bindingCookie())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"typedName\":\"Rina Sato\"}"))
+                .content(acceptBody(flowId, "Rina Sato")))
             .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/document-acceptance/exchange")
                 .session(browser.session())
@@ -314,12 +395,19 @@ class DocumentAcceptanceLinkExchangeIntegrationTest
         }
     }
 
+    /**
+     * A signed-in signer who is a privileged member still confined pending passkey enrollment must
+     * still be able to countersign: the link flow's authority is the grant cookie, and the session
+     * only supplies exchange lineage. Every other route keeps the confinement.
+     */
     @Test
-    void signedInMemberWithAWorkspaceCookieStillReachesThePreview() throws Exception {
+    void signedInPrivilegedMemberWithoutAPasskeyStillReachesThePreview() throws Exception {
         DocumentFixture fixture = finalDocument();
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
-        demoteFixtureActorToPlainMember();
+        assertTrue(privilegedMfaProperties.isEnforced());
+        assertTrue(privilegedAccountService.isPrivileged(currentUser.getId()));
+        assertFalse(webAuthnService.hasPasskey(currentUser.getId()));
         userMapper.updatePasswordHash(currentUser.getId(), passwordEncoder.encode(PASSWORD));
         Browser anonymous = bootstrapBrowser();
         MvcResult login = mockMvc.perform(post("/api/auth/login")
@@ -335,23 +423,26 @@ class DocumentAcceptanceLinkExchangeIntegrationTest
         Browser browser = new Browser(session, anonymous.bindingCookie());
         Cookie grant = flowCookie(exchange(token, 303, browser));
 
+        Cookie workspaceCookie = new Cookie(WorkspaceCookie.NAME, Integer.toString(workspace.getId()));
         mockMvc.perform(get("/api/document-acceptance")
                 .session(session)
-                .cookie(
-                    grant,
-                    browser.bindingCookie(),
-                    new Cookie(WorkspaceCookie.NAME, Integer.toString(workspace.getId()))))
+                .cookie(grant, browser.bindingCookie(), workspaceCookie))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.dealName").value(fixture.deal().getName()));
+        mockMvc.perform(get("/api/companies")
+                .session(session)
+                .cookie(workspaceCookie))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code")
+                .value(PrivilegedMfaEnforcementFilter.ENROLLMENT_REQUIRED_CODE));
     }
 
-    private void demoteFixtureActorToPlainMember() {
-        jdbcTemplate.update(
-            "DELETE wrp FROM workspace_role_permission wrp "
-                + "JOIN workspace_member wm ON wm.role_id = wrp.workspace_role_id "
-                + "WHERE wm.workspace_id = ? AND wm.user_id = ?",
-            workspace.getId(),
-            currentUser.getId());
+    private static String flowIdOf(MvcResult result) throws Exception {
+        return JsonPath.read(result.getResponse().getContentAsString(), "$.flowId");
+    }
+
+    private static String acceptBody(String flowId, String typedName) {
+        return "{\"flowId\":\"" + flowId + "\",\"typedName\":\"" + typedName + "\"}";
     }
 
     private MvcResult exchange(String rawToken, int expectedStatus, Browser browser)

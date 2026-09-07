@@ -119,7 +119,7 @@ export default function DocumentAcceptance({
         setRequestError(false);
         setIsSubmitting(true);
         try {
-            await acceptDocument({ typedName: normalizedName });
+            await acceptDocument({ flowId: preview.flowId, typedName: normalizedName });
             receiptRef.current = "accepted";
             setReceipt("accepted");
             setMode(null);
@@ -145,7 +145,7 @@ export default function DocumentAcceptance({
         setRequestError(false);
         setIsSubmitting(true);
         try {
-            await declineDocument({ reason: normalizedReason });
+            await declineDocument({ flowId: preview.flowId, reason: normalizedReason });
             receiptRef.current = "declined";
             setReceipt("declined");
             setMode(null);

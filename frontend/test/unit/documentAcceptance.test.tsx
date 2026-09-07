@@ -23,8 +23,8 @@ const api = vi.hoisted(() => ({
     exchange: vi.fn<(token: string) => Promise<void>>(),
     preview: vi.fn<() => Promise<DocumentAcceptancePreview>>(),
     markViewed: vi.fn<() => Promise<DocumentAcceptancePreview>>(),
-    accept: vi.fn<(payload: { typedName: string }) => Promise<unknown>>(),
-    decline: vi.fn<(payload: { reason: string }) => Promise<unknown>>(),
+    accept: vi.fn<(payload: { flowId: string; typedName: string }) => Promise<unknown>>(),
+    decline: vi.fn<(payload: { flowId: string; reason: string }) => Promise<unknown>>(),
 }));
 
 vi.mock("@/app/lib/api", async () => {
@@ -45,6 +45,7 @@ import { documentAcceptanceViewFailure } from "@/app/components/marketing/campai
 import { ApiError } from "@/app/lib/api";
 
 const TOKEN = `w12-${"a".repeat(64)}`;
+const FLOW_ID = "c".repeat(64);
 const MESSAGES = {
     ...acceptanceMessages,
     DealsDocuments: dealsMessages.DealsDocuments,
@@ -52,6 +53,7 @@ const MESSAGES = {
 
 function preview(overrides: Partial<DocumentAcceptancePreview> = {}): DocumentAcceptancePreview {
     return {
+        flowId: FLOW_ID,
         content: {
             generatedAt: "2026-09-01T10:30:00",
             workspace: { name: "Hikari Systems", address: "Tokyo" },
@@ -404,7 +406,7 @@ describe("document acceptance", () => {
             failure = documentAcceptanceViewFailure(terminalReceipt, error);
         });
 
-        await api.accept({ typedName: "Rina Sato" });
+        await api.accept({ flowId: FLOW_ID, typedName: "Rina Sato" });
         terminalReceipt = true;
         viewed.reject(new ApiError("Document link is no longer available", 404));
         await observedView;
@@ -437,9 +439,27 @@ describe("document acceptance", () => {
         await enterValue(input, "  Rina Sato  ");
         await click(button(rendered.container, "Confirm acceptance"));
 
-        expect(api.accept).toHaveBeenCalledWith({ typedName: "Rina Sato" });
+        expect(api.accept).toHaveBeenCalledWith({ flowId: FLOW_ID, typedName: "Rina Sato" });
         expect(rendered.container.textContent).toContain("Document accepted");
         expect(rendered.container.textContent).not.toContain("Confirm acceptance");
+
+        await unmount(rendered.root);
+    });
+
+    it("shows the unavailable state when the grant no longer matches the rendered flow", async () => {
+        api.accept.mockRejectedValueOnce(
+            new ApiError("Document link is no longer available", 404),
+        );
+        const rendered = await renderAcceptance();
+        await click(button(rendered.container, "Accept"));
+        const input = rendered.container.querySelector<HTMLInputElement>("#document-acceptance-name");
+        if (!input) throw new Error("Typed-name field not found");
+        await enterValue(input, "Rina Sato");
+        await click(button(rendered.container, "Confirm acceptance"));
+
+        expect(api.accept).toHaveBeenCalledWith({ flowId: FLOW_ID, typedName: "Rina Sato" });
+        expect(rendered.container.textContent).toContain("Link unavailable");
+        expect(rendered.container.textContent).not.toContain("Document accepted");
 
         await unmount(rendered.root);
     });
@@ -454,6 +474,7 @@ describe("document acceptance", () => {
         await click(button(rendered.container, "Confirm decline"));
 
         expect(api.decline).toHaveBeenCalledWith({
+            flowId: FLOW_ID,
             reason: "Commercial terms do not work",
         });
         expect(rendered.container.textContent).toContain("Document declined");
@@ -492,8 +513,8 @@ describe("document acceptance", () => {
 
         await actual.getDocumentAcceptancePreview();
         await actual.markDocumentAcceptanceViewed();
-        await actual.acceptDocument({ typedName: "Rina Sato" });
-        await actual.declineDocument({ reason: "Commercial terms" });
+        await actual.acceptDocument({ flowId: FLOW_ID, typedName: "Rina Sato" });
+        await actual.declineDocument({ flowId: FLOW_ID, reason: "Commercial terms" });
 
         const linkCalls = fetchMock.mock.calls
             .filter((call) => !String(call[0]).endsWith("/api/auth/csrf"));

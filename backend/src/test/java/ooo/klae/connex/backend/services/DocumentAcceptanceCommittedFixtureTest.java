@@ -22,8 +22,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import ooo.klae.connex.backend.beans.DocumentDelivery;
 import ooo.klae.connex.backend.beans.DocumentDeliveryArtifact;
 import ooo.klae.connex.backend.beans.DocumentDeliveryRecipient;
-import ooo.klae.connex.backend.dto.AcceptDocumentRequest;
-import ooo.klae.connex.backend.dto.DeclineDocumentRequest;
 import ooo.klae.connex.backend.dto.DocumentAcceptanceDecisionDto;
 import ooo.klae.connex.backend.dto.DocumentAcceptancePreviewDto;
 import ooo.klae.connex.backend.dto.DocumentDeliveryDto;
@@ -60,11 +58,11 @@ class DocumentAcceptanceCommittedFixtureTest
         assertFalse(preview.actionable());
         assertFalse(viewed.actionable());
         assertThrows(ResourceNotFoundException.class, () -> acceptanceService.accept(link(token),
-            new AcceptDocumentRequest("Viewer"),
+            acceptRequest(token, "Viewer"),
             "192.0.2.17",
             "viewer-agent"));
         assertThrows(ResourceNotFoundException.class, () -> acceptanceService.decline(link(token),
-            new DeclineDocumentRequest("Viewer cannot decide"),
+            declineRequest(token, "Viewer cannot decide"),
             "192.0.2.17",
             "viewer-agent"));
         assertEquals(1, countEvents(delivery.id(), "viewed"));
@@ -77,11 +75,11 @@ class DocumentAcceptanceCommittedFixtureTest
         String token = installToken(delivery.recipients().getFirst().id());
 
         DocumentAcceptanceDecisionDto first = acceptanceService.decline(link(token),
-            new DeclineDocumentRequest("Commercial terms were not accepted"),
+            declineRequest(token, "Commercial terms were not accepted"),
             "192.0.2.18",
             "decline-agent");
         DocumentAcceptanceDecisionDto second = acceptanceService.decline(link(token),
-            new DeclineDocumentRequest("Changed reason"),
+            declineRequest(token, "Changed reason"),
             "198.51.100.18",
             "changed-agent");
 
@@ -124,11 +122,11 @@ class DocumentAcceptanceCommittedFixtureTest
         String token = installToken(delivery.recipients().getFirst().id());
 
         DocumentAcceptanceDecisionDto first = acceptanceService.accept(link(token),
-            new AcceptDocumentRequest("Committed Signer"),
+            acceptRequest(token, "Committed Signer"),
             "192.0.2.20",
             "accept-agent");
         DocumentAcceptanceDecisionDto second = acceptanceService.accept(link(token),
-            new AcceptDocumentRequest("Changed Signer"),
+            acceptRequest(token, "Changed Signer"),
             "198.51.100.20",
             "changed-agent");
 
@@ -160,7 +158,7 @@ class DocumentAcceptanceCommittedFixtureTest
         acceptanceService.preview(link(token), "192.0.2.30");
         acceptanceService.markViewed(link(token), "192.0.2.30");
         acceptanceService.accept(link(token),
-            new AcceptDocumentRequest("External Signer"),
+            acceptRequest(token, "External Signer"),
             "192.0.2.30",
             "artifact-preservation-agent");
 

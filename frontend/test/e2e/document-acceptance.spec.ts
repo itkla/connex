@@ -19,6 +19,7 @@ import {
 import { message } from "./support/messages";
 
 const MOCK_GRANT = "e".repeat(64);
+const MOCK_FLOW_ID = "d".repeat(64);
 const SMTP_CAPTURE_PORT = 2525;
 const THEMES: readonly ("light" | "dark")[] = ["light", "dark"];
 
@@ -84,6 +85,7 @@ function preview(actionable: boolean, documentLocale: "en" | "ja" = "en"): Docum
                 grandTotal: 275000,
             },
         },
+        flowId: MOCK_FLOW_ID,
         dealName: "Autumn renewal",
         workspaceName: "Hikari Systems",
         recipientEmail: "r***@example.test",
@@ -659,12 +661,32 @@ test("authenticated setup completes through a cookie-less public bearer", async 
             return numberField(sent, "id", label);
         };
 
-        await sendDocument(
+        const emptyDeliveryId = await sendDocument(
             dealWithoutItemsId,
             documentWithoutItemsId,
             emptyDocumentRecipient,
             "empty document delivery",
         );
+        const recipientStatusOf = async (
+            dealId: number,
+            documentId: number,
+            targetDeliveryId: number,
+        ): Promise<unknown> => {
+            const response = await authenticatedApi.get(
+                `/api/deals/${dealId}/documents/${documentId}/delivery`,
+                { headers: writeHeaders },
+            );
+            const deliveries: unknown = await response.json();
+            if (!Array.isArray(deliveries)) throw new Error("delivery list was not a JSON array");
+            const target = deliveries.find((candidate) => (
+                isRecord(candidate) && candidate.id === targetDeliveryId
+            ));
+            if (!isRecord(target) || !Array.isArray(target.recipients)) {
+                throw new Error(`delivery ${targetDeliveryId} was absent from its document`);
+            }
+            const recipient = target.recipients[0];
+            return isRecord(recipient) ? recipient.status : undefined;
+        };
         const deliveryId = await sendDocument(
             dealWithItemsId,
             documentWithItemsId,
@@ -712,6 +734,32 @@ test("authenticated setup completes through a cookie-less public bearer", async 
             name: message("en", "document-acceptance", "DocumentAcceptance.accept"),
             exact: true,
         })).toBeEnabled();
+
+        const laterTab = await anonymousContext.newPage();
+        await laterTab.goto(acceptanceWithItemsPath);
+        await expect(laterTab).toHaveURL(/\/document-acceptance$/);
+        await expect(laterTab.getByTestId("document-line-items-table")).toBeVisible();
+        await laterTab.close();
+        await anonymousPage.getByRole("button", {
+            name: message("en", "document-acceptance", "DocumentAcceptance.accept"),
+            exact: true,
+        }).click();
+        await anonymousPage.getByLabel(message(
+            "en",
+            "document-acceptance",
+            "DocumentAcceptance.typedNameLabel",
+        ), { exact: true }).fill("Rina Sato");
+        await anonymousPage.getByRole("button", {
+            name: message("en", "document-acceptance", "DocumentAcceptance.confirmAccept"),
+            exact: true,
+        }).click();
+        await expect(anonymousPage.getByRole("heading", {
+            name: message("en", "document-acceptance", "DocumentAcceptance.unavailableTitle"),
+        })).toBeVisible();
+        expect(await recipientStatusOf(dealWithoutItemsId, documentWithoutItemsId, emptyDeliveryId))
+            .toBe("viewed");
+        expect(await recipientStatusOf(dealWithItemsId, documentWithItemsId, deliveryId))
+            .toBe("viewed");
 
         await anonymousPage.goto(acceptanceWithItemsPath);
         await expect(anonymousPage).toHaveURL(/\/document-acceptance$/);

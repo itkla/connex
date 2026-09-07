@@ -10,6 +10,7 @@ import type { DocumentAcceptancePreview } from "@/app/lib/types";
 
 function validPreview(): DocumentAcceptancePreview {
     return {
+        flowId: "c".repeat(64),
         content: {
             generatedAt: "2026-09-01T10:30:00",
             workspace: { name: "Hikari Systems", address: "Tokyo" },
@@ -85,11 +86,32 @@ describe("document acceptance public response boundary", () => {
             completed: "yes",
         }));
 
-        const request = acceptDocument({ typedName: "Rina Sato" });
+        const request = acceptDocument({ flowId: "c".repeat(64), typedName: "Rina Sato" });
 
         await expect(request).rejects.toBeInstanceOf(ApiError);
         await request.catch((error: unknown) => {
             expect(documentAcceptanceFailureKind(error)).toBe("service-unavailable");
+        });
+    });
+
+    it.each([
+        ["missing", (response: DocumentAcceptancePreview) => {
+            delete (response as Partial<DocumentAcceptancePreview>).flowId;
+        }],
+        ["uppercase", (response: DocumentAcceptancePreview) => {
+            response.flowId = "C".repeat(64);
+        }],
+        ["short", (response: DocumentAcceptancePreview) => {
+            response.flowId = "c".repeat(63);
+        }],
+    ])("rejects a preview whose flow identity is %s", async (_case, mutate) => {
+        const response = validPreview();
+        mutate(response);
+        stubPublicResponse(response);
+
+        await expect(getDocumentAcceptancePreview()).rejects.toMatchObject({
+            status: 502,
+            code: "INVALID_PUBLIC_RESPONSE",
         });
     });
 

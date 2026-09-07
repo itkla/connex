@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.dto.DocumentAcceptancePreviewDto;
 import ooo.klae.connex.backend.dto.DocumentDeliveryDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
+import ooo.klae.connex.backend.services.DocumentAcceptanceService.GrantedLink;
 import ooo.klae.connex.backend.services.DocumentAcceptanceService.Link;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -110,7 +111,7 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
             acceptanceService.markViewed(link(token), "192.0.2.11");
 
         DocumentAcceptanceDecisionDto result = acceptanceService.accept(link(token),
-            new AcceptDocumentRequest("External Signer"),
+            acceptRequest(token, "External Signer"),
             "192.0.2.11",
             "Acceptance test agent");
 
@@ -183,12 +184,12 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         installToken(delivery.recipients().get(1).id());
         String second = installToken(delivery.recipients().get(2).id());
 
-        DocumentAcceptanceDecisionDto pending = acceptanceService.accept(link(first), new AcceptDocumentRequest("Signer One"), "192.0.2.12", "agent-one");
+        DocumentAcceptanceDecisionDto pending = acceptanceService.accept(link(first), acceptRequest(first, "Signer One"), "192.0.2.12", "agent-one");
         assertFalse(pending.completed());
         assertEquals("sent", documentService.getOne(
             fixture.deal().getId(), fixture.document().id()).status());
 
-        DocumentAcceptanceDecisionDto complete = acceptanceService.accept(link(second), new AcceptDocumentRequest("Signer Two"), "192.0.2.13", "agent-two");
+        DocumentAcceptanceDecisionDto complete = acceptanceService.accept(link(second), acceptRequest(second, "Signer Two"), "192.0.2.13", "agent-two");
         assertTrue(complete.completed());
         assertEquals("completed", jdbcTemplate.queryForObject(
             "SELECT status FROM document_delivery_recipient WHERE workspace_id = ? AND id = ?",
@@ -208,7 +209,7 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         String second = installToken(delivery.recipients().getLast().id());
 
         DocumentAcceptanceDecisionDto declined = acceptanceService.decline(link(first),
-            new DeclineDocumentRequest("Commercial terms were not accepted"),
+            declineRequest(first, "Commercial terms were not accepted"),
             "192.0.2.14",
             "decline-agent");
 
@@ -216,7 +217,7 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         assertEquals("final", documentService.getOne(
             fixture.deal().getId(), fixture.document().id()).status());
         assertEquals(1, activityCount(fixture, "declined"));
-        assertThrows(ResourceNotFoundException.class, () -> acceptanceService.accept(link(second), new AcceptDocumentRequest("Too Late"), "192.0.2.15", "late-agent"));
+        assertThrows(ResourceNotFoundException.class, () -> acceptanceService.accept(link(second), acceptRequest(second, "Too Late"), "192.0.2.15", "late-agent"));
     }
 
     @Test
@@ -226,7 +227,7 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
             completedFixture, signer("completed@example.test", 1));
         String completedToken = installToken(completedDelivery.recipients().getFirst().id());
         acceptanceService.accept(link(completedToken),
-            new AcceptDocumentRequest("Completed Signer"),
+            acceptRequest(completedToken, "Completed Signer"),
             "192.0.2.18",
             "completed-agent");
 
@@ -235,7 +236,7 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
             declinedFixture, signer("declined@example.test", 1));
         String declinedToken = installToken(declinedDelivery.recipients().getFirst().id());
         acceptanceService.decline(link(declinedToken),
-            new DeclineDocumentRequest("Declined for this test"),
+            declineRequest(declinedToken, "Declined for this test"),
             "192.0.2.19",
             "declined-agent");
 
@@ -248,8 +249,57 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
 
     @Test
     void declineReasonValidationMatchesThePersistedTerminationWidth() {
-        assertTrue(validator.validate(new DeclineDocumentRequest("a".repeat(500))).isEmpty());
-        assertFalse(validator.validate(new DeclineDocumentRequest("a".repeat(501))).isEmpty());
+        assertTrue(validator.validate(
+            new DeclineDocumentRequest("f".repeat(64), "a".repeat(500))).isEmpty());
+        assertFalse(validator.validate(
+            new DeclineDocumentRequest("f".repeat(64), "a".repeat(501))).isEmpty());
+    }
+
+    @Test
+    void decisionBodiesRequireAWellFormedFlowIdentity() {
+        assertTrue(validator.validate(new AcceptDocumentRequest("f".repeat(64), "Signer")).isEmpty());
+        assertFalse(validator.validate(new AcceptDocumentRequest("", "Signer")).isEmpty());
+        assertFalse(validator.validate(new AcceptDocumentRequest("F".repeat(64), "Signer")).isEmpty());
+        assertFalse(validator.validate(new AcceptDocumentRequest("f".repeat(63), "Signer")).isEmpty());
+        assertFalse(validator.validate(new DeclineDocumentRequest("", "Reason")).isEmpty());
+    }
+
+    @Test
+    void decisionsRefuseAFlowIdentityFromAnotherPreview() {
+        DocumentFixture fixture = finalDocument();
+        DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
+        String token = installToken(delivery.recipients().getFirst().id());
+        DocumentFixture otherFixture = finalDocument();
+        DocumentDeliveryDto otherDelivery = send(otherFixture, signer("other@example.test", 1));
+        String otherToken = installToken(otherDelivery.recipients().getFirst().id());
+
+        assertEquals(flowId(token), acceptanceService.preview(link(token), "192.0.2.50").flowId());
+        assertEquals(flowId(token), acceptanceService.markViewed(link(token), "192.0.2.50").flowId());
+        ResourceNotFoundException staleAccept = assertThrows(
+            ResourceNotFoundException.class,
+            () -> acceptanceService.accept(
+                link(token), acceptRequest(otherToken, "Signer"), "192.0.2.50", "agent"));
+        ResourceNotFoundException staleDecline = assertThrows(
+            ResourceNotFoundException.class,
+            () -> acceptanceService.decline(
+                link(token), declineRequest(otherToken, "Reason"), "192.0.2.50", "agent"));
+
+        assertEquals("Document link is no longer available", staleAccept.getMessage());
+        assertEquals(staleAccept.getMessage(), staleDecline.getMessage());
+        assertEquals("viewed", recipientStatus(delivery));
+        assertEquals("pending", recipientStatus(otherDelivery));
+        assertEquals(0, countEvents(delivery.id(), "completed"));
+        assertTrue(acceptanceService.accept(
+            link(token), acceptRequest(token, "Signer"), "192.0.2.50", "agent").completed());
+        assertEquals("completed", recipientStatus(delivery));
+    }
+
+    private String recipientStatus(DocumentDeliveryDto delivery) {
+        return jdbcTemplate.queryForObject(
+            "SELECT status FROM document_delivery_recipient WHERE workspace_id = ? AND id = ?",
+            String.class,
+            workspace.getId(),
+            delivery.recipients().getFirst().id());
     }
 
     @Test
@@ -258,8 +308,8 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
 
-        DocumentAcceptanceDecisionDto first = acceptanceService.accept(link(token), new AcceptDocumentRequest("Signer"), "192.0.2.16", "agent");
-        DocumentAcceptanceDecisionDto second = acceptanceService.accept(link(token), new AcceptDocumentRequest("Changed Name"), "198.51.100.2", "changed-agent");
+        DocumentAcceptanceDecisionDto first = acceptanceService.accept(link(token), acceptRequest(token, "Signer"), "192.0.2.16", "agent");
+        DocumentAcceptanceDecisionDto second = acceptanceService.accept(link(token), acceptRequest(token, "Changed Name"), "198.51.100.2", "changed-agent");
 
         assertEquals(first, second);
         assertEquals(1, countEvents(delivery.id(), "completed"));
@@ -322,12 +372,16 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
             DocumentAcceptanceService.class.getMethod("exchange", String.class, String.class),
             DocumentAcceptanceService.class.getMethod(
                 "admitGrant", HttpServletRequest.class, String.class),
-            DocumentAcceptanceService.class.getMethod("preview", Link.class, String.class),
-            DocumentAcceptanceService.class.getMethod("markViewed", Link.class, String.class),
             DocumentAcceptanceService.class.getMethod(
-                "accept", Link.class, AcceptDocumentRequest.class, String.class, String.class),
+                "preview", GrantedLink.class, String.class),
             DocumentAcceptanceService.class.getMethod(
-                "decline", Link.class, DeclineDocumentRequest.class, String.class, String.class));
+                "markViewed", GrantedLink.class, String.class),
+            DocumentAcceptanceService.class.getMethod(
+                "accept", GrantedLink.class, AcceptDocumentRequest.class,
+                String.class, String.class),
+            DocumentAcceptanceService.class.getMethod(
+                "decline", GrantedLink.class, DeclineDocumentRequest.class,
+                String.class, String.class));
 
         for (Method method : entries) {
             assertFalse(method.isAnnotationPresent(Transactional.class), method.getName());
@@ -363,7 +417,7 @@ class DocumentAcceptanceServiceTest extends AbstractDocumentDeliveryServiceTest 
 
         String decidedToken = installToken(deliveryOf("decided@example.test").getFirst().id());
         acceptanceService.accept(
-            link(decidedToken), new AcceptDocumentRequest("Signer"), "203.0.113.41", "agent");
+            link(decidedToken), acceptRequest(decidedToken, "Signer"), "203.0.113.41", "agent");
         assertEquals(malformed, exchangeFailure(decidedToken));
 
         String unknownToken = installToken(deliveryOf("unknown@example.test").getFirst().id());
