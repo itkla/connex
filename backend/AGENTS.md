@@ -39,14 +39,17 @@ reference implementation) is only correct once **every** layer knows about it. W
    the application chain. Make it `STATELESS` and disable `csrf`, `requestCache` and `logout`; all
    three defaults reach for the session. Every other method on the path then falls through to the
    application chain and stays 401. See `CspReportSecurityConfig`.
-2. A cookie-hiding filter when the endpoint is browser-reachable, registered **below**
-   `SessionRepositoryFilter.DEFAULT_ORDER` and built with the *same* matcher as the chain. A chain
+2. A cookie-hiding filter when the endpoint is browser-reachable, registered **immediately ahead
+   of Spring Session's own registration** and built with the *same* matcher as the chain. A chain
    is not enough: `AnonymousAuthenticationFilter` and the `DispatcherServlet` call
    `getSession(false)` outside every chain's reach, and merely resolving the session makes Spring
    Session rewrite its last-accessed time — a page posting repeatedly would keep an idle login
    alive past the idle timeout. With no cookies there is no session for them to resolve. See
-   `CspReportCookieFilter`, and assert the ordering against the registrations rather than the
-   library constant (`spring.session.servlet.filter-order` is configurable).
+   `CspReportCookieFilter`. Derive the order from the `sessionRepositoryFilterRegistration` bean,
+   not from `SessionRepositoryFilter.DEFAULT_ORDER`: `spring.session.servlet.filter-order` moves
+   that registration, and a deployment that lowers it would otherwise leave Spring Session first
+   and the guarantee silently gone. Assert the ordering against the registrations too, and cover
+   the lowered property with its own context.
 3. `WebConfig` — add the path to `excludePathPatterns`. MVC interceptors run in the
    `DispatcherServlet`, after whichever chain served the request, so no security chain can exclude
    `TenantResolutionInterceptor`; only this list can.
