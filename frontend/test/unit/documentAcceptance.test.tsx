@@ -330,6 +330,56 @@ describe("document acceptance entry", () => {
         }
     });
 
+    it("stops the keep-alive once the recipient records a decision", async () => {
+        vi.useFakeTimers();
+        try {
+            const rendered = await renderEntry();
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+            });
+            expect(api.preview).toHaveBeenCalledTimes(2);
+
+            await click(button(rendered.container, "Accept"));
+            const input = rendered.container
+                .querySelector<HTMLInputElement>("#document-acceptance-name");
+            if (!input) throw new Error("Typed-name field not found");
+            await enterValue(input, "Rina Sato");
+            await click(button(rendered.container, "Confirm acceptance"));
+            expect(rendered.container.textContent).toContain("Document accepted");
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+            });
+
+            expect(api.preview).toHaveBeenCalledTimes(2);
+            expect(rendered.container.textContent).toContain("Document accepted");
+            expect(rendered.container.textContent).not.toContain("Link unavailable");
+
+            await unmount(rendered.root);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("never polls a preview that has no open decision", async () => {
+        vi.useFakeTimers();
+        try {
+            api.preview.mockImplementation(async () => preview({ actionable: false }));
+            const rendered = await renderEntry();
+            expect(api.preview).toHaveBeenCalledTimes(1);
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+            });
+
+            expect(api.preview).toHaveBeenCalledTimes(1);
+
+            await unmount(rendered.root);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it.each([
         [400, "Link unavailable"],
         [404, "Link unavailable"],

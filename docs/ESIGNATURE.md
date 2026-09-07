@@ -70,10 +70,15 @@ The grant's owner is that binding cookie combined with a lineage held only in th
 and `server.servlet.session.timeout` is 30 minutes — half the grant. A signer who reads a long
 contract without clicking anything would lose the session, and the next decision would be refused
 even though the grant is still live. The open recipient page therefore re-reads
-`GET /api/document-acceptance` every 10 minutes while a preview is on screen, which refreshes the
+`GET /api/document-acceptance` every 10 minutes while a decision is still open, which refreshes the
 session and nothing else: the read records no view, does not extend the grant, does not weaken the
 owner binding, and stops when the page is closed. If that read ever comes back unavailable, the page
 switches to the unavailable state, because the grant really is gone.
+
+The re-read stops as soon as the recipient is no longer actionable — a viewer-only delivery, or one
+this browser has just accepted or declined. `preview` applies the same actionability check every
+other operation does, so continuing to poll a settled link would replace a correct confirmation with
+a false "link unavailable".
 
 Every other endpoint — `GET /api/document-acceptance`, `POST /api/document-acceptance/viewed`,
 `/accept` and `/decline` — reads only that cookie. A token in a path or query is ignored, and the legacy

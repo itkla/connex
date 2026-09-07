@@ -43,6 +43,10 @@ const DOCUMENT_MESSAGES = {
  * contract without clicking would otherwise lose the lineage, so the still-valid grant would be
  * refused. This read records nothing and only refreshes the session, so it can never forge view
  * evidence.
+ *
+ * <p>It runs only while a decision is still open. The preview endpoint answers the uniform
+ * unavailable response once the recipient is no longer actionable, so polling a viewer-only or
+ * already-decided link would replace a correct confirmation with a false "link unavailable".
  */
 const SESSION_KEEP_ALIVE_MS = 10 * 60 * 1000;
 
@@ -74,6 +78,7 @@ function unavailableCopy(kind: DocumentAcceptanceFailureKind): DocumentAcceptanc
  */
 export default function DocumentAcceptanceEntry() {
     const [state, setState] = useState<EntryState>({ status: "loading" });
+    const [settled, setSettled] = useState(false);
 
     useEffect(() => {
         let active = true;
@@ -102,8 +107,10 @@ export default function DocumentAcceptanceEntry() {
         };
     }, []);
 
+    const keepAliveOpen = state.status === "ready" && state.preview.actionable && !settled;
+
     useEffect(() => {
-        if (state.status !== "ready") return;
+        if (!keepAliveOpen) return;
         let active = true;
         const timer = window.setInterval(() => {
             getDocumentAcceptancePreview().catch((error: unknown) => {
@@ -119,7 +126,7 @@ export default function DocumentAcceptanceEntry() {
             active = false;
             window.clearInterval(timer);
         };
-    }, [state.status]);
+    }, [keepAliveOpen]);
 
     useEffect(() => {
         const reopen = () => window.location.reload();
@@ -150,7 +157,10 @@ export default function DocumentAcceptanceEntry() {
         <NextIntlClientProvider locale={locale} messages={DOCUMENT_MESSAGES[locale]}>
             <div lang={locale}>
                 <DocumentTitle title={DOCUMENT_MESSAGES[locale].DocumentAcceptance.metaTitle} />
-                <DocumentAcceptance initialPreview={state.preview} />
+                <DocumentAcceptance
+                    initialPreview={state.preview}
+                    onSettled={() => setSettled(true)}
+                />
             </div>
         </NextIntlClientProvider>
     );

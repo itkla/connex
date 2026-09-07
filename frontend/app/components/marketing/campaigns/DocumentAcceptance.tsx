@@ -31,11 +31,18 @@ type DecisionMode = "accept" | "decline" | null;
 type DecisionReceipt = "accepted" | "declined" | null;
 type ViewState = "pending" | "recorded";
 
-/** Renders and records one public recipient review without using a Connex session. */
+/**
+ * Renders and records one public recipient review without using a Connex session.
+ * @param initialPreview the frozen document this browser's grant resolved to
+ * @param onSettled called once a decision receipt exists, so the host can stop polling a link the
+ *     backend now answers as unavailable
+ */
 export default function DocumentAcceptance({
     initialPreview,
+    onSettled,
 }: {
     initialPreview: DocumentAcceptancePreview;
+    onSettled?: () => void;
 }) {
     const t = useTranslations("DocumentAcceptance");
     const locale = useLocale();
@@ -128,6 +135,7 @@ export default function DocumentAcceptance({
             receiptRef.current = "accepted";
             setReceipt("accepted");
             setMode(null);
+            onSettled?.();
         } catch (error: unknown) {
             handleDecisionFailure(error);
         } finally {
@@ -154,6 +162,7 @@ export default function DocumentAcceptance({
             receiptRef.current = "declined";
             setReceipt("declined");
             setMode(null);
+            onSettled?.();
         } catch (error: unknown) {
             handleDecisionFailure(error);
         } finally {
