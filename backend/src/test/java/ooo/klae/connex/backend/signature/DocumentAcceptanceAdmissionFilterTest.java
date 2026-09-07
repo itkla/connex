@@ -189,6 +189,37 @@ class DocumentAcceptanceAdmissionFilterTest {
     }
 
     @Test
+    void pathParametersAndRepeatedSlashesDoNotBypassAdmission() throws Exception {
+        MockHttpServletRequest pathParameter = new MockHttpServletRequest(
+            "GET", "/api/document-acceptance;x=1");
+        MockHttpServletRequest repeatedSlashes = new MockHttpServletRequest(
+            "GET", "//api/document-acceptance");
+        MockHttpServletRequest decisionPathParameter = new MockHttpServletRequest(
+            "POST", "/api/document-acceptance;x=1/accept");
+        when(clientIpResolver.resolve(any())).thenReturn(SOURCE);
+
+        for (MockHttpServletRequest request : new MockHttpServletRequest[] {
+                pathParameter, repeatedSlashes, decisionPathParameter}) {
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+
+            filter.doFilter(request, response, chain);
+
+            assertEquals(404, response.getStatus(), request.getRequestURI());
+            assertEquals(UNAVAILABLE_BODY, response.getContentAsString());
+            assertNull(chain.getRequest(), request.getRequestURI());
+        }
+        verify(rateLimiter, org.mockito.Mockito.times(3))
+            .acquire(DocumentAcceptanceToken.hashForAdmission(null), SOURCE);
+
+        TrackingJsonRequest exchange = request("/exchange;x=1", null);
+        MockHttpServletResponse exchangeResponse = new MockHttpServletResponse();
+        MockFilterChain exchangeChain = new MockFilterChain();
+        filter.doFilter(exchange, exchangeResponse, exchangeChain);
+        assertNotNull(exchangeChain.getRequest());
+    }
+
+    @Test
     void missingUnknownExpiredAndDecidedGrantsHaveByteExactUnavailableResponses()
             throws Exception {
         String unknown = "b".repeat(64);

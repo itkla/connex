@@ -26,13 +26,19 @@ import ooo.klae.connex.backend.util.OneTimeTokenDigest;
  * The credential is the purpose-bound grant cookie; a missing or malformed grant gets the uniform
  * unavailable response and only consumes the shared sentinel and source budgets. The exchange
  * endpoint is excluded because its bearer travels in the JSON body, which this filter must not
- * read; the service applies the same per-token and per-source throttle after parsing it.
+ * read; {@link OneTimeLinkExchangeAdmissionFilter} budgets it per source before the body is read
+ * and the service applies the same per-token and per-source throttle after parsing it.
+ *
+ * <p>Paths are matched after stripping {@code ;} parameters and collapsing repeated slashes, the
+ * same normalisation Spring applies when it maps the handler, so no spelling of a routed request
+ * can skip admission.
  */
 @RequiredArgsConstructor
 public class DocumentAcceptanceAdmissionFilter extends OncePerRequestFilter {
     private static final String PATH = "/api/document-acceptance";
     private static final String EXCHANGE_PATH = PATH + "/exchange";
     private static final Pattern GRANT_PATTERN = Pattern.compile("[0-9a-f]{64}");
+    private static final Pattern REPEATED_SLASHES = Pattern.compile("/{2,}");
     private static final String UNAVAILABLE = "Document link is no longer available";
     private static final String UNAVAILABLE_BODY = "{\"code\":\""
         + ResourceNotFoundException.CODE
@@ -83,7 +89,9 @@ public class DocumentAcceptanceAdmissionFilter extends OncePerRequestFilter {
     }
 
     private static String apiPath(HttpServletRequest request) {
-        String uri = request.getRequestURI();
+        String uri = REPEATED_SLASHES.matcher(
+            PrivilegedMfaEnforcementFilter.stripPathParameters(request.getRequestURI()))
+            .replaceAll("/");
         String contextPath = request.getContextPath();
         if (contextPath != null && !contextPath.isBlank() && uri.startsWith(contextPath)) {
             return uri.substring(contextPath.length());
