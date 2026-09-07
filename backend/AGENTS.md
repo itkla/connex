@@ -55,7 +55,10 @@ reference implementation) is only correct once **every** layer knows about it. W
 5. A per-client throttle keyed on `ClientIpResolver.resolveWithProvenance`, and a fixed response
    status for every bounded body so the caller learns nothing from the response. Bound the key map,
    and bound it *fairly* — evict to admit a newcomer rather than refusing it, or one source
-   rotating through addresses silences every other client.
+   rotating through addresses silences every other client. Keep the eviction constant-time: an
+   access-ordered `LinkedHashMap` behind one lock yields the least recently used entry directly,
+   whereas scanning the map for the oldest entry sells an unauthenticated rotating source a pass
+   over every tracked key for the price of one request. See `CspReportRateLimiter`.
 6. `deploy/Caddyfile` — a `handle` with the same ceiling, placed **before** `handle /api/*` — plus
    the matching entries in `.github/scripts/test_edge_security_headers.py`, both
    `deploy/docker-compose.yml` service environments, and the body-limit table in

@@ -60,10 +60,10 @@ class CspReportRateLimiterTest {
 
     /**
      * A source rotating through addresses must not be able to lock the collector to its own keys:
-     * at the cap the least recently updated window makes way and the newcomer is still heard.
+     * at the cap the least recently used window makes way and the newcomer is still heard.
      */
     @Test
-    void admitsUnseenClientsAtTheTrackedCapByEvictingTheLeastRecentlyUpdatedWindow() {
+    void admitsUnseenClientsAtTheTrackedCapByEvictingTheLeastRecentlyUsedWindow() {
         MutableClock clock = new MutableClock();
         CspReportRateLimiter limiter = new CspReportRateLimiter(2, 60, 2, clock);
         assertTrue(limiter.tryAcquire("2001:db8::1"));
@@ -80,6 +80,36 @@ class CspReportRateLimiterTest {
         assertTrue(limiter.tracks("2001:db8::1"));
         assertTrue(limiter.tracks("2001:db8::3"));
         assertFalse(limiter.tryAcquire("2001:db8::1"));
+    }
+
+    /**
+     * Eviction must take the least recently used window and only that one: a run of newcomers
+     * arriving at a full map must not cost an address that is still reporting its place, nor reset
+     * the allowance it has already spent. A refused request counts as use — it is the client the
+     * throttle most recently heard from.
+     */
+    @Test
+    void newcomersAtTheCapNeverDisplaceTheMostRecentlyUsedWindow() {
+        MutableClock clock = new MutableClock();
+        CspReportRateLimiter limiter = new CspReportRateLimiter(1, 60, 4, clock);
+        for (String address : new String[] {"198.51.100.1", "198.51.100.2", "198.51.100.3",
+                "198.51.100.4"}) {
+            assertTrue(limiter.tryAcquire(address));
+        }
+        clock.advanceMillis(1_000);
+        assertFalse(limiter.tryAcquire("198.51.100.1"));
+
+        for (int newcomer = 0; newcomer < 3; newcomer++) {
+            clock.advanceMillis(1_000);
+            assertTrue(limiter.tryAcquire("203.0.113." + newcomer));
+        }
+
+        assertEquals(4, limiter.trackedKeys());
+        assertTrue(limiter.tracks("198.51.100.1"));
+        assertFalse(limiter.tracks("198.51.100.2"));
+        assertFalse(limiter.tracks("198.51.100.3"));
+        assertFalse(limiter.tracks("198.51.100.4"));
+        assertFalse(limiter.tryAcquire("198.51.100.1"));
     }
 
     /**
