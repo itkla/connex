@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,13 @@ import ooo.klae.connex.backend.storage.UploadPolicy.UploadPurpose;
  * {@code UploadContentInspector} rather than growing a second, weaker path, so the pins here fail
  * the build if inspection artifacts, archive parsing, or object writes leak out of the storage
  * package.
+ *
+ * <p>Image decoding is pinned to the surface the repository actually uses, the
+ * {@code javax.imageio} reader and stream API rather than an {@code ImageIO.read} idiom no
+ * production class calls. The sanctioned decoders are the inspector's own
+ * {@code ImageUploadValidator} and the business-card ingress's {@code BusinessCardImageValidator},
+ * which decodes and re-encodes card scans to a canonical JPEG before they are stored; any other
+ * class that starts decoding uploaded bytes fails this pin.
  */
 class UploadContentInspectionBoundaryArchTest {
     private static final Path SOURCE_ROOT = Path.of("src/main/java");
@@ -39,6 +47,18 @@ class UploadContentInspectionBoundaryArchTest {
         "ooo/klae/connex/backend/storage/UploadContentInspector.java");
     private static final Path MANAGED_OBJECT_SERVICE = SOURCE_ROOT.resolve(
         "ooo/klae/connex/backend/storage/ManagedObjectService.java");
+    private static final Path IMAGE_UPLOAD_VALIDATOR = SOURCE_ROOT.resolve(
+        "ooo/klae/connex/backend/storage/ImageUploadValidator.java");
+    private static final Path BUSINESS_CARD_IMAGE_VALIDATOR = SOURCE_ROOT.resolve(
+        "ooo/klae/connex/backend/businesscard/BusinessCardImageValidator.java");
+    private static final Set<Path> SANCTIONED_IMAGE_DECODERS = Set.of(
+        IMAGE_UPLOAD_VALIDATOR, BUSINESS_CARD_IMAGE_VALIDATOR);
+    private static final Map<String, Set<Path>> UNTRUSTED_PARSERS = Map.of(
+        "java.util.zip.ZipInputStream", Set.of(INSPECTOR),
+        "java.util.zip.ZipFile", Set.of(INSPECTOR),
+        "javax.imageio.ImageIO", SANCTIONED_IMAGE_DECODERS,
+        "ImageReader", SANCTIONED_IMAGE_DECODERS,
+        "ImageInputStream", SANCTIONED_IMAGE_DECODERS);
 
     @Test
     void inspectedUploadIsConstructedOnlyByTheInspector() throws IOException {
@@ -49,17 +69,14 @@ class UploadContentInspectionBoundaryArchTest {
     }
 
     @Test
-    void archiveAndImageParsingOfUploadsStaysInsideTheInspector() throws IOException {
-        for (String parser : List.of(
-                "java.util.zip.ZipInputStream",
-                "java.util.zip.ZipFile",
-                "ImageIO.read(")) {
-            List<Path> sources = sourcesContaining(parser);
-            sources.remove(INSPECTOR);
+    void archiveAndImageParsingOfUploadsStaysInsideTheSanctionedDecoders() throws IOException {
+        for (Map.Entry<String, Set<Path>> parser : UNTRUSTED_PARSERS.entrySet()) {
+            List<Path> sources = sourcesContaining(parser.getKey());
+            sources.removeAll(parser.getValue());
             assertTrue(
                 sources.isEmpty(),
-                "Untrusted upload parsing must stay inside the inspector: " + parser + " "
-                    + sources);
+                "Untrusted upload parsing must stay inside the sanctioned decoders: "
+                    + parser.getKey() + " " + sources);
         }
     }
 

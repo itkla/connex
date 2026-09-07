@@ -49,6 +49,11 @@ ManagedObjectService.storeInspectedAttachment(workspace, ScannedUpload)
 - `storeMigratedAttachment` is package-private and callable only from
   `LegacyUploadMigrationTransaction`.
 - `storeDocumentArtifact` serves `DOCUMENT_DELIVERY_ARTIFACT` and is fed by the same inspector.
+- Image decoding happens in exactly two classes: `ImageUploadValidator` (the inspector's
+  canonicalising decoder for direct raster uploads) and `BusinessCardImageValidator` (the
+  business-card ingress, which decodes and re-encodes card scans to a canonical JPEG before
+  `storeValidatedBusinessCardImage`). `UploadContentInspectionBoundaryArchTest` pins the
+  `javax.imageio` reader and stream API to those two files.
 
 ## 3. `InspectedUpload` invariants
 
