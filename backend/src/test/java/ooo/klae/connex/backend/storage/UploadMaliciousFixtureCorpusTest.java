@@ -2,8 +2,11 @@ package ooo.klae.connex.backend.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -277,6 +280,48 @@ class UploadMaliciousFixtureCorpusTest {
                 + PackageFixtures.manifestEntry("Pictures/c.tif", "image/tiff")
                 + PackageFixtures.manifestEntry("Pictures/d.bmp", "image/bmp"),
             members)));
+    }
+
+    @Test
+    void acceptsOdfEmbeddedFontsAndRejectsMisdeclaredOrOversizedOnes() throws Exception {
+        String font = "Fonts/Font_Liberation_Serif_1.ttf";
+        String declaration = PackageFixtures.manifestEntry(font, "application/x-font-ttf");
+        byte[] sfnt = PackageFixtures.trueTypeFont(1024, 1);
+
+        assertEquals(UploadFormat.ODT, accepted(UploadFormat.ODT, PackageFixtures.odf(
+            UploadFormat.ODT, declaration, PackageFixtures.members(font, sfnt))));
+        assertEquals(UploadFormat.ODT, accepted(UploadFormat.ODT, PackageFixtures.odf(
+            UploadFormat.ODT,
+            PackageFixtures.manifestEntry(font, "application/vnd.ms-opentype"),
+            PackageFixtures.members(font, sfnt))));
+        refused(UploadFormat.ODT, PackageFixtures.odf(
+            UploadFormat.ODT,
+            PackageFixtures.manifestEntry(font, "image/png"),
+            PackageFixtures.members(font, sfnt)));
+        refused(UploadFormat.ODT, PackageFixtures.odf(
+            UploadFormat.ODT, "", PackageFixtures.members(font, sfnt)));
+        refused(UploadFormat.ODT, PackageFixtures.odf(
+            UploadFormat.ODT,
+            declaration,
+            PackageFixtures.members(font, PackageFixtures.ascii("not an sfnt container"))));
+        refused(UploadFormat.ODT, PackageFixtures.odf(
+            UploadFormat.ODT,
+            declaration,
+            PackageFixtures.members(font, PackageFixtures.trueTypeFont(1024, 4096))));
+        refused(UploadFormat.ODT, PackageFixtures.odf(
+            UploadFormat.ODT,
+            declaration,
+            PackageFixtures.members(
+                font, PackageFixtures.trueTypeFont(16 * 1024 * 1024 + 1, 1))));
+    }
+
+    @Test
+    void acceptsRealLibreOfficeEmbeddedFontPackage() throws Exception {
+        byte[] odt = fixture("libreoffice-fonts-source.odt");
+
+        assertEquals(UploadFormat.ODT, accepted(UploadFormat.ODT, odt));
+        assertTrue(
+            new String(odt, StandardCharsets.ISO_8859_1).contains("Fonts/Font_D050000L_1.ttf"));
     }
 
     @Test
@@ -793,6 +838,16 @@ class UploadMaliciousFixtureCorpusTest {
 
         refused(UploadFormat.DOCX, java.util.Arrays.copyOf(signed, signed.length / 2));
         refused(UploadFormat.ODT, java.util.Arrays.copyOf(picture, picture.length / 2));
+    }
+
+    private static byte[] fixture(String name) throws IOException {
+        try (InputStream input = UploadMaliciousFixtureCorpusTest.class
+                .getResourceAsStream("/fixtures/" + name)) {
+            if (input == null) {
+                throw new IOException("Missing fixture " + name);
+            }
+            return input.readAllBytes();
+        }
     }
 
     private static byte[] metadataPackage(String about, String resource) throws IOException {

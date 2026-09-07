@@ -97,7 +97,8 @@ import tools.jackson.databind.ObjectMapper;
  * verifying. XML, VML, and signature parts are parsed; raster members are walked by the same
  * structural inspectors used for direct image uploads; EMF, WMF, TIFF, and BMP members are bound
  * by magic, an internal length that must agree with the member length, and their own declared
- * media type; embedded fonts and
+ * media type; ODF {@code Fonts/*.ttf|otf|ttc} members are bound by the sfnt magic, a table
+ * directory that fits the member, and a declared font type; OOXML obfuscated fonts and
  * {@code printerSettings[0-9]+.bin} are admitted as declared-opaque bytes with a negative header
  * sniff; directory and signature-origin entries must be empty. A member matching no class is
  * refused rather than stored uninspected. Members are bounded at 16 MiB each, embedded fonts at
@@ -342,6 +343,9 @@ public class UploadContentInspector implements AutoCloseable {
         "(word|xl|ppt)/fonts/[A-Za-z0-9._-]+\\.(odttf|fntdata)");
     private static final Pattern PRINTER_SETTINGS_MEMBER = Pattern.compile(
         "(word|xl|ppt)/printerSettings/printerSettings[0-9]+\\.bin");
+    private static final Pattern ODF_FONT_MEMBER = Pattern.compile(
+        "Fonts/[A-Za-z0-9._-]+\\.(ttf|otf|ttc)");
+    private static final String SFNT_FONT_TYPE = "font/sfnt";
     private static final Set<String> RASTER_MEMBER_EXTENSIONS = Set.of(
         "png", "jpg", "jpeg", "gif", "webp");
     private static final Set<String> SNIFFED_MEMBER_EXTENSIONS = Set.of(
@@ -1228,8 +1232,9 @@ public class UploadContentInspector implements AutoCloseable {
                     case MIMETYPE ->
                         packageMimeType = decodeUtf8(entry.content(), deadline).toString();
                     case RASTER -> sniffedType = inspectPackageRaster(entry.content(), deadline);
-                    case SNIFFED_OPAQUE ->
-                        sniffedType = sniffOpaqueMember(entry.content(), entry.length());
+                    case SNIFFED_OPAQUE -> sniffedType = ODF_FONT_MEMBER.matcher(name).matches()
+                        ? sniffFontMember(entry.content(), entry.length())
+                        : sniffOpaqueMember(entry.content(), entry.length());
                     case DECLARED_OPAQUE -> requireInertOpaqueMember(entry.content());
                     case SIGNATURE_ORIGIN, DIRECTORY, REFUSED ->
                         requireEmptyMember(entry.length());
@@ -1321,6 +1326,9 @@ public class UploadContentInspector implements AutoCloseable {
         if (normalized.startsWith("configurations2/")) {
             return PackageMemberClass.REFUSED;
         }
+        if (ODF_FONT_MEMBER.matcher(name).matches()) {
+            return PackageMemberClass.SNIFFED_OPAQUE;
+        }
         return classifyByExtension(normalized);
     }
 
@@ -1370,7 +1378,10 @@ public class UploadContentInspector implements AutoCloseable {
     private static long memberBound(PackageMemberClass memberClass, String name) {
         return switch (memberClass) {
             case XML, SIGNATURE, MIMETYPE -> MAX_XML_BYTES;
-            case RASTER, SNIFFED_OPAQUE -> MAX_PACKAGE_MEMBER_BYTES;
+            case RASTER -> MAX_PACKAGE_MEMBER_BYTES;
+            case SNIFFED_OPAQUE -> ODF_FONT_MEMBER.matcher(name).matches()
+                ? MAX_OPAQUE_FONT_BYTES
+                : MAX_PACKAGE_MEMBER_BYTES;
             case DECLARED_OPAQUE -> EMBEDDED_FONT_MEMBER.matcher(name).matches()
                 ? MAX_OPAQUE_FONT_BYTES
                 : MAX_OPAQUE_SETTINGS_BYTES;
@@ -1487,6 +1498,38 @@ public class UploadContentInspector implements AutoCloseable {
         return (type == 1 || type == 2)
             && littleEndianUnsignedShort(head, offset + 2) == 9
             && littleEndianUnsignedInt(head, offset + 6) * 2L == length;
+    }
+
+    /**
+     * Proves an ODF embedded font member is an sfnt container whose directory fits the member.
+     *
+     * <p>LibreOffice embeds the fonts a document uses under {@code Fonts/} as TrueType, OpenType,
+     * or collection files, so the member must start with one of the sfnt tags ({@code 00 01 00 00},
+     * {@code OTTO}, {@code true}, or {@code ttcf}) and its table or font directory must lie inside
+     * the member; the tables themselves are not parsed. Anything else is refused.
+     *
+     * @param head leading member bytes
+     * @param length exact member length
+     * @return the canonical sfnt media type
+     */
+    private static String sniffFontMember(byte[] head, long length) {
+        if (head.length < 12) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        long directoryEnd;
+        if (asciiEquals(head, 0, "ttcf")) {
+            directoryEnd = 12L + 4L * bigEndianUnsignedInt(head, 8);
+        } else if (bigEndianUnsignedInt(head, 0) == 0x00010000L
+                || asciiEquals(head, 0, "OTTO")
+                || asciiEquals(head, 0, "true")) {
+            directoryEnd = 12L + 16L * bigEndianUnsignedShort(head, 4);
+        } else {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        if (directoryEnd <= 12L || directoryEnd > length) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        return SFNT_FONT_TYPE;
     }
 
     /**
@@ -1881,6 +1924,8 @@ public class UploadContentInspector implements AutoCloseable {
             case "image/wmf" -> "image/x-wmf";
             case "image/x-tiff" -> "image/tiff";
             case "image/x-ms-bmp" -> "image/bmp";
+            case "application/x-font-ttf", "application/x-font-otf", "font/ttf", "font/otf",
+                "application/vnd.ms-opentype" -> SFNT_FONT_TYPE;
             default -> normalized;
         };
     }

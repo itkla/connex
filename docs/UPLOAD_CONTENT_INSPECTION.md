@@ -99,10 +99,15 @@ refused**, rather than stored uninspected.
 | `SIGNATURE_ORIGIN` | `_xmlsignatures/origin.sigs` | Must be empty and bound by the origin relationship |
 | `MIMETYPE` | ODF `mimetype` | STORED at offset 0 and equal to the format's media type |
 | `RASTER` | `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.webp` | Walked by the same structural inspectors used for direct image uploads; bytes are not decoded or re-encoded |
-| `SNIFFED_OPAQUE` | `*.emf`, `*.wmf`, `*.tif`, `*.tiff`, `*.bmp` | Magic plus an internal length that agrees with the member length: the EMF header byte count, the WMF header word count (after the placeable header when present), the TIFF first-directory offset, and the BMP file size |
+| `SNIFFED_OPAQUE` | `*.emf`, `*.wmf`, `*.tif`, `*.tiff`, `*.bmp`; ODF `Fonts/*.ttf\|*.otf\|*.ttc` | Magic plus an internal length that agrees with the member length: the EMF header byte count, the WMF header word count (after the placeable header when present), the TIFF first-directory offset, and the BMP file size. ODF embedded fonts must carry an sfnt tag (`00 01 00 00`, `OTTO`, `true`, `ttcf`) whose table or font directory fits the member, and be declared `application/x-font-ttf`, `application/x-font-otf`, `font/ttf`, `font/otf`, or `application/vnd.ms-opentype` |
 | `DECLARED_OPAQUE` | `(word\|xl\|ppt)/fonts/*.odttf\|*.fntdata`, `(word\|xl\|ppt)/printerSettings/printerSettingsN.bin`, ODF `layout-cache` | Declared type, size bound, and a negative header sniff that refuses executables, archives, compound files, documents, and markup |
 | `DIRECTORY` | names ending `/` | Must be empty |
 | `REFUSED` | everything else | Refused before any bytes are retained |
+
+ODF embedded fonts are the ODF counterpart of the OOXML obfuscated-font decision: LibreOffice
+writes them under `Fonts/` when a document is saved with "embed fonts", they were stored
+uninspected before package-member inspection existed, and they are now admitted only through the
+sfnt sniff and declared-type binding above, inside the 16 MiB font bound.
 
 Refused by name include `vbaProject.bin` and every other `.bin` except printer settings,
 `vbaProjectSignature*.bin`, `activeX/`, `embeddings/`, `oleObject*`, `customUI/`, `externalLinks/`,
@@ -227,6 +232,10 @@ accident:
 - EMF, WMF, TIFF, BMP, embedded fonts, and printer settings are accepted as bounded opaque bytes:
   their internal structure is not parsed, so a client-side parser exploit inside one of them is
   not detectable here. ClamAV still scans every stored byte.
+- An embedded font member larger than 16 MiB refuses the document. LibreOffice embeds CJK fonts
+  whole, and a single CJK TrueType collection can exceed that bound, so a Japanese document saved
+  with "embed fonts" may be refused; raise `MAX_OPAQUE_FONT_BYTES` with a test if that proves
+  common.
 - Signing tools whose XAdES or Office signature markup falls outside the enumerated schemas are
   refused by absence. That is the intended fail-closed posture; widen the vocabulary from the
   published schema, never by relaxing the allowlist.

@@ -508,6 +508,20 @@ final class PackageFixtures {
         return content;
     }
 
+    /**
+     * Builds an incompressible blob led by the TrueType sfnt tag and a one-table directory, so an
+     * ODF embedded font member passes the sfnt sniff while a size bound is exercised.
+     *
+     * @param length exact blob length, at least 28 bytes
+     * @param tables table count written into the sfnt directory
+     * @return font blob bytes
+     */
+    static byte[] trueTypeFont(int length, int tables) {
+        byte[] content = obfuscatedFont(length);
+        ByteBuffer.wrap(content).putInt(0x00010000).putShort((short) tables);
+        return content;
+    }
+
     static byte[] ascii(String value) {
         return value.getBytes(StandardCharsets.UTF_8);
     }
