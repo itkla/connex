@@ -151,9 +151,9 @@ def effective_referrer_policy(path: str) -> str:
         for operation in site_operations
         if operation[0].lstrip("+?->") == "Referrer-Policy"
     )
-    if path.startswith("/document-acceptance/"):
+    if path == "/document-acceptance" or path.startswith("/document-acceptance/"):
         acceptance_operations = direct_child_header_operations(
-            "handle /document-acceptance/* {",
+            "handle @document_acceptance {",
             2,
         )
         return next(
@@ -240,7 +240,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
 
     def test_referrer_policy_is_route_specific_after_proxying(self) -> None:
         acceptance_operations = direct_child_header_operations(
-            "handle /document-acceptance/* {",
+            "handle @document_acceptance {",
             2,
         )
 
@@ -250,7 +250,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
         )
         self.assertEqual(
             "no-referrer",
-            effective_referrer_policy("/document-acceptance/w42-secret"),
+            effective_referrer_policy("/document-acceptance"),
         )
         self.assertEqual(
             "strict-origin-when-cross-origin",
@@ -310,7 +310,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
                 "@workflows",
                 "@saml",
                 "/api/*",
-                "/document-acceptance/*",
+                "@document_acceptance",
                 None,
             ],
             direct_route_handles(),
@@ -324,12 +324,12 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
             "@workflows": "{$CONNEX_WORKFLOW_MAX_BODY_BYTES:98304}",
             "@saml": "{$CONNEX_FORM_MAX_BODY_BYTES:1048576}",
             "/api/*": "{$CONNEX_API_MAX_BODY_BYTES:10485760}",
-            "/document-acceptance/*": "{$CONNEX_FORM_MAX_BODY_BYTES:1048576}",
+            "@document_acceptance": "{$CONNEX_FORM_MAX_BODY_BYTES:1048576}",
         }
         for matcher, limit in expected_limits.items():
             with self.subTest(matcher=matcher):
                 self.assertEqual(limit, request_body_limit_for_handle(matcher))
-                if matcher not in ("/api/*", "/document-acceptance/*"):
+                if matcher not in ("/api/*", "@document_acceptance"):
                     self.assertLess(
                         caddyfile.index(f"handle {matcher} {{"),
                         caddyfile.index("handle /api/* {"),
