@@ -25,6 +25,8 @@ public class OneTimeLinkFlowCookie {
     public static final String WORKSPACE_INVITE = "connex_workspace_invite_flow";
     public static final String WORKSPACE_INVITE_LINK = "connex_workspace_invite_link_flow";
     public static final String SSO_LINK = "connex_sso_link_flow";
+    public static final String DOCUMENT_ACCEPTANCE = "connex_document_acceptance_flow";
+    public static final String DELIVERY_UNSUBSCRIBE = "connex_delivery_unsubscribe_flow";
 
     private final WorkspaceCookieProperties properties;
 
@@ -106,6 +108,8 @@ public class OneTimeLinkFlowCookie {
             case WORKSPACE_INVITE -> WORKSPACE_INVITE;
             case WORKSPACE_INVITE_LINK -> WORKSPACE_INVITE_LINK;
             case SSO_LINK -> SSO_LINK;
+            case DOCUMENT_ACCEPTANCE -> DOCUMENT_ACCEPTANCE;
+            case DELIVERY_UNSUBSCRIBE -> DELIVERY_UNSUBSCRIBE;
         };
     }
 
@@ -117,6 +121,8 @@ public class OneTimeLinkFlowCookie {
             case WORKSPACE_INVITE -> "/api/invites";
             case WORKSPACE_INVITE_LINK -> "/api/invite-links";
             case SSO_LINK -> "/api/auth/sso/link";
+            case DOCUMENT_ACCEPTANCE -> "/api/document-acceptance";
+            case DELIVERY_UNSUBSCRIBE -> "/api/delivery/unsubscribe";
         };
     }
 }

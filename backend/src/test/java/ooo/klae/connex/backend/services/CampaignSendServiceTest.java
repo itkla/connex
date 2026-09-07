@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -61,6 +62,8 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService.ResolvedFlow;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 @TestPropertySource(properties = "connex.delivery.enabled=true")
 @Import(CampaignSendServiceTest.FakeDeliveryConfig.class)
@@ -261,6 +264,26 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
     }
 
     @Test
+    void dispatchRendersTheUnsubscribeLinkAsAFragmentOnThePublicPage() {
+        String prefix = "unsub-link-" + unique();
+        Person recipient = person(newCompany(), prefix + "-in", prefix + "-in@example.com");
+        consentService.setForPerson(recipient.getId(), grantedConsent());
+        CampaignSendDto send = readySend(prefix);
+        int deliveryId = campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), send.id()).getFirst();
+        CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        campaignSendService.queueSend(send.campaignId(), send.id());
+
+        campaignDispatchService.processSend(workspace.getId(), send.id());
+
+        DeliveryRequest request = fakeDispatcher.requests().getFirst();
+        String html = request.content().bodyHtml();
+        assertNotNull(html);
+        assertTrue(html.contains("href=\"/unsubscribe#token=" + delivery.getUnsubscribeToken() + "\""));
+        assertFalse(html.contains("/api/delivery/unsubscribe"));
+        assertFalse(html.contains("/unsubscribe/" + delivery.getUnsubscribeToken()));
+    }
+
+    @Test
     void dispatchSkipsSuppressedRecipientWithoutSending() {
         String prefix = "skip-" + unique();
         Person person = person(newCompany(), prefix + "-in", prefix + "-in@example.com");
@@ -288,9 +311,11 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
         int deliveryId = campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), send.id()).getFirst();
         CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(workspace.getId(), deliveryId);
 
-        deliveryUnsubscribeService.unsubscribe(delivery.getUnsubscribeToken());
-        deliveryUnsubscribeService.unsubscribe(delivery.getUnsubscribeToken());
+        String tokenHash = deliveryUnsubscribeService.exchange(delivery.getUnsubscribeToken());
+        deliveryUnsubscribeService.unsubscribe(flow(tokenHash));
+        deliveryUnsubscribeService.unsubscribe(flow(tokenHash));
 
+        assertEquals(delivery.getUnsubscribeTokenHash(), tokenHash);
         assertTrue(campaignDeliveryMapper.hasEvent(workspace.getId(), deliveryId, "unsubscribed"));
         assertEquals(1, suppressionService.list().stream()
                 .filter(entry -> "unsubscribe".equals(entry.reason())
@@ -386,7 +411,8 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
         assertEquals("+819012345678", request.address());
         assertNull(request.content().subject());
         assertNull(request.content().bodyHtml());
-        assertTrue(request.content().bodyText().startsWith("Hi from "));
+        assertTrue(request.content().bodyText().startsWith("Hi from /unsubscribe#token="));
+        assertFalse(request.content().bodyText().contains("/api/delivery/unsubscribe"));
         CampaignSendDto completed = campaignSendService.getSend(send.campaignId(), send.id());
         assertEquals("completed", completed.status());
         assertEquals(1, completed.dispatchedCount());
@@ -555,7 +581,7 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
         assertEquals(1, first.totalRecipients());
         int deliveryId = campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), first.id()).getFirst();
         CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(workspace.getId(), deliveryId);
-        deliveryUnsubscribeService.unsubscribe(delivery.getUnsubscribeToken());
+        deliveryUnsubscribeService.unsubscribe(flow(delivery.getUnsubscribeTokenHash()));
         consentService.setForPerson(person.getId(), new ContactChannelConsentRequest(
                 "email", "marketing", "unknown", "manual", null, null));
 
@@ -769,5 +795,9 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
                 case AMBIGUOUS -> DispatchReceipt.ambiguous("provider outcome needs reconciliation");
             };
         }
+    }
+
+    private static ResolvedFlow flow(String tokenHash) {
+        return new ResolvedFlow(tokenHash, OneTimeTokenDigest.sha256("grant:" + tokenHash));
     }
 }

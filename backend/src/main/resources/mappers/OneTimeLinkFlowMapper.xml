@@ -20,12 +20,14 @@
       exchange_owner_hash,
       purpose,
       source_token_hash,
+      routing_workspace_id,
       expires_at
     ) VALUES (
       #{grantHash},
       #{exchangeOwnerHash},
       #{purpose},
       #{sourceTokenHash},
+      #{routingWorkspaceId},
       DATE_ADD(UTC_TIMESTAMP(), INTERVAL #{lifetimeSeconds} SECOND)
     )
     ON DUPLICATE KEY UPDATE
@@ -34,6 +36,15 @@
 
   <select id="findValidSourceTokenHash" resultType="string">
     SELECT source_token_hash
+    FROM one_time_link_flow
+    WHERE grant_hash = #{grantHash}
+      AND exchange_owner_hash = #{exchangeOwnerHash}
+      AND purpose = #{purpose}
+      AND expires_at > UTC_TIMESTAMP()
+  </select>
+
+  <select id="findValidRoutingWorkspaceId" resultType="java.lang.Integer">
+    SELECT routing_workspace_id
     FROM one_time_link_flow
     WHERE grant_hash = #{grantHash}
       AND exchange_owner_hash = #{exchangeOwnerHash}

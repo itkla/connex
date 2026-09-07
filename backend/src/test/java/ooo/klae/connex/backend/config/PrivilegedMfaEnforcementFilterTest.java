@@ -101,6 +101,43 @@ class PrivilegedMfaEnforcementFilterTest {
         verify(filterChain, org.mockito.Mockito.times(2)).doFilter(any(), any());
     }
 
+    @ParameterizedTest
+    @MethodSource("linkFlowPaths")
+    void unenrolledPrivilegedAccountMayOpenEmailedLinkFlows(String method, String path) throws Exception {
+        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+
+        MockHttpServletResponse response = execute(method, path);
+
+        assertEquals(200, response.getStatus());
+        verify(filterChain).doFilter(any(), any());
+        verify(auditService, never()).recordFailureScoped(
+                any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    private static Stream<Arguments> linkFlowPaths() {
+        return Stream.of(
+                Arguments.of("POST", "/api/document-acceptance/exchange"),
+                Arguments.of("GET", "/api/document-acceptance"),
+                Arguments.of("POST", "/api/document-acceptance/viewed"),
+                Arguments.of("POST", "/api/document-acceptance/accept"),
+                Arguments.of("POST", "/api/document-acceptance/decline;x"),
+                Arguments.of("POST", "/api/delivery/unsubscribe/exchange"),
+                Arguments.of("GET", "/api/delivery/unsubscribe"),
+                Arguments.of("POST", "/api/delivery/unsubscribe"));
+    }
+
+    @Test
+    void linkFlowExemptionDoesNotCoverPrefixLookalikes() throws Exception {
+        when(privilegedAccountService.isPrivileged(7)).thenReturn(true);
+
+        MockHttpServletResponse acceptance = execute("GET", "/api/document-acceptances");
+        MockHttpServletResponse delivery = execute("GET", "/api/delivery/unsubscribed");
+
+        assertEquals(403, acceptance.getStatus());
+        assertEquals(403, delivery.getStatus());
+        verify(filterChain, never()).doFilter(any(), any());
+    }
+
     @Test
     void nonPrivilegedAccountIsNotConfined() throws Exception {
         when(privilegedAccountService.isPrivileged(7)).thenReturn(false);

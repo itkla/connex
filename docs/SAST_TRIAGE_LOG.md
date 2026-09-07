@@ -933,6 +933,47 @@ replay:
 `gh api repos/itkla/connex/code-scanning/alerts/153 --jq '{state,dismissed_at,dismissed_reason,dismissed_comment}'`
 → `dismissed`, `2026-09-05T01:43:26Z`, `false positive`, the comment above.)
 
+### `java/csrf-unprotected-request-type` — #164, #165: acceptance and unsubscribe preview `GET`s, false positive
+
+Raised on the merge ref of PR #1597 (CHK-050 residual) by the base-vs-merge gate from PR #1592 —
+the first live block of that gate — at `DeliveryUnsubscribeController.java:53`
+(`GET /api/delivery/unsubscribe`, #164) and `DocumentAcceptanceController.java:65`
+(`GET /api/document-acceptance`, #165).
+
+**Runtime trace.** Both handlers read only. `DocumentAcceptanceController.preview` →
+`DocumentAcceptanceService.admitGrant` → `OneTimeLinkFlowService.requireRoutedFlow` → `requireFlow`
+→ `flowMapper.findValidSourceTokenHash` / `findValidRoutingWorkspaceId` (`<select>`s) →
+`DocumentAcceptanceService.preview` → `transactionTemplate.execute(status -> previewInTransaction(…))`,
+which returns the frozen document and records nothing (view evidence is written only by
+`POST /viewed`, so scanners and prefetchers cannot forge it). `DeliveryUnsubscribeController.preview`
+→ `requireFlow` (`<select>`) → `DeliveryUnsubscribeService.preview` → `requireSend` and
+`campaignDeliveryMapper.hasEvent` (`<select>`). `insertEvent`, `markRecipientViewed` and the audit
+writes are reachable only from the `POST` decisions, which are CSRF-protected and `flowId`-bound.
+
+**Why CodeQL fired.** The sinks are the sibling write lambdas of the same service classes, linked
+through `viableCallable` dispatch over `TransactionTemplate.execute(TransactionCallback)` and the
+`Supplier` passed to `inDeliveryWorkspace`; the same class as #153 / #159 and #111 / #114 / #151 /
+#152. The repository's `AutomationExecutor.runAs` + `TransactionTemplate` idiom reproduces this for
+every read-only `GET` that shares a class with a writer; a model-pack or read-path split is recorded
+as a systemic follow-up on the tracking issue.
+
+**Regression coverage.** `DocumentAcceptanceLinkExchangeIntegrationTest` (preview leaves the
+recipient `pending` with no `viewed` / `completed` event) and
+`DeliveryUnsubscribeIntegrationTest.previewAndUnsubscribeIdempotentThroughTheGrant` (no
+`unsubscribed` event after the `GET`).
+
+**Disposition: false positive.** Tracking issue
+[#1599](https://github.com/itkla/connex/issues/1599); owner Hunter Nakagawa; approver Security
+Owner role ([#1230](https://github.com/itkla/connex/issues/1230)); expiry **2027-02-14**, re-review
+**2027-01-14**. Both dismissed on 2026-09-07 with:
+
+> False positive: GET preview runs only SELECTs (requireFlow, previewInTransaction / hasEvent); no
+> event, audit or status write. CodeQL linked sibling write lambdas via TransactionTemplate/Supplier
+> dispatch. Owner Hunter Nakagawa. Expiry 2027-02-14, re-review 2027-01-14. #1599
+
+(275 characters.) The alert numbers are repository-wide, so the dismissals carry over to
+`refs/heads/main` when #1597 merges.
+
 ### `java/spring-disabled-csrf-protection` — #166: dedicated CSP report chain, false positive
 
 Raised on the merge ref of PR #1601 (the collector hardening follow-up to #1596) at

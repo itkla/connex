@@ -113,7 +113,11 @@
 			import backend_proxy
 		}
 
-		handle /document-acceptance/* {
+		# The recipient bearer now travels in the URL fragment, so the credential-free HTML route is
+		# the bare path; the legacy /document-acceptance/<token> subtree no longer exists but stays
+		# matched so a stale emailed link still gets no-referrer while Next answers 404.
+		@document_acceptance path /document-acceptance /document-acceptance/*
+		handle @document_acceptance {
 			request_body {
 				max_size {$CONNEX_FORM_MAX_BODY_BYTES:1048576}
 			}

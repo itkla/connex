@@ -282,7 +282,7 @@ public class TenantScopeInterceptor implements Interceptor {
         MAPPERS + "AttachmentMapper.clearUploaderAnywhere",
         MAPPERS + "CampaignMapper.clearCampaignUserReferencesAnywhere",
         MAPPERS + "CampaignMapper.clearSnapshotCreatorsAnywhere",
-        MAPPERS + "CampaignDeliveryMapper.getByToken",
+        MAPPERS + "CampaignDeliveryMapper.getByTokenHash",
         MAPPERS + "DeliveryProviderConfigMapper.findByWebhookTokenHash",
         MAPPERS + "ConsentMapper.clearEventCreatorsAnywhere",
         MAPPERS + "WorkflowMapper.findAffectedByUserAnywhere",

@@ -75,7 +75,7 @@ const nextConfig: NextConfig = {
         headers: FRONTEND_SECURITY_HEADERS,
       },
       {
-        source: "/document-acceptance/:path*",
+        source: "/document-acceptance",
         headers: DOCUMENT_ACCEPTANCE_SECURITY_HEADERS,
       },
       {

@@ -108,7 +108,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.WorkflowVersionMapper.findLockCandidatesByUserAnywhere",
         "ooo.klae.connex.backend.mappers.RuleMapper.findLockCandidatesByUserAnywhere",
         "ooo.klae.connex.backend.mappers.CampaignSendMapper.workspaceIdsWithQueuedSends",
-        "ooo.klae.connex.backend.mappers.CampaignDeliveryMapper.getByToken",
+        "ooo.klae.connex.backend.mappers.CampaignDeliveryMapper.getByTokenHash",
         "ooo.klae.connex.backend.mappers.DocumentDeliveryMapper.workspaceIdsWithExpired",
         "ooo.klae.connex.backend.mappers.DeliveryProviderConfigMapper.findByWebhookTokenHash"
     );

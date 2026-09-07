@@ -36,16 +36,21 @@ import ooo.klae.connex.backend.dto.SuppressionEntryRequest;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService.ResolvedFlow;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
- * Unit tests for the public unsubscribe flow: the delivery's own workspace scope is entered before
- * any workspace-scoped statement runs and before the write transaction opens (#994), the token alone
- * resolves the workspace, and repeating the request is idempotent.
+ * Unit tests for the public unsubscribe flow: the raw token is exchanged once for its digest, the
+ * delivery's own workspace scope is entered before any workspace-scoped statement runs and before
+ * the write transaction opens (#994), the digest alone resolves the workspace, and repeating the
+ * request is idempotent.
  */
 @ExtendWith(MockitoExtension.class)
 class DeliveryUnsubscribeServiceTest {
 
     private static final String TOKEN = "a".repeat(64);
+    private static final String TOKEN_HASH = OneTimeTokenDigest.sha256(TOKEN);
+    private static final ResolvedFlow FLOW = new ResolvedFlow(TOKEN_HASH, OneTimeTokenDigest.sha256("grant"));
     private static final int WORKSPACE = 11;
     private static final int DELIVERY_ID = 500;
     private static final int SEND_ID = 300;
@@ -97,13 +102,14 @@ class DeliveryUnsubscribeServiceTest {
 
     @Test
     void preview_readsTheSendAndEventStateInsideTheDeliveryWorkspaceScope() {
-        when(campaignDeliveryMapper.getByToken(TOKEN)).thenReturn(delivery(PERSON_ID));
+        when(campaignDeliveryMapper.getByTokenHash(TOKEN_HASH)).thenReturn(delivery(PERSON_ID));
         when(campaignSendMapper.getSend(WORKSPACE, SEND_ID)).thenReturn(send());
         when(campaignDeliveryMapper.hasEvent(WORKSPACE, DELIVERY_ID, "unsubscribed")).thenReturn(false);
         scopeInline();
 
-        DeliveryUnsubscribeDto result = service().preview(TOKEN);
+        DeliveryUnsubscribeDto result = service().preview(FLOW);
 
+        assertEquals(FLOW.flowId(), result.flowId());
         assertEquals("email", result.channel());
         assertEquals("r***@dest.test", result.address());
         assertFalse(result.unsubscribed());
@@ -115,12 +121,12 @@ class DeliveryUnsubscribeServiceTest {
 
     @Test
     void unsubscribe_entersTheWorkspaceScopeBeforeOpeningTheTransaction() {
-        when(campaignDeliveryMapper.getByToken(TOKEN)).thenReturn(delivery(PERSON_ID));
+        when(campaignDeliveryMapper.getByTokenHash(TOKEN_HASH)).thenReturn(delivery(PERSON_ID));
         when(campaignSendMapper.getSend(WORKSPACE, SEND_ID)).thenReturn(send());
         scopeInline();
         transactionInline();
 
-        assertTrue(service().unsubscribe(TOKEN).unsubscribed());
+        assertTrue(service().unsubscribe(FLOW).unsubscribed());
 
         InOrder ordered = inOrder(
                 automationExecutor, transactionTemplate, campaignSendMapper, campaignDeliveryMapper);
@@ -132,12 +138,12 @@ class DeliveryUnsubscribeServiceTest {
 
     @Test
     void unsubscribe_suppressesRevokesConsentAndRecordsTheEventInTheDeliveryWorkspace() {
-        when(campaignDeliveryMapper.getByToken(TOKEN)).thenReturn(delivery(PERSON_ID));
+        when(campaignDeliveryMapper.getByTokenHash(TOKEN_HASH)).thenReturn(delivery(PERSON_ID));
         when(campaignSendMapper.getSend(WORKSPACE, SEND_ID)).thenReturn(send());
         scopeInline();
         transactionInline();
 
-        assertTrue(service().unsubscribe(TOKEN).unsubscribed());
+        assertTrue(service().unsubscribe(FLOW).unsubscribed());
 
         ArgumentCaptor<SuppressionEntryRequest> suppression =
                 ArgumentCaptor.forClass(SuppressionEntryRequest.class);
@@ -158,12 +164,12 @@ class DeliveryUnsubscribeServiceTest {
 
     @Test
     void unsubscribe_skipsConsentRevocationWhenTheDeliveryHasNoPerson() {
-        when(campaignDeliveryMapper.getByToken(TOKEN)).thenReturn(delivery(null));
+        when(campaignDeliveryMapper.getByTokenHash(TOKEN_HASH)).thenReturn(delivery(null));
         when(campaignSendMapper.getSend(WORKSPACE, SEND_ID)).thenReturn(send());
         scopeInline();
         transactionInline();
 
-        assertTrue(service().unsubscribe(TOKEN).unsubscribed());
+        assertTrue(service().unsubscribe(FLOW).unsubscribed());
 
         verify(suppressionService).add(any(SuppressionEntryRequest.class));
         verifyNoInteractions(consentService);
@@ -171,46 +177,77 @@ class DeliveryUnsubscribeServiceTest {
 
     @Test
     void unsubscribe_isIdempotentWhenTheDeliveryIsAlreadyUnsubscribed() {
-        when(campaignDeliveryMapper.getByToken(TOKEN)).thenReturn(delivery(PERSON_ID));
+        when(campaignDeliveryMapper.getByTokenHash(TOKEN_HASH)).thenReturn(delivery(PERSON_ID));
         when(campaignSendMapper.getSend(WORKSPACE, SEND_ID)).thenReturn(send());
         when(campaignDeliveryMapper.hasEvent(WORKSPACE, DELIVERY_ID, "unsubscribed")).thenReturn(true);
         scopeInline();
         transactionInline();
 
-        assertTrue(service().unsubscribe(TOKEN).unsubscribed());
+        DeliveryUnsubscribeDto result = service().unsubscribe(FLOW);
 
+        assertTrue(result.unsubscribed());
+        assertEquals(FLOW.flowId(), result.flowId());
         verify(campaignDeliveryMapper, never()).insertEvent(any());
         verifyNoInteractions(suppressionService, consentService);
     }
 
     @Test
-    void neitherEntryPointIsTransactional() throws NoSuchMethodException {
+    void noEntryPointIsTransactional() throws NoSuchMethodException {
         String reason = "TenantWorkScope cannot change the pinned catalog inside an active "
                 + "transaction, so the delivery's workspace scope has to open first";
         assertNull(DeliveryUnsubscribeService.class.getAnnotation(Transactional.class), reason);
         assertNull(DeliveryUnsubscribeService.class
-                .getMethod("preview", String.class).getAnnotation(Transactional.class), reason);
+                .getMethod("exchange", String.class).getAnnotation(Transactional.class), reason);
         assertNull(DeliveryUnsubscribeService.class
-                .getMethod("unsubscribe", String.class).getAnnotation(Transactional.class), reason);
+                .getMethod("preview", ResolvedFlow.class).getAnnotation(Transactional.class), reason);
+        assertNull(DeliveryUnsubscribeService.class
+                .getMethod("unsubscribe", ResolvedFlow.class).getAnnotation(Transactional.class), reason);
+    }
+
+    @Test
+    void exchange_returnsTheDigestOfAKnownTokenWithoutEnteringAnyWorkspaceScope() {
+        when(campaignDeliveryMapper.getByTokenHash(TOKEN_HASH)).thenReturn(delivery(PERSON_ID));
+
+        assertEquals(TOKEN_HASH, service().exchange(TOKEN));
+
+        verifyNoInteractions(automationExecutor, transactionTemplate, campaignSendMapper);
+    }
+
+    @Test
+    void exchange_rejectsMalformedTokensWithoutALookup() {
+        assertThrows(ResourceNotFoundException.class, () -> service().exchange("not-a-token"));
+        assertThrows(ResourceNotFoundException.class, () -> service().exchange(TOKEN_HASH + "0"));
+        assertThrows(ResourceNotFoundException.class, () -> service().exchange(null));
+
+        verifyNoInteractions(campaignDeliveryMapper, automationExecutor);
+    }
+
+    @Test
+    void exchange_rejectsAnUnknownToken() {
+        when(campaignDeliveryMapper.getByTokenHash(TOKEN_HASH)).thenReturn(null);
+
+        assertThrows(ResourceNotFoundException.class, () -> service().exchange(TOKEN));
+
+        verifyNoInteractions(automationExecutor, transactionTemplate, campaignSendMapper);
     }
 
     @Test
     void unsubscribe_rejectsAnUnknownTokenWithoutEnteringAnyWorkspaceScope() {
-        when(campaignDeliveryMapper.getByToken(TOKEN)).thenReturn(null);
+        when(campaignDeliveryMapper.getByTokenHash(TOKEN_HASH)).thenReturn(null);
 
-        assertThrows(ResourceNotFoundException.class, () -> service().unsubscribe(TOKEN));
+        assertThrows(ResourceNotFoundException.class, () -> service().unsubscribe(FLOW));
 
         verifyNoInteractions(automationExecutor, transactionTemplate, campaignSendMapper);
     }
 
     @Test
     void unsubscribe_rejectsAMissingSendWithoutWriting() {
-        when(campaignDeliveryMapper.getByToken(TOKEN)).thenReturn(delivery(PERSON_ID));
+        when(campaignDeliveryMapper.getByTokenHash(TOKEN_HASH)).thenReturn(delivery(PERSON_ID));
         when(campaignSendMapper.getSend(WORKSPACE, SEND_ID)).thenReturn(null);
         scopeInline();
         transactionInline();
 
-        assertThrows(ResourceNotFoundException.class, () -> service().unsubscribe(TOKEN));
+        assertThrows(ResourceNotFoundException.class, () -> service().unsubscribe(FLOW));
 
         verify(campaignDeliveryMapper, never()).insertEvent(any());
         verifyNoInteractions(suppressionService, consentService);
