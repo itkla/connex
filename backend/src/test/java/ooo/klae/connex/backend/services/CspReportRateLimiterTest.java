@@ -9,6 +9,12 @@ import java.time.Instant;
 import java.time.ZoneId;
 
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 
 class CspReportRateLimiterTest {
 
@@ -52,22 +58,63 @@ class CspReportRateLimiterTest {
         assertFalse(limiter.tryAcquire("198.51.100.8"));
     }
 
+    /**
+     * A source rotating through addresses must not be able to lock the collector to its own keys:
+     * at the cap the least recently updated window makes way and the newcomer is still heard.
+     */
     @Test
-    void refusesUnseenClientsAtTheTrackedCapUntilEvictionFreesCapacity() {
+    void admitsUnseenClientsAtTheTrackedCapByEvictingTheLeastRecentlyUpdatedWindow() {
         MutableClock clock = new MutableClock();
-        CspReportRateLimiter limiter = new CspReportRateLimiter(5, 60, 2, clock);
+        CspReportRateLimiter limiter = new CspReportRateLimiter(2, 60, 2, clock);
         assertTrue(limiter.tryAcquire("2001:db8::1"));
+        clock.advanceMillis(1_000);
         assertTrue(limiter.tryAcquire("2001:db8::2"));
-
-        assertFalse(limiter.tryAcquire("2001:db8::3"));
+        clock.advanceMillis(1_000);
         assertTrue(limiter.tryAcquire("2001:db8::1"));
-        assertEquals(2, limiter.trackedKeys());
 
-        clock.advanceMillis(60_000);
-        limiter.evictStale();
+        clock.advanceMillis(1_000);
 
-        assertEquals(0, limiter.trackedKeys());
         assertTrue(limiter.tryAcquire("2001:db8::3"));
+        assertEquals(2, limiter.trackedKeys());
+        assertFalse(limiter.tracks("2001:db8::2"));
+        assertTrue(limiter.tracks("2001:db8::1"));
+        assertTrue(limiter.tracks("2001:db8::3"));
+        assertFalse(limiter.tryAcquire("2001:db8::1"));
+    }
+
+    /**
+     * Saturation is a different operational condition from ordinary throttling, so it is visible
+     * once per window rather than on every refused-capacity request.
+     */
+    @Test
+    void logsTrackedAddressSaturationOncePerWindow() {
+        MutableClock clock = new MutableClock();
+        CspReportRateLimiter limiter = new CspReportRateLimiter(5, 60, 1, clock);
+        Logger logger = (Logger) LoggerFactory.getLogger(CspReportRateLimiter.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            limiter.tryAcquire("198.51.100.1");
+            assertTrue(appender.list.isEmpty());
+
+            limiter.tryAcquire("198.51.100.2");
+            clock.advanceMillis(1_000);
+            limiter.tryAcquire("198.51.100.3");
+
+            assertEquals(1, appender.list.size());
+            assertEquals(Level.WARN, appender.list.getFirst().getLevel());
+            assertTrue(appender.list.getFirst().getFormattedMessage()
+                    .startsWith("csp.report.throttle.saturated"));
+
+            clock.advanceMillis(60_000);
+            limiter.tryAcquire("198.51.100.4");
+
+            assertEquals(2, appender.list.size());
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     private static final class MutableClock extends Clock {
