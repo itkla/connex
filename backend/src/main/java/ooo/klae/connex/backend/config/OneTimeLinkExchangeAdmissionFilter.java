@@ -14,7 +14,13 @@ import jakarta.servlet.http.HttpServletResponse;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 
-/** Rejects excessive unauthenticated one-time-link exchanges before controller database access. */
+/**
+ * Rejects excessive unauthenticated one-time-link exchanges before controller database access.
+ *
+ * <p>Paths are matched after stripping {@code ;} parameters and collapsing repeated slashes, the
+ * same normalization Spring applies when it maps the handler, so no alternate spelling of an
+ * exchange path can reach the controller without consuming this per-source budget.
+ */
 public class OneTimeLinkExchangeAdmissionFilter extends OncePerRequestFilter {
 
     private static final Set<String> EXCHANGE_PATHS = Set.of(
@@ -55,6 +61,6 @@ public class OneTimeLinkExchangeAdmissionFilter extends OncePerRequestFilter {
 
     private static boolean isExchange(HttpServletRequest request) {
         return HttpMethod.POST.matches(request.getMethod())
-            && EXCHANGE_PATHS.contains(request.getServletPath());
+            && EXCHANGE_PATHS.contains(RequestPathNormalizer.apiPath(request));
     }
 }

@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -86,6 +87,55 @@ class OneTimeLinkExchangeAdmissionFilterTest {
         assertEquals(200, previewResponse.getStatus());
     }
 
+    /**
+     * Path parameters and repeated slashes are ignored by handler mapping, so an exchange spelled
+     * either way still reaches its controller. It must therefore consume the same per-source budget
+     * as the canonical spelling rather than slipping past this filter unbudgeted.
+     */
+    @ParameterizedTest
+    @CsvSource({
+        "/api/delivery/unsubscribe/exchange;x=1, /api/delivery/unsubscribe/exchange",
+        "//api/delivery/unsubscribe/exchange, /api/delivery/unsubscribe/exchange",
+        "/api/document-acceptance/exchange;x=1, /api/document-acceptance/exchange",
+        "//api/document-acceptance/exchange, /api/document-acceptance/exchange",
+        "/api/auth/reset-password/exchange;x=1, /api/auth/reset-password/exchange",
+        "//api/auth/reset-password/exchange, /api/auth/reset-password/exchange"
+    })
+    void alternateSpellingsConsumeTheSameBudgetAsTheCanonicalExchange(
+            String spelling, String canonical) throws Exception {
+        LoginRateLimiter rateLimiter = new LoginRateLimiter(1, 100, 5000, 900);
+        ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);
+        OneTimeLinkExchangeAdmissionFilter filter =
+            new OneTimeLinkExchangeAdmissionFilter(rateLimiter, clientIpResolver);
+        when(clientIpResolver.resolveWithProvenance(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(new ResolvedClientIp("203.0.113.13", false));
+
+        MockHttpServletResponse spelledResponse = invoke(filter, spelling);
+        MockHttpServletResponse canonicalResponse = invoke(filter, canonical);
+
+        assertEquals(200, spelledResponse.getStatus(), spelling);
+        assertEquals(429, canonicalResponse.getStatus(), spelling);
+    }
+
+    /** A deployment context path must not shift an exchange path out of the budgeted set. */
+    @Test
+    void aContextPathPrefixStillMatchesTheExchangePath() throws Exception {
+        LoginRateLimiter rateLimiter = new LoginRateLimiter(1, 100, 5000, 900);
+        ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);
+        OneTimeLinkExchangeAdmissionFilter filter =
+            new OneTimeLinkExchangeAdmissionFilter(rateLimiter, clientIpResolver);
+        when(clientIpResolver.resolveWithProvenance(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(new ResolvedClientIp("203.0.113.14", false));
+
+        MockHttpServletResponse firstResponse =
+            invokeWithContextPath(filter, "/connex", "/connex/api/invites/exchange");
+        MockHttpServletResponse secondResponse =
+            invokeWithContextPath(filter, "/connex", "/connex/api/invites/exchange");
+
+        assertEquals(200, firstResponse.getStatus());
+        assertEquals(429, secondResponse.getStatus());
+    }
+
     @Test
     void rejectsAnExchangeAfterTheExistingIpBudgetIsExhausted() throws Exception {
         LoginRateLimiter rateLimiter = new LoginRateLimiter(1, 100, 5000, 900);
@@ -118,6 +168,17 @@ class OneTimeLinkExchangeAdmissionFilterTest {
         assertEquals(200, firstResponse.getStatus());
         assertEquals(200, secondResponse.getStatus());
         assertEquals(429, thirdResponse.getStatus());
+    }
+
+    private static MockHttpServletResponse invokeWithContextPath(
+            OneTimeLinkExchangeAdmissionFilter filter, String contextPath, String uri)
+            throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", uri);
+        request.setContextPath(contextPath);
+        request.setServletPath(uri.substring(contextPath.length()));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        filter.doFilter(request, response, new MockFilterChain());
+        return response;
     }
 
     private static MockHttpServletResponse invoke(

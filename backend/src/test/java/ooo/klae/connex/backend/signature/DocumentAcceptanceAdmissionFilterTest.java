@@ -212,11 +212,19 @@ class DocumentAcceptanceAdmissionFilterTest {
         verify(rateLimiter, org.mockito.Mockito.times(3))
             .acquire(DocumentAcceptanceToken.hashForAdmission(null), SOURCE);
 
-        TrackingJsonRequest exchange = request("/exchange;x=1", null);
-        MockHttpServletResponse exchangeResponse = new MockHttpServletResponse();
-        MockFilterChain exchangeChain = new MockFilterChain();
-        filter.doFilter(exchange, exchangeResponse, exchangeChain);
-        assertNotNull(exchangeChain.getRequest());
+        for (String exchangeUri : new String[] {
+                "/api/document-acceptance/exchange;x=1",
+                "//api/document-acceptance/exchange"}) {
+            TrackingJsonRequest exchange = request("", null);
+            exchange.setRequestURI(exchangeUri);
+            MockHttpServletResponse exchangeResponse = new MockHttpServletResponse();
+            MockFilterChain exchangeChain = new MockFilterChain();
+
+            filter.doFilter(exchange, exchangeResponse, exchangeChain);
+
+            assertNotNull(exchangeChain.getRequest(), exchangeUri);
+            assertFalse(exchange.bodyAccessed(), exchangeUri);
+        }
     }
 
     @Test

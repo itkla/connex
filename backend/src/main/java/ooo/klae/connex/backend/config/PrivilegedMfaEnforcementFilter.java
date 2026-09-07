@@ -56,7 +56,6 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     private static final Pattern REPORT_EXPORT = Pattern.compile(
             "/api/reports/" + IDENTIFIER_SEGMENT + "/(?:export\\.csv|snapshots/"
                     + IDENTIFIER_SEGMENT + "/export\\.csv)");
-    private static final Pattern PATH_PARAMETER_MARKER = Pattern.compile("(?i)(?:;|%(?:25)*3b)");
     private static final String CSP_REPORT_PATH = "/api/csp-reports";
 
     private final PrivilegedMfaProperties properties;
@@ -86,7 +85,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             filterChain.doFilter(request, response);
             return;
         }
-        String path = stripPathParameters(request.getRequestURI());
+        String path = RequestPathNormalizer.stripPathParameters(request.getRequestURI());
         if (isCspReport(request.getMethod(), path)) {
             filterChain.doFilter(request, response);
             return;
@@ -145,27 +144,6 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
                 || EXACT_EXPORT_PATHS.contains(path)
                 || ORG_AUDIT_EXPORT.matcher(path).matches()
                 || REPORT_EXPORT.matcher(path).matches();
-    }
-
-    static String stripPathParameters(String path) {
-        java.util.regex.Matcher marker = PATH_PARAMETER_MARKER.matcher(path);
-        if (!marker.find()) {
-            return path;
-        }
-        StringBuilder normalized = new StringBuilder(path.length());
-        int segmentStart = 0;
-        do {
-            normalized.append(path, segmentStart, marker.start());
-            int nextSegment = path.indexOf('/', marker.end());
-            if (nextSegment < 0) {
-                return normalized.toString();
-            }
-            normalized.append('/');
-            segmentStart = nextSegment + 1;
-            marker.region(segmentStart, path.length());
-        } while (marker.find());
-        normalized.append(path, segmentStart, path.length());
-        return normalized.toString();
     }
 
     /** Whether the request is a grant-cookie recipient surface rather than a session-authorized one. */

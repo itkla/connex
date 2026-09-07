@@ -38,7 +38,6 @@ public class DocumentAcceptanceAdmissionFilter extends OncePerRequestFilter {
     private static final String PATH = "/api/document-acceptance";
     private static final String EXCHANGE_PATH = PATH + "/exchange";
     private static final Pattern GRANT_PATTERN = Pattern.compile("[0-9a-f]{64}");
-    private static final Pattern REPEATED_SLASHES = Pattern.compile("/{2,}");
     private static final String UNAVAILABLE = "Document link is no longer available";
     private static final String UNAVAILABLE_BODY = "{\"code\":\""
         + ResourceNotFoundException.CODE
@@ -53,7 +52,7 @@ public class DocumentAcceptanceAdmissionFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = apiPath(request);
+        String path = RequestPathNormalizer.apiPath(request);
         boolean acceptancePath = path.equals(PATH) || path.startsWith(PATH + "/");
         return !acceptancePath || path.equals(EXCHANGE_PATH);
     }
@@ -86,17 +85,6 @@ public class DocumentAcceptanceAdmissionFilter extends OncePerRequestFilter {
     private static String grantFrom(HttpServletRequest request) {
         Cookie cookie = WebUtils.getCookie(request, OneTimeLinkFlowCookie.DOCUMENT_ACCEPTANCE);
         return cookie == null ? null : cookie.getValue();
-    }
-
-    private static String apiPath(HttpServletRequest request) {
-        String uri = REPEATED_SLASHES.matcher(
-            PrivilegedMfaEnforcementFilter.stripPathParameters(request.getRequestURI()))
-            .replaceAll("/");
-        String contextPath = request.getContextPath();
-        if (contextPath != null && !contextPath.isBlank() && uri.startsWith(contextPath)) {
-            return uri.substring(contextPath.length());
-        }
-        return uri;
     }
 
     private static void reject(HttpServletResponse response, int status, String message)
