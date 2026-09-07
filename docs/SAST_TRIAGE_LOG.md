@@ -932,3 +932,23 @@ replay:
 (277 characters; the API cap is 280. Verified after the dismissal with
 `gh api repos/itkla/connex/code-scanning/alerts/153 --jq '{state,dismissed_at,dismissed_reason,dismissed_comment}'`
 → `dismissed`, `2026-09-05T01:43:26Z`, `false positive`, the comment above.)
+
+### `java/spring-disabled-csrf-protection` — #166: dedicated CSP report chain, false positive
+
+Raised on the merge ref of PR #1601 (the collector hardening follow-up to #1596) at
+`CspReportSecurityConfig.java:79`, where the dedicated `@Order(0)` chain that serves
+`POST /api/csp-reports` disables CSRF. Same class as #156 (`PublicApiSecurityConfig`, #1591).
+
+**Why it is not a vulnerability.** The chain matches exactly `POST /api/csp-reports`, runs
+`SessionCreationPolicy.STATELESS` with the request cache disabled, and `permitAll`s the one
+route; `CspReportCookieFilter`, registered just before Spring Session's `SessionRepositoryFilter`,
+hides every cookie from that request, so no session and no cookie-borne authority exists for a
+cross-site request to ride. The endpoint records nothing but a bounded log line and always
+answers 204. The cookie-authorised `/api/**` chain keeps its CSRF protection.
+`CspReportEndpointSecurityTest.reportsNeverTouchTheSessionTheyCarry` proves through the real
+filter chain that a report carrying a valid session cookie leaves the session untouched and
+creates none.
+
+**Disposition: false positive.** Tracked on [#1591](https://github.com/itkla/connex/issues/1591)
+(same class); owner Hunter Nakagawa; approver Security Owner role; expiry **2027-02-14**,
+re-review **2027-01-14**. Dismissed on 2026-09-07 with a comment carrying that record.
