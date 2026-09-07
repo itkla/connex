@@ -849,7 +849,7 @@ CodeQL dismissal replay incomplete: 6 unmatched, 0 failed PATCH(es)
 | #151 | #157 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/AiAssistantController.java:294` | won't fix |
 | #152 | #158 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/AiAssistantController.java:203` | won't fix |
 | #153 | #159 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/ReportController.java:126` | false positive |
-| #150 | #160 | `java/potentially-weak-cryptographic-algorithm` | `backend/src/main/java/ooo/klae/connex/backend/password/PasswordCredentialService.java:153` | won't fix |::error title=Unmatched open CodeQL alert #26::java/user-controlled-bypass at backend/src/main/java/ooo/klae/connex/backend/services/WorkflowService.java:187:39 has no snapshotted dismissal and needs triage
+| #150 | #160 | `java/potentially-weak-cryptographic-algorithm` | `backend/src/main/java/ooo/klae/connex/backend/password/PasswordCredentialService.java:153` | won't fix |
 | #95 | #26 | `java/user-controlled-bypass` | `backend/src/main/java/ooo/klae/connex/backend/services/WorkflowService.java:187` | false positive (manual: snapshot line 182 drifted to 187 after #1590) |
 | #96 | #27 | `java/user-controlled-bypass` | `backend/src/main/java/ooo/klae/connex/backend/services/WorkflowService.java:202` | false positive (manual: snapshot line 192 drifted to 202 after #1590) |
 | #97 | #28 | `java/user-controlled-bypass` | `backend/src/main/java/ooo/klae/connex/backend/services/WorkflowService.java:315` | false positive (manual: snapshot line 305 drifted to 315 after #1590) |
