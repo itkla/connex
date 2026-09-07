@@ -3,12 +3,15 @@ package ooo.klae.connex.backend.signature;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
@@ -31,26 +34,33 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import jakarta.servlet.ServletInputStream;
+import jakarta.servlet.http.Cookie;
 import ooo.klae.connex.backend.config.DocumentAcceptanceAdmissionFilter;
+import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
 import ooo.klae.connex.backend.controllers.DocumentAcceptanceController;
 import ooo.klae.connex.backend.exceptions.GlobalExceptionHandler;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.observability.ErrorReporter;
-import ooo.klae.connex.backend.services.DocumentAcceptanceAdmissionService;
 import ooo.klae.connex.backend.services.DocumentAcceptanceService;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.util.ClientIpResolver;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 @ExtendWith(MockitoExtension.class)
 class DocumentAcceptanceAdmissionFilterTest {
-    private static final String TOKEN = "w42-" + "a".repeat(64);
+    private static final String GRANT = "a".repeat(64);
+    private static final String LEGACY_TOKEN = "w42-" + "a".repeat(64);
     private static final String SOURCE = "198.51.100.20";
+    private static final String UNAVAILABLE_BODY =
+        "{\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Document link is no longer available\"}";
 
     @Mock DocumentAcceptanceRateLimiter rateLimiter;
     @Mock ClientIpResolver clientIpResolver;
-    @Mock DocumentAcceptanceAdmissionService admissionService;
     @Mock DocumentAcceptanceService acceptanceService;
+    @Mock OneTimeLinkFlowService flowService;
+    @Mock OneTimeLinkFlowCookie flowCookie;
     @Mock ErrorReporter errorReporter;
     @Mock TenantContext tenantContext;
 
@@ -58,15 +68,12 @@ class DocumentAcceptanceAdmissionFilterTest {
 
     @BeforeEach
     void setUp() {
-        filter = new DocumentAcceptanceAdmissionFilter(
-            rateLimiter,
-            clientIpResolver,
-            admissionService);
+        filter = new DocumentAcceptanceAdmissionFilter(rateLimiter, clientIpResolver);
     }
 
     @Test
-    void malformedTokenGetsTheUniformUnavailableResponseBeforeBodyAccess() throws Exception {
-        TrackingJsonRequest request = request("not-a-token", "/accept");
+    void missingCookieGetsTheUniformUnavailableResponseBeforeBodyAccess() throws Exception {
+        TrackingJsonRequest request = request("/accept", null);
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
         when(clientIpResolver.resolve(request)).thenReturn(SOURCE);
@@ -75,32 +82,24 @@ class DocumentAcceptanceAdmissionFilterTest {
 
         assertEquals(404, response.getStatus());
         assertEquals("application/json", response.getContentType());
-        assertEquals(
-            "{\"code\":\"RESOURCE_NOT_FOUND\",\"message\":\"Document link is no longer available\"}",
-            response.getContentAsString());
+        assertEquals(UNAVAILABLE_BODY, response.getContentAsString());
         assertEquals("no-store", response.getHeader("Cache-Control"));
         assertNull(chain.getRequest());
         assertFalse(request.bodyAccessed());
-        verify(rateLimiter).acquire(
-            DocumentAcceptanceToken.hashForAdmission("not-a-token"),
-            SOURCE);
-        verify(admissionService).lookup("not-a-token");
+        verify(rateLimiter).acquire(DocumentAcceptanceToken.hashForAdmission(null), SOURCE);
     }
 
     @Test
-    void malformedTokensIncrementTheRealSourceThrottleCounter() throws Exception {
+    void malformedGrantsIncrementTheRealSourceThrottleCounter() throws Exception {
         SignatureProperties properties = new SignatureProperties();
         properties.setMaxRequestsPerSource(1);
         DocumentAcceptanceRateLimiter realRateLimiter = new DocumentAcceptanceRateLimiter(
             properties,
             Clock.fixed(Instant.parse("2026-09-02T00:00:00Z"), ZoneOffset.UTC));
         DocumentAcceptanceAdmissionFilter realFilter =
-            new DocumentAcceptanceAdmissionFilter(
-                realRateLimiter,
-                clientIpResolver,
-                admissionService);
-        TrackingJsonRequest firstRequest = request("first-malformed", "/accept");
-        TrackingJsonRequest secondRequest = request("second-malformed", "/accept");
+            new DocumentAcceptanceAdmissionFilter(realRateLimiter, clientIpResolver);
+        TrackingJsonRequest firstRequest = request("/accept", "first-malformed");
+        TrackingJsonRequest secondRequest = request("/accept", "second-malformed");
         when(clientIpResolver.resolve(firstRequest)).thenReturn(SOURCE);
         when(clientIpResolver.resolve(secondRequest)).thenReturn(SOURCE);
         MockHttpServletResponse firstResponse = new MockHttpServletResponse();
@@ -117,12 +116,12 @@ class DocumentAcceptanceAdmissionFilterTest {
 
     @Test
     void throttleRejectsBeforeMalformedJsonCanBeParsed() throws Exception {
-        TrackingJsonRequest request = request(TOKEN, "/decline");
+        TrackingJsonRequest request = request("/decline", GRANT);
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
         when(clientIpResolver.resolve(request)).thenReturn(SOURCE);
         doThrow(new TooManyRequestsException("limited"))
-            .when(rateLimiter).acquire(DocumentAcceptanceToken.hash(TOKEN), SOURCE);
+            .when(rateLimiter).acquire(OneTimeTokenDigest.sha256(GRANT), SOURCE);
 
         filter.doFilter(request, response, chain);
 
@@ -135,53 +134,129 @@ class DocumentAcceptanceAdmissionFilterTest {
     }
 
     @Test
-    void tokenAndSourceAdmissionRunBeforeTheChainReadsTheBody() throws Exception {
-        TrackingJsonRequest request = request(TOKEN, "/accept");
+    void grantAndSourceAdmissionRunBeforeTheChainReadsTheBody() throws Exception {
+        TrackingJsonRequest request = request("/accept", GRANT);
         MockHttpServletResponse response = new MockHttpServletResponse();
         when(clientIpResolver.resolve(request)).thenReturn(SOURCE);
         doAnswer(invocation -> {
             assertFalse(request.bodyAccessed());
             return null;
-        }).when(rateLimiter).acquire(DocumentAcceptanceToken.hash(TOKEN), SOURCE);
+        }).when(rateLimiter).acquire(OneTimeTokenDigest.sha256(GRANT), SOURCE);
 
         filter.doFilter(request, response, (servletRequest, servletResponse) ->
             servletRequest.getInputStream().readAllBytes());
 
         assertEquals(200, response.getStatus());
         assertTrue(request.bodyAccessed());
-        verify(rateLimiter).acquire(DocumentAcceptanceToken.hash(TOKEN), SOURCE);
+        verify(rateLimiter).acquire(OneTimeTokenDigest.sha256(GRANT), SOURCE);
     }
 
     @Test
-    void malformedUnknownExpiredAndDecidedTokensHaveByteExactUnavailableResponses() throws Exception {
-        String unknown = "w42-" + "b".repeat(64);
-        String expired = "w42-" + "c".repeat(64);
-        String decided = "w42-" + "d".repeat(64);
+    void exchangePathBypassesThisFilter() throws Exception {
+        TrackingJsonRequest request = request("/exchange", null);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(200, response.getStatus());
+        assertNotNull(chain.getRequest());
+        verifyNoInteractions(rateLimiter, clientIpResolver);
+    }
+
+    @Test
+    void barePreviewPathIsFilteredAndLegacyPathTokensAreNotCredentials() throws Exception {
+        MockHttpServletRequest bare = new MockHttpServletRequest("GET", "/api/document-acceptance");
+        MockHttpServletRequest legacy = new MockHttpServletRequest(
+            "GET", "/api/document-acceptance/" + LEGACY_TOKEN);
+        MockHttpServletRequest legacyDecision = new MockHttpServletRequest(
+            "POST", "/api/document-acceptance/" + LEGACY_TOKEN + "/accept");
         when(clientIpResolver.resolve(any())).thenReturn(SOURCE);
-        when(acceptanceService.preview(unknown, SOURCE))
-            .thenThrow(new ResourceNotFoundException("Document link is no longer available"));
-        when(acceptanceService.preview(expired, SOURCE))
-            .thenThrow(new ResourceNotFoundException("Document link is no longer available"));
-        when(acceptanceService.preview(decided, SOURCE))
-            .thenThrow(new ResourceNotFoundException("Document link is no longer available"));
+
+        for (MockHttpServletRequest request : new MockHttpServletRequest[] {
+                bare, legacy, legacyDecision}) {
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+
+            filter.doFilter(request, response, chain);
+
+            assertEquals(404, response.getStatus(), request.getRequestURI());
+            assertEquals(UNAVAILABLE_BODY, response.getContentAsString());
+            assertNull(chain.getRequest());
+        }
+        verify(rateLimiter, org.mockito.Mockito.times(3))
+            .acquire(DocumentAcceptanceToken.hashForAdmission(null), SOURCE);
+    }
+
+    @Test
+    void pathParametersAndRepeatedSlashesDoNotBypassAdmission() throws Exception {
+        MockHttpServletRequest pathParameter = new MockHttpServletRequest(
+            "GET", "/api/document-acceptance;x=1");
+        MockHttpServletRequest repeatedSlashes = new MockHttpServletRequest(
+            "GET", "//api/document-acceptance");
+        MockHttpServletRequest decisionPathParameter = new MockHttpServletRequest(
+            "POST", "/api/document-acceptance;x=1/accept");
+        when(clientIpResolver.resolve(any())).thenReturn(SOURCE);
+
+        for (MockHttpServletRequest request : new MockHttpServletRequest[] {
+                pathParameter, repeatedSlashes, decisionPathParameter}) {
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+
+            filter.doFilter(request, response, chain);
+
+            assertEquals(404, response.getStatus(), request.getRequestURI());
+            assertEquals(UNAVAILABLE_BODY, response.getContentAsString());
+            assertNull(chain.getRequest(), request.getRequestURI());
+        }
+        verify(rateLimiter, org.mockito.Mockito.times(3))
+            .acquire(DocumentAcceptanceToken.hashForAdmission(null), SOURCE);
+
+        for (String exchangeUri : new String[] {
+                "/api/document-acceptance/exchange;x=1",
+                "//api/document-acceptance/exchange"}) {
+            TrackingJsonRequest exchange = request("", null);
+            exchange.setRequestURI(exchangeUri);
+            MockHttpServletResponse exchangeResponse = new MockHttpServletResponse();
+            MockFilterChain exchangeChain = new MockFilterChain();
+
+            filter.doFilter(exchange, exchangeResponse, exchangeChain);
+
+            assertNotNull(exchangeChain.getRequest(), exchangeUri);
+            assertFalse(exchange.bodyAccessed(), exchangeUri);
+        }
+    }
+
+    @Test
+    void missingUnknownExpiredAndDecidedGrantsHaveByteExactUnavailableResponses()
+            throws Exception {
+        String unknown = "b".repeat(64);
+        String expired = "c".repeat(64);
+        String decided = "d".repeat(64);
+        when(clientIpResolver.resolve(any())).thenReturn(SOURCE);
+        for (String grant : new String[] {unknown, expired, decided}) {
+            when(acceptanceService.admitGrant(any(), eq(grant)))
+                .thenThrow(new ResourceNotFoundException("Document link is no longer available"));
+        }
         MockMvc mockMvc = MockMvcBuilders
-            .standaloneSetup(new DocumentAcceptanceController(acceptanceService, clientIpResolver))
+            .standaloneSetup(new DocumentAcceptanceController(
+                acceptanceService, clientIpResolver, flowService, flowCookie))
             .setControllerAdvice(new GlobalExceptionHandler(errorReporter, tenantContext))
             .addFilters(filter)
             .build();
 
-        MvcResult malformedResponse = mockMvc.perform(
-            get("/api/document-acceptance/not-a-token")).andReturn();
-        MvcResult unknownResponse = mockMvc.perform(
-            get("/api/document-acceptance/{token}", unknown)).andReturn();
-        MvcResult expiredResponse = mockMvc.perform(
-            get("/api/document-acceptance/{token}", expired)).andReturn();
-        MvcResult decidedResponse = mockMvc.perform(
-            get("/api/document-acceptance/{token}", decided)).andReturn();
+        MvcResult missingResponse = mockMvc.perform(get("/api/document-acceptance")).andReturn();
+        MvcResult unknownResponse = mockMvc.perform(get("/api/document-acceptance")
+            .cookie(new Cookie(OneTimeLinkFlowCookie.DOCUMENT_ACCEPTANCE, unknown))).andReturn();
+        MvcResult expiredResponse = mockMvc.perform(get("/api/document-acceptance")
+            .cookie(new Cookie(OneTimeLinkFlowCookie.DOCUMENT_ACCEPTANCE, expired))).andReturn();
+        MvcResult decidedResponse = mockMvc.perform(get("/api/document-acceptance")
+            .cookie(new Cookie(OneTimeLinkFlowCookie.DOCUMENT_ACCEPTANCE, decided))).andReturn();
 
-        assertUniformUnavailable(malformedResponse, unknownResponse);
-        assertUniformUnavailable(malformedResponse, expiredResponse);
-        assertUniformUnavailable(malformedResponse, decidedResponse);
+        assertEquals(404, missingResponse.getResponse().getStatus());
+        assertUniformUnavailable(missingResponse, unknownResponse);
+        assertUniformUnavailable(missingResponse, expiredResponse);
+        assertUniformUnavailable(missingResponse, decidedResponse);
     }
 
     private static void assertUniformUnavailable(MvcResult expected, MvcResult actual) {
@@ -192,12 +267,15 @@ class DocumentAcceptanceAdmissionFilterTest {
             actual.getResponse().getContentAsByteArray());
     }
 
-    private static TrackingJsonRequest request(String token, String suffix) {
+    private static TrackingJsonRequest request(String suffix, String grant) {
         TrackingJsonRequest request = new TrackingJsonRequest();
         request.setMethod("POST");
-        request.setRequestURI("/api/document-acceptance/" + token + suffix);
+        request.setRequestURI("/api/document-acceptance" + suffix);
         request.setContentType("application/json");
         request.setContent("{\"broken\"".getBytes(StandardCharsets.UTF_8));
+        if (grant != null) {
+            request.setCookies(new Cookie(OneTimeLinkFlowCookie.DOCUMENT_ACCEPTANCE, grant));
+        }
         return request;
     }
 

@@ -498,7 +498,7 @@ public class CampaignDispatchService {
 
     private String unsubscribeUrl(String token) {
         String base = deliveryProperties.getPublicBaseUrl();
-        String path = "/api/delivery/unsubscribe/" + token;
+        String path = "/unsubscribe#token=" + token;
         if (base == null || base.isBlank()) {
             return path;
         }

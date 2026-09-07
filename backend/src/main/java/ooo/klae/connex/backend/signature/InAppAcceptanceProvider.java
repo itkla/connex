@@ -15,7 +15,11 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import ooo.klae.connex.backend.mail.MailProperties;
 
-/** Built-in token acceptance adapter; it performs no network I/O. */
+/**
+ * Built-in token acceptance adapter; it performs no network I/O. The emailed link carries the bearer
+ * only in the URL fragment, which browsers never send to any server, so the recipient page exchanges
+ * it for a browser grant before any request names the token.
+ */
 @Component
 public class InAppAcceptanceProvider implements DocumentSignatureProvider {
     public static final String KEY = "in_app";
@@ -55,7 +59,8 @@ public class InAppAcceptanceProvider implements DocumentSignatureProvider {
             String token = "w" + command.workspaceId() + "-" + HexFormat.of().formatHex(secret);
             String acceptanceUrl = UriComponentsBuilder
                 .fromUriString(mailProperties.getAppBaseUrl())
-                .path("/document-acceptance/{token}")
+                .path("/document-acceptance")
+                .fragment("token={token}")
                 .encode()
                 .buildAndExpand(token)
                 .toUriString();

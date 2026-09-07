@@ -31,21 +31,29 @@ The `report-to` group and the `Reporting-Endpoints` header are emitted **only** 
 
 ### The collector
 
-`POST /api/csp-reports` on the backend is unauthenticated, CSRF-exempt, exempt from tenant resolution and from privileged-MFA confinement, and always answers `204` for a body the size filters admitted.
+`POST /api/csp-reports` on the backend is served by its own stateless Spring Security chain (`CspReportSecurityConfig`), ordered ahead of the public-API and application chains: no CSRF, and none of the session, epoch, absolute-timeout or privileged-MFA filters the application chain installs. Any other method on the path falls through to the application chain, where it is unauthenticated and therefore refused. The collector always answers `204` for a body the size filters admitted.
+
+**The collector must never refresh a session.** A same-origin report carries the session cookie, and merely resolving that session makes Spring Session rewrite its last-accessed time — so a page that keeps violating the policy would keep an otherwise idle login alive past the 30-minute idle timeout. Two things are needed, because the security chain alone is not enough:
+
+- `CspReportCookieFilter`, registered immediately ahead of Spring Session's own filter, hides **every** cookie from the request. Its order is derived from that registration (`sessionRepositoryFilterRegistration`) rather than from the `SessionRepositoryFilter.DEFAULT_ORDER` constant, because `spring.session.servlet.filter-order` moves it: a deployment that lowers the property below the library default would otherwise put Spring Session first and lose the guarantee silently. Setting the property to `Integer.MIN_VALUE` leaves no order ahead of it and is refused at startup. This is the load-bearing part: the remaining `getSession(false)` callers sit outside any chain's reach — Spring Security's `AnonymousAuthenticationFilter` reads the session id into `WebAuthenticationDetails`, and the `DispatcherServlet` retrieves flash maps and publishes a request-handled event. With no cookies there is no session for any of them to resolve, load, save or expire, and the response carries no `Set-Cookie`.
+- The stateless chain keeps the session, epoch, absolute-timeout and privileged-MFA filters off the path structurally, so the endpoint's behaviour cannot drift as those filters change.
+
+Tenant resolution is excluded separately in `WebConfig`: MVC interceptors run in the `DispatcherServlet`, after whichever chain served the request, so a security chain cannot exclude them.
 
 | Request | Response |
 |---|---|
 | `application/csp-report` with a legacy report body | 204, one log line |
-| `application/reports+json` with an array of N reports | 204, at most 10 log lines |
+| `application/reports+json` with an array of N reports | 204, at most 10 log lines, each charged to the client's throttle |
 | garbage bytes, wrong shape, or an empty body | 204, no log line |
 | body over 16 KiB (`CONNEX_CSP_REPORTS_MAX_BODY_BYTES`) | 413, at the edge and again in the application |
-| a report carrying a session cookie and no CSRF header | 204 |
-| a report from a privileged account confined pending MFA enrollment | 204 |
-| more than 60 reports per 60 seconds from one client IP | 204, dropped silently |
+| a report carrying a session cookie and no CSRF header | 204, and the session's last-accessed time does not move |
+| a report from a privileged account confined pending MFA enrollment, or carrying an expired session | 204 |
+| more than 60 records per 60 seconds from one client IP, however they are batched | 204, dropped silently |
+| an address the throttle has never seen while it already tracks 10 000 addresses | 204, logged and counted — the least recently updated address is evicted to make room |
 | `GET`, `PUT`, `DELETE` | 401 — the collector is write-only |
 | any other content type | 415 |
 
-The per-IP window is `connex.csp-reports.max-reports-per-window` / `connex.csp-reports.window-seconds` and the client address is resolved through the trusted-proxy chain. It is used **only** as the throttle key: it is never logged.
+The per-IP window is `connex.csp-reports.max-reports-per-window` / `connex.csp-reports.window-seconds` and is charged per logged record, not per request: parsing a body costs one allowance, which also pays for the first record it yields, and every further record of a batched Reporting-API body costs one more, so a client cannot multiply its budget by batching. `connex.csp-reports.max-tracked-clients` bounds how many distinct addresses the throttle remembers between evictions (`connex.csp-reports.eviction-delay-ms`). It bounds memory only, and admission stays fair: an address the throttle has never seen is never refused for want of capacity — at the cap the least recently used window is evicted to make room. The windows live in an access-ordered map behind one lock, so that eviction is a constant-time step rather than a scan for the oldest entry: on an unauthenticated route a scan would let a source rotating through addresses buy a pass over every tracked window with each cheap request. The same lock makes the capacity check and the insert one atomic step, so the cap is an exact bound. Refusing newcomers instead would let one source rotating through addresses hold every slot hostage, because each of its requests refreshes its own window and the scheduled eviction then frees nothing; the collector would go blind to every other client. The trade is that the cap buys no per-client isolation under saturation: an evicted client starts its next report on a fresh allowance, so a source rotating through more than `max-tracked-clients` addresses can raise the effective ceiling. Reaching the cap emits `csp.report.throttle.saturated` at WARN once per window, so saturation is distinguishable from ordinary throttling in the log. The client address is resolved through the trusted-proxy chain and is used **only** as the throttle key: it is never logged.
 
 ### Reading the reports
 

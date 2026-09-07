@@ -17,6 +17,7 @@ import javax.crypto.spec.SecretKeySpec;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
 
@@ -33,18 +34,33 @@ import ooo.klae.connex.backend.dto.DeclineDocumentRequest;
 import ooo.klae.connex.backend.dto.DocumentAcceptanceDecisionDto;
 import ooo.klae.connex.backend.dto.DocumentAcceptancePreviewDto;
 import ooo.klae.connex.backend.dto.DocumentContent;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.ServiceUnavailableException;
 import ooo.klae.connex.backend.mappers.DealDocumentMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.DocumentDeliveryMapper;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService.Purpose;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService.RoutedFlow;
+import ooo.klae.connex.backend.signature.DocumentAcceptanceRateLimiter;
 import ooo.klae.connex.backend.signature.DocumentAcceptanceToken;
 import ooo.klae.connex.backend.signature.SignatureProperties;
 import ooo.klae.connex.backend.util.ContactMask;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
  * Resolves public document links into their routed tenant before opening a write transaction.
  * Entry points deliberately remain non-transactional so catalog placement is pinned first.
+ *
+ * <p>The raw bearer is seen exactly once, by {@link #exchange}, which validates it and hands back
+ * the routed {@link Link} the controller turns into a browser grant. Every later operation is keyed
+ * by that grant through {@link #admitGrant}; the recipient row is still matched by
+ * {@code (workspace_id, token_hash)}, so the grant's routing hint never authorizes anything.
+ *
+ * <p>The purpose cookie is shared by every tab of one browser, so a later exchange silently replaces
+ * the grant an earlier tab rendered. Previews therefore carry the grant's non-authorizing flow
+ * identity and every decision must echo it; a mismatch is refused with the uniform unavailable
+ * response before any recipient row is touched.
  */
 @Service
 @RequiredArgsConstructor
@@ -56,6 +72,8 @@ public class DocumentAcceptanceService {
     private final DealDocumentMapper documentMapper;
     private final DealMapper dealMapper;
     private final DocumentAcceptanceAdmissionService admissionService;
+    private final DocumentAcceptanceRateLimiter rateLimiter;
+    private final OneTimeLinkFlowService flowService;
     private final DocumentDeliveryLifecycleService lifecycleService;
     private final AuditService auditService;
     private final SignatureProperties signatureProperties;
@@ -66,21 +84,61 @@ public class DocumentAcceptanceService {
     private final ObjectMapper objectMapper;
 
     /**
+     * Validates the emailed bearer once and returns the routed link a browser grant is issued for.
+     * Applies the same per-token and per-source throttle the admission filter applies to grant
+     * requests, then requires the recipient to still be actionable so a decided, expired, voided
+     * or unknown token cannot be exchanged. Records nothing: an exchange is not a view.
+     */
+    public Link exchange(String token, String sourceAddress) {
+        requireAvailable();
+        rateLimiter.acquire(DocumentAcceptanceToken.hashForAdmission(token), sourceAddress);
+        Admitted admitted = admit(token);
+        automationExecutor.runAs(
+            admitted.workspace().getId(),
+            systemActor.user(),
+            "system",
+            () -> transactionTemplate.execute(status -> {
+                Aggregate aggregate = lockAggregate(admitted, false);
+                requireActionable(aggregate.delivery(), aggregate.recipient(), now());
+                return null;
+            }));
+        return new Link(admitted.workspace().getId(), admitted.tokenHash());
+    }
+
+    /**
+     * Resolves the grant cookie into its routed link and non-authorizing flow identity. Missing,
+     * expired, foreign-browser and wrong-purpose grants all collapse into the uniform unavailable
+     * response.
+     */
+    public GrantedLink admitGrant(HttpServletRequest request, String grant) {
+        requireAvailable();
+        try {
+            RoutedFlow flow = flowService.requireRoutedFlow(
+                request, Purpose.DOCUMENT_ACCEPTANCE, grant);
+            return new GrantedLink(
+                new Link(flow.workspaceId(), flow.sourceTokenHash()), flow.flowId());
+        } catch (BadRequestException exception) {
+            throw unavailable();
+        }
+    }
+
+    /**
      * Returns the frozen document. Records nothing.
      *
      * <p>A browser opening an emailed link issues a {@code GET}, and so do email security scanners,
      * link prefetchers and URL-rewriting proxies. Stamping the first view here would let any of them
      * forge "the recipient viewed this at ..." into the completion certificate, which is the one
      * artifact whose value is trustworthy attribution. The view is recorded by
-     * {@link #markViewed(String, String)} instead, which the rendered recipient page calls.
+     * {@link #markViewed(GrantedLink, String)} instead, which the rendered recipient page calls.
      */
-    public DocumentAcceptancePreviewDto preview(String token, String sourceAddress) {
-        Link link = admit(token);
+    public DocumentAcceptancePreviewDto preview(GrantedLink granted, String sourceAddress) {
+        Admitted admitted = admit(granted.link());
         DocumentAcceptancePreviewDto result = automationExecutor.runAs(
-            link.workspace().getId(),
+            admitted.workspace().getId(),
             systemActor.user(),
             "system",
-            () -> transactionTemplate.execute(status -> previewInTransaction(link)));
+            () -> transactionTemplate.execute(
+                status -> previewInTransaction(admitted, granted.flowId())));
         return Objects.requireNonNull(result, "document preview result");
     }
 
@@ -88,17 +146,18 @@ public class DocumentAcceptanceService {
      * Idempotently records that the recipient opened the document. Safe to call repeatedly: only the
      * first call stamps {@code first_viewed_at} and appends the {@code viewed} event.
      */
-    public DocumentAcceptancePreviewDto markViewed(String token, String sourceAddress) {
-        Link link = admit(token);
+    public DocumentAcceptancePreviewDto markViewed(GrantedLink granted, String sourceAddress) {
+        Admitted admitted = admit(granted.link());
         DocumentAcceptancePreviewDto result = automationExecutor.runAs(
-            link.workspace().getId(),
+            admitted.workspace().getId(),
             systemActor.user(),
             "system",
-            () -> transactionTemplate.execute(status -> markViewedInTransaction(link)));
+            () -> transactionTemplate.execute(
+                status -> markViewedInTransaction(admitted, granted.flowId())));
         return Objects.requireNonNull(result, "document view result");
     }
 
-    private DocumentAcceptancePreviewDto markViewedInTransaction(Link link) {
+    private DocumentAcceptancePreviewDto markViewedInTransaction(Admitted link, String flowId) {
         Aggregate aggregate = lockAggregate(link, true);
         requireActionable(aggregate.delivery(), aggregate.recipient(), now());
         if (aggregate.recipient().getFirstViewedAt() == null) {
@@ -121,52 +180,60 @@ public class DocumentAcceptanceService {
             aggregate.delivery().setStatus("viewed");
             aggregate.recipient().setStatus("viewed");
         }
-        DocumentAcceptancePreviewDto viewed = previewDto(link, aggregate);
+        DocumentAcceptancePreviewDto viewed = previewDto(link, aggregate, flowId);
         auditRecipientOperation(
             aggregate, "document_delivery.preview", "Viewed a delivered document");
         return viewed;
     }
 
-    /** Records one signer acceptance and completes the envelope after the last signer. */
+    /**
+     * Records one signer acceptance and completes the envelope after the last signer. The request
+     * must echo the flow identity of the preview it was rendered from.
+     */
     public DocumentAcceptanceDecisionDto accept(
-            String token,
+            GrantedLink granted,
             AcceptDocumentRequest request,
             String sourceAddress,
             String userAgent) {
-        Link link = admit(token);
+        Admitted admitted = admit(requireBound(granted, request.flowId()));
         DocumentAcceptanceDecisionDto result = automationExecutor.runAs(
-            link.workspace().getId(),
+            admitted.workspace().getId(),
             systemActor.user(),
             "system",
             () -> transactionTemplate.execute(status -> acceptInTransaction(
-                link, request.typedName().trim(), sourceAddress, userAgent)));
+                admitted, request.typedName().trim(), sourceAddress, userAgent)));
         return Objects.requireNonNull(result, "document acceptance result");
     }
 
-    /** Records one signer decline and terminally closes the envelope. */
+    /**
+     * Records one signer decline and terminally closes the envelope. The request must echo the
+     * flow identity of the preview it was rendered from.
+     */
     public DocumentAcceptanceDecisionDto decline(
-            String token,
+            GrantedLink granted,
             DeclineDocumentRequest request,
             String sourceAddress,
             String userAgent) {
-        Link link = admit(token);
+        Admitted admitted = admit(requireBound(granted, request.flowId()));
         DocumentAcceptanceDecisionDto result = automationExecutor.runAs(
-            link.workspace().getId(),
+            admitted.workspace().getId(),
             systemActor.user(),
             "system",
             () -> transactionTemplate.execute(status -> declineInTransaction(
-                link, request.reason().trim(), sourceAddress, userAgent)));
+                admitted, request.reason().trim(), sourceAddress, userAgent)));
         return Objects.requireNonNull(result, "document decline result");
     }
 
-    private DocumentAcceptancePreviewDto previewInTransaction(Link link) {
+    private DocumentAcceptancePreviewDto previewInTransaction(Admitted link, String flowId) {
         Aggregate aggregate = lockAggregate(link, false);
         requireActionable(aggregate.delivery(), aggregate.recipient(), now());
-        return previewDto(link, aggregate);
+        return previewDto(link, aggregate, flowId);
     }
 
-    private DocumentAcceptancePreviewDto previewDto(Link link, Aggregate aggregate) {
+    private DocumentAcceptancePreviewDto previewDto(
+            Admitted link, Aggregate aggregate, String flowId) {
         return new DocumentAcceptancePreviewDto(
+            flowId,
             parseContent(aggregate.document()),
             aggregate.deal().getName(),
             link.workspace().getName(),
@@ -184,7 +251,7 @@ public class DocumentAcceptanceService {
     }
 
     private DocumentAcceptanceDecisionDto acceptInTransaction(
-            Link link, String typedName, String sourceAddress, String userAgent) {
+            Admitted link, String typedName, String sourceAddress, String userAgent) {
         Aggregate aggregate = lockAggregate(link, true);
         if ("completed".equals(aggregate.recipient().getStatus())) {
             auditRecipientOperation(
@@ -234,7 +301,7 @@ public class DocumentAcceptanceService {
     }
 
     private DocumentAcceptanceDecisionDto declineInTransaction(
-            Link link, String reason, String sourceAddress, String userAgent) {
+            Admitted link, String reason, String sourceAddress, String userAgent) {
         Aggregate aggregate = lockAggregate(link, true);
         if ("declined".equals(aggregate.recipient().getStatus())) {
             auditRecipientOperation(
@@ -293,7 +360,7 @@ public class DocumentAcceptanceService {
                 "recipientId", aggregate.recipient().getId()));
     }
 
-    private Aggregate lockAggregate(Link link, boolean lockAllRecipients) {
+    private Aggregate lockAggregate(Admitted link, boolean lockAllRecipients) {
         int workspaceId = link.workspace().getId();
         DocumentDeliveryRecipient discovered =
             deliveryMapper.getRecipientByTokenHash(workspaceId, link.tokenHash());
@@ -357,13 +424,28 @@ public class DocumentAcceptanceService {
         return recipient;
     }
 
-    private Link admit(String token) {
-        requireAvailable();
+    private Admitted admit(String token) {
         DocumentAcceptanceAdmissionService.Admission admission = admissionService.lookup(token);
         if (!admission.originalShapeValid() || admission.workspace() == null) {
             throw unavailable();
         }
-        return new Link(admission.workspace(), admission.tokenHash());
+        return new Admitted(admission.workspace(), admission.tokenHash());
+    }
+
+    private static Link requireBound(GrantedLink granted, String flowId) {
+        if (!OneTimeTokenDigest.constantTimeEquals(granted.flowId(), flowId)) {
+            throw unavailable();
+        }
+        return granted.link();
+    }
+
+    private Admitted admit(Link link) {
+        requireAvailable();
+        Workspace workspace = admissionService.lookupWorkspace(link.workspaceId());
+        if (workspace == null) {
+            throw unavailable();
+        }
+        return new Admitted(workspace, link.tokenHash());
     }
 
     private void requireAvailable() {
@@ -388,7 +470,7 @@ public class DocumentAcceptanceService {
     }
 
     private Evidence evidence(
-            Link link, Aggregate aggregate, String sourceAddress, String userAgent) {
+            Admitted link, Aggregate aggregate, String sourceAddress, String userAgent) {
         String scope = link.workspace().getId() + ":" + aggregate.delivery().getId()
             + ":" + aggregate.recipient().getId();
         return new Evidence(
@@ -457,7 +539,15 @@ public class DocumentAcceptanceService {
         return new ResourceNotFoundException(UNAVAILABLE);
     }
 
-    private record Link(Workspace workspace, String tokenHash) {
+    /** Routed identity of one recipient link: the tenant hint and the persisted token digest. */
+    public record Link(int workspaceId, String tokenHash) {
+    }
+
+    /** A resolved grant: its routed link plus the non-authorizing flow identity previews echo. */
+    public record GrantedLink(Link link, String flowId) {
+    }
+
+    private record Admitted(Workspace workspace, String tokenHash) {
     }
 
     private record Aggregate(

@@ -11,14 +11,12 @@ import { toastError } from "@/app/lib/toast";
 
 /**
  * Public unsubscribe confirmation card. Shows the masked recipient address and channel, confirms the
- * opt-out against the token, then settles into a calm done state. Idempotent: an already-unsubscribed
- * token opens directly in the done state.
+ * opt-out through the exchanged flow cookie, then settles into a calm done state. Idempotent: an
+ * already-unsubscribed delivery opens directly in the done state.
  */
 export default function UnsubscribeConfirm({
-    token,
     info,
 }: {
-    token: string;
     info: DeliveryUnsubscribeInfo;
 }) {
     const t = useTranslations("Unsubscribe");
@@ -30,7 +28,7 @@ export default function UnsubscribeConfirm({
     const confirm = async () => {
         setIsSubmitting(true);
         try {
-            await confirmUnsubscribe(token);
+            await confirmUnsubscribe({ flowId: info.flowId });
             setDone(true);
         } catch {
             toastError(t("errorTitle"), { description: t("errorBody") });

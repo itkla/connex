@@ -22,8 +22,9 @@ The site-level edge header contract applies to every response, including fronten
 assets, downloads, backend JSON, and Caddy-generated error responses. Caddy normalizes
 `X-Content-Type-Options: nosniff` and `X-Frame-Options: DENY`. It preserves an upstream
 `Referrer-Policy` and supplies `strict-origin-when-cross-origin` when one is absent; the
-`/document-acceptance/*` frontend handle also defers an explicit `no-referrer` override so the
-credential-bearing page keeps that stricter value after proxying. It supplies
+`@document_acceptance` frontend handle (the bare `/document-acceptance` route and the retired
+`/document-acceptance/*` subtree) also defers an explicit `no-referrer` override so the recipient page
+keeps that stricter value after proxying. It supplies
 `Content-Security-Policy: frame-ancestors 'none'` only when an upstream did not already set CSP,
 preserving the backend's stricter API policy without emitting a second value. Frontend HTML also
 carries the full nonce-based policy, enforced by default, ending in `report-uri /api/csp-reports`
