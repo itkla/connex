@@ -737,28 +737,129 @@ that the `src/`-path record carried.
 ### Snapshot and replay
 
 The complete alert inventory was snapshotted before PR-0 merged and committed as the audit carrier
-at `docs/sast/dismissal-snapshot-<YYYY-MM-DD>.json` (see [sast/README.md](sast/README.md)). After
+at `docs/sast/dismissal-snapshot-2026-09-05.json.gz` (see [sast/README.md](sast/README.md); 146 alerts, 67 dismissed, 79 fixed, 0 open, taken 2026-09-05T01:46Z after #153 was dismissed). After
 the first `main` Security run on the restored paths, `.github/scripts/replay-codeql-dismissals.py`
 matched every open alert on `refs/heads/main` to the snapshot by
 `(rule id, path minus its backend/ or frontend/ prefix, start line, start column)` and re-applied the
 snapshot's `dismissed_reason` and `dismissed_comment` verbatim, so each third-generation record
 states the same expiry and issue link its predecessor did. An open alert with no snapshotted
-dismissal makes the script exit `1` for manual triage; none was expected other than #153's twin,
-which matches #153's own snapshot record because #153 was dismissed before the snapshot was taken.
+dismissal makes the script exit `1` for manual triage. PR-0 (#1586) merged as `aabf17a30` on
+2026-09-07T05:58Z; the first `main` Security run (34088866092) regenerated 67 open alerts, all with
+`backend/`- or `frontend/`-prefixed paths. The dry run matched 61 and left 6 unmatched, so `--apply`
+dismissed the 61 and exited `1`; the 6 were dispositioned by hand before the end state was measured:
+
+- #26, #27, #28, #29 (`java/user-controlled-bypass`, `WorkflowService.java`) are the first-generation
+  numbers of the second-generation records #95–#98. Their lines moved from 182/192/305/318 at
+  snapshot time to 187/202/315/328 because PR #1590 (`3d9fa9e28`, merged 2026-09-06) touched the
+  file before the regeneration, so the `(rule, path, line, column)` key no longer matched. Each was
+  dismissed on 2026-09-07T06:08Z with its twin's `dismissed_reason` and `dismissed_comment` copied
+  verbatim (same rationale, expiry 2027-02-14, re-review 2027-01-14, #1296) — a manual copy of the
+  same record, not a widened match.
+- #156 (`java/spring-disabled-csrf-protection`, `PublicApiSecurityConfig.java:122`) and #161
+  (`java/concatenated-sql-query`, `PublicApiCredentialRollbackSafetyIntegrationTest.java:184`) are
+  new findings from PR #1590, raised by the 2026-09-07 `main` analysis after the snapshot. They
+  were triaged under [#1591](https://github.com/itkla/connex/issues/1591) and dismissed on
+  2026-09-07T06:09Z: #156 `false positive` (the `/api/v1/**` chain is bearer-token only with
+  `SessionCreationPolicy.STATELESS` and accepts no cookies, so CSRF does not apply; the cookie
+  `/api` chain is unchanged) and #161 `used in tests` (fixture `INSERT`s built from test-generated
+  integers and constants in `src/test`, never shipped). Both comments carry owner, expiry
+  2027-02-14, re-review 2027-01-14 and the issue link.
 
 Replay output (dry run, then `--apply`), recorded by the operator:
 
 ```
-<REPLAY-OUTPUT>
+$ python3 .github/scripts/replay-codeql-dismissals.py --snapshot docs/sast/dismissal-snapshot-2026-09-05.json.gz --open /tmp/open-on-main.json
+CodeQL dismissal replay (dry run): 66 snapshotted dismissal(s), 67 open alert(s), 61 match(es), 6 unmatched
+::error title=Unmatched open CodeQL alert #26::java/user-controlled-bypass at backend/src/main/java/ooo/klae/connex/backend/services/WorkflowService.java:187:39 has no snapshotted dismissal and needs triage
+::error title=Unmatched open CodeQL alert #27::java/user-controlled-bypass at backend/src/main/java/ooo/klae/connex/backend/services/WorkflowService.java:202:9 has no snapshotted dismissal and needs triage
+::error title=Unmatched open CodeQL alert #28::java/user-controlled-bypass at backend/src/main/java/ooo/klae/connex/backend/services/WorkflowService.java:315:39 has no snapshotted dismissal and needs triage
+::error title=Unmatched open CodeQL alert #29::java/user-controlled-bypass at backend/src/main/java/ooo/klae/connex/backend/services/WorkflowService.java:328:9 has no snapshotted dismissal and needs triage
+::error title=Unmatched open CodeQL alert #156::java/spring-disabled-csrf-protection at backend/src/main/java/ooo/klae/connex/backend/config/PublicApiSecurityConfig.java:122:9 has no snapshotted dismissal and needs triage
+::error title=Unmatched open CodeQL alert #161::java/concatenated-sql-query at backend/src/test/java/ooo/klae/connex/backend/integration/PublicApiCredentialRollbackSafetyIntegrationTest.java:184:33 has no snapshotted dismissal and needs triage
+CodeQL dismissal replay incomplete: 6 unmatched, 0 failed PATCH(es)
+$ python3 .github/scripts/replay-codeql-dismissals.py --snapshot docs/sast/dismissal-snapshot-2026-09-05.json.gz --open /tmp/open-on-main.json --apply
+CodeQL dismissal replay (apply): 66 snapshotted dismissal(s), 67 open alert(s), 61 match(es), 6 unmatched
+dismissed #2 as used in tests (from #85)
+… 61 lines, one per match (the full old-to-new mapping follows) …
+dismissed #160 as won't fix (from #150)
+CodeQL dismissal replay incomplete: 6 unmatched, 0 failed PATCH(es)
 ```
 
 ### Old-to-new mapping
 
-<REPLAY-MAPPING-TABLE>
+| Snapshot alert | New alert | Rule | Site | Reason |
+| --- | --- | --- | --- | --- |
+| #85 | #2 | `js/insecure-randomness` | `frontend/test/e2e/global.setup.ts:102` | used in tests |
+| #86 | #3 | `js/insecure-randomness` | `frontend/test/e2e/global.setup.ts:103` | used in tests |
+| #83 | #4 | `js/xss-through-dom` | `frontend/app/components/records/companies/NewCompanyDialog.tsx:495` | false positive |
+| #84 | #5 | `js/xss-through-dom` | `frontend/app/components/records/companies/NewCompanyDialog.tsx:939` | false positive |
+| #88 | #6 | `js/log-injection` | `frontend/test/e2e/matrix/fault-proxy.mjs:73` | used in tests |
+| #89 | #7 | `js/log-injection` | `frontend/test/e2e/matrix/fault-proxy.mjs:79` | used in tests |
+| #90 | #8 | `js/log-injection` | `frontend/test/e2e/matrix/fault-proxy.mjs:87` | used in tests |
+| #87 | #9 | `js/insecure-temporary-file` | `frontend/test/e2e/matrix/support/matrix.ts:433` | used in tests |
+| #91 | #15 | `java/unreleased-lock` | `backend/src/main/java/ooo/klae/connex/backend/ai/AiRestrictionEpoch.java:97` | false positive |
+| #92 | #16 | `java/unreleased-lock` | `backend/src/main/java/ooo/klae/connex/backend/ai/AiRestrictionEpoch.java:143` | false positive |
+| #93 | #17 | `java/unreleased-lock` | `backend/src/main/java/ooo/klae/connex/backend/services/HealthService.java:98` | false positive |
+| #106 | #18 | `java/log-injection` | `backend/src/main/java/ooo/klae/connex/backend/mail/MailService.java:103` | false positive |
+| #107 | #19 | `java/log-injection` | `backend/src/main/java/ooo/klae/connex/backend/connectedaccounts/ProviderConnectionService.java:127` | false positive |
+| #108 | #20 | `java/log-injection` | `backend/src/main/java/ooo/klae/connex/backend/connectedaccounts/ProviderConnectionService.java:132` | false positive |
+| #109 | #21 | `java/log-injection` | `backend/src/main/java/ooo/klae/connex/backend/mail/MailService.java:97` | false positive |
+| #94 | #25 | `java/user-controlled-bypass` | `backend/src/main/java/ooo/klae/connex/backend/controllers/WebAuthnController.java:165` | false positive |
+| #99 | #30 | `java/user-controlled-bypass` | `backend/src/main/java/ooo/klae/connex/backend/services/WorkspaceMailConfigService.java:107` | false positive |
+| #111 | #32 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/AiAssistantController.java:275` | won't fix |
+| #112 | #33 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/AiAssistantController.java:258` | won't fix |
+| #113 | #34 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/AiOrganizationBudgetController.java:27` | false positive |
+| #114 | #35 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/AiAssistantController.java:101` | won't fix |
+| #115 | #36 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/AttachmentController.java:174` | false positive |
+| #116 | #37 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/AttachmentController.java:118` | false positive |
+| #117 | #38 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/AttachmentController.java:102` | false positive |
+| #119 | #39 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/AttachmentController.java:54` | false positive |
+| #118 | #40 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/BusinessCardController.java:100` | false positive |
+| #120 | #41 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/DataSubjectRequestController.java:61` | false positive |
+| #121 | #42 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/DataSubjectRequestController.java:49` | false positive |
+| #122 | #43 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/DataSubjectRequestController.java:33` | false positive |
+| #124 | #44 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/DeliveryUnsubscribeController.java:29` | false positive |
+| #125 | #45 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/HealthController.java:39` | false positive |
+| #131 | #46 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/NotificationController.java:122` | false positive |
+| #132 | #47 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/NotificationController.java:65` | false positive |
+| #126 | #48 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/IntroductionController.java:111` | false positive |
+| #127 | #49 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/IntroductionController.java:82` | false positive |
+| #128 | #50 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/IntroductionController.java:62` | false positive |
+| #129 | #51 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/IntroductionController.java:51` | false positive |
+| #135 | #52 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/PersonController.java:638` | false positive |
+| #136 | #53 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/PersonController.java:607` | false positive |
+| #133 | #54 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/ProviderCaptureController.java:68` | false positive |
+| #137 | #55 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/ProviderCaptureController.java:44` | false positive |
+| #139 | #56 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/RadarController.java:47` | false positive |
+| #140 | #57 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/RadarController.java:36` | false positive |
+| #134 | #58 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/ProviderConnectionController.java:47` | won't fix |
+| #138 | #59 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/ProviderConnectionController.java:37` | false positive |
+| #145 | #64 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/TenantDiagnosticsController.java:40` | false positive |
+| #146 | #65 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/TenantDiagnosticsController.java:32` | false positive |
+| #147 | #66 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/TenantLifecycleController.java:67` | won't fix |
+| #149 | #67 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/UserController.java:67` | false positive |
+| #148 | #68 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/WorkflowManualRunController.java:44` | won't fix |
+| #103 | #69 | `java/uncontrolled-arithmetic` | `backend/src/main/java/ooo/klae/connex/backend/mail/SecretCipher.java:97` | false positive |
+| #104 | #70 | `java/uncontrolled-arithmetic` | `backend/src/main/java/ooo/klae/connex/backend/secrets/SecretStoreCrypto.java:201` | false positive |
+| #105 | #71 | `java/uncontrolled-arithmetic` | `backend/src/main/java/ooo/klae/connex/backend/sso/AesGcm.java:57` | false positive |
+| #100 | #72 | `java/tainted-arithmetic` | `backend/src/main/java/ooo/klae/connex/backend/connectedaccounts/capture/ProviderCaptureReviewService.java:61` | false positive |
+| #101 | #73 | `java/tainted-arithmetic` | `backend/src/main/java/ooo/klae/connex/backend/services/MatchingService.java:352` | false positive |
+| #102 | #74 | `java/tainted-arithmetic` | `backend/src/main/java/ooo/klae/connex/backend/services/MatchingService.java:372` | false positive |
+| #123 | #79 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/DocumentAcceptanceController.java:36` | false positive |
+| #151 | #157 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/AiAssistantController.java:294` | won't fix |
+| #152 | #158 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/AiAssistantController.java:203` | won't fix |
+| #153 | #159 | `java/csrf-unprotected-request-type` | `backend/src/main/java/ooo/klae/connex/backend/controllers/ReportController.java:126` | false positive |
+| #150 | #160 | `java/potentially-weak-cryptographic-algorithm` | `backend/src/main/java/ooo/klae/connex/backend/password/PasswordCredentialService.java:153` | won't fix |::error title=Unmatched open CodeQL alert #26::java/user-controlled-bypass at backend/src/main/java/ooo/klae/connex/backend/services/WorkflowService.java:187:39 has no snapshotted dismissal and needs triage
+| #95 | #26 | `java/user-controlled-bypass` | `backend/src/main/java/ooo/klae/connex/backend/services/WorkflowService.java:187` | false positive (manual: snapshot line 182 drifted to 187 after #1590) |
+| #96 | #27 | `java/user-controlled-bypass` | `backend/src/main/java/ooo/klae/connex/backend/services/WorkflowService.java:202` | false positive (manual: snapshot line 192 drifted to 202 after #1590) |
+| #97 | #28 | `java/user-controlled-bypass` | `backend/src/main/java/ooo/klae/connex/backend/services/WorkflowService.java:315` | false positive (manual: snapshot line 305 drifted to 315 after #1590) |
+| #98 | #29 | `java/user-controlled-bypass` | `backend/src/main/java/ooo/klae/connex/backend/services/WorkflowService.java:328` | false positive (manual: snapshot line 318 drifted to 328 after #1590) |
+| — | #156 | `java/spring-disabled-csrf-protection` | `backend/src/main/java/ooo/klae/connex/backend/config/PublicApiSecurityConfig.java:122` | false positive (new after the snapshot, #1590; tracked in #1591) |
+| — | #161 | `java/concatenated-sql-query` | `backend/src/test/java/ooo/klae/connex/backend/integration/PublicApiCredentialRollbackSafetyIntegrationTest.java:184` | used in tests (new after the snapshot, #1590; tracked in #1591) |
 
 ### End state
 
-Recaptured from the code-scanning API after the replay: `<N>` alerts, `0` open on `refs/heads/main`.
+Recaptured from the code-scanning API after the replay and the six manual dispositions (2026-09-07T06:10Z): `154` alerts — `134` dismissed (every one with an expiry), `20` fixed, `0` open on `refs/heads/main`.
 Reproduce with:
 
 ```bash
@@ -772,7 +873,7 @@ From this generation on, the `main` baseline gate in [STATIC_ANALYSIS.md](STATIC
 the Security workflow red on `main` whenever an open Critical/High exists there, so the end state is
 enforced mechanically rather than re-measured by hand.
 
-### `java/csrf-unprotected-request-type` — #153 (→ #<TWIN>): `ReportController.widgetKpi`, false positive
+### `java/csrf-unprotected-request-type` — #153 (→ #159): `ReportController.widgetKpi`, false positive
 
 Raised by PR #1574 on 2026-09-03 at `ReportController.java:126`, the
 `GET /api/reports/{id}/widgets/{widgetId}/kpi` handler (`@RequirePermission(REPORT_READ)`). It was
@@ -820,7 +921,7 @@ turns the new test red.
 Security Owner role ([#1230](https://github.com/itkla/connex/issues/1230)); expiry **2027-02-14**,
 re-review **2027-01-14**. Reassess if `widgetKpi` or `generationInputs` gains a write, or if the
 query's dispatch modelling changes. Dismissed on 2026-09-05T01:43Z with the following comment on
-#153 before the snapshot, and copied verbatim onto its third-generation twin #<TWIN>
+#153 before the snapshot, and copied verbatim onto its third-generation twin #159
 (`backend/src/main/java/ooo/klae/connex/backend/controllers/ReportController.java:126`) by the
 replay:
 
