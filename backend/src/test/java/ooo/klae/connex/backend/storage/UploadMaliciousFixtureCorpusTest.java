@@ -66,13 +66,23 @@ import tools.jackson.databind.ObjectMapper;
  * {@code _xmlsignatures/} still meets the ordinary active-element blocklist; it is recorded as a
  * defence-in-depth guard rather than the sole control.
  *
- * <p>Cases added while applying review findings were measured the same way:
- * {@code rejectsOdfMetadataManifestReferencingExternalOrAbsentMembers} and
- * {@code rejectsRasterMemberOverTheMemberCeiling} are red against the pre-fix inspector; {@code rejectsExternalRetrievalMethodInSignaturePart} fails when the
- * signature reference binding is removed; the internal-length cases in
- * {@code acceptsMetafileMediaPartsAndRejectsMismatchedDeclarations} fail when the EMF and WMF
- * length rule is removed; and {@code rejectsRasterMemberOverTheMemberCeiling} also fails when the
- * member ceiling is raised back to 32 MiB.
+ * <p>Cases added while applying review findings were measured the same way (31 of 52 cases red
+ * against the pre-fix inspector): {@code rejectsOdfMetadataManifestReferencingExternalOrAbsentMembers},
+ * {@code rejectsRasterMemberOverTheMemberCeiling},
+ * {@code acceptsOdfEmbeddedFontsAndRejectsMisdeclaredOrOversizedOnes} and
+ * {@code rejectsExternalRetrievalMethodInSignaturePart} are red against the pre-fix inspector,
+ * the last only because it refused every signed package. Each new guard was then removed on its
+ * own from the current inspector and turned exactly one method red:
+ * {@code rejectsExternalRetrievalMethodInSignaturePart} without the {@code RetrievalMethod} URI
+ * binding and again without the {@code SPURI} / {@code SignatureProviderUrl} text rule;
+ * {@code acceptsMetafileMediaPartsAndRejectsMismatchedDeclarations} without the EMF and WMF
+ * internal-length comparison; {@code rejectsRasterMemberOverTheMemberCeiling} with the member
+ * ceiling raised back to 32 MiB; {@code rejectsOdfMetadataManifestReferencingExternalOrAbsentMembers}
+ * without the {@code rdf:about} / {@code rdf:resource} binding; and
+ * {@code acceptsOdfEmbeddedFontsAndRejectsMisdeclaredOrOversizedOnes} with the sfnt sniff
+ * accepting any bytes. {@code acceptsRealLibreOfficeEmbeddedFontPackage} is green in both states
+ * because the pre-fix inspector stored embedded fonts uninspected; it pins the over-refusal an
+ * earlier revision of this change introduced.
  */
 class UploadMaliciousFixtureCorpusTest {
     private static final String SVG_PAYLOAD =
