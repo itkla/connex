@@ -736,9 +736,14 @@ test("authenticated setup completes through a cookie-less public bearer", async 
         })).toBeEnabled();
 
         const laterTab = await anonymousContext.newPage();
+        const laterViewed = laterTab.waitForResponse((response) => (
+            response.request().method() === "POST"
+            && new URL(response.url()).pathname === "/api/document-acceptance/viewed"
+        ));
         await laterTab.goto(acceptanceWithItemsPath);
         await expect(laterTab).toHaveURL(/\/document-acceptance$/);
         await expect(laterTab.getByTestId("document-line-items-table")).toBeVisible();
+        expect((await laterViewed).status()).toBe(200);
         await laterTab.close();
         await anonymousPage.getByRole("button", {
             name: message("en", "document-acceptance", "DocumentAcceptance.accept"),
@@ -756,10 +761,12 @@ test("authenticated setup completes through a cookie-less public bearer", async 
         await expect(anonymousPage.getByRole("heading", {
             name: message("en", "document-acceptance", "DocumentAcceptance.unavailableTitle"),
         })).toBeVisible();
-        expect(await recipientStatusOf(dealWithoutItemsId, documentWithoutItemsId, emptyDeliveryId))
-            .toBe("viewed");
-        expect(await recipientStatusOf(dealWithItemsId, documentWithItemsId, deliveryId))
-            .toBe("viewed");
+        await expect.poll(() => (
+            recipientStatusOf(dealWithoutItemsId, documentWithoutItemsId, emptyDeliveryId)
+        )).toBe("viewed");
+        await expect.poll(() => (
+            recipientStatusOf(dealWithItemsId, documentWithItemsId, deliveryId)
+        )).toBe("viewed");
 
         await anonymousPage.goto(acceptanceWithItemsPath);
         await expect(anonymousPage).toHaveURL(/\/document-acceptance$/);
