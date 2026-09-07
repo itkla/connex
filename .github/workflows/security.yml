@@ -72,6 +72,8 @@ jobs:
         run: python .github/scripts/test_ci_change_classification.py
       - name: Regression-test CodeQL alert gate
         run: python .github/scripts/test_codeql_alerts.py
+      - name: Regression-test CodeQL dismissal replay
+        run: python .github/scripts/test_replay_codeql_dismissals.py
       - name: Regression-test candidate soak evidence
         run: python .github/scripts/test_candidate_soak.py
       - name: Regression-test security workflow gates
@@ -189,8 +191,7 @@ jobs:
           languages: java-kotlin
           build-mode: manual
           queries: security-extended
-          config-file: ./.github/codeql/codeql-config.yml
-          source-root: backend
+          config-file: ./.github/codeql/backend.yml
       - name: Compile backend for CodeQL extraction
         working-directory: backend
         run: >-
@@ -251,8 +252,7 @@ jobs:
           languages: javascript-typescript
           build-mode: none
           queries: security-extended
-          config-file: ./.github/codeql/codeql-config.yml
-          source-root: frontend
+          config-file: ./.github/codeql/frontend.yml
       - name: Analyze frontend with CodeQL
         uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
         with:

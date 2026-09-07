@@ -132,7 +132,7 @@ covers. Add later baselines or batch triages to that log rather than starting a 
 
 Suppressions are exceptional, and source-level ignore comments are not permitted. Prefer fixing the
 construct so the query can understand it. **Connex has no repository-wide query exclusions, and the
-filter list in `.github/codeql/codeql-config.yml` is asserted empty by
+filter lists in `.github/codeql/backend.yml` and `.github/codeql/frontend.yml` are asserted empty by
 `test_security_workflow.py`.**
 
 It used to have one: `java/potentially-weak-cryptographic-algorithm`, for the SHA-1 index the HIBP

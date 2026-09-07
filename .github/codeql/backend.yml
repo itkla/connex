@@ -1,3 +1,12 @@
+# Backend (java-kotlin) CodeQL configuration.
+#
+# `paths` scopes the analysis to the backend tree from the repository root. It must stay a
+# repository-relative path and the workflow must NOT pass `source-root`: from 2026-08-26 until the
+# path restoration on #1244, `source-root: backend` made CodeQL emit SARIF locations relative to
+# `backend/` (`src/main/java/...`), which the codeql-action's diff-range filter then compared against
+# repository-relative diff paths. Nothing matched, every pull-request analysis uploaded zero results,
+# and the alert gate passed blind. `test_security_workflow.py` asserts both halves of this contract.
+#
 # No query filters.
 #
 # `java/potentially-weak-cryptographic-algorithm` was excluded here for the SHA-1 that HIBP's
@@ -9,4 +18,6 @@
 # carries the same accountability metadata. Keep this list empty: an entry here is never narrower
 # than the whole repository. See #1464.
 
+paths:
+  - backend
 query-filters: []
