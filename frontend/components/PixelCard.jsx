@@ -27,6 +27,10 @@ class Pixel {
     return Math.random() * (max - min) + min;
   }
 
+  setColor(color) {
+    this.color = color;
+  }
+
   draw() {
     const centerOffset = this.maxSizeInteger * 0.5 - this.size * 0.5;
     this.ctx.fillStyle = this.color;
@@ -130,8 +134,12 @@ export default function PixelCard({ variant = 'default', gap, speed, colors, noF
   const canvasRef = useRef(null);
   const pixelsRef = useRef([]);
   const animationRef = useRef(null);
-  const timePreviousRef = useRef(performance.now());
-  const reducedMotion = useRef(window.matchMedia('(prefers-reduced-motion: reduce)').matches).current;
+  const timePreviousRef = useRef(0);
+  const reducedMotionRef = useRef(false);
+
+  useEffect(() => {
+    reducedMotionRef.current = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }, []);
 
   const variantCfg = VARIANTS[variant] || VARIANTS.default;
   const finalGap = gap ?? variantCfg.gap;
@@ -141,7 +149,9 @@ export default function PixelCard({ variant = 'default', gap, speed, colors, noF
 
   // Keep the latest colors in a ref so we can recolor pixels in place (no re-seed) on change.
   const colorsRef = useRef(finalColors);
-  colorsRef.current = finalColors;
+  useEffect(() => {
+    colorsRef.current = finalColors;
+  }, [finalColors]);
 
   const initPixels = () => {
     if (!containerRef.current || !canvasRef.current) return;
@@ -159,6 +169,7 @@ export default function PixelCard({ variant = 'default', gap, speed, colors, noF
     canvasRef.current.style.height = `${height}px`;
 
     const colorsArray = colorsRef.current.split(',');
+    const reducedMotion = reducedMotionRef.current;
     const pxs = [];
     for (let x = 0; x < width; x += parseInt(finalGap, 10)) {
       for (let y = 0; y < height; y += parseInt(finalGap, 10)) {
@@ -178,9 +189,8 @@ export default function PixelCard({ variant = 'default', gap, speed, colors, noF
     pixelsRef.current = pxs;
   };
 
-  const doAnimate = fnName => {
-    animationRef.current = requestAnimationFrame(() => doAnimate(fnName));
-    const timeNow = performance.now();
+  const doAnimate = (fnName, timeNow) => {
+    animationRef.current = requestAnimationFrame(timestamp => doAnimate(fnName, timestamp));
     const timePassed = timeNow - timePreviousRef.current;
     const timeInterval = 1000 / 60;
 
@@ -207,7 +217,7 @@ export default function PixelCard({ variant = 'default', gap, speed, colors, noF
 
   const handleAnimation = name => {
     cancelAnimationFrame(animationRef.current);
-    animationRef.current = requestAnimationFrame(() => doAnimate(name));
+    animationRef.current = requestAnimationFrame(timestamp => doAnimate(name, timestamp));
   };
 
   const onMouseEnter = () => handleAnimation('appear');
@@ -245,7 +255,7 @@ export default function PixelCard({ variant = 'default', gap, speed, colors, noF
   useEffect(() => {
     const colorsArray = colorsRef.current.split(',');
     for (const pixel of pixelsRef.current) {
-      pixel.color = colorsArray[(pixel.colorIndex ?? 0) % colorsArray.length];
+      pixel.setColor(colorsArray[(pixel.colorIndex ?? 0) % colorsArray.length]);
     }
   }, [finalColors]);
 

@@ -850,7 +850,9 @@
             "nextBody": "Add tasks, assign owners, use record values, and define branches in the editor. Preview on a real record before enabling the workflow.",
             "continue": "Continue to editor",
             "catalogFailed": "Could not load workflow building blocks. Retry to keep creating your workflow.",
-            "catalogUnavailable": "New workflow building blocks are unavailable on this deployment."
+            "catalogUnavailable": "New workflow building blocks are unavailable on this deployment.",
+            "eventOnlyHelp": "Task and document workflows start from their supported record events. Choose the event and actions in the editor.",
+            "nextBodyLegacy": "Choose the event and supported actions, then save and publish from the editor."
         },
         "inputs": {
             "launchTitle": "Inputs for this run",
