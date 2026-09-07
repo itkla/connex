@@ -250,7 +250,8 @@
       "effectAssignee": "Assignee or recipient: {name}",
       "effectDueDate": "Due: {date}",
       "effectUnresolved": "Some values are resolved after an earlier step runs.",
-      "recordOutcomesTitle": "Record outcomes"
+      "recordOutcomesTitle": "Record outcomes",
+      "eligibleAt": "Can start again: {date}"
     },
     "status": {
       "queued": "Queued",
@@ -312,7 +313,7 @@
       "configureTitle": "What you need to set",
       "configureBody": "Fill in the values below. The trigger and the steps themselves are fixed here — you can change them once the workflow exists.",
       "nameLabel": "Workflow name",
-      "exampleRecordLabel": "Example record ID (optional)",
+      "exampleRecordLabel": "Example record (optional)",
       "exampleRecordHelp": "Search for a visible record to preview the recipe. The preview does not make changes.",
       "previewOnlyTitle": "Preview only — nothing will run",
       "previewOnlyBody": "Nothing is created or changed: no workflow, no run, and no task, note, activity, tag, or notification.",
@@ -355,9 +356,22 @@
         "cooling-company-review": {
           "title": "Review a cooling company",
           "description": "On a schedule, find companies whose warmth is cooling and create a task to check in."
+        },
+        "person-qualified-routing": {
+          "title": "Route a contact to the right owner",
+          "description": "Assign a contact to the owner you choose and create a linked follow-up task."
+        },
+        "deal-follow-through": {
+          "title": "Follow through on a deal",
+          "description": "Create a follow-up task and wait for its completion before moving the deal to the stage you choose."
+        },
+        "deal-renewal-preparation": {
+          "title": "Prepare for a renewal",
+          "description": "Use a deal’s expected close date to start a renewal task ahead of time and follow its completion."
         }
       },
-      "startBlank": "Build a workflow from scratch"
+      "startBlank": "Build a workflow from scratch",
+      "renewalDateHelp": "This recipe uses the deal’s expected close date. Set a negative day offset to start before that date, and enter an IANA time zone such as Asia/Tokyo or Pacific/Honolulu."
     },
     "sourceEvent": {
       "person": {
@@ -407,7 +421,12 @@
       "taskTitle": "Task title",
       "activityNote": "Activity note",
       "dueInDays": "Due in days",
-      "coolingDays": "Days without contact"
+      "coolingDays": "Days without contact",
+      "targetStageId": "Stage after follow-up",
+      "completionTimeoutDays": "Wait for completion, in days",
+      "offsetDays": "Days from expected close date",
+      "localTime": "Start time",
+      "timezone": "Time zone"
     },
     "parameter": {
       "actorUserId": "Runs as",
@@ -417,7 +436,12 @@
       "dueInDays": "Due in days",
       "coolingDays": "Days without contact",
       "userPlaceholder": "Choose a workspace member",
-      "stagePlaceholder": "Choose a pipeline stage"
+      "stagePlaceholder": "Choose a pipeline stage",
+      "targetStageId": "Stage after follow-up",
+      "completionTimeoutDays": "Wait for completion, in days",
+      "offsetDays": "Days from expected close date",
+      "localTime": "Start time",
+      "timezone": "Time zone"
     },
     "permission": {
       "TASK_CREATE": "Create tasks",

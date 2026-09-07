@@ -9,11 +9,28 @@ export const WORKFLOW_RECIPE_KEYS = [
     "person-job-change-follow-up",
     "deal-won-handoff",
     "cooling-company-review",
+    "person-qualified-routing",
+    "deal-follow-through",
+    "deal-renewal-preparation",
 ] as const;
 
 /** Whether a recipe key belongs to the immutable curated register exposed by this client. */
 export function isWorkflowRecipeKey(value: string): value is (typeof WORKFLOW_RECIPE_KEYS)[number] {
     return WORKFLOW_RECIPE_KEYS.some((key) => key === value);
+}
+
+/** Resolves the primary record for each supported recipe before searching for an example. */
+export function workflowRecipeRecordType(recipeKey: string): "person" | "company" | "deal" {
+    switch (recipeKey) {
+        case "cooling-company-review":
+            return "company";
+        case "deal-won-handoff":
+        case "deal-follow-through":
+        case "deal-renewal-preparation":
+            return "deal";
+        default:
+            return "person";
+    }
 }
 
 function hasValidRecordIds(recordIds: number[]): boolean {

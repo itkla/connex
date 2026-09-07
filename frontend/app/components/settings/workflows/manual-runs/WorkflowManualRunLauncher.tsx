@@ -519,7 +519,13 @@ function PreparationSummary({ preparation }: { preparation: WorkflowManualPrepar
                     <AlertTitle>{t("manual.blockersTitle")}</AlertTitle>
                     <AlertDescription>
                         <ul className="list-disc space-y-1 pl-4">
-                            {preparation.blockers.map((blocker) => <li key={blocker}>{t(`blocker.${blocker}`)}</li>)}
+                            {preparation.blockers.map((blocker) => {
+                                const eligibleAt = preparation.blockerDetails?.find((detail) => detail.code === blocker)?.eligibleAt;
+                                return <li key={blocker}>
+                                    {t.has(`blocker.${blocker}`) ? t(`blocker.${blocker}`) : t("manual.availability.configuration_unavailable")}
+                                    {eligibleAt ? <p>{t("manual.eligibleAt", { date: formatWorkflowRunDateTime(eligibleAt, locale) })}</p> : null}
+                                </li>;
+                            })}
                         </ul>
                     </AlertDescription>
                 </Alert>
@@ -548,6 +554,7 @@ function InvocationSummary({
         ["running", result.runningCount],
         ["waiting", result.waitingCount],
         ["succeeded", result.succeededCount],
+        ["stopped", result.stoppedCount],
         ["failed", result.failedCount],
         ["intervention_required", result.interventionRequiredCount],
         ["cancelled", result.cancelledCount],

@@ -156,7 +156,7 @@
       "execution_failed": "このステップを完了できませんでした。",
       "unknown": "このバージョンの Connex では、失敗の内容を説明できません。ページを再読み込みし、それでも続く場合はサポートにご連絡ください。",
       "condition_matched": "レコードが停止条件に一致しました。",
-      "date_superseded": "商談の受注予定日が変更されました。",
+      "date_superseded": "商談の決着予定日が変更されました。",
       "task_wait_timeout": "期限までにタスクが完了しませんでした。"
     },
     "retrySafety": {
@@ -250,7 +250,8 @@
       "effectAssignee": "担当者または通知先：{name}",
       "effectDueDate": "期限：{date}",
       "effectUnresolved": "一部の値は、前のステップの実行後に確定します。",
-      "recordOutcomesTitle": "レコードごとの結果"
+      "recordOutcomesTitle": "レコードごとの結果",
+      "eligibleAt": "次に開始できる日時：{date}"
     },
     "status": {
       "queued": "順番待ち",
@@ -312,7 +313,7 @@
       "configureTitle": "設定が必要な項目",
       "configureBody": "以下の値を入力してください。トリガーとステップはここでは変更できませんが、ワークフローの作成後に変更できます。",
       "nameLabel": "ワークフロー名",
-      "exampleRecordLabel": "サンプルのレコード ID（任意）",
+      "exampleRecordLabel": "プレビューするレコード（任意）",
       "exampleRecordHelp": "レコードを検索してレシピをプレビューします。プレビューでは変更を行いません。",
       "previewOnlyTitle": "プレビューのみで、実行はされません",
       "previewOnlyBody": "何も作成・変更されません。ワークフローも実行も作られず、タスク・メモ・アクティビティ・タグ・通知も作成されません。",
@@ -355,9 +356,22 @@
         "cooling-company-review": {
           "title": "温度感が下がった会社の確認",
           "description": "スケジュールに従って、温度感が下がっている会社を見つけ、様子を確認するタスクを作成します。"
+        },
+        "person-qualified-routing": {
+          "title": "連絡先の担当者を決める",
+          "description": "選択した担当者を連絡先に割り当て、フォローアップのタスクを作成します。"
+        },
+        "deal-follow-through": {
+          "title": "商談のフォローアップを進める",
+          "description": "フォローアップのタスクを作成し、完了を確認してから商談を指定のステージに進めます。"
+        },
+        "deal-renewal-preparation": {
+          "title": "更新に備える",
+          "description": "商談の決着予定日を基準に、更新準備のタスクを事前に作成し、完了を確認します。"
         }
       },
-      "startBlank": "ワークフローを一から作成"
+      "startBlank": "ワークフローを一から作成",
+      "renewalDateHelp": "このレシピは商談の決着予定日を使います。予定日より前に開始する場合は日数をマイナスにしてください。タイムゾーンは Asia/Tokyo や Pacific/Honolulu の形式で入力します。"
     },
     "sourceEvent": {
       "person": {
@@ -395,7 +409,7 @@
       "set_response_due": "初回応答期限を設定",
       "change_stage": "ステージを変更",
       "notify": "通知を作成",
-      "update_field": "受注予定日を更新"
+      "update_field": "決着予定日を更新"
     },
     "recipeField": {
       "sourceEvent": "開始のきっかけ",
@@ -407,7 +421,12 @@
       "taskTitle": "タスク名",
       "activityNote": "アクティビティの内容",
       "dueInDays": "期限までの日数",
-      "coolingDays": "連絡がない日数"
+      "coolingDays": "連絡がない日数",
+      "targetStageId": "フォローアップ後のステージ",
+      "completionTimeoutDays": "タスクの完了を待つ日数",
+      "offsetDays": "決着予定日からの日数",
+      "localTime": "開始時刻",
+      "timezone": "タイムゾーン"
     },
     "parameter": {
       "actorUserId": "実行者",
@@ -417,7 +436,12 @@
       "dueInDays": "期限までの日数",
       "coolingDays": "連絡がない日数",
       "userPlaceholder": "ワークスペースメンバーを選択",
-      "stagePlaceholder": "パイプラインのステージを選択"
+      "stagePlaceholder": "パイプラインのステージを選択",
+      "targetStageId": "フォローアップ後のステージ",
+      "completionTimeoutDays": "タスクの完了を待つ日数",
+      "offsetDays": "決着予定日からの日数",
+      "localTime": "開始時刻",
+      "timezone": "タイムゾーン"
     },
     "permission": {
       "TASK_CREATE": "タスクを作成",
@@ -433,12 +457,12 @@
       "active_run_exists": "このレコードはすでに実行中です。",
       "cooldown_active": "再開始までの時間が経過していません。",
       "condition_matched": "レコードが停止条件に一致しました。",
-      "date_superseded": "商談の受注予定日が変更されました。",
+      "date_superseded": "商談の決着予定日が変更されました。",
       "custom": "停止: {reason}",
       "task_wait_timeout": "期限までにタスクが完了しませんでした。"
     },
     "dateSchedule": {
-      "sourceDate": "受注予定日: {date}",
+      "sourceDate": "決着予定日: {date}",
       "scheduled": "予定された現地の日付: {date}",
       "dueAt": "予定時刻: {date}"
     }
