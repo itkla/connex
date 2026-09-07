@@ -4852,7 +4852,7 @@ export type WorkflowValidation = {
 };
 
 export type WorkflowSimulation = {
-    result: "would_complete" | "not_enrolled" | "would_wait" | "blocked";
+    result: "would_complete" | "not_enrolled" | "would_wait" | "would_stop" | "blocked";
     path: Array<{
         nodeId: string;
         nodeType: WorkflowRuntimeNodeType;
@@ -5154,6 +5154,7 @@ export type WorkflowManualExpectedSkips = {
 };
 
 export type WorkflowManualPreparation = {
+    blockerDetails?: Array<{ code: string; eligibleAt: string | null }>;
     resolvedInputs?: Array<{ key: string; label: string; type: WorkflowInputType; value: WorkflowInputValue; displayValue: string; source: "supplied" | "default" }>;
     effectSamples?: Array<{ recordId: number; nodeId: string; actionType: string; title: string | null; body: string | null; targetUserId: number | null; targetLabel: string | null; dueDate: string | null; retrySafety: WorkflowRetrySafety }>;
     invocationId: number;
@@ -5197,6 +5198,7 @@ export type WorkflowInvocationResult = {
     runningCount: number;
     waitingCount: number;
     succeededCount: number;
+    stoppedCount: number;
     failedCount: number;
     interventionRequiredCount: number;
     cancelledCount: number;

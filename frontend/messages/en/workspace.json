@@ -649,7 +649,8 @@
                 "would_complete": "Would complete",
                 "not_enrolled": "Would not enroll",
                 "would_wait": "Would wait here",
-                "blocked": "Blocked"
+                "blocked": "Blocked",
+                "would_stop": "Would stop"
             }
         },
         "close": "Close",
@@ -936,16 +937,16 @@
             "reasonHelp": "Optional: use a short reason with lowercase letters, numbers, and underscores, starting with a letter."
         },
         "policies": {
-            "title": "Enrollment and stopping",
-            "help": "These rules apply to manual and automatic starts for this primary record.",
+            "title": "Starting and stopping",
+            "help": "Choose when this workflow can start and when it should stop.",
             "oneActive": "Only one active run per record",
             "cooldown": "Time before starting again (minutes)",
             "cooldownHelp": "Measured from the last accepted start. Enter 0 to allow another start immediately.",
             "entry": "Only start when conditions match",
             "stop": "Stop when conditions match",
             "stopHelp": "Rechecked before actions and when a waiting run resumes. Matching stops the run without marking it as failed.",
-            "compatibilityEnrollment": "The first Condition step selects records for this existing schedule. Edit that step to change enrollment.",
-            "stopAllWarning": "An empty stop condition matches every record. Add a condition before publishing, or turn this rule off."
+            "compatibilityEnrollment": "The first Condition step selects records for this existing schedule. Edit that step to change which records can start.",
+            "stopAllWarning": "An empty stop condition matches every record. Add a condition before publishing, or turn off “Stop when conditions match”."
         },
         "date": {
             "fieldHelp": "Uses this deal’s expected close date. A deal without that date cannot enter this schedule.",

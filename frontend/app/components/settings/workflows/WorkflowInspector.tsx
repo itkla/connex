@@ -451,7 +451,7 @@ function TriggerFields({
                     />
                 </LabeledField>
             ) : null}
-            {recordType === "deal" && !isSchedule && !isManual ? (
+            {recordType === "deal" && !isSchedule && !isManual && !isDate ? (
                 <LabeledField label={tr("stageFilterLabel")}>
                     <Select
                         value={node.config.targetStageId ? String(node.config.targetStageId) : "any"}
@@ -558,6 +558,7 @@ function ActionFields({
     };
     const userValues = valuesForField("targetUser").filter((option) => option.valueType === "user");
     const dateValues = valuesForField("dueDate").filter((option) => option.valueType === "date");
+    const updateDateValues = valuesForField(node.config.field ?? "expectedCloseDate").filter((option) => option.valueType === "date");
     const update = (config: RuleAction, mode: ChangeMode) => onNodeChange({ ...node, config }, mode);
     const selectedMessage = campaignMessageOptions?.items.find(
         ({ message }) => message.id === node.config.campaignMessageId,
@@ -603,15 +604,15 @@ function ActionFields({
                 <div className="space-y-3">
                     <p className="text-sm text-muted-foreground">{t("date.updateFieldHelp")}</p>
                     <LabeledField label={t("date.newDate")}>
-                        {node.config.valueRef ? <WorkflowValuePicker options={valuesForField("value").filter((option) => option.valueType === "date")} value={node.config.valueRef}
+                        {node.config.valueRef ? <WorkflowValuePicker options={updateDateValues} value={node.config.valueRef}
                             label={t("date.newDate")} disabled={readOnly} onChange={(valueRef) => update({ ...node.config, field: "expectedCloseDate", value: undefined, valueRef }, "commit")} />
                             : <Input type="date" aria-label={t("date.newDate")} {...fieldProps("config.value")} value={typeof node.config.value === "string" ? node.config.value : ""} disabled={readOnly}
                                 onChange={(event) => update({ ...node.config, field: "expectedCloseDate", value: event.target.value || undefined, valueRef: undefined }, "transient")} onBlur={onCommitTransient} />}
                     </LabeledField>
                     <div className="flex items-center justify-between gap-3">
                         <Label htmlFor="workflow-update-value">{t("values.useValue")}</Label>
-                        <Switch id="workflow-update-value" checked={node.config.valueRef !== undefined} disabled={readOnly || !valuesForField("value").some((option) => option.valueType === "date")}
-                            onCheckedChange={(checked) => update({ ...node.config, field: "expectedCloseDate", value: undefined, valueRef: checked ? valuesForField("value").find((option) => option.valueType === "date")?.ref : undefined }, "commit")} />
+                        <Switch id="workflow-update-value" checked={node.config.valueRef !== undefined} disabled={readOnly || updateDateValues.length === 0}
+                            onCheckedChange={(checked) => update({ ...node.config, field: "expectedCloseDate", value: undefined, valueRef: checked ? updateDateValues[0]?.ref : undefined }, "commit")} />
                     </div>
                 </div>
             ) : null}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
     ArrowPathIcon,
@@ -37,7 +37,7 @@ import type {
     WorkflowRecipeParameters,
     WorkflowRecipePreview,
 } from "@/app/lib/types";
-import { isWorkflowRecipeKey, WORKFLOW_RECIPE_KEYS } from "@/app/lib/workflowOperations";
+import { isWorkflowRecipeKey, workflowRecipeRecordType, WORKFLOW_RECIPE_KEYS } from "@/app/lib/workflowOperations";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,11 @@ function recipeMessageKey(recipeKey: string): (typeof WORKFLOW_RECIPE_KEYS)[numb
 
 /** Curated deterministic recipe register with source, actor, side-effect, and permission disclosure. */
 export function WorkflowRecipeGallery() {
+    const { activeWorkspaceId, switching } = useWorkspace();
+    return <WorkflowRecipeGalleryBody key={switching ? "switching" : activeWorkspaceId ?? "no-workspace"} />;
+}
+
+function WorkflowRecipeGalleryBody() {
     const t = useTranslations("WorkflowOperations");
     const { activeWorkspaceId, switching } = useWorkspace();
     const [recipes, setRecipes] = useState<WorkflowRecipe[] | null>(null);
@@ -134,6 +139,12 @@ export function WorkflowRecipeGallery() {
 
 /** Recipe disclosure, read-only preview, and disabled-workflow installation flow. */
 export function WorkflowRecipeDetail({ recipeKey, definitionAuthoringEnabled = false }: { recipeKey: string; definitionAuthoringEnabled?: boolean }) {
+    const { activeWorkspaceId, switching } = useWorkspace();
+    if (switching || activeWorkspaceId == null) return <WorkflowRecipeDetailSkeleton />;
+    return <WorkflowRecipeDetailBody key={`${activeWorkspaceId}:${recipeKey}`} recipeKey={recipeKey} definitionAuthoringEnabled={definitionAuthoringEnabled} />;
+}
+
+function WorkflowRecipeDetailBody({ recipeKey, definitionAuthoringEnabled }: { recipeKey: string; definitionAuthoringEnabled: boolean }) {
     const t = useTranslations("WorkflowOperations");
     const tw = useTranslations("WorkspaceWorkflows");
     const router = useRouter();
@@ -149,13 +160,16 @@ export function WorkflowRecipeDetail({ recipeKey, definitionAuthoringEnabled = f
     const [pending, setPending] = useState<"preview" | "install" | null>(null);
     const [error, setError] = useState<"forbidden" | "missing" | "load" | "action" | null>(null);
     const [attempt, setAttempt] = useState(0);
+    const operationRef = useRef<AbortController | null>(null);
+
+    useEffect(() => () => operationRef.current?.abort(), []);
 
     const headers = useMemo(
         () => activeWorkspaceId == null ? undefined : { "X-Workspace-Id": String(activeWorkspaceId) },
         [activeWorkspaceId],
     );
     const requestInit = useMemo(() => ({ headers }), [headers]);
-    const recordType = recipeKey === "cooling-company-review" ? "company" : recipeKey === "deal-won-handoff" ? "deal" : "person";
+    const recordType = workflowRecipeRecordType(recipeKey);
     const recordSearch = useWorkflowRecordSearch(recordType, requestInit, Boolean(headers) && !switching);
 
     useEffect(() => {
@@ -190,7 +204,10 @@ export function WorkflowRecipeDetail({ recipeKey, definitionAuthoringEnabled = f
     };
 
     const runPreview = async () => {
-        if (!recipe || !headers) return;
+        if (!recipe || !headers || pending) return;
+        const controller = new AbortController();
+        operationRef.current?.abort();
+        operationRef.current = controller;
         setPending("preview");
         setError(null);
         try {
@@ -198,17 +215,21 @@ export function WorkflowRecipeDetail({ recipeKey, definitionAuthoringEnabled = f
                 name: name.trim() || undefined,
                 parameters,
                 exampleRecordId: /^\d+$/.test(exampleRecordId) ? Number(exampleRecordId) : undefined,
-            }, { headers });
+            }, { headers, signal: controller.signal });
+            if (controller.signal.aborted) return;
             setPreview(loaded);
         } catch {
-            setError("action");
+            if (!controller.signal.aborted) setError("action");
         } finally {
-            setPending(null);
+            if (!controller.signal.aborted) setPending(null);
         }
     };
 
     const install = async () => {
-        if (!recipe || !preview || !headers) return;
+        if (!recipe || !preview || !headers || pending) return;
+        const controller = new AbortController();
+        operationRef.current?.abort();
+        operationRef.current = controller;
         setPending("install");
         setError(null);
         try {
@@ -216,11 +237,14 @@ export function WorkflowRecipeDetail({ recipeKey, definitionAuthoringEnabled = f
                 previewHash: preview.previewHash,
                 name: name.trim() || undefined,
                 parameters,
-            }, { headers });
+            }, { headers, signal: controller.signal });
+            if (controller.signal.aborted) return;
             router.push(`/workflows/${installed.workflow.id}`);
         } catch {
-            setError("action");
-            setPending(null);
+            if (!controller.signal.aborted) {
+                setError("action");
+                setPending(null);
+            }
         }
     };
 
@@ -261,7 +285,7 @@ export function WorkflowRecipeDetail({ recipeKey, definitionAuthoringEnabled = f
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="recipe-name">{t("recipes.nameLabel")}</Label>
-                            <Input id="recipe-name" value={name} onChange={(event) => { setName(event.target.value); setPreview(null); }} />
+                            <Input id="recipe-name" value={name} maxLength={128} disabled={pending !== null} onChange={(event) => { setName(event.target.value); setPreview(null); }} />
                         </div>
                         {recipe.requiredParameters.map((parameter) => (
                             <ParameterField
@@ -271,9 +295,11 @@ export function WorkflowRecipeDetail({ recipeKey, definitionAuthoringEnabled = f
                                 users={users}
                                 stages={stages}
                                 pipelines={pipelines}
+                                disabled={pending !== null}
                                 onChange={(value) => updateParameter(parameter, value)}
                             />
                         ))}
+                        {recipe.recipeKey === "deal-renewal-preparation" ? <p className="text-sm text-muted-foreground">{t("recipes.renewalDateHelp")}</p> : null}
                         <div className="space-y-2">
                             <Label htmlFor="recipe-example-record">{t("recipes.exampleRecordLabel")}</Label>
                             <RecordSelect
@@ -394,6 +420,7 @@ function ParameterField({
     users,
     stages,
     pipelines,
+    disabled,
     onChange,
 }: {
     parameter: string;
@@ -401,16 +428,20 @@ function ParameterField({
     users: User[];
     stages: Stage[];
     pipelines: Pipeline[];
+    disabled: boolean;
     onChange: (value: string) => void;
 }) {
     const t = useTranslations("WorkflowOperations");
     const stringValue = value == null ? "" : String(value);
     const userParameter = parameter === "actorUserId" || parameter === "targetUserId";
+    const daysParameter = parameter.endsWith("Days");
+    const minimum = parameter === "offsetDays" ? -365 : parameter === "coolingDays" ? 30 : parameter === "completionTimeoutDays" ? 1 : daysParameter ? 0 : undefined;
+    const maximum = parameter === "completionTimeoutDays" ? 30 : daysParameter ? 365 : undefined;
     return (
         <div className="space-y-2">
             <Label htmlFor={`recipe-${parameter}`}>{t(`parameter.${parameter}`)}</Label>
             {userParameter ? (
-                <Select value={stringValue} onValueChange={onChange}>
+                <Select value={stringValue} onValueChange={onChange} disabled={disabled}>
                     <SelectTrigger id={`recipe-${parameter}`} className="w-full">
                         <SelectValue placeholder={t("parameter.userPlaceholder")} />
                     </SelectTrigger>
@@ -419,16 +450,18 @@ function ParameterField({
                     </SelectContent>
                 </Select>
             ) : parameter === "targetStageId" || parameter === "stageId" ? (
-                <Select value={stringValue} onValueChange={onChange}>
+                <Select value={stringValue} onValueChange={onChange} disabled={disabled}>
                     <SelectTrigger id={`recipe-${parameter}`} className="w-full"><SelectValue placeholder={t("parameter.stagePlaceholder")} /></SelectTrigger>
                     <SelectContent>{stages.map((stage) => <SelectItem key={stage.id} value={String(stage.id)}>{pipelines.find((pipeline) => pipeline.id === stage.pipeline)?.name} · {stage.name}</SelectItem>)}</SelectContent>
                 </Select>
             ) : (
                 <Input
                     id={`recipe-${parameter}`}
-                    type={parameter.endsWith("Days") ? "number" : "text"}
-                    min={parameter === "coolingDays" ? 30 : parameter.endsWith("Days") ? 0 : undefined}
-                    max={parameter.endsWith("Days") ? 365 : undefined}
+                    type={daysParameter ? "number" : parameter === "localTime" ? "time" : "text"}
+                    min={minimum}
+                    max={maximum}
+                    maxLength={parameter === "taskTitle" ? 255 : parameter === "activityNote" ? 2_000 : 128}
+                    disabled={disabled}
                     value={stringValue}
                     onChange={(event) => onChange(event.target.value)}
                 />

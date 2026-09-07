@@ -78,6 +78,16 @@ for (const type of ["person", "company", "deal"] as const) {
         await selectOption(page, page.getByRole("combobox", { name: "Assignee value", exact: true }), "Input · Task owner");
         await selectOption(page, page.getByRole("combobox", { name: "Task due date", exact: true }), "Input · Due date");
         await closeInspector(page, mobile);
+        if (type === "deal") {
+            const taskRow = outline.getByRole("listitem").filter({ has: page.getByRole("button", { name: /^create a task/i }) });
+            await taskRow.getByRole("button", { name: "Insert", exact: true }).click();
+            await page.getByRole("menuitem", { name: "Action", exact: true }).click();
+            await outline.getByRole("button", { name: /^create a task/i }).last().click();
+            await selectOption(page, page.getByRole("combobox", { name: "Action", exact: true }), "update expected close date");
+            await page.getByRole("switch", { name: "Use an input or record value", exact: true }).click();
+            await selectOption(page, page.getByRole("combobox", { name: "New expected close date", exact: true }), "Input · Due date");
+            await closeInspector(page, mobile);
+        }
 
         await page.getByRole("button", { name: "Save draft", exact: true }).click();
         await expect(page).toHaveURL(/\/workflows\/\d+$/);
@@ -119,6 +129,14 @@ for (const type of ["person", "company", "deal"] as const) {
         expect(createdTask?.[type === "person" ? "personId" : type === "company" ? "companyId" : "dealId"]).toBe(record.id);
         expect(createdTask?.dueDate).toBe(dueDate);
         expect(typeof createdTask?.assignedToId).toBe("number");
+        if (type === "deal") {
+            await expect.poll(async () => {
+                const response = await page.request.get(`/api/deals/${record.id}`);
+                expect(response.ok()).toBe(true);
+                const deal: unknown = await response.json();
+                return isRecord(deal) ? deal.expectedCloseDate : null;
+            }, { timeout: 30_000 }).toBe(dueDate);
+        }
         await launcher.getByRole("button", { name: "Refresh", exact: true }).click();
         await launcher.getByRole("link", { name: "View run", exact: true }).click();
         await expect(page.getByRole("link", { name: "View created task", exact: true })).toHaveAttribute("href", `/activity/tasks?task=${String(createdTask?.id)}`);
@@ -200,4 +218,44 @@ test("resumes a process only after its created task is completed @mobile", async
     await page.goto(runUrl);
     await expect(page.getByText("Task completion observed", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Cancel run", exact: true })).toHaveCount(0);
+});
+
+test("configures a renewal recipe against a deal date and creates it turned off @mobile", async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
+    const name = `Renewal preparation ${testInfo.testId}`;
+    await page.goto("/workflows/recipes/deal-renewal-preparation");
+    await expect(page.getByRole("heading", { name: "Prepare for a renewal", exact: true })).toBeVisible();
+    await page.getByLabel("Workflow name", { exact: true }).fill(name);
+    await selectOption(page, page.getByRole("combobox", { name: "Runs as", exact: true }), "E2E Harness");
+    await selectOption(page, page.getByRole("combobox", { name: "Task assignee", exact: true }), "E2E Harness");
+    await page.getByLabel("Task title", { exact: true }).fill("Prepare the renewal discussion");
+    await page.getByLabel("Days from expected close date", { exact: true }).fill("-30");
+    await page.getByLabel("Start time", { exact: true }).fill("09:00");
+    await page.getByLabel("Time zone", { exact: true }).fill("Asia/Tokyo");
+    await page.getByLabel("Due in days", { exact: true }).fill("5");
+    await page.getByLabel("Wait for completion, in days", { exact: true }).fill("7");
+    await expect(page.getByText(/This recipe uses the deal’s expected close date/)).toBeVisible();
+    const previewed = page.waitForResponse((response) => response.request().method() === "POST"
+        && new URL(response.url()).pathname === "/api/workflow-recipes/deal-renewal-preparation/preview");
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    const previewResponse = await previewed;
+    expect(previewResponse.status(), await previewResponse.text()).toBe(200);
+    const preview: unknown = await previewResponse.json();
+    if (!isRecord(preview) || !isRecord(preview.definition) || !Array.isArray(preview.definition.nodes)) throw new Error("Expected the recipe preview definition");
+    expect(preview.writesCreated).toBe(false);
+    expect(preview.definition.schemaVersion).toBe(2);
+    const trigger = preview.definition.nodes.find((node): node is Record<string, unknown> => isRecord(node) && node.type === "TRIGGER");
+    expect(trigger?.config).toMatchObject({ type: "date", dateField: "expectedCloseDate", offsetDays: -30, localTime: "09:00", timezone: "Asia/Tokyo" });
+    expect(preview.definition.nodes.some((node) => isRecord(node) && node.type === "WAIT")).toBe(true);
+    await expect(page.getByText("Confirmed: nothing was created or changed.", { exact: true })).toBeVisible();
+    const installed = page.waitForResponse((response) => response.request().method() === "POST"
+        && new URL(response.url()).pathname === "/api/workflow-recipes/deal-renewal-preparation/install");
+    await page.getByRole("button", { name: "Create it, turned off", exact: true }).click();
+    const installResponse = await installed;
+    expect(installResponse.ok(), await installResponse.text()).toBe(true);
+    const result: unknown = await installResponse.json();
+    if (!isRecord(result) || !isRecord(result.workflow)) throw new Error("Expected the installed workflow");
+    expect(result.workflow.enabled).toBe(false);
+    await expect(page).toHaveURL(/\/workflows\/\d+$/);
+    await expect(page.getByRole("button", { name: "Enable", exact: true })).toBeVisible();
 });
