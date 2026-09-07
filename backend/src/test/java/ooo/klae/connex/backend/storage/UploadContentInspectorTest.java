@@ -211,6 +211,81 @@ class UploadContentInspectorTest {
             UploadSource.from("fields.docx", docxContentType(), simpleFields)).format());
     }
 
+    /**
+     * Verifies that real LibreOffice packages carrying pictures, thumbnails, and metadata
+     * manifests still upload once every package member is inspected, and that their raster
+     * members are walked structurally rather than handed to the decoding image validator, which
+     * is what keeps photo-heavy documents inside the five-second deadline.
+     */
+    @Test
+    void acceptsRealLibreOfficePicturePackages() throws Exception {
+        byte[] odt = fixture("libreoffice-picture-source.odt");
+        byte[] docx = fixture("libreoffice-picture-source.docx");
+        byte[] pptx = fixture("libreoffice-picture-source.pptx");
+        UploadPolicy policy = new UploadPolicy(properties);
+        ImageUploadValidator refusingValidator = new ImageUploadValidator(
+                properties,
+                policy,
+                new ImageDecodeAdmissionService(properties),
+                imageValidationExecutor) {
+            @Override
+            public ValidatedImage validate(UploadSource source) {
+                throw new AssertionError("Package members must be walked, never decoded");
+            }
+
+            @Override
+            public ValidatedImage validate(UploadSource source, UploadPurpose purpose) {
+                throw new AssertionError("Package members must be walked, never decoded");
+            }
+
+            @Override
+            public ValidatedAiImage validateForAi(UploadSource source) {
+                throw new AssertionError("Package members must be walked, never decoded");
+            }
+
+            @Override
+            public ValidatedAiImage validateStoredForAi(UploadSource source) {
+                throw new AssertionError("Package members must be walked, never decoded");
+            }
+        };
+
+        try (UploadContentInspector packageInspector =
+                new UploadContentInspector(policy, refusingValidator, new ObjectMapper())) {
+            assertEquals(UploadFormat.ODT, packageInspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "picture.odt", "application/vnd.oasis.opendocument.text", odt)).format());
+            assertEquals(UploadFormat.DOCX, packageInspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from("picture.docx", docxContentType(), docx)).format());
+            assertEquals(UploadFormat.PPTX, packageInspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from("picture.pptx", pptxContentType(), pptx)).format());
+        }
+
+        assertTrue(contains(odt, "Thumbnails/thumbnail.png"
+            .getBytes(StandardCharsets.US_ASCII)));
+        assertTrue(contains(odt, "manifest.rdf".getBytes(StandardCharsets.US_ASCII)));
+        assertTrue(contains(docx, "word/media/image1.png"
+            .getBytes(StandardCharsets.US_ASCII)));
+        assertTrue(contains(pptx, "ppt/media/image1.png".getBytes(StandardCharsets.US_ASCII)));
+    }
+
+    /** Verifies the legacy migration path inspects package members the same way. */
+    @Test
+    void acceptsLegacyInspectionOfRealLibreOfficePicturePackages() throws Exception {
+        assertEquals(UploadFormat.ODT, inspector.inspectLegacyAttachment(
+            UploadSource.from(
+                "picture.odt",
+                "application/octet-stream",
+                fixture("libreoffice-picture-source.odt"))).format());
+        assertEquals(UploadFormat.DOCX, inspector.inspectLegacyAttachment(
+            UploadSource.from(
+                "picture.docx",
+                "application/octet-stream",
+                fixture("libreoffice-picture-source.docx"))).format());
+    }
+
     @ParameterizedTest
     @MethodSource("odfDdeDocuments")
     void rejectsOdfDdeElements(UploadFormat format, String mainXml) throws Exception {
@@ -523,11 +598,11 @@ class UploadContentInspectorTest {
     @Test
     void validatesEveryNestedOfficeRelationshipTarget() throws Exception {
         byte[] safeNestedRelationship = packageWithNestedRelationship(
-            "media/pixel.dat", "", true);
+            "media/pixel.png", "", true);
         byte[] implicitExternalRelationship = packageWithNestedRelationship(
             "https://example.invalid/payload", "", false);
         byte[] disguisedOleRelationship = packageWithNestedRelationship(
-            "media/payload.dat", "", true, "oleObject");
+            "media/payload.png", "", true, "oleObject");
 
         InspectedUpload accepted = inspector.inspect(
             UploadPurpose.ATTACHMENT,
@@ -553,10 +628,9 @@ class UploadContentInspectorTest {
         String content = "<office:document-content xmlns:office=\""
             + "urn:oasis:names:tc:opendocument:xmlns:office:1.0\" "
             + "xmlns:xlink=\"http://www.w3.org/1999/xlink\">"
-            + "<office:body xlink:href=\"Pictures/padding.dat\"/>"
+            + "<office:body xlink:href=\"Pictures/padding.png\"/>"
             + "</office:document-content>";
-        byte[] resolved = officePackage(
-            UploadFormat.ODT, content, "safe".getBytes(StandardCharsets.UTF_8));
+        byte[] resolved = officePackage(UploadFormat.ODT, content, image("png"));
         byte[] missing = officePackage(UploadFormat.ODT, content, null);
 
         assertEquals(UploadFormat.ODT, inspector.inspect(
@@ -1172,7 +1246,7 @@ class UploadContentInspectorTest {
             put(zip, "word/_rels/document.xml.rels",
                 relationships.getBytes(StandardCharsets.UTF_8));
             if (includeTarget) {
-                put(zip, "word/" + target, "safe".getBytes(StandardCharsets.UTF_8));
+                put(zip, "word/" + target, image("png"));
             }
         }
         return output.toByteArray();
@@ -1196,14 +1270,26 @@ class UploadContentInspectorTest {
             zip.write(mimeType);
             zip.closeEntry();
             put(zip, "content.xml", mainXml.getBytes(StandardCharsets.UTF_8));
-            put(zip, "META-INF/manifest.xml", ("<manifest:manifest xmlns:manifest=\""
-                + "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\"/>")
+            put(zip, "META-INF/manifest.xml", odfManifestXml(padding != null)
                 .getBytes(StandardCharsets.UTF_8));
             if (padding != null) {
-                put(zip, "Pictures/padding.dat", padding);
+                put(zip, "Pictures/padding.png", padding);
             }
         }
         return output.toByteArray();
+    }
+
+    /** Builds the ODF package manifest, which must list every non-META-INF member. */
+    private static String odfManifestXml(boolean picture) {
+        return "<manifest:manifest xmlns:manifest=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\">"
+            + "<manifest:file-entry manifest:full-path=\"content.xml\" "
+            + "manifest:media-type=\"text/xml\"/>"
+            + (picture
+                ? "<manifest:file-entry manifest:full-path=\"Pictures/padding.png\" "
+                    + "manifest:media-type=\"image/png\"/>"
+                : "")
+            + "</manifest:manifest>";
     }
 
     /** Builds an ODT package carrying one additional named XML part. */
@@ -1225,8 +1311,7 @@ class UploadContentInspectorTest {
             zip.closeEntry();
             put(zip, "content.xml",
                 defaultMainXml(UploadFormat.ODT).getBytes(StandardCharsets.UTF_8));
-            put(zip, "META-INF/manifest.xml", ("<manifest:manifest xmlns:manifest=\""
-                + "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\"/>")
+            put(zip, "META-INF/manifest.xml", odfManifestXml(false)
                 .getBytes(StandardCharsets.UTF_8));
             put(zip, partName, partXml.getBytes(StandardCharsets.UTF_8));
         }
@@ -1255,6 +1340,7 @@ class UploadContentInspectorTest {
 
     private static String contentTypesXml(UploadFormat format) {
         return "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+            + "<Default Extension=\"png\" ContentType=\"image/png\"/>"
             + "<Override PartName=\"/" + mainPart(format)
             + "\" ContentType=\"" + mainContentType(format) + "\"/></Types>";
     }

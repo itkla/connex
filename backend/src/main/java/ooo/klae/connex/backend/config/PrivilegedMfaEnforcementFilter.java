@@ -57,6 +57,7 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             "/api/reports/" + IDENTIFIER_SEGMENT + "/(?:export\\.csv|snapshots/"
                     + IDENTIFIER_SEGMENT + "/export\\.csv)");
     private static final Pattern PATH_PARAMETER_MARKER = Pattern.compile("(?i)(?:;|%(?:25)*3b)");
+    private static final String CSP_REPORT_PATH = "/api/csp-reports";
 
     private final PrivilegedMfaProperties properties;
     private final PrivilegedAccountService privilegedAccountService;
@@ -86,6 +87,10 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             return;
         }
         String path = stripPathParameters(request.getRequestURI());
+        if (isCspReport(request.getMethod(), path)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
         if (privilegedAccountService.isPrivileged(user.getId())
                 && !webAuthnService.hasPasskey(user.getId())
                 && !isEnrollmentPath(request.getMethod(), path)
@@ -167,6 +172,18 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     static boolean isLinkFlowPath(String path) {
         return LINK_FLOW_PATHS.stream()
                 .anyMatch(prefix -> path.equals(prefix) || path.startsWith(prefix + "/"));
+    }
+
+    /**
+     * Whether the request is a browser Content Security Policy violation report.
+     *
+     * <p>A confined privileged account still runs a browser under the enforced policy, and its
+     * violation reports carry the session cookie. Denying them would silence exactly the surface an
+     * unenrolled operator is confined to, so the collector is exempt. It is unauthenticated,
+     * persists nothing and reads no principal, so exempting it grants no data access.
+     */
+    private static boolean isCspReport(String method, String path) {
+        return "POST".equals(method) && CSP_REPORT_PATH.equals(path);
     }
 
     private static boolean isEnrollmentPath(String method, String path) {

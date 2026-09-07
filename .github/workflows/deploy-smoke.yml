@@ -385,6 +385,24 @@ jobs:
             fi
           }
 
+          # Proxied HTML carries the frontend's enforced nonce-based policy (CONNEX_CSP_MODE defaults
+          # to enforce), whose nonce changes per response, so those routes assert a shape rather
+          # than an exact value: exactly one Content-Security-Policy header, nonce-bearing
+          # script-src with 'strict-dynamic', frame-ancestors 'none' still present, and the
+          # report-uri that feeds the violation collector.
+          ENFORCED_HTML_CSP_PATTERN="^content-security-policy: *default-src 'self'; script-src 'self' 'nonce-[A-Za-z0-9+/=]+' 'strict-dynamic'; .*frame-ancestors 'none'; .*report-uri /api/csp-reports"
+
+          require_edge_csp_pattern() {
+            local pattern="$1"
+            local count
+            count=$(awk '{ line = $0; sub(/\r$/, "", line); if (tolower(substr(line, 1, 24)) == "content-security-policy:") n++ } END { print n + 0 }' "$EDGE_HEADERS_FILE")
+            if [ "$count" != "1" ] || ! grep -qiE "$pattern" "$EDGE_HEADERS_FILE"; then
+              echo "::error::expected exactly one enforced Content-Security-Policy header matching: $pattern"
+              sed -n '1,40p' "$EDGE_HEADERS_FILE"
+              exit 1
+            fi
+          }
+
           # nosniff only helps when the declared Content-Type is already correct; a mislabelled
           # script would make the browser refuse it, so CHK-040 requires asserting the type too.
           require_edge_content_type() {
@@ -412,7 +430,11 @@ jobs:
             require_edge_header_once 'X-Content-Type-Options: nosniff'
             require_edge_header_once "Referrer-Policy: $expected_referrer_policy"
             require_edge_header_once 'X-Frame-Options: DENY'
-            require_edge_header_once "Content-Security-Policy: $expected_csp"
+            if [ "$expected_csp" = "ENFORCED_HTML" ]; then
+              require_edge_csp_pattern "$ENFORCED_HTML_CSP_PATTERN"
+            else
+              require_edge_header_once "Content-Security-Policy: $expected_csp"
+            fi
             if [ -n "$expected_content_type" ]; then
               require_edge_content_type "$expected_content_type"
             fi
@@ -426,18 +448,18 @@ jobs:
           probe_edge_headers \
             http://localhost:18099/auth/login \
             200 \
-            "frame-ancestors 'none'" \
+            ENFORCED_HTML \
             'text/html'
           probe_edge_headers \
             http://localhost:18099/document-acceptance \
             200 \
-            "frame-ancestors 'none'" \
+            ENFORCED_HTML \
             'text/html' \
             'no-referrer'
           probe_edge_headers \
             http://localhost:18099/does-not-exist \
             404 \
-            "frame-ancestors 'none'"
+            ENFORCED_HTML
           probe_edge_headers \
             http://localhost:18099/attachments/x \
             404 \

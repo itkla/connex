@@ -29,6 +29,29 @@ Primary layers:
 
 Before touching tenancy, routing, lifecycle, catalog/control planes, or organization-wide data access, read `../docs/MULTITENANCY_PLAN.md` and the relevant architecture tests.
 
+### Unauthenticated ingest endpoints
+
+An endpoint that a browser or third party posts to without a session (`/api/csp-reports` is the
+reference implementation) is only correct once **every** layer knows about it. Work the list:
+
+1. `SecurityConfig` — `csrf.ignoringRequestMatchers(...)` **and** a method-scoped `permitAll()`
+   before `anyRequest().authenticated()`. Permit the write method only; reads stay 401.
+2. `WebConfig` — add the path to `excludePathPatterns` so `TenantResolutionInterceptor` cannot turn
+   a cookie-bearing request into a 403 from a stale workspace pin.
+3. `PrivilegedMfaEnforcementFilter` — exempt it if a confined privileged browser must still reach
+   it; state in Javadoc why the exemption grants no data access.
+4. `RequestBodySizeProperties` + `ApiRequestBodySizeFilter.limitFor` + `application.yml` — a
+   dedicated, small route ceiling. Never let it fall through to the 10 MiB default.
+5. A per-client throttle keyed on `ClientIpResolver.resolveWithProvenance`, and a fixed response
+   status for every bounded body so the caller learns nothing from the response.
+6. `deploy/Caddyfile` — a `handle` with the same ceiling, placed **before** `handle /api/*` — plus
+   the matching entries in `.github/scripts/test_edge_security_headers.py`, both
+   `deploy/docker-compose.yml` service environments, and the body-limit table in
+   `../docs/EDGE_DEFENCE.md`.
+7. Read only allowlisted fields, strip control characters, bound every string, map any reported
+   page path through `RequestPathRedactor` before it is logged or stored (paths carry bearer tokens),
+   and persist nothing without a retention plan.
+
 ## Task routing
 
 Read the relevant contract before editing that subsystem:
@@ -58,6 +81,7 @@ Inspect the owning package, nearest implementation, and tests in addition to the
 - Authentication methods establish sessions through the existing `AuthService` path; do not expose principal IDs or servlet session IDs merely for client correlation.
 - Provider and network egress must use the established bounded/fixed-host/address-validation adapters for that subsystem. Do not add arbitrary redirects, remote URL fetching, or network I/O inside database transactions.
 - Upload/image paths must preserve the existing bounded decode/admission and metadata-stripping boundaries. Never add unbounded multipart/image processing or log recognized/uploaded content.
+- `UploadContentInspector` is the sole ingress for uploaded bytes: every new upload surface must call it with a server-selected purpose and store only the resulting artifact. The contract, package member policy, and MUST/MUST NOT list for new pipelines are in `../docs/UPLOAD_CONTENT_INSPECTION.md`, pinned by `UploadContentInspectionBoundaryArchTest`.
 - Idempotency, one-use proofs, generation handles, leases, and ownership checks are data-integrity/security mechanisms. Do not simplify them without reading the owning contract and tests.
 - New tables holding workspace/org data must participate in the appropriate tenant/control lifecycle, export, teardown, and residual-verification registries. `../docs/MULTITENANCY_PLAN.md` is authoritative.
 

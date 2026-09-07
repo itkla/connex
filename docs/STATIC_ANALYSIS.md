@@ -144,15 +144,85 @@ to describe the gate as absent:
   be up to date with `main`, so a pull request analysed against an older base can merge. The `main`
   gate above is the compensating detection: the merge commit's own push run re-evaluates the
   combined tree and turns `main` red if the combination introduced a blocking alert.
-- **Administrator bypass — open hardening item.** `enforce_admins` is `false`, so an administrator
-  can merge past a failed required check.
-- **No required review of the gate itself — open hardening item.** `required_approving_review_count`
+- **Administrator bypass — closed 2026-09-05 on #1244.** `enforce_admins` was enabled on
+  2026-09-05 and verified the same day, so an administrator can no longer merge past a failed
+  required check: `gh api repos/itkla/connex/branches/main/protection --jq
+  .enforce_admins.enabled` returned `true`, and the unauthenticated
+  `curl -s https://api.github.com/repos/itkla/connex/branches/main | jq
+  '.protection.required_status_checks.enforcement_level'` returned `"everyone"` (it read
+  `"non_admins"` on 2026-09-02). Re-verify with the same two commands. The canary proof asserts it
+  every week under `--require-admin-enforcement`, so silently turning it off turns the proof red.
+  **Emergency path**, for a CI outage that leaves a required check unable to pass at all:
+  `gh api -X DELETE repos/itkla/connex/branches/main/protection/enforce_admins`, land the fix, and
+  `gh api -X POST .../enforce_admins` again **within the same incident**. Both calls appear in the
+  repository audit log; the incident record must name who ran them and why.
+- **No required review of the gate itself — expiring acceptance.** `required_approving_review_count`
   is `0`, the repository defines no rulesets, and there is no `CODEOWNERS`. The workflow and
   classifier still execute from the pull request's checkout, so the self-modification limitation
-  below remains unmitigated.
+  below is unmitigated. Accepted 2026-09-04 — owner Hunter Nakagawa, approver Security Owner role,
+  **expiry 2027-02-14**, **re-review 2027-01-14** — because the repository has one committer and its
+  agents ship under that same account: a code-owner review requirement no one can satisfy would stop
+  every merge rather than add an independent reviewer. The mandatory trigger below is unchanged.
 
 Branch protection is administered outside this change; this document must be updated only after the
 setting is independently verified.
+
+## Incident record — result paths and the blind window (2026-08-26 → 2026-09-07)
+
+**The pull-request gate reported success without examining anything for that entire window.** This
+is recorded as a control failure, not as a footnote.
+
+**Mechanism.** PR #1294 (`6984ae910`, merged 2026-08-26T13:05:36Z) replaced the workflow's inline
+`config: paths: [backend|frontend]` with a shared `config-file:` plus `source-root: backend` and
+`source-root: frontend`. `source-root` makes CodeQL emit SARIF locations relative to that subtree
+(`src/main/java/...`, `app/...`) instead of to the repository root. The codeql-action prunes
+pull-request results before upload in `filterAlertsByDiffRange`, which matches a result's location
+against the pull request's diff ranges with `range.path === locationUri` — exact string equality
+against repository-relative paths. Nothing ever matched.
+
+**Evidence.** Every pull-request analysis from that date stored `results_count: 0`
+(`analyses?ref=refs/pull/<n>/merge`), so `alerts?pr=<n>` returned nothing and the gate step printed
+`CodeQL alert check passed: 0 queried open alert(s)`. The same commit analysed on `refs/heads/main`
+stored 58 java-kotlin and 8 javascript-typescript results. PR #1574 merged an **in-diff** HIGH —
+alert #153, `java/csrf-unprotected-request-type` at `ReportController.java:126`, inside the pull
+request's own hunk — with the gate green; the first post-merge `main` analysis raised it.
+
+**Scope.** 60 pull requests merged after `6984ae910` and before the restoration and were therefore
+gated blind:
+
+#1467, #1469, #1470, #1471, #1476, #1474, #1482, #1480, #1484, #1487, #1488, #1485, #1492, #1493,
+#1498, #1500, #1503, #1490, #1495, #1496, #1504, #1507, #1509, #1514, #1505, #1497, #1515, #1516,
+#1526, #1524, #1528, #1519, #1536, #1531, #1525, #1535, #1548, #1551, #1553, #1552, #1554, #1555,
+#1556, #1550, #1557, #1558, #1564, #1567, #1568, #1566, #1572, #1573, #1569, #1574, #1575, #1576,
+#1577, #1579, #1580, #1581
+
+The retrospective scan of their combined result is the `main` alert inventory measured after the
+restoration and recorded in [SAST_TRIAGE_LOG.md](SAST_TRIAGE_LOG.md) under *Third generation —
+2026-09 path restoration*.
+
+**Remediation.** Repository-relative `paths:` restored in per-language configuration files with
+`source-root` removed; the regenerated alert identities re-dismissed from a committed pre-change
+snapshot by `.github/scripts/replay-codeql-dismissals.py`; the gate re-scoped from diff attribution
+to a base-vs-merge alert-identity comparison with diff-informed analysis disabled; the same step
+extended to gate `main` itself.
+
+**What keeps it closed.** Five independent assertions, each of which fails loudly:
+
+1. `test_security_workflow.py` requires `paths:` in both configuration files and forbids
+   `source-root` on either `init` step.
+2. `test_security_workflow.py` requires `CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'` on both SAST
+   jobs, so no result is pruned before upload.
+3. The gate step refuses, within the same run, an analysis of the analysed commit that stored zero
+   results while the base ref's newest analysis of the same category stored some
+   (`check-codeql-alerts.py --analyses`, exit `2`). The failure class itself — a processed, empty
+   upload — fails the pull request on the spot instead of reading as a pass. A pruned but non-empty
+   upload is outside its reach; that is what assertion 5 is for.
+4. The gate compares alert identities across refs, so it no longer depends on GitHub's diff
+   attribution being correct at all.
+5. The weekly canary proof measures the outcome end to end: it asserts each analysis carries the
+   base commit's result count **plus exactly one**, and that both fixture alerts are attributed
+   under `pr=<n>` — which is only true while result paths are repository-relative. A silent
+   regression of this class turns the proof red within a week.
 
 ## Known self-modification limitation
 
@@ -163,12 +233,19 @@ today because the repository has one committer with administrative write access,
 additional writer from whom the mechanism could protect itself.
 
 Any additional person or automation identity gaining repository write access is the mandatory
-trigger to revisit this acceptance before that access is used. At that point, add code-owner review
-for `.github/**` and require more than zero approving reviews in branch protection or a ruleset.
-`Security — required` is already a required check, as recorded above. Until the remaining settings
-are active and verified, do not describe CodeQL as an independently *tamper-resistant* merge gate:
-the required checks are repository-enforced, but an administrator can both bypass them and change
-the mechanism that produces them.
+trigger to revisit this acceptance before that access is used. At that point, run the two prepared
+commands:
+
+```bash
+printf '/.github/ @itkla\n' > .github/CODEOWNERS
+gh api -X PATCH repos/itkla/connex/branches/main/protection/required_pull_request_reviews \
+  -F required_approving_review_count=1 -F require_code_owner_reviews=true
+```
+
+`Security — required` is already a required check and administrators can no longer bypass it, as
+recorded above. Until code-owner review is active and verified, do not describe CodeQL as an
+independently *tamper-resistant* merge gate: the required checks are repository-enforced and
+administrator-proof, but the single writer can still change the mechanism that produces them.
 
 ## Finding ownership and deadlines
 
@@ -227,9 +304,65 @@ fixed-term exception and escalation rules apply to `won't fix` or `used in tests
 
 ## Workflow failure proof and independent retest
 
-The initial workflow failure behavior is proved in the pull request for
-[#1244](https://github.com/itkla/connex/issues/1244) by temporarily adding a deliberately vulnerable
-fixture under `frontend/test/fixtures/codeql/`, recording the real failing CodeQL and
-`Security — required` output, then removing the fixture before merge. The issue retains the run URL,
-alert identifier, query identifier, severity, and failing output. A Security reviewer who did not
-implement the workflow independently repeats the test before CHK-089 moves from `NG` to `OK`.
+The gate's failure behaviour is proved continuously, not once. A **permanent, never-merged canary
+pull request** carries one deliberately vulnerable fixture per analysed language, and
+`.github/workflows/sast-canary-proof.yml` re-runs that pull request's own `Security` workflow every
+Sunday at 21:37 UTC (and on `workflow_dispatch`) and asserts the result.
+
+| | |
+| --- | --- |
+| Branch | `canary/sast-gate-proof` (base `main`, label `sast-canary`, **not** a draft) |
+| Pull request | #1593, titled `[DO NOT MERGE] CodeQL gate canary (CHK-089)` |
+| Frontend fixture | `frontend/test/fixtures/codeql/intentional-command-injection.mjs` → `js/command-line-injection`, critical |
+| Backend fixture | `backend/src/test/java/ooo/klae/connex/backend/codeqlfixture/IntentionalCommandInjectionFixture.java` → `java/command-line-injection`, critical |
+
+The fixtures are inert where they live: the `.mjs` file is outside `tsconfig.json`'s `include`,
+outside Vitest's and Playwright's test globs, and is not linted by CI; the Java file is test source,
+is never referenced, is not component-scanned, is excluded from the WAR, and sits outside the
+architecture tests' walk of `backend/src/main/java`. Both are analysed by CodeQL, and neither ever
+reaches `main` — the proof asserts that both paths return 404 on `?ref=main`.
+
+`.github/scripts/verify-sast-canary.py` fails the proof unless **all** of the following hold:
+
+- both SAST jobs concluded `failure` **at** `Block Critical, High, or error-severity alerts`, with
+  `Analyze … with CodeQL` green — a tool failure is reported as a tool failure, never as a proof;
+- `Security — required` concluded `failure` and `Classify security impact` concluded `success`;
+- both fixtures have an open Critical alert on `refs/pull/<n>/merge` under the expected rule id,
+  path and analysis category;
+- the same two alert numbers appear under `alerts?pr=<n>` — attribution only works while result
+  paths are repository-relative, so this re-proves the incident above stays closed;
+- each category's analysis of the merge commit carries exactly one result more than `main`'s
+  analysis of that merge commit's first parent — the invariant that nothing is being pruned. The
+  workflow walks `main`'s analysis list newest-first, up to 20 pages of 100, until it finds that
+  parent; a parent it cannot find is reported as an aged canary with the rebase remedy, never as a
+  count violation;
+- branch protection still requires `Security — required`, `Backend SAST (CodeQL)` and
+  `Frontend SAST (CodeQL)`, with `enforcement_level` `everyone`;
+- the pull request's `mergeStateStatus` is `BLOCKED` and all three check runs are `FAILURE`.
+
+It writes those tables to the run's step summary, and a failed proof opens or comments on a
+`sast-canary-failed` issue. The reporting step runs on `failure() || cancelled()`, so a proof that
+is cancelled or hits its 60-minute job timeout reports too, with the job status in the body; a
+workflow-file error that concludes `startup_failure` runs no step at all and is visible only in the
+Actions tab.
+
+**Refresh rule.** A re-run reuses the original merge commit, so a gate change on `main` is not
+exercised until the canary is rebased. Whenever `.github/workflows/security.yml`,
+`.github/scripts/check-codeql-alerts.py`, `.github/scripts/classify-ci-changes.py` or
+`.github/codeql/*.yml` changes on `main`, **and in any case at least every 28 days**, rebase
+`canary/sast-gate-proof` onto `origin/main` and `git push --force-with-lease`. This is the
+repository's single documented force-push exception: a single-purpose branch that is never merged.
+The time bound exists because GitHub refuses to re-run a workflow run more than 30 days after its
+initial run, and because the base commit of an old merge commit drifts down `main`'s analysis list
+(about a hundred analyses a week at the 2026-09 merge rate, against the proof's 20-page budget).
+The proof compares each gate file's blob id between `main` and the analysed merge commit, refuses a
+canary Security run older than 28 days before it re-runs anything, and fails each case with the
+same explicit rebase instruction.
+
+**Honest limits.** The proof covers detection, gate-step failure, required-check failure,
+attribution, full-result upload, protection settings and mergeability. It does not exercise every
+merge path, and it re-runs an existing analysis rather than creating a new pull request.
+
+**Independent retest.** A Security reviewer who did not implement the workflow dispatches
+`sast-canary-proof.yml`, reads its step summary, and re-measures `branches/main/protection` before
+CHK-089 moves from `NG` to `OK`.

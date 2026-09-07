@@ -306,6 +306,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
                 "@uploads",
                 "@business_cards",
                 "@client_errors",
+                "@csp_reports",
                 "@webauthn",
                 "@workflows",
                 "@saml",
@@ -320,6 +321,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
             "@uploads": "{$CONNEX_UPLOAD_MAX_BODY_BYTES:28311552}",
             "@business_cards": "{$CONNEX_BUSINESS_CARD_MAX_BODY_BYTES:12582912}",
             "@client_errors": "{$CONNEX_CLIENT_ERRORS_MAX_BODY_BYTES:16384}",
+            "@csp_reports": "{$CONNEX_CSP_REPORTS_MAX_BODY_BYTES:16384}",
             "@webauthn": "{$CONNEX_WEBAUTHN_MAX_BODY_BYTES:65536}",
             "@workflows": "{$CONNEX_WORKFLOW_MAX_BODY_BYTES:98304}",
             "@saml": "{$CONNEX_FORM_MAX_BODY_BYTES:1048576}",
@@ -349,7 +351,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
         lines = tokenized_caddyfile()
         self.assertIn(["header_up", "X-Forwarded-For", "{client_ip}"], lines)
         self.assertIn(["header_up", "-CF-Connecting-IP"], lines)
-        self.assertEqual(8, lines.count(["import", "backend_proxy"]))
+        self.assertEqual(9, lines.count(["import", "backend_proxy"]))
 
     def test_authoritative_cloudflare_rate_rules_and_exclusions_are_documented(self) -> None:
         edge_defence = EDGE_DEFENCE_PATH.read_text(encoding="utf-8")

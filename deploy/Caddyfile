@@ -73,6 +73,15 @@
 			import backend_proxy
 		}
 
+		# Unauthenticated browser CSP violation reports; the backend answers 204 for any bounded body.
+		@csp_reports path /api/csp-reports
+		handle @csp_reports {
+			request_body {
+				max_size {$CONNEX_CSP_REPORTS_MAX_BODY_BYTES:16384}
+			}
+			import backend_proxy
+		}
+
 		@webauthn path /api/auth/webauthn /api/auth/webauthn/*
 		handle @webauthn {
 			request_body {

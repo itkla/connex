@@ -14,15 +14,24 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 
 /**
- * Enforces the configured absolute lifetime for authenticated servlet sessions.
+ * Enforces the configured absolute lifetime for authenticated servlet sessions. Browser CSP
+ * violation reports are exempt: the collector reads no principal, and a report that happens to
+ * carry an absolutely expired session cookie must still be received rather than answered 401.
  */
 @RequiredArgsConstructor
 public class AbsoluteSessionTimeoutFilter extends OncePerRequestFilter {
+    private static final String CSP_REPORT_PATH = "/api/csp-reports";
+
     private final SessionSecurityService sessionSecurityService;
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !apiPath(request).startsWith("/api/");
+        String path = apiPath(request);
+        return !path.startsWith("/api/") || isCspReport(request.getMethod(), path);
+    }
+
+    private static boolean isCspReport(String method, String path) {
+        return "POST".equals(method) && CSP_REPORT_PATH.equals(path);
     }
 
     @Override

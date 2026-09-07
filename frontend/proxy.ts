@@ -4,8 +4,11 @@ import type { NextRequest } from 'next/server';
 import { isProtectedPath } from '@/app/lib/protectedRoutes';
 import {
     applyFrontendContentSecurityPolicy,
+    applyFrontendReportingEndpoints,
     applyFrontendSecurityHeaders,
+    contentSecurityPolicyReportingEndpoint,
     createFrontendContentSecurityPolicy,
+    createReportingEndpointsHeader,
     resolveContentSecurityPolicyMode,
 } from '@/security-headers';
 
@@ -62,13 +65,19 @@ function isDocumentAcceptancePath(pathname: string): boolean {
     return DOCUMENT_ACCEPTANCE_PATH.test(pathname);
 }
 
-function protectedResponse(response: NextResponse, policy: string, pathname: string): NextResponse {
+function protectedResponse(
+    response: NextResponse,
+    policy: string,
+    pathname: string,
+    reportingEndpointsHeader: string | null,
+): NextResponse {
     applyFrontendSecurityHeaders(response.headers, pathname);
     applyFrontendContentSecurityPolicy(
         response.headers,
         policy,
         resolveContentSecurityPolicyMode(process.env.CONNEX_CSP_MODE),
     );
+    applyFrontendReportingEndpoints(response.headers, reportingEndpointsHeader);
     return response;
 }
 
@@ -76,6 +85,7 @@ function forwardedResponse(
     request: NextRequest,
     nonce: string,
     policy: string,
+    reportingEndpointsHeader: string | null,
     isolateCredentials = false,
 ): NextResponse {
     const { pathname, search } = request.nextUrl;
@@ -92,6 +102,7 @@ function forwardedResponse(
         NextResponse.next({ request: { headers: requestHeaders } }),
         policy,
         pathname,
+        reportingEndpointsHeader,
     );
 }
 
@@ -99,22 +110,27 @@ function forwardedResponse(
 export function proxy(request: NextRequest) {
     const { pathname, search, searchParams } = request.nextUrl;
     const nonce = createNonce();
+    const requestOrigin = browserFacingRequestOrigin(request);
+    const reportingEndpointUrl = contentSecurityPolicyReportingEndpoint(requestOrigin);
+    const reportingEndpointsHeader = createReportingEndpointsHeader(reportingEndpointUrl);
     const policy = createFrontendContentSecurityPolicy({
         nonce,
-        requestUrl: browserFacingRequestOrigin(request),
+        requestUrl: requestOrigin,
         isDevelopment: process.env.NODE_ENV === 'development',
         configuredWebSocketUrl: process.env.NEXT_PUBLIC_WS_URL,
         configuredImageOrigins: process.env.CONNEX_CSP_IMAGE_ORIGINS,
+        reportingEndpointUrl,
     });
     const redirect = (url: URL) => protectedResponse(
         NextResponse.redirect(url),
         policy,
         pathname,
+        reportingEndpointsHeader,
     );
-    const next = () => forwardedResponse(request, nonce, policy);
+    const next = () => forwardedResponse(request, nonce, policy, reportingEndpointsHeader);
 
     if (isDocumentAcceptancePath(pathname)) {
-        return forwardedResponse(request, nonce, policy, true);
+        return forwardedResponse(request, nonce, policy, reportingEndpointsHeader, true);
     }
 
     const hasSession = request.cookies.has(SESSION_COOKIE);

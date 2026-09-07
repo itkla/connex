@@ -82,6 +82,10 @@ jobs:
         run: python .github/scripts/test_candidate_soak.py
       - name: Regression-test security workflow gates
         run: python .github/scripts/test_security_workflow.py
+      - name: Regression-test the SAST canary proof workflow
+        run: python .github/scripts/test_sast_canary_proof.py
+      - name: Regression-test the SAST canary proof verifier
+        run: python .github/scripts/test_verify_sast_canary.py
       - name: Regression-test the red-main alert coverage
         run: python .github/scripts/test_main_red_alert.py
       - name: Regression-test the red-main alert behaviour

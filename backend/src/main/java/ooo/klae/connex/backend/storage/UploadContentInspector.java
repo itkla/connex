@@ -32,6 +32,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -91,6 +92,33 @@ import tools.jackson.databind.ObjectMapper;
  * ordinary ODF namespace allowlist and are refused. Parser error, timeout, ambiguous structure,
  * active content, and any exceeded bound all fail closed.
  *
+ * <p>Every package member is classified into exactly one inspection class and is validated, never
+ * re-encoded, so document bytes reach storage unchanged and any signature over them keeps
+ * verifying. XML, VML, and signature parts are parsed; raster members are walked by the same
+ * structural inspectors used for direct image uploads, except that a GIF member may be animated;
+ * EMF, WMF, TIFF, and BMP members are bound
+ * by magic, an internal length that must agree with the member length, and their own declared
+ * media type; ODF {@code Fonts/*.ttf|otf|ttc} members are bound by the sfnt magic, a table
+ * directory that fits the member, and a declared font type; OOXML obfuscated fonts and
+ * {@code printerSettings[0-9]+.bin} are admitted as declared-opaque bytes with a negative header
+ * sniff; directory and signature-origin entries must be empty. A member matching no class is
+ * refused rather than stored uninspected. Members are bounded at 16 MiB each, embedded fonts at
+ * 16 MiB, and printer settings and the ODF layout cache at 1 MiB, inside the unchanged 64 MiB
+ * expanded-package bound.
+ *
+ * <p>The package's own declared media types are then bound to the members they describe: the Open
+ * Packaging Conventions {@code Override} then {@code Default} rule for OOXML, and the
+ * {@code manifest:file-entry} media type for ODF. A raster or metafile member whose declared type
+ * disagrees with the format its bytes prove is refused, as is any member declared with an active
+ * type such as {@code image/svg+xml}, so an extension dodge cannot smuggle scriptable content into
+ * a document package.
+ *
+ * <p>OOXML signature parts under {@code _xmlsignatures/} are admitted through their own closed
+ * XMLDSig, OPC, Microsoft Office, and XAdES vocabulary, bound by the signature-origin and
+ * signature relationships and the OPC signature content types. That widening is narrow on purpose:
+ * {@code <Object>} stays refused everywhere else, and macro signature parts and macro-enabled
+ * packages stay refused.
+ *
  * <p>The returned {@link InspectedUpload} is authoritative: stored bytes, length, digest, response
  * metadata, migration verification, and downstream provider input must all derive from that exact
  * artifact rather than the original source.
@@ -107,6 +135,10 @@ public class UploadContentInspector implements AutoCloseable {
     private static final int MAX_XML_DEPTH = 128;
     private static final int MAX_XML_ATTRIBUTES = 256;
     private static final int MAX_IMAGE_METADATA_BYTES = 1024 * 1024;
+    private static final long MAX_PACKAGE_MEMBER_BYTES = 16L * 1024L * 1024L;
+    private static final long MAX_OPAQUE_FONT_BYTES = 16L * 1024L * 1024L;
+    private static final long MAX_OPAQUE_SETTINGS_BYTES = 1024L * 1024L;
+    private static final int OPAQUE_SNIFF_BYTES = 64;
     private static final long MAX_PDF_WORK_BYTES = 64L * 1024L * 1024L;
     private static final int MAX_PDF_GRAPH_NODES = 100_000;
     private static final int MAX_PDF_GRAPH_DEPTH = 256;
@@ -135,9 +167,10 @@ public class UploadContentInspector implements AutoCloseable {
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
         "http://purl.oclc.org/ooxml/officeDocument/relationships/hyperlink");
     private static final Set<String> ACTIVE_OOXML_RELATIONSHIP_KINDS = Set.of(
-        "activexcontrol", "activexcontrolbinary", "attachedtemplate", "control", "ctrlprop",
-        "customui", "ddelink", "embeddedobject", "embeddedpackage", "externallink",
-        "oleobject", "package", "querytable", "vbaproject");
+        "activexcontrol", "activexcontrolbinary", "attachedtemplate", "audio", "control",
+        "ctrlprop", "customui", "ddelink", "embeddedobject", "embeddedpackage",
+        "externallink", "media", "oleobject", "package", "querytable", "vbaproject",
+        "video");
     private static final String ODF_TEXT_NAMESPACE =
         "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
     private static final String ODF_OFFICE_NAMESPACE =
@@ -210,11 +243,157 @@ public class UploadContentInspector implements AutoCloseable {
         "signaturepolicyimplied", "claimedroles", "claimedrole",
         "signatureproductionplace", "city", "stateorprovince", "postalcode",
         "countryname");
+    private static final String OOXML_CONTENT_TYPES_PART = "[Content_Types].xml";
+    private static final String OOXML_ROOT_RELATIONSHIPS_PART = "_rels/.rels";
+    private static final String OOXML_SIGNATURE_DIRECTORY = "_xmlsignatures/";
+    private static final String OOXML_SIGNATURE_ORIGIN_PART = "_xmlsignatures/origin.sigs";
+    private static final String OOXML_SIGNATURE_ORIGIN_RELATIONSHIPS_PART =
+        "_xmlsignatures/_rels/origin.sigs.rels";
+    private static final String OOXML_SIGNATURE_CONTENT_TYPE =
+        "application/vnd.openxmlformats-package.digital-signature-xmlsignature+xml";
+    private static final String OOXML_SIGNATURE_ORIGIN_CONTENT_TYPE =
+        "application/vnd.openxmlformats-package.digital-signature-origin";
+    private static final String OOXML_SIGNATURE_ORIGIN_RELATIONSHIP =
+        "http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/origin";
+    private static final String OOXML_SIGNATURE_RELATIONSHIP =
+        "http://schemas.openxmlformats.org/package/2006/relationships/digital-signature/signature";
+    private static final Set<String> OOXML_SIGNATURE_NAMESPACES = Set.of(
+        "http://www.w3.org/2000/09/xmldsig#",
+        "http://www.w3.org/2009/xmldsig11#",
+        "http://schemas.openxmlformats.org/package/2006/digital-signature",
+        "http://schemas.microsoft.com/office/2006/digsig",
+        "http://uri.etsi.org/01903/v1.1.1#",
+        "http://uri.etsi.org/01903/v1.3.2#",
+        "http://uri.etsi.org/01903/v1.4.1#");
+    private static final Set<String> XMLDSIG_ELEMENTS = Set.of(
+        "signature", "signedinfo", "signaturevalue", "keyinfo", "object",
+        "canonicalizationmethod", "signaturemethod", "reference", "transforms", "transform",
+        "digestmethod", "digestvalue", "keyname", "mgmtdata", "keyvalue", "dsakeyvalue",
+        "rsakeyvalue", "eckeyvalue", "namedcurve", "publickey", "retrievalmethod", "x509data",
+        "x509issuerserial", "x509ski", "x509subjectname", "x509certificate", "x509crl",
+        "x509issuername", "x509serialnumber", "pgpdata", "pgpkeyid", "pgpkeypacket",
+        "spkidata", "spkisexp", "manifest", "signatureproperties", "signatureproperty",
+        "hmacoutputlength", "xpath", "p", "q", "g", "y", "j", "seed", "pgencounter",
+        "modulus", "exponent");
+    private static final Set<String> OPC_SIGNATURE_ELEMENTS = Set.of(
+        "relationshipreference", "relationshipsgroupreference", "signaturetime", "format",
+        "value");
+    private static final Set<String> OFFICE_SIGNATURE_ELEMENTS = Set.of(
+        "signatureinfov1", "signatureinfov2", "setupid", "signaturetext", "signatureimage",
+        "signaturecomments", "windowsversion", "officeversion", "applicationversion",
+        "monitors", "horizontalresolution", "verticalresolution", "colordepth",
+        "signatureproviderid", "signatureproviderurl", "signatureproviderdetails",
+        "signaturetype", "delegatesuggestedsigner", "delegatesuggestedsigner2",
+        "delegatesuggestedsigneremail", "manifesthashalgorithm", "address1", "address2");
+    private static final Set<String> XADES_ELEMENTS = Set.of(
+        "alldataobjectstimestamp", "allsigneddataobjects", "any", "archivetimestamp",
+        "attrauthoritiescertvalues", "attributecertificaterefs", "attributerevocationrefs",
+        "attributerevocationvalues", "bykey", "byname", "cert", "certdigest",
+        "certificatevalues", "certifiedrole", "certifiedroles", "certrefs", "city",
+        "claimedrole", "claimedroles", "commitmenttypeid", "commitmenttypeindication",
+        "commitmenttypequalifier", "commitmenttypequalifiers", "completecertificaterefs",
+        "completerevocationrefs", "countersignature", "countryname", "crlidentifier",
+        "crlref", "crlrefs", "crlvalues", "dataobjectformat", "description",
+        "digestalgandvalue", "documentationreference", "documentationreferences",
+        "encapsulatedcrlvalue", "encapsulatedocspvalue", "encapsulatedpkidata",
+        "encapsulatedtimestamp", "encapsulatedx509certificate", "encoding", "explicittext",
+        "identifier", "include", "individualdataobjectstimestamp", "int", "issuer",
+        "issuerserial", "issuetime", "mimetype", "noticenumbers", "noticeref", "number",
+        "objectidentifier", "objectreference", "ocspidentifier", "ocspref", "ocsprefs",
+        "ocspvalues", "organization", "othercertificate", "otherref", "otherrefs",
+        "othertimestamp", "othervalue", "othervalues", "postalcode", "producedat",
+        "qualifyingproperties", "qualifyingpropertiesreference", "referenceinfo",
+        "refsonlytimestamp", "responderid", "revocationvalues", "sigandrefstimestamp",
+        "signaturepolicyid", "signaturepolicyidentifier", "signaturepolicyimplied",
+        "signatureproductionplace", "signaturetimestamp", "signeddataobjectproperties",
+        "signedproperties", "signedsignatureproperties", "signerrole", "signingcertificate",
+        "signingtime", "sigpolicyhash", "sigpolicyid", "sigpolicyqualifier",
+        "sigpolicyqualifiers", "spuri", "spusernotice", "stateorprovince",
+        "unsigneddataobjectproperties", "unsigneddataobjectproperty", "unsignedproperties",
+        "unsignedsignatureproperties", "xadestimestamp", "xmltimestamp",
+        "timestampvalidationdata");
+    private static final Set<String> OOXML_SIGNATURE_ELEMENTS = ooxmlSignatureElements();
+    private static final String ODF_MANIFEST_NAMESPACE =
+        "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0";
+    private static final String ODF_MANIFEST_PART = "META-INF/manifest.xml";
+    private static final String ODF_METADATA_MANIFEST_PART = "manifest.rdf";
+    private static final String ODF_LAYOUT_CACHE_PART = "layout-cache";
+    private static final Set<String> ODF_MANIFEST_ELEMENTS = Set.of("manifest", "file-entry");
+    private static final String ODF_METADATA_NAMESPACE_PREFIX =
+        "http://docs.oasis-open.org/ns/office/1.2/meta/";
+    private static final Set<String> ODF_METADATA_NAMESPACES = Set.of(
+        "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+        "http://docs.oasis-open.org/ns/office/1.2/meta/pkg#",
+        "http://docs.oasis-open.org/ns/office/1.2/meta/odf#");
+    private static final Set<String> ODF_METADATA_ELEMENTS = Set.of(
+        "rdf", "description", "type", "haspart", "document", "contentfile", "stylesfile",
+        "metadatafile");
+    private static final Set<String> VML_NAMESPACES = Set.of(
+        "urn:schemas-microsoft-com:vml");
+    private static final Set<String> DRAWING_NAMESPACES = Set.of(
+        "http://schemas.openxmlformats.org/drawingml/2006/main",
+        "http://purl.oclc.org/ooxml/drawingml/main");
+    private static final Set<String> PRESENTATION_ACTION_ELEMENTS = Set.of(
+        "hlinkclick", "hlinkhover", "hlinkmouseover");
+    private static final Pattern SAFE_PRESENTATION_ACTION = Pattern.compile(
+        "ppaction://(noaction|media|hlinksldjump"
+            + "|hlinkshowjump\\?jump=(firstslide|lastslide|nextslide|previousslide"
+            + "|lastslideviewed|endshow|[0-9]+)"
+            + "|customshow\\?id=[0-9]+(&return=true)?)");
+    private static final Pattern EMBEDDED_FONT_MEMBER = Pattern.compile(
+        "(word|xl|ppt)/fonts/[A-Za-z0-9._-]+\\.(odttf|fntdata)");
+    private static final Pattern PRINTER_SETTINGS_MEMBER = Pattern.compile(
+        "(word|xl|ppt)/printerSettings/printerSettings[0-9]+\\.bin");
+    private static final Pattern ODF_FONT_MEMBER = Pattern.compile(
+        "Fonts/[A-Za-z0-9._-]+\\.(ttf|otf|ttc)");
+    private static final String SFNT_FONT_TYPE = "font/sfnt";
+    private static final Set<String> RASTER_MEMBER_EXTENSIONS = Set.of(
+        "png", "jpg", "jpeg", "gif", "webp");
+    private static final Set<String> SNIFFED_MEMBER_EXTENSIONS = Set.of(
+        "emf", "wmf", "tif", "tiff", "bmp");
+    private static final Set<String> EMBEDDED_FONT_CONTENT_TYPES = Set.of(
+        "application/vnd.openxmlformats-officedocument.obfuscatedfont",
+        "application/x-fontdata");
+    private static final Set<String> PRINTER_SETTINGS_CONTENT_TYPES = Set.of(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.printersettings",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.printersettings",
+        "application/vnd.openxmlformats-officedocument.presentationml.printersettings");
+    private static final Set<String> XML_MEMBER_CONTENT_TYPES = Set.of(
+        "text/xml", "application/xml", "application/rdf+xml");
+    private static final Set<String> ODF_OPAQUE_MEMBER_CONTENT_TYPES = Set.of(
+        "application/binary", "application/octet-stream");
+    private static final Set<String> SIGNATURE_URI_ELEMENTS = Set.of(
+        "spuri", "signatureproviderurl");
+    private static final Set<String> REFUSED_DECLARED_CONTENT_TYPES = Set.of(
+        "image/svg+xml", "text/html", "application/xhtml+xml", "application/javascript",
+        "text/javascript", "application/ecmascript", "application/x-msdownload",
+        "application/x-msdos-program", "application/hta", "application/x-shockwave-flash",
+        "application/vnd.ms-office.vbaproject",
+        "application/vnd.openxmlformats-officedocument.oleobject",
+        "application/vnd.openxmlformats-officedocument.package",
+        "application/vnd.ms-office.activex+xml",
+        "application/vnd.ms-excel.controlproperties+xml");
+    private static final List<byte[]> REFUSED_OPAQUE_MAGIC = List.of(
+        new byte[] {0x4d, 0x5a},
+        new byte[] {0x7f, 0x45, 0x4c, 0x46},
+        new byte[] {0x50, 0x4b, 0x03, 0x04},
+        new byte[] {(byte) 0xd0, (byte) 0xcf, 0x11, (byte) 0xe0, (byte) 0xa1, (byte) 0xb1, 0x1a, (byte) 0xe1},
+        new byte[] {(byte) 0x89, 0x50, 0x4e, 0x47},
+        new byte[] {(byte) 0xff, (byte) 0xd8, (byte) 0xff},
+        new byte[] {0x47, 0x49, 0x46, 0x38},
+        new byte[] {0x25, 0x50, 0x44, 0x46},
+        new byte[] {0x42, 0x4d},
+        new byte[] {0x49, 0x49, 0x2a, 0x00},
+        new byte[] {0x4d, 0x4d, 0x00, 0x2a},
+        new byte[] {0x43, 0x57, 0x53},
+        new byte[] {0x46, 0x57, 0x53});
+    private static final Set<String> REFUSED_OPAQUE_TEXT_PREFIXES = Set.of(
+        "<?xml", "<svg", "<html", "<script", "<!doctype", "<!--", "#!", "{\\rtf");
     private static final Set<String> ACTIVE_XML_ELEMENTS = Set.of(
         "script", "event-listener", "event-listeners", "altchunk", "object",
         "oleobject", "control", "dde-source", "dde-connection", "dde-connection-decl",
         "dde-connection-decls", "dde-link", "dde-links", "object-ole", "applet",
-        "plugin", "floating-frame", "execute-macro");
+        "plugin", "floating-frame", "execute-macro", "fmlamacro");
     private static final Set<String> SAFE_WORD_FIELD_COMMANDS = Set.of(
         "ADVANCE", "AUTHOR", "AUTONUM", "AUTONUMLGL", "AUTONUMOUT", "BIBLIOGRAPHY",
         "CITATION", "COMMENTS", "CREATEDATE", "DATE", "DOCPROPERTY", "DOCVARIABLE", "EDITTIME",
@@ -224,6 +403,7 @@ public class UploadContentInspector implements AutoCloseable {
         "SAVEDATE", "SECTION", "SECTIONPAGES", "SEQ", "SET", "SKIPIF", "STYLEREF",
         "SUBJECT", "SYMBOL", "TA", "TC", "TEMPLATE", "TIME", "TITLE", "TOA", "TOC", "XE");
     private static final int MAX_WORD_FIELD_INSTRUCTION_CHARACTERS = 4096;
+    private static final int MAX_SIGNATURE_URI_CHARACTERS = 2048;
 
     private final UploadPolicy uploadPolicy;
     private final ImageUploadValidator imageUploadValidator;
@@ -478,7 +658,7 @@ public class UploadContentInspector implements AutoCloseable {
         switch (format) {
             case JPEG -> inspectJpeg(content, deadline);
             case PNG -> inspectPng(content, deadline);
-            case GIF -> inspectGif(content, deadline);
+            case GIF -> inspectGif(content, deadline, true);
             case WEBP -> inspectWebp(content, deadline);
             default -> throw UnsupportedUploadMediaTypeException.unsupported();
         }
@@ -641,7 +821,20 @@ public class UploadContentInspector implements AutoCloseable {
         throw UnsupportedUploadMediaTypeException.unsupported();
     }
 
-    private static void inspectGif(byte[] content, Deadline deadline) {
+    /**
+     * Walks a GIF structurally: header, colour tables, every extension and image block, and the
+     * trailer, which must be the last byte.
+     *
+     * <p>A direct raster upload must hold exactly one image because it is canonicalised to a
+     * still image afterwards; a document package member keeps its bytes, so it may carry the
+     * several frames of an animated GIF as long as every frame is walked and the trailer still
+     * ends the member.
+     *
+     * @param content exact GIF bytes
+     * @param deadline shared inspection deadline
+     * @param singleImage whether exactly one image block is required
+     */
+    private static void inspectGif(byte[] content, Deadline deadline, boolean singleImage) {
         if (content.length < 14
                 || !(startsWith(content, "GIF87a".getBytes(StandardCharsets.US_ASCII))
                     || startsWith(content, "GIF89a".getBytes(StandardCharsets.US_ASCII)))) {
@@ -658,7 +851,7 @@ public class UploadContentInspector implements AutoCloseable {
             deadline.check();
             int introducer = unsigned(content[offset++]);
             if (introducer == 0x3b) {
-                if (images != 1 || offset != content.length) {
+                if (images < 1 || singleImage && images > 1 || offset != content.length) {
                     throw UnsupportedUploadMediaTypeException.unsupported();
                 }
                 return;
@@ -1005,9 +1198,14 @@ public class UploadContentInspector implements AutoCloseable {
             boolean odfPackage) {
         Set<String> seen = new HashSet<>();
         Map<String, String> contentTypeOverrides = new HashMap<>();
+        Map<String, String> contentTypeDefaults = new HashMap<>();
+        Map<String, String> manifestMediaTypes = new HashMap<>();
+        Map<String, MemberEvidence> members = new HashMap<>();
         Map<String, XmlRoot> xmlRoots = new HashMap<>();
         Set<String> officeDocumentTargets = new HashSet<>();
         Set<String> relationshipTargets = new HashSet<>();
+        Set<String> signatureOriginTargets = new HashSet<>();
+        Set<String> signatureTargets = new HashSet<>();
         String packageMimeType = null;
         long expanded = 0;
         try (ZipInputStream zip = new ZipInputStream(
@@ -1015,33 +1213,48 @@ public class UploadContentInspector implements AutoCloseable {
             ZipEntry zipEntry;
             while ((zipEntry = zip.getNextEntry()) != null) {
                 deadline.check();
-                ArchiveEntry expected = directory.entries().get(zipEntry.getName());
-                if (expected == null || !seen.add(zipEntry.getName())) {
+                String name = zipEntry.getName();
+                ArchiveEntry expected = directory.entries().get(name);
+                if (expected == null || !seen.add(name)) {
                     throw UnsupportedUploadMediaTypeException.unsupported();
                 }
-                int captureLimit = xmlEntry(zipEntry.getName()) || "mimetype".equals(zipEntry.getName())
-                    ? MAX_XML_BYTES
-                    : 0;
-                EntryContent entry = readArchiveEntry(zip, expected, expanded, captureLimit, deadline);
+                PackageMemberClass memberClass = classifyMember(name, odfPackage);
+                if (memberClass == PackageMemberClass.REFUSED) {
+                    throw UnsupportedUploadMediaTypeException.unsupported();
+                }
+                EntryContent entry = readArchiveEntry(
+                    zip,
+                    expected,
+                    expanded,
+                    memberBound(memberClass, name),
+                    memberCapturePrefix(memberClass),
+                    deadline);
                 expanded = Math.addExact(expanded, entry.length());
-                if (activePackageEntry(zipEntry.getName())) {
-                    throw UnsupportedUploadMediaTypeException.unsupported();
-                }
-                if (xmlEntry(zipEntry.getName())) {
-                    XmlEvidence xml = inspectXml(
-                        zipEntry.getName(), entry.content(), deadline, odfPackage);
-                    xmlRoots.put(zipEntry.getName(), xml.root());
-                    officeDocumentTargets.addAll(xml.officeDocumentTargets());
-                    relationshipTargets.addAll(xml.relationshipTargets());
-                    for (Map.Entry<String, String> override : xml.contentTypeOverrides().entrySet()) {
-                        if (contentTypeOverrides.putIfAbsent(
-                                override.getKey(), override.getValue()) != null) {
-                            throw UnsupportedUploadMediaTypeException.unsupported();
-                        }
+                String sniffedType = null;
+                switch (memberClass) {
+                    case XML, SIGNATURE -> {
+                        XmlEvidence xml = inspectXml(name, entry.content(), deadline, odfPackage);
+                        xmlRoots.put(name, xml.root());
+                        officeDocumentTargets.addAll(xml.officeDocumentTargets());
+                        relationshipTargets.addAll(xml.relationshipTargets());
+                        signatureOriginTargets.addAll(xml.signatureOriginTargets());
+                        signatureTargets.addAll(xml.signatureTargets());
+                        mergeDeclaredTypes(contentTypeOverrides, xml.contentTypeOverrides());
+                        mergeDeclaredTypes(contentTypeDefaults, xml.contentTypeDefaults());
+                        mergeDeclaredTypes(manifestMediaTypes, xml.manifestMediaTypes());
                     }
-                } else if ("mimetype".equals(zipEntry.getName())) {
-                    packageMimeType = decodeUtf8(entry.content(), deadline).toString();
+                    case MIMETYPE ->
+                        packageMimeType = decodeUtf8(entry.content(), deadline).toString();
+                    case RASTER -> sniffedType = inspectPackageRaster(entry.content(), deadline);
+                    case SNIFFED_OPAQUE -> sniffedType = ODF_FONT_MEMBER.matcher(name).matches()
+                        ? sniffFontMember(entry.content(), entry.length())
+                        : sniffOpaqueMember(entry.content(), entry.length());
+                    case DECLARED_OPAQUE -> requireInertOpaqueMember(entry.content());
+                    case SIGNATURE_ORIGIN, DIRECTORY, REFUSED ->
+                        requireEmptyMember(entry.length());
                 }
+                members.put(
+                    name, new MemberEvidence(name, memberClass, sniffedType, entry.length()));
                 zip.closeEntry();
             }
         } catch (UnsupportedUploadMediaTypeException exception) {
@@ -1056,23 +1269,323 @@ public class UploadContentInspector implements AutoCloseable {
         return new PackageEvidence(
             Set.copyOf(seen),
             Map.copyOf(contentTypeOverrides),
+            Map.copyOf(contentTypeDefaults),
+            Map.copyOf(manifestMediaTypes),
+            Map.copyOf(members),
             Map.copyOf(xmlRoots),
             Set.copyOf(officeDocumentTargets),
             Set.copyOf(relationshipTargets),
+            Set.copyOf(signatureOriginTargets),
+            Set.copyOf(signatureTargets),
             packageMimeType);
+    }
+
+    private static void mergeDeclaredTypes(
+            Map<String, String> merged,
+            Map<String, String> captured) {
+        for (Map.Entry<String, String> declaration : captured.entrySet()) {
+            if (merged.putIfAbsent(declaration.getKey(), declaration.getValue()) != null) {
+                throw UnsupportedUploadMediaTypeException.unsupported();
+            }
+        }
+    }
+
+    /**
+     * Assigns every package member to the single inspection class that governs how many of its
+     * bytes may be retained and which structural walker must agree with them.
+     *
+     * <p>The classification is closed: a member that matches no known family is refused rather
+     * than stored uninspected, because an unclassified member would otherwise reach storage with
+     * only its CRC and size checked.
+     *
+     * @param name exact archive entry name
+     * @param odfPackage whether the enclosing package is ODF rather than OOXML
+     * @return the inspection class that governs this member
+     */
+    private static PackageMemberClass classifyMember(String name, boolean odfPackage) {
+        String normalized = name.toLowerCase(Locale.ROOT);
+        if (normalized.endsWith("/")) {
+            return PackageMemberClass.DIRECTORY;
+        }
+        if (refusedPackageEntry(name, normalized)) {
+            return PackageMemberClass.REFUSED;
+        }
+        return odfPackage
+            ? classifyOdfMember(name, normalized)
+            : classifyOoxmlMember(name, normalized);
+    }
+
+    private static PackageMemberClass classifyOdfMember(String name, String normalized) {
+        if ("mimetype".equals(name)) {
+            return PackageMemberClass.MIMETYPE;
+        }
+        if (ODF_SIGNATURE_PART.equals(name)) {
+            return PackageMemberClass.SIGNATURE;
+        }
+        if (ODF_MANIFEST_PART.equals(name)) {
+            return PackageMemberClass.XML;
+        }
+        if (normalized.startsWith("meta-inf/")) {
+            return PackageMemberClass.REFUSED;
+        }
+        if (ODF_METADATA_MANIFEST_PART.equals(name)) {
+            return PackageMemberClass.XML;
+        }
+        if (normalized.endsWith(".rdf")) {
+            return PackageMemberClass.REFUSED;
+        }
+        if (ODF_LAYOUT_CACHE_PART.equals(name)) {
+            return PackageMemberClass.DECLARED_OPAQUE;
+        }
+        if (normalized.startsWith("configurations2/")) {
+            return PackageMemberClass.REFUSED;
+        }
+        if (ODF_FONT_MEMBER.matcher(name).matches()) {
+            return PackageMemberClass.SNIFFED_OPAQUE;
+        }
+        return classifyByExtension(normalized);
+    }
+
+    private static PackageMemberClass classifyOoxmlMember(String name, String normalized) {
+        if (OOXML_SIGNATURE_ORIGIN_PART.equals(name)) {
+            return PackageMemberClass.SIGNATURE_ORIGIN;
+        }
+        if (OOXML_SIGNATURE_ORIGIN_RELATIONSHIPS_PART.equals(name)) {
+            return PackageMemberClass.XML;
+        }
+        if (normalized.startsWith(OOXML_SIGNATURE_DIRECTORY)) {
+            return normalized.endsWith(".xml")
+                ? PackageMemberClass.SIGNATURE
+                : PackageMemberClass.REFUSED;
+        }
+        if (normalized.endsWith(".vml")) {
+            return PackageMemberClass.XML;
+        }
+        if (EMBEDDED_FONT_MEMBER.matcher(name).matches()
+                || PRINTER_SETTINGS_MEMBER.matcher(name).matches()) {
+            return PackageMemberClass.DECLARED_OPAQUE;
+        }
+        return classifyByExtension(normalized);
+    }
+
+    private static PackageMemberClass classifyByExtension(String normalized) {
+        if (xmlEntry(normalized)) {
+            return PackageMemberClass.XML;
+        }
+        String extension = memberExtension(normalized);
+        if (RASTER_MEMBER_EXTENSIONS.contains(extension)) {
+            return PackageMemberClass.RASTER;
+        }
+        if (SNIFFED_MEMBER_EXTENSIONS.contains(extension)) {
+            return PackageMemberClass.SNIFFED_OPAQUE;
+        }
+        return PackageMemberClass.REFUSED;
+    }
+
+    private static String memberExtension(String normalized) {
+        int separator = normalized.lastIndexOf('/');
+        String fileName = separator < 0 ? normalized : normalized.substring(separator + 1);
+        int dot = fileName.lastIndexOf('.');
+        return dot < 0 ? "" : fileName.substring(dot + 1);
+    }
+
+    private static long memberBound(PackageMemberClass memberClass, String name) {
+        return switch (memberClass) {
+            case XML, SIGNATURE, MIMETYPE -> MAX_XML_BYTES;
+            case RASTER -> MAX_PACKAGE_MEMBER_BYTES;
+            case SNIFFED_OPAQUE -> ODF_FONT_MEMBER.matcher(name).matches()
+                ? MAX_OPAQUE_FONT_BYTES
+                : MAX_PACKAGE_MEMBER_BYTES;
+            case DECLARED_OPAQUE -> EMBEDDED_FONT_MEMBER.matcher(name).matches()
+                ? MAX_OPAQUE_FONT_BYTES
+                : MAX_OPAQUE_SETTINGS_BYTES;
+            case SIGNATURE_ORIGIN, DIRECTORY, REFUSED -> 0;
+        };
+    }
+
+    private static long memberCapturePrefix(PackageMemberClass memberClass) {
+        return switch (memberClass) {
+            case XML, SIGNATURE, MIMETYPE -> MAX_XML_BYTES;
+            case RASTER -> MAX_PACKAGE_MEMBER_BYTES;
+            case SNIFFED_OPAQUE, DECLARED_OPAQUE -> OPAQUE_SNIFF_BYTES;
+            case SIGNATURE_ORIGIN, DIRECTORY, REFUSED -> 0;
+        };
+    }
+
+    private static void requireEmptyMember(long length) {
+        if (length != 0) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+    }
+
+    /**
+     * Walks a package raster member with the same structural inspectors used for direct image
+     * uploads and returns the media type its bytes actually claim.
+     *
+     * <p>The bytes are never decoded or re-encoded: a document package must stay byte-identical
+     * so that its own digital signatures keep verifying and so that the stored artifact remains
+     * the exact uploaded bytes.
+     *
+     * @param content exact member bytes
+     * @param deadline shared inspection deadline
+     * @return canonical media type proven by the member's magic and structure
+     */
+    private static String inspectPackageRaster(byte[] content, Deadline deadline) {
+        if (startsWith(content, PNG_SIGNATURE)) {
+            inspectPng(content, deadline);
+            return "image/png";
+        }
+        if (content.length >= 3
+                && unsigned(content[0]) == 0xff
+                && unsigned(content[1]) == 0xd8
+                && unsigned(content[2]) == 0xff) {
+            inspectJpeg(content, deadline);
+            return "image/jpeg";
+        }
+        if (asciiEquals(content, 0, "GIF87a") || asciiEquals(content, 0, "GIF89a")) {
+            inspectGif(content, deadline, false);
+            return "image/gif";
+        }
+        if (asciiEquals(content, 0, "RIFF") && asciiEquals(content, 8, "WEBP")) {
+            inspectWebp(content, deadline);
+            return "image/webp";
+        }
+        throw UnsupportedUploadMediaTypeException.unsupported();
+    }
+
+    /**
+     * Identifies a metafile or uncompressed raster member from its header alone.
+     *
+     * <p>These formats have no in-repository structural validator, so they are admitted as opaque
+     * bytes bound by magic, an internal length that must agree with the member length, and the
+     * package's own declared media type: the EMF header byte count, the WMF header word count
+     * (after the placeable header when present), the TIFF first-directory offset, and the BMP
+     * file size. Anything whose header is not one of these families is refused.
+     *
+     * @param head leading member bytes
+     * @param length exact member length
+     * @return canonical media type proven by the member header
+     */
+    private static String sniffOpaqueMember(byte[] head, long length) {
+        if (head.length >= 52
+                && littleEndianUnsignedInt(head, 0) == 1L
+                && asciiEquals(head, 40, " EMF")
+                && littleEndianUnsignedInt(head, 48) == length) {
+            return "image/x-emf";
+        }
+        if (head.length >= 40
+                && unsigned(head[0]) == 0xd7
+                && unsigned(head[1]) == 0xcd
+                && unsigned(head[2]) == 0xc6
+                && unsigned(head[3]) == 0x9a
+                && wmfHeaderCoversMember(head, 22, length - 22)) {
+            return "image/x-wmf";
+        }
+        if (head.length >= 18 && wmfHeaderCoversMember(head, 0, length)) {
+            return "image/x-wmf";
+        }
+        if (head.length >= 8
+                && asciiEquals(head, 0, "II")
+                && unsigned(head[2]) == 0x2a
+                && unsigned(head[3]) == 0x00
+                && littleEndianUnsignedInt(head, 4) < length) {
+            return "image/tiff";
+        }
+        if (head.length >= 8
+                && asciiEquals(head, 0, "MM")
+                && unsigned(head[2]) == 0x00
+                && unsigned(head[3]) == 0x2a
+                && bigEndianUnsignedInt(head, 4) < length) {
+            return "image/tiff";
+        }
+        if (head.length >= 14
+                && asciiEquals(head, 0, "BM")
+                && littleEndianUnsignedInt(head, 2) == length
+                && littleEndianUnsignedInt(head, 10) < length) {
+            return "image/bmp";
+        }
+        throw UnsupportedUploadMediaTypeException.unsupported();
+    }
+
+    private static boolean wmfHeaderCoversMember(byte[] head, int offset, long length) {
+        int type = littleEndianUnsignedShort(head, offset);
+        return (type == 1 || type == 2)
+            && littleEndianUnsignedShort(head, offset + 2) == 9
+            && littleEndianUnsignedInt(head, offset + 6) * 2L == length;
+    }
+
+    /**
+     * Proves an ODF embedded font member is an sfnt container whose directory fits the member.
+     *
+     * <p>LibreOffice embeds the fonts a document uses under {@code Fonts/} as TrueType, OpenType,
+     * or collection files, so the member must start with one of the sfnt tags ({@code 00 01 00 00},
+     * {@code OTTO}, {@code true}, or {@code ttcf}) and its table or font directory must lie inside
+     * the member; the tables themselves are not parsed. Anything else is refused.
+     *
+     * @param head leading member bytes
+     * @param length exact member length
+     * @return the canonical sfnt media type
+     */
+    private static String sniffFontMember(byte[] head, long length) {
+        if (head.length < 12) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        long directoryEnd;
+        if (asciiEquals(head, 0, "ttcf")) {
+            directoryEnd = 12L + 4L * bigEndianUnsignedInt(head, 8);
+        } else if (bigEndianUnsignedInt(head, 0) == 0x00010000L
+                || asciiEquals(head, 0, "OTTO")
+                || asciiEquals(head, 0, "true")) {
+            directoryEnd = 12L + 16L * bigEndianUnsignedShort(head, 4);
+        } else {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        if (directoryEnd <= 12L || directoryEnd > length) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        return SFNT_FONT_TYPE;
+    }
+
+    /**
+     * Refuses a declared-opaque member whose leading bytes look like an executable, an archive, a
+     * compound file, a document, or markup rather than the inert blob its declared type promises.
+     *
+     * @param head leading member bytes
+     */
+    private static void requireInertOpaqueMember(byte[] head) {
+        for (byte[] magic : REFUSED_OPAQUE_MAGIC) {
+            if (startsWith(head, magic)) {
+                throw UnsupportedUploadMediaTypeException.unsupported();
+            }
+        }
+        int offset = 0;
+        while (offset < head.length && (head[offset] == ' ' || head[offset] == '\t'
+                || head[offset] == '\r' || head[offset] == '\n' || head[offset] == (byte) 0xef
+                || head[offset] == (byte) 0xbb || head[offset] == (byte) 0xbf)) {
+            offset++;
+        }
+        String prefix = ascii(head, offset, head.length - offset).toLowerCase(Locale.ROOT);
+        for (String marker : REFUSED_OPAQUE_TEXT_PREFIXES) {
+            if (prefix.startsWith(marker)) {
+                throw UnsupportedUploadMediaTypeException.unsupported();
+            }
+        }
     }
 
     private static EntryContent readArchiveEntry(
             ZipInputStream zip,
             ArchiveEntry expected,
             long expandedBefore,
-            int captureLimit,
+            long maxBytes,
+            long capturePrefix,
             Deadline deadline) throws IOException {
         if (expected.uncompressedSize() > MAX_ARCHIVE_EXPANDED_BYTES - expandedBefore
-                || captureLimit > 0 && expected.uncompressedSize() > captureLimit) {
+                || expected.uncompressedSize() > maxBytes) {
             throw UnsupportedUploadMediaTypeException.unsupported();
         }
-        byte[] captured = captureLimit > 0 ? new byte[Math.toIntExact(expected.uncompressedSize())] : null;
+        int captureLength = Math.toIntExact(
+            Math.min(expected.uncompressedSize(), capturePrefix));
+        byte[] captured = new byte[captureLength];
         CRC32 crc = new CRC32();
         byte[] buffer = new byte[8192];
         long read = 0;
@@ -1084,15 +1597,20 @@ public class UploadContentInspector implements AutoCloseable {
                 throw UnsupportedUploadMediaTypeException.unsupported();
             }
             crc.update(buffer, 0, count);
-            if (captured != null) {
-                System.arraycopy(buffer, 0, captured, Math.toIntExact(read), count);
+            if (read < captureLength) {
+                System.arraycopy(
+                    buffer,
+                    0,
+                    captured,
+                    Math.toIntExact(read),
+                    Math.toIntExact(Math.min(count, captureLength - read)));
             }
             read += count;
         }
         if (read != expected.uncompressedSize() || crc.getValue() != expected.crc()) {
             throw UnsupportedUploadMediaTypeException.unsupported();
         }
-        return new EntryContent(read, captured == null ? new byte[0] : captured);
+        return new EntryContent(read, captured);
     }
 
     private static XmlEvidence inspectXml(
@@ -1306,6 +1824,137 @@ public class UploadContentInspector implements AutoCloseable {
                 || !rootNamespaces.contains(mainRoot.namespaceUri())) {
             throw UnsupportedUploadMediaTypeException.unsupported();
         }
+        requireInertDeclaredTypes(evidence.contentTypeOverrides().values());
+        requireInertDeclaredTypes(evidence.contentTypeDefaults().values());
+        bindOoxmlMembers(evidence);
+        requireOoxmlSignatures(evidence);
+    }
+
+    /**
+     * Binds every inspected OOXML member to the content type the package itself declares for it.
+     *
+     * <p>Resolution follows the Open Packaging Conventions rule: the {@code Override} whose
+     * {@code PartName} matches wins, otherwise the {@code Default} for the member extension. A
+     * non-XML member with no declared type is refused, and a raster or metafile member whose
+     * declared type disagrees with the type its bytes prove is refused, so an
+     * {@code image/svg+xml} payload is refused whatever the member is called.
+     *
+     * @param evidence evidence gathered during the single package pass
+     */
+    private static void bindOoxmlMembers(PackageEvidence evidence) {
+        for (MemberEvidence member : evidence.members().values()) {
+            if (boundExemptMember(member.memberClass())) {
+                continue;
+            }
+            String declared = evidence.contentTypeOverrides().get("/" + member.name());
+            if (declared == null) {
+                declared = evidence.contentTypeDefaults()
+                    .get(memberExtension(member.name().toLowerCase(Locale.ROOT)));
+            }
+            requireDeclaredType(member, declared, EMBEDDED_FONT_MEMBER
+                .matcher(member.name()).matches()
+                ? EMBEDDED_FONT_CONTENT_TYPES
+                : PRINTER_SETTINGS_CONTENT_TYPES);
+        }
+    }
+
+    /**
+     * Admits digitally signed OOXML packages through the narrow shape the Open Packaging
+     * Conventions define, and refuses every other arrangement of signature markup.
+     *
+     * <p>Signed contracts are ordinary attachments in this product's market, and before this
+     * binding a signed {@code .docx} was refused outright because XMLDSig uses {@code <Object>}.
+     * The widening is deliberately narrow: signature markup is admitted only inside
+     * {@code _xmlsignatures/}, only when the package declares the OPC signature content types,
+     * and only when the root relationships part points at the signature origin part. Macro
+     * signatures and {@code <Object>} outside a signature part stay refused.
+     *
+     * @param evidence evidence gathered during the single package pass
+     */
+    private static void requireOoxmlSignatures(PackageEvidence evidence) {
+        Set<String> signatureParts = new HashSet<>();
+        for (MemberEvidence member : evidence.members().values()) {
+            if (member.memberClass() == PackageMemberClass.SIGNATURE) {
+                signatureParts.add(member.name());
+            }
+        }
+        for (Map.Entry<String, String> override : evidence.contentTypeOverrides().entrySet()) {
+            if (OOXML_SIGNATURE_CONTENT_TYPE.equalsIgnoreCase(override.getValue())
+                    && !signatureParts.contains(override.getKey().substring(1))) {
+                throw UnsupportedUploadMediaTypeException.unsupported();
+            }
+        }
+        if (!signatureParts.containsAll(evidence.signatureTargets())) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        if (signatureParts.isEmpty() && evidence.signatureOriginTargets().isEmpty()) {
+            return;
+        }
+        MemberEvidence origin = evidence.members().get(OOXML_SIGNATURE_ORIGIN_PART);
+        if (!signatureParts.equals(evidence.signatureTargets())
+                || !Set.of(OOXML_SIGNATURE_ORIGIN_PART).equals(evidence.signatureOriginTargets())
+                || origin == null
+                || origin.memberClass() != PackageMemberClass.SIGNATURE_ORIGIN) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+    }
+
+    private static boolean boundExemptMember(PackageMemberClass memberClass) {
+        return memberClass == PackageMemberClass.XML
+            || memberClass == PackageMemberClass.MIMETYPE
+            || memberClass == PackageMemberClass.DIRECTORY;
+    }
+
+    private static void requireDeclaredType(
+            MemberEvidence member,
+            String declared,
+            Set<String> opaqueContentTypes) {
+        if (declared == null) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        String normalized = canonicalDeclaredType(declared);
+        boolean bound = switch (member.memberClass()) {
+            case RASTER, SNIFFED_OPAQUE -> normalized.equals(member.sniffedType());
+            case DECLARED_OPAQUE -> opaqueContentTypes.contains(normalized);
+            case SIGNATURE -> OOXML_SIGNATURE_CONTENT_TYPE.equals(normalized);
+            case SIGNATURE_ORIGIN -> OOXML_SIGNATURE_ORIGIN_CONTENT_TYPE.equals(normalized);
+            case XML -> XML_MEMBER_CONTENT_TYPES.contains(normalized);
+            case MIMETYPE, DIRECTORY, REFUSED -> false;
+        };
+        if (!bound) {
+            throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+    }
+
+    private static String canonicalDeclaredType(String declared) {
+        String normalized = declared.trim().toLowerCase(Locale.ROOT);
+        int parameter = normalized.indexOf(';');
+        if (parameter >= 0) {
+            normalized = normalized.substring(0, parameter).trim();
+        }
+        return switch (normalized) {
+            case "image/jpg", "image/pjpeg" -> "image/jpeg";
+            case "image/emf" -> "image/x-emf";
+            case "image/wmf" -> "image/x-wmf";
+            case "image/x-tiff" -> "image/tiff";
+            case "image/x-ms-bmp" -> "image/bmp";
+            case "application/x-font-ttf", "application/x-font-otf", "font/ttf", "font/otf",
+                "application/vnd.ms-opentype" -> SFNT_FONT_TYPE;
+            default -> normalized;
+        };
+    }
+
+    private static void requireInertDeclaredTypes(java.util.Collection<String> declaredTypes) {
+        for (String declared : declaredTypes) {
+            String normalized = canonicalDeclaredType(declared);
+            if (REFUSED_DECLARED_CONTENT_TYPES.contains(normalized)
+                    || normalized.startsWith("audio/")
+                    || normalized.startsWith("video/")
+                    || normalized.contains("macroenabled")
+                    || normalized.contains("vba")) {
+                throw UnsupportedUploadMediaTypeException.unsupported();
+            }
+        }
     }
 
     private static void requireOdf(
@@ -1326,9 +1975,43 @@ public class UploadContentInspector implements AutoCloseable {
                     ODF_OFFICE_NAMESPACE,
                     "document-content").equals(contentRoot)
                 || !new XmlRoot(
-                    "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0",
+                    ODF_MANIFEST_NAMESPACE,
                     "manifest").equals(manifestRoot)) {
             throw UnsupportedUploadMediaTypeException.unsupported();
+        }
+        requireInertDeclaredTypes(evidence.manifestMediaTypes().values());
+        bindOdfMembers(evidence);
+    }
+
+    /**
+     * Binds every inspected ODF member to the media type its own package manifest declares.
+     *
+     * <p>ODF 1.3 Part 2 requires exactly one {@code manifest:file-entry} for every member other
+     * than {@code mimetype} and the {@code META-INF/} parts, so a member missing from the
+     * manifest and a manifest entry naming a member that is not present are both refused. A
+     * picture whose declared media type disagrees with the format its bytes prove is refused
+     * whatever the member is called.
+     *
+     * @param evidence evidence gathered during the single package pass
+     */
+    private static void bindOdfMembers(PackageEvidence evidence) {
+        for (MemberEvidence member : evidence.members().values()) {
+            if (member.memberClass() == PackageMemberClass.DIRECTORY
+                    || member.memberClass() == PackageMemberClass.MIMETYPE
+                    || member.name().startsWith("META-INF/")) {
+                continue;
+            }
+            requireDeclaredType(
+                member,
+                evidence.manifestMediaTypes().get(member.name()),
+                ODF_OPAQUE_MEMBER_CONTENT_TYPES);
+        }
+        for (String declaredMember : evidence.manifestMediaTypes().keySet()) {
+            if (!"/".equals(declaredMember)
+                    && !declaredMember.endsWith("/")
+                    && !evidence.names().contains(declaredMember)) {
+                throw UnsupportedUploadMediaTypeException.unsupported();
+            }
         }
     }
 
@@ -1424,8 +2107,25 @@ public class UploadContentInspector implements AutoCloseable {
         }
     }
 
-    private static boolean activePackageEntry(String name) {
-        String normalized = name.toLowerCase(Locale.ROOT);
+    /**
+     * Refuses package members by name family before any of their bytes are retained.
+     *
+     * <p>The blanket {@code .bin} refusal is deliberately widened for
+     * {@code (word|xl|ppt)/printerSettings/printerSettingsN.bin} only: Excel on Windows writes
+     * that part into most saved workbooks, and refusing it rejected ordinary business documents.
+     * Those parts are admitted as declared-opaque bytes bounded at 1 MiB with a negative header
+     * sniff, so a compound file, executable, or archive smuggled under that exact name is still
+     * refused. Every other {@code .bin} member, including {@code vbaProjectSignature*.bin},
+     * remains refused outright.
+     *
+     * @param name exact archive entry name
+     * @param normalized lower-case archive entry name
+     * @return whether the member is refused on its name alone
+     */
+    private static boolean refusedPackageEntry(String name, String normalized) {
+        if (normalized.endsWith(".bin") && PRINTER_SETTINGS_MEMBER.matcher(name).matches()) {
+            return false;
+        }
         return normalized.endsWith("vbaproject.bin")
             || normalized.contains("/activex/")
             || normalized.contains("/embeddings/")
@@ -1442,6 +2142,10 @@ public class UploadContentInspector implements AutoCloseable {
             || normalized.startsWith("object ")
             || normalized.contains("/object ")
             || normalized.startsWith("objectreplacements/")
+            || normalized.startsWith("dialogs/")
+            || normalized.contains("/dialogs/")
+            || normalized.startsWith("[trash]/")
+            || normalized.contains("afchunk")
             || normalized.endsWith(".bin")
             || normalized.endsWith(".svg")
             || normalized.endsWith(".html")
@@ -1459,7 +2163,35 @@ public class UploadContentInspector implements AutoCloseable {
             || normalized.endsWith(".bat")
             || normalized.endsWith(".cmd")
             || normalized.endsWith(".hta")
-            || normalized.endsWith(".swf");
+            || normalized.endsWith(".swf")
+            || normalized.endsWith(".svm")
+            || normalized.endsWith(".wdp")
+            || normalized.endsWith(".hdp")
+            || normalized.endsWith(".mht")
+            || normalized.endsWith(".mhtml")
+            || normalized.endsWith(".xhtml")
+            || normalized.endsWith(".vbs")
+            || normalized.endsWith(".wsf")
+            || normalized.endsWith(".lnk");
+    }
+
+    /**
+     * Builds the closed element vocabulary admitted inside an OOXML package signature part.
+     *
+     * <p>The names are the union of the XMLDSig core schema, the OPC digital-signature markup,
+     * the Microsoft Office signature-information schema, and the XAdES 1.3.2 and 1.4.1 schemas.
+     * Anything outside the union is refused by absence, which is the same fail-closed posture the
+     * ODF signature part already uses.
+     *
+     * @return lower-case element local names admitted inside a signature part
+     */
+    private static Set<String> ooxmlSignatureElements() {
+        Set<String> elements = new HashSet<>(ODF_SIGNATURE_ELEMENTS);
+        elements.addAll(XMLDSIG_ELEMENTS);
+        elements.addAll(OPC_SIGNATURE_ELEMENTS);
+        elements.addAll(OFFICE_SIGNATURE_ELEMENTS);
+        elements.addAll(XADES_ELEMENTS);
+        return Set.copyOf(elements);
     }
 
     private static boolean xmlEntry(String name) {
@@ -1677,18 +2409,45 @@ public class UploadContentInspector implements AutoCloseable {
         }
     }
 
+    private enum PackageMemberClass {
+        XML,
+        SIGNATURE,
+        SIGNATURE_ORIGIN,
+        MIMETYPE,
+        RASTER,
+        SNIFFED_OPAQUE,
+        DECLARED_OPAQUE,
+        DIRECTORY,
+        REFUSED
+    }
+
+    private record MemberEvidence(
+            String name,
+            PackageMemberClass memberClass,
+            String sniffedType,
+            long length) {}
+
     private record PackageEvidence(
             Set<String> names,
             Map<String, String> contentTypeOverrides,
+            Map<String, String> contentTypeDefaults,
+            Map<String, String> manifestMediaTypes,
+            Map<String, MemberEvidence> members,
             Map<String, XmlRoot> xmlRoots,
             Set<String> officeDocumentTargets,
             Set<String> relationshipTargets,
+            Set<String> signatureOriginTargets,
+            Set<String> signatureTargets,
             String packageMimeType) {}
 
     private record XmlEvidence(
             Map<String, String> contentTypeOverrides,
+            Map<String, String> contentTypeDefaults,
+            Map<String, String> manifestMediaTypes,
             Set<String> officeDocumentTargets,
             Set<String> relationshipTargets,
+            Set<String> signatureOriginTargets,
+            Set<String> signatureTargets,
             XmlRoot root) {}
 
     private record XmlRoot(String namespaceUri, String localName) {}
@@ -1714,16 +2473,26 @@ public class UploadContentInspector implements AutoCloseable {
         private final String entryName;
         private final boolean odfPackage;
         private final boolean odfSignaturePart;
+        private final boolean odfManifestPart;
+        private final boolean odfMetadataPart;
+        private final boolean ooxmlSignaturePart;
+        private final boolean signaturePart;
         private final boolean contentTypesDocument;
         private final boolean rootRelationshipsDocument;
         private final boolean relationshipsDocument;
         private final Map<String, String> contentTypeOverrides = new HashMap<>();
+        private final Map<String, String> contentTypeDefaults = new HashMap<>();
+        private final Map<String, String> manifestMediaTypes = new HashMap<>();
         private final Set<String> officeDocumentTargets = new HashSet<>();
         private final Set<String> relationshipTargets = new HashSet<>();
+        private final Set<String> signatureOriginTargets = new HashSet<>();
+        private final Set<String> signatureTargets = new HashSet<>();
         private final Set<String> relationshipIds = new HashSet<>();
         private final List<WordFieldState> wordFields = new ArrayList<>();
+        private final StringBuilder signatureUriText = new StringBuilder();
         private int depth;
         private int instructionTextDepth;
+        private int signatureUriTextDepth;
         private int emptyOnlyOfficeElementDepth;
         private XmlRoot root;
 
@@ -1735,8 +2504,14 @@ public class UploadContentInspector implements AutoCloseable {
             this.entryName = entryName;
             this.odfPackage = odfPackage;
             odfSignaturePart = odfPackage && ODF_SIGNATURE_PART.equals(entryName);
-            contentTypesDocument = "[Content_Types].xml".equals(entryName);
-            rootRelationshipsDocument = "_rels/.rels".equals(entryName);
+            odfManifestPart = odfPackage && ODF_MANIFEST_PART.equals(entryName);
+            odfMetadataPart = odfPackage && ODF_METADATA_MANIFEST_PART.equals(entryName);
+            ooxmlSignaturePart = !odfPackage
+                && entryName.startsWith(OOXML_SIGNATURE_DIRECTORY)
+                && entryName.toLowerCase(Locale.ROOT).endsWith(".xml");
+            signaturePart = odfSignaturePart || ooxmlSignaturePart;
+            contentTypesDocument = OOXML_CONTENT_TYPES_PART.equals(entryName);
+            rootRelationshipsDocument = OOXML_ROOT_RELATIONSHIPS_PART.equals(entryName);
             relationshipsDocument = entryName.toLowerCase(Locale.ROOT).endsWith(".rels");
         }
 
@@ -1761,6 +2536,21 @@ public class UploadContentInspector implements AutoCloseable {
                         || !ODF_SIGNATURE_ELEMENTS.contains(normalizedElement)) {
                     throw new SAXException("ODF signature content is not allowed");
                 }
+            } else if (ooxmlSignaturePart) {
+                if (!OOXML_SIGNATURE_NAMESPACES.contains(uri)
+                        || !OOXML_SIGNATURE_ELEMENTS.contains(normalizedElement)) {
+                    throw new SAXException("Package signature content is not allowed");
+                }
+            } else if (odfMetadataPart) {
+                if (!ODF_METADATA_NAMESPACES.contains(uri)
+                        || !ODF_METADATA_ELEMENTS.contains(normalizedElement)) {
+                    throw new SAXException("ODF metadata manifest content is not allowed");
+                }
+            } else if (odfManifestPart) {
+                if (!ODF_MANIFEST_NAMESPACE.equals(uri)
+                        || !ODF_MANIFEST_ELEMENTS.contains(normalizedElement)) {
+                    throw new SAXException("ODF manifest content is not allowed");
+                }
             } else if (odfPackage) {
                 if (emptyOnlyOfficeElementDepth > 0) {
                     throw new SAXException("ODF office element must be empty");
@@ -1784,12 +2574,44 @@ public class UploadContentInspector implements AutoCloseable {
                     emptyOnlyOfficeElementDepth = depth;
                 }
             }
-            if (!odfSignaturePart && ACTIVE_XML_ELEMENTS.contains(normalizedElement)) {
+            if (!signaturePart && ACTIVE_XML_ELEMENTS.contains(normalizedElement)) {
                 throw new SAXException("Active XML content is not allowed");
+            }
+            if (ooxmlSignaturePart
+                    && ("reference".equals(normalizedElement)
+                        || "retrievalmethod".equals(normalizedElement))) {
+                String referenced = signatureReferenceTarget(attribute(attributes, "URI"));
+                if (referenced != null) {
+                    relationshipTargets.add(referenced);
+                }
+            }
+            if (ooxmlSignaturePart && SIGNATURE_URI_ELEMENTS.contains(normalizedElement)) {
+                if (signatureUriTextDepth != 0) {
+                    throw new SAXException("Package signature reference is invalid");
+                }
+                signatureUriTextDepth = depth;
+                signatureUriText.setLength(0);
+            }
+            if (odfManifestPart && "file-entry".equals(normalizedElement)) {
+                inspectManifestFileEntry(attributes);
             }
             inspectWordFieldStart(uri, normalizedElement, attributes);
             if (formulaElement(uri, normalizedElement)) {
                 throw new SAXException("Spreadsheet formulas are not allowed");
+            }
+            if (contentTypesDocument && "Default".equals(element)) {
+                if (depth != 2 || !OOXML_CONTENT_TYPES_NAMESPACE.equals(uri)) {
+                    throw new SAXException("Package content types are invalid");
+                }
+                String extension = attribute(attributes, "Extension");
+                String contentType = attribute(attributes, "ContentType");
+                if (extension == null
+                        || contentType == null
+                        || extension.isBlank()
+                        || contentTypeDefaults.putIfAbsent(
+                            extension.toLowerCase(Locale.ROOT), contentType) != null) {
+                    throw new SAXException("Package content types are ambiguous");
+                }
             }
             if (contentTypesDocument && "Override".equals(element)) {
                 if (depth != 2 || !OOXML_CONTENT_TYPES_NAMESPACE.equals(uri)) {
@@ -1824,6 +2646,17 @@ public class UploadContentInspector implements AutoCloseable {
                             || "automatic-update".equals(normalizedName))) {
                     throw new SAXException("ODF active attribute is not allowed");
                 }
+                if (odfMetadataPart
+                        && ("about".equals(normalizedName)
+                            || "resource".equals(normalizedName))) {
+                    inspectMetadataReference(value);
+                }
+                if ("action".equals(normalizedName)
+                        && DRAWING_NAMESPACES.contains(uri)
+                        && PRESENTATION_ACTION_ELEMENTS.contains(normalizedElement)
+                        && !SAFE_PRESENTATION_ACTION.matcher(value.trim()).matches()) {
+                    throw new SAXException("Presentation action is not allowed");
+                }
                 if (("instr".equals(normalizedName)
                             && !(WORDPROCESSING_NAMESPACES.contains(uri)
                                 && "fldsimple".equals(normalizedElement)))
@@ -1846,12 +2679,17 @@ public class UploadContentInspector implements AutoCloseable {
         }
 
         @Override
-        public void endElement(String uri, String localName, String qualifiedName) {
+        public void endElement(String uri, String localName, String qualifiedName)
+                throws SAXException {
             deadline.check();
             String element = localName.isEmpty() ? qualifiedName : localName;
             if (WORDPROCESSING_NAMESPACES.contains(uri)
                     && "instrtext".equals(element.toLowerCase(Locale.ROOT))) {
                 instructionTextDepth = 0;
+            }
+            if (depth == signatureUriTextDepth) {
+                inspectSignatureUriText();
+                signatureUriTextDepth = 0;
             }
             if (depth == emptyOnlyOfficeElementDepth) {
                 emptyOnlyOfficeElementDepth = 0;
@@ -1862,6 +2700,12 @@ public class UploadContentInspector implements AutoCloseable {
         @Override
         public void characters(char[] characters, int start, int length) throws SAXException {
             deadline.check();
+            if (signatureUriTextDepth > 0) {
+                if (signatureUriText.length() + length > MAX_SIGNATURE_URI_CHARACTERS) {
+                    throw new SAXException("Package signature reference exceeds safe bounds");
+                }
+                signatureUriText.append(characters, start, length);
+            }
             if (instructionTextDepth > 0) {
                 if (wordFields.isEmpty()) {
                     throw new SAXException("Word field instruction is malformed");
@@ -1879,6 +2723,9 @@ public class UploadContentInspector implements AutoCloseable {
         public void endDocument() throws SAXException {
             if (!wordFields.isEmpty() || instructionTextDepth != 0) {
                 throw new SAXException("Word field instruction is malformed");
+            }
+            if (signatureUriTextDepth != 0) {
+                throw new SAXException("Package signature reference is invalid");
             }
         }
 
@@ -1904,8 +2751,12 @@ public class UploadContentInspector implements AutoCloseable {
             }
             return new XmlEvidence(
                 Map.copyOf(contentTypeOverrides),
+                Map.copyOf(contentTypeDefaults),
+                Map.copyOf(manifestMediaTypes),
                 Set.copyOf(officeDocumentTargets),
                 Set.copyOf(relationshipTargets),
+                Set.copyOf(signatureOriginTargets),
+                Set.copyOf(signatureTargets),
                 root);
         }
 
@@ -1941,6 +2792,18 @@ public class UploadContentInspector implements AutoCloseable {
             }
             String normalizedTarget = normalizeRelationshipTarget(entryName, target);
             relationshipTargets.add(normalizedTarget);
+            if (OOXML_SIGNATURE_ORIGIN_RELATIONSHIP.equals(relationshipType)) {
+                if (!rootRelationshipsDocument) {
+                    throw new SAXException("Package signature origin relationship is misplaced");
+                }
+                signatureOriginTargets.add(normalizedTarget);
+            }
+            if (OOXML_SIGNATURE_RELATIONSHIP.equals(relationshipType)) {
+                if (!OOXML_SIGNATURE_ORIGIN_RELATIONSHIPS_PART.equals(entryName)) {
+                    throw new SAXException("Package signature relationship is misplaced");
+                }
+                signatureTargets.add(normalizedTarget);
+            }
             if (rootRelationshipsDocument
                     && OOXML_OFFICE_DOCUMENT_RELATIONSHIPS.contains(relationshipType)
                     && !officeDocumentTargets.add(normalizedTarget)) {
@@ -2098,6 +2961,117 @@ public class UploadContentInspector implements AutoCloseable {
             return String.join("/", path);
         }
 
+        private void inspectManifestFileEntry(Attributes attributes) throws SAXException {
+            if (depth != 2) {
+                throw new SAXException("ODF manifest entry is misplaced");
+            }
+            String fullPath = attribute(attributes, "full-path");
+            String mediaType = attribute(attributes, "media-type");
+            if (fullPath == null
+                    || mediaType == null
+                    || !safeManifestPath(fullPath)
+                    || manifestMediaTypes.putIfAbsent(fullPath, mediaType) != null) {
+                throw new SAXException("ODF manifest entry is ambiguous");
+            }
+        }
+
+        private static boolean safeManifestPath(String value) {
+            if ("/".equals(value)) {
+                return true;
+            }
+            return value.endsWith("/")
+                ? safeArchivePath(value.substring(0, value.length() - 1))
+                : safeArchivePath(value);
+        }
+
+        /**
+         * Binds URL-bearing signature text such as XAdES {@code SPURI} and Office
+         * {@code SignatureProviderUrl} to the same rule as signature references, except that an
+         * ordinary web, mail, or telephone hyperlink is also admitted because those values are
+         * shown to a person rather than dereferenced by the package consumer.
+         */
+        private void inspectSignatureUriText() throws SAXException {
+            String value = signatureUriText.toString().trim();
+            if (value.isEmpty() || safeExternalHyperlink(value)) {
+                return;
+            }
+            String referenced = signatureReferenceTarget(value);
+            if (referenced != null) {
+                relationshipTargets.add(referenced);
+            }
+        }
+
+        /**
+         * Binds an ODF metadata-manifest subject or object to the package it lives in.
+         *
+         * <p>An {@code rdf:about} or {@code rdf:resource} value may be empty (the package
+         * itself), an ODF metadata vocabulary URI, or a reference to a member of this package,
+         * which is recorded as a relationship target so that a reference to an absent member
+         * refuses. Any other URI, including every external one, refuses.
+         */
+        private void inspectMetadataReference(String value) throws SAXException {
+            String normalized = value.trim();
+            if (normalized.isEmpty() || normalized.startsWith(ODF_METADATA_NAMESPACE_PREFIX)) {
+                return;
+            }
+            String referenced = normalizePackageReference(normalized);
+            if (referenced != null) {
+                relationshipTargets.add(referenced);
+            }
+        }
+
+        /**
+         * Validates a signature reference and returns the package part it covers.
+         *
+         * <p>A {@code Reference}, a {@code RetrievalMethod}, or URL-bearing signature text may
+         * only address a fragment inside the signature itself or a part of this package written
+         * as {@code /part?ContentType=type}. The returned part is recorded as a relationship
+         * target so that a signature covering a part that is not present refuses, and a reference
+         * whose declared content type names macro, OLE, ActiveX, control, or embedded-package
+         * content refuses outright.
+         *
+         * @param value raw reference value
+         * @return the referenced archive path, or {@code null} for an in-signature reference
+         */
+        private static String signatureReferenceTarget(String value) throws SAXException {
+            if (value == null) {
+                throw new SAXException("Package signature reference is invalid");
+            }
+            String normalized = value.trim();
+            if (normalized.isEmpty()) {
+                return null;
+            }
+            if (normalized.startsWith("#")) {
+                if (!safeFragment(normalized.substring(1))) {
+                    throw new SAXException("Package signature reference is invalid");
+                }
+                return null;
+            }
+            if (!normalized.startsWith("/")) {
+                throw new SAXException("Package signature reference is invalid");
+            }
+            int query = normalized.indexOf('?');
+            String path = query < 0
+                ? normalized.substring(1)
+                : normalized.substring(1, query);
+            if (!safeArchivePath(path)) {
+                throw new SAXException("Package signature reference is invalid");
+            }
+            if (query >= 0) {
+                String parameters = normalized.substring(query + 1).toLowerCase(Locale.ROOT);
+                if (!parameters.startsWith("contenttype=")
+                        || parameters.contains("vba")
+                        || parameters.contains("macroenabled")
+                        || parameters.contains("oleobject")
+                        || parameters.contains("activex")
+                        || parameters.contains("controlproperties")
+                        || parameters.contains("officedocument.package")) {
+                    throw new SAXException("Package signature reference is invalid");
+                }
+            }
+            return path;
+        }
+
         private static boolean rootRelationshipName(String entryName) {
             return "_rels/.rels".equals(entryName);
         }
@@ -2187,7 +3161,17 @@ public class UploadContentInspector implements AutoCloseable {
             return true;
         }
 
+        /**
+         * Refuses spreadsheet and chart formula vocabularies wherever they appear.
+         *
+         * <p>The VML namespace is exempt because {@code v:formulas} and {@code v:f} there are
+         * static shape-geometry adjustments, not calculated expressions; legacy cell comments and
+         * Word watermarks would otherwise stop uploading now that VML parts are parsed.
+         */
         private static boolean formulaElement(String uri, String localName) {
+            if (VML_NAMESPACES.contains(uri)) {
+                return false;
+            }
             if (localName.contains("formula")
                     || "definedname".equals(localName)
                     || "refersto".equals(localName)) {

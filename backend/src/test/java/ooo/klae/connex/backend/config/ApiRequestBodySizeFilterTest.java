@@ -37,6 +37,7 @@ class ApiRequestBodySizeFilterTest {
         properties.setWorkflowMaxBodyBytes(6);
         properties.setBusinessCardMaxBodyBytes(20);
         properties.setClientErrorsMaxBodyBytes(10);
+        properties.setCspReportsMaxBodyBytes(9);
         filter = new ApiRequestBodySizeFilter(properties);
     }
 
@@ -280,6 +281,39 @@ class ApiRequestBodySizeFilterTest {
 
         assertEquals(413, rejectedResponse.getStatus());
         assertNull(rejectedChain.getRequest());
+    }
+
+    @Test
+    void appliesDedicatedCspReportLimitToKnownLengthBody() throws Exception {
+        MockHttpServletRequest allowed = jsonRequest("POST", "/api/csp-reports", "123456789");
+        MockHttpServletResponse allowedResponse = new MockHttpServletResponse();
+        MockFilterChain allowedChain = new MockFilterChain();
+
+        filter.doFilter(allowed, allowedResponse, allowedChain);
+
+        assertEquals(200, allowedResponse.getStatus());
+        assertNotNull(allowedChain.getRequest());
+
+        MockHttpServletRequest rejected = jsonRequest("POST", "/api/csp-reports", "1234567890");
+        MockHttpServletResponse rejectedResponse = new MockHttpServletResponse();
+        MockFilterChain rejectedChain = new MockFilterChain();
+
+        filter.doFilter(rejected, rejectedResponse, rejectedChain);
+
+        assertEquals(413, rejectedResponse.getStatus());
+        assertNull(rejectedChain.getRequest());
+    }
+
+    @Test
+    void appliesDedicatedCspReportLimitToUnknownLengthBody() throws Exception {
+        MockHttpServletRequest request =
+                unknownLengthJsonRequest("POST", "/api/csp-reports", "1234567890");
+        request.addHeader("Transfer-Encoding", "chunked");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, drainingInputStreamChain());
+
+        assertEquals(413, response.getStatus());
     }
 
     @Test

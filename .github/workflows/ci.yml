@@ -379,6 +379,10 @@ jobs:
           fi
       - name: Build and start frontend
         working-directory: frontend
+        env:
+          # Explicit even though enforce is the shipped default: csp-enforcement.spec.ts proves the
+          # enforced policy, so the suite must never silently drift back to Report-Only.
+          CONNEX_CSP_MODE: enforce
         run: |
           set -euo pipefail
           node_modules/.bin/next build
