@@ -15,7 +15,7 @@ class CspReportRateLimiterTest {
     @Test
     void dropsReportsPastThePerClientCapWithoutThrowing() {
         MutableClock clock = new MutableClock();
-        CspReportRateLimiter limiter = new CspReportRateLimiter(2, 60, clock);
+        CspReportRateLimiter limiter = new CspReportRateLimiter(2, 60, 100, clock);
 
         assertTrue(limiter.tryAcquire("198.51.100.7"));
         assertTrue(limiter.tryAcquire("198.51.100.7"));
@@ -25,7 +25,7 @@ class CspReportRateLimiterTest {
     @Test
     void isolatesClientsAndResetsAtTheNextWindow() {
         MutableClock clock = new MutableClock();
-        CspReportRateLimiter limiter = new CspReportRateLimiter(1, 60, clock);
+        CspReportRateLimiter limiter = new CspReportRateLimiter(1, 60, 100, clock);
 
         assertTrue(limiter.tryAcquire("198.51.100.7"));
         assertFalse(limiter.tryAcquire("198.51.100.7"));
@@ -39,7 +39,7 @@ class CspReportRateLimiterTest {
     @Test
     void evictsOnlyStaleWindows() {
         MutableClock clock = new MutableClock();
-        CspReportRateLimiter limiter = new CspReportRateLimiter(2, 60, clock);
+        CspReportRateLimiter limiter = new CspReportRateLimiter(2, 60, 100, clock);
         limiter.tryAcquire("198.51.100.7");
         clock.advanceMillis(40_000);
         limiter.tryAcquire("198.51.100.8");
@@ -50,6 +50,24 @@ class CspReportRateLimiterTest {
         assertEquals(1, limiter.trackedKeys());
         assertTrue(limiter.tryAcquire("198.51.100.8"));
         assertFalse(limiter.tryAcquire("198.51.100.8"));
+    }
+
+    @Test
+    void refusesUnseenClientsAtTheTrackedCapUntilEvictionFreesCapacity() {
+        MutableClock clock = new MutableClock();
+        CspReportRateLimiter limiter = new CspReportRateLimiter(5, 60, 2, clock);
+        assertTrue(limiter.tryAcquire("2001:db8::1"));
+        assertTrue(limiter.tryAcquire("2001:db8::2"));
+
+        assertFalse(limiter.tryAcquire("2001:db8::3"));
+        assertTrue(limiter.tryAcquire("2001:db8::1"));
+        assertEquals(2, limiter.trackedKeys());
+
+        clock.advanceMillis(60_000);
+        limiter.evictStale();
+
+        assertEquals(0, limiter.trackedKeys());
+        assertTrue(limiter.tryAcquire("2001:db8::3"));
     }
 
     private static final class MutableClock extends Clock {
