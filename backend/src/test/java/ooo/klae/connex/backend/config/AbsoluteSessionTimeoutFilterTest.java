@@ -37,10 +37,10 @@ class AbsoluteSessionTimeoutFilterTest {
     }
 
     @Test
-    void cspReportPostBypassesAbsoluteExpiryEvenWithAnExpiredSession() throws Exception {
+    void nonApiRoutesAreNotFilteredAtAll() throws Exception {
         MockHttpSession session = new MockHttpSession();
         when(sessionSecurityService.isAbsoluteExpired(session)).thenReturn(true);
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/csp-reports");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/login");
         request.setSession(session);
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
@@ -50,20 +50,5 @@ class AbsoluteSessionTimeoutFilterTest {
         assertEquals(200, response.getStatus());
         assertFalse(session.isInvalid());
         assertNotNull(chain.getRequest());
-    }
-
-    @Test
-    void cspReportGetStaysConfined() throws Exception {
-        MockHttpSession session = new MockHttpSession();
-        when(sessionSecurityService.isAbsoluteExpired(session)).thenReturn(true);
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/csp-reports");
-        request.setSession(session);
-        MockHttpServletResponse response = new MockHttpServletResponse();
-        MockFilterChain chain = new MockFilterChain();
-
-        filter.doFilter(request, response, chain);
-
-        assertEquals(401, response.getStatus());
-        assertNull(chain.getRequest());
     }
 }

@@ -64,6 +64,12 @@ public class CspReportService {
      * <p>Never throws: an unparsable, throttled or wrongly shaped body yields an empty result so the
      * controller can answer {@code 204} unconditionally.
      *
+     * <p>The throttle is charged per logged record, not per request. Parsing a body costs the client
+     * one allowance, which also pays for the first record it yields; every further record in a
+     * batched Reporting-API body costs one more and the batch stops at the first refusal. A client
+     * therefore produces at most {@code max-reports-per-window} log lines per window regardless of
+     * how it packs them.
+     *
      * @param body the raw request body
      * @param client the resolved client address and its provenance
      * @return the sanitized records that were logged
@@ -72,7 +78,8 @@ public class CspReportService {
         if (body == null || body.isBlank()) {
             return List.of();
         }
-        if (!rateLimiter.tryAcquire(throttleKey(client))) {
+        String throttleKey = throttleKey(client);
+        if (!rateLimiter.tryAcquire(throttleKey)) {
             log.debug("csp.report.throttled");
             return List.of();
         }
@@ -83,15 +90,20 @@ public class CspReportService {
             log.debug("csp.report.unparsable");
             return List.of();
         }
-        List<CspViolationRecord> records = collect(root);
-        for (CspViolationRecord record : records) {
+        List<CspViolationRecord> logged = new ArrayList<>();
+        for (CspViolationRecord record : collect(root)) {
+            if (!logged.isEmpty() && !rateLimiter.tryAcquire(throttleKey)) {
+                log.debug("csp.report.throttled");
+                break;
+            }
             log.warn("csp.violation disposition={} directive={} blockedHost={} documentPath={} "
                     + "sourceHost={} line={} statusCode={} format={} forwardedByTrustedProxy={}",
                     record.disposition(), record.directive(), record.blockedHost(),
                     record.documentPath(), record.sourceHost(), record.lineNumber(),
                     record.statusCode(), record.format(), client.forwardedByTrustedProxy());
+            logged.add(record);
         }
-        return records;
+        return List.copyOf(logged);
     }
 
     private static String throttleKey(ResolvedClientIp client) {

@@ -278,6 +278,9 @@ connex:
     csp-reports:
         max-reports-per-window: ${CONNEX_CSP_REPORTS_MAX_REPORTS_PER_WINDOW:60}
         window-seconds: ${CONNEX_CSP_REPORTS_WINDOW_SECONDS:60}
+        # Upper bound on distinct client addresses the throttle remembers between evictions; the
+        # key space is unauthenticated, so this is what keeps a rotating-address source off the heap.
+        max-tracked-clients: ${CONNEX_CSP_REPORTS_MAX_TRACKED_CLIENTS:10000}
         eviction-delay-ms: ${CONNEX_CSP_REPORTS_EVICTION_DELAY_MS:300000}
     webauthn:
         # Passkey / WebAuthn relying-party config (#295). rp-id is the site's registrable domain
