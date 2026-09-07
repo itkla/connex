@@ -285,6 +285,51 @@ describe("document acceptance entry", () => {
         await unmount(rendered.root);
     });
 
+    it("keeps the grant's session alive while the preview stays open, and stops on unmount", async () => {
+        vi.useFakeTimers();
+        try {
+            const rendered = await renderEntry();
+            expect(api.preview).toHaveBeenCalledTimes(1);
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+            });
+            expect(api.preview).toHaveBeenCalledTimes(2);
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+            });
+            expect(api.preview).toHaveBeenCalledTimes(3);
+
+            await unmount(rendered.root);
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+            });
+            expect(api.preview).toHaveBeenCalledTimes(3);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("surfaces the unavailable state when the keep-alive loses the grant", async () => {
+        vi.useFakeTimers();
+        try {
+            const rendered = await renderEntry();
+            expect(rendered.container.textContent).toContain("Frozen document title");
+            api.preview.mockRejectedValue(new ApiError("gone", 404));
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+            });
+
+            expect(rendered.container.textContent).toContain("Link unavailable");
+
+            await unmount(rendered.root);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it.each([
         [400, "Link unavailable"],
         [404, "Link unavailable"],

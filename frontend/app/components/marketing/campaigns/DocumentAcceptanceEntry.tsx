@@ -35,6 +35,17 @@ const DOCUMENT_MESSAGES = {
     },
 } satisfies Record<Locale, Record<string, unknown>>;
 
+/**
+ * How often the open acceptance page re-reads its preview.
+ *
+ * <p>The grant lives 60 minutes but its owner is the browser binding cookie plus the servlet
+ * session lineage, and the session expires after 30 idle minutes. A signer who reads a long
+ * contract without clicking would otherwise lose the lineage, so the still-valid grant would be
+ * refused. This read records nothing and only refreshes the session, so it can never forge view
+ * evidence.
+ */
+const SESSION_KEEP_ALIVE_MS = 10 * 60 * 1000;
+
 type EntryState =
     | { status: "loading" }
     | { status: "failed"; kind: DocumentAcceptanceFailureKind }
@@ -58,6 +69,8 @@ function unavailableCopy(kind: DocumentAcceptanceFailureKind): DocumentAcceptanc
 /**
  * Exchanges the emailed document-acceptance fragment bearer for a purpose-bound browser grant and
  * then renders the recipient surface entirely from that grant, so no request ever names the bearer.
+ * While a preview is on screen the page re-reads it periodically, which keeps the servlet session
+ * that owns the grant lineage alive for as long as the grant itself lasts.
  */
 export default function DocumentAcceptanceEntry() {
     const [state, setState] = useState<EntryState>({ status: "loading" });
@@ -88,6 +101,25 @@ export default function DocumentAcceptanceEntry() {
             active = false;
         };
     }, []);
+
+    useEffect(() => {
+        if (state.status !== "ready") return;
+        let active = true;
+        const timer = window.setInterval(() => {
+            getDocumentAcceptancePreview().catch((error: unknown) => {
+                if (!active) return;
+                setState({
+                    status: "failed",
+                    kind: documentAcceptanceFailureKind(error) ?? "service-unavailable",
+                });
+            });
+        }, SESSION_KEEP_ALIVE_MS);
+
+        return () => {
+            active = false;
+            window.clearInterval(timer);
+        };
+    }, [state.status]);
 
     useEffect(() => {
         const reopen = () => window.location.reload();

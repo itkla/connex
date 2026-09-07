@@ -66,6 +66,15 @@ sets `connex_document_acceptance_flow`, an `HttpOnly`, `SameSite=Strict` grant c
 The grant lives 60 minutes, is renewed by re-opening the emailed link in the same browser, and is still
 bounded by the recipient token's own expiry and terminal state.
 
+The grant's owner is that binding cookie combined with a lineage held only in the servlet session,
+and `server.servlet.session.timeout` is 30 minutes — half the grant. A signer who reads a long
+contract without clicking anything would lose the session, and the next decision would be refused
+even though the grant is still live. The open recipient page therefore re-reads
+`GET /api/document-acceptance` every 10 minutes while a preview is on screen, which refreshes the
+session and nothing else: the read records no view, does not extend the grant, does not weaken the
+owner binding, and stops when the page is closed. If that read ever comes back unavailable, the page
+switches to the unavailable state, because the grant really is gone.
+
 Every other endpoint — `GET /api/document-acceptance`, `POST /api/document-acceptance/viewed`,
 `/accept` and `/decline` — reads only that cookie. A token in a path or query is ignored, and the legacy
 `/api/document-acceptance/{token}` shapes answer the uniform 404. Because the cookie is now the
