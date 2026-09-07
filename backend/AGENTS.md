@@ -58,6 +58,7 @@ Inspect the owning package, nearest implementation, and tests in addition to the
 - Authentication methods establish sessions through the existing `AuthService` path; do not expose principal IDs or servlet session IDs merely for client correlation.
 - Provider and network egress must use the established bounded/fixed-host/address-validation adapters for that subsystem. Do not add arbitrary redirects, remote URL fetching, or network I/O inside database transactions.
 - Upload/image paths must preserve the existing bounded decode/admission and metadata-stripping boundaries. Never add unbounded multipart/image processing or log recognized/uploaded content.
+- `UploadContentInspector` is the sole ingress for uploaded bytes: every new upload surface must call it with a server-selected purpose and store only the resulting artifact. The contract, package member policy, and MUST/MUST NOT list for new pipelines are in `../docs/UPLOAD_CONTENT_INSPECTION.md`, pinned by `UploadContentInspectionBoundaryArchTest`.
 - Idempotency, one-use proofs, generation handles, leases, and ownership checks are data-integrity/security mechanisms. Do not simplify them without reading the owning contract and tests.
 - New tables holding workspace/org data must participate in the appropriate tenant/control lifecycle, export, teardown, and residual-verification registries. `../docs/MULTITENANCY_PLAN.md` is authoritative.
 
