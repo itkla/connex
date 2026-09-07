@@ -44,6 +44,8 @@ import ooo.klae.connex.backend.services.OneTimeLinkFlowService.Purpose;
 import ooo.klae.connex.backend.tenant.WorkspaceCookie;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Drives the fragment exchange and grant-only document-acceptance contract through the real
@@ -385,10 +387,12 @@ class DocumentAcceptanceLinkExchangeIntegrationTest
         try {
             exchange(token, 303, browser);
             MvcResult throttled = exchange(token, 429, browser);
+            JsonNode throttledBody = JsonMapper.builder().build().readTree(throttled.getResponse().getContentAsString());
+            assertEquals("TOO_MANY_REQUESTS", throttledBody.path("code").asText());
             assertEquals(
-                "{\"code\":\"TOO_MANY_REQUESTS\",\"message\":"
-                    + "\"Too many document-link requests. Please try again later.\"}",
-                throttled.getResponse().getContentAsString());
+                "Too many document-link requests. Please try again later.",
+                throttledBody.path("message").asText());
+            assertEquals(2, throttledBody.size());
             assertResponseSecretFree(throttled, token);
         } finally {
             signatureProperties.setMaxRequestsPerToken(previousLimit);
