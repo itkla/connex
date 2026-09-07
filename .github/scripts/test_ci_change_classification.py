@@ -126,6 +126,19 @@ class CiChangeClassificationTest(unittest.TestCase):
                 self.assertTrue(categories["action_pins"])
                 self.assertFalse(categories["compose"])
 
+    def test_sast_compliance_documents_run_the_placeholder_guard(self) -> None:
+        """A documentation-only edit to the SAST records must still run `action-pins`.
+
+        `check-doc-placeholders.py` runs in that job, and the incident record and triage log are
+        completed in documentation-only commits after the numbers exist (#1244).
+        """
+        for path in ("docs/STATIC_ANALYSIS.md", "docs/SAST_TRIAGE_LOG.md"):
+            with self.subTest(path=path):
+                categories = self.classify(path)
+                self.assertTrue(categories["action_pins"])
+                self.assertFalse(categories["backend_sast"])
+                self.assertFalse(categories["frontend_sast"])
+
     def test_ci_policy_change_forces_every_category(self) -> None:
         categories = self.classify(".github/workflows/ci.yml")
         self.assertTrue(all(categories.values()))

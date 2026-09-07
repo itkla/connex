@@ -111,7 +111,26 @@ class SecurityWorkflowTest(unittest.TestCase):
         runs = [step.get("run", "") for step in self.steps("action-pins")]
         self.assertIn("python .github/scripts/test_replay_codeql_dismissals.py", runs)
 
-    def test_pr_alert_gate_waits_for_analysis_and_filters_by_pr(self) -> None:
+    def test_the_compliance_documents_are_guarded_against_unfilled_placeholders(self) -> None:
+        runs = [step.get("run", "") for step in self.steps("action-pins")]
+        self.assertIn("python .github/scripts/check-doc-placeholders.py", runs)
+        self.assertIn("python .github/scripts/test_doc_placeholders.py", runs)
+
+    def test_pull_request_analysis_is_not_diff_informed(self) -> None:
+        """Every analysis uploads its complete result set, including on pull requests.
+
+        Diff-informed analysis restricts pull-request results to the diff ranges before upload.
+        From 2026-08-26 the ranges never matched the relativised SARIF paths, every pull-request
+        analysis stored zero results, and the gate passed blind. The gate now compares alert
+        identities on the merge ref against the base ref, which only works when nothing is pruned.
+        """
+        for job_name in ("backend-sast", "frontend-sast"):
+            with self.subTest(job=job_name):
+                self.assertEqual(
+                    "false", self.job(job_name)["env"]["CODEQL_ACTION_DIFF_INFORMED_QUERIES"]
+                )
+
+    def test_alert_gate_compares_the_analysed_ref_against_main_on_every_event(self) -> None:
         for job_name, language in (
             ("backend-sast", "java-kotlin"),
             ("frontend-sast", "javascript-typescript"),
@@ -130,23 +149,42 @@ class SecurityWorkflowTest(unittest.TestCase):
                 gate = self.named_step(
                     job_name, "Block Critical, High, or error-severity alerts"
                 )
-                self.assertEqual(
-                    "github.event_name == 'pull_request' || "
-                    "github.event_name == 'merge_group'",
-                    gate["if"],
-                )
-                self.assertIn('-f "pr=$PR_NUMBER"', gate["run"])
-                self.assertIn('-f "ref=$ANALYSIS_REF"', gate["run"])
+                self.assertNotIn("if", gate)
+                self.assertIn('-f "ref=$1"', gate["run"])
+                self.assertNotIn("pr=", gate["run"])
                 self.assertIn("--method GET --paginate --slurp", gate["run"])
-                self.assertIn("--paginate --slurp", gate["run"])
+                self.assertIn("pull_request|merge_group)", gate["run"])
+                self.assertIn("push|schedule|workflow_dispatch)", gate["run"])
+                self.assertIn("fork pull requests are not gated", gate["run"])
                 self.assertIn("Unsupported CodeQL gate event", gate["run"])
+                self.assertEqual(
+                    2, gate["run"].count('check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY"')
+                )
+                self.assertEqual(
+                    2, gate["run"].count('--analyses "$analyses_file" --commit "$ANALYSIS_SHA"')
+                )
+                self.assertIn('"repos/$GITHUB_REPOSITORY/code-scanning/analyses"', gate["run"])
+                self.assertIn('fetch_analyses "$ANALYSIS_REF" > "$analyses_file"', gate["run"])
+                self.assertIn('fetch_analyses "$BASE_REF" > "$baseline_analyses_file"', gate["run"])
                 self.assertIn(
-                    'check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY"',
+                    '--ref "$ANALYSIS_REF" --baseline "$baseline_file" --baseline-ref "$BASE_REF" \\\n'
+                    '      --baseline-analyses "$baseline_analyses_file" ;;',
                     gate["run"],
                 )
+                self.assertIn('--ref "$ANALYSIS_REF" ;;', gate["run"])
                 self.assertEqual(f"/language:{language}", gate["env"]["ANALYSIS_CATEGORY"])
                 self.assertEqual("${{ github.ref }}", gate["env"]["ANALYSIS_REF"])
+                self.assertEqual("${{ github.sha }}", gate["env"]["ANALYSIS_SHA"])
+                self.assertEqual(
+                    "${{ github.event.merge_group.base_ref || "
+                    "format('refs/heads/{0}', github.event.pull_request.base.ref) }}",
+                    gate["env"]["BASE_REF"],
+                )
                 self.assertEqual("${{ github.event_name }}", gate["env"]["EVENT_NAME"])
+                self.assertEqual(
+                    "${{ github.event.pull_request.head.repo.fork }}",
+                    gate["env"]["HEAD_REPO_FORK"],
+                )
 
     def test_required_job_rejects_selected_skipped_scans(self) -> None:
         required = self.job("required")
