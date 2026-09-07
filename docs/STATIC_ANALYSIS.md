@@ -167,7 +167,7 @@ to describe the gate as absent:
 Branch protection is administered outside this change; this document must be updated only after the
 setting is independently verified.
 
-## Incident record — result paths and the blind window (2026-08-26 → <PR-0-MERGE-DATE>)
+## Incident record — result paths and the blind window (2026-08-26 → 2026-09-07)
 
 **The pull-request gate reported success without examining anything for that entire window.** This
 is recorded as a control failure, not as a footnote.
