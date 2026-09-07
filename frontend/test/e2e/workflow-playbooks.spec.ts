@@ -15,6 +15,32 @@ async function closeInspector(page: Page, mobile: boolean): Promise<void> {
     if (mobile) await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
 }
 
+for (const type of ["task", "document"] as const) {
+    test(`preserves new ${type} workflows and their existing events @mobile`, async ({ page }, testInfo) => {
+        const mobile = testInfo.project.name === "mobile-chromium";
+        await page.goto(`/workflows/new?recordType=${type}`);
+        await page.getByLabel("Workflow name").fill(`${type} automation ${testInfo.testId}`);
+        await expect(page.getByRole("button", { name: "Manually from a record", exact: true })).toHaveCount(0);
+        await page.getByRole("button", { name: "Continue to editor" }).click();
+        if (!mobile) await page.getByRole("button", { name: "Outline", exact: true }).click();
+        await page.getByRole("list", { name: "Workflow steps" }).getByRole("button").first().click();
+        await page.getByRole("button", { name: type === "task" ? "completed" : "approved", exact: true }).click();
+        await expect(page.getByRole("button", { name: "Add input", exact: true })).toHaveCount(0);
+        await closeInspector(page, mobile);
+        const created = page.waitForResponse((response) => response.request().method() === "POST"
+            && new URL(response.url()).pathname === "/api/workflows");
+        await page.getByRole("button", { name: "Save draft", exact: true }).click();
+        const response = await created;
+        expect(response.status(), await response.text()).toBe(201);
+        const body: unknown = await response.json();
+        if (!isRecord(body) || !isRecord(body.definition)) throw new Error("Expected the created workflow definition");
+        expect(body.recordType).toBe(type);
+        expect(body.definition.schemaVersion).toBe(1);
+        expect(body.definition.inputs).toBeUndefined();
+        await expect(page).toHaveURL(/\/workflows\/\d+$/);
+    });
+}
+
 for (const type of ["person", "company", "deal"] as const) {
     test(`authors and runs a ${type} playbook with frozen inputs and a linked task @mobile`, async ({ page }, testInfo) => {
         test.setTimeout(120_000);

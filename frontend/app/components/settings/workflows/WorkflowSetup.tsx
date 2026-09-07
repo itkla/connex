@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 export type WorkflowSetupValue = {
     name: string;
     purpose: string;
-    recordType: "person" | "company" | "deal";
+    recordType: "person" | "company" | "deal" | "task" | "document";
     start: "manual" | "entity_change" | "schedule";
 };
 
@@ -42,11 +42,12 @@ export default function WorkflowSetup({
     const tr = useTranslations("WorkflowAuthoring");
     const router = useRouter();
     const [value, setValue] = useState<WorkflowSetupValue>({
-        name: "", purpose: "", recordType: initialRecordType, start: initialStart,
+        name: "", purpose: "", recordType: initialRecordType, start: initialRecordType === "task" || initialRecordType === "document" ? "entity_change" : initialStart,
     });
+    const eventOnly = value.recordType === "task" || value.recordType === "document";
     const [destination, setDestination] = useState("/workflows");
     const dirty = value.name.trim().length > 0 || value.purpose.trim().length > 0
-        || value.recordType !== initialRecordType || value.start !== initialStart;
+        || value.recordType !== initialRecordType || value.start !== (initialRecordType === "task" || initialRecordType === "document" ? "entity_change" : initialStart);
     const guard = useUnsavedChangesGuard({
         isDirty: dirty,
         onClose: () => router.push(destination),
@@ -75,7 +76,7 @@ export default function WorkflowSetup({
                     <fieldset className="space-y-3">
                         <legend className="text-base font-semibold text-foreground">{t("setup.startQuestion")}</legend>
                         <div className="flex flex-col gap-2">
-                            {STARTS.map(({ value: start, icon: Icon }) => (
+                            {STARTS.filter((start) => !eventOnly || start.value === "entity_change").map(({ value: start, icon: Icon }) => (
                                 <div key={start} className="space-y-1.5">
                                     <Button
                                         type="button"
@@ -102,17 +103,17 @@ export default function WorkflowSetup({
                         <Select
                             value={value.recordType}
                             onValueChange={(recordType) => {
-                                if (recordType === "person" || recordType === "company" || recordType === "deal") {
-                                    setValue((current) => ({ ...current, recordType }));
+                                if (recordType === "person" || recordType === "company" || recordType === "deal" || recordType === "task" || recordType === "document") {
+                                    setValue((current) => ({ ...current, recordType, start: recordType === "task" || recordType === "document" ? "entity_change" : current.start }));
                                 }
                             }}
                         >
                             <SelectTrigger id="workflow-setup-record" className="w-full"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                                {["person", "company", "deal"].map((recordType) => <SelectItem key={recordType} value={recordType}>{tr(`record.${recordType}`)}</SelectItem>)}
+                                {["person", "company", "deal", "task", "document"].map((recordType) => <SelectItem key={recordType} value={recordType}>{tr(`record.${recordType}`)}</SelectItem>)}
                             </SelectContent>
                         </Select>
-                        <p className="text-sm text-muted-foreground">{t("setup.recordHelp")}</p>
+                        <p className="text-sm text-muted-foreground">{t(eventOnly ? "setup.eventOnlyHelp" : "setup.recordHelp")}</p>
                     </div>
                 </div>
                 <div className="space-y-6">
@@ -140,7 +141,7 @@ export default function WorkflowSetup({
                     </div>
                     <div className="border-t border-border pt-5">
                         <h2 className="text-base font-semibold text-foreground">{t("setup.nextTitle")}</h2>
-                        <p className="mt-2 text-sm text-muted-foreground">{t("setup.nextBody")}</p>
+                        <p className="mt-2 text-sm text-muted-foreground">{t(eventOnly ? "setup.nextBodyLegacy" : "setup.nextBody")}</p>
                     </div>
                 </div>
                 <div className="flex flex-wrap justify-between gap-3 border-t border-border pt-5 lg:col-span-2">

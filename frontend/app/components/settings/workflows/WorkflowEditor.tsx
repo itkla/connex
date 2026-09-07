@@ -507,7 +507,7 @@ function WorkflowEditorBody({
         const requestedStart = searchParams.get("start");
         return <WorkflowSetup
             key={activeWorkspaceId}
-            initialRecordType={requestedType === "company" || requestedType === "deal" ? requestedType : "person"}
+            initialRecordType={requestedType === "company" || requestedType === "deal" || requestedType === "task" || requestedType === "document" ? requestedType : "person"}
             initialStart={requestedStart === "entity_change" || requestedStart === "schedule" ? requestedStart : "manual"}
             onContinue={(value) => {
                 editor.configureNewWorkflow(value);

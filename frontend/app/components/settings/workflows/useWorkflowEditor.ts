@@ -377,8 +377,11 @@ export function useWorkflowEditor({
     }, [catalog, history.present, updateDocument]);
 
     const configureNewWorkflow = useCallback((value: WorkflowSetupValue) => {
-        const graph = createEmptyWorkflowGraph(value.recordType, 2, value.start);
-        const readyGraph = value.start === "schedule" ? ensureScheduleEnrollment(graph.definition, graph.canvas, value.recordType) : graph;
+        const legacyRecordType = value.recordType === "task" || value.recordType === "document";
+        const graph = legacyRecordType
+            ? createEmptyWorkflowGraph(value.recordType)
+            : createEmptyWorkflowGraph(value.recordType, 2, value.start);
+        const readyGraph = !legacyRecordType && value.start === "schedule" ? ensureScheduleEnrollment(graph.definition, graph.canvas, value.recordType) : graph;
         updateDocument({ name: value.name, description: value.purpose || null, recordType: value.recordType, executionMode: "user", definition: readyGraph.definition, canvas: readyGraph.canvas }, "commit");
         setSelectedNodeId(readyGraph.definition.entryNodeId);
     }, [updateDocument]);
