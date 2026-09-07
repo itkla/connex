@@ -6,7 +6,8 @@
   <sql id="deliveryColumns">
     id, workspace_id, send_id, person_id, address, status, skip_reason, provider_message_id,
     provider_id, attempt_target_fingerprint, attempt_count, last_error, last_error_code,
-    reconciliation_required_at, reconciliation_outcome, unsubscribe_token, created_at, updated_at
+    reconciliation_required_at, reconciliation_outcome, unsubscribe_token, unsubscribe_token_hash,
+    created_at, updated_at
   </sql>
 
   <insert id="insertDeliveries">
@@ -102,9 +103,9 @@
       AND person_id = #{personId} AND dedupe_active = 1
   </select>
 
-  <select id="getByToken" resultType="CampaignDelivery">
+  <select id="getByTokenHash" resultType="CampaignDelivery">
     SELECT <include refid="deliveryColumns"/> FROM campaign_delivery
-    WHERE unsubscribe_token = #{token}
+    WHERE unsubscribe_token_hash = #{tokenHash}
   </select>
 
   <select id="findByProviderMessage" resultType="CampaignDelivery">

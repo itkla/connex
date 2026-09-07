@@ -260,9 +260,7 @@ public class SecurityConfig {
                     "/api/auth/webauthn/authenticate/**",
                     "/api/account/connections/native/prepare",
                     "/api/account/connections/native/complete",
-                    "/api/delivery/unsubscribe/**",
                     "/api/delivery/webhooks/**",
-                    "/api/document-acceptance/**",
                     "/api/document-signature/webhooks/**",
                     "/api/csp-reports");
             if (ssoEnabled) {
@@ -280,9 +278,11 @@ public class SecurityConfig {
                     .requestMatchers(HttpMethod.GET, "/api/capabilities").permitAll()
                     .requestMatchers(HttpMethod.POST, "/api/csp-reports").permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/mail/managed").permitAll()
-                    .requestMatchers("/api/delivery/unsubscribe/**").permitAll()
+                    .requestMatchers(
+                        "/api/delivery/unsubscribe", "/api/delivery/unsubscribe/**").permitAll()
                     .requestMatchers("/api/delivery/webhooks/**").permitAll()
-                    .requestMatchers("/api/document-acceptance/**").permitAll()
+                    .requestMatchers(
+                        "/api/document-acceptance", "/api/document-acceptance/**").permitAll()
                     .requestMatchers("/api/document-signature/webhooks/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/**").authenticated()

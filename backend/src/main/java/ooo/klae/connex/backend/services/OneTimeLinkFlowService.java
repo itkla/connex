@@ -41,7 +41,6 @@ public class OneTimeLinkFlowService {
 
     public static final String BROWSER_BINDING_COOKIE = "connex_one_time_link_binding";
 
-    private static final Duration LIFETIME = Duration.ofMinutes(10);
     private static final String SESSION_LINEAGE_ATTRIBUTE =
         OneTimeLinkFlowService.class.getName() + ".SESSION_LINEAGE";
     private static final String INVALID_LINK = "This link is invalid or has expired";
@@ -51,14 +50,32 @@ public class OneTimeLinkFlowService {
     private final OneTimeLinkFlowMapper flowMapper;
     private final OneTimeLinkFlowClaimService claimService;
 
-    /** One-time browser-link purposes that must never be interchangeable. */
+    /**
+     * One-time browser-link purposes that must never be interchangeable. Each purpose carries the
+     * lifetime of the grant it issues; document acceptance is longer because reading a contract
+     * routinely exceeds a ten-minute exchange window, while the recipient token's own expiry and
+     * terminal state still bound every operation the grant can reach.
+     */
     public enum Purpose {
-        PASSWORD_RESET,
-        REGISTRATION_VERIFICATION,
-        EMAIL_CHANGE,
-        WORKSPACE_INVITE,
-        WORKSPACE_INVITE_LINK,
-        SSO_LINK
+        PASSWORD_RESET(Duration.ofMinutes(10)),
+        REGISTRATION_VERIFICATION(Duration.ofMinutes(10)),
+        EMAIL_CHANGE(Duration.ofMinutes(10)),
+        WORKSPACE_INVITE(Duration.ofMinutes(10)),
+        WORKSPACE_INVITE_LINK(Duration.ofMinutes(10)),
+        SSO_LINK(Duration.ofMinutes(10)),
+        DOCUMENT_ACCEPTANCE(Duration.ofMinutes(60)),
+        DELIVERY_UNSUBSCRIBE(Duration.ofMinutes(10));
+
+        private final Duration lifetime;
+
+        Purpose(Duration lifetime) {
+            this.lifetime = lifetime;
+        }
+
+        /** Returns how long a grant issued for this purpose stays valid. */
+        public Duration lifetime() {
+            return lifetime;
+        }
     }
 
     /**
@@ -79,9 +96,27 @@ public class OneTimeLinkFlowService {
      */
     @Transactional
     public IssuedGrant issue(HttpServletRequest request, Purpose purpose, String sourceTokenHash) {
-        Cookie cookie = WebUtils.getCookie(request, BROWSER_BINDING_COOKIE);
-        String binding = cookie == null ? null : cookie.getValue();
-        return issue(request, binding, purpose, sourceTokenHash);
+        return issue(request, browserBinding(request), purpose, sourceTokenHash, null);
+    }
+
+    /**
+     * Issues a flow whose source lives on a tenant plane, remembering the routing hint the token
+     * carried so a token-free endpoint can find the tenant without any caller-supplied identifier.
+     * The hint is a lookup aid only: the tenant row is still matched by the source-token digest.
+     * @param request current browser request carrying both halves of the exchange owner
+     * @param purpose single allowed operation
+     * @param sourceTokenHash digest of the original bearer
+     * @param routingWorkspaceId workspace the validated source token routed to
+     * @return deterministic raw browser grant and its cookie lifetime
+     */
+    @Transactional
+    public IssuedGrant issueRouted(
+            HttpServletRequest request,
+            Purpose purpose,
+            String sourceTokenHash,
+            int routingWorkspaceId) {
+        return issue(
+            request, browserBinding(request), purpose, sourceTokenHash, routingWorkspaceId);
     }
 
     /**
@@ -98,6 +133,15 @@ public class OneTimeLinkFlowService {
             String browserBinding,
             Purpose purpose,
             String sourceTokenHash) {
+        return issue(request, browserBinding, purpose, sourceTokenHash, null);
+    }
+
+    private IssuedGrant issue(
+            HttpServletRequest request,
+            String browserBinding,
+            Purpose purpose,
+            String sourceTokenHash,
+            Integer routingWorkspaceId) {
         requireValidHash(sourceTokenHash);
         String exchangeOwnerHash = exchangeOwnerHash(request, browserBinding);
         String rawGrant = derivedGrant(exchangeOwnerHash, purpose, sourceTokenHash);
@@ -108,8 +152,14 @@ public class OneTimeLinkFlowService {
             exchangeOwnerHash,
             purpose.name(),
             sourceTokenHash,
-            LIFETIME.toSeconds());
-        return new IssuedGrant(rawGrant, LIFETIME);
+            routingWorkspaceId,
+            purpose.lifetime().toSeconds());
+        return new IssuedGrant(rawGrant, purpose.lifetime());
+    }
+
+    private static String browserBinding(HttpServletRequest request) {
+        Cookie cookie = WebUtils.getCookie(request, BROWSER_BINDING_COOKIE);
+        return cookie == null ? null : cookie.getValue();
     }
 
     /**
@@ -118,9 +168,7 @@ public class OneTimeLinkFlowService {
      * @return SHA-256 digest of the combined owner
      */
     public String exchangeOwnerHash(HttpServletRequest request) {
-        Cookie cookie = WebUtils.getCookie(request, BROWSER_BINDING_COOKIE);
-        String binding = cookie == null ? null : cookie.getValue();
-        return exchangeOwnerHash(request, binding);
+        return exchangeOwnerHash(request, browserBinding(request));
     }
 
     private static String exchangeOwnerHash(
@@ -153,6 +201,44 @@ public class OneTimeLinkFlowService {
             throw invalidLink();
         }
         return new ResolvedFlow(sourceTokenHash, grantHash);
+    }
+
+    /**
+     * Resolves a valid flow for a token-free final operation only when the request echoes the
+     * preview identity it was rendered from, so a grant another tab swapped in cannot decide it.
+     * @param request current browser request
+     * @param purpose expected operation
+     * @param rawGrant flow cookie value
+     * @param flowId preview identity shown for the operation
+     * @return the source digest and non-authorizing identity
+     */
+    public ResolvedFlow requireBoundFlow(
+            HttpServletRequest request, Purpose purpose, String rawGrant, String flowId) {
+        if (!OneTimeTokenDigest.constantTimeEquals(grantHash(rawGrant), flowId)) {
+            throw invalidLink();
+        }
+        return requireFlow(request, purpose, rawGrant);
+    }
+
+    /**
+     * Resolves a valid routed flow without consuming it. A grant issued without a routing hint can
+     * never route, so it fails closed exactly like an unknown or expired grant.
+     * @param request current browser request
+     * @param purpose expected operation
+     * @param rawGrant flow cookie value
+     * @return the source digest, non-authorizing identity, and tenant routing hint
+     */
+    public RoutedFlow requireRoutedFlow(
+            HttpServletRequest request, Purpose purpose, String rawGrant) {
+        ResolvedFlow flow = requireFlow(request, purpose, rawGrant);
+        Integer workspaceId = flowMapper.findValidRoutingWorkspaceId(
+            flow.flowId(),
+            exchangeOwnerHash(request),
+            purpose.name());
+        if (workspaceId == null) {
+            throw invalidLink();
+        }
+        return new RoutedFlow(flow.sourceTokenHash(), flow.flowId(), workspaceId);
     }
 
     /**
@@ -261,6 +347,10 @@ public class OneTimeLinkFlowService {
 
     /** Server-resolved source and non-authorizing preview identity for one browser flow. */
     public record ResolvedFlow(String sourceTokenHash, String flowId) {
+    }
+
+    /** Resolved flow whose source lives in the hinted tenant workspace. */
+    public record RoutedFlow(String sourceTokenHash, String flowId, int workspaceId) {
     }
 
     /** Tenant operation that deletes its grant inside the transaction that applies its mutation. */

@@ -15,10 +15,7 @@ import {
     documentAcceptanceFailureKind,
     markDocumentAcceptanceViewed,
 } from "@/app/lib/api";
-import {
-    documentAcceptanceTokenFromLocation,
-    documentAcceptanceViewFailure,
-} from "@/app/components/marketing/campaigns/documentAcceptance";
+import { documentAcceptanceViewFailure } from "@/app/components/marketing/campaigns/documentAcceptance";
 import type {
     DocumentAcceptanceFailureKind,
     DocumentAcceptancePreview,
@@ -34,17 +31,25 @@ type DecisionMode = "accept" | "decline" | null;
 type DecisionReceipt = "accepted" | "declined" | null;
 type ViewState = "pending" | "recorded";
 
-/** Renders and records one public recipient review without using a Connex session. */
+/**
+ * Renders and records one public recipient review without using a Connex session.
+ * @param initialPreview the frozen document this browser's grant resolved to
+ * @param onSettled called once a decision receipt exists, so the host can stop polling a link the
+ *     backend now answers as unavailable
+ */
 export default function DocumentAcceptance({
     initialPreview,
+    onSettled,
 }: {
     initialPreview: DocumentAcceptancePreview;
+    onSettled?: () => void;
 }) {
     const t = useTranslations("DocumentAcceptance");
     const locale = useLocale();
     const viewRequested = useRef(false);
     const receiptRef = useRef<DecisionReceipt>(null);
     const [preview, setPreview] = useState(initialPreview);
+    const renderedFlowId = useRef(initialPreview.flowId);
     const [viewState, setViewState] = useState<ViewState>("pending");
     const [failure, setFailure] = useState<DocumentAcceptanceFailureKind | null>(null);
     const [mode, setMode] = useState<DecisionMode>(null);
@@ -58,14 +63,13 @@ export default function DocumentAcceptance({
     useEffect(() => {
         if (viewRequested.current) return;
         viewRequested.current = true;
-        const token = documentAcceptanceTokenFromLocation();
-        if (!token) {
-            void Promise.resolve().then(() => setFailure("unavailable"));
-            return;
-        }
-        void markDocumentAcceptanceViewed(token)
+        void markDocumentAcceptanceViewed()
             .then((viewed) => {
                 if (receiptRef.current) return;
+                if (viewed.flowId !== renderedFlowId.current) {
+                    setFailure("unavailable");
+                    return;
+                }
                 setPreview(viewed);
                 setViewState("recorded");
             })
@@ -127,15 +131,11 @@ export default function DocumentAcceptance({
         setRequestError(false);
         setIsSubmitting(true);
         try {
-            const token = documentAcceptanceTokenFromLocation();
-            if (!token) {
-                setFailure("unavailable");
-                return;
-            }
-            await acceptDocument(token, { typedName: normalizedName });
+            await acceptDocument({ flowId: preview.flowId, typedName: normalizedName });
             receiptRef.current = "accepted";
             setReceipt("accepted");
             setMode(null);
+            onSettled?.();
         } catch (error: unknown) {
             handleDecisionFailure(error);
         } finally {
@@ -158,15 +158,11 @@ export default function DocumentAcceptance({
         setRequestError(false);
         setIsSubmitting(true);
         try {
-            const token = documentAcceptanceTokenFromLocation();
-            if (!token) {
-                setFailure("unavailable");
-                return;
-            }
-            await declineDocument(token, { reason: normalizedReason });
+            await declineDocument({ flowId: preview.flowId, reason: normalizedReason });
             receiptRef.current = "declined";
             setReceipt("declined");
             setMode(null);
+            onSettled?.();
         } catch (error: unknown) {
             handleDecisionFailure(error);
         } finally {

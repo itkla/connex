@@ -451,7 +451,7 @@ jobs:
             ENFORCED_HTML \
             'text/html'
           probe_edge_headers \
-            http://localhost:18099/document-acceptance/not-a-bearer \
+            http://localhost:18099/document-acceptance \
             200 \
             ENFORCED_HTML \
             'text/html' \

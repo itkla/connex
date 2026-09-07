@@ -22,6 +22,11 @@ public class DocumentAcceptanceAdmissionService {
         return new Admission(originalShapeValid, workspace, tokenHash);
     }
 
+    /** Resolves the active workspace a routed grant points at, or null when it is gone. */
+    public Workspace lookupWorkspace(int workspaceId) {
+        return workspaceMapper.getActiveById(workspaceId);
+    }
+
     /** Result of the public bearer admission lookup. */
     public record Admission(
             boolean originalShapeValid,

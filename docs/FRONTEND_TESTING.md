@@ -148,14 +148,19 @@ Known scope cut: the notifications flow asserts the inbox/read-state surface but
 The document-acceptance spec creates frozen documents both without and with a real deal line item,
 then sends their deliveries with the authenticated request context. CI configures the backend's
 instance SMTP transport on loopback port 2525, where the spec's dependency-free SMTP capture
-obtains the only supported bearer surface exposed by `InAppAcceptanceProvider`. Playwright opens
-those links in a new context with no storage state, inspects every bearer-route request for absent
-session/workspace credentials, and drives preview, viewed, and accept through the running frontend
-and backend without interception before verifying the committed delivery receipt. CI enables
-signature delivery, permits the loopback SMTP destination, and trusts only loopback as the
-sanitizing proxy for this dev-profile test process. The separate bounded preview fixture remains
-responsible for viewer presentation, themes, responsive layout, reduced motion, and Japanese-document
-rendering; it does not stand in for persistence proof.
+obtains the `/document-acceptance#token=…` fragment link `InAppAcceptanceProvider` emits. Playwright
+opens those links in a new context with no storage state and asserts the cutover contract: the address
+bar settles on the bare `/document-acceptance`, no request URL ever contains the bearer, exactly one
+`POST /api/document-acceptance/exchange` carries it in its body, and the resulting
+`connex_document_acceptance_flow` cookie is `HttpOnly`, `SameSite=Strict`, and scoped to
+`/api/document-acceptance`. It then drives preview, viewed, and accept through the running frontend
+and backend without interception, verifies the committed delivery receipt, and re-opens the same link
+in a fresh context to prove a decided link can no longer be exchanged. CI enables signature delivery,
+permits the loopback SMTP destination, and trusts only loopback as the sanitizing proxy for this
+dev-profile test process. The presentation cases in the same file route the CSRF bootstrap, exchange,
+and the three token-free endpoints in the browser, so viewer presentation, themes, responsive layout,
+reduced motion, and Japanese-document rendering no longer need a second Next server; they do not stand
+in for persistence proof.
 
 ## Flake policy
 

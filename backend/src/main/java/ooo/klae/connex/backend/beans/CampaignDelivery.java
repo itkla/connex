@@ -26,6 +26,7 @@ public class CampaignDelivery {
     private String channel;
     private String reconciliationOutcome;
     private String unsubscribeToken;
+    private String unsubscribeTokenHash;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
