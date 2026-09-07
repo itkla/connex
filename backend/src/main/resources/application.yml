@@ -416,6 +416,12 @@ connex:
         batch-size: ${CONNEX_LEAD_RESPONSE_SLA_BATCH_SIZE:200}
         max-batches: ${CONNEX_LEAD_RESPONSE_SLA_MAX_BATCHES:10}
     workflows:
+        # Rolling-deployment fence for the `send_message` action. Leave it closed until every node
+        # can validate and execute the token. Close it everywhere before rolling back binaries.
+        triggered-send:
+            enabled: ${CONNEX_WORKFLOWS_TRIGGERED_SEND_ENABLED:false}
+            recipient-limit: ${CONNEX_WORKFLOWS_TRIGGERED_SEND_RECIPIENT_LIMIT:200}
+            dispatch-page-size: ${CONNEX_WORKFLOWS_TRIGGERED_SEND_DISPATCH_PAGE_SIZE:200}
         # Rolling-deployment fence for the `document` automation record type. A binary that predates
         # document automation would attach a document run's task/activity/note to nothing and fails
         # every canonical document run closed, so leave this off until every node in the deployment

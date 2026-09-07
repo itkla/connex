@@ -11,7 +11,8 @@ The policy treats these accounts as privileged:
 
 - organization `owner` and `admin` members;
 - active built-in workspace `owner` and `admin` members; and
-- active custom-role members granted any of `AUDIT_READ`, `CAMPAIGN_MANAGE`, `CAMPAIGN_SEND`,
+- active custom-role members granted any of `API_CREDENTIAL_MANAGE`, `AUDIT_READ`,
+  `CAMPAIGN_MANAGE`, `CAMPAIGN_SEND`,
   `CONSENT_MANAGE`, `CUSTOM_FIELD_MANAGE`, `DOCUMENT_MANAGE`, `MEMBER_MANAGE`, `PIPELINE_MANAGE`,
   `PRODUCT_MANAGE`, `ROLE_MANAGE`, `RULE_MANAGE`, `SEQUENCE_MANAGE`, `SHARE_MANAGE`, `TAG_MANAGE`,
   `TEAM_MANAGE`, or `WORKSPACE_SETTINGS`.
@@ -22,6 +23,10 @@ outbound sales activity; holding it in any workspace makes the account privilege
 
 `TEAM_MANAGE` is privileged because it authorizes manager assignment and membership changes across
 the workspace's teams.
+
+`API_CREDENTIAL_MANAGE` is privileged because it can mint a durable bearer credential. Public API
+authentication independently applies the same passkey-enrollment policy before admitting a PAT,
+so an unenrolled privileged creator cannot bypass browser confinement with an existing token.
 
 An unenrolled privileged account may read its own account and workspace-membership snapshot, read
 the public capability posture, obtain a CSRF token, list and enroll passkeys, use the recovery
@@ -39,7 +44,8 @@ registration ceremony creates the recent-MFA stamp.
 The existing service boundaries require recent WebAuthn verification for role and membership
 changes, SSO and allowed-domain configuration, secret/provider/mail/connector configuration,
 tenant deletion and lifecycle export, provider disconnection and captured-data purge, support and
-privacy exports, and passkey changes. The policy filter also covers every remaining CSV/data-export
+privacy exports, passkey changes, and personal API credential issuance. The policy filter also
+covers every remaining CSV/data-export
 surface: ordinary CRM exports, workspace and organization audit exports, campaign audience
 exports, and report/snapshot exports. A password re-prompt never satisfies these gates. The recent
 verification window defaults to ten minutes; an absent, zero, negative, or malformed duration

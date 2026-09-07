@@ -117,7 +117,8 @@ public class CampaignRecipientService {
                 .map(row -> new CampaignRecipientDto(
                         row.deliveryId(), row.sendId(), row.channel(), row.personId(),
                         row.personId() == null ? null : labels.get(row.personId()),
-                        row.status(), row.skipReason(), row.createdAt(), row.updatedAt()))
+                        row.status(), row.skipReason(), row.reconciliationRequiredAt() != null,
+                        row.reasonCode(), row.createdAt(), row.updatedAt()))
                 .toList();
     }
 }

@@ -48,6 +48,7 @@ import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProviders;
 import ooo.klae.connex.backend.connectedaccounts.capture.ProviderCapturePurgeService;
+import ooo.klae.connex.backend.publicapi.ApiCredentialLifecycleService;
 
 /**
  * Service-layer replacement for the database-level fan-out that account
@@ -112,6 +113,7 @@ public class UserOffboardingService {
     private final TenantWorkScope tenantWorkScope;
     private final TenantContext tenantContext;
     private final SequenceMapper sequenceMapper;
+    private final ApiCredentialLifecycleService apiCredentialLifecycleService;
 
     /**
      * Refuses deletion while the user still owns authored content, mirroring
@@ -196,6 +198,7 @@ public class UserOffboardingService {
             lockTeamReferences(teamMapper.findReferencesForUser(workspaceId, userId));
             teamMapper.deleteMembershipsForUser(workspaceId, userId);
             teamMapper.clearManagerForUser(workspaceId, userId);
+            apiCredentialLifecycleService.deleteForMembership(workspaceId, userId);
         }
     }
 
@@ -279,6 +282,7 @@ public class UserOffboardingService {
         lockTeamReferences(teamMapper.findReferencesForUser(workspaceId, userId));
         teamMapper.deleteMembershipsForUser(workspaceId, userId);
         teamMapper.clearManagerForUser(workspaceId, userId);
+        apiCredentialLifecycleService.deleteForMembership(workspaceId, userId);
     }
 
     /**

@@ -17,6 +17,8 @@ public record WorkflowStepRunDto(
     String selectedOutcome,
     String selectedEdgeId,
     String nextNodeId,
+    String actionOutcome,
+    Long actionReferenceId,
     LocalDateTime startedAt,
     LocalDateTime finishedAt,
     Long durationMs,

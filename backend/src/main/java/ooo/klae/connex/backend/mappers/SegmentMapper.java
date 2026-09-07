@@ -45,17 +45,33 @@ public interface SegmentMapper {
         @Param("limit") int limit);
 
     /** Ids of companies that have at least one open deal ({@code won IS NULL}). */
-    List<Integer> companyIdsWithOpenDeal(int workspaceId);
+    List<Integer> companyIdsWithOpenDeal(
+            @Param("workspaceId") int workspaceId,
+            @Param("candidateIds") List<Integer> candidateIds);
 
     /** Ids of companies with no processable logged activity in the last {@code days} days. */
-    List<Integer> companyIdsNoActivitySince(@Param("workspaceId") int workspaceId, @Param("days") int days);
+    List<Integer> companyIdsNoActivitySince(
+            @Param("workspaceId") int workspaceId,
+            @Param("days") int days,
+            @Param("candidateIds") List<Integer> candidateIds);
 
     /**
      * Ids of the companies owning any of {@code personIds}, excluding companies the given user has
      * already logged activity with. {@code personIds} must be non-empty.
      */
     List<Integer> companyIdsForPersonsWithoutUserActivity(@Param("workspaceId") int workspaceId,
-            @Param("userId") int userId, @Param("personIds") List<Integer> personIds);
+            @Param("userId") int userId, @Param("personIds") List<Integer> personIds,
+            @Param("candidateIds") List<Integer> candidateIds);
+
+    /**
+     * Candidate-scoped warm-intro predicate for bounded automation evaluation.
+     * {@code candidateIds} must be non-empty company ids from one evaluator page.
+     */
+    List<Integer> companyIdsWithWarmIntro(
+            @Param("workspaceId") int workspaceId,
+            @Param("userId") int userId,
+            @Param("candidateIds") List<Integer> candidateIds,
+            @Param("strongEdge") int strongEdge);
 
     /**
      * Ids of companies matching one field condition. {@code params} carries {@code workspaceId},

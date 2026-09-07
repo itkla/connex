@@ -20,8 +20,12 @@ import { useWorkflowEditor } from "@/app/components/settings/workflows/useWorkfl
 import { useWorkflowWorkspaceAccess } from "@/app/components/settings/workflows/useWorkflowWorkspaceAccess";
 import { workflowDelayDiagnostics } from "@/app/components/settings/workflows/workflowGraph";
 import { workflowRunReferenceParts } from "@/app/components/settings/workflows/workflowRunKey";
+import { canAuthorTriggeredSend } from "@/app/components/settings/workflows/vocabulary";
+import { useGrantedPermissions } from "@/app/hooks/usePermissions";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
 import {
+    getCampaignMessages,
+    getCampaigns,
     getCompanies,
     getPipelines,
     getSegmentFields,
@@ -32,6 +36,7 @@ import { toastError } from "@/app/lib/toast";
 import type {
     RuleBuilderOptions,
     SegmentFields,
+    WorkflowCampaignMessageOptions,
     WorkflowDiagnostic,
     WorkflowDiagnosticCode,
     WorkflowEdgeOutcome,
@@ -66,15 +71,30 @@ function narrowEditorServerSnapshot(): boolean {
 }
 
 /** Full-height canonical workflow editor with peer canvas and outline authoring renderers. */
-export default function WorkflowEditor({ workflowId }: { workflowId?: number }) {
+export default function WorkflowEditor({
+    workflowId,
+    triggeredSendEnabled,
+}: {
+    workflowId?: number;
+    triggeredSendEnabled: boolean;
+}) {
     return (
         <ReactFlowProvider>
-            <WorkflowEditorBody workflowId={workflowId} />
+            <WorkflowEditorBody
+                workflowId={workflowId}
+                triggeredSendEnabled={triggeredSendEnabled}
+            />
         </ReactFlowProvider>
     );
 }
 
-function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
+function WorkflowEditorBody({
+    workflowId,
+    triggeredSendEnabled,
+}: {
+    workflowId?: number;
+    triggeredSendEnabled: boolean;
+}) {
     const t = useTranslations("WorkspaceWorkflows");
     const tr = useTranslations("WorkflowAuthoring");
     const router = useRouter();
@@ -85,6 +105,7 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
         narrowEditorServerSnapshot,
     );
     const { activeWorkspaceId, switching } = useWorkspace();
+    const grantedPermissions = useGrantedPermissions();
     const { canRunAsSystem, members } = useWorkflowWorkspaceAccess();
     const editor = useWorkflowEditor({ workflowId, activeWorkspaceId, switching, canRunAsSystem });
     const loadedWorkflow = editor.workflow;
@@ -105,6 +126,8 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
         workspaceId: number;
         value: Omit<RuleBuilderOptions, "owners">;
     } | null>(null);
+    const [campaignMessageOptions, setCampaignMessageOptions] =
+        useState<(WorkflowCampaignMessageOptions & { workspaceId: number }) | null>(null);
 
     useEffect(() => {
         if (
@@ -165,6 +188,53 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
             }
             : null
     ), [activeWorkspaceId, members, referenceOptions]);
+
+    const canConfigureTriggeredSend = canAuthorTriggeredSend(
+        editor.document.recordType,
+        editor.document.executionMode,
+        grantedPermissions,
+        triggeredSendEnabled,
+    );
+
+    useEffect(() => {
+        if (!activeWorkspaceId || !canConfigureTriggeredSend) return;
+        const workspaceId = activeWorkspaceId;
+        let active = true;
+        const controller = new AbortController();
+        const workspaceHeaders = { "X-Workspace-Id": String(workspaceId) };
+        void getCampaigns({ signal: controller.signal, headers: workspaceHeaders })
+            .then(async (campaigns) => {
+                const messages = await Promise.all(campaigns.map(async (campaign) => ({
+                    campaign,
+                    messages: await getCampaignMessages(campaign.id, {
+                        signal: controller.signal,
+                        headers: workspaceHeaders,
+                    }),
+                })));
+                if (!active || controller.signal.aborted) return;
+                setCampaignMessageOptions({
+                        workspaceId,
+                        status: "ready",
+                        items: messages.flatMap(({ campaign, messages: campaignMessages }) => (
+                            campaignMessages.map((message) => ({ campaignName: campaign.name, message }))
+                        )),
+                    });
+            })
+            .catch(() => {
+                if (!active || controller.signal.aborted) return;
+                setCampaignMessageOptions({ workspaceId, status: "failed", items: [] });
+            });
+        return () => {
+            active = false;
+            controller.abort();
+        };
+    }, [activeWorkspaceId, canConfigureTriggeredSend]);
+
+    const availableCampaignMessages = campaignMessageOptions?.workspaceId === activeWorkspaceId
+        ? campaignMessageOptions
+        : canConfigureTriggeredSend && activeWorkspaceId
+            ? { status: "loading" as const, items: [] }
+            : null;
 
     useEffect(() => {
         const recordType = editor.document.recordType;
@@ -271,7 +341,13 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
     const diagnosticMessage = useCallback((diagnostic: {
         code: WorkflowDiagnosticCode;
         params: Record<string, string>;
-    }) => t(`diagnostics.${diagnostic.code}`, diagnostic.params), [t]);
+    }) => t.has(`diagnostics.${diagnostic.code}`)
+        ? t(`diagnostics.${diagnostic.code}`, diagnostic.params)
+        : (
+            <span title={diagnostic.code} aria-description={diagnostic.code}>
+                {t("diagnosticFallback")}
+            </span>
+        ), [t]);
     const localDiagnostics = useMemo(
         () => workflowDelayDiagnostics(editor.document.definition),
         [editor.document.definition],
@@ -330,6 +406,9 @@ function WorkflowEditorBody({ workflowId }: { workflowId?: number }) {
             diagnostics={visibleDiagnostics}
             readOnly={editor.editingReadOnly}
             canRunAsSystem={canRunAsSystem}
+            triggeredSendEnabled={triggeredSendEnabled}
+            canConfigureTriggeredSend={canConfigureTriggeredSend}
+            campaignMessageOptions={availableCampaignMessages}
             focusFieldPath={editor.focusFieldPath}
             focusRequestId={editor.focusRequestId}
             diagnosticMessage={(diagnostic) => diagnosticMessage(diagnostic)}

@@ -26,6 +26,7 @@
   <sql id="stepColumns">
     id, workspace_id, workflow_run_id, sequence_number, node_id, node_type, status,
     attempt_count, retry_safety, selected_outcome, selected_edge_id, next_node_id,
+    action_outcome, action_reference_id,
     failure_code, failure_message, started_at, finished_at
   </sql>
 
@@ -96,11 +97,13 @@
     INSERT INTO workflow_step_run
       (workspace_id, workflow_run_id, sequence_number, node_id, node_type, status,
        attempt_count, retry_safety, selected_outcome, selected_edge_id, next_node_id,
+       action_outcome, action_reference_id,
        failure_code, failure_message, started_at, finished_at)
     VALUES
       (#{workspaceId}, #{workflowRunId}, #{sequenceNumber}, #{nodeId}, #{nodeType},
        #{status}, #{attemptCount}, #{retrySafety}, #{selectedOutcome}, #{selectedEdgeId},
-       #{nextNodeId}, #{failureCode}, #{failureMessage}, #{startedAt}, #{finishedAt})
+       #{nextNodeId}, #{actionOutcome}, #{actionReferenceId}, #{failureCode},
+       #{failureMessage}, #{startedAt}, #{finishedAt})
   </insert>
 
   <select id="getStepByNodeForUpdate" resultType="WorkflowStepRun">
@@ -128,6 +131,8 @@
         selected_outcome = NULL,
         selected_edge_id = NULL,
         next_node_id = NULL,
+        action_outcome = NULL,
+        action_reference_id = NULL,
         failure_code = NULL,
         failure_message = NULL,
         started_at = #{startedAt},
@@ -175,6 +180,8 @@
         selected_outcome = #{selectedOutcome},
         selected_edge_id = #{selectedEdgeId},
         next_node_id = #{nextNodeId},
+        action_outcome = #{actionOutcome},
+        action_reference_id = #{actionReferenceId},
         failure_code = NULL,
         failure_message = NULL,
         finished_at = #{finishedAt}
@@ -580,5 +587,13 @@
     WHERE workspace_id = #{workspaceId} AND workflow_run_id = #{workflowRunId}
     ORDER BY sequence_number, id
   </select>
+
+  <update id="markActionDeliveryCapped">
+    UPDATE workflow_step_run
+    SET action_outcome = 'delivery_capped'
+    WHERE workspace_id = #{workspaceId}
+      AND action_reference_id = #{deliveryId}
+      AND action_outcome IN ('delivery_queued', 'delivery_dedup_skipped')
+  </update>
 
 </mapper>

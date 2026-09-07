@@ -182,7 +182,7 @@ class CampaignEngagementServiceTest extends AbstractServiceTest {
 
     private void toFailed(int id) {
         campaignDeliveryMapper.claim(workspace.getId(), id);
-        campaignDeliveryMapper.markFailed(workspace.getId(), id, "boom");
+        campaignDeliveryMapper.markFailed(workspace.getId(), id, "boom", "relay_error");
         recordEvent(id, "failed");
     }
 

@@ -64,6 +64,8 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
+import ooo.klae.connex.backend.publicapi.ApiCredentialLifecycleService;
+import ooo.klae.connex.backend.publicapi.ApiCredentialReferenceRoot;
 import ooo.klae.connex.backend.services.WorkflowOffboardingService.OffboardingPlan;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -105,6 +107,7 @@ class UserOffboardingOrderTest {
     @Mock private WorkflowOffboardingService workflowOffboardingService;
     @Mock private ProviderCapturePurgeService providerCapturePurgeService;
     @Mock private TenantWorkScope tenantWorkScope;
+    @Mock private ApiCredentialLifecycleService apiCredentialLifecycleService;
     @Spy private TenantContext tenantContext = new TenantContext();
 
     @InjectMocks private UserOffboardingService service;
@@ -139,7 +142,8 @@ class UserOffboardingOrderTest {
             savedViewPreferenceMapper, savedViewMapper,
             dealDuplicateReviewProofMapper, duplicateReviewMapper,
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
-            notificationMapper, dealMapper, relationshipSignalMapper, teamMapper);
+            notificationMapper, dealMapper, relationshipSignalMapper, teamMapper,
+            apiCredentialLifecycleService);
         order.verify(tenantWorkScope).withWorkspacePlacement(eq(7), any());
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
@@ -161,6 +165,7 @@ class UserOffboardingOrderTest {
         order.verify(teamMapper).getByIdForUpdate(7, 12);
         order.verify(teamMapper).deleteMembershipsForUser(7, 9);
         order.verify(teamMapper).clearManagerForUser(7, 9);
+        order.verify(apiCredentialLifecycleService).deleteForMembership(7, 9);
         assertPreviousTenantContext();
     }
 
@@ -217,7 +222,7 @@ class UserOffboardingOrderTest {
             aiChatMapper, aiBriefScheduleMapper, aiWatchMapper,
             taskMapper, companyMapper,
             personMapper, dealMapper, campaignMapper, sequenceMapper, relationshipSignalMapper,
-            teamMapper);
+            teamMapper, apiCredentialLifecycleService);
         order.verify(providerCapturePurgeService).purge(7, 9, "google");
         order.verify(providerCapturePurgeService).purge(7, 9, "microsoft");
         order.verify(notificationMapper).lockRecipientMemberships(9);
@@ -244,6 +249,7 @@ class UserOffboardingOrderTest {
         order.verify(teamMapper).getByIdForUpdate(7, 12);
         order.verify(teamMapper).deleteMembershipsForUser(7, 9);
         order.verify(teamMapper).clearManagerForUser(7, 9);
+        order.verify(apiCredentialLifecycleService).deleteForMembership(7, 9);
         verifyNoInteractions(stateVersionService);
     }
 
@@ -337,10 +343,17 @@ class UserOffboardingOrderTest {
         UserAccountCatalogOffboardingService catalogOffboardingService =
             mock(UserAccountCatalogOffboardingService.class);
         TenantWorkScope tenantWorkScope = mock(TenantWorkScope.class);
+        ApiCredentialLifecycleService apiCredentialLifecycleService =
+            mock(ApiCredentialLifecycleService.class);
         User user = new User();
         user.setId(9);
         user.setUsername("target");
         when(workspaceService.discoverOwnedWorkspaceIds(9)).thenReturn(List.of(7));
+        List<ApiCredentialReferenceRoot> credentialRoots = List.of(
+            new ApiCredentialReferenceRoot(3, 2),
+            new ApiCredentialReferenceRoot(11, 5));
+        when(apiCredentialLifecycleService.discoverAccountReferenceRoots(9))
+            .thenReturn(credentialRoots);
         when(userMapper.lockById(9)).thenReturn(9);
         when(userMapper.reserveAccountDeletion(
                 eq(9), org.mockito.ArgumentMatchers.anyString()))
@@ -357,7 +370,9 @@ class UserOffboardingOrderTest {
             workspaceService,
             orgMemberService,
             mock(ooo.klae.connex.backend.storage.ManagedObjectService.class),
-            auditService
+            auditService,
+            apiCredentialLifecycleService,
+            tenantContext
         );
         when(tenantWorkScope.unrouted(
                 org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any()))
@@ -382,26 +397,30 @@ class UserOffboardingOrderTest {
             deletionTransaction,
             accountSessionRevocationService
         );
+        tenantContext.set(13, 6, 9, "member", null);
 
         userService.delete(9);
 
         InOrder order = inOrder(
             workspaceService, providerOffboardingService,
-            catalogOffboardingService, orgMemberService, userMapper);
+            catalogOffboardingService, orgMemberService, userMapper,
+            apiCredentialLifecycleService);
         order.verify(workspaceService).requireSelf(9);
         order.verify(userMapper).lockById(9);
         order.verify(workspaceService).discoverOwnedWorkspaceIds(9);
         order.verify(workspaceService).lockAccountWorkspaceRoots(List.of(7), List.of());
         order.verify(workspaceService).assertNotSoleOwnerOfWorkspaces(List.of(7));
-        order.verify(orgMemberService).assertNotSoleOwnerOfAnyOrg(9);
+        order.verify(orgMemberService).assertNotSoleOwnerOfAnyOrg(9, List.of());
         order.verify(catalogOffboardingService).assertNoAuthoredContent(9);
         order.verify(providerOffboardingService).purgeBeforeAccountDeletion(9);
         order.verify(catalogOffboardingService).eraseReferences(9);
         order.verify(userMapper).lockById(9);
         order.verify(workspaceService).discoverOwnedWorkspaceIds(9);
-        order.verify(workspaceService).lockAccountWorkspaceRoots(List.of(7), List.of());
+        order.verify(apiCredentialLifecycleService).discoverAccountReferenceRoots(9);
+        order.verify(workspaceService).lockAccountWorkspaceRoots(List.of(7), List.of(3, 11, 13));
         order.verify(workspaceService).assertNotSoleOwnerOfWorkspaces(List.of(7));
-        order.verify(orgMemberService).assertNotSoleOwnerOfAnyOrg(9);
+        order.verify(orgMemberService).assertNotSoleOwnerOfAnyOrg(9, List.of(2, 5, 6));
+        order.verify(apiCredentialLifecycleService).deleteForAccount(9, credentialRoots);
         order.verify(userMapper).delete(9);
 
         InOrder revocationOrder = inOrder(userMapper, accountSessionRevocationService);

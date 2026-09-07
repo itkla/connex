@@ -2,11 +2,13 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -15,6 +17,7 @@ import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,18 +26,17 @@ import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import ooo.klae.connex.backend.beans.Rule;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.WorkflowNode;
-import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
-import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
 
 @ExtendWith(MockitoExtension.class)
@@ -43,16 +45,17 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
     @Mock private WorkflowTriggerOutboxMapper outboxMapper;
     @Mock private WorkflowMapper workflowMapper;
     @Mock private WorkflowVersionMapper versionMapper;
-    @Mock private RuleMapper ruleMapper;
-    @Mock private WorkspaceMapper workspaceMapper;
     @Mock private SegmentMapper segmentMapper;
     @Mock private SegmentService segmentService;
     @Mock private WorkflowRuntimeClaimService claimService;
     @Mock private WorkflowExecutionPrincipalService principalService;
     @Mock private RuleEngineService ruleEngineService;
     @Mock private WorkflowRuntimeProperties properties;
+    @Mock private WorkflowTriggeredSendGate triggeredSendGate;
+    @Mock private AuditService auditService;
 
     private WorkflowTriggerOutboxDeliveryService service;
+    private WorkflowExecutionPrincipal principal;
 
     @BeforeEach
     void setUp() {
@@ -60,20 +63,28 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
             outboxMapper,
             workflowMapper,
             versionMapper,
-            ruleMapper,
-            workspaceMapper,
             segmentMapper,
             segmentService,
             claimService,
             principalService,
             ruleEngineService,
-            properties);
+            properties,
+            triggeredSendGate,
+            auditService);
+        lenient().when(triggeredSendGate.recipientLimit()).thenReturn(200);
+        User actor = new User();
+        actor.setId(17);
+        principal = new WorkflowExecutionPrincipal(
+            actor, "member", 17, 17, java.util.Set.of());
+        lenient().when(principalService.resolveLocked(anyInt(), any(WorkflowVersion.class)))
+            .thenReturn(principal);
     }
 
     @Test
     void entityDeliveryBracketsCanonicalClaimWithBothPersistedOwnerChecks() {
         WorkflowTriggerOutbox outbox = entityOutbox();
         Workflow workflow = matchingWorkflow();
+        when(outboxMapper.getById(7, 31L)).thenReturn(outbox);
         when(outboxMapper.getOwnedForUpdate(7, 31L, "lease"))
             .thenReturn(outbox);
         when(workflowMapper.getById(7, 11)).thenReturn(workflow);
@@ -81,13 +92,8 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
         version.setExecutionMode("user");
         version.setRunAsUserId(17);
         when(versionMapper.getById(7, 11, 23L)).thenReturn(version);
-        Rule rule = new Rule();
-        rule.setExecutionMode("user");
-        rule.setRunAsUserId(17);
-        when(ruleMapper.getById(7, 29)).thenReturn(rule);
         when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
         when(outboxMapper.complete(7, 31L, "lease")).thenReturn(1);
-
         WorkflowTriggerOutboxDeliveryService.DeliveryResult result =
             service.deliver(7, 31L, "lease");
 
@@ -97,25 +103,25 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
         InOrder order = inOrder(
             workflowMapper,
             versionMapper,
-            ruleMapper,
-            workspaceMapper,
+            principalService,
             ruleEngineService,
             claimService,
             outboxMapper);
-        order.verify(outboxMapper).ensureWorkspaceGate(7);
-        order.verify(outboxMapper).getOwnedForUpdate(7, 31L, "lease");
+        order.verify(outboxMapper).getById(7, 31L);
         order.verify(workflowMapper).getById(7, 11);
         order.verify(versionMapper).getById(7, 11, 23L);
-        order.verify(ruleMapper).getById(7, 29);
-        order.verify(workspaceMapper).lockAuthorizationMembership(7, 17);
+        order.verify(principalService).resolveLocked(7, version);
+        order.verify(outboxMapper).ensureWorkspaceGate(7);
+        order.verify(outboxMapper).getOwnedForUpdate(7, 31L, "lease");
         order.verify(workflowMapper).getByIdForUpdate(7, 11);
         order.verify(ruleEngineService)
-            .onEntityChangeForWorkflow(11, entityDispatch());
+            .onEntityChangeForWorkflow(11, entityDispatch(), principal);
         order.verify(claimService).claimOutbox(outbox, 19);
         order.verify(ruleEngineService)
-            .onEntityChangeForWorkflow(11, entityDispatch());
+            .onEntityChangeForWorkflow(11, entityDispatch(), principal);
         order.verify(outboxMapper).complete(7, 31L, "lease");
-        verifyNoInteractions(segmentMapper, segmentService, principalService);
+        verify(principalService, never()).resolve(7, version);
+        verifyNoInteractions(segmentMapper, segmentService);
     }
 
     @Test
@@ -142,9 +148,11 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
         WorkflowNode.Condition condition = new WorkflowNode.Condition(
             "enrollment", definition);
         CompiledWorkflow compiled = mock(CompiledWorkflow.class);
+        when(compiled.nodes()).thenReturn(java.util.Map.of());
         WorkflowRuntimeClaimService.ScheduleEnrollment enrollment =
             new WorkflowRuntimeClaimService.ScheduleEnrollment(
                 11, version, compiled, condition, 17);
+        when(outboxMapper.getById(7, 31L)).thenReturn(outbox);
         when(outboxMapper.getOwnedForUpdate(7, 31L, "lease"))
             .thenReturn(outbox);
         when(workflowMapper.getById(7, 11)).thenReturn(workflow);
@@ -154,7 +162,7 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
         when(properties.maxScheduleRecordsPerPage()).thenReturn(100);
         when(segmentMapper.entityIdsPage(7, "company", 0, 0, 100))
             .thenReturn(List.of());
-        when(outboxMapper.saveSchedulePage(7, 31L, "lease", 0, true))
+        when(outboxMapper.saveSchedulePage(7, 31L, "lease", 0, 0, true))
             .thenReturn(1);
 
         service.deliver(7, 31L, "lease");
@@ -171,19 +179,10 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
         version.setId(23L);
         version.setExecutionMode("user");
         version.setRunAsUserId(17);
-        SegmentDefinition definition = new SegmentDefinition();
-        WorkflowNode.Condition condition = new WorkflowNode.Condition(
-            "enrollment", definition);
-        WorkflowRuntimeClaimService.ScheduleEnrollment enrollment =
-            new WorkflowRuntimeClaimService.ScheduleEnrollment(
-                11, version, mock(CompiledWorkflow.class), condition, 17);
-        when(outboxMapper.getOwnedForUpdate(7, 31L, "lease"))
-            .thenReturn(outbox);
+        when(outboxMapper.getById(7, 31L)).thenReturn(outbox);
         when(workflowMapper.getById(7, 11)).thenReturn(workflow);
         when(versionMapper.getById(7, 11, 23L)).thenReturn(version);
-        when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
-        when(claimService.outboxScheduleEnrollment(outbox)).thenReturn(enrollment);
-        when(principalService.resolve(7, version)).thenThrow(
+        when(principalService.resolveLocked(7, version)).thenThrow(
             new WorkflowExecutionException(
                 "actor_unavailable", "Actor unavailable", true));
 
@@ -193,8 +192,59 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
 
         assertEquals("actor_unavailable", failure.code());
         verify(outboxMapper, never()).saveSchedulePage(
-            anyInt(), anyLong(), anyString(), anyInt(), anyBoolean());
+            anyInt(), anyLong(), anyString(), anyInt(), anyInt(), anyBoolean());
         verifyNoInteractions(segmentMapper, segmentService);
+    }
+
+    @Test
+    void scheduledTriggeredSendStopsAtConfiguredRecipientLimitWithDiagnosticAndStrictAudit() {
+        WorkflowTriggerOutbox outbox = scheduleOutbox();
+        outbox.setRecordType("person");
+        outbox.setRecordScanUpperId(2);
+        Workflow workflow = matchingWorkflow();
+        workflow.setLegacyRuleId(null);
+        WorkflowVersion version = new WorkflowVersion();
+        version.setId(23L);
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
+        SegmentDefinition definition = new SegmentDefinition();
+        WorkflowNode.Condition condition = new WorkflowNode.Condition("enrollment", definition);
+        RuleAction send = new RuleAction();
+        send.setType("send_message");
+        CompiledWorkflow compiled = mock(CompiledWorkflow.class);
+        when(compiled.nodes()).thenReturn(Map.of(
+            "send", new WorkflowNode.Action("send", send)));
+        WorkflowRuntimeClaimService.ScheduleEnrollment enrollment =
+            new WorkflowRuntimeClaimService.ScheduleEnrollment(
+                11, version, compiled, condition, 17);
+        when(outboxMapper.getById(7, 31L)).thenReturn(outbox);
+        when(outboxMapper.getOwnedForUpdate(7, 31L, "lease")).thenReturn(outbox);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        when(versionMapper.getById(7, 11, 23L)).thenReturn(version);
+        when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
+        when(claimService.outboxScheduleEnrollment(outbox)).thenReturn(enrollment);
+        when(properties.maxScheduleRecordsPerPage()).thenReturn(100);
+        when(triggeredSendGate.recipientLimit()).thenReturn(1);
+        when(segmentMapper.entityIdsPage(7, "person", 0, 2, 100))
+            .thenReturn(List.of(1, 2));
+        when(segmentService.matchesEntity(7, 17, "person", definition, 1)).thenReturn(true);
+        when(segmentService.matchesEntity(7, 17, "person", definition, 2)).thenReturn(true);
+        when(outboxMapper.deadLetter(
+            7, 31L, "lease", "triggered_send_recipient_limit")).thenReturn(1);
+
+        service.deliver(7, 31L, "lease");
+
+        verify(claimService).claimOutbox(outbox, 1);
+        verify(claimService, never()).claimOutbox(outbox, 2);
+        verify(outboxMapper).deadLetter(
+            7, 31L, "lease", "triggered_send_recipient_limit");
+        verify(auditService).recordStrict(
+            "workflow.triggered_send.recipient_limit",
+            "workflow",
+            11,
+            "Workflow 11",
+            "Scheduled send-message recipients were capped",
+            Map.of("limit", 1, "code", "triggered_send_recipient_limit"));
     }
 
     private static WorkflowTriggerOutbox scheduleOutbox() {

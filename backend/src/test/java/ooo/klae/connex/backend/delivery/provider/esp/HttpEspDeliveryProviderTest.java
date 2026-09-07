@@ -1,8 +1,10 @@
 package ooo.klae.connex.backend.delivery.provider.esp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mockStatic;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -10,13 +12,22 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.springframework.http.HttpMethod;
@@ -30,12 +41,14 @@ import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryCredentials;
 import ooo.klae.connex.backend.delivery.DeliveryEvent;
 import ooo.klae.connex.backend.delivery.DeliveryEventType;
+import ooo.klae.connex.backend.delivery.DeliveryProperties;
 import ooo.klae.connex.backend.delivery.DeliveryProviderException;
 import ooo.klae.connex.backend.delivery.DeliveryRequest;
 import ooo.klae.connex.backend.delivery.DispatchReceipt;
 import ooo.klae.connex.backend.delivery.DispatchStatus;
 import ooo.klae.connex.backend.delivery.RenderedMessage;
 import ooo.klae.connex.backend.delivery.ResolvedDeliveryProvider;
+import ooo.klae.connex.backend.delivery.provider.http.DeadlineBoundHttpTransport;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -51,14 +64,30 @@ class HttpEspDeliveryProviderTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private ResolvedDeliveryProvider espTarget(String credentialKey, String credentialValue) {
+        return espTarget(ENDPOINT, credentialKey, credentialValue);
+    }
+
+    private ResolvedDeliveryProvider espTarget(
+            String endpoint, String credentialKey, String credentialValue) {
         return new ResolvedDeliveryProvider(
-                HttpEspDeliveryProvider.PROVIDER_ID, DeliveryChannel.EMAIL, 7, ENDPOINT,
+                HttpEspDeliveryProvider.PROVIDER_ID, DeliveryChannel.EMAIL, 7, endpoint,
                 "no-reply@sender.test", "Sender", DeliveryCredentials.of(Map.of(credentialKey, credentialValue)));
     }
 
     private DeliveryRequest request() {
         return new DeliveryRequest(DeliveryChannel.EMAIL, "recipient@dest.test",
                 new RenderedMessage("Hi", "<p>Hi</p>", "Hi"), 42, "send:1:2");
+    }
+
+    @Test
+    void genericAdapterDoesNotPromiseEndpointIdempotency() {
+        HttpEspDeliveryProvider provider =
+                new HttpEspDeliveryProvider(RestClient.create(), 1024, objectMapper);
+        try {
+            assertFalse(provider.capabilities().idempotentSubmission());
+        } finally {
+            provider.shutdown();
+        }
     }
 
     @Test
@@ -69,6 +98,7 @@ class HttpEspDeliveryProviderTest {
         server.expect(requestTo(ENDPOINT))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(header("Authorization", "Bearer " + API_KEY))
+                .andExpect(header("Idempotency-Key", "send:1:2"))
                 .andRespond(withSuccess("{\"messageId\":\"esp-777\"}", MediaType.APPLICATION_JSON));
 
         try (MockedStatic<AiEgressGuard> guard = mockStatic(AiEgressGuard.class)) {
@@ -78,6 +108,95 @@ class HttpEspDeliveryProviderTest {
             assertEquals("esp-777", receipt.providerMessageId());
             guard.verify(() -> AiEgressGuard.resolveFetchableHost("esp.example.com", false));
             server.verify();
+        }
+    }
+
+    @Test
+    void dispatch_hardDeadlineAbortsASlowDripBeforeTheClaimLeaseExpires() throws Exception {
+        Duration deadline = Duration.ofMillis(500);
+        DeliveryProperties properties = new DeliveryProperties();
+        properties.setEspConnectTimeoutMs(100);
+        properties.setEspRequestTimeoutMs(100);
+        properties.setAudienceExportProviderDeadlineMs(deadline.toMillis());
+        long dripMillis = 25;
+        byte[] response = ("{\"messageId\":\"esp-777\",\"padding\":\""
+                + "x".repeat(32) + "\"}").getBytes(StandardCharsets.UTF_8);
+        CountDownLatch responseStarted = new CountDownLatch(1);
+        AtomicBoolean idempotencyHeaderSeen = new AtomicBoolean();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/slow", exchange -> {
+            idempotencyHeaderSeen.set("send:1:2".equals(
+                    exchange.getRequestHeaders().getFirst("Idempotency-Key")));
+            responseStarted.countDown();
+            try {
+                exchange.sendResponseHeaders(200, 0);
+                try (OutputStream output = exchange.getResponseBody()) {
+                    for (byte value : response) {
+                        output.write(value);
+                        output.flush();
+                        Thread.sleep(dripMillis);
+                    }
+                }
+            } catch (IOException ignored) {
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+        DeadlineBoundHttpTransport transport = new DeadlineBoundHttpTransport(
+                Duration.ofSeconds(1), Duration.ofSeconds(1), 1024,
+                host -> InetAddress.getLoopbackAddress(), System::nanoTime);
+        HttpEspDeliveryProvider provider =
+                new HttpEspDeliveryProvider(transport, 1024, objectMapper, false);
+        String endpoint = "http://esp-provider.example.test:"
+                + server.getAddress().getPort() + "/slow";
+        DeliveryRequest request = new DeliveryRequest(
+                DeliveryChannel.EMAIL, "recipient@dest.test",
+                new RenderedMessage("Hi", "<p>Hi</p>", "Hi"), 42, "send:1:2",
+                System.nanoTime() + deadline.toNanos());
+        long started = System.nanoTime();
+        try {
+            DispatchReceipt receipt = provider.dispatch(
+                    espTarget(endpoint, "apiKey", API_KEY), request);
+            Duration elapsed = Duration.ofNanos(System.nanoTime() - started);
+
+            assertTrue(responseStarted.await(10, TimeUnit.SECONDS));
+            assertTrue(idempotencyHeaderSeen.get());
+            assertEquals(DispatchStatus.AMBIGUOUS, receipt.status());
+            assertTrue(elapsed.compareTo(deadline.minusMillis(50)) >= 0);
+            assertTrue(elapsed.compareTo(deadline.plusSeconds(1)) < 0);
+            assertTrue(elapsed.compareTo(properties.providerCallLeaseDuration()) < 0);
+        } finally {
+            provider.shutdown();
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void dispatch_expiredDeadlineRefusesProviderResolutionAndEgress() {
+        AtomicBoolean resolutionAttempted = new AtomicBoolean();
+        DeadlineBoundHttpTransport transport = new DeadlineBoundHttpTransport(
+                Duration.ofSeconds(1), Duration.ofSeconds(1), 1024,
+                host -> {
+                    resolutionAttempted.set(true);
+                    return InetAddress.getLoopbackAddress();
+                }, System::nanoTime);
+        HttpEspDeliveryProvider provider =
+                new HttpEspDeliveryProvider(transport, 1024, objectMapper, false);
+        DeliveryRequest expired = new DeliveryRequest(
+                DeliveryChannel.EMAIL, "recipient@dest.test",
+                new RenderedMessage("Hi", "<p>Hi</p>", "Hi"), 42, "send:1:2",
+                System.nanoTime() - 1);
+        try {
+            DispatchReceipt receipt = provider.dispatch(
+                    espTarget("http://esp-provider.example.test/send", "apiKey", API_KEY), expired);
+
+            assertEquals(DispatchStatus.REJECTED, receipt.status());
+            assertFalse(resolutionAttempted.get());
+        } finally {
+            provider.shutdown();
         }
     }
 

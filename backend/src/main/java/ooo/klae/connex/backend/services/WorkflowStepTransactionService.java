@@ -58,24 +58,36 @@ public class WorkflowStepTransactionService {
             String expectedNodeId,
             CompiledWorkflow compiled,
             String leaseOwner) {
-        WorkflowRun run = leaseOwner == null
-            ? workflowRunMapper.getByIdForUpdate(workspaceId, runId)
-            : workflowRunMapper.getOwnedByIdForUpdate(workspaceId, runId, leaseOwner);
-        if (run == null
-                || !"running".equals(run.getStatus())
-                || run.getCancelRequestedAt() != null
-                || !Objects.equals(expectedNodeId, run.getCurrentNodeId())) {
+        WorkflowRun discoveredRun = workflowRunMapper.getByIdInWorkspace(workspaceId, runId);
+        if (discoveredRun == null
+                || !"running".equals(discoveredRun.getStatus())
+                || discoveredRun.getCancelRequestedAt() != null
+                || !Objects.equals(expectedNodeId, discoveredRun.getCurrentNodeId())) {
             return StepResult.noOp();
         }
-        LocalDateTime startedAt = LocalDateTime.now();
         WorkflowVersion version = workflowVersionMapper.getById(
-            workspaceId, run.getWorkflowId(), run.getWorkflowVersionId());
+            workspaceId,
+            discoveredRun.getWorkflowId(),
+            discoveredRun.getWorkflowVersionId());
         if (version == null) {
             throw new WorkflowExecutionException(
                 "definition_unavailable",
                 "The pinned workflow version is unavailable.",
                 true);
         }
+        WorkflowExecutionPrincipal principal = principalService.resolveLocked(workspaceId, version);
+        WorkflowRun run = leaseOwner == null
+            ? workflowRunMapper.getByIdForUpdate(workspaceId, runId)
+            : workflowRunMapper.getOwnedByIdForUpdate(workspaceId, runId, leaseOwner);
+        if (run == null
+                || !"running".equals(run.getStatus())
+                || run.getCancelRequestedAt() != null
+                || !Objects.equals(expectedNodeId, run.getCurrentNodeId())
+                || run.getWorkflowId() != discoveredRun.getWorkflowId()
+                || run.getWorkflowVersionId() != discoveredRun.getWorkflowVersionId()) {
+            return StepResult.noOp();
+        }
+        LocalDateTime startedAt = LocalDateTime.now();
         WorkflowNode node = compiled.node(expectedNodeId);
         NodeType nodeType = compiled.nodeType(expectedNodeId);
         if (node == null || nodeType == null) {
@@ -84,7 +96,6 @@ public class WorkflowStepTransactionService {
                 "The pinned workflow definition is inconsistent.",
                 true);
         }
-        WorkflowExecutionPrincipal principal = principalService.resolve(workspaceId, version);
         if (!Objects.equals(run.getActorUserId(), principal.actorUserId())
                 || !Objects.equals(run.getAttributionUserId(), principal.attributionUserId())) {
             throw new WorkflowExecutionException(
@@ -216,6 +227,8 @@ public class WorkflowStepTransactionService {
                 transition.outcome() == null ? null : transition.outcome().value(),
                 edge == null ? null : edge.id(),
                 edge == null ? null : edge.targetNodeId(),
+                transition.actionResult().outcome(),
+                transition.actionResult().referenceId(),
                 finishedAt) != 1) {
             throw new IllegalStateException("Workflow action step was not completed");
         }
@@ -253,6 +266,8 @@ public class WorkflowStepTransactionService {
             ? null : transition.outcome().value());
         step.setSelectedEdgeId(edge == null ? null : edge.id());
         step.setNextNodeId(edge == null ? null : edge.targetNodeId());
+        step.setActionOutcome(transition.actionResult().outcome());
+        step.setActionReferenceId(transition.actionResult().referenceId());
         step.setStartedAt(startedAt);
         step.setFinishedAt(finishedAt);
         return step;

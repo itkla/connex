@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.lenient;
 
 import java.util.Arrays;
 import java.util.List;
@@ -48,16 +49,27 @@ class WorkflowDefinitionValidatorTest {
 
     @Mock private SegmentService segmentService;
     @Mock private WorkspaceService workspaceService;
+    @Mock private SystemActor systemActor;
 
     private WorkflowDefinitionValidator validator;
 
     @BeforeEach
     void setUp() {
+        lenient().when(systemActor.permissions()).thenReturn(Set.of(
+            Permission.TASK_CREATE,
+            Permission.ACTIVITY_CREATE,
+            Permission.NOTE_CREATE,
+            Permission.COMPANY_UPDATE,
+            Permission.PERSON_UPDATE,
+            Permission.DEAL_UPDATE,
+            Permission.CONSENT_MANAGE));
         RuleDefinitionValidator ruleDefinitionValidator = new RuleDefinitionValidator(
             segmentService,
             workspaceService,
             BEAN_VALIDATOR,
-            new WorkflowDocumentAutomationGate(true));
+            new WorkflowDocumentAutomationGate(true),
+            new WorkflowTriggeredSendGate(true),
+            systemActor);
         validator = new WorkflowDefinitionValidator(ruleDefinitionValidator);
     }
 

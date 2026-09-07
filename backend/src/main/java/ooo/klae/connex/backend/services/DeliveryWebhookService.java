@@ -148,8 +148,8 @@ public class DeliveryWebhookService {
 
     private void applyStatus(int workspaceId, CampaignDelivery delivery, DeliveryEventType type) {
         List<String> fromStatuses = switch (type) {
-            case DELIVERED, FAILED -> List.of("dispatched");
-            case BOUNCED, COMPLAINED -> List.of("dispatched", "delivered");
+            case DELIVERED, FAILED -> List.of("dispatched", "failed");
+            case BOUNCED, COMPLAINED -> List.of("dispatched", "delivered", "failed");
         };
         campaignDeliveryMapper.applyProviderStatus(workspaceId, delivery.getId(), type.token(), fromStatuses);
     }

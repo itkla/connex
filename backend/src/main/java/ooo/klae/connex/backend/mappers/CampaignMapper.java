@@ -46,6 +46,12 @@ public interface CampaignMapper {
 
     void insertSnapshot(CampaignAudienceSnapshot snapshot);
 
+    /** Returns the synthetic snapshot that keeps one triggered revision rollback-readable. */
+    CampaignAudienceSnapshot getTriggeredSnapshot(
+            @Param("workspaceId") int workspaceId,
+            @Param("messageId") int messageId,
+            @Param("messageVersion") int messageVersion);
+
     List<CampaignAudienceSnapshotSummaryDto> getSnapshots(
             @Param("workspaceId") int workspaceId,
             @Param("campaignId") int campaignId);

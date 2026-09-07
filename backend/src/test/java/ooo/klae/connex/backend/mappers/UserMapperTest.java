@@ -326,6 +326,20 @@ class UserMapperTest extends AbstractMapperTest {
         assertTrue(userMapper.isPrivilegedAccount(user.getId()));
     }
 
+    @Test
+    void customRoleHoldingOnlyApiCredentialManageIsPrivileged() {
+        User user = newUser();
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(workspace.getId());
+        role.setName("api-credential-manager-" + unique());
+        roleMapper.insertRole(role);
+        workspaceMapper.setMemberCustomRole(workspace.getId(), user.getId(), role.getId());
+        roleMapper.insertPermissions(
+            workspace.getId(), role.getId(), List.of("API_CREDENTIAL_MANAGE"));
+
+        assertTrue(userMapper.isPrivilegedAccount(user.getId()));
+    }
+
     private User newUnassignedUser() {
         String suffix = unique();
         User user = new User();

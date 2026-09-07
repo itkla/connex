@@ -58,6 +58,8 @@ public enum Permission {
     ROLE_MANAGE,
     AUDIT_READ,
     WORKSPACE_SETTINGS,
+    /** Permission to issue, inventory, and revoke personal API credentials. */
+    API_CREDENTIAL_MANAGE,
     RULE_MANAGE,
     CAMPAIGN_VIEW,
     CAMPAIGN_MANAGE,

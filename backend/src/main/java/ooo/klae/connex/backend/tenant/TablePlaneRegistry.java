@@ -40,6 +40,8 @@ public final class TablePlaneRegistry {
         "SPRING_SESSION",
         "SPRING_SESSION_ATTRIBUTES",
         "ai_provider_config",
+        "api_credential",
+        "api_credential_scope",
         "organization_ai_budget",
         "organization_ai_budget_reservation",
         "organization_ai_budget_usage",
@@ -98,6 +100,7 @@ public final class TablePlaneRegistry {
 
     /** Direct workspace-keyed control state that is not tenant-export content. */
     public static final Set<String> CONTROL_PLANE_WORKSPACE_STATE_TABLES = Set.of(
+        "api_credential",
         "audit_log",
         "secret_value",
         "tenant_cleanup_tombstone",

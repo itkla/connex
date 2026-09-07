@@ -182,10 +182,10 @@ than grandfathered, and V192 repeats V191's sweep so none remain to refuse. Any 
 across both migrations has already run V191's sweep; the repeat covers only databases sitting at
 exactly V191 — staging and developer clones. Anonymous sessions are spared, as in V191.
 
-### V201/V202 emailed-link fragment cutover (document acceptance, campaign unsubscribe)
+### V203/V204 emailed-link fragment cutover (document acceptance, campaign unsubscribe)
 
-`V201__campaign_delivery_unsubscribe_token_hash.sql` and
-`V202__one_time_link_flow_routing_workspace.sql` are both expand-only and rolling-deploy safe: an old
+`V203__campaign_delivery_unsubscribe_token_hash.sql` and
+`V204__one_time_link_flow_routing_workspace.sql` are both expand-only and rolling-deploy safe: an old
 binary neither reads nor writes `campaign_delivery.unsubscribe_token_hash` (a STORED generated column)
 or `one_time_link_flow.routing_workspace_id`.
 
@@ -218,6 +218,14 @@ calling them must bootstrap `GET /api/auth/csrf` and echo the CSRF header on eve
 requests — `POST /api/document-acceptance/accept`, `POST /api/document-acceptance/decline` and
 `POST /api/delivery/unsubscribe` — also carry a JSON body echoing the `flowId` the preview returned; a
 body whose `flowId` does not name the grant the browser currently holds is refused without any state change.
+## Triggered-send rollback quiescence
+
+The triggered-send fence is captured at backend startup; changing an environment file does not close
+running replicas. Before replacing binaries with a version that does not understand triggered sends,
+set `CONNEX_WORKFLOWS_TRIGGERED_SEND_ENABLED=false`, drain and restart or recreate every
+current-version backend replica, verify no running instance remains enabled, and wait one full claim
+lease plus one provider-deadline interval. The authoritative provider-boundary and reconciliation
+contract is [Automation: triggered campaign delivery](backend/AUTOMATION.md#triggered-campaign-delivery).
 
 ## On-prem upgrade runbook
 
@@ -337,11 +345,11 @@ body whose `flowId` does not name the grant the browser currently holds is refus
    unlimited uses. Registration-verification links remain valid for 24 hours in the previous version;
    affected registrants must request a fresh verification email. Password-reset links last only 30
    minutes, so there is effectively no outstanding population to migrate and no operator action is
-   needed; a user with a rare in-flight reset must request a fresh link. Upgrades that cross V201/V202
+   needed; a user with a rare in-flight reset must request a fresh link. Upgrades that cross V203/V204
    must additionally re-send every outstanding document delivery (acceptance tokens stay valid until
    each delivery's `expiresAt`, which may be unset), re-send campaigns whose unsubscribe links are
    still in recipients' inboxes because those links never expire and now 404, and update the
-   Cloudflare skip and rate-limit expressions — see the V201/V202 cutover section above.
+   Cloudflare skip and rate-limit expressions — see the V203/V204 cutover section above.
 11. **On pre-ingress failure** — keep Caddy and upstream ingress closed and stop the target application
    containers. Remove the target deployment directory, re-verify and extract the exact prior signed
    deploy archive, restore the prior mode-0600 `.env` byte-for-byte, and confirm both recorded hashes.

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,6 +10,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.WorkflowRun;
+import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.services.WorkflowRuntimeClaimService.CanonicalClaim;
@@ -30,6 +32,8 @@ public class WorkflowRuntimeService {
     private final WorkflowExecutionPrincipalService principalService;
     private final SegmentService segmentService;
     private final RuleEngineService ruleEngineService;
+    private final WorkflowTriggeredSendGate triggeredSendGate;
+    private final AuditService auditService;
 
     public WorkflowDispatchResult dispatch(WorkflowTriggerDispatch dispatch) {
         if (dispatch instanceof WorkflowTriggerDispatch.EntityChange entityChange) {
@@ -94,16 +98,25 @@ public class WorkflowRuntimeService {
                     continue;
                 }
                 principalService.resolve(dispatch.workspaceId(), enrollment.version());
+                boolean triggeredSend = hasTriggeredSend(enrollment);
+                int limit = triggeredSend
+                    ? triggeredSendGate.recipientLimit() : MAX_SCHEDULE_ENROLLMENTS;
                 List<Integer> recordIds = segmentService.evaluate(
                     dispatch.workspaceId(),
                     enrollment.conditionActorId(),
                     enrollment.version().getRecordType(),
-                    enrollment.condition().config());
-                if (recordIds.size() > MAX_SCHEDULE_ENROLLMENTS) {
+                    enrollment.condition().config(),
+                    limit + 1);
+                if (!triggeredSend && recordIds.size() > limit) {
                     throw new WorkflowExecutionException(
                         "enrollment_limit",
                         "The schedule enrollment exceeds the bounded fan-out limit.",
                         true);
+                }
+                if (triggeredSend && recordIds.size() > limit) {
+                    recordRecipientLimit(dispatch.workspaceId(), workflowId, limit);
+                    recordIds = recordIds.subList(0, limit);
+                    counters.rejected++;
                 }
                 for (int recordId : recordIds) {
                     resumeClaim(claimService.claimScheduleRecord(
@@ -123,14 +136,38 @@ public class WorkflowRuntimeService {
         return counters.result();
     }
 
+    private static boolean hasTriggeredSend(ScheduleEnrollment enrollment) {
+        return enrollment.compiled().nodes().values().stream()
+            .filter(WorkflowNode.Action.class::isInstance)
+            .map(WorkflowNode.Action.class::cast)
+            .anyMatch(action -> action.config().getType() != null
+                && "send_message".equalsIgnoreCase(action.config().getType().trim()));
+    }
+
+    private void recordRecipientLimit(int workspaceId, int workflowId, int limit) {
+        log.warn(
+            "Canonical workflow schedule truncated workflowId={} diagnosticCode={}",
+            workflowId,
+            "triggered_send_recipient_limit");
+        auditService.recordStrict(
+            "workflow.triggered_send.recipient_limit",
+            "workflow",
+            workflowId,
+            "Workflow " + workflowId,
+            "Scheduled send-message recipients were capped",
+            Map.of("limit", limit, "code", "triggered_send_recipient_limit"));
+    }
+
     private void resumeRunningScheduleClaims(
             int workspaceId,
             int workflowId,
             String triggerKey,
             Counters counters) {
+        int replayLimit = Math.max(
+            MAX_SCHEDULE_ENROLLMENTS, triggeredSendGate.recipientLimit());
         List<WorkflowRun> running = workflowRunMapper.getRunningByTrigger(
-            workspaceId, workflowId, triggerKey, MAX_SCHEDULE_ENROLLMENTS + 1);
-        if (running.size() > MAX_SCHEDULE_ENROLLMENTS) {
+            workspaceId, workflowId, triggerKey, replayLimit + 1);
+        if (running.size() > replayLimit) {
             throw new WorkflowExecutionException(
                 "enrollment_limit",
                 "The schedule replay exceeds the bounded fan-out limit.",

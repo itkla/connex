@@ -5,25 +5,31 @@ import java.util.List;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.dto.CampaignDeliveryReconciliationDto;
+import ooo.klae.connex.backend.dto.CampaignDeliveryReconciliationRequest;
 import ooo.klae.connex.backend.dto.CampaignEngagementDto;
 import ooo.klae.connex.backend.dto.CampaignRecipientDto;
 import ooo.klae.connex.backend.dto.CampaignSendEngagementDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.services.CampaignEngagementService;
 import ooo.klae.connex.backend.services.CampaignRecipientService;
+import ooo.klae.connex.backend.services.CampaignTriggeredSendService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 import ooo.klae.connex.backend.util.DealFilterNormalizer;
 import ooo.klae.connex.backend.util.PageBounds;
 
-/** Workspace-scoped read-only campaign engagement and attribution endpoints. */
+/** Workspace-scoped campaign engagement, recipient, and delivery-reconciliation endpoints. */
 @RestController
 @RequestMapping("/api/campaigns/{id}")
 @RequiredArgsConstructor
@@ -31,6 +37,7 @@ import ooo.klae.connex.backend.util.PageBounds;
 public class CampaignEngagementController {
     private final CampaignEngagementService campaignEngagementService;
     private final CampaignRecipientService campaignRecipientService;
+    private final CampaignTriggeredSendService campaignTriggeredSendService;
 
     @GetMapping("/engagement")
     @RequirePermission(Permission.CAMPAIGN_VIEW)
@@ -79,5 +86,22 @@ public class CampaignEngagementController {
                 event, CampaignRecipientService.RECIPIENT_EVENTS, "event"),
             bounds.size(),
             bounds.offset());
+    }
+
+    /**
+     * Records an operator-confirmed outcome for one ambiguous campaign delivery.
+     *
+     * @param id owning campaign
+     * @param deliveryId reconciliation-required delivery
+     * @param request provider-confirmed resolution
+     * @return persisted terminal delivery state
+     */
+    @PostMapping("/recipients/{deliveryId}/reconcile")
+    @RequirePermission(Permission.CAMPAIGN_MANAGE)
+    public CampaignDeliveryReconciliationDto reconcileRecipient(
+            @Positive @PathVariable int id,
+            @Positive @PathVariable int deliveryId,
+            @Valid @RequestBody CampaignDeliveryReconciliationRequest request) {
+        return campaignTriggeredSendService.reconcile(id, deliveryId, request);
     }
 }

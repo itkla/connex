@@ -93,7 +93,7 @@ public class HttpListConnector implements AudienceSyncConnector {
     public static final String PROVIDER_ID = "http_list";
 
     private static final DeliveryCapabilities CAPABILITIES =
-            new DeliveryCapabilities(false, true, false, 0);
+            new DeliveryCapabilities(false, true, false, false, 0);
     private static final String CREDENTIAL_KEY_API = "apiKey";
     private static final int DETAIL_LIMIT = 512;
     private static final int BUFFER_BYTES = 8192;

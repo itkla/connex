@@ -35,7 +35,7 @@ public class DeliveryProperties {
     /** Socket read inactivity timeout, in milliseconds, for outbound HTTP delivery. */
     private long espRequestTimeoutMs = 15000;
 
-    /** Hard wall-clock deadline, in milliseconds, for one audience-export provider call. */
+    /** Hard wall-clock deadline, in milliseconds, for one leased delivery-provider call. */
     private long audienceExportProviderDeadlineMs = 18000;
 
     /**
@@ -67,6 +67,14 @@ public class DeliveryProperties {
     }
 
     /**
+     * Returns the shared hard deadline for one leased delivery-provider call.
+     * @return the validated provider-call deadline
+     */
+    public Duration providerCallDeadline() {
+        return audienceExportProviderDeadline();
+    }
+
+    /**
      * Returns the running lease for one audience export provider call. The lease covers the hard
      * provider deadline plus the configured database-clock adjustment, handoff, and persistence
      * margin. It prevents database-clock expiry during a live monotonic provider budget only while
@@ -93,6 +101,14 @@ public class DeliveryProperties {
             throw invalidAudienceExportTransportBounds(
                     "the provider deadline plus safety margin must fit within the 5-minute maximum lease");
         }
+    }
+
+    /**
+     * Returns the database lease that contains the provider deadline and its safety margin.
+     * @return the validated delivery lease duration
+     */
+    public Duration providerCallLeaseDuration() {
+        return audienceExportLeaseDuration();
     }
 
     @PostConstruct

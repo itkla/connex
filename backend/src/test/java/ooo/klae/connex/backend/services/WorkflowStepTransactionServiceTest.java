@@ -90,9 +90,10 @@ class WorkflowStepTransactionServiceTest {
             Map.of("action", Map.of(WorkflowEdge.Outcome.NEXT, edge)),
             java.util.List.of("action"),
             null);
+        lenient().when(workflowRunMapper.getByIdInWorkspace(7, 31L)).thenReturn(run);
         lenient().when(workflowRunMapper.getByIdForUpdate(7, 31L)).thenReturn(run);
         lenient().when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
-        lenient().when(principalService.resolve(7, version)).thenReturn(principal);
+        lenient().when(principalService.resolveLocked(7, version)).thenReturn(principal);
     }
 
     @Test
@@ -109,15 +110,38 @@ class WorkflowStepTransactionServiceTest {
 
         assertTrue(result.executed());
         InOrder order = inOrder(
+            workflowRunMapper,
+            workflowVersionMapper,
             principalService,
             recordGuard,
-            nodeExecutor,
-            workflowRunMapper);
-        order.verify(principalService).resolve(7, version);
+            nodeExecutor);
+        order.verify(workflowRunMapper).getByIdInWorkspace(7, 31L);
+        order.verify(workflowVersionMapper).getById(7, 11, 19L);
+        order.verify(principalService).resolveLocked(7, version);
+        order.verify(workflowRunMapper).getByIdForUpdate(7, 31L);
         order.verify(recordGuard).requireAccessible(run);
         order.verify(nodeExecutor).execute(any(), eq(compiled.node("action")));
         order.verify(workflowRunMapper).insertStep(any());
         order.verify(workflowRunMapper).advanceRun(7, 31L, "action", "end");
+    }
+
+    @Test
+    void queuedDeliveryIdentityIsPersistedWithTheSuccessfulStep() {
+        when(nodeExecutor.execute(any(), any())).thenReturn(
+            new WorkflowStepTransition(
+                WorkflowStepTransition.Continuation.IMMEDIATE,
+                WorkflowEdge.Outcome.NEXT,
+                new WorkflowActionResult("delivery_queued", 71L)));
+        when(workflowRunMapper.nextSequence(7, 31L)).thenReturn(2);
+        when(workflowRunMapper.advanceRun(7, 31L, "action", "end")).thenReturn(1);
+
+        service.execute(7, 31L, "action", compiled);
+
+        ArgumentCaptor<ooo.klae.connex.backend.beans.WorkflowStepRun> step =
+            ArgumentCaptor.forClass(ooo.klae.connex.backend.beans.WorkflowStepRun.class);
+        verify(workflowRunMapper).insertStep(step.capture());
+        assertEquals("delivery_queued", step.getValue().getActionOutcome());
+        assertEquals(71L, step.getValue().getActionReferenceId());
     }
 
     @Test

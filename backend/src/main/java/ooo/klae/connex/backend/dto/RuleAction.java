@@ -11,9 +11,9 @@ import lombok.NoArgsConstructor;
 /**
  * One THEN action. {@code type} selects the kind ({@code create_task}, {@code log_activity},
  * {@code add_tag}, {@code notify}, {@code remove_tag}, {@code create_note}, {@code assign_owner},
- * {@code set_response_due}, {@code change_stage}); the remaining fields carry that type's
- * configuration and are validated per
- * type by the service. Every action runs through the tenant- and RBAC-enforcing service for its kind.
+ * {@code set_response_due}, {@code change_stage}, {@code send_message}); the remaining fields carry
+ * that type's configuration and are validated per type by the service. Every action runs through the
+ * tenant- and RBAC-enforcing service for its kind.
  */
 @Data
 @NoArgsConstructor
@@ -55,4 +55,12 @@ public class RuleAction {
     private Integer targetUserId;
 
     private Integer targetStageId;
+
+    /** Campaign message selected by a {@code send_message} action. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer campaignMessageId;
+
+    /** Immutable revision selected by a {@code send_message} action. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer campaignMessageVersion;
 }

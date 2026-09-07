@@ -8,11 +8,21 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.beans.CampaignMessage;
+import ooo.klae.connex.backend.beans.CampaignMessageRevision;
+import ooo.klae.connex.backend.beans.CampaignSend;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.capability.Capability;
+import ooo.klae.connex.backend.capability.CapabilityRegistry;
+import ooo.klae.connex.backend.delivery.DeliveryChannel;
+import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
+import ooo.klae.connex.backend.delivery.DeliveryProviderException;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
 import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.CampaignMessageMapper;
+import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -27,6 +37,12 @@ public class WorkflowActionGuard {
     private final TagMapper tagMapper;
     private final PipelineMapper pipelineMapper;
     private final DealMapper dealMapper;
+    private final CampaignMessageMapper campaignMessageMapper;
+    private final CampaignSendMapper campaignSendMapper;
+    private final AudienceEligibilityService audienceEligibilityService;
+    private final CapabilityRegistry capabilityRegistry;
+    private final DeliveryProviderConfigService deliveryProviderConfigService;
+    private final WorkflowTriggeredSendGate triggeredSendGate;
 
     public WorkflowDiagnosticDto blocker(
             int workspaceId,
@@ -35,14 +51,19 @@ public class WorkflowActionGuard {
             int recordId,
             String nodeId,
             RuleAction action) {
-        Permission required = definitionValidator.actionPermission(action, recordType);
+        Set<Permission> required = definitionValidator.actionPermissions(action, recordType);
         Set<Permission> permissions = workspaceService.permissionsFor(workspaceId, actorUserId);
-        if (required != null && !permissions.contains(required)) {
+        Permission missing = required.stream()
+                .filter(permission -> !permissions.contains(permission))
+                .sorted()
+                .findFirst()
+                .orElse(null);
+        if (missing != null) {
             return diagnostic(
                 WorkflowDiagnosticCode.ACTION_PERMISSION_MISSING,
                 nodeId,
                 null,
-                Map.of("permission", required.name()));
+                Map.of("permission", missing.name()));
         }
         String type = normalize(action.getType());
         if (("add_tag".equals(type) || "remove_tag".equals(type))
@@ -79,6 +100,107 @@ public class WorkflowActionGuard {
                     "config.targetStageId",
                     Map.of());
             }
+        }
+        if ("send_message".equals(type)) {
+            return triggeredSendBlocker(workspaceId, recordId, nodeId, action);
+        }
+        return null;
+    }
+
+    private WorkflowDiagnosticDto triggeredSendBlocker(
+            int workspaceId,
+            int personId,
+            String nodeId,
+            RuleAction action) {
+        if (action.getCampaignMessageId() == null) {
+            return diagnostic(
+                    WorkflowDiagnosticCode.ACTION_CAMPAIGN_MESSAGE_UNAVAILABLE,
+                    nodeId,
+                    "config.campaignMessageId",
+                    Map.of());
+        }
+        if (action.getCampaignMessageVersion() == null) {
+            return diagnostic(
+                    WorkflowDiagnosticCode.ACTION_CAMPAIGN_MESSAGE_REVISION_UNAVAILABLE,
+                    nodeId,
+                    "config.campaignMessageVersion",
+                    Map.of());
+        }
+        if (!triggeredSendGate.enabled()
+                || !capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
+            return diagnostic(
+                    WorkflowDiagnosticCode.ACTION_DELIVERY_CAPABILITY_UNAVAILABLE,
+                    nodeId,
+                    null,
+                    Map.of());
+        }
+        CampaignMessage message = campaignMessageMapper.getMessage(
+                workspaceId, action.getCampaignMessageId());
+        if (message == null) {
+            return diagnostic(
+                    WorkflowDiagnosticCode.ACTION_CAMPAIGN_MESSAGE_UNAVAILABLE,
+                    nodeId,
+                    "config.campaignMessageId",
+                    Map.of());
+        }
+        CampaignMessageRevision revision = campaignMessageMapper.getRevision(
+                workspaceId,
+                action.getCampaignMessageId(),
+                action.getCampaignMessageVersion());
+        if (revision == null) {
+            return diagnostic(
+                    WorkflowDiagnosticCode.ACTION_CAMPAIGN_MESSAGE_REVISION_UNAVAILABLE,
+                    nodeId,
+                    "config.campaignMessageVersion",
+                    Map.of());
+        }
+        DeliveryChannel channel;
+        try {
+            channel = DeliveryChannel.fromToken(message.getChannel());
+        } catch (DeliveryProviderException exception) {
+            return diagnostic(
+                    WorkflowDiagnosticCode.ACTION_DELIVERY_TRANSPORT_UNAVAILABLE,
+                    nodeId,
+                    "config.campaignMessageId",
+                    Map.of());
+        }
+        if ((channel != DeliveryChannel.EMAIL && channel != DeliveryChannel.SMS)
+                || !deliveryProviderConfigService.isReady(workspaceId, channel)) {
+            return diagnostic(
+                    WorkflowDiagnosticCode.ACTION_DELIVERY_TRANSPORT_UNAVAILABLE,
+                    nodeId,
+                    "config.campaignMessageId",
+                    Map.of());
+        }
+        AudienceEligibilityService.AudienceClassification eligibility =
+                audienceEligibilityService.classify(
+                    workspaceId, java.util.List.of(personId), channel.token(), "marketing");
+        String exclusionReason = eligibility.reasonFor(personId);
+        if ("restricted".equals(exclusionReason)) {
+            return diagnostic(
+                    WorkflowDiagnosticCode.ACTION_TRIGGERED_SEND_UNAVAILABLE,
+                    nodeId,
+                    null,
+                    Map.of("status", exclusionReason));
+        }
+        if ("no_address".equals(exclusionReason)) {
+            return diagnostic(
+                    WorkflowDiagnosticCode.ACTION_RECIPIENT_ADDRESS_UNAVAILABLE,
+                    nodeId,
+                    null,
+                    Map.of());
+        }
+        CampaignSend send = campaignSendMapper.getTriggeredSend(
+                workspaceId,
+                action.getCampaignMessageId(),
+                action.getCampaignMessageVersion());
+        if (send != null
+                && !"triggered".equals(send.getStatus())) {
+            return diagnostic(
+                    WorkflowDiagnosticCode.ACTION_TRIGGERED_SEND_UNAVAILABLE,
+                    nodeId,
+                    null,
+                    Map.of("status", send.getStatus()));
         }
         return null;
     }

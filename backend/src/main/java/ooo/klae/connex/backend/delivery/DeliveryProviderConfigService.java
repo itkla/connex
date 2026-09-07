@@ -89,7 +89,16 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
             throw new DeliveryProviderException("No usable mail transport is configured for delivery");
         }
         return ResolvedDeliveryProvider.of(
-                SmtpDeliveryProvider.PROVIDER_ID, DeliveryChannel.EMAIL, workspaceId, DeliveryCredentials.none());
+                SmtpDeliveryProvider.PROVIDER_ID,
+                DeliveryChannel.EMAIL,
+                workspaceId,
+                DeliveryCredentials.none(),
+                DeliveryTargetFingerprint.create(
+                        SmtpDeliveryProvider.PROVIDER_ID,
+                        mail.configurationVersion(),
+                        smtpEndpointIdentity(mail),
+                        mail.credentialReference()),
+                mail);
     }
 
     @Override
@@ -212,8 +221,11 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
             config.setCredentialRef(deliveryProviderSecretCipher.encryptCredential(workspaceId, newCredential));
         }
         config.setEnabled(request.isEnabled());
+        config.setIdempotentSubmission(
+                !SmtpDeliveryProvider.PROVIDER_ID.equals(provider)
+                        && request.isIdempotentSubmission());
 
-        deliveryProviderConfigMapper.upsert(config);
+        deliveryProviderConfigMapper.upsert(config, newCredential != null);
         deleteReplacedCredential(workspaceId, existing, config, sameProvider);
         auditService.record("workspace.delivery_provider.save", "workspace", workspaceId, provider,
                 "Updated delivery provider settings", null);
@@ -245,7 +257,7 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
         String rawSecret = randomHex();
         config.setWebhookTokenHash(sha256Hex(rawToken));
         config.setWebhookSecretRef(deliveryProviderSecretCipher.encryptWebhookSecret(workspaceId, rawSecret));
-        deliveryProviderConfigMapper.upsert(config);
+        deliveryProviderConfigMapper.upsert(config, false);
         if (!isBlank(previousSecretRef) && !previousSecretRef.equals(config.getWebhookSecretRef())) {
             deliveryProviderSecretCipher.deleteWebhookSecretReference(workspaceId, previousSecretRef);
         }
@@ -296,7 +308,10 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
                 config.getEndpoint(),
                 config.getFromAddress(),
                 config.getFromName(),
-                DeliveryCredentials.of(Map.of(CREDENTIAL_KEY_API, apiKey)));
+                DeliveryCredentials.of(Map.of(CREDENTIAL_KEY_API, apiKey)),
+                config.isIdempotentSubmission(),
+                targetFingerprint(config),
+                null);
     }
 
     private ResolvedDeliveryProvider resolveSms(DeliveryProviderConfig config) {
@@ -318,7 +333,40 @@ public class DeliveryProviderConfigService implements DeliveryProviderReadiness 
                 config.getEndpoint(),
                 config.getFromAddress(),
                 config.getFromName(),
-                DeliveryCredentials.of(Map.of(CREDENTIAL_KEY_API, apiKey)));
+                DeliveryCredentials.of(Map.of(CREDENTIAL_KEY_API, apiKey)),
+                config.isIdempotentSubmission(),
+                targetFingerprint(config),
+                null);
+    }
+
+    /**
+     * Derives the delivery target fingerprint an attempt is claimed against.
+     *
+     * <p>The inputs are the adapter id, the configuration id and generation, the endpoint and
+     * non-secret account identity, and the opaque credential reference. No credential material is
+     * hashed, so the value is safe to persist next to the delivery row. Rotating a send credential
+     * advances the configuration generation even when the store returns the same reference, which
+     * is what stops an expired claim from replaying under a new credential.
+     *
+     * @param config the stored provider configuration
+     * @return the lowercase SHA-256 fingerprint
+     */
+    public static String targetFingerprint(DeliveryProviderConfig config) {
+        return DeliveryTargetFingerprint.create(
+                config.getProvider(),
+                "delivery-provider:" + config.getId() + ":" + config.getConfigGeneration(),
+                String.valueOf(config.getEndpoint())
+                        + "|account=" + String.valueOf(config.getFromAddress()),
+                config.getCredentialRef());
+    }
+
+    private static String smtpEndpointIdentity(ResolvedMailConfig config) {
+        return "smtp://" + config.host() + ":" + config.port()
+                + "|username=" + String.valueOf(config.username())
+                + "|from=" + String.valueOf(config.fromAddress())
+                + "|starttls=" + config.starttls()
+                + "|ssl=" + config.ssl()
+                + "|auth=" + config.auth();
     }
 
     private String validateAndPopulateSmsHttp(DeliveryProviderConfigRequest request, DeliveryProviderConfig config) {

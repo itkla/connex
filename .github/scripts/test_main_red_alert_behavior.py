@@ -36,7 +36,11 @@ GH_STUB = textwrap.dedent(
         printf '%s' "$GH_CURRENT_MAIN"; exit 0 ;;
       "api repos/"*"/actions/workflows/"*)
         if [ "${GH_WORKFLOW_RUNS_FAILS:-}" = "1" ]; then exit 1; fi
-        printf '%s' "$GH_LATEST_RUN"; exit 0 ;;
+        case "$2" in
+          *"event=${GH_SUPERSEDING_EVENT}&"*) printf '%s' "$GH_LATEST_RUN" ;;
+          *) printf '%s' "$RUN_ID" ;;
+        esac
+        exit 0 ;;
       "api repos/"*"/actions/runs/"*)
         jqexpr=""; prev=""
         for a in "$@"; do [ "$prev" = "--jq" ] && jqexpr="$a"; prev="$a"; done
@@ -81,6 +85,7 @@ def run_step(env_overrides, gh_env):
             "RUN_URL": "https://run",
             "RUN_NAME": "CI",
             "RUN_ID": "1000",
+            "RUN_EVENT": "push",
             "WORKFLOW_ID": "42",
             "HEAD_SHA": CURRENT_MAIN,
             "CONCLUSION": "failure",
@@ -96,6 +101,7 @@ def run_step(env_overrides, gh_env):
             "GH_WORKFLOW_RUNS_FAILS": "0",
             "GH_CURRENT_MAIN": CURRENT_MAIN,
             "GH_LATEST_RUN": "1000",
+            "GH_SUPERSEDING_EVENT": "push",
             "GH_ISSUE_LIST": "[]",
             **gh_env,
             **env_overrides,
@@ -135,6 +141,28 @@ class RedMainAlertBehavior(unittest.TestCase):
         result, actions = run_step({}, {"GH_LATEST_RUN": "2000", "GH_ISSUE_LIST": "[]"})
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual([], actions, "a superseded run must not report")
+
+    def test_a_scheduled_failure_on_current_main_opens_an_issue(self):
+        # The weekly Security scan gates main on its open alert set; a red scheduled run on the
+        # current head is main being red just as much as a red push run is.
+        result, actions = run_step({"RUN_EVENT": "schedule"}, {"GH_ISSUE_LIST": "[]"})
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("create", actions)
+
+    def test_a_scheduled_run_is_superseded_only_by_a_later_scheduled_run(self):
+        # A newer push run of the same head is not a verdict on the scheduled scan; only a newer
+        # scheduled run is. The stub answers the supersession query with a higher id solely for
+        # the event named in GH_SUPERSEDING_EVENT.
+        by_push, actions_after_push = run_step(
+            {"RUN_EVENT": "schedule"},
+            {"GH_LATEST_RUN": "2000", "GH_SUPERSEDING_EVENT": "push", "GH_ISSUE_LIST": "[]"})
+        by_schedule, actions_after_schedule = run_step(
+            {"RUN_EVENT": "schedule"},
+            {"GH_LATEST_RUN": "2000", "GH_SUPERSEDING_EVENT": "schedule", "GH_ISSUE_LIST": "[]"})
+        self.assertEqual(0, by_push.returncode, by_push.stderr)
+        self.assertIn("create", actions_after_push, "a push run must not supersede a scheduled run")
+        self.assertEqual(0, by_schedule.returncode, by_schedule.stderr)
+        self.assertEqual([], actions_after_schedule, "a later scheduled run supersedes")
 
     def test_a_startup_failure_on_current_main_opens_an_issue(self):
         # A workflow-file error concludes startup_failure without running a job; main is just as

@@ -6,7 +6,8 @@ import java.time.LocalDateTime;
  * API representation of a campaign send.
  * @param id the send id
  * @param campaignId the owning campaign id
- * @param snapshotId the frozen snapshot id
+ * @param snapshotId the frozen audience or triggered-revision snapshot id
+ * @param origin whether the send is audience-backed or triggered
  * @param messageId the message id
  * @param messageVersion the message revision version
  * @param channel the delivery channel
@@ -28,6 +29,7 @@ public record CampaignSendDto(
         int id,
         int campaignId,
         int snapshotId,
+        String origin,
         int messageId,
         int messageVersion,
         String channel,

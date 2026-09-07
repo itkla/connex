@@ -35,6 +35,11 @@ public class SmtpDestinationGuard {
         return requirePublicDestination(config.host(), config.port());
     }
 
+    /** Returns whether this deployment explicitly permits internal SMTP destinations. */
+    public boolean allowsInternalHosts() {
+        return mailProperties.isAllowInternalHosts();
+    }
+
     /**
      * Validates a workspace-managed host and port and returns the resolved address to pin.
      *

@@ -332,7 +332,8 @@ class EncryptionGuardrailArchTest {
         "ooo/klae/connex/backend/dto/PersonDto.java#duplicateReviewToken",
         "ooo/klae/connex/backend/dto/SecretStoreSecretDiagnosticDto.java#secretId",
         "ooo/klae/connex/backend/dto/SsoConnectionDto.java#hasClientSecret",
-        "ooo/klae/connex/backend/dto/WorkflowManualPreparationDto.java#scopeToken");
+        "ooo/klae/connex/backend/dto/WorkflowManualPreparationDto.java#scopeToken",
+        "ooo/klae/connex/backend/publicapi/ApiCredentialService.java#token");
 
     private static final Map<String, ApprovedSecretSink> APPROVED_SECRET_SINKS = Map.of();
 

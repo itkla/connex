@@ -33,6 +33,7 @@ class WorkflowActionRetryPolicyTest {
             assertEquals(RetrySafety.TRANSACTIONAL, policy.safety(action(type)), type);
         }
         assertEquals(RetrySafety.DEDUPLICATED, policy.safety(action("notify")));
+        assertEquals(RetrySafety.DEDUPLICATED, policy.safety(action("send_message")));
         assertEquals(RetrySafety.NONE, policy.safety(action("future_action")));
         assertEquals(RetrySafety.NONE, policy.safety(null));
     }

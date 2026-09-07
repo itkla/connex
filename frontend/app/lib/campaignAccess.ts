@@ -97,3 +97,8 @@ export function canCreateExport(access: CampaignAccess): boolean {
 export function canReadRecipients(access: CampaignAccess): boolean {
     return access.consent;
 }
+
+/** Whether the viewer may record a provider-confirmed outcome for an ambiguous delivery. */
+export function canReconcileRecipients(access: CampaignAccess): boolean {
+    return access.manage && access.consent;
+}

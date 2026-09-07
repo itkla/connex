@@ -6,6 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -41,6 +44,7 @@ import org.apache.ibatis.reflection.SystemMetaObject;
 import org.apache.ibatis.session.ResultHandler;
 import org.apache.ibatis.session.RowBounds;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -56,11 +60,17 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import ooo.klae.connex.backend.beans.Campaign;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.capability.Capability;
+import ooo.klae.connex.backend.capability.CapabilityRegistry;
+import ooo.klae.connex.backend.delivery.DeliveryChannel;
+import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
 import ooo.klae.connex.backend.dto.CampaignAudienceRequest;
 import ooo.klae.connex.backend.dto.CampaignAudienceSnapshotDto;
 import ooo.klae.connex.backend.dto.CampaignDto;
@@ -74,6 +84,8 @@ import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
+import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
+import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -108,6 +120,7 @@ import tools.jackson.databind.ObjectMapper;
  */
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @Import(CampaignConcurrencyIntegrationTest.MutexProbeConfiguration.class)
+@TestPropertySource(properties = "connex.workflows.triggered-send.enabled=true")
 class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
 
     @Autowired private CampaignService campaignService;
@@ -119,6 +132,19 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private DataSource dataSource;
     @Autowired private MutexRequestProbe mutexRequestProbe;
+    @Autowired private CampaignTriggeredSendService campaignTriggeredSendService;
+    @Autowired private CampaignDeliveryMapper campaignDeliveryMapper;
+    @Autowired private CampaignSendMapper campaignSendMapper;
+    @MockitoBean private CapabilityRegistry capabilityRegistry;
+    @MockitoBean private DeliveryProviderConfigService deliveryProviderConfigService;
+
+    @BeforeEach
+    void enableTriggeredDelivery() {
+        lenient().when(capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY))
+            .thenReturn(true);
+        lenient().when(deliveryProviderConfigService.isReady(anyInt(), eq(DeliveryChannel.EMAIL)))
+            .thenReturn(true);
+    }
 
     private static final String OBSERVED_WAIT_QUERY = """
             SELECT COUNT(*)
@@ -144,6 +170,56 @@ class CampaignConcurrencyIntegrationTest extends CampaignRealDbTestSupport {
             WHERE rt.PROCESSLIST_ID IN (?, ?)
               AND bt.PROCESSLIST_ID = ?
             """;
+
+    @Test
+    void concurrentTriggeredEnrollmentsWaitOnCampaignAndCatchTheUniqueRevisionRace()
+            throws Exception {
+        String prefix = "triggered-race-" + unique();
+        Person person = person(newCompany(), prefix, prefix + "@example.com");
+        CampaignDto campaign = campaignService.create(campaignRequest("Triggered race"));
+        CampaignMessageDto message = campaignSendService.createMessage(
+            campaign.id(), new CampaignMessageRequest("Triggered message", "email"));
+        campaignSendService.addRevision(campaign.id(), message.id(), emailRevision());
+        User waiter = newOutcomeWaiter();
+        OutcomeBarrier barrier = new OutcomeBarrier();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<CampaignTriggeredSendService.EnrollmentResult> holder = executor.submit(
+                () -> holdCampaignOutcomeAs(
+                    currentUser,
+                    barrier,
+                    "Triggered enrollment waiter did not start",
+                    () -> campaignTriggeredSendService.enroll(person.getId(), message.id(), 1)));
+            barrier.awaitHeld(
+                "Triggered enrollment holder did not acquire the campaign lock",
+                () -> diagnosticDump(barrier));
+            Future<TimedResult<CampaignTriggeredSendService.EnrollmentResult>> waitingEnrollment =
+                executor.submit(() -> timedOutcomeCall(
+                    waiter,
+                    campaign.id(),
+                    barrier,
+                    () -> campaignTriggeredSendService.enroll(person.getId(), message.id(), 1)));
+
+            awaitObservedOutcomeWait(barrier, "Triggered enrollment");
+            CampaignTriggeredSendService.EnrollmentResult first = awaitOutcomeHolder(
+                holder, "Triggered enrollment", barrier);
+            TimedResult<CampaignTriggeredSendService.EnrollmentResult> second = awaitOutcomeWaiter(
+                waitingEnrollment, "Triggered enrollment", barrier);
+            assertCompletedAfterHolderCommit(barrier, second, "Triggered enrollment");
+
+            assertEquals("delivery_queued", first.outcome());
+            assertEquals("delivery_dedup_skipped", second.value().outcome());
+            assertEquals(first.sendId(), second.value().sendId());
+            assertEquals(first.deliveryId(), second.value().deliveryId());
+            assertEquals(1, campaignSendMapper.getSendsByCampaign(
+                workspace.getId(), campaign.id()).size());
+            assertEquals(1, campaignDeliveryMapper.pendingDeliveryIds(
+                workspace.getId(), first.sendId()).size());
+        } finally {
+            barrier.abort();
+            shutdown(executor);
+        }
+    }
 
     @Test
     void concurrentAudienceUpdatesAuditTheScopeTheyActuallyReplace() throws Exception {

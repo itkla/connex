@@ -13,6 +13,8 @@ import java.time.LocalDateTime;
  * @param personId the contact record id, or null once the contact link was cleared
  * @param status the current delivery status
  * @param skipReason the ordered skip reason when the delivery was skipped
+ * @param reconciliationRequiredAt when provider-outcome reconciliation became required, or null
+ * @param reasonCode bounded failure reason safe for a product surface, or null
  * @param createdAt when the delivery was materialized
  * @param updatedAt when the delivery last changed
  */
@@ -23,6 +25,8 @@ public record CampaignRecipientRow(
         Integer personId,
         String status,
         String skipReason,
+        LocalDateTime reconciliationRequiredAt,
+        String reasonCode,
         LocalDateTime createdAt,
         LocalDateTime updatedAt) {
 }

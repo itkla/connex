@@ -1,5 +1,6 @@
 "use client";
 
+import { type ReactNode } from "react";
 import { ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 
@@ -13,7 +14,7 @@ export default function WorkflowValidationSummary({
     onSelectDiagnostic,
 }: {
     validation: WorkflowValidation;
-    diagnosticMessage: (diagnostic: WorkflowDiagnostic) => string;
+    diagnosticMessage: (diagnostic: WorkflowDiagnostic) => ReactNode;
     onSelectDiagnostic: (diagnostic: WorkflowDiagnostic) => void;
 }) {
     const t = useTranslations("WorkspaceWorkflows");

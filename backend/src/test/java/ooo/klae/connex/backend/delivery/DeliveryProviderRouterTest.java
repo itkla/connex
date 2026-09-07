@@ -11,8 +11,10 @@ import org.junit.jupiter.api.Test;
 
 class DeliveryProviderRouterTest {
 
-    private static final DeliveryCapabilities DISPATCH_CAPS = new DeliveryCapabilities(true, false, false, 1);
-    private static final DeliveryCapabilities SYNC_CAPS = new DeliveryCapabilities(false, true, false, 0);
+    private static final DeliveryCapabilities DISPATCH_CAPS =
+            new DeliveryCapabilities(true, false, false, true, 1);
+    private static final DeliveryCapabilities SYNC_CAPS =
+            new DeliveryCapabilities(false, true, false, false, 0);
 
     private static final class FakeDispatcher implements MessageDispatcher {
         private final String id;

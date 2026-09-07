@@ -147,9 +147,10 @@ The workspace's port also falls back to `connex.mail.port` (default `587`) when 
 
 **The ESP identity takes part in no precedence at all.** `HttpEspDeliveryProvider` builds its send
 payload directly from the resolved provider config's `fromAddress` and `fromName`; there is no
-fallback to `connex.mail.*` and no fallback to the workspace SMTP override, in either direction. Only
-the built-in `smtp` delivery provider re-resolves the transport through `MailConfigResolver`, and only
-that path inherits the two-tier fallback in [§2.1](#21-how-a-sender-is-resolved).
+fallback to `connex.mail.*` and no fallback to the workspace SMTP override, in either direction. The
+built-in `smtp` delivery provider uses the exact transport selected through `MailConfigResolver`
+before its delivery claim, and that selection inherits the two-tier fallback in
+[§2.1](#21-how-a-sender-is-resolved).
 
 **So an ESP `From` domain is a separate domain you must publish DNS for**
 ([§4](#4-dns-records-per-deployment-shape)). This is the single easiest way to get deliverability
@@ -176,6 +177,31 @@ never rejects anything.
 
 `SmtpDestinationGuard` resolves the SMTP host and `PinnedSocketFactory` connects to that exact
 address, so the name cannot be re-resolved to a different host between check and connect.
+
+Campaign sends track the SMTP transport socket for hard deadline cancellation. A workspace-supplied
+host uses the pinned socket factory when the destination guard returns an approved address. When
+internal workspace relays are explicitly allowed, and for the trusted instance transport, Connex
+resolves the configured hostname within the same absolute deadline and uses the tracked non-pinned
+factory. At the deadline Connex closes the socket before the synchronized JavaMail transport; this
+interrupts a relay that continues slow-drip activity after `DATA`, which inactivity timeouts alone
+cannot bound.
+
+**The tracked socket is always the raw TCP socket, including on TLS transports.** Connex publishes
+only a plain socket factory and lets the mail library layer TLS over the socket it opened, for
+implicit TLS (port 465) as much as for STARTTLS. Two properties depend on this. Publishing an SSL
+socket factory instead would make the mail library ignore the plain factory and open its own socket
+to the configured hostname, discarding the approved destination pin. And a TLS write that fills the
+network buffers parks inside the TLS record layer while holding that layer's record lock, so closing
+the TLS layer would wait for exactly the write it is trying to interrupt, whereas closing the raw
+socket underneath fails that write immediately. **The absolute deadline is therefore the only bound
+on a campaign body write**; the socket read timeout bounds reads only, and the deadline path
+deliberately does not set a per-write timeout, which the mail library would implement with an extra
+scheduled executor per send.
+
+Host resolution is admitted through a small bounded resolver. Admission control covers
+workspace-supplied hosts, whose destinations an operator can edit; a trusted instance default is
+exempt and the resolver pool reserves a thread for it, so a busy resolver cannot turn an
+instance-default send into a rejection earlier than its own deadline requires.
 
 **The guard governs workspace-supplied hosts only.** `resolveForSend` returns `null` immediately when
 `config.workspaceSupplied()` is false, so **the instance relay is trusted and never checked** — not at
@@ -285,6 +311,27 @@ report delivery"*) **after** handing every recipient's message to the async send
 unusable, the snapshot is still frozen and that audit record is still written. The audit is honest —
 it says *queued* — but it is exactly that and no more. **"The audit says the report was delivered" is
 not evidence that mail left the building.** Only the SMTP logs, or the receiving mailbox, are.
+
+Campaign SMTP has a different persisted outcome path, but it is still a **best-effort submission**.
+Connex places a stable `Message-ID` and `Idempotency-Key` in the MIME message for correlation; SMTP
+relays do not promise to deduplicate either header and may accept repeated `DATA` submissions. The
+built-in `smtp` provider therefore declares no idempotent-submission capability. If a worker claim
+expires after the relay outcome becomes unknown, Connex marks the delivery failed with a
+reconciliation requirement instead of replaying it. An operator must check the relay, then confirm
+`delivered` or `not_delivered` through the campaign recipient reconciliation endpoint. That endpoint
+records evidence only; it never sends. Generic HTTP ESP/SMS connectors default
+`idempotentSubmission` to false. A workspace administrator may enable it only after verifying that
+the configured endpoint guarantees repeated requests carrying the same `Idempotency-Key` deliver no
+more than once; enabling it incorrectly can cause duplicate delivery. Connex returns an expired claim to the queue only if
+the current connector has the exact provider/configuration/endpoint/credential-reference fingerprint
+persisted before the original egress; changing an account or endpoint makes the result ambiguous
+instead of replaying the key in a different provider namespace. **Rotating a send credential counts
+as a configuration change even though nothing visible moves.** The central secret store keeps one
+row per workspace and purpose, so saving a new API key overwrites that row and returns the same
+opaque reference; the save path therefore tells the configuration upsert that a new secret was
+written, the configuration generation advances, and the fingerprint changes. Issuing or rotating an
+inbound webhook token deliberately does not advance it, so an in-flight claim survives a webhook
+rotation.
 
 ## 4. DNS records per deployment shape
 
@@ -607,6 +654,7 @@ The two are asymmetric, and the asymmetry is easy to misread as a product-wide c
 | Unsubscribe | Yes — body link, per recipient | **None** |
 | `List-Unsubscribe` header | **No** | **No** |
 | Per-message outcome | Recorded against the delivery row | Swallowed ([§3.1](#31-failure-semantics-most-send-failures-are-invisible)) |
+| Worker-loss replay | HTTP ESP/SMS only when that connector explicitly declares idempotent submission; SMTP requires reconciliation | None |
 
 **Bounce and complaint telemetry requires an ESP provider with webhooks.** A hard bounce or a
 complaint arriving on the webhook endpoint records a suppression entry and revokes consent
@@ -614,6 +662,12 @@ automatically. On the **built-in SMTP provider none of that exists**: you get `s
 handoff and nothing after, so `delivered`, `bounced`, and `complained` on the campaign engagement
 figures are all zero. Zero there means *no receipts*, not *no bounces* — do not read a clean SMTP
 campaign report as a clean campaign.
+
+**SMTP acceptance is not idempotent.** The stable `Message-ID` is useful when searching relay logs,
+but it is not a duplicate-suppression guarantee. When a campaign recipient is marked as needing
+confirmation, inspect the relay before resolving it. Mark it `delivered` when the relay accepted the
+message. Mark it `not_delivered` only when the relay confirms no delivery occurred; that preserves
+the failed attempt and allows a later workflow enrollment to create a replacement delivery.
 
 **Transactional mail has no bounce handling, no suppression, and no unsubscribe at all.** That
 machinery is exclusively campaign-scoped. An invite sent to a dead address bounces to the `From`

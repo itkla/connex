@@ -84,9 +84,13 @@ class MainRedAlertCoverage(unittest.TestCase):
         # A tag filter with no branch filter runs on tags only, not on a branch push to main.
         self.assertFalse(_runs_on_main_push({"on": {"push": {"tags": ["v*.*.*"]}}}))
 
-    def test_the_alert_only_reports_real_pushes(self):
+    def test_the_alert_only_reports_pushes_and_schedules(self):
+        # Both events run on the repository's own main; pull_request runs of a fork branch named
+        # "main" must not report. Scheduled runs are watched because the Security workflow's weekly
+        # scan gates main on its open alert set (#1244).
         job = yaml.safe_load(ALERT.read_text())["jobs"]["alert"]["if"]
-        self.assertIn("workflow_run.event == 'push'", job)
+        self.assertIn('contains(fromJSON(\'["push", "schedule"]\'), github.event.workflow_run.event)', job)
+        self.assertNotIn("pull_request", job)
 
     def test_every_terminal_non_success_conclusion_is_reportable(self):
         """Pins the reportable set against GitHub's full conclusion enum.
@@ -117,11 +121,14 @@ class MainRedAlertCoverage(unittest.TestCase):
         # aborts before any issue is opened, so the alert silently never fires.
         self.assertEqual("read", doc["permissions"]["actions"])
 
-    def test_supersession_considers_only_push_runs(self):
-        step = yaml.safe_load(ALERT.read_text())["jobs"]["alert"]["steps"][0]["run"]
+    def test_supersession_considers_only_runs_of_the_triggering_event(self):
+        alert_step = yaml.safe_load(ALERT.read_text())["jobs"]["alert"]["steps"][0]
         # A later workflow_dispatch or scheduled run of the same workflow has a higher id; without
-        # the event filter it would falsely mark a red push run as superseded.
-        self.assertIn("event=push", step)
+        # the event filter it would falsely mark a red push run as superseded. Keying the filter on
+        # the triggering event gives scheduled runs the same protection against push runs.
+        self.assertIn("event=$RUN_EVENT", alert_step["run"])
+        self.assertNotIn("event=push", alert_step["run"])
+        self.assertEqual("${{ github.event.workflow_run.event }}", alert_step["env"]["RUN_EVENT"])
 
     def test_main_is_rechecked_before_the_issue_is_mutated(self):
         step = yaml.safe_load(ALERT.read_text())["jobs"]["alert"]["steps"][0]["run"]

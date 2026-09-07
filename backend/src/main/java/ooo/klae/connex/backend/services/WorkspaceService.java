@@ -103,7 +103,8 @@ public class WorkspaceService {
             Permission.PRODUCT_MANAGE, Permission.DOCUMENT_MANAGE, Permission.DOCUMENT_SEND,
             Permission.DOCUMENT_APPROVE,
             Permission.CUSTOM_FIELD_MANAGE, Permission.SHARE_MANAGE, Permission.MEMBER_MANAGE,
-            Permission.AUDIT_READ, Permission.WORKSPACE_SETTINGS, Permission.RULE_MANAGE,
+            Permission.AUDIT_READ, Permission.WORKSPACE_SETTINGS, Permission.API_CREDENTIAL_MANAGE,
+            Permission.RULE_MANAGE,
             Permission.AI_USE, Permission.AI_SESSION_SHARE, Permission.AI_SESSION_ADMIN,
             Permission.GOAL_MANAGE,
             Permission.CAMPAIGN_MANAGE,
@@ -652,6 +653,105 @@ public class WorkspaceService {
             return EnumSet.noneOf(Permission.class);
         }
         return parsePermissions(roleMapper.lockPermissions(workspaceId, roleId));
+    }
+
+    /**
+     * Returns one member generation and its effective permissions using consistent, non-locking
+     * reads. The caller must hold a read-only {@code REPEATABLE_READ} transaction across this
+     * lookup and every protected read that consumes the result.
+     *
+     * @param workspaceId workspace whose current authorization is required
+     * @param userId non-system member whose current generation is required
+     * @return snapshot authorization or {@code null} when the membership is not active
+     */
+    public SnapshotMemberAuthorization snapshotMemberAuthorization(int workspaceId, int userId) {
+        if (systemActor.is(userId) || userMapper.isAccountDeletionReserved(userId)) {
+            return null;
+        }
+        WorkspaceMember membership = workspaceMapper.getAuthorizationMembership(workspaceId, userId);
+        if (!isExactMembership(membership, workspaceId, userId)
+                || !"active".equals(membership.getStatus())) {
+            return null;
+        }
+        Long membershipId = workspaceMapper.getMembershipGenerationId(workspaceId, userId);
+        Integer organizationId = workspaceMapper.getOrgId(workspaceId);
+        if (membershipId == null || organizationId == null) {
+            return null;
+        }
+        Set<Permission> permissions;
+        if (membership.getRoleId() == null) {
+            Role role = Role.of(membership.getRole());
+            permissions = role == null ? EnumSet.noneOf(Permission.class) : builtInPermissions(role);
+        } else {
+            WorkspaceRole role = roleMapper.findRole(workspaceId, membership.getRoleId());
+            if (role == null || role.getWorkspaceId() != workspaceId
+                    || role.getId() != membership.getRoleId()) {
+                return null;
+            }
+            permissions = parsePermissions(role.getPermissions());
+        }
+        return new SnapshotMemberAuthorization(
+            membershipId, organizationId, Set.copyOf(permissions));
+    }
+
+    /** Authorization state valid only for the read transaction that produced it. */
+    public record SnapshotMemberAuthorization(
+            long membershipId,
+            int organizationId,
+            Set<Permission> permissions) {
+    }
+
+    /**
+     * Locks and returns the exact membership generation, workspace organization, and effective
+     * permissions used by credential issuance and authentication. The workspace root and its
+     * organization root are both taken {@code FOR SHARE} before the membership row, so a caller
+     * that goes on to lock {@code api_credential} children never holds a child row while waiting
+     * for a root the audit append will request.
+     *
+     * @param workspaceId workspace whose authorization rows are locked
+     * @param userId non-system member whose current generation is required
+     * @return locked authorization or {@code null} when the membership is not active
+     */
+    public LockedMemberAuthorization lockedMemberAuthorization(int workspaceId, int userId) {
+        if (!Boolean.FALSE.equals(userMapper.isAccountDeletionReservedForShare(userId))) {
+            return null;
+        }
+        Integer organizationId = workspaceMapper.lockActiveWorkspaceForShare(workspaceId);
+        if (organizationId == null) {
+            return null;
+        }
+        if (organizationMapper.lockByIdForShare(organizationId) == null) {
+            return null;
+        }
+        WorkspaceMember membership = workspaceMapper.lockAuthorizationMembership(workspaceId, userId);
+        if (!isExactMembership(membership, workspaceId, userId)
+                || !"active".equals(membership.getStatus())) {
+            return null;
+        }
+        Long membershipId = workspaceMapper.getMembershipGenerationId(workspaceId, userId);
+        if (membershipId == null) {
+            return null;
+        }
+        Set<Permission> permissions;
+        if (membership.getRoleId() == null) {
+            Role role = Role.of(membership.getRole());
+            permissions = role == null ? EnumSet.noneOf(Permission.class) : builtInPermissions(role);
+        } else {
+            int roleId = membership.getRoleId();
+            if (roleMapper.lockRole(workspaceId, roleId) == null) {
+                return null;
+            }
+            permissions = parsePermissions(roleMapper.lockPermissions(workspaceId, roleId));
+        }
+        return new LockedMemberAuthorization(
+            membershipId, organizationId, Set.copyOf(permissions));
+    }
+
+    /** Locked authorization state bound to one membership generation. */
+    public record LockedMemberAuthorization(
+            long membershipId,
+            int organizationId,
+            Set<Permission> permissions) {
     }
 
     /**

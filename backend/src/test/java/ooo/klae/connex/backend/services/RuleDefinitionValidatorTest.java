@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 
 import java.util.List;
@@ -27,8 +28,10 @@ import ooo.klae.connex.backend.dto.RuleRequest;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.services.WorkspaceService.Role;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -41,20 +44,36 @@ class RuleDefinitionValidatorTest {
 
     @Mock private SegmentService segmentService;
     @Mock private WorkspaceService workspaceService;
+    @Mock private SystemActor systemActor;
 
     private RuleDefinitionValidator validator;
 
     @BeforeEach
     void setUp() {
+        lenient().when(systemActor.permissions()).thenReturn(Set.of(
+            Permission.TASK_CREATE,
+            Permission.ACTIVITY_CREATE,
+            Permission.NOTE_CREATE,
+            Permission.COMPANY_UPDATE,
+            Permission.PERSON_UPDATE,
+            Permission.DEAL_UPDATE,
+            Permission.CONSENT_MANAGE));
         validator = validatorWithDocumentFence(true);
     }
 
     private RuleDefinitionValidator validatorWithDocumentFence(boolean open) {
+        return validatorWithFences(open, true);
+    }
+
+    private RuleDefinitionValidator validatorWithFences(
+            boolean documentOpen, boolean triggeredSendOpen) {
         return new RuleDefinitionValidator(
             segmentService,
             workspaceService,
             BEAN_VALIDATOR,
-            new WorkflowDocumentAutomationGate(open));
+            new WorkflowDocumentAutomationGate(documentOpen),
+            new WorkflowTriggeredSendGate(triggeredSendOpen),
+            systemActor);
     }
 
     @AfterAll
@@ -413,6 +432,106 @@ class RuleDefinitionValidatorTest {
         }
     }
 
+    @Test
+    void sendMessageIsPersonOnlyAndRequiresTheCompletePermissionSet() {
+        RuleAction send = action("send_message");
+        RuleRequest person = request(
+            "person", entityChange("person.updated"), "user", send);
+
+        assertEquals(
+            Set.of(
+                Permission.CAMPAIGN_MANAGE,
+                Permission.CAMPAIGN_SEND,
+                Permission.CONSENT_MANAGE),
+            validator.validateForMutation(person));
+        assertDoesNotThrow(() -> validator.validate(person));
+        verify(workspaceService).requirePermission(Permission.CAMPAIGN_MANAGE);
+        verify(workspaceService).requirePermission(Permission.CAMPAIGN_SEND);
+        verify(workspaceService).requirePermission(Permission.CONSENT_MANAGE);
+
+        for (String recordType : List.of("company", "deal", "task", "document")) {
+            RuleRequest unsupported = request(
+                recordType,
+                entityChange(switch (recordType) {
+                    case "company" -> "company.updated";
+                    case "deal" -> "deal.won";
+                    case "task" -> "task.completed";
+                    case "document" -> "document.approved";
+                    default -> throw new IllegalStateException();
+                }),
+                "user",
+                send);
+            WorkflowDefinitionValidationException exception = assertThrows(
+                WorkflowDefinitionValidationException.class,
+                () -> validator.validateForMutation(unsupported));
+            assertEquals(
+                ooo.klae.connex.backend.dto.WorkflowDiagnosticCode.ACTION_RECORD_TYPE_UNSUPPORTED,
+                exception.diagnostic().code());
+        }
+    }
+
+    @Test
+    void sendMessageRequiresBothRevisionIdentityFields() {
+        RuleAction missingMessage = action("send_message");
+        missingMessage.setCampaignMessageId(null);
+        WorkflowDefinitionValidationException messageFailure = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> validator.validateForMutation(request(
+                "person", entityChange("person.updated"), "user", missingMessage)));
+
+        RuleAction missingVersion = action("send_message");
+        missingVersion.setCampaignMessageVersion(null);
+        WorkflowDefinitionValidationException versionFailure = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> validator.validateForMutation(request(
+                "person", entityChange("person.updated"), "user", missingVersion)));
+
+        assertEquals("config.campaignMessageId", messageFailure.diagnostic().fieldPath());
+        assertEquals("config.campaignMessageVersion", versionFailure.diagnostic().fieldPath());
+    }
+
+    @Test
+    void triggeredSendFenceRejectsTheActionWithoutBlockingOtherActions() {
+        RuleDefinitionValidator fenced = validatorWithFences(true, false);
+
+        WorkflowDefinitionValidationException exception = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> fenced.validateForMutation(request(
+                "person", entityChange("person.updated"), "user", action("send_message"))));
+
+        assertEquals(
+            ooo.klae.connex.backend.dto.WorkflowDiagnosticCode.ACTION_TYPE_INVALID,
+            exception.diagnostic().code());
+        assertDoesNotThrow(() -> fenced.validateForMutation(request(
+            "person", entityChange("person.updated"), "user", action("create_task"))));
+    }
+
+    @Test
+    void systemModeCannotPublishSendMessageWithoutSystemActorPermissions() {
+        WorkflowDefinitionValidationException exception = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> validator.validateForMutation(request(
+                "person", entityChange("person.updated"), "system", action("send_message"))));
+
+        assertEquals(
+            ooo.klae.connex.backend.dto.WorkflowDiagnosticCode.ACTION_SYSTEM_PERMISSION_MISSING,
+            exception.diagnostic().code());
+    }
+
+    @Test
+    void systemModeCannotSaveSendMessageDraftWithoutSystemActorPermissions() {
+        WorkflowDefinitionValidationException exception = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> validator.validateDraftActionsForMutation(
+                "person",
+                List.of(new WorkflowNode.Action("send", action("send_message"))),
+                "system"));
+
+        assertEquals(
+            ooo.klae.connex.backend.dto.WorkflowDiagnosticCode.ACTION_SYSTEM_PERMISSION_MISSING,
+            exception.diagnostic().code());
+    }
+
     private void assertStructurallyInvalid(RuleRequest request) {
         BadRequestException exception = assertThrows(
             BadRequestException.class, () -> validator.validate(request));
@@ -452,6 +571,10 @@ class RuleDefinitionValidatorTest {
             case "add_tag" -> action.setTagId(1);
             case "log_activity" -> action.setActivityType("call");
             case "create_note" -> action.setBody("body");
+            case "send_message" -> {
+                action.setCampaignMessageId(17);
+                action.setCampaignMessageVersion(3);
+            }
             default -> { }
         }
         return action;

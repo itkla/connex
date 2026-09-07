@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.tenant;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -22,6 +23,9 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.CorrelationIds;
+import ooo.klae.connex.backend.publicapi.ApiCredentialAuthenticationFilter;
+import ooo.klae.connex.backend.publicapi.ApiCredentialAuthenticationFilter.TenantBinding;
+import ooo.klae.connex.backend.publicapi.ApiCredentialPrincipal;
 import ooo.klae.connex.backend.services.WorkspaceService;
 
 /**
@@ -30,6 +34,9 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * {@code connex_workspace} cookie, then the user's remembered/first membership.
  * The candidate is always re-validated against membership, so a forged header or
  * cookie cannot grant access to a workspace the caller does not belong to.
+ * Public API requests retain the authoritative workspace and catalog already
+ * resolved by the credential filter and deliberately ignore both browser
+ * selection mechanisms.
  *
  * <p>A stale matching cookie/header pair — or a cookie-only pin — that fails
  * membership after the caller was removed from that workspace falls back to
@@ -44,10 +51,10 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * keep a scope from outliving the request that installed it:
  *
  * <ul>
- *   <li>{@link #preHandle} clears before every early return, so a request that
- *       resolves no workspace — a lifecycle path, an unauthenticated caller, or a
- *       user with no active membership — can never inherit whatever the previous
- *       request on this thread left behind.</li>
+ *   <li>{@link #preHandle} retains only a public credential binding whose request
+ *       marker, authenticated details, and live scope agree exactly. Every other
+ *       path clears before returning, so an unresolved request can never inherit
+ *       whatever the previous request on this thread left behind.</li>
  *   <li>This is an {@link AsyncHandlerInterceptor} because Spring dispatches
  *       {@link #afterConcurrentHandlingStarted} <em>instead of</em>
  *       {@link #afterCompletion} once a handler starts async processing, and only
@@ -80,18 +87,21 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
     private final ClientAssertedCorrelationPseudonymizer correlationPseudonymizer;
 
     /**
-     * Discards any scope left on this pooled thread, then resolves the request's own.
-     * The clear runs first so that every early return below leaves the thread
-     * unresolved rather than inheriting the previous request's tenant.
+     * Retains a validated public credential scope or discards any scope left on
+     * this pooled thread before resolving an ordinary browser request.
      */
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         request.removeAttribute(ORGANIZATION_ID_ATTRIBUTE);
-        tenantContext.clear();
         if (isLifecycleRequest(request)) {
+            tenantContext.clear();
             return true;
         }
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (workspaceRequestResolver.isPublicApiRequest(request)) {
+            return retainPublicApiBinding(request, auth);
+        }
+        tenantContext.clear();
         if (auth == null || !(auth.getPrincipal() instanceof User user)) {
             return true;
         }
@@ -125,6 +135,35 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
         String catalog = tenantCatalogResolver.resolveCatalog(orgId);
         tenantContext.set(candidate, orgId, user.getId(), role, catalog);
         request.setAttribute(ORGANIZATION_ID_ATTRIBUTE, orgId);
+        return true;
+    }
+
+    private boolean retainPublicApiBinding(
+            HttpServletRequest request, Authentication authentication) {
+        Object attribute = request.getAttribute(
+            ApiCredentialAuthenticationFilter.TENANT_BINDING_ATTRIBUTE);
+        User user = authentication != null && authentication.getPrincipal() instanceof User principal
+            ? principal
+            : null;
+        ApiCredentialPrincipal credential = user == null
+            ? null
+            : workspaceRequestResolver.resolvePublicApiCredential(
+                request, authentication, user.getId());
+        if (!(attribute instanceof TenantBinding binding)
+                || credential == null
+                || binding.credentialId() != credential.credentialId()
+                || binding.workspaceId() != credential.workspaceId()
+                || binding.organizationId() != credential.organizationId()
+                || binding.userId() != credential.userId()
+                || !tenantContext.isResolved()
+                || !Objects.equals(tenantContext.getWorkspaceId(), binding.workspaceId())
+                || !Objects.equals(tenantContext.getOrgId(), binding.organizationId())
+                || !Objects.equals(tenantContext.getUserId(), binding.userId())
+                || !Objects.equals(tenantContext.getScopeCatalog(), binding.catalog())) {
+            tenantContext.clear();
+            throw new ForbiddenException("API credential tenant binding is unavailable");
+        }
+        request.setAttribute(ORGANIZATION_ID_ATTRIBUTE, binding.organizationId());
         return true;
     }
 

@@ -303,6 +303,8 @@ public class WorkflowRunReadService {
             step.getSelectedOutcome(),
             step.getSelectedEdgeId(),
             step.getNextNodeId(),
+            step.getActionOutcome(),
+            step.getActionReferenceId(),
             step.getStartedAt(),
             step.getFinishedAt(),
             duration(step.getStartedAt(), step.getFinishedAt()),

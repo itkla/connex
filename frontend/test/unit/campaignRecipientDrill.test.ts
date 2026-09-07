@@ -2,7 +2,11 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { canReadRecipients, resolveCampaignAccess } from '@/app/lib/campaignAccess';
+import {
+    canReadRecipients,
+    canReconcileRecipients,
+    resolveCampaignAccess,
+} from '@/app/lib/campaignAccess';
 import {
     ENGAGEMENT_COUNTERS,
     recipientFilterFor,
@@ -18,6 +22,17 @@ function messages(locale: 'en' | 'ja'): Record<string, string> {
     const entries = Object.entries(scope as Record<string, unknown>)
         .filter((entry): entry is [string, string] => typeof entry[1] === 'string');
     return Object.fromEntries(entries);
+}
+
+function reasonCodes(locale: 'en' | 'ja'): Record<string, string> {
+    const parsed: unknown = JSON.parse(source(`messages/${locale}/campaigns.json`));
+    if (typeof parsed !== 'object' || parsed === null) throw new Error('campaigns catalog is not an object');
+    const scope = (parsed as Record<string, unknown>).CampaignRecipients;
+    if (typeof scope !== 'object' || scope === null) throw new Error('no CampaignRecipients namespace');
+    const reasons = (scope as Record<string, unknown>).reasonCodes;
+    if (typeof reasons !== 'object' || reasons === null) throw new Error('no reasonCodes namespace');
+    return Object.fromEntries(Object.entries(reasons)
+        .filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
 }
 
 function descriptionKey(counter: EngagementCounter): string {
@@ -80,10 +95,18 @@ describe('a campaign engagement count opens the contacts behind it', () => {
         expect(canReadRecipients(resolveCampaignAccess([]))).toBe(false);
     });
 
+    it('requires both campaign management and consent management to reconcile', () => {
+        expect(canReconcileRecipients(resolveCampaignAccess(ADMIN_PERMISSIONS))).toBe(true);
+        expect(canReconcileRecipients(resolveCampaignAccess(MEMBER_PERMISSIONS))).toBe(false);
+        expect(canReconcileRecipients(resolveCampaignAccess(MANAGER_WITHOUT_CONSENT))).toBe(false);
+        expect(canReconcileRecipients(resolveCampaignAccess(['CONSENT_MANAGE']))).toBe(false);
+    });
+
     it('passes that answer from the detail page into the counters', () => {
         const detail = source(DETAIL);
 
         expect(detail).toContain('canReadRecipients={canReadRecipients(access)}');
+        expect(detail).toContain('canReconcileRecipients={canReconcileRecipients(access)}');
         expect(source(ENGAGEMENT)).toContain('onDrill={canReadRecipients ? setOpenCounter : null}');
     });
 
@@ -107,9 +130,32 @@ describe('a campaign engagement count opens the contacts behind it', () => {
         expect(dialog).toContain("t('contactRemoved')");
     });
 
+    it('surfaces ambiguous delivery reconciliation state in both locales', () => {
+        const dialog = source(DIALOG);
+
+        expect(dialog).toContain('recipient.reconciliationRequired');
+        expect(dialog).toContain('t(FAILURE_REASON_KEY[recipient.reasonCode])');
+        expect(dialog).not.toContain('recipient.lastError');
+        for (const locale of ['en', 'ja'] as const) {
+            const catalog = messages(locale);
+            expect(catalog.reconciliationRequired).toBeTruthy();
+            expect(catalog.reconciliationPermissionRequired).toBeTruthy();
+            expect(Object.keys(reasonCodes(locale))).toEqual([
+                'provider_timeout',
+                'provider_rejected',
+                'deadline_ambiguous',
+                'delivery_target_changed',
+                'relay_error',
+            ]);
+        }
+    });
+
     it('asks the server for exactly the population the counter selected', () => {
         expect(source(DIALOG)).toContain('...recipientFilterFor(counter), page, size: PAGE_SIZE');
         expect(source('app/lib/api.ts')).toContain('`/api/campaigns/${id}/recipients${buildQuery(params)}`');
+        expect(source('app/lib/api.ts')).toContain(
+            '`/api/campaigns/${campaignId}/recipients/${deliveryId}/reconcile`',
+        );
     });
 
     it('describes each population in its own words, so a withheld or bounced list never claims it reached anyone', () => {

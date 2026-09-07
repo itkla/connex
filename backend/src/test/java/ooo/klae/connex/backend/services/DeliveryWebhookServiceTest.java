@@ -130,7 +130,8 @@ class DeliveryWebhookServiceTest {
         assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
 
         verify(eventSource).verifySignature(any(), any(), any());
-        verify(campaignDeliveryMapper).applyProviderStatus(WORKSPACE_A, 500, "delivered", List.of("dispatched"));
+        verify(campaignDeliveryMapper).applyProviderStatus(
+                WORKSPACE_A, 500, "delivered", List.of("dispatched", "failed"));
         verifyNoInteractions(suppressionService, consentService);
     }
 
@@ -148,7 +149,7 @@ class DeliveryWebhookServiceTest {
         assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
 
         verify(campaignDeliveryMapper).applyProviderStatus(
-                WORKSPACE_A, 500, "bounced", List.of("dispatched", "delivered"));
+                WORKSPACE_A, 500, "bounced", List.of("dispatched", "delivered", "failed"));
         org.mockito.ArgumentCaptor<SuppressionEntryRequest> captor =
                 org.mockito.ArgumentCaptor.forClass(SuppressionEntryRequest.class);
         verify(suppressionService).add(captor.capture());
@@ -196,7 +197,8 @@ class DeliveryWebhookServiceTest {
         assertEquals(1, service().ingest(PROVIDER, "tok", new byte[0], Map.of()));
 
         verify(campaignDeliveryMapper).insertEvent(any(CampaignDeliveryEvent.class));
-        verify(campaignDeliveryMapper).applyProviderStatus(WORKSPACE_A, 500, "delivered", List.of("dispatched"));
+        verify(campaignDeliveryMapper).applyProviderStatus(
+                WORKSPACE_A, 500, "delivered", List.of("dispatched", "failed"));
     }
 
     @Test

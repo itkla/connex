@@ -72,6 +72,12 @@ jobs:
         run: python .github/scripts/test_ci_change_classification.py
       - name: Regression-test CodeQL alert gate
         run: python .github/scripts/test_codeql_alerts.py
+      - name: Regression-test CodeQL dismissal replay
+        run: python .github/scripts/test_replay_codeql_dismissals.py
+      - name: Require the SAST compliance documents to carry no unfilled placeholder
+        run: python .github/scripts/check-doc-placeholders.py
+      - name: Regression-test the placeholder guard
+        run: python .github/scripts/test_doc_placeholders.py
       - name: Regression-test candidate soak evidence
         run: python .github/scripts/test_candidate_soak.py
       - name: Regression-test security workflow gates
@@ -173,6 +179,11 @@ jobs:
     permissions:
       contents: read
       security-events: write
+    # Diff-informed analysis prunes pull-request results to the diff before upload. The gate below
+    # compares alert identities on the analysed ref with the base ref, so it needs the full result
+    # set on the pull-request merge ref; pruning is what hid every result from 2026-08-26 (#1244).
+    env:
+      CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -189,8 +200,7 @@ jobs:
           languages: java-kotlin
           build-mode: manual
           queries: security-extended
-          config-file: ./.github/codeql/codeql-config.yml
-          source-root: backend
+          config-file: ./.github/codeql/backend.yml
       - name: Compile backend for CodeQL extraction
         working-directory: backend
         run: >-
@@ -206,31 +216,63 @@ jobs:
           category: /language:java-kotlin
           wait-for-processing: true
       - name: Block Critical, High, or error-severity alerts
-        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
           ANALYSIS_CATEGORY: /language:java-kotlin
           ANALYSIS_REF: ${{ github.ref }}
+          ANALYSIS_SHA: ${{ github.sha }}
+          BASE_REF: ${{ github.event.merge_group.base_ref || format('refs/heads/{0}', github.event.pull_request.base.ref) }}
           EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO_FORK: ${{ github.event.pull_request.head.repo.fork }}
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           alerts_file="$RUNNER_TEMP/codeql-backend-alerts.json"
+          baseline_file="$RUNNER_TEMP/codeql-backend-baseline.json"
+          analyses_file="$RUNNER_TEMP/codeql-backend-analyses.json"
+          baseline_analyses_file="$RUNNER_TEMP/codeql-backend-baseline-analyses.json"
+          fetch_open_alerts() {
+            gh api --method GET --paginate --slurp \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              -f tool_name=CodeQL \
+              -f state=open \
+              -f per_page=100 \
+              -f "ref=$1" \
+              "repos/$GITHUB_REPOSITORY/code-scanning/alerts"
+          }
+          # The newest analyses of a ref, so the checker can refuse an upload that was processed
+          # but stored no results: that is what every pull-request analysis looked like from
+          # 2026-08-26 (#1244), and an empty alert set is indistinguishable from a clean one.
+          fetch_analyses() {
+            gh api --method GET \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              -f tool_name=CodeQL \
+              -f per_page=20 \
+              -f "ref=$1" \
+              "repos/$GITHUB_REPOSITORY/code-scanning/analyses"
+          }
           case "$EVENT_NAME" in
-            pull_request) scope_arguments=(-f "pr=$PR_NUMBER") ;;
-            merge_group) scope_arguments=(-f "ref=$ANALYSIS_REF") ;;
+            pull_request|merge_group)
+              if [ "$HEAD_REPO_FORK" = "true" ]; then
+                echo "::error::fork pull requests are not gated"; exit 1
+              fi
+              fetch_open_alerts "$ANALYSIS_REF" > "$alerts_file"
+              fetch_open_alerts "$BASE_REF" > "$baseline_file"
+              fetch_analyses "$ANALYSIS_REF" > "$analyses_file"
+              fetch_analyses "$BASE_REF" > "$baseline_analyses_file"
+              python3 .github/scripts/check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY" \
+                --analyses "$analyses_file" --commit "$ANALYSIS_SHA" \
+                --ref "$ANALYSIS_REF" --baseline "$baseline_file" --baseline-ref "$BASE_REF" \
+                --baseline-analyses "$baseline_analyses_file" ;;
+            push|schedule|workflow_dispatch)
+              fetch_open_alerts "$ANALYSIS_REF" > "$alerts_file"
+              fetch_analyses "$ANALYSIS_REF" > "$analyses_file"
+              python3 .github/scripts/check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY" \
+                --analyses "$analyses_file" --commit "$ANALYSIS_SHA" \
+                --ref "$ANALYSIS_REF" ;;
             *) echo "::error::Unsupported CodeQL gate event: $EVENT_NAME"; exit 1 ;;
           esac
-          gh api --method GET --paginate --slurp \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2026-03-10" \
-            -f tool_name=CodeQL \
-            -f state=open \
-            -f per_page=100 \
-            "${scope_arguments[@]}" \
-            "repos/$GITHUB_REPOSITORY/code-scanning/alerts" \
-            > "$alerts_file"
-          python3 .github/scripts/check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY"
 
   frontend-sast:
     name: Frontend SAST (CodeQL)
@@ -241,6 +283,11 @@ jobs:
     permissions:
       contents: read
       security-events: write
+    # Diff-informed analysis prunes pull-request results to the diff before upload. The gate below
+    # compares alert identities on the analysed ref with the base ref, so it needs the full result
+    # set on the pull-request merge ref; pruning is what hid every result from 2026-08-26 (#1244).
+    env:
+      CODEQL_ACTION_DIFF_INFORMED_QUERIES: 'false'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -251,39 +298,70 @@ jobs:
           languages: javascript-typescript
           build-mode: none
           queries: security-extended
-          config-file: ./.github/codeql/codeql-config.yml
-          source-root: frontend
+          config-file: ./.github/codeql/frontend.yml
       - name: Analyze frontend with CodeQL
         uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
         with:
           category: /language:javascript-typescript
           wait-for-processing: true
       - name: Block Critical, High, or error-severity alerts
-        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
           ANALYSIS_CATEGORY: /language:javascript-typescript
           ANALYSIS_REF: ${{ github.ref }}
+          ANALYSIS_SHA: ${{ github.sha }}
+          BASE_REF: ${{ github.event.merge_group.base_ref || format('refs/heads/{0}', github.event.pull_request.base.ref) }}
           EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO_FORK: ${{ github.event.pull_request.head.repo.fork }}
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           alerts_file="$RUNNER_TEMP/codeql-frontend-alerts.json"
+          baseline_file="$RUNNER_TEMP/codeql-frontend-baseline.json"
+          analyses_file="$RUNNER_TEMP/codeql-frontend-analyses.json"
+          baseline_analyses_file="$RUNNER_TEMP/codeql-frontend-baseline-analyses.json"
+          fetch_open_alerts() {
+            gh api --method GET --paginate --slurp \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              -f tool_name=CodeQL \
+              -f state=open \
+              -f per_page=100 \
+              -f "ref=$1" \
+              "repos/$GITHUB_REPOSITORY/code-scanning/alerts"
+          }
+          # The newest analyses of a ref, so the checker can refuse an upload that was processed
+          # but stored no results: that is what every pull-request analysis looked like from
+          # 2026-08-26 (#1244), and an empty alert set is indistinguishable from a clean one.
+          fetch_analyses() {
+            gh api --method GET \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              -f tool_name=CodeQL \
+              -f per_page=20 \
+              -f "ref=$1" \
+              "repos/$GITHUB_REPOSITORY/code-scanning/analyses"
+          }
           case "$EVENT_NAME" in
-            pull_request) scope_arguments=(-f "pr=$PR_NUMBER") ;;
-            merge_group) scope_arguments=(-f "ref=$ANALYSIS_REF") ;;
+            pull_request|merge_group)
+              if [ "$HEAD_REPO_FORK" = "true" ]; then
+                echo "::error::fork pull requests are not gated"; exit 1
+              fi
+              fetch_open_alerts "$ANALYSIS_REF" > "$alerts_file"
+              fetch_open_alerts "$BASE_REF" > "$baseline_file"
+              fetch_analyses "$ANALYSIS_REF" > "$analyses_file"
+              fetch_analyses "$BASE_REF" > "$baseline_analyses_file"
+              python3 .github/scripts/check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY" \
+                --analyses "$analyses_file" --commit "$ANALYSIS_SHA" \
+                --ref "$ANALYSIS_REF" --baseline "$baseline_file" --baseline-ref "$BASE_REF" \
+                --baseline-analyses "$baseline_analyses_file" ;;
+            push|schedule|workflow_dispatch)
+              fetch_open_alerts "$ANALYSIS_REF" > "$alerts_file"
+              fetch_analyses "$ANALYSIS_REF" > "$analyses_file"
+              python3 .github/scripts/check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY" \
+                --analyses "$analyses_file" --commit "$ANALYSIS_SHA" \
+                --ref "$ANALYSIS_REF" ;;
             *) echo "::error::Unsupported CodeQL gate event: $EVENT_NAME"; exit 1 ;;
           esac
-          gh api --method GET --paginate --slurp \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2026-03-10" \
-            -f tool_name=CodeQL \
-            -f state=open \
-            -f per_page=100 \
-            "${scope_arguments[@]}" \
-            "repos/$GITHUB_REPOSITORY/code-scanning/alerts" \
-            > "$alerts_file"
-          python3 .github/scripts/check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY"
 
   dependency-review:
     name: Dependency review (PR)

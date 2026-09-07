@@ -66,6 +66,8 @@ OCR_DEPENDENCY_FILES = {
 
 SECURITY_REGRESSION_DOCUMENTS = {
     "docs/DEPLOYMENT.md",
+    "docs/SAST_TRIAGE_LOG.md",
+    "docs/STATIC_ANALYSIS.md",
     "docs/UPGRADING.md",
 }
 

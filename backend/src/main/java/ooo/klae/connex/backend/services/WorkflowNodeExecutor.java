@@ -41,16 +41,15 @@ public class WorkflowNodeExecutor {
                 node.id(),
                 context.run().getRecordType(),
                 context.run().getRecordId(),
-                context.principal().attributionUserId());
-            automationExecutor.runAs(
+                context.principal().attributionUserId(),
+                context.principal().actorUserId(),
+                context.principal().lockedPermissions());
+            WorkflowActionResult actionResult = automationExecutor.runAs(
                 context.run().getWorkspaceId(),
                 context.principal().principal(),
                 context.principal().role(),
-                () -> {
-                    actionExecutor.execute(action.config(), actionContext);
-                    return null;
-                });
-            return transition;
+                () -> actionExecutor.execute(action.config(), actionContext));
+            return transition.withActionResult(actionResult);
         }
         return transition;
     }

@@ -36,6 +36,12 @@ public interface WorkspaceMapper {
     WorkspaceMember lockAuthorizationMembership(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
+    WorkspaceMember getAuthorizationMembership(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
+    Long getMembershipGenerationId(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
     boolean isMemberIncludingPending(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     List<Integer> getMemberIdsIncludingPending(
         @Param("workspaceId") int workspaceId,
@@ -60,6 +66,7 @@ public interface WorkspaceMapper {
     Integer lockWorkspaceForShare(@Param("workspaceId") int workspaceId);
     java.util.List<Integer> lockOwnerIds(@Param("workspaceId") int workspaceId);
     Integer lockActiveWorkspaceForShare(@Param("workspaceId") int workspaceId);
+    Integer lockWorkspaceOrgIdForShare(@Param("workspaceId") int workspaceId);
     int removeMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getLastActiveWorkspaceId(int userId);
     int setLastActiveWorkspaceId(@Param("userId") int userId, @Param("workspaceId") int workspaceId);

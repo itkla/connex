@@ -17,6 +17,9 @@ public class CampaignAudienceSnapshot {
     private String definitionJson;
     private String channel;
     private String purpose;
+    private String origin;
+    private Integer triggeredMessageId;
+    private Integer triggeredMessageVersion;
     private int estimatedIncluded;
     private int excludedTotal;
     private int excludedConsent;

@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunStatus;
 import ooo.klae.connex.backend.services.PlacementRegistry;
+import ooo.klae.connex.backend.services.WorkflowTriggeredSendGate;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 import java.util.Map;
@@ -35,6 +36,7 @@ public class CampaignSendWorker {
     private final CampaignSendMapper campaignSendMapper;
     private final CampaignDispatchService campaignDispatchService;
     private final JobRunRecorder jobRunRecorder;
+    private final WorkflowTriggeredSendGate triggeredSendGate;
 
     @Value("${connex.delivery.dispatch-enabled:false}")
     private boolean dispatchEnabled;
@@ -58,7 +60,8 @@ public class CampaignSendWorker {
 
     private void dispatchCatalog(String catalog) {
         for (int workspaceId : tenantWorkScope.withCatalog(
-                catalog, campaignSendMapper::workspaceIdsWithQueuedSends)) {
+                catalog, () -> campaignSendMapper.workspaceIdsWithQueuedSends(
+                    triggeredSendGate.enabled()))) {
             JobRunDetail detail = JobRunDetail.startedUtc();
             try {
                 tenantWorkScope.inWorkspace(workspaceId, () -> {

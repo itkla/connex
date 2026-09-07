@@ -5,17 +5,21 @@ import yaml
 
 
 WORKFLOW_PATH = Path(__file__).parents[1] / "workflows" / "security.yml"
-CODEQL_CONFIG_PATH = Path(__file__).parents[1] / "codeql" / "codeql-config.yml"
+BACKEND_CODEQL_CONFIG = Path(__file__).parents[1] / "codeql" / "backend.yml"
+FRONTEND_CODEQL_CONFIG = Path(__file__).parents[1] / "codeql" / "frontend.yml"
 CODEQL_REVISION = "ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd"
-CODEQL_CONFIG_INPUT = "./.github/codeql/codeql-config.yml"
+BACKEND_CODEQL_CONFIG_INPUT = "./.github/codeql/backend.yml"
+FRONTEND_CODEQL_CONFIG_INPUT = "./.github/codeql/frontend.yml"
 
 
 class SecurityWorkflowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
-        cls.codeql_config_text = CODEQL_CONFIG_PATH.read_text(encoding="utf-8")
-        cls.codeql_config = yaml.safe_load(cls.codeql_config_text)
+        cls.codeql_configs = {
+            "backend": yaml.safe_load(BACKEND_CODEQL_CONFIG.read_text(encoding="utf-8")),
+            "frontend": yaml.safe_load(FRONTEND_CODEQL_CONFIG.read_text(encoding="utf-8")),
+        }
 
     def job(self, name: str) -> dict[str, object]:
         return self.workflow["jobs"][name]
@@ -45,11 +49,26 @@ class SecurityWorkflowTest(unittest.TestCase):
         finding belongs in a dismissal, which is scoped to its location and carries the same
         accountability metadata; this keeps the filter list empty so the trade cannot be made again
         by adding an entry (#1464).
+
+        Each per-language file also scopes the analysis with a repository-relative `paths` entry.
+        That is the only sanctioned way to narrow CodeQL to one tree: `source-root` relativises
+        SARIF locations to the subtree, which blinded the pull-request gate from 2026-08-26 until the
+        path restoration on #1244.
         """
-        self.assertEqual([], self.codeql_config["query-filters"])
-        self.assertNotIn("paths-ignore", self.codeql_config)
+        for surface, config in self.codeql_configs.items():
+            with self.subTest(surface=surface):
+                self.assertEqual([], config["query-filters"])
+                self.assertNotIn("paths-ignore", config)
+                self.assertEqual([surface], config["paths"])
 
     def test_backend_codeql_uses_manual_java_26_build(self) -> None:
+        """The backend analysis is scoped by its config file's `paths`, never by `source-root`.
+
+        `source-root` makes CodeQL emit SARIF locations relative to `backend/`. The codeql-action's
+        diff-range filter compares those against repository-relative diff paths, nothing matches,
+        and every pull-request upload carries zero results — which is how the gate ran blind from
+        2026-08-26 (PR #1294) until #1244 restored the per-language `paths` configuration.
+        """
         job = self.job("backend-sast")
         self.assertEqual("needs.classify.outputs.backend_sast == 'true'", job["if"])
         setup = next(
@@ -63,8 +82,8 @@ class SecurityWorkflowTest(unittest.TestCase):
         self.assertEqual("java-kotlin", initialize["with"]["languages"])
         self.assertEqual("manual", initialize["with"]["build-mode"])
         self.assertEqual("security-extended", initialize["with"]["queries"])
-        self.assertEqual(CODEQL_CONFIG_INPUT, initialize["with"]["config-file"])
-        self.assertEqual("backend", initialize["with"]["source-root"])
+        self.assertEqual(BACKEND_CODEQL_CONFIG_INPUT, initialize["with"]["config-file"])
+        self.assertNotIn("source-root", initialize["with"])
         self.assertNotIn("config", initialize["with"])
         build = self.named_step("backend-sast", "Compile backend for CodeQL extraction")
         self.assertEqual("backend", build["working-directory"])
@@ -72,6 +91,11 @@ class SecurityWorkflowTest(unittest.TestCase):
         self.assertTrue(build["run"].endswith("compileTestJava"))
 
     def test_frontend_codeql_is_buildless_and_scoped(self) -> None:
+        """The frontend analysis is scoped by its config file's `paths`, never by `source-root`.
+
+        See the backend test above: relativised SARIF locations defeat diff attribution and blinded
+        the gate from 2026-08-26 until #1244.
+        """
         job = self.job("frontend-sast")
         self.assertEqual("needs.classify.outputs.frontend_sast == 'true'", job["if"])
         initialize = self.named_step("frontend-sast", "Initialize frontend CodeQL database")
@@ -79,11 +103,34 @@ class SecurityWorkflowTest(unittest.TestCase):
         self.assertEqual("javascript-typescript", initialize["with"]["languages"])
         self.assertEqual("none", initialize["with"]["build-mode"])
         self.assertEqual("security-extended", initialize["with"]["queries"])
-        self.assertEqual(CODEQL_CONFIG_INPUT, initialize["with"]["config-file"])
-        self.assertEqual("frontend", initialize["with"]["source-root"])
+        self.assertEqual(FRONTEND_CODEQL_CONFIG_INPUT, initialize["with"]["config-file"])
+        self.assertNotIn("source-root", initialize["with"])
         self.assertNotIn("config", initialize["with"])
 
-    def test_pr_alert_gate_waits_for_analysis_and_filters_by_pr(self) -> None:
+    def test_dismissal_replay_is_regression_tested_in_the_pin_policy_job(self) -> None:
+        runs = [step.get("run", "") for step in self.steps("action-pins")]
+        self.assertIn("python .github/scripts/test_replay_codeql_dismissals.py", runs)
+
+    def test_the_compliance_documents_are_guarded_against_unfilled_placeholders(self) -> None:
+        runs = [step.get("run", "") for step in self.steps("action-pins")]
+        self.assertIn("python .github/scripts/check-doc-placeholders.py", runs)
+        self.assertIn("python .github/scripts/test_doc_placeholders.py", runs)
+
+    def test_pull_request_analysis_is_not_diff_informed(self) -> None:
+        """Every analysis uploads its complete result set, including on pull requests.
+
+        Diff-informed analysis restricts pull-request results to the diff ranges before upload.
+        From 2026-08-26 the ranges never matched the relativised SARIF paths, every pull-request
+        analysis stored zero results, and the gate passed blind. The gate now compares alert
+        identities on the merge ref against the base ref, which only works when nothing is pruned.
+        """
+        for job_name in ("backend-sast", "frontend-sast"):
+            with self.subTest(job=job_name):
+                self.assertEqual(
+                    "false", self.job(job_name)["env"]["CODEQL_ACTION_DIFF_INFORMED_QUERIES"]
+                )
+
+    def test_alert_gate_compares_the_analysed_ref_against_main_on_every_event(self) -> None:
         for job_name, language in (
             ("backend-sast", "java-kotlin"),
             ("frontend-sast", "javascript-typescript"),
@@ -102,23 +149,42 @@ class SecurityWorkflowTest(unittest.TestCase):
                 gate = self.named_step(
                     job_name, "Block Critical, High, or error-severity alerts"
                 )
-                self.assertEqual(
-                    "github.event_name == 'pull_request' || "
-                    "github.event_name == 'merge_group'",
-                    gate["if"],
-                )
-                self.assertIn('-f "pr=$PR_NUMBER"', gate["run"])
-                self.assertIn('-f "ref=$ANALYSIS_REF"', gate["run"])
+                self.assertNotIn("if", gate)
+                self.assertIn('-f "ref=$1"', gate["run"])
+                self.assertNotIn("pr=", gate["run"])
                 self.assertIn("--method GET --paginate --slurp", gate["run"])
-                self.assertIn("--paginate --slurp", gate["run"])
+                self.assertIn("pull_request|merge_group)", gate["run"])
+                self.assertIn("push|schedule|workflow_dispatch)", gate["run"])
+                self.assertIn("fork pull requests are not gated", gate["run"])
                 self.assertIn("Unsupported CodeQL gate event", gate["run"])
+                self.assertEqual(
+                    2, gate["run"].count('check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY"')
+                )
+                self.assertEqual(
+                    2, gate["run"].count('--analyses "$analyses_file" --commit "$ANALYSIS_SHA"')
+                )
+                self.assertIn('"repos/$GITHUB_REPOSITORY/code-scanning/analyses"', gate["run"])
+                self.assertIn('fetch_analyses "$ANALYSIS_REF" > "$analyses_file"', gate["run"])
+                self.assertIn('fetch_analyses "$BASE_REF" > "$baseline_analyses_file"', gate["run"])
                 self.assertIn(
-                    'check-codeql-alerts.py "$alerts_file" "$ANALYSIS_CATEGORY"',
+                    '--ref "$ANALYSIS_REF" --baseline "$baseline_file" --baseline-ref "$BASE_REF" \\\n'
+                    '      --baseline-analyses "$baseline_analyses_file" ;;',
                     gate["run"],
                 )
+                self.assertIn('--ref "$ANALYSIS_REF" ;;', gate["run"])
                 self.assertEqual(f"/language:{language}", gate["env"]["ANALYSIS_CATEGORY"])
                 self.assertEqual("${{ github.ref }}", gate["env"]["ANALYSIS_REF"])
+                self.assertEqual("${{ github.sha }}", gate["env"]["ANALYSIS_SHA"])
+                self.assertEqual(
+                    "${{ github.event.merge_group.base_ref || "
+                    "format('refs/heads/{0}', github.event.pull_request.base.ref) }}",
+                    gate["env"]["BASE_REF"],
+                )
                 self.assertEqual("${{ github.event_name }}", gate["env"]["EVENT_NAME"])
+                self.assertEqual(
+                    "${{ github.event.pull_request.head.repo.fork }}",
+                    gate["env"]["HEAD_REPO_FORK"],
+                )
 
     def test_required_job_rejects_selected_skipped_scans(self) -> None:
         required = self.job("required")

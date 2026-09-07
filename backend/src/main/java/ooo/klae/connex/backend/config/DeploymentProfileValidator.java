@@ -40,6 +40,8 @@ import ooo.klae.connex.backend.capability.CapabilityRegistry;
  * would otherwise advertise the capability as unavailable while still routing mail through the
  * managed transport and locking the customer out of their own SMTP. Failing startup makes that
  * divergent state unreachable instead of merely undocumented.
+ * The silo profile also refuses the dormant public-API switch because its external ingress and
+ * replica-wide abuse controls are not part of that isolated deployment posture.
  *
  * <p>Posture keys are read through the same relaxed {@link Binder} that populates the backing
  * {@code @ConfigurationProperties} beans, not exact-match {@code Environment.getProperty}. An
@@ -65,6 +67,7 @@ public class DeploymentProfileValidator implements ApplicationRunner {
     private static final String MAIL_MANAGED = "connex.mail.managed";
     private static final String MALWARE_SCANNING_ALLOW_DISABLED =
         "connex.malware-scanning.allow-disabled";
+    private static final String PUBLIC_API_ENABLED = "connex.public-api.enabled";
     private static final List<String> SAAS_FORBIDDEN_KEYS = List.of(
         BOOTSTRAP_ENABLED,
         SSO_ALLOW_PRIVATE_ISSUER_HOSTS,
@@ -78,11 +81,14 @@ public class DeploymentProfileValidator implements ApplicationRunner {
         AI_ALLOW_INTERNAL_ENDPOINTS,
         MAIL_ALLOW_INTERNAL_HOSTS,
         MAIL_MANAGED,
-        MALWARE_SCANNING_ALLOW_DISABLED
+        MALWARE_SCANNING_ALLOW_DISABLED,
+        PUBLIC_API_ENABLED
     );
     private static final Map<String, List<String>> FORBIDDEN_KEYS_BY_PROFILE = Map.of(
         DeploymentProperties.PROFILE_SAAS, SAAS_FORBIDDEN_KEYS,
-        DeploymentProperties.PROFILE_SILO, List.of(MALWARE_SCANNING_ALLOW_DISABLED),
+        DeploymentProperties.PROFILE_SILO, List.of(
+            MALWARE_SCANNING_ALLOW_DISABLED,
+            PUBLIC_API_ENABLED),
         DeploymentProperties.PROFILE_ON_PREM, List.of(MALWARE_SCANNING_ALLOW_DISABLED)
     );
     private static final Map<String, Capability> CAPABILITY_BY_POSTURE_KEY = Map.of(

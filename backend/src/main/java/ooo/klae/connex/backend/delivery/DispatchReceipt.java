@@ -26,4 +26,13 @@ public record DispatchReceipt(DispatchStatus status, String providerMessageId, S
     public static DispatchReceipt rejected(String detail) {
         return new DispatchReceipt(DispatchStatus.REJECTED, null, detail);
     }
+
+    /**
+     * Builds a receipt for an attempt whose provider-side acceptance cannot be determined safely.
+     * @param detail a short note describing why reconciliation is required
+     * @return an ambiguous receipt
+     */
+    public static DispatchReceipt ambiguous(String detail) {
+        return new DispatchReceipt(DispatchStatus.AMBIGUOUS, null, detail);
+    }
 }

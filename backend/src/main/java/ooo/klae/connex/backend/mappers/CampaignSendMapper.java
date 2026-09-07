@@ -17,6 +17,12 @@ public interface CampaignSendMapper {
 
     CampaignSend getSendForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
+    /** Returns the long-lived triggered send for one immutable message revision. */
+    CampaignSend getTriggeredSend(
+            @Param("workspaceId") int workspaceId,
+            @Param("messageId") int messageId,
+            @Param("messageVersion") int messageVersion);
+
     void insertSend(CampaignSend send);
 
     int transitionStatus(
@@ -36,7 +42,10 @@ public interface CampaignSendMapper {
 
     int refreshCounters(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
-    List<Integer> queuedSendIds(@Param("workspaceId") int workspaceId);
+    List<Integer> queuedSendIds(
+            @Param("workspaceId") int workspaceId,
+            @Param("triggeredSendEnabled") boolean triggeredSendEnabled);
 
-    List<Integer> workspaceIdsWithQueuedSends();
+    List<Integer> workspaceIdsWithQueuedSends(
+            @Param("triggeredSendEnabled") boolean triggeredSendEnabled);
 }

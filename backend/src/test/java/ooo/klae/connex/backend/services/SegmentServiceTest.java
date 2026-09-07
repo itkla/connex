@@ -234,6 +234,21 @@ class SegmentServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void boundedWarmIntroMatchesOnlyTheCandidateScopedGraph() {
+        Company target = newCompany();
+        Person contact = newPerson(target);
+        Person engaged = newPerson(newCompany());
+        recentActivity(engaged);
+        strongEdge(contact, engaged);
+
+        List<Integer> ids = segmentService.evaluate(
+                workspace.getId(), currentUser.getId(), "company",
+                def("all", predicate("warm_intro_available")), 200);
+
+        assertTrue(ids.contains(target.getId()));
+    }
+
+    @Test
     void predicate_noActivity_excludesRecentlyActiveCompany() {
         Company quiet = newCompany();
         Company active = newCompany();
