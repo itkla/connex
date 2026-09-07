@@ -312,7 +312,7 @@ Sunday at 21:37 UTC (and on `workflow_dispatch`) and asserts the result.
 | | |
 | --- | --- |
 | Branch | `canary/sast-gate-proof` (base `main`, label `sast-canary`, **not** a draft) |
-| Pull request | #<CANARY-PR>, titled `[DO NOT MERGE] CodeQL gate canary (CHK-089)` |
+| Pull request | #1593, titled `[DO NOT MERGE] CodeQL gate canary (CHK-089)` |
 | Frontend fixture | `frontend/test/fixtures/codeql/intentional-command-injection.mjs` → `js/command-line-injection`, critical |
 | Backend fixture | `backend/src/test/java/ooo/klae/connex/backend/codeqlfixture/IntentionalCommandInjectionFixture.java` → `java/command-line-injection`, critical |
 
