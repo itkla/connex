@@ -19,4 +19,6 @@ public class TaskReminderCandidate {
     private String dealLabel;
     private Integer personId;
     private String personLabel;
+    private Integer companyId;
+    private String companyLabel;
 }

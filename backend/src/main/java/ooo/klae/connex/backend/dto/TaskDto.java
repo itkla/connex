@@ -12,6 +12,7 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
@@ -55,6 +56,10 @@ public class TaskDto {
 
     private Integer dealId;
 
+    private Company company;
+
+    private Integer companyId;
+
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)
     private String createdAt;
     private String updatedAt;
@@ -77,6 +82,8 @@ public class TaskDto {
         dto.personId = t.getPerson() == null ? null : t.getPerson().getId();
         dto.deal = t.getDeal();
         dto.dealId = t.getDeal() == null ? null : t.getDeal().getId();
+        dto.company = t.getCompany();
+        dto.companyId = t.getCompany() == null ? null : t.getCompany().getId();
         dto.createdAt = t.getCreatedAt();
         dto.updatedAt = t.getUpdatedAt();
         dto.references = t.getReferences() == null
@@ -110,6 +117,13 @@ public class TaskDto {
             t.setDeal(d);
         } else {
             t.setDeal(deal);
+        }
+        if (companyId != null) {
+            Company c = new Company();
+            c.setId(companyId);
+            t.setCompany(c);
+        } else {
+            t.setCompany(company);
         }
         t.setCreatedAt(createdAt);
         t.setUpdatedAt(updatedAt);

@@ -22,10 +22,14 @@
     <association property="deal" javaType="Deal">
       <id property="id" column="deal_id"/>
     </association>
+    <association property="company" javaType="Company">
+      <id property="id" column="company_id"/>
+    </association>
   </resultMap>
 
   <sql id="taskColumns">
     id, workspace_id, description, completed, status, position, due_date, assigned_to_id, person_id, deal_id,
+    company_id,
     created_at, updated_at
   </sql>
 
@@ -195,7 +199,8 @@
         AND t.deal_id = #{dealId}
       </if>
       <if test="companyId != null">
-        AND (EXISTS (SELECT 1 FROM person p
+        AND (t.company_id = #{companyId}
+          OR EXISTS (SELECT 1 FROM person p
               WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id
                 AND p.company_id = #{companyId} AND p.archived_at IS NULL)
           OR EXISTS (SELECT 1 FROM deal d
@@ -220,7 +225,7 @@
 
   <select id="getAiAssistantTasksByPersonId" resultMap="TaskResult">
     SELECT t.id, t.workspace_id, t.description, t.completed, t.status, t.position, t.due_date,
-      t.assigned_to_id, t.person_id, t.deal_id, t.created_at, t.updated_at
+      t.assigned_to_id, t.person_id, t.deal_id, t.company_id, t.created_at, t.updated_at
     FROM task t
     WHERE t.workspace_id = #{workspaceId} AND t.person_id = #{personId}
       AND <include refid="assistantLinkedPeopleProcessable"/>
@@ -258,12 +263,28 @@
 
   <select id="getAiAssistantTasksByDealId" resultMap="TaskResult">
     SELECT t.id, t.workspace_id, t.description, t.completed, t.status, t.position, t.due_date,
-      t.assigned_to_id, t.person_id, t.deal_id, t.created_at, t.updated_at
+      t.assigned_to_id, t.person_id, t.deal_id, t.company_id, t.created_at, t.updated_at
     FROM task t
     WHERE t.workspace_id = #{workspaceId} AND t.deal_id = #{dealId}
       AND <include refid="assistantLinkedPeopleProcessable"/>
     ORDER BY t.due_date IS NULL, t.due_date, t.id
     LIMIT #{limit}
+  </select>
+
+  <select id="getTasksByCompanyId" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/> FROM task t
+    WHERE t.workspace_id = #{workspaceId}
+      AND (t.person_id IS NULL OR EXISTS (SELECT 1 FROM person linked_person
+          WHERE linked_person.workspace_id = #{workspaceId}
+            AND linked_person.id = t.person_id AND linked_person.archived_at IS NULL))
+      AND (t.company_id = #{companyId}
+        OR EXISTS (SELECT 1 FROM person p
+          WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id
+            AND p.company_id = #{companyId} AND p.archived_at IS NULL)
+        OR EXISTS (SELECT 1 FROM deal d
+          WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id
+            AND d.company_id = #{companyId}))
+    ORDER BY t.due_date IS NULL, t.due_date, t.id
   </select>
 
   <select id="getCompanyTasks" resultMap="TaskResult">
@@ -272,7 +293,8 @@
       AND (t.person_id IS NULL OR EXISTS (SELECT 1 FROM person linked_person
           WHERE linked_person.workspace_id = #{workspaceId}
             AND linked_person.id = t.person_id AND linked_person.archived_at IS NULL))
-      AND (EXISTS (SELECT 1 FROM person p
+      AND (t.company_id = #{companyId}
+        OR EXISTS (SELECT 1 FROM person p
           WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id
             AND p.company_id = #{companyId} AND p.archived_at IS NULL)
         OR EXISTS (SELECT 1 FROM deal d
@@ -283,11 +305,12 @@
 
   <select id="getAiAssistantTasksByCompanyId" resultMap="TaskResult">
     SELECT t.id, t.workspace_id, t.description, t.completed, t.status, t.position, t.due_date,
-      t.assigned_to_id, t.person_id, t.deal_id, t.created_at, t.updated_at
+      t.assigned_to_id, t.person_id, t.deal_id, t.company_id, t.created_at, t.updated_at
     FROM task t
     WHERE t.workspace_id = #{workspaceId}
       AND <include refid="assistantLinkedPeopleProcessable"/>
-      AND (EXISTS (SELECT 1 FROM person p
+      AND (t.company_id = #{companyId}
+        OR EXISTS (SELECT 1 FROM person p
           WHERE p.id = t.person_id AND p.company_id = #{companyId}
             AND <include refid="assistantProcessablePerson"/>)
         OR EXISTS (SELECT 1 FROM deal d
@@ -303,6 +326,14 @@
         WHERE d.workspace_id = #{workspaceId} AND d.id = t.deal_id
           AND d.company_id IN
           <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>)
+    ORDER BY t.updated_at DESC, t.id DESC
+  </select>
+
+  <select id="getTasksByCompanyIds" resultMap="TaskResult">
+    SELECT <include refid="taskColumns"/> FROM task t
+    WHERE t.workspace_id = #{workspaceId}
+      AND t.company_id IN
+      <foreach item="id" collection="companyIds" open="(" separator="," close=")">#{id}</foreach>
     ORDER BY t.updated_at DESC, t.id DESC
   </select>
 
@@ -330,6 +361,7 @@
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO task (
       workspace_id, description, completed, status, position, due_date, assigned_to_id, person_id, deal_id,
+      company_id,
       created_at
     )
     VALUES (
@@ -340,6 +372,10 @@
       </choose>,
       <choose>
         <when test="deal != null">#{deal.id}</when>
+        <otherwise>NULL</otherwise>
+      </choose>,
+      <choose>
+        <when test="company != null">#{company.id}</when>
         <otherwise>NULL</otherwise>
       </choose>,
       COALESCE(#{createdAt}, CURRENT_TIMESTAMP)
@@ -391,6 +427,11 @@
         deal_id =
           <choose>
             <when test="deal != null">#{deal.id}</when>
+            <otherwise>NULL</otherwise>
+          </choose>,
+        company_id =
+          <choose>
+            <when test="company != null">#{company.id}</when>
             <otherwise>NULL</otherwise>
           </choose>
     WHERE workspace_id = #{workspaceId} AND id = #{id}

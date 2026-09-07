@@ -17,6 +17,7 @@ import java.util.function.Predicate;
 
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.beans.Notification;
@@ -57,6 +58,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class TaskService {
     private final TaskMapper taskMapper;
+    private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
@@ -158,6 +160,15 @@ public class TaskService {
     public List<Task> getTasksByDealId(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksByDealId(workspaceId, dealId));
+    }
+
+    public List<Task> getTasksByCompanyId(int companyId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (!companyMapper.exists(workspaceId, companyId)) {
+            throw new ResourceNotFoundException("Company not found");
+        }
+        return referenceService.hydrateTasks(
+            workspaceId, taskMapper.getTasksByCompanyId(workspaceId, companyId));
     }
 
     public Task getTaskById(int id) {
@@ -358,6 +369,7 @@ public class TaskService {
             task.getAssignedTo() == null ? null : task.getAssignedTo().getId(),
             task.getPerson() == null ? null : task.getPerson().getId(),
             task.getDeal() == null ? null : task.getDeal().getId(),
+            task.getCompany() == null ? null : task.getCompany().getId(),
             task.getUpdatedAt());
     }
 
@@ -531,6 +543,10 @@ public class TaskService {
         if (task.getDeal() != null && !dealMapper.exists(workspaceId, task.getDeal().getId())) {
             throw new BadRequestException("Task deal must belong to the current workspace");
         }
+        if (task.getCompany() != null
+                && !companyMapper.exists(workspaceId, task.getCompany().getId())) {
+            throw new BadRequestException("Task company must be visible in the current workspace");
+        }
     }
 
     private Task hydrate(int workspaceId, Task task) {
@@ -563,6 +579,10 @@ public class TaskService {
             contextType = "person";
             contextId = task.getPerson().getId();
             actionUrl = "/records/contacts/" + contextId + taskAnchor;
+        } else if (task.getCompany() != null && task.getCompany().getId() > 0) {
+            contextType = "company";
+            contextId = task.getCompany().getId();
+            actionUrl = "/records/companies/" + contextId + taskAnchor;
         }
         for (int recipientId : recipientIds) {
             if (recipientId == actor.getId()) {

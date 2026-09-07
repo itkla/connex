@@ -407,6 +407,7 @@ class ScoringServiceTest {
         deal.setCompanyId(10);
         Task task = task(person, deal, "2026-06-29 13:00:00");
         task.setId(40);
+        task.setCompany(company);
         when(companyMapper.getByIds(WS, List.of(10))).thenReturn(List.of(company));
         when(personMapper.getPersonsByCompanyIds(WS, List.of(10))).thenReturn(List.of(person));
         when(personMapper.getProcessablePersonIds(WS, List.of(1))).thenReturn(List.of(1));
@@ -416,6 +417,7 @@ class ScoringServiceTest {
         when(noteMapper.getWorkspaceNotesByCompanyIds(WS, List.of(10))).thenReturn(List.of());
         when(taskMapper.getTasksByPersonCompanyIds(WS, List.of(1), List.of(10))).thenReturn(List.of(task));
         when(taskMapper.getTasksByDealCompanyIds(WS, List.of(10))).thenReturn(List.of(task));
+        when(taskMapper.getTasksByCompanyIds(WS, List.of(10))).thenReturn(List.of(task));
         ScoringService service = new ScoringService(personMapper, companyMapper, dealMapper,
             activityMapper, noteMapper, taskMapper, Clock.fixed(NOW, ZoneOffset.UTC));
 
@@ -424,6 +426,7 @@ class ScoringServiceTest {
         assertEquals(1, score.getTouchCount());
         verify(taskMapper).getTasksByPersonCompanyIds(WS, List.of(1), List.of(10));
         verify(taskMapper).getTasksByDealCompanyIds(WS, List.of(10));
+        verify(taskMapper).getTasksByCompanyIds(WS, List.of(10));
     }
 
     @Test

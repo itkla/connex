@@ -26,6 +26,7 @@ import org.junit.jupiter.api.Test;
 
 import com.zaxxer.hikari.HikariDataSource;
 
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
@@ -76,6 +77,7 @@ class TaskPlaneRoutingIntegrationTest {
                 + "id INT PRIMARY KEY, workspace_id INT NOT NULL, description VARCHAR(255) NOT NULL, "
                 + "completed BOOLEAN NOT NULL, status VARCHAR(32) NOT NULL, position INT NOT NULL, "
                 + "due_date DATE NULL, assigned_to_id INT NULL, person_id INT NULL, deal_id INT NULL, "
+                + "company_id INT NULL, "
                 + "created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)");
             insertFixtures(connection);
         } catch (SQLException exception) {
@@ -129,9 +131,13 @@ class TaskPlaneRoutingIntegrationTest {
             List<Integer> dealTaskIds = withSession(session -> session.getMapper(TaskMapper.class)
                 .getTasksByDealCompanyIds(workspaceId, List.of(701)))
                 .stream().map(Task::getId).toList();
+            List<Integer> directCompanyTaskIds = withSession(session -> session.getMapper(TaskMapper.class)
+                .getTasksByCompanyIds(workspaceId, List.of(701)))
+                .stream().map(Task::getId).toList();
 
             assertEquals(List.of(2, 1), personTaskIds);
             assertEquals(List.of(2), dealTaskIds);
+            assertEquals(List.of(5, 2), directCompanyTaskIds);
             try (Connection connection = DriverManager.getConnection(url, username, password)) {
                 assertFalse(tableExists(connection, scratchCatalog, "workspace"));
             }
@@ -155,15 +161,17 @@ class TaskPlaneRoutingIntegrationTest {
                 + "(id, company_id) VALUES (501, 701), (999, 702)");
             statement.executeUpdate("INSERT INTO " + scratchCatalog + ".task "
                 + "(id, workspace_id, description, completed, status, position, assigned_to_id, "
-                + "person_id, deal_id, created_at, updated_at) VALUES "
-                + "(1, " + workspaceId + ", 'person only', FALSE, 'todo', 0, 1, 501, NULL, "
+                + "person_id, deal_id, company_id, created_at, updated_at) VALUES "
+                + "(1, " + workspaceId + ", 'person only', FALSE, 'todo', 0, 1, 501, NULL, NULL, "
                 + "'2026-01-01 10:00:00', '2026-01-01 10:00:00'), "
-                + "(2, " + workspaceId + ", 'person and deal', FALSE, 'todo', 0, 1, 501, 601, "
+                + "(2, " + workspaceId + ", 'every link', FALSE, 'todo', 0, 1, 501, 601, 701, "
                 + "'2026-01-02 10:00:00', '2026-01-02 10:00:00'), "
-                + "(3, " + workspaceId + ", 'other company', FALSE, 'todo', 0, 1, 999, 602, "
+                + "(3, " + workspaceId + ", 'other company', FALSE, 'todo', 0, 1, 999, 602, NULL, "
                 + "'2026-01-03 10:00:00', '2026-01-03 10:00:00'), "
-                + "(4, " + (workspaceId + 1) + ", 'other workspace', FALSE, 'todo', 0, 1, 501, 601, "
-                + "'2026-01-04 10:00:00', '2026-01-04 10:00:00')");
+                + "(4, " + (workspaceId + 1) + ", 'other workspace', FALSE, 'todo', 0, 1, 501, 601, 701, "
+                + "'2026-01-04 10:00:00', '2026-01-04 10:00:00'), "
+                + "(5, " + workspaceId + ", 'direct company', FALSE, 'todo', 0, 1, NULL, NULL, 701, "
+                + "'2026-01-05 10:00:00', '2026-01-05 10:00:00')");
         }
     }
 
@@ -187,6 +195,7 @@ class TaskPlaneRoutingIntegrationTest {
         Configuration configuration = new Configuration(
             new Environment("task-plane-routing", new JdbcTransactionFactory(), routing));
         configuration.setMapUnderscoreToCamelCase(true);
+        configuration.getTypeAliasRegistry().registerAlias("Company", Company.class);
         configuration.getTypeAliasRegistry().registerAlias("Deal", Deal.class);
         configuration.getTypeAliasRegistry().registerAlias("Person", Person.class);
         configuration.getTypeAliasRegistry().registerAlias("Task", Task.class);

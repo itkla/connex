@@ -124,6 +124,7 @@
     JOIN person p ON p.id = t.person_id
     WHERE t.workspace_id = #{workspaceId} AND p.company_id IS NOT NULL
       AND <include refid="attributablePerson"/>
+      AND (t.company_id IS NULL OR t.company_id &lt;&gt; p.company_id)
     UNION ALL
     SELECT 'task' AS source_type,
            t.id AS source_id,
@@ -135,6 +136,25 @@
     JOIN deal d ON d.id = t.deal_id
     WHERE t.workspace_id = #{workspaceId} AND d.workspace_id = #{workspaceId}
       AND d.company_id IS NOT NULL
+      AND (t.person_id IS NULL OR EXISTS (
+        SELECT 1 FROM person p
+        WHERE p.id = t.person_id AND <include refid="attributablePerson"/>
+      ))
+      AND (t.company_id IS NULL OR t.company_id &lt;&gt; d.company_id)
+      AND NOT EXISTS (
+        SELECT 1 FROM person p
+        WHERE p.id = t.person_id AND p.company_id = d.company_id
+          AND <include refid="attributablePerson"/>
+      )
+    UNION ALL
+    SELECT 'task' AS source_type,
+           t.id AS source_id,
+           t.company_id,
+           'task' AS interaction_type,
+           t.created_at AS touched_at,
+           #{model.taskWeight} AS weight
+    FROM task t
+    WHERE t.workspace_id = #{workspaceId} AND t.company_id IS NOT NULL
       AND (t.person_id IS NULL OR EXISTS (
         SELECT 1 FROM person p
         WHERE p.id = t.person_id AND <include refid="attributablePerson"/>
@@ -218,6 +238,7 @@
     JOIN person p ON p.id = t.person_id
     WHERE t.workspace_id = #{workspaceId} AND p.company_id = #{companyId}
       AND <include refid="attributablePerson"/>
+      AND (t.company_id IS NULL OR t.company_id &lt;&gt; p.company_id)
       AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
     UNION ALL
     SELECT 'task' AS source_type,
@@ -238,6 +259,20 @@
         WHERE p.id = t.person_id AND p.company_id = d.company_id
           AND <include refid="attributablePerson"/>
       )
+      AND (t.company_id IS NULL OR t.company_id &lt;&gt; d.company_id)
+      AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
+    UNION ALL
+    SELECT 'task' AS source_type,
+           t.id AS source_id,
+           'task' AS interaction_type,
+           t.created_at AS touched_at,
+           #{model.taskWeight} AS weight
+    FROM task t
+    WHERE t.workspace_id = #{workspaceId} AND t.company_id = #{companyId}
+      AND (t.person_id IS NULL OR EXISTS (
+        SELECT 1 FROM person p
+        WHERE p.id = t.person_id AND <include refid="attributablePerson"/>
+      ))
       AND t.created_at IS NOT NULL AND t.created_at &lt;= #{reference}
   </sql>
 
@@ -620,7 +655,8 @@
         AS num_activities,
       (SELECT COUNT(*) FROM task t
        WHERE t.workspace_id = #{workspaceId}
-         AND (EXISTS (SELECT 1 FROM person p
+         AND (t.company_id = #{companyId}
+           OR EXISTS (SELECT 1 FROM person p
              WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId}
                AND p.archived_at IS NULL)
            OR EXISTS (SELECT 1 FROM deal d
@@ -628,7 +664,8 @@
         AS num_tasks,
       (SELECT COUNT(*) FROM task t
        WHERE t.workspace_id = #{workspaceId} AND t.completed = FALSE
-         AND (EXISTS (SELECT 1 FROM person p
+         AND (t.company_id = #{companyId}
+           OR EXISTS (SELECT 1 FROM person p
              WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId}
                AND p.archived_at IS NULL)
            OR EXISTS (SELECT 1 FROM deal d
@@ -662,7 +699,8 @@
         SELECT t.assigned_to_id AS user_id, t.created_at AS touched_at
         FROM task t
         WHERE t.workspace_id = #{workspaceId}
-          AND (EXISTS (SELECT 1 FROM person p
+          AND (t.company_id = #{companyId}
+            OR EXISTS (SELECT 1 FROM person p
               WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId}
                 AND p.archived_at IS NULL)
             OR EXISTS (SELECT 1 FROM deal d
@@ -705,7 +743,8 @@
       FROM task t
       WHERE t.workspace_id = #{workspaceId}
         AND t.created_at &gt;= #{windowStart} AND t.created_at &lt;= #{windowEnd}
-        AND (EXISTS (SELECT 1 FROM person p
+        AND (t.company_id = #{companyId}
+          OR EXISTS (SELECT 1 FROM person p
             WHERE p.workspace_id = #{workspaceId} AND p.id = t.person_id AND p.company_id = #{companyId}
               AND p.archived_at IS NULL)
           OR EXISTS (SELECT 1 FROM deal d

@@ -95,6 +95,10 @@ public interface TaskMapper {
         @Param("companyIds") List<Integer> companyIds
     );
     List<Task> getTasksByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
+    List<Task> getTasksByCompanyId(
+        @Param("workspaceId") int workspaceId,
+        @Param("companyId") int companyId
+    );
     List<Task> getAiAssistantTasksByDealId(
         @Param("workspaceId") int workspaceId,
         @Param("dealId") int dealId,
@@ -108,6 +112,8 @@ public interface TaskMapper {
         @Param("organizationWorkspaceIds") List<Integer> organizationWorkspaceIds,
         @Param("limit") int limit);
     List<Task> getTasksByDealCompanyIds(@Param("workspaceId") int workspaceId,
+            @Param("companyIds") List<Integer> companyIds);
+    List<Task> getTasksByCompanyIds(@Param("workspaceId") int workspaceId,
             @Param("companyIds") List<Integer> companyIds);
     Task getTaskById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Task getTaskByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);

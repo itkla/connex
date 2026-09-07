@@ -144,6 +144,21 @@ class TaskMentionTest extends AbstractServiceTest {
         assertEquals("/records/deals/" + deal.getId() + "?task=" + created.getId(), notification.getActionUrl());
     }
 
+    @Test
+    void mentionNotification_deepLinksToDirectCompany() {
+        User mentioned = newUser();
+        var company = newCompany();
+        Task task = draft(mention("Mentioned", mentioned));
+        task.setCompany(company);
+        Task created = taskService.create(task);
+
+        Notification notification = mentions(mentioned.getId()).getFirst();
+        assertEquals("company", notification.getContextType());
+        assertEquals(company.getId(), notification.getContextId());
+        assertEquals("/records/companies/" + company.getId() + "?task=" + created.getId(),
+            notification.getActionUrl());
+    }
+
     /**
      * Deleting a task purges its references (the polymorphic table has no FK cascade).
      */

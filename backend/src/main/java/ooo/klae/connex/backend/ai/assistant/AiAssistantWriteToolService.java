@@ -980,6 +980,7 @@ public class AiAssistantWriteToolService {
         state.put("assignedToId", id(task.getAssignedTo()));
         state.put("personId", id(task.getPerson()));
         state.put("dealId", id(task.getDeal()));
+        state.put("companyId", id(task.getCompany()));
         return state;
     }
 
