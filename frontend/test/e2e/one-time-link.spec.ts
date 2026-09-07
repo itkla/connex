@@ -191,6 +191,7 @@ test("unsubscribe removes its fragment bearer before exchange navigation", async
                 status: 200,
                 contentType: "application/json",
                 body: JSON.stringify({
+                    flowId: "d".repeat(64),
                     channel: "email",
                     address: "r***@dest.test",
                     unsubscribed: false,

@@ -1569,12 +1569,15 @@ function parseDocumentAcceptanceDecision(value: unknown): Types.DocumentAcceptan
 
 function parseDeliveryUnsubscribeInfo(value: unknown): Types.DeliveryUnsubscribeInfo {
     if (!isObjectRecord(value)
+            || typeof value.flowId !== "string"
+            || !/^[0-9a-f]{64}$/.test(value.flowId)
             || typeof value.channel !== "string"
             || typeof value.address !== "string"
             || typeof value.unsubscribed !== "boolean") {
         throw invalidPublicResponse();
     }
     return {
+        flowId: value.flowId,
         channel: value.channel,
         address: value.address,
         unsubscribed: value.unsubscribed,
@@ -6645,13 +6648,18 @@ export function getUnsubscribeInfo(init: RequestInit = {}) {
 /**
  * Confirms the unsubscribe the flow cookie authorizes, suppressing the resolved address.
  * Idempotent: repeat confirmations return the already-unsubscribed state without error.
+ * @param payload the flow identity of the preview being confirmed
  * @returns the masked address, channel, and resulting suppression state
  */
-export function confirmUnsubscribe() {
+export function confirmUnsubscribe(payload: Types.ConfirmUnsubscribePayload) {
     return linkFlowJson(
         "/api/delivery/unsubscribe",
         "POST",
         parseDeliveryUnsubscribeInfo,
+        {
+            body: JSON.stringify(payload),
+            headers: { "Content-Type": "application/json" },
+        },
     );
 }
 

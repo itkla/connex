@@ -28,7 +28,7 @@ export default function UnsubscribeConfirm({
     const confirm = async () => {
         setIsSubmitting(true);
         try {
-            await confirmUnsubscribe();
+            await confirmUnsubscribe({ flowId: info.flowId });
             setDone(true);
         } catch {
             toastError(t("errorTitle"), { description: t("errorBody") });

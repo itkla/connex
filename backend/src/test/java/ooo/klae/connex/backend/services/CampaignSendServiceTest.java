@@ -60,6 +60,8 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService.ResolvedFlow;
+import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 @TestPropertySource(properties = "connex.delivery.enabled=true")
 @Import(CampaignSendServiceTest.FakeDeliveryConfig.class)
@@ -273,8 +275,8 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
         CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(workspace.getId(), deliveryId);
 
         String tokenHash = deliveryUnsubscribeService.exchange(delivery.getUnsubscribeToken());
-        deliveryUnsubscribeService.unsubscribe(tokenHash);
-        deliveryUnsubscribeService.unsubscribe(tokenHash);
+        deliveryUnsubscribeService.unsubscribe(flow(tokenHash));
+        deliveryUnsubscribeService.unsubscribe(flow(tokenHash));
 
         assertEquals(delivery.getUnsubscribeTokenHash(), tokenHash);
         assertTrue(campaignDeliveryMapper.hasEvent(workspace.getId(), deliveryId, "unsubscribed"));
@@ -542,7 +544,7 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
         assertEquals(1, first.totalRecipients());
         int deliveryId = campaignDeliveryMapper.pendingDeliveryIds(workspace.getId(), first.id()).getFirst();
         CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(workspace.getId(), deliveryId);
-        deliveryUnsubscribeService.unsubscribe(delivery.getUnsubscribeTokenHash());
+        deliveryUnsubscribeService.unsubscribe(flow(delivery.getUnsubscribeTokenHash()));
         consentService.setForPerson(person.getId(), new ContactChannelConsentRequest(
                 "email", "marketing", "unknown", "manual", null, null));
 
@@ -750,5 +752,9 @@ class CampaignSendServiceTest extends CampaignRealDbTestSupport {
                     ? DispatchReceipt.sent("fake-" + dispatches.get(), "ok")
                     : DispatchReceipt.rejected("rejected");
         }
+    }
+
+    private static ResolvedFlow flow(String tokenHash) {
+        return new ResolvedFlow(tokenHash, OneTimeTokenDigest.sha256("grant:" + tokenHash));
     }
 }

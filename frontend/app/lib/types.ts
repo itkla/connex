@@ -2647,10 +2647,20 @@ export type CampaignAudienceExportReconciliationPayload = {
 };
 
 /** Public confirmation payload for an unsubscribe link; the address is masked by the backend. */
+/**
+ * A live unsubscribe preview. The flow identity names the grant the preview was rendered from and
+ * must be echoed by the confirmation.
+ */
 export type DeliveryUnsubscribeInfo = {
+    flowId: string;
     channel: string;
     address: string;
     unsubscribed: boolean;
+};
+
+/** Body for a public unsubscribe confirmation, bound to the previewed flow identity. */
+export type ConfirmUnsubscribePayload = {
+    flowId: string;
 };
 
 export type ContactChannelConsent = {

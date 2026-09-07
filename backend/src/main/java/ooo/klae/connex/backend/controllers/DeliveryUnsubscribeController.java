@@ -13,6 +13,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
+import ooo.klae.connex.backend.dto.ConfirmUnsubscribeRequest;
 import ooo.klae.connex.backend.dto.DeliveryUnsubscribeDto;
 import ooo.klae.connex.backend.dto.OneTimeLinkExchangeRequest;
 import ooo.klae.connex.backend.services.DeliveryUnsubscribeService;
@@ -54,15 +55,17 @@ public class DeliveryUnsubscribeController {
             String grant,
             HttpServletRequest request) {
         return deliveryUnsubscribeService.preview(
-            oneTimeLinkFlowService.require(request, Purpose.DELIVERY_UNSUBSCRIBE, grant));
+            oneTimeLinkFlowService.requireFlow(request, Purpose.DELIVERY_UNSUBSCRIBE, grant));
     }
 
     @PostMapping
     public DeliveryUnsubscribeDto unsubscribe(
+            @Valid @RequestBody ConfirmUnsubscribeRequest dto,
             @CookieValue(name = OneTimeLinkFlowCookie.DELIVERY_UNSUBSCRIBE, required = false)
             String grant,
             HttpServletRequest request) {
         return deliveryUnsubscribeService.unsubscribe(
-            oneTimeLinkFlowService.require(request, Purpose.DELIVERY_UNSUBSCRIBE, grant));
+            oneTimeLinkFlowService.requireBoundFlow(
+                request, Purpose.DELIVERY_UNSUBSCRIBE, grant, dto.flowId()));
     }
 }

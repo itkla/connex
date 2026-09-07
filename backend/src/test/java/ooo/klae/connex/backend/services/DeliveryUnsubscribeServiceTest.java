@@ -36,6 +36,7 @@ import ooo.klae.connex.backend.dto.SuppressionEntryRequest;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService.ResolvedFlow;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
@@ -49,6 +50,7 @@ class DeliveryUnsubscribeServiceTest {
 
     private static final String TOKEN = "a".repeat(64);
     private static final String TOKEN_HASH = OneTimeTokenDigest.sha256(TOKEN);
+    private static final ResolvedFlow FLOW = new ResolvedFlow(TOKEN_HASH, OneTimeTokenDigest.sha256("grant"));
     private static final int WORKSPACE = 11;
     private static final int DELIVERY_ID = 500;
     private static final int SEND_ID = 300;
@@ -105,8 +107,9 @@ class DeliveryUnsubscribeServiceTest {
         when(campaignDeliveryMapper.hasEvent(WORKSPACE, DELIVERY_ID, "unsubscribed")).thenReturn(false);
         scopeInline();
 
-        DeliveryUnsubscribeDto result = service().preview(TOKEN_HASH);
+        DeliveryUnsubscribeDto result = service().preview(FLOW);
 
+        assertEquals(FLOW.flowId(), result.flowId());
         assertEquals("email", result.channel());
         assertEquals("r***@dest.test", result.address());
         assertFalse(result.unsubscribed());
@@ -123,7 +126,7 @@ class DeliveryUnsubscribeServiceTest {
         scopeInline();
         transactionInline();
 
-        assertTrue(service().unsubscribe(TOKEN_HASH).unsubscribed());
+        assertTrue(service().unsubscribe(FLOW).unsubscribed());
 
         InOrder ordered = inOrder(
                 automationExecutor, transactionTemplate, campaignSendMapper, campaignDeliveryMapper);
@@ -140,7 +143,7 @@ class DeliveryUnsubscribeServiceTest {
         scopeInline();
         transactionInline();
 
-        assertTrue(service().unsubscribe(TOKEN_HASH).unsubscribed());
+        assertTrue(service().unsubscribe(FLOW).unsubscribed());
 
         ArgumentCaptor<SuppressionEntryRequest> suppression =
                 ArgumentCaptor.forClass(SuppressionEntryRequest.class);
@@ -166,7 +169,7 @@ class DeliveryUnsubscribeServiceTest {
         scopeInline();
         transactionInline();
 
-        assertTrue(service().unsubscribe(TOKEN_HASH).unsubscribed());
+        assertTrue(service().unsubscribe(FLOW).unsubscribed());
 
         verify(suppressionService).add(any(SuppressionEntryRequest.class));
         verifyNoInteractions(consentService);
@@ -180,8 +183,10 @@ class DeliveryUnsubscribeServiceTest {
         scopeInline();
         transactionInline();
 
-        assertTrue(service().unsubscribe(TOKEN_HASH).unsubscribed());
+        DeliveryUnsubscribeDto result = service().unsubscribe(FLOW);
 
+        assertTrue(result.unsubscribed());
+        assertEquals(FLOW.flowId(), result.flowId());
         verify(campaignDeliveryMapper, never()).insertEvent(any());
         verifyNoInteractions(suppressionService, consentService);
     }
@@ -194,9 +199,9 @@ class DeliveryUnsubscribeServiceTest {
         assertNull(DeliveryUnsubscribeService.class
                 .getMethod("exchange", String.class).getAnnotation(Transactional.class), reason);
         assertNull(DeliveryUnsubscribeService.class
-                .getMethod("preview", String.class).getAnnotation(Transactional.class), reason);
+                .getMethod("preview", ResolvedFlow.class).getAnnotation(Transactional.class), reason);
         assertNull(DeliveryUnsubscribeService.class
-                .getMethod("unsubscribe", String.class).getAnnotation(Transactional.class), reason);
+                .getMethod("unsubscribe", ResolvedFlow.class).getAnnotation(Transactional.class), reason);
     }
 
     @Test
@@ -230,7 +235,7 @@ class DeliveryUnsubscribeServiceTest {
     void unsubscribe_rejectsAnUnknownTokenWithoutEnteringAnyWorkspaceScope() {
         when(campaignDeliveryMapper.getByTokenHash(TOKEN_HASH)).thenReturn(null);
 
-        assertThrows(ResourceNotFoundException.class, () -> service().unsubscribe(TOKEN_HASH));
+        assertThrows(ResourceNotFoundException.class, () -> service().unsubscribe(FLOW));
 
         verifyNoInteractions(automationExecutor, transactionTemplate, campaignSendMapper);
     }
@@ -242,7 +247,7 @@ class DeliveryUnsubscribeServiceTest {
         scopeInline();
         transactionInline();
 
-        assertThrows(ResourceNotFoundException.class, () -> service().unsubscribe(TOKEN_HASH));
+        assertThrows(ResourceNotFoundException.class, () -> service().unsubscribe(FLOW));
 
         verify(campaignDeliveryMapper, never()).insertEvent(any());
         verifyNoInteractions(suppressionService, consentService);

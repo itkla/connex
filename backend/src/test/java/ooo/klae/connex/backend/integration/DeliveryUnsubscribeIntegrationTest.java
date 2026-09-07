@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -12,6 +13,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.util.List;
 import java.util.UUID;
+
+import com.jayway.jsonpath.JsonPath;
 
 import jakarta.servlet.Filter;
 import jakarta.servlet.http.Cookie;
@@ -155,13 +158,18 @@ class DeliveryUnsubscribeIntegrationTest {
             .andExpect(jsonPath("$.unsubscribed").value(false))
             .andReturn();
         assertResponseSecretFree(preview, recipient.token());
+        String flowId = flowIdOf(preview);
+        assertNotEquals(flowCookie.getValue(), flowId);
 
         for (int attempt = 0; attempt < 2; attempt++) {
             MvcResult unsubscribed = mockMvc.perform(post("/api/delivery/unsubscribe")
                     .session(browser.session())
                     .cookie(flowCookie, browser.bindingCookie())
-                    .with(csrf().asHeader()))
+                    .with(csrf().asHeader())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(confirmBody(flowId)))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.flowId").value(flowId))
                 .andExpect(jsonPath("$.unsubscribed").value(true))
                 .andReturn();
             assertResponseSecretFree(unsubscribed, recipient.token());
@@ -230,24 +238,102 @@ class DeliveryUnsubscribeIntegrationTest {
             .andExpect(status().isBadRequest());
         mockMvc.perform(post("/api/delivery/unsubscribe")
                 .session(new MockHttpSession(context.getServletContext()))
-                .with(csrf().asHeader()))
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(confirmBody("f".repeat(64))))
             .andExpect(status().isBadRequest());
 
         Browser browser = bootstrapBrowser();
         Cookie flowCookie = flowCookie(exchange(recipient.token(), 303, browser));
+        String flowId = OneTimeTokenDigest.sha256(flowCookie.getValue());
         mockMvc.perform(post("/api/delivery/unsubscribe")
                 .session(new MockHttpSession(context.getServletContext()))
                 .cookie(flowCookie, browser.bindingCookie())
-                .with(csrf().asHeader()))
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(confirmBody(flowId)))
             .andExpect(status().isBadRequest());
         mockMvc.perform(post("/api/delivery/unsubscribe")
                 .session(browser.session())
-                .cookie(flowCookie, browser.bindingCookie()))
+                .cookie(flowCookie, browser.bindingCookie())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(confirmBody(flowId)))
             .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/delivery/unsubscribe")
+                .session(browser.session())
+                .cookie(flowCookie, browser.bindingCookie())
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isBadRequest());
 
         RequestContextHolder.resetRequestAttributes();
         assertFalse(campaignDeliveryMapper.hasEvent(
             recipient.workspaceId(), recipient.deliveryId(), "unsubscribed"));
+    }
+
+    /**
+     * The purpose cookie is shared by every tab of one browser, so a later exchange replaces the
+     * grant an earlier tab rendered. Confirming with the earlier tab's flow identity must refuse
+     * rather than suppress the later address.
+     */
+    @Test
+    void staleUnsubscribeTabCannotSuppressTheLaterTabsAddress() throws Exception {
+        RequestContextHolder.resetRequestAttributes();
+        Recipient recipient = seedRecipient();
+        Recipient laterRecipient = seedRecipient();
+        Browser browser = bootstrapBrowser();
+        Cookie flowCookie = flowCookie(exchange(recipient.token(), 303, browser));
+        String flowId = flowIdOf(mockMvc.perform(get("/api/delivery/unsubscribe")
+                .session(browser.session())
+                .cookie(flowCookie, browser.bindingCookie()))
+            .andExpect(status().isOk())
+            .andReturn());
+        Cookie laterFlowCookie = flowCookie(exchange(laterRecipient.token(), 303, browser));
+        String laterFlowId = flowIdOf(mockMvc.perform(get("/api/delivery/unsubscribe")
+                .session(browser.session())
+                .cookie(laterFlowCookie, browser.bindingCookie()))
+            .andExpect(status().isOk())
+            .andReturn());
+        assertNotEquals(flowId, laterFlowId);
+
+        MvcResult stale = mockMvc.perform(post("/api/delivery/unsubscribe")
+                .session(browser.session())
+                .cookie(laterFlowCookie, browser.bindingCookie())
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(confirmBody(flowId)))
+            .andExpect(status().isBadRequest())
+            .andReturn();
+        assertEquals("This link is invalid or has expired", jsonMessage(stale));
+
+        RequestContextHolder.resetRequestAttributes();
+        assertFalse(campaignDeliveryMapper.hasEvent(
+            recipient.workspaceId(), recipient.deliveryId(), "unsubscribed"));
+        assertFalse(campaignDeliveryMapper.hasEvent(
+            laterRecipient.workspaceId(), laterRecipient.deliveryId(), "unsubscribed"));
+
+        mockMvc.perform(post("/api/delivery/unsubscribe")
+                .session(browser.session())
+                .cookie(laterFlowCookie, browser.bindingCookie())
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(confirmBody(laterFlowId)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.unsubscribed").value(true));
+        RequestContextHolder.resetRequestAttributes();
+        assertFalse(campaignDeliveryMapper.hasEvent(
+            recipient.workspaceId(), recipient.deliveryId(), "unsubscribed"));
+        assertTrue(campaignDeliveryMapper.hasEvent(
+            laterRecipient.workspaceId(), laterRecipient.deliveryId(), "unsubscribed"));
+    }
+
+    private static String flowIdOf(MvcResult result) throws Exception {
+        return JsonPath.read(result.getResponse().getContentAsString(), "$.flowId");
+    }
+
+    private static String confirmBody(String flowId) {
+        return "{\"flowId\":\"" + flowId + "\"}";
     }
 
     private MvcResult exchange(String rawToken, int expectedStatus, Browser browser)

@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.dto.SuppressionEntryRequest;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
+import ooo.klae.connex.backend.services.OneTimeLinkFlowService.ResolvedFlow;
 import ooo.klae.connex.backend.util.ContactMask;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
@@ -78,32 +79,38 @@ public class DeliveryUnsubscribeService {
         return tokenHash;
     }
 
-    /** Returns the confirmation payload for an exchanged unsubscribe digest. */
-    public DeliveryUnsubscribeDto preview(String tokenHash) {
-        CampaignDelivery delivery = requireDelivery(tokenHash);
+    /** Returns the confirmation payload for an exchanged unsubscribe flow. */
+    public DeliveryUnsubscribeDto preview(ResolvedFlow flow) {
+        CampaignDelivery delivery = requireDelivery(flow.sourceTokenHash());
         return inDeliveryWorkspace(delivery, () -> {
             CampaignSend send = requireSend(delivery);
             boolean unsubscribed = campaignDeliveryMapper.hasEvent(
                     delivery.getWorkspaceId(), delivery.getId(), EVENT_UNSUBSCRIBED);
             return new DeliveryUnsubscribeDto(
-                    send.getChannel(), ContactMask.maskEmail(delivery.getAddress()), unsubscribed);
+                    flow.flowId(),
+                    send.getChannel(),
+                    ContactMask.maskEmail(delivery.getAddress()),
+                    unsubscribed);
         });
     }
 
-    /** Performs the unsubscribe: idempotent suppression, consent revocation, and an event. */
-    public DeliveryUnsubscribeDto unsubscribe(String tokenHash) {
-        CampaignDelivery delivery = requireDelivery(tokenHash);
+    /**
+     * Performs the unsubscribe: idempotent suppression, consent revocation, and an event. The flow
+     * must already be bound to the preview identity the recipient confirmed.
+     */
+    public DeliveryUnsubscribeDto unsubscribe(ResolvedFlow flow) {
+        CampaignDelivery delivery = requireDelivery(flow.sourceTokenHash());
         DeliveryUnsubscribeDto result = inDeliveryWorkspace(delivery,
-                () -> transactionTemplate.execute(status -> apply(delivery)));
+                () -> transactionTemplate.execute(status -> apply(delivery, flow.flowId())));
         return Objects.requireNonNull(result, "unsubscribe result");
     }
 
-    private DeliveryUnsubscribeDto apply(CampaignDelivery delivery) {
+    private DeliveryUnsubscribeDto apply(CampaignDelivery delivery, String flowId) {
         CampaignSend send = requireSend(delivery);
         int workspaceId = delivery.getWorkspaceId();
         if (campaignDeliveryMapper.hasEvent(workspaceId, delivery.getId(), EVENT_UNSUBSCRIBED)) {
             return new DeliveryUnsubscribeDto(
-                    send.getChannel(), ContactMask.maskEmail(delivery.getAddress()), true);
+                    flowId, send.getChannel(), ContactMask.maskEmail(delivery.getAddress()), true);
         }
         suppressionService.add(new SuppressionEntryRequest(
                 "workspace", send.getChannel(), delivery.getAddress(), delivery.getPersonId(),
@@ -120,7 +127,7 @@ public class DeliveryUnsubscribeService {
         event.setDetail("Recipient unsubscribed");
         campaignDeliveryMapper.insertEvent(event);
         return new DeliveryUnsubscribeDto(
-                send.getChannel(), ContactMask.maskEmail(delivery.getAddress()), true);
+                flowId, send.getChannel(), ContactMask.maskEmail(delivery.getAddress()), true);
     }
 
     private <T> T inDeliveryWorkspace(CampaignDelivery delivery, Supplier<T> work) {

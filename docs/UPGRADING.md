@@ -214,7 +214,10 @@ Operator actions after the target deployment is healthy:
   covers both the bare path and the retired subtree.
 
 Both API prefixes are now CSRF-protected because the grant cookie is the authority. Any custom client
-calling them must bootstrap `GET /api/auth/csrf` and echo the CSRF header on every mutation.
+calling them must bootstrap `GET /api/auth/csrf` and echo the CSRF header on every mutation. The final
+requests — `POST /api/document-acceptance/accept`, `POST /api/document-acceptance/decline` and
+`POST /api/delivery/unsubscribe` — also carry a JSON body echoing the `flowId` the preview returned; a
+body whose `flowId` does not name the grant the browser currently holds is refused without any state change.
 
 ## On-prem upgrade runbook
 

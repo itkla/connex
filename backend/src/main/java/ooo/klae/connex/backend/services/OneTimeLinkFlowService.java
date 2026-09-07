@@ -204,6 +204,23 @@ public class OneTimeLinkFlowService {
     }
 
     /**
+     * Resolves a valid flow for a token-free final operation only when the request echoes the
+     * preview identity it was rendered from, so a grant another tab swapped in cannot decide it.
+     * @param request current browser request
+     * @param purpose expected operation
+     * @param rawGrant flow cookie value
+     * @param flowId preview identity shown for the operation
+     * @return the source digest and non-authorizing identity
+     */
+    public ResolvedFlow requireBoundFlow(
+            HttpServletRequest request, Purpose purpose, String rawGrant, String flowId) {
+        if (!OneTimeTokenDigest.constantTimeEquals(grantHash(rawGrant), flowId)) {
+            throw invalidLink();
+        }
+        return requireFlow(request, purpose, rawGrant);
+    }
+
+    /**
      * Resolves a valid routed flow without consuming it. A grant issued without a routing hint can
      * never route, so it fails closed exactly like an unknown or expired grant.
      * @param request current browser request
