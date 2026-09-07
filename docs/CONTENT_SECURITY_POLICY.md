@@ -36,16 +36,17 @@ The `report-to` group and the `Reporting-Endpoints` header are emitted **only** 
 | Request | Response |
 |---|---|
 | `application/csp-report` with a legacy report body | 204, one log line |
-| `application/reports+json` with an array of N reports | 204, at most 10 log lines |
+| `application/reports+json` with an array of N reports | 204, at most 10 log lines, each charged to the client's throttle |
 | garbage bytes, wrong shape, or an empty body | 204, no log line |
 | body over 16 KiB (`CONNEX_CSP_REPORTS_MAX_BODY_BYTES`) | 413, at the edge and again in the application |
 | a report carrying a session cookie and no CSRF header | 204 |
 | a report from a privileged account confined pending MFA enrollment | 204 |
-| more than 60 reports per 60 seconds from one client IP | 204, dropped silently |
+| more than 60 records per 60 seconds from one client IP, however they are batched | 204, dropped silently |
+| an address the throttle has never seen while it already tracks 10 000 addresses | 204, dropped silently until eviction frees capacity |
 | `GET`, `PUT`, `DELETE` | 401 — the collector is write-only |
 | any other content type | 415 |
 
-The per-IP window is `connex.csp-reports.max-reports-per-window` / `connex.csp-reports.window-seconds` and the client address is resolved through the trusted-proxy chain. It is used **only** as the throttle key: it is never logged.
+The per-IP window is `connex.csp-reports.max-reports-per-window` / `connex.csp-reports.window-seconds` and is charged per logged record, not per request: parsing a body costs one allowance, which also pays for the first record it yields, and every further record of a batched Reporting-API body costs one more, so a client cannot multiply its budget by batching. `connex.csp-reports.max-tracked-clients` bounds how many distinct addresses the throttle remembers between evictions (`connex.csp-reports.eviction-delay-ms`); a previously unseen address is refused while the map is full. The client address is resolved through the trusted-proxy chain and is used **only** as the throttle key: it is never logged.
 
 ### Reading the reports
 
