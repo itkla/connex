@@ -228,7 +228,7 @@ non-GET methods are not silently rewritten, and preserve the path and query stri
 |---|---|---|
 | `CF-CUSTOM-01-METHODS` | Intended host and method is `TRACE` or `CONNECT` | Block. Connex exposes neither method. |
 | `CF-EX-01-WEBSOCKET` | Host is `connexcrm.jp` or `preview.connexcrm.jp`, and path is exactly `/api/ws` | Skip Super Bot Fight Mode. Keep managed WAF inspection of the initial handshake; the generic rate expression excludes this path. Logging may remain enabled because this path carries no credential. |
-| `CF-EX-02-TOKEN-CALLBACKS` | Intended host and path starts with `/api/delivery/webhooks/`, `/api/delivery/unsubscribe`, or `/api/document-acceptance` | Skip Super Bot Fight Mode, rate limiting, and managed WAF. Disable Skip-rule logging because the webhook path contains a credential; the acceptance and unsubscribe API prefixes are credential-free in the URL but keep the same treatment so a stale emailed link cannot be logged. Application webhook signature/token verification, idempotent unsubscribe handling, and acceptance-token admission remain authoritative. |
+| `CF-EX-02-TOKEN-CALLBACKS` | Intended host and path starts with `/api/delivery/webhooks/`, `/api/delivery/unsubscribe`, `/document-acceptance/`, or `/api/document-acceptance` | Skip Super Bot Fight Mode, rate limiting, and managed WAF. Disable Skip-rule logging because the webhook path and the retired `/document-acceptance/{token}` frontend prefix both contain a credential; the acceptance and unsubscribe API prefixes are credential-free in the URL but keep the same treatment so a stale emailed link cannot be logged. Application webhook signature/token verification, idempotent unsubscribe handling, and acceptance-token admission remain authoritative. |
 | `CF-EX-03-SAML` | Intended host, method `POST`, and path starts with `/api/login/saml2/sso/` | Skip Super Bot Fight Mode and interactive challenges. Preserve the form body, cookies, and redirect response unchanged. Keep managed WAF inspection unless one rule ID is proven incompatible. |
 | `CF-EX-04-UPLOADS` | Intended host and an upload path listed in the Caddy table, including `/api/imports/*` and `/api/business-cards/*` | Skip Super Bot Fight Mode so multipart/binary clients are not challenged mid-transfer. Do not skip the dedicated upload rate rule, the origin body cap, or all managed WAF rules. |
 
@@ -242,7 +242,7 @@ CF-EX-01-WEBSOCKET
 (http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and http.request.uri.path eq "/api/ws")
 
 CF-EX-02-TOKEN-CALLBACKS
-(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe") or starts_with(http.request.uri.path, "/api/document-acceptance")))
+(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe") or starts_with(http.request.uri.path, "/document-acceptance/") or starts_with(http.request.uri.path, "/api/document-acceptance")))
 
 CF-EX-03-SAML
 (http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and http.request.method eq "POST" and starts_with(http.request.uri.path, "/api/login/saml2/sso/"))
@@ -250,6 +250,16 @@ CF-EX-03-SAML
 CF-EX-04-UPLOADS
 (http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))
 ```
+
+`/document-acceptance/` is the **retired** frontend link shape. Current mail carries the bearer in a
+fragment, which no browser sends, so the current routes are credential-free. Emailed
+`/document-acceptance/{token}` links issued before the V203/V204 cutover are still in recipients'
+inboxes, still arrive at the edge, and still carry a live bearer that remains redeemable at
+`POST /api/document-acceptance/exchange`. Keeping the prefix in `CF-EX-02-TOKEN-CALLBACKS` and
+`CF-CONFIG-01-COMPATIBILITY` is what keeps those bearers out of edge logs even though Next answers
+the path with a 404. Remove the prefix only after every outstanding document delivery has been
+re-sent or invalidated, per the
+[V203/V204 emailed-link fragment cutover](UPGRADING.md#v203v204-emailed-link-fragment-cutover-document-acceptance-campaign-unsubscribe).
 
 Add configuration rule `CF-CONFIG-01-COMPATIBILITY` with the expression below. Set Browser
 Integrity Check to Off and Security Level to Essentially Off. This prevents the independent Browser
@@ -259,7 +269,7 @@ active.
 
 ```text
 CF-CONFIG-01-COMPATIBILITY
-(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (http.request.uri.path eq "/api/ws" or starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe") or starts_with(http.request.uri.path, "/api/document-acceptance") or (http.request.method eq "POST" and starts_with(http.request.uri.path, "/api/login/saml2/sso/")) or (http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))))
+(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (http.request.uri.path eq "/api/ws" or starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe") or starts_with(http.request.uri.path, "/document-acceptance/") or starts_with(http.request.uri.path, "/api/document-acceptance") or (http.request.method eq "POST" and starts_with(http.request.uri.path, "/api/login/saml2/sso/")) or (http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))))
 ```
 
 Configure Super Bot Fight Mode according to the recorded origin-lock design:
@@ -344,7 +354,10 @@ count look comprehensive.
   `/api/document-acceptance*` endpoints remain unchallenged; API requests are application-throttled
   (the exchange by the shared per-source one-time-link budget before its body is read, then by the
   per-token and per-source acceptance limiter; every other request by the grant-keyed admission
-  filter), and no bearer appears in any exported path.
+  filter), and no bearer appears in any exported path. The retired `/document-acceptance/{token}`
+  frontend prefix stays in the skip and configuration rules until the outstanding deliveries that
+  still name it have been re-sent or invalidated: it 404s, but its logged path would still be a
+  redeemable bearer.
 - **File upload/download:** the 27 MiB multipart envelope preserves the 25 MiB stored-object limit,
   imports retain 64 MiB, and Business-plan upload capacity exceeds both. Downloads are not body
   capped and authenticated responses are not cached.

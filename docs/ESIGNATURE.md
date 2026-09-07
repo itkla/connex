@@ -86,7 +86,10 @@ before the report can reach the control-plane diagnostics row.
 Cloudflare skip and rate-limit expressions must be updated for the cutover: the HTML routes
 `/document-acceptance` and `/unsubscribe` no longer carry a credential, and the API prefixes to exclude
 from the generic API rate rule are `/api/document-acceptance` and `/api/delivery/unsubscribe` with no
-trailing-slash requirement. See `docs/EDGE_DEFENCE.md` and the cutover entry in `docs/UPGRADING.md`.
+trailing-slash requirement. The retired `/document-acceptance/{token}` prefix stays in the no-logging
+skip rule until every outstanding delivery has been re-sent or invalidated, because an already-emailed
+link still carries a redeemable bearer in its path. See `docs/EDGE_DEFENCE.md` and the cutover entry in
+`docs/UPGRADING.md`.
 
 ### Accepted residual: unavailable-link timing
 

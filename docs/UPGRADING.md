@@ -209,7 +209,12 @@ Operator actions after the target deployment is healthy:
 - **Update the Cloudflare skip and rate-limit expressions** per
   [EDGE_DEFENCE.md](EDGE_DEFENCE.md): the HTML routes `/document-acceptance` and `/unsubscribe` no
   longer carry a credential, and the API prefixes to exclude are `/api/document-acceptance` and
-  `/api/delivery/unsubscribe` with no trailing-slash requirement.
+  `/api/delivery/unsubscribe` with no trailing-slash requirement. **Keep the retired
+  `/document-acceptance/` frontend prefix in the no-logging skip rule and in
+  `CF-CONFIG-01-COMPATIBILITY`** until the re-send above is complete. Already-emailed
+  `/document-acceptance/{token}` links still reach the edge, and their bearers stay redeemable at
+  `POST /api/document-acceptance/exchange`, so dropping the prefix early would write live bearers
+  into edge logs even though the path itself now 404s.
 - **Reverse proxies** must route the bare `/document-acceptance` path; the bundled Caddyfile matcher
   covers both the bare path and the retired subtree.
 
@@ -218,6 +223,7 @@ calling them must bootstrap `GET /api/auth/csrf` and echo the CSRF header on eve
 requests — `POST /api/document-acceptance/accept`, `POST /api/document-acceptance/decline` and
 `POST /api/delivery/unsubscribe` — also carry a JSON body echoing the `flowId` the preview returned; a
 body whose `flowId` does not name the grant the browser currently holds is refused without any state change.
+
 ## Triggered-send rollback quiescence
 
 The triggered-send fence is captured at backend startup; changing an environment file does not close
@@ -349,7 +355,9 @@ contract is [Automation: triggered campaign delivery](backend/AUTOMATION.md#trig
    must additionally re-send every outstanding document delivery (acceptance tokens stay valid until
    each delivery's `expiresAt`, which may be unset), re-send campaigns whose unsubscribe links are
    still in recipients' inboxes because those links never expire and now 404, and update the
-   Cloudflare skip and rate-limit expressions — see the V203/V204 cutover section above.
+   Cloudflare skip and rate-limit expressions while retaining the retired `/document-acceptance/`
+   prefix in the no-logging rules until that resend is complete — see the V203/V204 cutover section
+   above.
 11. **On pre-ingress failure** — keep Caddy and upstream ingress closed and stop the target application
    containers. Remove the target deployment directory, re-verify and extract the exact prior signed
    deploy archive, restore the prior mode-0600 `.env` byte-for-byte, and confirm both recorded hashes.
