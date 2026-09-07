@@ -87,7 +87,10 @@ class SastCanaryProofWorkflowTest(unittest.TestCase):
             {"group": "sast-canary-proof", "cancel-in-progress": False},
             self.workflow["concurrency"],
         )
-        self.assertEqual(60, self.job["timeout-minutes"])
+        self.assertEqual(75, self.job["timeout-minutes"])
+        rerun = next(step for step in self.job["steps"] if step["name"] == "Re-run the canary's Security workflow")
+        self.assertLess(rerun["timeout-minutes"], self.job["timeout-minutes"],
+                        "the re-run step must time out before the job so the reporting step still runs")
 
     def test_every_external_action_is_pinned_to_a_full_commit(self) -> None:
         uses = [step["uses"] for step in self.steps if "uses" in step]

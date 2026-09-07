@@ -36,7 +36,7 @@ jobs:
   prove:
     name: Prove the CodeQL gate blocks the canary
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 75
     permissions:
       contents: read
       actions: write
@@ -116,6 +116,10 @@ jobs:
           done
           exit "$stale"
       - name: Re-run the canary's Security workflow
+        # A step-level bound (below the job's 75 minutes) turns a slow or queued re-run into a
+        # failed step, so the reporting step below still runs; a job-level timeout would cancel the
+        # whole job before it could report.
+        timeout-minutes: 55
         id: rerun
         env:
           CANARY_NUMBER: ${{ steps.canary.outputs.number }}
@@ -234,7 +238,8 @@ jobs:
             --summary "$GITHUB_STEP_SUMMARY" \
             --require-admin-enforcement
       - name: Report a failed proof
-        # cancelled() covers the job's own timeout-minutes (GitHub cancels the job) and a manual
+        # cancelled() covers a manual cancellation; the re-run step's own timeout-minutes turns a
+        # slow re-run into failure() before the job-level bound (75 minutes) could cancel the job. A
         # cancellation; failure() alone would leave both silent. A workflow-file error concludes
         # startup_failure without running any step and is visible only in the Actions tab.
         if: failure() || cancelled()
