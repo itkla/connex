@@ -932,3 +932,64 @@ replay:
 (277 characters; the API cap is 280. Verified after the dismissal with
 `gh api repos/itkla/connex/code-scanning/alerts/153 --jq '{state,dismissed_at,dismissed_reason,dismissed_comment}'`
 → `dismissed`, `2026-09-05T01:43:26Z`, `false positive`, the comment above.)
+
+### `java/csrf-unprotected-request-type` — #164, #165: acceptance and unsubscribe preview `GET`s, false positive
+
+Raised on the merge ref of PR #1597 (CHK-050 residual) by the base-vs-merge gate from PR #1592 —
+the first live block of that gate — at `DeliveryUnsubscribeController.java:53`
+(`GET /api/delivery/unsubscribe`, #164) and `DocumentAcceptanceController.java:65`
+(`GET /api/document-acceptance`, #165).
+
+**Runtime trace.** Both handlers read only. `DocumentAcceptanceController.preview` →
+`DocumentAcceptanceService.admitGrant` → `OneTimeLinkFlowService.requireRoutedFlow` → `requireFlow`
+→ `flowMapper.findValidSourceTokenHash` / `findValidRoutingWorkspaceId` (`<select>`s) →
+`DocumentAcceptanceService.preview` → `transactionTemplate.execute(status -> previewInTransaction(…))`,
+which returns the frozen document and records nothing (view evidence is written only by
+`POST /viewed`, so scanners and prefetchers cannot forge it). `DeliveryUnsubscribeController.preview`
+→ `requireFlow` (`<select>`) → `DeliveryUnsubscribeService.preview` → `requireSend` and
+`campaignDeliveryMapper.hasEvent` (`<select>`). `insertEvent`, `markRecipientViewed` and the audit
+writes are reachable only from the `POST` decisions, which are CSRF-protected and `flowId`-bound.
+
+**Why CodeQL fired.** The sinks are the sibling write lambdas of the same service classes, linked
+through `viableCallable` dispatch over `TransactionTemplate.execute(TransactionCallback)` and the
+`Supplier` passed to `inDeliveryWorkspace`; the same class as #153 / #159 and #111 / #114 / #151 /
+#152. The repository's `AutomationExecutor.runAs` + `TransactionTemplate` idiom reproduces this for
+every read-only `GET` that shares a class with a writer; a model-pack or read-path split is recorded
+as a systemic follow-up on the tracking issue.
+
+**Regression coverage.** `DocumentAcceptanceLinkExchangeIntegrationTest` (preview leaves the
+recipient `pending` with no `viewed` / `completed` event) and
+`DeliveryUnsubscribeIntegrationTest.previewAndUnsubscribeIdempotentThroughTheGrant` (no
+`unsubscribed` event after the `GET`).
+
+**Disposition: false positive.** Tracking issue
+[#1599](https://github.com/itkla/connex/issues/1599); owner Hunter Nakagawa; approver Security
+Owner role ([#1230](https://github.com/itkla/connex/issues/1230)); expiry **2027-02-14**, re-review
+**2027-01-14**. Both dismissed on 2026-09-07 with:
+
+> False positive: GET preview runs only SELECTs (requireFlow, previewInTransaction / hasEvent); no
+> event, audit or status write. CodeQL linked sibling write lambdas via TransactionTemplate/Supplier
+> dispatch. Owner Hunter Nakagawa. Expiry 2027-02-14, re-review 2027-01-14. #1599
+
+(275 characters.) The alert numbers are repository-wide, so the dismissals carry over to
+`refs/heads/main` when #1597 merges.
+
+### `java/spring-disabled-csrf-protection` — #166: dedicated CSP report chain, false positive
+
+Raised on the merge ref of PR #1601 (the collector hardening follow-up to #1596) at
+`CspReportSecurityConfig.java:79`, where the dedicated `@Order(0)` chain that serves
+`POST /api/csp-reports` disables CSRF. Same class as #156 (`PublicApiSecurityConfig`, #1591).
+
+**Why it is not a vulnerability.** The chain matches exactly `POST /api/csp-reports`, runs
+`SessionCreationPolicy.STATELESS` with the request cache disabled, and `permitAll`s the one
+route; `CspReportCookieFilter`, registered just before Spring Session's `SessionRepositoryFilter`,
+hides every cookie from that request, so no session and no cookie-borne authority exists for a
+cross-site request to ride. The endpoint records nothing but a bounded log line and always
+answers 204. The cookie-authorised `/api/**` chain keeps its CSRF protection.
+`CspReportEndpointSecurityTest.reportsNeverTouchTheSessionTheyCarry` proves through the real
+filter chain that a report carrying a valid session cookie leaves the session untouched and
+creates none.
+
+**Disposition: false positive.** Tracked on [#1591](https://github.com/itkla/connex/issues/1591)
+(same class); owner Hunter Nakagawa; approver Security Owner role; expiry **2027-02-14**,
+re-review **2027-01-14**. Dismissed on 2026-09-07 with a comment carrying that record.

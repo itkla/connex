@@ -180,8 +180,9 @@ public class SecurityConfig {
      * session-stored in the default repository and echoed by the SPA in a header it fetches from
      * {@code GET /api/auth/csrf}; a plain (non-XOR) handler keeps that token stable so the client
      * can cache it. Only the pre-session auth handshake, the bearer-grade native connection
-     * handoff, the token-authenticated delivery routes, the browser CSP violation collector and,
-     * when SSO is enabled, the SAML assertion consumer are exempt.
+     * handoff, the token-authenticated delivery routes and, when SSO is enabled, the SAML
+     * assertion consumer are exempt; the browser CSP violation collector never reaches this chain
+     * (see {@link CspReportSecurityConfig}).
      *
      * <p>The request cache is disabled. Nothing here replays a saved request — every
      * post-authentication redirect targets a trusted frontend URL — but the default
@@ -260,11 +261,8 @@ public class SecurityConfig {
                     "/api/auth/webauthn/authenticate/**",
                     "/api/account/connections/native/prepare",
                     "/api/account/connections/native/complete",
-                    "/api/delivery/unsubscribe/**",
                     "/api/delivery/webhooks/**",
-                    "/api/document-acceptance/**",
-                    "/api/document-signature/webhooks/**",
-                    "/api/csp-reports");
+                    "/api/document-signature/webhooks/**");
             if (ssoEnabled) {
                 csrf.ignoringRequestMatchers("/api/login/saml2/sso/**");
             }
@@ -278,11 +276,12 @@ public class SecurityConfig {
                     .requestMatchers("/api/metrics")
                         .hasAuthority(MetricsScrapeTokenFilter.SCRAPE_AUTHORITY)
                     .requestMatchers(HttpMethod.GET, "/api/capabilities").permitAll()
-                    .requestMatchers(HttpMethod.POST, "/api/csp-reports").permitAll()
                     .requestMatchers(HttpMethod.GET, "/api/mail/managed").permitAll()
-                    .requestMatchers("/api/delivery/unsubscribe/**").permitAll()
+                    .requestMatchers(
+                        "/api/delivery/unsubscribe", "/api/delivery/unsubscribe/**").permitAll()
                     .requestMatchers("/api/delivery/webhooks/**").permitAll()
-                    .requestMatchers("/api/document-acceptance/**").permitAll()
+                    .requestMatchers(
+                        "/api/document-acceptance", "/api/document-acceptance/**").permitAll()
                     .requestMatchers("/api/document-signature/webhooks/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/authenticate/**").permitAll()
                     .requestMatchers("/api/auth/webauthn/**").authenticated()

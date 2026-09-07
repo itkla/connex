@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.time.Clock;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -185,6 +186,26 @@ class CspReportServiceTest {
             assertEquals(List.of(), service.ingest(body, CLIENT), body);
         }
         assertEquals(List.of(), service.ingest(null, CLIENT));
+    }
+
+    @Test
+    void chargesTheThrottleOnceForEveryLoggedRecordOfABatch() {
+        CspReportService throttled = new CspReportService(
+                new ObjectMapper(), new CspReportRateLimiter(5, 60, 100, Clock.systemUTC()));
+        String entries = IntStream.range(0, 10)
+                .mapToObj(index -> "{\"type\":\"csp-violation\",\"body\":{\"effectiveDirective\":\"img-src\","
+                        + "\"blockedURL\":\"https://cdn.example.invalid/" + index + ".png\","
+                        + "\"documentURL\":\"https://connex.example.com/dashboard\"}}")
+                .collect(Collectors.joining(","));
+
+        List<CspViolationRecord> firstBatch = throttled.ingest("[" + entries + "]", CLIENT);
+        List<CspViolationRecord> nextRequest = throttled.ingest(
+                "{\"csp-report\":{\"effective-directive\":\"img-src\",\"blocked-uri\":\"inline\"}}",
+                CLIENT);
+
+        assertEquals(5, firstBatch.size());
+        assertEquals("https://cdn.example.invalid", firstBatch.getFirst().blockedHost());
+        assertEquals(List.of(), nextRequest);
     }
 
     @Test

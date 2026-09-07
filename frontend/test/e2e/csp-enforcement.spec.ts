@@ -204,7 +204,8 @@ test.describe("frontend CSP enforcement", () => {
             await page.goto("/auth/register", { waitUntil: "domcontentloaded" });
             await expect(page.getByRole("button", { name: "Create account" })).toBeVisible();
 
-            await page.goto(`/document-acceptance/w42-${"c".repeat(64)}`, { waitUntil: "domcontentloaded" });
+            await page.goto(`/document-acceptance#token=w42-${"c".repeat(64)}`, { waitUntil: "domcontentloaded" });
+            await expect(page).toHaveURL(/\/document-acceptance$/);
             await expect(page.getByRole("heading", {
                 name: message("en", "document-acceptance", "DocumentAcceptance.unavailableTitle"),
             })).toBeVisible();

@@ -13,7 +13,7 @@ built-in roles receive that permission; custom roles receive it only when explic
 gate returns an explicit unavailable response and never pretends that a send succeeded. Deployment setup
 is described in [DEPLOYMENT.md](DEPLOYMENT.md).
 
-The recipient-facing `/document-acceptance/{token}` frontend page renders the frozen document in the
+The recipient-facing `/document-acceptance` frontend page renders the frozen document in the
 document's own locale and lets signers accept with a typed name or decline with a reason. It does not
 write an anonymous visitor's locale cookie. Viewers see the document without decision controls. A
 successful decision produces an in-session receipt; reloading a completed or declined link returns the
@@ -22,15 +22,14 @@ same unavailable state as any other inactive link.
 Delivery remains off by default. There is no sender-side frontend for send, resend, void, or artifact
 download yet, so an operator who enables the flag can initiate the flow only through the authenticated
 API. Before enabling any environment, verify a usable mail transport and the Cloudflare no-log Skip rule
-for both the frontend and API bearer paths. Configure `connex.security.trusted-proxies` so source
+for the `/api/document-acceptance` prefix. Configure `connex.security.trusted-proxies` so source
 throttling resolves the recipient address instead of collapsing all recipients behind the Next.js
 server. The published bundle trusts the `caddy` and `frontend` service names through Docker DNS.
-Caddy replaces the browser-supplied forwarding header with one validated client address; for SSR,
-the frontend passes that value to the backend over the private app network. The backend accepts it
-only from the resolved frontend socket peer reached through the app-network-only `backend-app`
-alias. A compromised frontend can spoof this SSR source value; this accepted boundary does not let
-a recipient supply a trusted forwarding value through Caddy. Metadata and page rendering share one
-request-scoped preview fetch, so one frontend render consumes one backend admission.
+Every acceptance request — the exchange, the preview, `viewed`, `accept` and `decline` — is issued by
+the recipient's browser and reaches the backend through Caddy like any other `/api/*` call; the page
+itself fetches nothing server-side. Caddy replaces the browser-supplied forwarding header with one
+validated client address, so the trusted-proxy configuration is the only source-address boundary and
+each browser request consumes one backend admission.
 Whether preview staging should enable the flag is an operator decision; the checked-in deployment
 examples remain disabled.
 
@@ -58,30 +57,53 @@ Malformed input is canonicalized to a fixed `w-1-…` admission sentinel. Its re
 workspace identifier is excluded by the public token grammar and Connex's positive workspace-ID
 contract, so no legitimately issued bearer can equal the sentinel.
 
-The emailed bearer link points to the frontend route `/document-acceptance/{token}`. The recipient page
-calls `/api/document-acceptance/{token}` and its decision subpaths, so the complete bearer appears in
-both frontend and API request paths. Cloudflare must apply the no-log Skip rule and compatibility
-exception to both routes; the API route also stays excluded from the generic API rate rule. The
-application stores only the hash, never writes the token or raw path to application/audit logs, uses a
-uniform unavailable response, and applies the per-token and trusted-source admission before request-body
-parsing. These controls compensate for the path shape; edge events or exported raw paths must never be
-treated as secret-free evidence.
+The emailed bearer link points to the frontend route `/document-acceptance#token={token}`. Browsers never
+send a fragment to any server, so the bearer reaches Connex exactly once: in the JSON body of
+`POST /api/document-acceptance/exchange`, which the recipient page issues after stripping the fragment
+from the address bar. That exchange answers `303` with a token-free `Location: /document-acceptance` and
+sets `connex_document_acceptance_flow`, an `HttpOnly`, `SameSite=Strict` grant cookie scoped to
+`Path=/api/document-acceptance` and bound to the browser binding cookie plus the server session lineage.
+The grant lives 60 minutes, is renewed by re-opening the emailed link in the same browser, and is still
+bounded by the recipient token's own expiry and terminal state.
 
-The frontend HTML response sets `Referrer-Policy: no-referrer`, preventing the bearer path from reaching
-same-origin asset, API, or navigation requests. Client error reporting replaces bearer path segments in
-the pathname, message, and stack before the report can reach the control-plane diagnostics row. The
-default `strict-origin-when-cross-origin` policy already withholds the path from cross-origin links; the
-route-specific override closes the same-origin exposure.
+The grant's owner is that binding cookie combined with a lineage held only in the servlet session,
+and `server.servlet.session.timeout` is 30 minutes — half the grant. A signer who reads a long
+contract without clicking anything would lose the session, and the next decision would be refused
+even though the grant is still live. The open recipient page therefore re-reads
+`GET /api/document-acceptance` every 10 minutes while a decision is still open, which refreshes the
+session and nothing else: the read records no view, does not extend the grant, does not weaken the
+owner binding, and stops when the page is closed. If that read ever comes back unavailable, the page
+switches to the unavailable state, because the grant really is gone.
 
-Security control #1237 / SEC-56 prescribes exchanging an emailed one-time token for a short-lived
-server-side session followed by an immediate redirect to a token-free URL. This increment retains the
-path bearer under the compensating controls above. Because that bearer is the dynamic route segment,
-Next.js necessarily carries its value in the canonical route URL and dynamic router tree in the RSC
-payload, including the Flight scripts embedded in initial HTML. The page does not copy it into
-application metadata, client props, component keys, visible body content, links, or form actions, but
-the segment itself cannot be removed from router state without the SEC-56 token-to-session exchange.
-The security workstream that owns #1237 also owns closing that residual browser-history, RSC, initial
-HTML, and access-log gap.
+The re-read stops as soon as the recipient is no longer actionable — a viewer-only delivery, or one
+this browser has just accepted or declined. `preview` applies the same actionability check every
+other operation does, so continuing to poll a settled link would replace a correct confirmation with
+a false "link unavailable".
+
+Every other endpoint — `GET /api/document-acceptance`, `POST /api/document-acceptance/viewed`,
+`/accept` and `/decline` — reads only that cookie. A token in a path or query is ignored, and the legacy
+`/api/document-acceptance/{token}` shapes answer the uniform 404. Because the cookie is now the
+authority, both prefixes are CSRF-protected: the recipient page sends the CSRF header on every mutation.
+The cookie is shared by every tab of one browser, so a later exchange silently replaces the grant an
+earlier tab rendered; the preview therefore carries a non-authorizing `flowId` (the digest of the grant)
+and `accept`/`decline` must echo it, otherwise the request answers the uniform 404 and no recipient row
+changes. The exchange itself is budgeted per source address before its body is read, by the same
+per-IP exchange budget every other one-time link shares.
+The application still stores only the token hash, never writes the token to application or audit logs,
+uses a uniform unavailable response, and applies the per-token and trusted-source admission — at the
+exchange for the emailed bearer, and keyed on the grant cookie for every later request.
+
+The frontend HTML response sets `Referrer-Policy: no-referrer` on `/document-acceptance`. Client error
+reporting replaces bearer path segments and `#token=` fragments in the pathname, message, and stack
+before the report can reach the control-plane diagnostics row.
+
+Cloudflare skip and rate-limit expressions must be updated for the cutover: the HTML routes
+`/document-acceptance` and `/unsubscribe` no longer carry a credential, and the API prefixes to exclude
+from the generic API rate rule are `/api/document-acceptance` and `/api/delivery/unsubscribe` with no
+trailing-slash requirement. The retired `/document-acceptance/{token}` prefix stays in the no-logging
+skip rule until every outstanding delivery has been re-sent or invalidated, because an already-emailed
+link still carries a redeemable bearer in its path. See `docs/EDGE_DEFENCE.md` and the cutover entry in
+`docs/UPGRADING.md`.
 
 ### Accepted residual: unavailable-link timing
 
@@ -106,11 +128,13 @@ or rate limits change.
 ## What a recorded view means
 
 Opening the emailed frontend link is a `GET`, and email security scanners, link prefetchers and
-URL-rewriting proxies all issue one. The page's `GET /api/document-acceptance/{token}` therefore records
-nothing at all: it returns the frozen document and stamps no evidence.
+URL-rewriting proxies all issue one. The page's `GET /api/document-acceptance` therefore records
+nothing at all: it returns the frozen document and stamps no evidence. The exchange that precedes it
+records nothing either — an exchange is not a view — although a scanner that executes no JavaScript
+never reaches it, because the bearer lives in the fragment.
 
-The view is recorded by `POST /api/document-acceptance/{token}/viewed`, which the rendered recipient
-page calls. Automated fetchers do not execute that page, so they cannot forge
+The view is recorded by `POST /api/document-acceptance/viewed`, which the rendered recipient
+page calls with its grant cookie. Automated fetchers do not execute that page, so they cannot forge
 `first_viewed_at` or a `viewed` event into the completion certificate. The call is idempotent — only
 the first one stamps the timestamp and appends the event.
 

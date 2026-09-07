@@ -1306,28 +1306,42 @@ async function getAuthenticatedApiError(res: Response): Promise<ApiError> {
 }
 
 /**
- * Calls a public, unauthenticated endpoint without the workspace header, CSRF token, or credentials
- * the tenant-scoped helpers attach. Used for links a recipient opens with no Connex session.
+ * Calls a token-free recipient endpoint whose only credential is its purpose-bound HttpOnly flow
+ * cookie, obtained beforehand by exchanging the emailed fragment bearer. Sends credentials and a
+ * CSRF header on mutations, and deliberately omits the workspace header so a signed-in member's
+ * active workspace can never be mistaken for the link's tenant.
  * @param path the API path to request
  * @param method the HTTP method
- * @param init optional fetch overrides
  * @param parse validates and returns the endpoint-specific response
+ * @param init optional fetch overrides
  * @returns the validated JSON body
  * @throws ApiError when the response status is not ok
  */
-async function publicJson<T>(
+async function linkFlowJson<T>(
     path: string,
     method: "GET" | "POST",
     parse: (value: unknown) => T,
     init: RequestInit = {},
 ): Promise<T> {
-    const res = await fetch(`${API_BASE}${path}`, {
-        cache: "no-store",
-        ...init,
-        method,
-        credentials: "omit",
-        headers: { Accept: "application/json", ...init.headers },
-    });
+    const send = async (forceRefresh: boolean) => {
+        const headers = new Headers({
+            Accept: "application/json",
+            "Accept-Language": requestLocale(init),
+            ...(method === "POST" ? await csrfHeader(forceRefresh) : {}),
+        });
+        new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+        return fetch(`${API_BASE}${path}`, {
+            cache: "no-store",
+            ...init,
+            method,
+            credentials: "include",
+            headers,
+        });
+    };
+    let res = await send(false);
+    if (method === "POST" && res.status === 403) {
+        res = await send(true);
+    }
     if (!res.ok) {
         throw await getApiError(res);
     }
@@ -1508,6 +1522,8 @@ function isDocumentAcceptancePreview(
     value: unknown,
 ): value is Types.DocumentAcceptancePreview {
     return isObjectRecord(value)
+        && typeof value.flowId === "string"
+        && /^[0-9a-f]{64}$/.test(value.flowId)
         && isDocumentContent(value.content)
         && typeof value.dealName === "string"
         && typeof value.workspaceName === "string"
@@ -1553,12 +1569,15 @@ function parseDocumentAcceptanceDecision(value: unknown): Types.DocumentAcceptan
 
 function parseDeliveryUnsubscribeInfo(value: unknown): Types.DeliveryUnsubscribeInfo {
     if (!isObjectRecord(value)
+            || typeof value.flowId !== "string"
+            || !/^[0-9a-f]{64}$/.test(value.flowId)
             || typeof value.channel !== "string"
             || typeof value.address !== "string"
             || typeof value.unsubscribed !== "boolean") {
         throw invalidPublicResponse();
     }
     return {
+        flowId: value.flowId,
         channel: value.channel,
         address: value.address,
         unsubscribed: value.unsubscribed,
@@ -6627,15 +6646,23 @@ export function reconcileCampaignRecipient(
 }
 
 /**
- * Fetches the public unsubscribe preview for a delivery token. Deliberately bypasses the workspace
- * and CSRF machinery: the route is unauthenticated and resolves the tenant from the token alone.
- * @param token the 64-character hex delivery token from the unsubscribe link
- * @param init optional fetch overrides (used by SSR to disable caching)
+ * Exchanges an emailed unsubscribe fragment bearer for its purpose-bound browser flow, so the raw
+ * token travels once in a request body and never in a URL.
+ * @param token the 64-character hex delivery token from the unsubscribe link fragment
+ */
+export function exchangeUnsubscribeToken(token: string) {
+    return exchangeOneTimeLink("/api/delivery/unsubscribe/exchange", token);
+}
+
+/**
+ * Fetches the unsubscribe preview through the exchanged flow cookie. Deliberately bypasses the
+ * workspace machinery: the route is unauthenticated and resolves the tenant from the flow alone.
+ * @param init optional fetch overrides
  * @returns the masked address, channel, and current suppression state
  */
-export function getUnsubscribeInfo(token: string, init: RequestInit = {}) {
-    return publicJson(
-        `/api/delivery/unsubscribe/${token}`,
+export function getUnsubscribeInfo(init: RequestInit = {}) {
+    return linkFlowJson(
+        "/api/delivery/unsubscribe",
         "GET",
         parseDeliveryUnsubscribeInfo,
         init,
@@ -6643,16 +6670,20 @@ export function getUnsubscribeInfo(token: string, init: RequestInit = {}) {
 }
 
 /**
- * Confirms an unsubscribe for a delivery token, suppressing the resolved address. Public and
- * idempotent: repeat confirmations return the already-unsubscribed state without error.
- * @param token the 64-character hex delivery token from the unsubscribe link
+ * Confirms the unsubscribe the flow cookie authorizes, suppressing the resolved address.
+ * Idempotent: repeat confirmations return the already-unsubscribed state without error.
+ * @param payload the flow identity of the preview being confirmed
  * @returns the masked address, channel, and resulting suppression state
  */
-export function confirmUnsubscribe(token: string) {
-    return publicJson(
-        `/api/delivery/unsubscribe/${token}`,
+export function confirmUnsubscribe(payload: Types.ConfirmUnsubscribePayload) {
+    return linkFlowJson(
+        "/api/delivery/unsubscribe",
         "POST",
         parseDeliveryUnsubscribeInfo,
+        {
+            body: JSON.stringify(payload),
+            headers: { "Content-Type": "application/json" },
+        },
     );
 }
 
@@ -6750,29 +6781,38 @@ export function getVersion(init: RequestInit = {}) {
     return getJson<Types.ProductVersion>("/api/version", { cache: "no-store", ...init });
 }
 
-/** Fetches a frozen document through its session-less recipient bearer. */
-export function getDocumentAcceptancePreview(token: string, init: RequestInit = {}) {
-    return publicJson(
-        `/api/document-acceptance/${encodeURIComponent(token)}`,
+/**
+ * Exchanges an emailed document-acceptance fragment bearer for its purpose-bound browser flow, so
+ * the raw token travels once in a request body and never in a URL.
+ * @param token the raw recipient bearer from the acceptance link fragment
+ */
+export function exchangeDocumentAcceptanceToken(token: string) {
+    return exchangeOneTimeLink("/api/document-acceptance/exchange", token);
+}
+
+/** Fetches a frozen document through the exchanged session-less recipient flow. */
+export function getDocumentAcceptancePreview(init: RequestInit = {}) {
+    return linkFlowJson(
+        "/api/document-acceptance",
         "GET",
         parseDocumentAcceptancePreview,
         init,
     );
 }
 
-/** Records one rendered view through the session-less recipient bearer. */
-export function markDocumentAcceptanceViewed(token: string) {
-    return publicJson(
-        `/api/document-acceptance/${encodeURIComponent(token)}/viewed`,
+/** Records one rendered view through the exchanged session-less recipient flow. */
+export function markDocumentAcceptanceViewed() {
+    return linkFlowJson(
+        "/api/document-acceptance/viewed",
         "POST",
         parseDocumentAcceptancePreview,
     );
 }
 
-/** Records a typed-name acceptance through the session-less recipient bearer. */
-export function acceptDocument(token: string, payload: Types.AcceptDocumentPayload) {
-    return publicJson(
-        `/api/document-acceptance/${encodeURIComponent(token)}/accept`,
+/** Records a typed-name acceptance through the exchanged session-less recipient flow. */
+export function acceptDocument(payload: Types.AcceptDocumentPayload) {
+    return linkFlowJson(
+        "/api/document-acceptance/accept",
         "POST",
         parseDocumentAcceptanceDecision,
         {
@@ -6782,10 +6822,10 @@ export function acceptDocument(token: string, payload: Types.AcceptDocumentPaylo
     );
 }
 
-/** Records a reasoned decline through the session-less recipient bearer. */
-export function declineDocument(token: string, payload: Types.DeclineDocumentPayload) {
-    return publicJson(
-        `/api/document-acceptance/${encodeURIComponent(token)}/decline`,
+/** Records a reasoned decline through the exchanged session-less recipient flow. */
+export function declineDocument(payload: Types.DeclineDocumentPayload) {
+    return linkFlowJson(
+        "/api/document-acceptance/decline",
         "POST",
         parseDocumentAcceptanceDecision,
         {
@@ -6801,6 +6841,7 @@ export function documentAcceptanceFailureKind(
 ): Types.DocumentAcceptanceFailureKind | null {
     if (!(error instanceof ApiError)) return null;
     if (error.code === INVALID_PUBLIC_RESPONSE_CODE) return "service-unavailable";
+    if (error.status === 400) return "unavailable";
     if (error.status === 404) return "unavailable";
     if (error.status === 429) return "throttled";
     if (error.status === 503) return "service-unavailable";

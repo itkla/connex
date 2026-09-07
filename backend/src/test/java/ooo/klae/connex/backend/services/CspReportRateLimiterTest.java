@@ -9,13 +9,19 @@ import java.time.Instant;
 import java.time.ZoneId;
 
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 
 class CspReportRateLimiterTest {
 
     @Test
     void dropsReportsPastThePerClientCapWithoutThrowing() {
         MutableClock clock = new MutableClock();
-        CspReportRateLimiter limiter = new CspReportRateLimiter(2, 60, clock);
+        CspReportRateLimiter limiter = new CspReportRateLimiter(2, 60, 100, clock);
 
         assertTrue(limiter.tryAcquire("198.51.100.7"));
         assertTrue(limiter.tryAcquire("198.51.100.7"));
@@ -25,7 +31,7 @@ class CspReportRateLimiterTest {
     @Test
     void isolatesClientsAndResetsAtTheNextWindow() {
         MutableClock clock = new MutableClock();
-        CspReportRateLimiter limiter = new CspReportRateLimiter(1, 60, clock);
+        CspReportRateLimiter limiter = new CspReportRateLimiter(1, 60, 100, clock);
 
         assertTrue(limiter.tryAcquire("198.51.100.7"));
         assertFalse(limiter.tryAcquire("198.51.100.7"));
@@ -39,7 +45,7 @@ class CspReportRateLimiterTest {
     @Test
     void evictsOnlyStaleWindows() {
         MutableClock clock = new MutableClock();
-        CspReportRateLimiter limiter = new CspReportRateLimiter(2, 60, clock);
+        CspReportRateLimiter limiter = new CspReportRateLimiter(2, 60, 100, clock);
         limiter.tryAcquire("198.51.100.7");
         clock.advanceMillis(40_000);
         limiter.tryAcquire("198.51.100.8");
@@ -50,6 +56,95 @@ class CspReportRateLimiterTest {
         assertEquals(1, limiter.trackedKeys());
         assertTrue(limiter.tryAcquire("198.51.100.8"));
         assertFalse(limiter.tryAcquire("198.51.100.8"));
+    }
+
+    /**
+     * A source rotating through addresses must not be able to lock the collector to its own keys:
+     * at the cap the least recently used window makes way and the newcomer is still heard.
+     */
+    @Test
+    void admitsUnseenClientsAtTheTrackedCapByEvictingTheLeastRecentlyUsedWindow() {
+        MutableClock clock = new MutableClock();
+        CspReportRateLimiter limiter = new CspReportRateLimiter(2, 60, 2, clock);
+        assertTrue(limiter.tryAcquire("2001:db8::1"));
+        clock.advanceMillis(1_000);
+        assertTrue(limiter.tryAcquire("2001:db8::2"));
+        clock.advanceMillis(1_000);
+        assertTrue(limiter.tryAcquire("2001:db8::1"));
+
+        clock.advanceMillis(1_000);
+
+        assertTrue(limiter.tryAcquire("2001:db8::3"));
+        assertEquals(2, limiter.trackedKeys());
+        assertFalse(limiter.tracks("2001:db8::2"));
+        assertTrue(limiter.tracks("2001:db8::1"));
+        assertTrue(limiter.tracks("2001:db8::3"));
+        assertFalse(limiter.tryAcquire("2001:db8::1"));
+    }
+
+    /**
+     * Eviction must take the least recently used window and only that one: a run of newcomers
+     * arriving at a full map must not cost an address that is still reporting its place, nor reset
+     * the allowance it has already spent. A refused request counts as use — it is the client the
+     * throttle most recently heard from.
+     */
+    @Test
+    void newcomersAtTheCapNeverDisplaceTheMostRecentlyUsedWindow() {
+        MutableClock clock = new MutableClock();
+        CspReportRateLimiter limiter = new CspReportRateLimiter(1, 60, 4, clock);
+        for (String address : new String[] {"198.51.100.1", "198.51.100.2", "198.51.100.3",
+                "198.51.100.4"}) {
+            assertTrue(limiter.tryAcquire(address));
+        }
+        clock.advanceMillis(1_000);
+        assertFalse(limiter.tryAcquire("198.51.100.1"));
+
+        for (int newcomer = 0; newcomer < 3; newcomer++) {
+            clock.advanceMillis(1_000);
+            assertTrue(limiter.tryAcquire("203.0.113." + newcomer));
+        }
+
+        assertEquals(4, limiter.trackedKeys());
+        assertTrue(limiter.tracks("198.51.100.1"));
+        assertFalse(limiter.tracks("198.51.100.2"));
+        assertFalse(limiter.tracks("198.51.100.3"));
+        assertFalse(limiter.tracks("198.51.100.4"));
+        assertFalse(limiter.tryAcquire("198.51.100.1"));
+    }
+
+    /**
+     * Saturation is a different operational condition from ordinary throttling, so it is visible
+     * once per window rather than on every refused-capacity request.
+     */
+    @Test
+    void logsTrackedAddressSaturationOncePerWindow() {
+        MutableClock clock = new MutableClock();
+        CspReportRateLimiter limiter = new CspReportRateLimiter(5, 60, 1, clock);
+        Logger logger = (Logger) LoggerFactory.getLogger(CspReportRateLimiter.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            limiter.tryAcquire("198.51.100.1");
+            assertTrue(appender.list.isEmpty());
+
+            limiter.tryAcquire("198.51.100.2");
+            clock.advanceMillis(1_000);
+            limiter.tryAcquire("198.51.100.3");
+
+            assertEquals(1, appender.list.size());
+            assertEquals(Level.WARN, appender.list.getFirst().getLevel());
+            assertTrue(appender.list.getFirst().getFormattedMessage()
+                    .startsWith("csp.report.throttle.saturated"));
+
+            clock.advanceMillis(60_000);
+            limiter.tryAcquire("198.51.100.4");
+
+            assertEquals(2, appender.list.size());
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     private static final class MutableClock extends Clock {

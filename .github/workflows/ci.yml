@@ -348,6 +348,7 @@ jobs:
           CONNEX_BREACHED_PASSWORD_OFFLINE_FILE: src/test/resources/breached-passwords-test.txt
           CONNEX_BREACHED_PASSWORD_OFFLINE_SHA256: 902cd1791ee85aaf80cc4a31f33912d0bbbd504840b689d947c028d5100a9208
           CONNEX_SIGNATURE_ENABLED: "true"
+          CONNEX_WORKFLOWS_RUNTIME_ENABLED: "true"
           CONNEX_MAIL_ENABLED: "true"
           CONNEX_MAIL_HOST: "127.0.0.1"
           CONNEX_MAIL_PORT: "2525"
