@@ -108,7 +108,8 @@ for (const type of ["person", "company", "deal"] as const) {
 
         let createdTask: Record<string, unknown> | undefined;
         await expect.poll(async () => {
-            const response = await page.request.get("/api/tasks");
+            const filter = type === "person" ? "personId" : type === "company" ? "companyId" : "dealId";
+            const response = await page.request.get(`/api/tasks?${filter}=${record.id}`);
             expect(response.ok()).toBe(true);
             const tasks: unknown = await response.json();
             if (!Array.isArray(tasks)) throw new Error("Task collection must be an array");
@@ -174,7 +175,7 @@ test("resumes a process only after its created task is completed @mobile", async
     await expect(launcher.getByText("Run started", { exact: true })).toBeVisible();
     let firstTaskId: number | undefined;
     const tasks = async () => {
-        const response = await page.request.get("/api/tasks");
+        const response = await page.request.get(`/api/tasks?personId=${record.id}`);
         expect(response.ok()).toBe(true);
         const value: unknown = await response.json();
         if (!Array.isArray(value)) throw new Error("Task collection must be an array");
