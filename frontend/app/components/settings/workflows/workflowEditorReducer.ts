@@ -69,7 +69,7 @@ export type WorkflowEditorHistory = {
 export type WorkflowEditorAction =
     | { type: "initialize"; document: WorkflowEditorDocument }
     | { type: "replace"; document: WorkflowEditorDocument }
-    | { type: "untracked"; document: WorkflowEditorDocument }
+    | { type: "moveViewport"; viewport: WorkflowCanvas["viewport"] }
     | { type: "commit"; document: WorkflowEditorDocument }
     | { type: "commitTransient" }
     | { type: "undo" }
@@ -117,10 +117,13 @@ export function workflowEditorReducer(
                 transientBase: state.transientBase ?? structuredClone(state.present),
                 future: [],
             };
-        case "untracked":
+        case "moveViewport":
             return {
                 ...state,
-                present: structuredClone(action.document),
+                present: {
+                    ...state.present,
+                    canvas: { ...state.present.canvas, viewport: { ...action.viewport } },
+                },
             };
         case "commit": {
             const historyBase = state.transientBase ?? state.present;

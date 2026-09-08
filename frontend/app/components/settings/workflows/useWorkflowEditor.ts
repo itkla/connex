@@ -339,9 +339,9 @@ export function useWorkflowEditor({
 
     useEffect(() => cancelCreationContinuation, [cancelCreationContinuation]);
 
-    const updateDocument = useCallback((document: WorkflowEditorDocument, mode: "transient" | "commit" | "untracked") => {
+    const updateDocument = useCallback((document: WorkflowEditorDocument, mode: "transient" | "commit") => {
         if (creationLockRef.current) return false;
-        dispatch({ type: mode === "transient" ? "replace" : mode === "untracked" ? "untracked" : "commit", document });
+        dispatch({ type: mode === "transient" ? "replace" : "commit", document });
         invalidateDocumentEvidence();
         return true;
     }, [dispatch, invalidateDocumentEvidence]);
@@ -467,8 +467,10 @@ export function useWorkflowEditor({
     }, [history.present, updateDocument]);
 
     const moveViewport = useCallback((viewport: { x: number; y: number; zoom: number }) => {
-        updateDocument({ ...history.present, canvas: { ...history.present.canvas, viewport } }, "untracked");
-    }, [history.present, updateDocument]);
+        if (creationLockRef.current) return;
+        dispatch({ type: "moveViewport", viewport });
+        invalidateDocumentEvidence();
+    }, [dispatch, invalidateDocumentEvidence]);
 
     const reconcileServerWorkflow = useCallback((serverWorkflow: WorkflowDto) => {
         const serverDocument = documentFromWorkflow(serverWorkflow);
