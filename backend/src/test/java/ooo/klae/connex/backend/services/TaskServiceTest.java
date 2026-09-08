@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Isolation;
@@ -30,6 +31,7 @@ class TaskServiceTest extends AbstractServiceTest {
 
     @Autowired TaskService taskService;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired SqlSessionTemplate sqlSession;
 
     @Test
     void directCompanyLinkCanBeCreatedUpdatedReadAndCleared() {
@@ -248,6 +250,7 @@ class TaskServiceTest extends AbstractServiceTest {
         jdbcTemplate.update(
             "UPDATE task SET company_id = ?, updated_at = '2026-08-30 12:00:00' WHERE id = ?",
             second.getId(), task.getId());
+        sqlSession.clearCache();
         String after = taskService.findOpenAssignedWork(
             Instant.parse("2026-08-30T12:00:00Z"), 10).items().stream()
             .filter(item -> item.task().getId() == task.getId())

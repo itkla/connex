@@ -465,16 +465,17 @@ class WorkflowRuntimeClaimServiceTest {
     private void stubCanonicalCompilation(RuleTrigger trigger) {
         when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
         when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
+        String recordType = version.getRecordType();
         byte[] hash = new byte[32];
         CanonicalDraft canonical = new CanonicalDraft(
-            "Workflow", null, "company", "user", "{}", "{}", hash);
+            "Workflow", null, recordType, "user", "{}", "{}", hash);
         when(canonicalizer.canonicalizeDraftJson(
-            "Workflow", null, "company", "user", "{}", "{}"))
+            "Workflow", null, recordType, "user", "{}", "{}"))
             .thenReturn(canonical);
         WorkflowDefinition definition = new WorkflowDefinition(
             1, "trigger", List.of(), List.of());
         when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
-        when(definitionValidator.validate("company", "user", definition))
+        when(definitionValidator.validate(recordType, "user", definition))
             .thenReturn(compiled);
         when(compiled.entryNodeId()).thenReturn("trigger");
         when(compiled.node("trigger")).thenReturn(

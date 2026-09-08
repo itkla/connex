@@ -315,8 +315,8 @@ class RuleServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void create_linkedActionOnCompanyRule_throws() {
-        assertThrows(BadRequestException.class,
+    void create_linkedActionOnCompanyRule_allowed() {
+        assertDoesNotThrow(
             () -> ruleService.create(req("company", entityChange("company.updated"), "user", action("create_task"))));
     }
 

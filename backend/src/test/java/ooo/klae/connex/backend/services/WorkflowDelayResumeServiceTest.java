@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -51,16 +52,24 @@ class WorkflowDelayResumeServiceTest {
         run.setWorkspaceId(7);
         run.setWorkflowId(11);
         run.setWorkflowVersionId(19L);
+        run.setStatus("running");
         run.setCurrentNodeId("delay");
         run.setActorUserId(17);
         run.setAttributionUserId(17);
+        when(runMapper.getByIdInWorkspace(7, 31L)).thenReturn(run);
         when(runMapper.getOwnedByIdForUpdate(7, 31L, "owner")).thenReturn(run);
         WorkflowVersion version = new WorkflowVersion();
         version.setId(19L);
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
         when(versionMapper.getById(7, 11, 19L)).thenReturn(version);
         User actor = new User();
         actor.setId(17);
-        when(principalService.resolve(7, version)).thenReturn(
+        WorkspaceService.LockedPermissionSnapshot authorization =
+            org.mockito.Mockito.mock(WorkspaceService.LockedPermissionSnapshot.class);
+        when(workspaceService.lockAndRequirePermissionsSnapshot(
+            7, Map.of(17, Set.of()))).thenReturn(authorization);
+        when(principalService.resolveLocked(7, version, authorization)).thenReturn(
             new WorkflowExecutionPrincipal(actor, "member", 17, 17));
         WorkflowNode.Delay delay = new WorkflowNode.Delay(
             "delay", new WorkflowDelayConfig(3_600));

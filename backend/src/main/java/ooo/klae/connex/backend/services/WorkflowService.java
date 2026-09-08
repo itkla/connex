@@ -100,7 +100,7 @@ public class WorkflowService {
     WorkflowDto createForRecipe(
             WorkflowCreateRequest request,
             int runAsUserId) {
-        return createWithPrincipal(request, runAsUserId, "canonical");
+        return createWithPrincipal(request, runAsUserId, "legacy");
     }
 
     private WorkflowDto createWithPrincipal(

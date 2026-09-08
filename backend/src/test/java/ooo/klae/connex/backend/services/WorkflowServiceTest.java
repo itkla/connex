@@ -147,6 +147,24 @@ class WorkflowServiceTest {
     }
 
     @Test
+    void recipeCreateKeepsLegacyOwnerUntilFirstPublicationAssignsCanonicalPointer()
+            throws Exception {
+        stubUserMutation(Set.of(41, 55), Set.of(55));
+        doAnswer(invocation -> {
+            invocation.<Workflow>getArgument(0).setId(101);
+            return null;
+        }).when(workflowMapper).insert(any(Workflow.class));
+
+        service.createForRecipe(createRequest("user"), 55);
+
+        ArgumentCaptor<Workflow> workflow = ArgumentCaptor.forClass(Workflow.class);
+        verify(workflowMapper).insert(workflow.capture());
+        assertEquals("legacy", workflow.getValue().getRuntimeOwner());
+        assertNull(workflow.getValue().getActiveVersionId());
+        assertEquals(55, workflow.getValue().getDraftRunAsUserId());
+    }
+
+    @Test
     void listUsesOneBoundedProjectionAndSelectsTheLatestRunCandidate() {
         WorkflowListView first = listView(101);
         first.setCanonicalRunId(301L);

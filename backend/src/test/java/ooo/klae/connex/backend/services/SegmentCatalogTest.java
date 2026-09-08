@@ -57,6 +57,7 @@ class SegmentCatalogTest {
             new FieldSpec("title", Kind.STRING, ValueSource.NONE),
             new FieldSpec("email", Kind.STRING, ValueSource.NONE),
             new FieldSpec("phone", Kind.STRING, ValueSource.NONE),
+            new FieldSpec("lifecycle", Kind.STRING, ValueSource.NONE),
             new FieldSpec("company", Kind.ID, ValueSource.COMPANIES),
             new FieldSpec("owner", Kind.ID, ValueSource.OWNERS),
             new FieldSpec("tag", Kind.TAG, ValueSource.TAGS),

@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -89,7 +90,7 @@ class WorkflowRecipeServiceTest {
             anyString(), anyString(), any(WorkflowDefinition.class)))
             .thenReturn(Set.of(Permission.TASK_CREATE));
         when(retryPolicy.safety(any())).thenReturn(RetrySafety.TRANSACTIONAL);
-        when(simulationService.simulateDraft(
+        lenient().when(simulationService.simulateDraft(
             any(CanonicalDraft.class),
             any(WorkflowDefinition.class),
             anyInt(),

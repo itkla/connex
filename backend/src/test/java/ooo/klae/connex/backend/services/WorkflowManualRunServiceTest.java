@@ -311,7 +311,8 @@ class WorkflowManualRunServiceTest {
             null,
             null,
             Map.of("permission", "TASK_CREATE"));
-        when(actionGuard.blocker(7, 17, "deal", 91, "action", action)).thenReturn(blocker);
+        when(actionGuard.blocker(7, 17, "deal", 91, "action", action, null))
+            .thenReturn(blocker);
         doAnswer(call -> {
             if (call.getArgument(2, Integer.class) == 92) {
                 throw new WorkflowExecutionException(
@@ -422,7 +423,6 @@ class WorkflowManualRunServiceTest {
         WorkflowDefinition definition = new WorkflowDefinition(
             1, "trigger", List.of(), List.of());
         when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
-        when(workspaceService.getRole(7, 17)).thenReturn("member");
         when(objectMapper.writeValueAsString(any())).thenReturn("{}");
         doAnswer(call -> {
             call.<WorkflowInvocation>getArgument(0).setId(31L);

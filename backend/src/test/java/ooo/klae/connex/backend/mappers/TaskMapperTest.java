@@ -137,7 +137,7 @@ class TaskMapperTest extends AbstractMapperTest {
         jdbcTemplate.update("DELETE FROM company WHERE workspace_id = ? AND id = ?",
             workspace.getId(), company.getId());
 
-        Task retained = taskMapper.getTaskById(workspace.getId(), task.getId());
+        Task retained = taskMapper.getTaskByIdForUpdate(workspace.getId(), task.getId());
         assertNotNull(retained);
         assertTrue(retained.getCompany() == null || retained.getCompany().getId() == 0);
     }
