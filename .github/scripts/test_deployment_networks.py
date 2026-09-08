@@ -402,7 +402,9 @@ class DeploymentNetworkTest(unittest.TestCase):
         )
 
     def test_local_development_publishes_only_on_loopback(self) -> None:
-        model = resolve_compose_model(LOCAL_DEV_COMPOSE_PATH, http_port=None)
+        model = resolve_compose_model(
+            LOCAL_DEV_COMPOSE_PATH, profiles=("ocr", "clamav"), http_port=None
+        )
         services = model["services"]
         published = [
             (name, port)
@@ -410,6 +412,11 @@ class DeploymentNetworkTest(unittest.TestCase):
             for port in service.get("ports", [])
         ]
         self.assertTrue(published, "the local development stack must publish something")
+        self.assertEqual(
+            {("db", 3306, "3306"), ("db", 33060, "33060"), ("adminer", 8080, "9001"),
+             ("ocr", 8090, "8090"), ("clamav", 8091, "8091")},
+            {(name, port["target"], port["published"]) for name, port in published},
+        )
         for name, port in published:
             self.assertEqual(
                 "127.0.0.1",
@@ -418,6 +425,40 @@ class DeploymentNetworkTest(unittest.TestCase):
                 " development database and its admin console must not be reachable"
                 " from the local network",
             )
+
+    def test_development_services_have_explicit_minimum_network_memberships(self) -> None:
+        for profiles in ((), ("ocr",), ("clamav",), ("ocr", "clamav")):
+            with self.subTest(profiles=profiles):
+                model = resolve_compose_model(LOCAL_DEV_COMPOSE_PATH, profiles=profiles)
+                expected = {"db": {"db"}, "adminer": {"db"}}
+                expected.update({name: {f"{name}_internal"} for name in profiles})
+                self.assertEqual(set(expected), set(model["services"]))
+                self.assertNotIn("default", model["networks"])
+                for name, networks in expected.items():
+                    self.assertEqual(networks, set(model["services"][name]["networks"]))
+                self.assertFalse(model["networks"]["db"].get("internal", False))
+                for name, network in model["networks"].items():
+                    if name == "db":
+                        continue
+                    self.assertIs(network["internal"], True)
+                    self.assertEqual("false", network["driver_opts"][
+                        "com.docker.network.bridge.enable_ip_masquerade"])
+                    self.assertNotEqual("isolated", network["driver_opts"].get(
+                        "com.docker.network.bridge.gateway_mode_ipv4"))
+
+    def test_deployment_editions_share_the_same_network_topology(self) -> None:
+        baseline = self.compose_models["published-sidecars"]
+        for edition in ("saas", "silo", "on-prem"):
+            with self.subTest(edition=edition):
+                model = resolve_compose_model(
+                    COMPOSE_PATH, profiles=("ocr", "clamav"),
+                    environment_overrides={"CONNEX_DEPLOYMENT_PROFILE": edition},
+                )
+                self.assertEqual(baseline["networks"], model["networks"])
+                self.assertEqual(
+                    {name: service["networks"] for name, service in baseline["services"].items()},
+                    {name: service["networks"] for name, service in model["services"].items()},
+                )
 
     def test_backup_run_mode_uses_only_the_database_network(self) -> None:
         expected = "CONNEX_BACKUP_DOCKER_NETWORK=auto"

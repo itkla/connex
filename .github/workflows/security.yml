@@ -98,6 +98,10 @@ jobs:
         run: python .github/scripts/test_attested_sbom.py
       - name: Regression-test deployment network segmentation
         run: python .github/scripts/test_deployment_networks.py
+      - name: Regression-test the network smoke harness
+        run: python .github/scripts/test_smoke_deployment_networks.py
+      - name: Verify runtime deployment and development network reachability
+        run: python .github/scripts/smoke_deployment_networks.py
 
   secret-scan:
     name: Secret scan (gitleaks)

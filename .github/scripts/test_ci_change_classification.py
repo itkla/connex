@@ -114,6 +114,11 @@ class CiChangeClassificationTest(unittest.TestCase):
         self.assertTrue(categories["profile_boot"])
         self.assertTrue(categories["action_pins"])
 
+    def test_development_topology_change_runs_network_regressions(self) -> None:
+        categories = self.classify("backend/docker-compose.yml")
+        self.assertTrue(categories["action_pins"])
+        self.assertTrue(categories["backend"])
+
     def test_deployment_documentation_runs_security_regressions(self) -> None:
         categories = self.classify("deploy/backup/README.md")
         self.assertTrue(categories["action_pins"])

@@ -40,6 +40,13 @@ class SecurityWorkflowTest(unittest.TestCase):
                 )
                 self.assertNotIn("continue-on-error", str(self.job(job_name)))
 
+    def test_network_isolation_requires_a_runtime_smoke(self) -> None:
+        step = self.named_step(
+            "action-pins", "Verify runtime deployment and development network reachability"
+        )
+        self.assertEqual("python .github/scripts/smoke_deployment_networks.py", step["run"])
+        self.assertNotIn("continue-on-error", step)
+
     def test_no_query_is_silenced_repository_wide(self) -> None:
         """A query filter cannot be scoped to one finding.
 
