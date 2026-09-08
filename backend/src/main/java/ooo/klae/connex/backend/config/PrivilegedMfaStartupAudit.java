@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationPolicy;
 
 /**
  * Validates and durably records the privileged-MFA posture applied at startup.
@@ -18,16 +19,20 @@ import ooo.klae.connex.backend.services.AuditService;
 @RequiredArgsConstructor
 public class PrivilegedMfaStartupAudit implements ApplicationRunner {
     private final PrivilegedMfaProperties properties;
+    private final PasskeyBootstrapConfirmationPolicy bootstrapConfirmationPolicy;
     private final AuditService auditService;
     private final Clock clock;
 
     @Override
     public void run(ApplicationArguments args) {
         properties.validate(clock);
+        boolean bootstrapConfirmationEnabled = bootstrapConfirmationPolicy.isConfirmationEnabled();
+        properties.validateBootstrapConfirmation(bootstrapConfirmationEnabled);
         Map<String, Object> posture = new LinkedHashMap<>();
         posture.put("actor", properties.getChangeActor());
         posture.put("configuredValue", properties.configuredEnforcedValue());
         posture.put("enforced", properties.isEnforced());
+        posture.put("bootstrapConfirmationEnabled", bootstrapConfirmationEnabled);
         auditService.recordStrictIndependentScoped(
                 "auth.mfa.policy.configured",
                 "security_policy",

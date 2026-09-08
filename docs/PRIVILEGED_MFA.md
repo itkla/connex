@@ -57,8 +57,9 @@ fails closed.
 disables the added confinement and export filter; an absent, blank, or unparseable value is
 enforced. Set `CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR` to the operator or approved change identifier
 whenever explicitly changing the flag. Startup refuses `false` when that actor is absent or still
-the `configuration-default` placeholder. Every backend start writes the effective value and actor
-to the integrity-chained system audit log as `auth.mfa.policy.configured`. The public
+the `configuration-default` placeholder. Every backend start writes the effective enforcement and
+first-passkey confirmation values and the actor to the integrity-chained system audit log as
+`auth.mfa.policy.configured`. The public
 `GET /api/capabilities` response exposes the effective `privilegedMfaEnforced` value.
 
 Disabling this flag is a staged-rollout exception, not an MFA recovery mechanism. It does not make
@@ -97,6 +98,13 @@ CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_EMAIL_ENABLED=true
 CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_BASE_URL=https://app.example.com
 ```
 
+Disabling first-passkey confirmation requires `CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR` to identify the
+accountable operator or approved change. An absent, blank, or `configuration-default` actor refuses
+policy initialization, including when the main MFA enforcement switch remains enabled. The strict
+startup audit records the effective setting as `bootstrapConfirmationEnabled`; failure to write
+that event fails startup. An attributed disable permits password-only first-passkey enrollment and
+its automatic step-up, so it is an explicit policy exception rather than an account-recovery route.
+
 The confirmation is fail-closed and requires a working instance sender (`connex.mail.*`). **An
 instance that leaves mail unconfigured cannot complete the emailed confirmation**, so the request
 endpoint refuses with `MAIL_TRANSPORT_UNAVAILABLE` rather than silently promising an email that will
@@ -104,7 +112,9 @@ never arrive. That is not a dead end: operator-authorized break-glass recovery e
 password-backed account without email, including one that has never enrolled, and the routes below
 say when to reach for it. Configure a sender anyway — break-glass costs an out-of-band operator
 token and a support round trip, so it is an incident path, not an onboarding one. The `dev` profile
-disables the requirement, because local development has no SMTP; never enable `dev` in production.
+disables the requirement and attributes it to `local-development`, because local development has no
+SMTP. An explicitly supplied change actor overrides that local default; never enable `dev` in
+production.
 
 ### If the confirmation cannot be completed
 
