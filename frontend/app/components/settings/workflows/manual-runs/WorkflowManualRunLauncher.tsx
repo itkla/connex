@@ -285,9 +285,12 @@ export default function WorkflowManualRunLauncher({
                                     <div className="space-y-2">
                                         <p className="text-sm text-muted-foreground">{t("manual.noWorkflows")}</p>
                                         <Button variant="outline" asChild>
-                                            <Link href={manualOptions?.createHref.startsWith("/workflows/new?")
-                                                ? manualOptions.createHref
-                                                : `/workflows/new?start=manual&recordType=${encodeURIComponent(primaryType)}`}>
+                                            <Link
+                                                href={manualOptions?.createHref.startsWith("/workflows/new?")
+                                                    ? manualOptions.createHref
+                                                    : `/workflows/new?start=manual&recordType=${encodeURIComponent(primaryType)}`}
+                                                onNavigate={() => onOpenChange(false)}
+                                            >
                                                 {t("manual.createWorkflow")}
                                             </Link>
                                         </Button>
@@ -358,7 +361,7 @@ export default function WorkflowManualRunLauncher({
                     ) : null}
 
                     {phase === "complete" && result && preparation ? (
-                        <InvocationSummary result={result} preparation={preparation} />
+                        <InvocationSummary result={result} preparation={preparation} onNavigate={() => onOpenChange(false)} />
                     ) : null}
                 </div>
 
@@ -537,9 +540,11 @@ function PreparationSummary({ preparation }: { preparation: WorkflowManualPrepar
 function InvocationSummary({
     result,
     preparation,
+    onNavigate,
 }: {
     result: WorkflowInvocationResult;
     preparation: WorkflowManualPreparation;
+    onNavigate: () => void;
 }) {
     const t = useTranslations("WorkflowOperations");
     const sampledLabels = useMemo(
@@ -592,7 +597,11 @@ function InvocationSummary({
                                     {record.reasonCode ? <ManualReason code={record.reasonCode} stopped={record.status === "stopped"} /> : t(`status.${record.status}`)}
                                 </span>
                                 {record.runKey ? (
-                                    <Link className="text-brand hover:text-brand-hover" href={`/workflows/${preparation.workflowId}/runs/${encodeURIComponent(record.runKey)}`}>
+                                    <Link
+                                        className="text-brand hover:text-brand-hover"
+                                        href={`/workflows/${preparation.workflowId}/runs/${encodeURIComponent(record.runKey)}`}
+                                        onNavigate={onNavigate}
+                                    >
                                         {t("manual.viewRun")}
                                     </Link>
                                 ) : null}

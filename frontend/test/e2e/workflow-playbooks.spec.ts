@@ -232,6 +232,8 @@ for (const type of ["person", "company", "deal"] as const) {
         }
         await launcher.getByRole("button", { name: "Refresh", exact: true }).click();
         await launcher.getByRole("link", { name: "View run", exact: true }).click();
+        await expect(page).toHaveURL(/\/workflows\/\d+\/runs\/canonical-\d+$/);
+        await expect(launcher).toHaveCount(0);
         await expect(page.getByRole("link", { name: "View created task", exact: true })).toHaveAttribute("href", `/activity/tasks?task=${String(createdTask?.id)}`);
         await page.getByRole("link", { name: "View created task", exact: true }).click();
         await expect(page.getByRole("dialog")).toBeVisible();
@@ -300,6 +302,8 @@ test("resumes a process only after its created task is completed @mobile", async
     expect((await tasks()).filter((task) => task.description === nextTitle)).toHaveLength(0);
     await launcher.getByRole("button", { name: "Refresh", exact: true }).click();
     await launcher.getByRole("link", { name: "View run", exact: true }).click();
+    await expect(page).toHaveURL(/\/workflows\/\d+\/runs\/canonical-\d+$/);
+    await expect(launcher).toHaveCount(0);
     const runUrl = page.url();
     await expect(page.getByText("Waiting for the task to be completed", { exact: true })).toBeVisible();
     await page.getByRole("link", { name: "View the task", exact: true }).click();
