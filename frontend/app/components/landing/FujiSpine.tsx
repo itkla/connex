@@ -17,9 +17,10 @@ import { springSmooth } from "@/app/lib/motion";
  *
  * Three things are driven by scroll progress:
  *
- * 1. The camera pans down, so the summit starts above the viewport and the
- *    visible curve reads as a rising line with no falloff. The peak arrives as
- *    the reader descends the page.
+ * 1. The camera pans down and left in two planes: the distant foothills travel
+ *    at roughly half the rate of Fuji itself, so the scene has depth rather than
+ *    sliding as one flat sheet. The summit starts above the viewport, and the
+ *    visible curve reads as a rising line with no falloff until the peak arrives.
  * 2. Cloud banks drift across the flanks at differing rates, clipped to the
  *    mountain so they never smudge the open sky behind the copy. They are kept
  *    well below the summit: a clear peak above the cloud line is the whole point.
@@ -98,15 +99,16 @@ function CloudBank({ cloud, progress }: { cloud: (typeof CLOUDS)[number]; progre
 
 function SpineMark({ point, at, progress }: { point: Point; at: number; progress: MotionValue<number> }) {
     const opacity = useTransform(progress, [Math.max(at - 0.05, 0), at], [0, 1]);
+    const scale = useTransform(progress, [Math.max(at - 0.05, 0), at], [0.6, 1]);
     return (
         <motion.circle
             cx={point.x}
             cy={point.y}
             r={4.5}
-            className="fill-background stroke-brand motion-reduce:opacity-100!"
+            className="fill-background stroke-brand [transform-box:fill-box] [transform-origin:center] motion-reduce:opacity-100! motion-reduce:transform-none!"
             strokeWidth={2.5}
             vectorEffect="non-scaling-stroke"
-            style={{ opacity }}
+            style={{ opacity, scale }}
         />
     );
 }
@@ -123,6 +125,9 @@ export default function FujiSpine() {
     const pathLength = useTransform(eased, [0, 0.9], [0.24, stopAt]);
     const panY = useTransform(eased, [0, 0.7], [0, 240]);
     const panX = useTransform(eased, [0, 0.7], [0, -560]);
+    const farPanY = useTransform(eased, [0, 0.7], [0, 108]);
+    const farPanX = useTransform(eased, [0, 0.7], [0, -250]);
+    const cloudReveal = useTransform(eased, [0, 0.28], [0.5, 1]);
     const headOpacity = useTransform(eased, [0.78, 0.92], [0, 1]);
 
     useEffect(() => {
@@ -170,6 +175,12 @@ export default function FujiSpine() {
                         <stop offset="1" className="[stop-color:var(--color-foreground)]" stopOpacity="0.01" />
                     </linearGradient>
 
+                    <linearGradient id="fuji-ridge" gradientUnits="userSpaceOnUse" x1="0" y1="220" x2="0" y2="1200">
+                        <stop offset="0" className="[stop-color:var(--color-foreground)]" stopOpacity="0.38" />
+                        <stop offset="0.45" className="[stop-color:var(--color-foreground)]" stopOpacity="0.24" />
+                        <stop offset="1" className="[stop-color:var(--color-foreground)]" stopOpacity="0.05" />
+                    </linearGradient>
+
                     <linearGradient id="fuji-line" x1="0" y1="1" x2="1" y2="0">
                         <stop offset="0" className="[stop-color:var(--color-brand-dark)]" />
                         <stop offset="0.55" className="[stop-color:var(--color-brand)]" />
@@ -187,7 +198,7 @@ export default function FujiSpine() {
                         <rect x="-400" y="0" width="3000" height="1740" fill="url(#fuji-haze)" />
                     </mask>
 
-                    <filter id="fuji-bloom" x="-20%" y="-20%" width="140%" height="140%">
+                    <filter id="fuji-bloom" x="-8%" y="-8%" width="116%" height="116%">
                         <feGaussianBlur stdDeviation="7" />
                     </filter>
 
@@ -200,29 +211,35 @@ export default function FujiSpine() {
                     </filter>
                 </defs>
 
-                <motion.g style={{ x: panX, y: panY }} className="motion-reduce:transform-none!">
-                    <g mask="url(#fuji-haze-mask)">
+                <g mask="url(#fuji-haze-mask)">
+                    <motion.g style={{ x: farPanX, y: farPanY }} className="motion-reduce:transform-none!">
                         <path d={FAR_RIDGE} fill="url(#fuji-far)" />
+                    </motion.g>
+                    <motion.g style={{ x: panX, y: panY }} className="motion-reduce:transform-none!">
                         <path d={MASS} fill="url(#fuji-mass)" />
-                    </g>
-                </motion.g>
+                    </motion.g>
+                </g>
 
                 <motion.g style={{ x: panX, y: panY }} className="motion-reduce:transform-none!">
                     <path
                         ref={measureRef}
                         d={SPINE}
-                        className="stroke-foreground/25"
+                        stroke="url(#fuji-ridge)"
                         strokeWidth={1.5}
                         strokeLinejoin="round"
                         strokeLinecap="round"
                         vectorEffect="non-scaling-stroke"
                     />
 
-                    <g clipPath="url(#fuji-mass-clip)">
+                    <motion.g
+                        clipPath="url(#fuji-mass-clip)"
+                        style={{ opacity: cloudReveal }}
+                        className="motion-reduce:opacity-100!"
+                    >
                         {CLOUDS.map((cloud) => (
                             <CloudBank key={`${cloud.x}-${cloud.y}`} cloud={cloud} progress={eased} />
                         ))}
-                    </g>
+                    </motion.g>
 
                     <motion.path
                         d={SPINE}
