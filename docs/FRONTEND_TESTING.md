@@ -3,7 +3,7 @@
 The frontend has two test layers, both living in `frontend/`:
 
 - **Unit tests** — [vitest](https://vitest.dev), `frontend/test/unit/`, covering pure logic (analytics bucketing, URL list-state helpers, formatters/parsers, segment validation, shortcut normalization, locale resolution) plus the toolchain's declared Node floor. Node environment, no DOM, no snapshots — behavioral assertions only.
-- **E2E tests** — [`@playwright/test`](https://playwright.dev), `frontend/test/e2e/`, driving fifteen critical flows through a real browser against a running full stack. The harness provides project-isolated desktop/phone tenants and EN/JA locale control; individual specs opt into the additional quadrants they prove.
+- **E2E tests** — [`@playwright/test`](https://playwright.dev), `frontend/test/e2e/`, driving critical flows through a real browser against a running full stack. The harness provides project-isolated desktop/phone tenants and EN/JA locale control; individual specs opt into the additional quadrants they prove.
 
 ## Running locally
 
@@ -110,7 +110,7 @@ bash gradlew seedData -PseederProfile=small -PseederSeed=853 -PseederWorkspaces=
 
 Then boot the backend against that same schema. Every seeded user's password is `seeder-password`; treat any schema the seeder touched as compromised for authentication.
 
-## The fifteen flows
+## Product flows
 
 | Spec | Flow |
 | --- | --- |
@@ -122,6 +122,7 @@ Then boot the backend against that same schema. Every seeded user's password is 
 | `notifications.spec.ts` | inbox renders controls/read state; bell popover links to the inbox |
 | `analytics.spec.ts` | range/granularity switching updates URL, pressed state, offered grains, and panels (#866 surface) |
 | `workflow-canvas.spec.ts` | valid/invalid handle dragging, zoom-aware context insertion, canvas affordances, and the outline alternative |
+| `workflow-playbooks.spec.ts` | contact/company/deal manual authoring, declared launch inputs, preparation invalidation, linked task effects, task-completion waits, renewal recipe setup, and task/document creation compatibility on desktop/phone |
 | `search.spec.ts` | toolbar search finds a seeded contact and opens its record |
 | `import-preflight.spec.ts` | CSV preview exposes exact and ambiguous duplicate-review decisions before commit |
 | `interaction-history-import.spec.ts` | EN/JA desktop/phone historical activity import and replay suppression |
@@ -140,6 +141,15 @@ Three further specs exist to keep the harness itself honest rather than to cover
 | `csp-enforcement.spec.ts` | the shipped Content Security Policy is actually *enforced*: authenticated dashboard/analytics/records/library/Ask Connex journeys, an upload and its same-origin preview, the dark theme, a passkey enrollment plus passkey sign-in through a CDP virtual authenticator, and the logged-out login/register/document-acceptance pages all raise zero `securitypolicyviolation` events, while an injected inline event handler (`<img onerror>`, the markup-injection shape `'strict-dynamic'` does not trust) is blocked with `script-src-attr` and its `report-uri` report is delivered to `/api/csp-reports` as a 204 |
 
 The suite runs on `http://localhost:3000`, so the proxy emits `report-uri` without `report-to`/`Reporting-Endpoints` (Chromium accepts only HTTPS reporting endpoints) and the violation report is a synchronous, page-initiated POST that `page.waitForRequest` can observe; a script inserted with `document.createElement` is *not* a usable probe because `'strict-dynamic'` deliberately trusts non-parser-inserted scripts.
+
+The workflow playbook cases require `CONNEX_WORKFLOWS_RUNTIME_ENABLED=true` on the test backend;
+CI sets it in the frontend E2E job. They create workflows in the test projects' isolated workspaces,
+prepare and confirm record-scoped runs through the UI, and assert persisted tasks through the
+record-filtered task API. The completion case marks the created task complete in its drawer and
+checks that exactly one downstream task appears with recorded completion evidence. The renewal case
+previews a date-based recipe and confirms that installation creates a disabled workflow with the
+chosen date offset, local time and time zone. Local runs need the same runtime setting before
+starting the backend.
 
 Known scope cut: **Ask Connex specs stop short of asking a question.** The e2e stack boots the backend with no AI provider configured, and `AiFeatureGate` fails closed on provider readiness — but only at *turn start*. Session create/list/read, presence, and participants need `AI_USE` and workspace membership alone, which the registered owner has. So every surface, context, navigation, width, rail, deep-link, and locale assertion runs against the real stack unchanged, while send → answer → evidence peek → tool-call approval cannot run at all. Those need a provider or a test-only provider stub, and no such stub exists server-side; do not fake one client-side, because the retention, masking, and citation behaviour under test *is* the provider round trip. `ask-connex.spec.ts` therefore needs no feature-gate enablement in CI.
 
