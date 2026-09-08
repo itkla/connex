@@ -428,9 +428,10 @@ class WorkflowControllerTest {
             .collect(Collectors.toSet());
         assertEquals(
             Set.of(
-                "list", "create", "get", "saveDraft", "validate", "publish", "enable",
-                "disable", "archive", "restore", "pause", "resume", "cutOverToCanonical",
-                "rollBackToLegacy", "versions", "simulate", "resolveLegacyRule"),
+                "catalog", "manualOptions", "list", "create", "get", "saveDraft",
+                "validate", "publish", "enable", "disable", "archive", "restore",
+                "pause", "resume", "cutOverToCanonical", "rollBackToLegacy", "versions",
+                "simulate", "resolveLegacyRule"),
             methodNames);
 
         verifyNoInteractions(workflowService);

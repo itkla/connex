@@ -27,7 +27,8 @@
     WHERE workspace_id = #{workspaceId} AND id = #{workflowId}
   </select>
 
-  <select id="getScheduleStatus" resultType="WorkflowDateScheduleStatusDto">
+  <select id="getScheduleStatus"
+          resultType="ooo.klae.connex.backend.dto.WorkflowDateScheduleStatusDto">
     SELECT CAST(COALESCE(SUM(e.state = 'planned'), 0) AS SIGNED) AS planned_count,
            CAST(COALESCE(SUM(e.state = 'queued'), 0) AS SIGNED) AS queued_count,
            CAST(COALESCE(SUM(e.state = 'missed'), 0) AS SIGNED) AS missed_count,
