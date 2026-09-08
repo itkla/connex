@@ -12,9 +12,9 @@ import { springSmooth } from "@/app/lib/motion";
  * half-bled off the right edge.
  *
  * The mountain is built as an atmospheric scene rather than an outline: a distant
- * foothill ridge behind, a gradient mass for Fuji itself, a filled snow cap, a
- * dawn bloom behind the summit, and a mask that dissolves every fill into the
- * page background at the base. Only the strokes stay crisp.
+ * foothill ridge behind, a gradient mass for Fuji itself, a filled snow cap, and
+ * a mask that dissolves every fill into the page background at the base. Only
+ * the strokes stay crisp.
  *
  * Scroll progress drives `pathLength`, so the green line draws itself over the
  * length of the page.
@@ -134,12 +134,6 @@ export default function FujiSpine() {
                         />
                     </linearGradient>
 
-                    <radialGradient id="fuji-dawn" cx="0.5" cy="0.5" r="0.5">
-                        <stop offset="0" className="[stop-color:var(--color-brand)]" stopOpacity="0.16" />
-                        <stop offset="0.55" className="[stop-color:var(--color-brand)]" stopOpacity="0.05" />
-                        <stop offset="1" className="[stop-color:var(--color-brand)]" stopOpacity="0" />
-                    </radialGradient>
-
                     <linearGradient id="fuji-line" x1="0" y1="1" x2="1" y2="0">
                         <stop offset="0" className="[stop-color:var(--color-brand-dark)]" />
                         <stop offset="0.55" className="[stop-color:var(--color-brand)]" />
@@ -164,8 +158,6 @@ export default function FujiSpine() {
                         <feGaussianBlur stdDeviation="7" />
                     </filter>
                 </defs>
-
-                <ellipse cx="1382" cy="150" rx="520" ry="420" fill="url(#fuji-dawn)" />
 
                 <g mask="url(#fuji-haze-mask)">
                     <path d={FAR_RIDGE} fill="url(#fuji-far)" />
