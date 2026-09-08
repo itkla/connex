@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -53,7 +54,7 @@ public class WorkflowRunFailureService {
                 "The workflow traversal exceeded its bounded node limit.",
                 true);
         }
-        LocalDateTime finishedAt = LocalDateTime.now();
+        LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
         if (sequence >= 0 && sequence <= 49) {
             WorkflowStepRun step = new WorkflowStepRun();
             step.setWorkspaceId(workspaceId);
@@ -108,7 +109,7 @@ public class WorkflowRunFailureService {
         ClassifiedFailure classified = classify(failure);
         WorkflowStepRun step = workflowRunMapper.getStepByNodeForUpdate(
             workspaceId, runId, expectedNodeId);
-        LocalDateTime finishedAt = LocalDateTime.now();
+        LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
         if (nodeType == NodeType.ACTION && step != null) {
             return failAction(
                 run, step, leaseOwner, failure, classified, finishedAt);
@@ -266,7 +267,7 @@ public class WorkflowRunFailureService {
     }
 
     private void cancelClaimed(WorkflowRun run, String leaseOwner) {
-        LocalDateTime finishedAt = LocalDateTime.now();
+        LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
         WorkflowStepRun step = workflowRunMapper.getStepByNodeForUpdate(
             run.getWorkspaceId(), run.getId(), run.getCurrentNodeId());
         if (step != null) {

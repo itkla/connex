@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.Map;
 import java.util.Set;
@@ -91,7 +92,7 @@ public class WorkflowDelayResumeService {
             String stopReason = recordPolicyService.stopReason(
                 run, compiled, principal.attributionUserId());
             if (stopReason != null) {
-                LocalDateTime stoppedAt = LocalDateTime.now();
+                LocalDateTime stoppedAt = LocalDateTime.now(ZoneOffset.UTC);
                 if (runMapper.skipExistingStep(
                         workspaceId, runId, run.getCurrentNodeId(), stoppedAt) != 1
                         || runMapper.stopClaimedRun(
@@ -112,7 +113,7 @@ public class WorkflowDelayResumeService {
                 "The pinned Delay transition is unavailable.",
                 true);
         }
-        LocalDateTime finishedAt = LocalDateTime.now();
+        LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
         if (runMapper.succeedWaitingDelayStep(
                 workspaceId,
                 runId,

@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -16,13 +17,16 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -269,7 +273,7 @@ class WorkflowManualRunServiceTest {
     }
 
     @Test
-    void preparationLabelsTheActorAndAccessibleSkippedRecordsWithoutLeakingMissingIds() {
+    void preparationUsesUtcExpiryAndLabelsAccessibleSkippedRecordsWithoutLeakingMissingIds() {
         when(workspaceService.getCurrentUserId()).thenReturn(41);
         Workflow workflow = new Workflow();
         workflow.setId(11);
@@ -325,10 +329,17 @@ class WorkflowManualRunServiceTest {
             return null;
         }).when(operationsMapper).insertInvocation(any());
 
-        WorkflowManualPreparationDto result = service.prepare(
-            11,
-            new WorkflowManualPrepareRequest(
-                "record_list", new WorkflowManualScope.PageSelection(List.of(91, 92))));
+        TimeZone originalTimezone = TimeZone.getDefault();
+        WorkflowManualPreparationDto result;
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Honolulu"));
+            result = service.prepare(
+                11,
+                new WorkflowManualPrepareRequest(
+                    "record_list", new WorkflowManualScope.PageSelection(List.of(91, 92))));
+        } finally {
+            TimeZone.setDefault(originalTimezone);
+        }
 
         assertEquals("Workflow Owner", result.actorLabel());
         assertEquals(
@@ -336,6 +347,11 @@ class WorkflowManualRunServiceTest {
             result.skippedSamples());
         assertEquals(1, result.expectedSkips().missingReference());
         assertEquals(1, result.expectedSkips().unsupportedContext());
+        ArgumentCaptor<WorkflowInvocation> invocation = ArgumentCaptor.forClass(
+            WorkflowInvocation.class);
+        verify(operationsMapper).insertInvocation(invocation.capture());
+        assertTrue(invocation.getValue().getExpiresAt().isAfter(
+            LocalDateTime.now(ZoneOffset.UTC).plusMinutes(14)));
     }
 
     @Test

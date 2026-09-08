@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -115,7 +116,7 @@ public class WorkflowManualRunConfirmationTransaction {
                 || invocation.getRequestedById() != requesterId) {
             throw new ResourceNotFoundException("Manual workflow scope not found");
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         if (invocation.getExpiresAt().isBefore(now)
                 && "prepared".equals(invocation.getStatus())) {
             operationsMapper.updateInvocationStatus(

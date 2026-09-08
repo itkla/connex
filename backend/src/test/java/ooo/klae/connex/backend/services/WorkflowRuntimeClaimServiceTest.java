@@ -22,6 +22,7 @@ import java.time.ZoneOffset;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.TimeZone;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -219,7 +220,7 @@ class WorkflowRuntimeClaimServiceTest {
     }
 
     @Test
-    void claimPinsTheLockedActiveVersionAndEntryNode() {
+    void claimPinsTheLockedActiveVersionEntryNodeAndUtcStartInHonolulu() {
         stubCanonicalCompilation();
         when(workflowRunMapper.getByDedupe(eq(7), eq(11), anyString()))
             .thenReturn(null);
@@ -228,7 +229,14 @@ class WorkflowRuntimeClaimServiceTest {
             return null;
         }).when(workflowRunMapper).insertRun(any());
 
-        WorkflowRuntimeClaimService.CanonicalClaim claim = service.claimEntity(11, dispatch);
+        TimeZone originalTimezone = TimeZone.getDefault();
+        WorkflowRuntimeClaimService.CanonicalClaim claim;
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Honolulu"));
+            claim = service.claimEntity(11, dispatch);
+        } finally {
+            TimeZone.setDefault(originalTimezone);
+        }
 
         ArgumentCaptor<WorkflowRun> run = ArgumentCaptor.forClass(WorkflowRun.class);
         verify(workflowRunMapper).insertRun(run.capture());
@@ -238,6 +246,8 @@ class WorkflowRuntimeClaimServiceTest {
         assertEquals("queued", run.getValue().getStatus());
         assertEquals(7, run.getValue().getWorkspaceId());
         assertEquals(entityDedupeKey(13), run.getValue().getDedupeKey());
+        assertTrue(run.getValue().getStartedAt().isAfter(
+            LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1)));
         verify(workflowTriggerOutboxMapper).ensureWorkspaceGate(7);
         InOrder lockOrder = inOrder(workflowTriggerOutboxMapper, workflowMapper);
         lockOrder.verify(workflowTriggerOutboxMapper).ensureWorkspaceGate(7);

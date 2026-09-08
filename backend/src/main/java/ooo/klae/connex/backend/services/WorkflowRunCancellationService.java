@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -53,7 +54,7 @@ public class WorkflowRunCancellationService {
     }
 
     private void finalizeLocked(WorkflowRun run, String leaseOwner) {
-        LocalDateTime finishedAt = LocalDateTime.now();
+        LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
         WorkflowStepRun step = runMapper.getStepByNodeForUpdate(
             run.getWorkspaceId(), run.getId(), run.getCurrentNodeId());
         if (step != null) {

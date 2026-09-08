@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -122,7 +123,7 @@ public class WorkflowStepTransactionService {
                 || run.getWorkflowVersionId() != discoveredRun.getWorkflowVersionId()) {
             return StepResult.noOp();
         }
-        LocalDateTime startedAt = LocalDateTime.now();
+        LocalDateTime startedAt = LocalDateTime.now(ZoneOffset.UTC);
         if (!Objects.equals(run.getActorUserId(), principal.actorUserId())
                 || !Objects.equals(run.getAttributionUserId(), principal.attributionUserId())) {
             throw new WorkflowExecutionException(
@@ -161,7 +162,7 @@ public class WorkflowStepTransactionService {
             new WorkflowNodeExecutionContext(
                 run, version, compiled, principal, authorization),
             executionNode);
-        LocalDateTime finishedAt = LocalDateTime.now();
+        LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
         WorkflowEdge edge = transition.outcome() == null
             ? null
             : compiled.transition(expectedNodeId, transition.outcome());

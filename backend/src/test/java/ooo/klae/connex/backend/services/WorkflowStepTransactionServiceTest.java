@@ -17,32 +17,39 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InOrder;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.WorkflowEventWait;
 import ooo.klae.connex.backend.beans.WorkflowRun;
+import ooo.klae.connex.backend.beans.WorkflowStepRun;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleAction;
-import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowDelayConfig;
+import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowEndConfig;
 import ooo.klae.connex.backend.dto.WorkflowNode;
-import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
-import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
+import ooo.klae.connex.backend.dto.WorkflowWaitConfig;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
+import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
+import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.NodeType;
 
@@ -198,7 +205,7 @@ class WorkflowStepTransactionServiceTest {
     }
 
     @Test
-    void delayAtomicallyPersistsOneWaitingStepAndDatabaseTimedRunWait() {
+    void delayUsesUtcStepEvidenceAndDatabaseTimedRunWaitInHonolulu() {
         run.setCurrentNodeId("delay");
         WorkflowNode.Delay delay = new WorkflowNode.Delay(
             "delay", new WorkflowDelayConfig(3_600));
@@ -217,18 +224,92 @@ class WorkflowStepTransactionServiceTest {
         when(workflowRunMapper.waitForDelay(
             7, 31L, "delay", "owner", 3_600)).thenReturn(1);
 
-        WorkflowStepTransactionService.StepResult result = service.executeClaimed(
-            7, 31L, "delay", delayWorkflow, "owner");
+        TimeZone originalTimezone = TimeZone.getDefault();
+        WorkflowStepTransactionService.StepResult result;
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Honolulu"));
+            result = service.executeClaimed(
+                7, 31L, "delay", delayWorkflow, "owner");
+        } finally {
+            TimeZone.setDefault(originalTimezone);
+        }
 
         assertTrue(result.suspended());
-        ArgumentCaptor<ooo.klae.connex.backend.beans.WorkflowStepRun> step =
-            ArgumentCaptor.forClass(
-                ooo.klae.connex.backend.beans.WorkflowStepRun.class);
+        ArgumentCaptor<WorkflowStepRun> step = ArgumentCaptor.forClass(
+            WorkflowStepRun.class);
         verify(workflowRunMapper).insertStep(step.capture());
         assertEquals("waiting", step.getValue().getStatus());
         assertEquals("none", step.getValue().getRetrySafety());
+        assertTrue(step.getValue().getStartedAt().isAfter(
+            LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1)));
         verify(workflowRunMapper).waitForDelay(
             7, 31L, "delay", "owner", 3_600);
+    }
+
+    @Test
+    void eventWaitDerivesItsTimeoutFromDatabaseUtcInHonolulu() {
+        run.setCurrentNodeId("wait");
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
+        WorkflowNode.Wait wait = new WorkflowNode.Wait(
+            "wait",
+            new WorkflowWaitConfig(
+                "event",
+                "task.completed",
+                new WorkflowWaitConfig.Source("task", "taskId"),
+                300));
+        CompiledWorkflow waitWorkflow = new CompiledWorkflow(
+            2,
+            "wait",
+            Map.of("wait", wait),
+            Map.of("wait", NodeType.WAIT),
+            Map.of("wait", Map.of()),
+            java.util.List.of("wait"),
+            java.util.List.of(),
+            null,
+            null,
+            null);
+        WorkspaceService.LockedPermissionSnapshot authorization =
+            new WorkspaceService.LockedPermissionSnapshot(
+                Map.of(17, Set.of()), Map.of(17, Set.of()));
+        WorkflowStepRun source = new WorkflowStepRun();
+        source.setId(41L);
+        source.setStatus("succeeded");
+        source.setActionOutputsJson("{\"taskId\":91}");
+        Task task = new Task();
+        task.setId(91);
+        LocalDateTime databaseNow = LocalDateTime.of(2026, 8, 3, 22, 30);
+        when(workspaceService.lockAndRequirePermissionsSnapshot(eq(7), any()))
+            .thenReturn(authorization);
+        when(principalService.resolveLocked(7, version, authorization))
+            .thenReturn(principal);
+        when(workflowRunMapper.getOwnedByIdForUpdate(7, 31L, "owner"))
+            .thenReturn(run);
+        when(workflowRunMapper.getStepByNodeForUpdate(7, 31L, "task"))
+            .thenReturn(source);
+        when(workflowRunMapper.currentTimestamp(7, 11)).thenReturn(databaseNow);
+        when(taskMapper.getTaskByIdForUpdate(7, 91)).thenReturn(task);
+        when(workflowRunMapper.nextSequence(7, 31L)).thenReturn(2);
+        when(workflowRunMapper.waitForEvent(
+            7, 31L, "wait", "owner", databaseNow.plusSeconds(300))).thenReturn(1);
+
+        TimeZone originalTimezone = TimeZone.getDefault();
+        WorkflowStepTransactionService.StepResult result;
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Honolulu"));
+            result = service.executeClaimed(
+                7, 31L, "wait", waitWorkflow, "owner");
+        } finally {
+            TimeZone.setDefault(originalTimezone);
+        }
+
+        assertTrue(result.suspended());
+        ArgumentCaptor<WorkflowEventWait> eventWait = ArgumentCaptor.forClass(
+            WorkflowEventWait.class);
+        verify(eventWaitMapper).insertWait(eventWait.capture());
+        assertEquals(databaseNow.plusSeconds(300), eventWait.getValue().getTimeoutAt());
+        verify(workflowRunMapper).waitForEvent(
+            7, 31L, "wait", "owner", databaseNow.plusSeconds(300));
     }
 
     @Test

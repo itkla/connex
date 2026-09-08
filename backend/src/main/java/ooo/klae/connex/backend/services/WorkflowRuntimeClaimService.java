@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 
@@ -469,7 +470,7 @@ public class WorkflowRuntimeClaimService {
                 ? launchInputsJson : "{}");
         }
         run.setCurrentNodeId(compiled.entryNodeId());
-        run.setStartedAt(LocalDateTime.now());
+        run.setStartedAt(LocalDateTime.now(ZoneOffset.UTC));
         if (compiled.schemaVersion() >= 2) {
             WorkflowEnrollmentPolicyService.Decision decision =
                 enrollmentPolicyService.evaluateLocked(

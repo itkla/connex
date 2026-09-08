@@ -8,6 +8,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.TimeZone;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -217,20 +221,31 @@ class WorkflowRunFailureServiceTest {
         when(workflowRunMapper.cancelClaimed(
             eq(7), eq(31L), eq("owner"), any())).thenReturn(1);
 
-        WorkflowRunFailureService.FailureResult result = service.failClaimed(
-            7,
-            31L,
-            "wait",
-            "owner",
-            NodeType.WAIT,
-            new IllegalStateException("resume raced cancellation"));
+        TimeZone originalTimezone = TimeZone.getDefault();
+        WorkflowRunFailureService.FailureResult result;
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Honolulu"));
+            result = service.failClaimed(
+                7,
+                31L,
+                "wait",
+                "owner",
+                NodeType.WAIT,
+                new IllegalStateException("resume raced cancellation"));
+        } finally {
+            TimeZone.setDefault(originalTimezone);
+        }
 
         assertEquals(WorkflowRunFailureService.FailureResult.CANCELLED, result);
         verify(eventWaitMapper).resolveCurrent(
             eq(7), eq(31L), eq("wait"), eq("cancelled"), any());
         verify(workflowRunMapper).cancelExistingStep(
             eq(7), eq(31L), eq("wait"), any());
+        ArgumentCaptor<LocalDateTime> finishedAt = ArgumentCaptor.forClass(
+            LocalDateTime.class);
         verify(workflowRunMapper).cancelClaimed(
-            eq(7), eq(31L), eq("owner"), any());
+            eq(7), eq(31L), eq("owner"), finishedAt.capture());
+        assertTrue(finishedAt.getValue().isAfter(
+            LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1)));
     }
 }

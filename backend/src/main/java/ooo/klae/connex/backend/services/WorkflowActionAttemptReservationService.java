@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -54,7 +55,7 @@ public class WorkflowActionAttemptReservationService {
                     workspaceId, runId, nodeId, leaseOwner) != 1) {
             throw new IllegalStateException("Workflow retry wait was not claimed");
         }
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         WorkflowStepRun step = runMapper.getStepByNodeForUpdate(
             workspaceId, runId, nodeId);
         int attemptNumber;

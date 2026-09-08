@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -9,11 +10,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
+import java.util.TimeZone;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
@@ -65,7 +69,7 @@ class WorkflowManualRunConfirmationTransactionTest {
         invocation.setScopeHash(new byte[32]);
         invocation.setReadyCount(0);
         invocation.setStatus("prepared");
-        invocation.setExpiresAt(LocalDateTime.now().plusMinutes(5));
+        invocation.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(5));
         WorkflowVersion version = version();
         WorkflowDefinition definition = new WorkflowDefinition(1, null, List.of(), List.of());
         when(operationsMapper.getInvocationByToken(7, 11, new byte[32]))
@@ -92,7 +96,7 @@ class WorkflowManualRunConfirmationTransactionTest {
     }
 
     @Test
-    void confirmationDurablyEnrollsTheWorkspaceForRestartRecovery() {
+    void confirmationUsesUtcAndDurablyEnrollsTheWorkspaceForRestartRecovery() {
         Workflow workflow = new Workflow();
         workflow.setId(11);
         workflow.setWorkspaceId(7);
@@ -106,7 +110,7 @@ class WorkflowManualRunConfirmationTransactionTest {
         invocation.setScopeHash(new byte[32]);
         invocation.setReadyCount(1);
         invocation.setStatus("prepared");
-        invocation.setExpiresAt(LocalDateTime.now().plusMinutes(5));
+        invocation.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(5));
         WorkflowVersion version = version();
         WorkflowDefinition definition = new WorkflowDefinition(1, null, List.of(), List.of());
         when(operationsMapper.getInvocationByToken(7, 11, new byte[32]))
@@ -126,10 +130,22 @@ class WorkflowManualRunConfirmationTransactionTest {
             anyInt(), anyLong(), anyInt(), any(), any(LocalDateTime.class)))
             .thenReturn(1);
 
-        transaction.confirm(
-            7, 11, 41, new byte[32], new byte[32], new byte[16]);
+        TimeZone originalTimezone = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Honolulu"));
+            transaction.confirm(
+                7, 11, 41, new byte[32], new byte[32], new byte[16]);
+        } finally {
+            TimeZone.setDefault(originalTimezone);
+        }
 
         verify(outboxMapper).ensureWorkspaceGate(7);
+        ArgumentCaptor<LocalDateTime> confirmedAt = ArgumentCaptor.forClass(
+            LocalDateTime.class);
+        verify(operationsMapper).confirmInvocation(
+            anyInt(), anyLong(), anyInt(), any(), confirmedAt.capture());
+        assertTrue(confirmedAt.getValue().isAfter(
+            LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1)));
     }
 
     private static WorkflowVersion version() {
