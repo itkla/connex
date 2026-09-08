@@ -22,6 +22,7 @@ import ooo.klae.connex.backend.beans.WorkflowDateEnrollment;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleTrigger;
+import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -97,18 +98,10 @@ public class WorkflowRuntimeClaimService {
                 || !normalize(dispatch.cadence()).equals(normalize(trigger.getCadence()))) {
             return null;
         }
-        String enrollmentNodeId = compiled.enrollmentConditionNodeId();
-        WorkflowNode enrollmentNode = compiled.node(enrollmentNodeId);
-        if (!(enrollmentNode instanceof WorkflowNode.Condition condition)
-                || condition.config() == null) {
-            throw new WorkflowExecutionException(
-                "definition_invalid",
-                "The active workflow definition is invalid.",
-                true);
-        }
         int conditionActorId = conditionActorId(version);
         return new ScheduleEnrollment(
-            workflow.getId(), version, compiled, condition, conditionActorId);
+            workflow.getId(), version, compiled,
+            scheduleEnrollmentCondition(compiled), conditionActorId);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
@@ -326,17 +319,9 @@ public class WorkflowRuntimeClaimService {
         if (!scheduleOutboxMatches(version, triggerNode.config(), outbox)) {
             return null;
         }
-        String enrollmentNodeId = compiled.enrollmentConditionNodeId();
-        WorkflowNode enrollmentNode = compiled.node(enrollmentNodeId);
-        if (!(enrollmentNode instanceof WorkflowNode.Condition condition)
-                || condition.config() == null) {
-            throw new WorkflowExecutionException(
-                "definition_invalid",
-                "The active workflow definition is invalid.",
-                true);
-        }
         return new ScheduleEnrollment(
-            workflow.getId(), version, compiled, condition, conditionActorId(version));
+            workflow.getId(), version, compiled,
+            scheduleEnrollmentCondition(compiled), conditionActorId(version));
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -665,6 +650,27 @@ public class WorkflowRuntimeClaimService {
         return trigger;
     }
 
+    private static SegmentDefinition scheduleEnrollmentCondition(CompiledWorkflow compiled) {
+        if (compiled.schemaVersion() == 2
+                && compiled.enrollment() != null
+                && compiled.enrollment().condition() != null) {
+            return compiled.enrollment().condition();
+        }
+        String enrollmentNodeId = compiled.enrollmentConditionNodeId();
+        if (enrollmentNodeId == null && compiled.schemaVersion() == 2) {
+            return null;
+        }
+        WorkflowNode enrollmentNode = compiled.node(enrollmentNodeId);
+        if (!(enrollmentNode instanceof WorkflowNode.Condition condition)
+                || condition.config() == null) {
+            throw new WorkflowExecutionException(
+                "definition_invalid",
+                "The active workflow definition is invalid.",
+                true);
+        }
+        return condition.config();
+    }
+
     private static boolean legacyOwnerCanClaim(
             Workflow workflow, Rule rule, int workspaceId) {
         if (!rule.isEnabled() || rule.getWorkspaceId() != workspaceId) {
@@ -842,7 +848,7 @@ public class WorkflowRuntimeClaimService {
         int workflowId,
         WorkflowVersion version,
         CompiledWorkflow compiled,
-        WorkflowNode.Condition condition,
+        SegmentDefinition condition,
         int conditionActorId
     ) { }
 

@@ -17,6 +17,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.NodeType;
 
@@ -26,6 +27,7 @@ import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.NodeType;
 public class WorkflowRunFailureService {
 
     private final WorkflowRunMapper workflowRunMapper;
+    private final WorkflowEventWaitMapper eventWaitMapper;
     private final WorkflowInterventionRecorder interventionRecorder;
     private final WorkflowActionRetryPolicy retryPolicy;
     private final WorkflowRuntimeProperties properties;
@@ -272,6 +274,12 @@ public class WorkflowRunFailureService {
                 run.getWorkspaceId(), run.getId(), step.getId(), "cancelled", finishedAt);
             workflowRunMapper.cancelExistingStep(
                 run.getWorkspaceId(), run.getId(), run.getCurrentNodeId(), finishedAt);
+        }
+        if ("event".equals(run.getWaitKind())
+                && eventWaitMapper.resolveCurrent(
+                    run.getWorkspaceId(), run.getId(), run.getCurrentNodeId(),
+                    "cancelled", finishedAt) != 1) {
+            throw new IllegalStateException("Workflow event wait cancellation was not finalized");
         }
         if (workflowRunMapper.cancelClaimed(
                 run.getWorkspaceId(), run.getId(), leaseOwner, finishedAt) != 1) {

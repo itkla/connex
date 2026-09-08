@@ -100,6 +100,18 @@ class SegmentServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void boundedNullDefinitionSelectsVisibleRecordsWithoutExceedingTheLimit() {
+        newCompany();
+        newCompany();
+
+        List<Integer> ids = segmentService.evaluate(
+            workspace.getId(), currentUser.getId(), "company", null, 1);
+
+        assertEquals(1, ids.size());
+        assertTrue(ids.getFirst() > 0);
+    }
+
+    @Test
     void predicate_openDeal_matches() {
         Company withDeal = newCompany();
         Pipeline pipeline = newPipeline();

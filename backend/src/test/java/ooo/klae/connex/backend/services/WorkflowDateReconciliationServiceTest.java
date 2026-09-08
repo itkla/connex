@@ -106,6 +106,34 @@ class WorkflowDateReconciliationServiceTest {
         verify(scheduleService, never()).resolve(any(), any());
     }
 
+    @Test
+    void unchangedPlannedOccurrenceFromYesterdayRemainsEligibleForCatchup() {
+        LocalDateTime now = LocalDateTime.of(2027, 3, 2, 12, 0);
+        LocalDate sourceDate = LocalDate.of(2027, 3, 31);
+        WorkflowDateEnrollment existing = enrollment(41L, sourceDate, "planned");
+        Deal deal = new Deal();
+        deal.setExpectedCloseDate(sourceDate.toString());
+        WorkflowDateScheduleService.Schedule schedule =
+            new WorkflowDateScheduleService.Schedule(
+                sourceDate,
+                LocalDate.of(2027, 3, 1),
+                LocalDateTime.of(2027, 3, 1, 9, 0),
+                ZoneId.of("UTC"));
+        when(dealMapper.getDealByIdForUpdate(7, 19)).thenReturn(deal);
+        when(enrollmentMapper.getPendingByRecordForUpdate(7, 11, 19))
+            .thenReturn(List.of(existing));
+        when(enrollmentMapper.currentTimestamp(7, 11)).thenReturn(now);
+        when(scheduleService.resolve(sourceDate, trigger)).thenReturn(schedule);
+        when(enrollmentMapper.getByPeriodForUpdate(
+            7, 11, 19, "expectedCloseDate", sourceDate)).thenReturn(existing);
+
+        service.reconcile(outbox, version, trigger);
+
+        verify(enrollmentMapper).refreshPlanned(
+            7, 41L, 29L, 5L, schedule.scheduledLocalDate(), schedule.dueAt());
+        verify(enrollmentMapper, never()).markMissed(7, 41L, now);
+    }
+
     private static WorkflowDateEnrollment enrollment(
             long id, LocalDate sourceDate, String state) {
         WorkflowDateEnrollment enrollment = new WorkflowDateEnrollment();

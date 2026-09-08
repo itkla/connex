@@ -254,12 +254,13 @@ public class WorkflowTriggerOutboxDeliveryService {
                 && "send_message".equalsIgnoreCase(action.config().getType().trim()));
         int matchedCount = outbox.getScheduleMatchCount();
         for (int recordId : recordIds) {
-            boolean matched = segmentService.matchesEntity(
-                outbox.getWorkspaceId(),
-                enrollment.conditionActorId(),
-                outbox.getRecordType(),
-                enrollment.condition().config(),
-                recordId);
+            boolean matched = enrollment.condition() == null
+                || segmentService.matchesEntity(
+                    outbox.getWorkspaceId(),
+                    enrollment.conditionActorId(),
+                    outbox.getRecordType(),
+                    enrollment.condition(),
+                    recordId);
             if (!matched) {
                 continue;
             }

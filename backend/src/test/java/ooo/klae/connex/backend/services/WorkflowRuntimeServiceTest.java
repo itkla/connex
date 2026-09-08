@@ -118,7 +118,6 @@ class WorkflowRuntimeServiceTest {
         version.setId(23L);
         version.setRecordType("person");
         SegmentDefinition definition = new SegmentDefinition();
-        WorkflowNode.Condition condition = new WorkflowNode.Condition("condition", definition);
         RuleAction action = new RuleAction();
         action.setType("send_message");
         WorkflowDefinitionValidator.CompiledWorkflow compiled =
@@ -127,7 +126,7 @@ class WorkflowRuntimeServiceTest {
             "send", new WorkflowNode.Action("send", action)));
         when(claimService.scheduleEnrollment(11, schedule)).thenReturn(
             new WorkflowRuntimeClaimService.ScheduleEnrollment(
-                11, version, compiled, condition, 17));
+                11, version, compiled, definition, 17));
         List<Integer> matches = IntStream.rangeClosed(1, 201).boxed().toList();
         when(segmentService.evaluate(7, 17, "person", definition, 201))
             .thenReturn(matches);

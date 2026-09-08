@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -34,6 +35,7 @@ import ooo.klae.connex.backend.dto.WorkflowDelayConfig;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
+import ooo.klae.connex.backend.dto.WorkflowEndConfig;
 import ooo.klae.connex.backend.dto.WorkflowInputDefinition;
 import ooo.klae.connex.backend.dto.WorkflowInputType;
 import ooo.klae.connex.backend.dto.WorkflowNode;
@@ -258,6 +260,53 @@ class WorkflowDefinitionValidatorTest {
         assertEquals(
             WorkflowDiagnosticCode.STEP_OUTPUT_NOT_DOMINATING,
             dominance.diagnostic().code());
+    }
+
+    @Test
+    void schemaV2StoppedEndAcceptsAnOmittedReasonAndValidatesProvidedTokens() {
+        RuleTrigger omittedTrigger = entityChange();
+        omittedTrigger.setAllowManualRuns(true);
+        RuleAction omittedAction = notifyAction();
+        omittedAction.setTargetUserId(41);
+        WorkflowDefinition omitted = new WorkflowDefinition(
+            2,
+            "trigger",
+            List.of(
+                new WorkflowNode.Trigger("trigger", omittedTrigger),
+                new WorkflowNode.Action("action", omittedAction),
+                new WorkflowNode.End(
+                    "end", new WorkflowEndConfig("stopped", null))),
+            List.of(
+                edge("trigger-action", "trigger", "action", WorkflowEdge.Outcome.NEXT),
+                edge("action-end", "action", "end", WorkflowEdge.Outcome.NEXT)),
+            List.of(),
+            null,
+            null);
+
+        assertDoesNotThrow(() -> validator.validateForMutation("deal", "user", omitted));
+
+        RuleTrigger invalidTrigger = entityChange();
+        invalidTrigger.setAllowManualRuns(true);
+        RuleAction invalidAction = notifyAction();
+        invalidAction.setTargetUserId(41);
+        WorkflowDefinition invalid = new WorkflowDefinition(
+            2,
+            "trigger",
+            List.of(
+                new WorkflowNode.Trigger("trigger", invalidTrigger),
+                new WorkflowNode.Action("action", invalidAction),
+                new WorkflowNode.End(
+                    "end", new WorkflowEndConfig("stopped", "Invalid reason"))),
+            List.of(
+                edge("trigger-action", "trigger", "action", WorkflowEdge.Outcome.NEXT),
+                edge("action-end", "action", "end", WorkflowEdge.Outcome.NEXT)),
+            List.of(),
+            null,
+            null);
+        WorkflowDefinitionValidationException failure = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> validator.validateForMutation("deal", "user", invalid));
+        assertEquals(WorkflowDiagnosticCode.CONFIG_FIELD_INVALID, failure.diagnostic().code());
     }
 
     @Test

@@ -160,6 +160,46 @@ class WorkflowEventWaitConcurrencyIntegrationTest extends AbstractServiceTest {
             workspace.getId(), run.getId()));
     }
 
+    @Test
+    void cancellationFailureFinalizerResolvesThePersistedEventWaitAtomically() {
+        Fixture fixture = fixture();
+        jdbcTemplate.update(
+            "UPDATE workflow_run SET cancel_requested_at = CURRENT_TIMESTAMP(6) "
+                + "WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), run.getId());
+        WorkflowRunFailureService failureService = new WorkflowRunFailureService(
+            runMapper,
+            eventWaitMapper,
+            mock(WorkflowInterventionRecorder.class),
+            mock(WorkflowActionRetryPolicy.class),
+            mock(WorkflowRuntimeProperties.class));
+
+        WorkflowRunFailureService.FailureResult result = readCommitted().execute(status ->
+            failureService.failClaimed(
+                workspace.getId(),
+                run.getId(),
+                "wait-task",
+                fixture.leaseOwner(),
+                NodeType.WAIT,
+                new IllegalStateException("cancellation committed during resume")));
+
+        assertEquals(WorkflowRunFailureService.FailureResult.CANCELLED, result);
+        assertEquals("cancelled", jdbcTemplate.queryForObject(
+            "SELECT resolution FROM workflow_event_wait "
+                + "WHERE workspace_id = ? AND workflow_run_id = ? AND node_id = 'wait-task'",
+            String.class,
+            workspace.getId(), run.getId()));
+        assertEquals("cancelled", jdbcTemplate.queryForObject(
+            "SELECT status FROM workflow_step_run "
+                + "WHERE workspace_id = ? AND workflow_run_id = ? AND node_id = 'wait-task'",
+            String.class,
+            workspace.getId(), run.getId()));
+        assertEquals("cancelled", jdbcTemplate.queryForObject(
+            "SELECT status FROM workflow_run WHERE workspace_id = ? AND id = ?",
+            String.class,
+            workspace.getId(), run.getId()));
+    }
+
     private Fixture fixture() {
         task = newTask(currentUser, null, null);
         workflow = workflow();

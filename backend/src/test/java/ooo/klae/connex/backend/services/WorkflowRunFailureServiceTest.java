@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowStepRun;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.NodeType;
 
@@ -27,6 +28,7 @@ import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.NodeType;
 class WorkflowRunFailureServiceTest {
 
     @Mock private WorkflowRunMapper workflowRunMapper;
+    @Mock private WorkflowEventWaitMapper eventWaitMapper;
     @Mock private WorkflowActionRetryPolicy retryPolicy;
     @Mock private WorkflowRuntimeProperties properties;
     @Mock private WorkflowInterventionRecorder interventionRecorder;
@@ -36,7 +38,7 @@ class WorkflowRunFailureServiceTest {
     @BeforeEach
     void setUp() {
         service = new WorkflowRunFailureService(
-            workflowRunMapper, interventionRecorder, retryPolicy, properties);
+            workflowRunMapper, eventWaitMapper, interventionRecorder, retryPolicy, properties);
         WorkflowRun run = new WorkflowRun();
         run.setWorkspaceId(7);
         run.setId(31L);
@@ -190,5 +192,45 @@ class WorkflowRunFailureServiceTest {
             result);
         verify(workflowRunMapper).abandonRunningAttempts(
             eq(7), eq(31L), eq(41L), eq("permission_denied"), any());
+    }
+
+    @Test
+    void cancellationRacingEventResumeFinalizesTheWaitStepAndRunTogether() {
+        WorkflowRun run = new WorkflowRun();
+        run.setWorkspaceId(7);
+        run.setId(31L);
+        run.setStatus("running");
+        run.setCurrentNodeId("wait");
+        run.setWaitKind("event");
+        run.setCancelRequestedAt(java.time.LocalDateTime.of(2026, 8, 3, 12, 0));
+        WorkflowStepRun step = new WorkflowStepRun();
+        step.setId(41L);
+        step.setNodeId("wait");
+        step.setNodeType("wait");
+        step.setStatus("waiting");
+        when(workflowRunMapper.getOwnedByIdForUpdate(7, 31L, "owner"))
+            .thenReturn(run);
+        when(workflowRunMapper.getStepByNodeForUpdate(7, 31L, "wait"))
+            .thenReturn(step);
+        when(eventWaitMapper.resolveCurrent(
+            eq(7), eq(31L), eq("wait"), eq("cancelled"), any())).thenReturn(1);
+        when(workflowRunMapper.cancelClaimed(
+            eq(7), eq(31L), eq("owner"), any())).thenReturn(1);
+
+        WorkflowRunFailureService.FailureResult result = service.failClaimed(
+            7,
+            31L,
+            "wait",
+            "owner",
+            NodeType.WAIT,
+            new IllegalStateException("resume raced cancellation"));
+
+        assertEquals(WorkflowRunFailureService.FailureResult.CANCELLED, result);
+        verify(eventWaitMapper).resolveCurrent(
+            eq(7), eq(31L), eq("wait"), eq("cancelled"), any());
+        verify(workflowRunMapper).cancelExistingStep(
+            eq(7), eq(31L), eq("wait"), any());
+        verify(workflowRunMapper).cancelClaimed(
+            eq(7), eq(31L), eq("owner"), any());
     }
 }

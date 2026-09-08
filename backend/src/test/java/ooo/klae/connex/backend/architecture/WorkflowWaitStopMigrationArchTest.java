@@ -33,6 +33,16 @@ class WorkflowWaitStopMigrationArchTest {
     }
 
     @Test
+    void followupMigrationAllowsStoppedEndsWithoutAConfiguredReason() throws Exception {
+        String sql = compact(resource(
+            "db/migration/tenant/V209__workflow_optional_stop_reason.sql"));
+
+        assertTrue(sql.contains("DROP CHECK chk_workflow_run_status_reason"));
+        assertTrue(sql.contains(
+            "status_reason IS NULL OR status IN ('skipped', 'stopped')"));
+    }
+
+    @Test
     void lifecycleDeletesWaitsBeforeStepsAndKeepsCompletionEvidenceWorkspaceScoped() {
         var wait = TenantLifecycleRegistry.require("workflow_event_wait");
         var step = TenantLifecycleRegistry.require("workflow_step_run");

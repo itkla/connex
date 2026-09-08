@@ -105,7 +105,7 @@ public class WorkflowRuntimeService {
                     dispatch.workspaceId(),
                     enrollment.conditionActorId(),
                     enrollment.version().getRecordType(),
-                    enrollment.condition().config(),
+                    enrollment.condition(),
                     limit + 1);
                 if (!triggeredSend && recordIds.size() > limit) {
                     throw new WorkflowExecutionException(

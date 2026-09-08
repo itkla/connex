@@ -529,9 +529,8 @@ public class WorkflowDefinitionValidator {
             String reason = end.config().reason();
             if (!Set.of("completed", "stopped").contains(outcome)
                     || "completed".equals(outcome) && reason != null
-                    || "stopped".equals(outcome)
-                        && (reason == null
-                            || !reason.matches("[a-z][a-z0-9_]{0,63}"))) {
+                    || "stopped".equals(outcome) && reason != null
+                        && !reason.matches("[a-z][a-z0-9_]{0,63}")) {
                 throw invalid(
                     WorkflowDiagnosticCode.CONFIG_FIELD_INVALID,
                     "Workflow end configuration is invalid",

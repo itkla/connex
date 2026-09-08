@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -17,6 +18,7 @@ import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Method;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,6 +37,7 @@ import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowDelayConfig;
+import ooo.klae.connex.backend.dto.WorkflowEndConfig;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
@@ -61,6 +64,7 @@ class WorkflowStepTransactionServiceTest {
     private WorkflowRun run;
     private WorkflowVersion version;
     private CompiledWorkflow compiled;
+    private WorkflowExecutionPrincipal principal;
 
     @BeforeEach
     void setUp() {
@@ -88,7 +92,7 @@ class WorkflowStepTransactionServiceTest {
         version.setId(19L);
         User actor = new User();
         actor.setId(17);
-        WorkflowExecutionPrincipal principal = new WorkflowExecutionPrincipal(
+        principal = new WorkflowExecutionPrincipal(
             actor, "member", 17, 17);
         RuleAction action = new RuleAction();
         action.setType("notify");
@@ -225,5 +229,47 @@ class WorkflowStepTransactionServiceTest {
         assertEquals("none", step.getValue().getRetrySafety());
         verify(workflowRunMapper).waitForDelay(
             7, 31L, "delay", "owner", 3_600);
+    }
+
+    @Test
+    void stoppedEndWithoutAConfiguredReasonStillStopsTheRun() {
+        run.setCurrentNodeId("end");
+        WorkflowNode.End end = new WorkflowNode.End(
+            "end", new WorkflowEndConfig("stopped", null));
+        CompiledWorkflow stoppedWorkflow = new CompiledWorkflow(
+            2,
+            "end",
+            Map.of("end", end),
+            Map.of("end", NodeType.END),
+            Map.of("end", Map.of()),
+            java.util.List.of("end"),
+            java.util.List.of(),
+            null,
+            null,
+            null);
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
+        WorkspaceService.LockedPermissionSnapshot authorization =
+            new WorkspaceService.LockedPermissionSnapshot(
+                Map.of(17, Set.of()), Map.of(17, Set.of()));
+        when(workspaceService.lockAndRequirePermissionsSnapshot(eq(7), any()))
+            .thenReturn(authorization);
+        when(principalService.resolveLocked(7, version, authorization))
+            .thenReturn(principal);
+        when(nodeExecutor.execute(any(), eq(end))).thenReturn(
+            new WorkflowStepTransition(
+                WorkflowStepTransition.Continuation.TERMINAL, null));
+        when(workflowRunMapper.nextSequence(7, 31L)).thenReturn(2);
+        when(workflowRunMapper.stopRun(
+            eq(7), eq(31L), eq("end"), isNull(), any())).thenReturn(1);
+
+        WorkflowStepTransactionService.StepResult result = service.execute(
+            7, 31L, "end", stoppedWorkflow);
+
+        assertTrue(result.terminal());
+        verify(workflowRunMapper).stopRun(
+            eq(7), eq(31L), eq("end"), isNull(), any());
+        verify(workflowRunMapper, never()).completeRun(
+            anyInt(), anyLong(), any(), any());
     }
 }

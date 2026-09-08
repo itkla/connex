@@ -40,7 +40,10 @@ import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleTrigger;
+import ooo.klae.connex.backend.dto.SegmentCondition;
+import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
+import ooo.klae.connex.backend.dto.WorkflowEnrollment;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
@@ -373,6 +376,76 @@ class WorkflowRuntimeClaimServiceTest {
 
         assertEquals("definition_invalid", exception.code());
         assertTrue(exception.interventionRequired());
+    }
+
+    @Test
+    void v2CoolingScheduleUsesTopLevelEnrollmentBeforeItsDirectAction() {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("schedule");
+        trigger.setCadence("daily");
+        stubCanonicalCompilation(trigger);
+        SegmentCondition cooling = new SegmentCondition();
+        cooling.setType("predicate");
+        cooling.setKey("cooling");
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        condition.setConditions(List.of(cooling));
+        when(compiled.schemaVersion()).thenReturn(2);
+        when(compiled.enrollment()).thenReturn(
+            new WorkflowEnrollment(condition, true, 43_200));
+        when(compiled.enrollmentConditionNodeId()).thenReturn(null);
+        workflow.setRuntimeGeneration(5L);
+        WorkflowTriggerOutbox outbox = new WorkflowTriggerOutbox();
+        outbox.setWorkspaceId(7);
+        outbox.setWorkflowId(11);
+        outbox.setWorkflowVersionId(19L);
+        outbox.setWorkflowRuntimeGeneration(5L);
+        outbox.setTriggerType("schedule");
+        outbox.setTriggerEvent("daily");
+        outbox.setTriggerKey("20260803");
+        outbox.setRecordType("company");
+
+        WorkflowRuntimeClaimService.ScheduleEnrollment enrollment =
+            service.outboxScheduleEnrollment(outbox);
+
+        assertSame(condition, enrollment.condition());
+        assertEquals(17, enrollment.conditionActorId());
+        verify(compiled, never()).node(null);
+    }
+
+    @Test
+    void v1ScheduleRetainsItsImmediateConditionEnrollment() {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("schedule");
+        trigger.setCadence("daily");
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
+        CanonicalDraft canonical = new CanonicalDraft(
+            "Workflow", null, "company", "user", "{}", "{}", new byte[32]);
+        when(canonicalizer.canonicalizeDraftJson(
+            "Workflow", null, "company", "user", "{}", "{}"))
+            .thenReturn(canonical);
+        WorkflowDefinition definition = new WorkflowDefinition(
+            1, "trigger", List.of(), List.of());
+        when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
+        when(definitionValidator.validate("company", "user", definition))
+            .thenReturn(compiled);
+        when(compiled.schemaVersion()).thenReturn(1);
+        when(compiled.entryNodeId()).thenReturn("trigger");
+        when(compiled.node("trigger")).thenReturn(
+            new WorkflowNode.Trigger("trigger", trigger));
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        when(compiled.enrollmentConditionNodeId()).thenReturn("enrollment");
+        when(compiled.node("enrollment")).thenReturn(
+            new WorkflowNode.Condition("enrollment", condition));
+        WorkflowTriggerDispatch.ScheduleTick tick =
+            new WorkflowTriggerDispatch.ScheduleTick(7, "daily", "20260803");
+
+        WorkflowRuntimeClaimService.ScheduleEnrollment enrollment =
+            service.scheduleEnrollment(11, tick);
+
+        assertSame(condition, enrollment.condition());
     }
 
     private void stubCanonicalCompilation() {

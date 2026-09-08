@@ -157,13 +157,11 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
         version.setExecutionMode("user");
         version.setRunAsUserId(17);
         SegmentDefinition definition = new SegmentDefinition();
-        WorkflowNode.Condition condition = new WorkflowNode.Condition(
-            "enrollment", definition);
         CompiledWorkflow compiled = mock(CompiledWorkflow.class);
         when(compiled.nodes()).thenReturn(java.util.Map.of());
         WorkflowRuntimeClaimService.ScheduleEnrollment enrollment =
             new WorkflowRuntimeClaimService.ScheduleEnrollment(
-                11, version, compiled, condition, 17);
+                11, version, compiled, definition, 17);
         when(outboxMapper.getById(7, 31L)).thenReturn(outbox);
         when(outboxMapper.getOwnedForUpdate(7, 31L, "lease"))
             .thenReturn(outbox);
@@ -220,7 +218,6 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
         version.setExecutionMode("user");
         version.setRunAsUserId(17);
         SegmentDefinition definition = new SegmentDefinition();
-        WorkflowNode.Condition condition = new WorkflowNode.Condition("enrollment", definition);
         RuleAction send = new RuleAction();
         send.setType("send_message");
         CompiledWorkflow compiled = mock(CompiledWorkflow.class);
@@ -228,7 +225,7 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
             "send", new WorkflowNode.Action("send", send)));
         WorkflowRuntimeClaimService.ScheduleEnrollment enrollment =
             new WorkflowRuntimeClaimService.ScheduleEnrollment(
-                11, version, compiled, condition, 17);
+                11, version, compiled, definition, 17);
         when(outboxMapper.getById(7, 31L)).thenReturn(outbox);
         when(outboxMapper.getOwnedForUpdate(7, 31L, "lease")).thenReturn(outbox);
         when(workflowMapper.getById(7, 11)).thenReturn(workflow);

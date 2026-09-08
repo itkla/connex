@@ -180,22 +180,24 @@ public class WorkflowStepTransactionService {
             completeReservedAction(run, reservedActionStep, edge, transition, finishedAt);
         }
         if (transition.continuation() == WorkflowStepTransition.Continuation.TERMINAL) {
-            String stopReason = node instanceof WorkflowNode.End end
-                    && end.config() != null
-                    && "stopped".equals(end.config().outcome())
-                ? end.config().reason() : null;
-            int terminal = stopReason == null
+            WorkflowNode.End end = node instanceof WorkflowNode.End terminalEnd
+                ? terminalEnd : null;
+            boolean stopped = end != null
+                && end.config() != null
+                && "stopped".equals(end.config().outcome());
+            String stopReason = stopped ? end.config().reason() : null;
+            int terminal = stopped
                 ? leaseOwner == null
-                    ? workflowRunMapper.completeRun(
-                        workspaceId, runId, expectedNodeId, finishedAt)
-                    : workflowRunMapper.completeClaimedRun(
-                        workspaceId, runId, expectedNodeId, leaseOwner, finishedAt)
-                : leaseOwner == null
                     ? workflowRunMapper.stopRun(
                         workspaceId, runId, expectedNodeId, stopReason, finishedAt)
                     : workflowRunMapper.stopClaimedRun(
                         workspaceId, runId, expectedNodeId, leaseOwner,
-                        stopReason, finishedAt);
+                        stopReason, finishedAt)
+                : leaseOwner == null
+                    ? workflowRunMapper.completeRun(
+                        workspaceId, runId, expectedNodeId, finishedAt)
+                    : workflowRunMapper.completeClaimedRun(
+                        workspaceId, runId, expectedNodeId, leaseOwner, finishedAt);
             requireCheckpoint(terminal, "completion");
             return new StepResult(true, null, true, false);
         }

@@ -114,7 +114,7 @@ public class WorkflowDateReconciliationService {
                 outbox.getWorkflowRuntimeGeneration(),
                 schedule.scheduledLocalDate(),
                 schedule.dueAt());
-            if (schedule.scheduledLocalDate().isBefore(today)) {
+            if (schedule.scheduledLocalDate().isBefore(today.minusDays(1))) {
                 enrollmentMapper.markMissed(workspaceId, existing.getId(), now);
             }
         } else if ("superseded".equals(existing.getState())

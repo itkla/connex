@@ -85,4 +85,38 @@ class WorkflowRunWorkerTest {
             eq(NodeType.DELAY),
             isA(IllegalStateException.class));
     }
+
+    @Test
+    void eventResumeCancellationRaceRoutesThroughTheClaimedFailureFinalizer() {
+        WorkflowRunWorker worker = new WorkflowRunWorker(
+            runMapper,
+            delayResumeService,
+            eventWaitResumeService,
+            traversalService,
+            cancellationService,
+            failureService,
+            properties);
+        WorkflowWorkClaim claim = new WorkflowWorkClaim(
+            Kind.RUN, 7, 31L, "owner", "event");
+        WorkflowRun run = new WorkflowRun();
+        run.setCurrentNodeId("wait");
+        when(runMapper.getByIdInWorkspace(7, 31L)).thenReturn(run);
+        when(eventWaitResumeService.resume(7, 31L, "owner"))
+            .thenThrow(new IllegalStateException("cancelled after initial check"));
+
+        worker.process(claim);
+
+        verify(failureService).failClaimed(
+            eq(7),
+            eq(31L),
+            eq("wait"),
+            eq("owner"),
+            eq(NodeType.WAIT),
+            isA(IllegalStateException.class));
+        verify(traversalService, never()).resumeClaimed(
+            org.mockito.ArgumentMatchers.anyInt(),
+            org.mockito.ArgumentMatchers.anyLong(),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyInt());
+    }
 }

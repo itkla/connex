@@ -132,12 +132,24 @@
   </update>
 
   <select id="findDuePlannedIdForUpdate" resultType="long">
-    SELECT id
-    FROM workflow_date_enrollment
-    WHERE workspace_id = #{workspaceId}
-      AND state = 'planned'
-      AND due_at &lt;= CURRENT_TIMESTAMP(6)
-    ORDER BY due_at, id
+    SELECT e.id
+    FROM workflow_date_enrollment e
+    WHERE e.workspace_id = #{workspaceId}
+      AND e.state = 'planned'
+      AND e.due_at &lt;= CURRENT_TIMESTAMP(6)
+      AND EXISTS (
+        SELECT 1
+        FROM workflow w
+        WHERE w.workspace_id = e.workspace_id
+          AND w.id = e.workflow_id
+          AND w.enabled = TRUE
+          AND w.runtime_owner = 'canonical'
+          AND w.archived_at IS NULL
+          AND w.intake_paused_at IS NULL
+          AND w.active_version_id = e.workflow_version_id
+          AND w.runtime_generation = e.workflow_runtime_generation
+      )
+    ORDER BY e.due_at, e.id
     LIMIT 1
     FOR UPDATE SKIP LOCKED
   </select>
