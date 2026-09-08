@@ -54,9 +54,6 @@
     "ctaHeading": "Start with the relationships you already have",
     "ctaSubtext": "Bring your team onto Connex and keep every relationship moving.",
     "footerTagline": "The CRM for teams who close by staying close.",
-    "footerProduct": "Product",
-    "footerCompany": "Company",
-    "footerAbout": "About",
     "footerRights": "© 2026 Connex. All rights reserved.",
     "toggleLightDarkMode": "Toggle light/dark mode",
     "warmthHeading": "Warmth you can open",
@@ -93,7 +90,7 @@
     "faqDataQ": "Where does our data live?",
     "faqDataA": "Each workspace is isolated. Connex runs on our cloud, on a dedicated instance, or entirely on your own infrastructure.",
     "faqAppiQ": "Is Connex ready for APPI?",
-    "faqAppiA": "Yes. Disclosure, retention, and data requests each have a page, a record, and an evidence trail.",
+    "faqAppiA": "Disclosure, retention, and data requests each have a page, a record, and an evidence trail. Connex is built for APPI obligations, and your legal team can review exactly how each one is met.",
     "faqAiQ": "Does the AI change our records?",
     "faqAiA": "No. Connex drafts, suggests, and explains. You apply. Anything it adds while answering is announced and reversible.",
     "faqImportQ": "Can we bring our existing data?",
@@ -102,7 +99,12 @@
     "faqJaA": "Japanese and English are both first-class. Not a translation layer over an English product.",
     "faqStartQ": "How soon do we see warmth?",
     "faqStartA": "Warmth reads from logged activity, so it sharpens as your team works. Imported history counts from day one.",
-    "bentoHistoryNow": "Now"
+    "bentoHistoryNow": "Now",
+    "skipToContent": "Skip to content",
+    "footerNavProduct": "Product",
+    "footerNavLegal": "Legal",
+    "metaTitle": "Connex: the CRM that reads relationship warmth",
+    "metaDescription": "Stop losing relationships you already earned. Connex reads the warmth of every relationship and shows you the ones cooling while there is still time."
   },
   "CommonSidebar": {
     "ariaPrimarySidebar": "Primary sidebar",

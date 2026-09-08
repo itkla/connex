@@ -120,7 +120,7 @@ export default async function FeatureBento() {
         <div className="mt-14 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-12">
             {cells.map((cell, i) => (
                 <Reveal key={cell.key} delay={i * 0.05} className={cell.span}>
-                    <div className="group relative flex h-full grow flex-col justify-between overflow-hidden rounded-2xl border border-border bg-card/90 p-6 backdrop-blur-md transition-[transform,border-color,box-shadow] duration-(--motion-standard) ease-(--motion-ease-calm) hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-[0_18px_40px_-24px_var(--color-brand)] motion-reduce:transition-none motion-reduce:hover:translate-y-0">
+                    <div className="group relative flex h-full grow flex-col overflow-hidden rounded-2xl border border-border bg-card p-6 transition-[transform,border-color,box-shadow] duration-(--motion-standard) ease-(--motion-ease-calm) hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-[0_18px_40px_-24px_var(--color-brand)] motion-reduce:transition-none motion-reduce:hover:translate-y-0">
                         <div>
                             <h3 className={titleClass}>{t(`bento${cell.key}Title`)}</h3>
                             <p className={bodyClass}>{t(`bento${cell.key}Body`)}</p>

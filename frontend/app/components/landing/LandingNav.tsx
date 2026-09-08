@@ -16,7 +16,7 @@ function ThemeToggle() {
         <button
             type="button"
             onClick={() => setTheme(next)}
-            aria-label={t("toggleLightDarkMode", { mode: next })}
+            aria-label={t("toggleLightDarkMode")}
             className="inline-flex size-9 items-center justify-center rounded-full border border-border text-foreground transition-transform duration-(--motion-micro) active:scale-[0.95] motion-reduce:active:scale-100"
         >
             <MoonIcon className="size-5 dark:hidden" />
@@ -36,7 +36,6 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
     ];
 
     return (
-        // TODO: make this a floating navbar
         <header className="sticky top-0 z-40 border-b border-border bg-background/80 backdrop-blur-md">
             <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6 lg:px-8">
                 <div className="flex items-center gap-8">

@@ -24,8 +24,10 @@ import { springSmooth } from "@/app/lib/motion";
  * 2. Cloud banks drift across the flanks at differing rates, clipped to the
  *    mountain so they never smudge the open sky behind the copy. They are kept
  *    well below the summit: a clear peak above the cloud line is the whole point.
- * 3. The green line draws itself, and deliberately stops short of the summit.
- *    Its head pulses there rather than completing the climb.
+ * 3. The green line draws itself and deliberately stops short of the summit. A
+ *    pulsing head rides its growing tip, so the stroke never ends in a bare cap.
+ *    The whole scene eases back over the closing sections so the line never
+ *    competes with the FAQ controls or the final call to action.
  *
  * Reduced motion is pinned in CSS rather than in JavaScript: `motion-reduce:`
  * rules park the camera, hold the clouds, still the pulse, and force the stroke
@@ -97,6 +99,33 @@ function CloudBank({ cloud, progress }: { cloud: (typeof CLOUDS)[number]; progre
     );
 }
 
+function SpineHead({
+    head,
+    progress,
+}: {
+    head: { stops: number[]; xs: number[]; ys: number[] };
+    progress: MotionValue<number>;
+}) {
+    const cx = useTransform(progress, head.stops, head.xs);
+    const cy = useTransform(progress, head.stops, head.ys);
+    return (
+        <>
+            <motion.circle
+                r={16}
+                style={{ cx, cy }}
+                className="fill-brand opacity-30 animate-pulse motion-reduce:animate-none!"
+            />
+            <motion.circle
+                r={6}
+                style={{ cx, cy }}
+                className="fill-brand stroke-background"
+                strokeWidth={2.5}
+                vectorEffect="non-scaling-stroke"
+            />
+        </>
+    );
+}
+
 function SpineMark({ point, at, progress }: { point: Point; at: number; progress: MotionValue<number> }) {
     const opacity = useTransform(progress, [Math.max(at - 0.05, 0), at], [0, 1]);
     const scale = useTransform(progress, [Math.max(at - 0.05, 0), at], [0.6, 1]);
@@ -116,7 +145,7 @@ function SpineMark({ point, at, progress }: { point: Point; at: number; progress
 export default function FujiSpine() {
     const measureRef = useRef<SVGPathElement>(null);
     const [marks, setMarks] = useState<Point[]>([]);
-    const [head, setHead] = useState<Point | null>(null);
+    const [headPath, setHeadPath] = useState<{ stops: number[]; xs: number[]; ys: number[] } | null>(null);
     const [stopAt, setStopAt] = useState(0.84);
 
     const { scrollYProgress } = useScroll();
@@ -128,7 +157,7 @@ export default function FujiSpine() {
     const farPanY = useTransform(eased, [0, 0.7], [0, 108]);
     const farPanX = useTransform(eased, [0, 0.7], [0, -250]);
     const cloudReveal = useTransform(eased, [0, 0.28], [0.5, 1]);
-    const headOpacity = useTransform(eased, [0.78, 0.92], [0, 1]);
+    const spineFade = useTransform(eased, [0.74, 0.96], [1, 0.6]);
 
     useEffect(() => {
         const path = measureRef.current;
@@ -148,7 +177,20 @@ export default function FujiSpine() {
 
         const stop = Math.max(apexFraction - 0.07, 0.2);
         setStopAt(stop);
-        setHead(path.getPointAtLength(total * stop));
+
+        const SAMPLES = 24;
+        const stops: number[] = [];
+        const xs: number[] = [];
+        const ys: number[] = [];
+        for (let i = 0; i <= SAMPLES; i++) {
+            const scrollAt = (i / SAMPLES) * 0.9;
+            const drawn = 0.24 + (scrollAt / 0.9) * (stop - 0.24);
+            const { x, y } = path.getPointAtLength(total * drawn);
+            stops.push(scrollAt);
+            xs.push(x);
+            ys.push(y);
+        }
+        setHeadPath({ stops, xs, ys });
         setMarks(
             MARKS.map((fraction) => {
                 const { x, y } = path.getPointAtLength(total * fraction);
@@ -158,7 +200,8 @@ export default function FujiSpine() {
     }, []);
 
     return (
-        <div
+        <motion.div
+            style={{ opacity: spineFade }}
             className="pointer-events-none fixed inset-0 z-0 overflow-hidden max-md:inset-y-auto max-md:bottom-0 max-md:h-[46vh]"
             aria-hidden="true"
         >
@@ -267,26 +310,9 @@ export default function FujiSpine() {
                         <SpineMark key={MARKS[i]} point={point} at={MARKS[i]} progress={eased} />
                     ))}
 
-                    {head ? (
-                        <motion.g style={{ opacity: headOpacity }} className="motion-reduce:opacity-100!">
-                            <circle
-                                cx={head.x}
-                                cy={head.y}
-                                r={16}
-                                className="fill-brand opacity-30 animate-pulse motion-reduce:animate-none!"
-                            />
-                            <circle
-                                cx={head.x}
-                                cy={head.y}
-                                r={6}
-                                className="fill-brand stroke-background"
-                                strokeWidth={2.5}
-                                vectorEffect="non-scaling-stroke"
-                            />
-                        </motion.g>
-                    ) : null}
+                    {headPath ? <SpineHead head={headPath} progress={eased} /> : null}
                 </motion.g>
             </svg>
-        </div>
+        </motion.div>
     );
 }

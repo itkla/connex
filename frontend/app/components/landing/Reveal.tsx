@@ -20,7 +20,10 @@ const getServerSnapshot = () => false;
  *
  * Reduced motion is pinned in CSS (`motion-reduce:` beats the inline style
  * `motion` writes), not read from `useReducedMotion()`, which returns `null` on
- * a server-rendered first paint and would let the movement through.
+ * a server-rendered first paint and would let the movement through. It must be
+ * `transform-none`: Tailwind's `translate-y-0` compiles to the `translate`
+ * property, which composes with rather than cancels the `transform` that
+ * `motion` writes.
  */
 export default function Reveal({
     children,
@@ -37,7 +40,7 @@ export default function Reveal({
 
     return (
         <motion.div
-            className={`motion-reduce:translate-y-0! motion-reduce:opacity-100! ${className ?? ""}`}
+            className={`motion-reduce:transform-none! motion-reduce:opacity-100! ${className ?? ""}`}
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, amount: 0.2 }}
