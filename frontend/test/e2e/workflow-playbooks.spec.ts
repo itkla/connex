@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { runFixture } from "./support/fixtures";
+import { useLocale } from "./support/locale";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === "object" && value !== null;
@@ -77,6 +78,34 @@ test("filters date-start time zones and selects the match with the keyboard @mob
     await timezone.press("ArrowDown");
     await timezone.press("Enter");
     await expect(timezone).toHaveValue("Asia/Tokyo");
+});
+
+test("authors Japanese launch inputs in dark mode without horizontal overflow @mobile", async ({ page }, testInfo) => {
+    const mobile = testInfo.project.name === "mobile-chromium";
+    await useLocale(page, "ja");
+    await page.addInitScript(() => window.localStorage.setItem("theme", "dark"));
+    await page.goto("/workflows/new?recordType=company&start=manual");
+    await expect(page.locator("html")).toHaveClass(/dark/);
+    await page.getByLabel("ワークフロー名", { exact: true }).fill(`会社レビュー ${testInfo.testId}`);
+    await expect(page.getByRole("button", { name: "レコードから手動で実行", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "エディターに進む", exact: true }).click();
+    if (!mobile) await page.getByRole("button", { name: "アウトライン", exact: true }).click();
+    await page.getByRole("list", { name: "ワークフローのステップ" }).getByRole("button").first().click();
+    await page.getByRole("button", { name: "入力項目を追加", exact: true }).click();
+    await page.getByLabel("入力項目のラベル", { exact: true }).fill("今回確認する内容");
+    await page.getByLabel("既定値（任意）", { exact: true }).fill("次回の打ち合わせと担当者を確認");
+    await expect(page.getByRole("heading", { name: "実行時の入力", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("workflow-ja-dark.png"), fullPage: true });
+    await closeInspector(page, mobile);
+    const created = page.waitForResponse((response) => response.request().method() === "POST"
+        && new URL(response.url()).pathname === "/api/workflows");
+    await page.getByRole("button", { name: "下書きを保存", exact: true }).click();
+    const response = await created;
+    expect(response.status(), await response.text()).toBe(201);
+    const workflow: unknown = await response.json();
+    if (!isRecord(workflow) || !isRecord(workflow.definition)) throw new Error("Expected the Japanese workflow draft");
+    expect(workflow.definition.inputs).toEqual([expect.objectContaining({ label: "今回確認する内容", defaultValue: "次回の打ち合わせと担当者を確認" })]);
 });
 
 for (const type of ["task", "document"] as const) {
