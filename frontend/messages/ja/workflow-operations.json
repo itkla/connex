@@ -351,7 +351,7 @@
         },
         "deal-won-handoff": {
           "title": "成約案件の引き継ぎ",
-          "description": "案件が成約したとき、引き継ぎ内容を記録し、指定した担当者にフォローアップタスクを作成します。"
+          "description": "案件が成約したとき、指定した担当者に引き継ぎタスクを作成し、タスクの完了後に引き継ぎ内容を記録します。"
         },
         "cooling-company-review": {
           "title": "温度感が下がった会社の確認",
@@ -359,7 +359,7 @@
         },
         "person-qualified-routing": {
           "title": "連絡先の担当者を決める",
-          "description": "選択した担当者を連絡先に割り当て、フォローアップのタスクを作成します。"
+          "description": "連絡先が「見込みあり」になったとき、選択した担当者を割り当て、フォローアップのタスクを作成します。"
         },
         "deal-follow-through": {
           "title": "商談のフォローアップを進める",
@@ -375,13 +375,20 @@
     },
     "sourceEvent": {
       "person": {
-        "job_changed": "連絡先の勤務先変更"
+        "job_changed": "連絡先の勤務先変更",
+        "lifecycle_changed": "連絡先のライフサイクル変更"
       },
       "deal": {
-        "won": "案件の成約"
+        "won": "案件の成約",
+        "created": "案件の作成"
       },
       "schedule": {
         "daily": "温度感の日次確認"
+      },
+      "date": {
+        "deal": {
+          "expectedCloseDate": "案件の決着予定日の前後"
+        }
       }
     },
     "actorModel": {
@@ -416,6 +423,10 @@
       "recordType": "レコード種別",
       "actionTypes": "アクション",
       "retryBehavior": "再試行",
+      "enrollmentPolicy": "再び開始する条件",
+      "stopPolicy": "停止する条件",
+      "dateField": "基準となる日付",
+      "catchupPolicy": "過ぎた開始日の扱い",
       "actorUserId": "実行者",
       "targetUserId": "タスクの担当者",
       "taskTitle": "タスク名",
@@ -449,8 +460,7 @@
       "NOTE_CREATE": "メモを作成",
       "DEAL_UPDATE": "案件を更新",
       "COMPANY_UPDATE": "会社を更新",
-      "PERSON_UPDATE": "連絡先を更新",
-      "TASK_READ": "タスクを閲覧"
+      "PERSON_UPDATE": "連絡先を更新"
     },
     "runReason": {
       "entry_condition_not_matched": "レコードが開始条件に一致しませんでした。",

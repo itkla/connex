@@ -351,7 +351,7 @@
         },
         "deal-won-handoff": {
           "title": "Hand off a won deal",
-          "description": "When a deal is won, log the handoff and create a follow-up task for the owner you choose."
+          "description": "When a deal is won, create a handoff task for the owner you choose and record the handoff after the task is completed."
         },
         "cooling-company-review": {
           "title": "Review a cooling company",
@@ -359,7 +359,7 @@
         },
         "person-qualified-routing": {
           "title": "Route a contact to the right owner",
-          "description": "Assign a contact to the owner you choose and create a linked follow-up task."
+          "description": "When a contact becomes qualified, assign the owner you choose and create a linked follow-up task."
         },
         "deal-follow-through": {
           "title": "Follow through on a deal",
@@ -375,13 +375,20 @@
     },
     "sourceEvent": {
       "person": {
-        "job_changed": "Contact employment changed"
+        "job_changed": "Contact employment changed",
+        "lifecycle_changed": "Contact lifecycle changed"
       },
       "deal": {
-        "won": "Deal won"
+        "won": "Deal won",
+        "created": "Deal created"
       },
       "schedule": {
         "daily": "Daily warmth check"
+      },
+      "date": {
+        "deal": {
+          "expectedCloseDate": "Before or after the deal’s expected close date"
+        }
       }
     },
     "actorModel": {
@@ -416,6 +423,10 @@
       "recordType": "Record type",
       "actionTypes": "Actions",
       "retryBehavior": "Retries",
+      "enrollmentPolicy": "Conditions for starting again",
+      "stopPolicy": "Conditions for stopping",
+      "dateField": "Date to use",
+      "catchupPolicy": "Handling missed start dates",
       "actorUserId": "Runs as",
       "targetUserId": "Task assignee",
       "taskTitle": "Task title",
@@ -449,8 +460,7 @@
       "NOTE_CREATE": "Create notes",
       "DEAL_UPDATE": "Update deals",
       "COMPANY_UPDATE": "Update companies",
-      "PERSON_UPDATE": "Update contacts",
-      "TASK_READ": "Read tasks"
+      "PERSON_UPDATE": "Update contacts"
     },
     "runReason": {
       "entry_condition_not_matched": "The record did not match the entry conditions.",

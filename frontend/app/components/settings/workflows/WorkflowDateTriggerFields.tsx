@@ -43,9 +43,10 @@ export default function WorkflowDateTriggerFields({ trigger, disabled, fieldProp
                     if (timezone) onChange({ ...trigger, timezone }, "commit");
                 }}>
                     <ComboboxInput id="workflow-date-timezone" {...fieldProps("config.timezone")} />
-                    <ComboboxContent><ComboboxList><ComboboxEmpty>{t("date.timezoneEmpty")}</ComboboxEmpty>
-                        {timezones.map((timezone) => <ComboboxItem key={timezone} value={timezone}>{timezone}</ComboboxItem>)}
-                    </ComboboxList></ComboboxContent>
+                    <ComboboxContent>
+                        <ComboboxEmpty>{t("date.timezoneEmpty")}</ComboboxEmpty>
+                        <ComboboxList>{(timezone: string) => <ComboboxItem key={timezone} value={timezone}>{timezone}</ComboboxItem>}</ComboboxList>
+                    </ComboboxContent>
                 </Combobox>
             </div>
             <p className="text-sm text-muted-foreground">{t("date.catchupHelp")}</p>

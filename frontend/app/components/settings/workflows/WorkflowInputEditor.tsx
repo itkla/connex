@@ -75,9 +75,8 @@ export default function WorkflowInputEditor({ inputs, members, disabled, fieldPr
                 </fieldset>
             ))}
             <Button variant="outline" size="toolbar" disabled={disabled || inputs.length >= 16} onClick={() => {
-                let number = inputs.length + 1;
-                while (inputs.some((input) => input.key === `input${number}`)) number += 1;
-                onChange([...inputs, { key: `input${number}`, label: t("inputs.newInput"), type: "text", required: true }], "commit");
+                const key = `input${globalThis.crypto.randomUUID().replaceAll("-", "")}`;
+                onChange([...inputs, { key, label: t("inputs.newInput"), type: "text", required: true }], "commit");
             }}><PlusIcon className="size-4" />{t("inputs.add")}</Button>
         </section>
     );

@@ -15,6 +15,70 @@ async function closeInspector(page: Page, mobile: boolean): Promise<void> {
     if (mobile) await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
 }
 
+test("keeps deleted input bindings unresolved and fits sixteen preview inputs", async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto("/workflows/new?recordType=person&start=manual");
+    await page.getByLabel("Workflow name").fill(`Input identity ${testInfo.testId}`);
+    await page.getByRole("button", { name: "Continue to editor" }).click();
+    await page.getByRole("button", { name: "Outline", exact: true }).click();
+    const outline = page.getByRole("list", { name: "Workflow steps" });
+    await outline.getByRole("button").first().click();
+    await page.getByRole("button", { name: "Add input", exact: true }).click();
+    await page.getByLabel("Input label", { exact: true }).fill("Original context");
+    const originalId = await page.getByLabel("Input label", { exact: true }).getAttribute("id");
+    if (!originalId?.startsWith("input-label-")) throw new Error("Expected the original input identity");
+    const originalKey = originalId.slice("input-label-".length);
+    await outline.getByRole("button", { name: "Insert", exact: true }).first().click();
+    await page.getByRole("menuitem", { name: "Action", exact: true }).click();
+    await outline.getByRole("button", { name: /^create a task/i }).click();
+    await selectOption(page, page.getByRole("combobox", { name: "Insert a value into Title", exact: true }), "Input · Original context");
+    await outline.getByRole("button").first().click();
+    await page.getByRole("button", { name: "Remove Original context", exact: true }).click();
+    for (let index = 1; index <= 16; index += 1) {
+        await page.getByRole("button", { name: "Add input", exact: true }).click();
+        await page.getByLabel("Input label", { exact: true }).last().fill(`Context ${index}`);
+    }
+    await expect(page.getByRole("button", { name: "Add input", exact: true })).toBeDisabled();
+    const created = page.waitForResponse((response) => response.request().method() === "POST"
+        && new URL(response.url()).pathname === "/api/workflows");
+    await page.getByRole("button", { name: "Save draft", exact: true }).click();
+    const response = await created;
+    expect(response.status(), await response.text()).toBe(201);
+    const workflow: unknown = await response.json();
+    if (!isRecord(workflow) || !isRecord(workflow.definition) || !Array.isArray(workflow.definition.inputs)
+        || !Array.isArray(workflow.definition.nodes)) throw new Error("Expected the saved input bindings");
+    expect(workflow.definition.inputs.every((input) => isRecord(input) && input.key !== originalKey)).toBe(true);
+    const action = workflow.definition.nodes.find((node): node is Record<string, unknown> => isRecord(node) && node.type === "ACTION");
+    expect(action?.config).toMatchObject({ titleTemplate: { parts: expect.arrayContaining([{ ref: { source: "launch_input", key: originalKey } }]) } });
+    await page.getByRole("button", { name: "Preview", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    for (let index = 1; index <= 16; index += 1) {
+        const input = dialog.getByLabel(`Context ${index}`, { exact: true });
+        await input.scrollIntoViewIfNeeded();
+        await expect(input).toBeInViewport();
+    }
+    await expect(dialog.getByRole("button", { name: "Preview path", exact: true })).toBeInViewport();
+    await expect(dialog.getByRole("heading")).toBeInViewport();
+});
+
+test("filters date-start time zones and selects the match with the keyboard @mobile", async ({ page }, testInfo) => {
+    const mobile = testInfo.project.name === "mobile-chromium";
+    await page.goto("/workflows/new?recordType=deal&start=date");
+    await page.getByLabel("Workflow name").fill(`Date zone ${testInfo.testId}`);
+    await page.getByRole("button", { name: "Continue to editor" }).click();
+    if (!mobile) await page.getByRole("button", { name: "Outline", exact: true }).click();
+    await page.getByRole("list", { name: "Workflow steps" }).getByRole("button").first().click();
+    const timezone = page.getByRole("combobox", { name: "Time zone", exact: true });
+    await timezone.fill("Tokyo");
+    await expect(page.getByRole("option", { name: "Asia/Tokyo", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "UTC", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("option", { name: "America/New_York", exact: true })).toHaveCount(0);
+    await timezone.press("ArrowDown");
+    await timezone.press("Enter");
+    await expect(timezone).toHaveValue("Asia/Tokyo");
+});
+
 for (const type of ["task", "document"] as const) {
     test(`preserves new ${type} workflows and their existing events @mobile`, async ({ page }, testInfo) => {
         const mobile = testInfo.project.name === "mobile-chromium";

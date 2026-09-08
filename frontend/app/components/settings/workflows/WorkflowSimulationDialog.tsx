@@ -66,15 +66,15 @@ export default function WorkflowSimulationDialog({
 
     return (
         <ResponsiveDialog open={open} onOpenChange={changeOpen}>
-            <ResponsiveDialogContent className="sm:max-w-2xl">
-                <ResponsiveDialogHeader className="px-4 pt-4 sm:px-0 sm:pt-0">
+            <ResponsiveDialogContent className="max-h-[90dvh] sm:flex sm:max-w-2xl sm:flex-col">
+                <ResponsiveDialogHeader className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-0">
                     <ResponsiveDialogTitle className="flex items-center gap-2">
                         <BeakerIcon className="size-5" />
                         {t("simulation.title")}
                     </ResponsiveDialogTitle>
                     <ResponsiveDialogDescription>{t("simulation.description")}</ResponsiveDialogDescription>
                 </ResponsiveDialogHeader>
-                <div className="space-y-4 px-4 sm:px-0">
+                <div className="min-h-0 space-y-4 px-4 sm:overflow-y-auto sm:px-0">
                     {supported ? (
                         <>
                             <div className="rounded-xl border border-brand/30 bg-brand-light p-3 text-sm text-foreground">
@@ -109,7 +109,7 @@ export default function WorkflowSimulationDialog({
                         <WorkflowSimulationEvidence definition={definition} result={result} diagnosticMessage={diagnosticMessage} />
                     ) : null}
                 </div>
-                <ResponsiveDialogFooter className="border-t border-border px-4 py-4 sm:border-0 sm:px-0 sm:py-0">
+                <ResponsiveDialogFooter className="shrink-0 border-t border-border px-4 py-4 sm:border-0 sm:px-0 sm:py-0">
                     <Button variant="outline" onClick={() => changeOpen(false)}>{t("close")}</Button>
                     {supported ? (
                         <Button
