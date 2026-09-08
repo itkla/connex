@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,6 +47,7 @@ class WorkflowEventWaitResumeServiceTest {
     @Mock private WorkflowTraversalService traversalService;
     @Mock private WorkflowExecutionPrincipalService principalService;
     @Mock private WorkflowRecordPolicyService recordPolicyService;
+    @Mock private AutomationExecutor automationExecutor;
     @Mock private WorkspaceService workspaceService;
     @Mock private CompiledWorkflow compiled;
 
@@ -63,6 +65,7 @@ class WorkflowEventWaitResumeServiceTest {
             traversalService,
             principalService,
             recordPolicyService,
+            automationExecutor,
             workspaceService);
         run = new WorkflowRun();
         run.setId(31L);
@@ -109,6 +112,9 @@ class WorkflowEventWaitResumeServiceTest {
             .thenReturn(authorization);
         lenient().when(principalService.resolveLocked(7, version, authorization))
             .thenReturn(principal);
+        lenient().when(automationExecutor.runAs(
+                eq(7), any(User.class), eq("member"), any()))
+            .thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(3).get());
         lenient().when(runMapper.getOwnedByIdForUpdate(7, 31L, "lease")).thenReturn(run);
         lenient().when(traversalService.compiled(run)).thenReturn(compiled);
         lenient().when(compiled.node("wait-task")).thenReturn(node);

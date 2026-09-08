@@ -22,6 +22,7 @@ import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -61,6 +62,7 @@ class WorkflowStepTransactionServiceTest {
     @Mock private WorkflowExecutionPrincipalService principalService;
     @Mock private WorkflowRecordGuard recordGuard;
     @Mock private WorkflowRecordPolicyService recordPolicyService;
+    @Mock private AutomationExecutor automationExecutor;
     @Mock private WorkflowNodeExecutor nodeExecutor;
     @Mock private WorkflowActionBindingService bindingService;
     @Mock private WorkspaceService workspaceService;
@@ -81,6 +83,7 @@ class WorkflowStepTransactionServiceTest {
             principalService,
             recordGuard,
             recordPolicyService,
+            automationExecutor,
             nodeExecutor,
             bindingService,
             workspaceService,
@@ -117,6 +120,9 @@ class WorkflowStepTransactionServiceTest {
         lenient().when(workflowRunMapper.getByIdForUpdate(7, 31L)).thenReturn(run);
         lenient().when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
         lenient().when(principalService.resolveLocked(7, version)).thenReturn(principal);
+        lenient().when(automationExecutor.runAs(
+                eq(7), any(User.class), eq("member"), any()))
+            .thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(3).get());
     }
 
     @Test
@@ -202,6 +208,115 @@ class WorkflowStepTransactionServiceTest {
         assertNotNull(transaction);
         assertEquals(Propagation.REQUIRES_NEW, transaction.propagation());
         assertEquals(Isolation.READ_COMMITTED, transaction.isolation());
+    }
+
+    @Test
+    void schemaV2PolicyAndDecisionRunInsideTheLockedActorScope() {
+        run.setCurrentNodeId("trigger");
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
+        WorkflowNode.Trigger trigger = new WorkflowNode.Trigger("trigger", null);
+        WorkflowEdge edge = new WorkflowEdge(
+            "trigger-end", "trigger", "end", WorkflowEdge.Outcome.NEXT);
+        CompiledWorkflow schemaV2 = new CompiledWorkflow(
+            2,
+            "trigger",
+            Map.of("trigger", trigger),
+            Map.of("trigger", NodeType.TRIGGER),
+            Map.of("trigger", Map.of(WorkflowEdge.Outcome.NEXT, edge)),
+            java.util.List.of("trigger"),
+            java.util.List.of(),
+            null,
+            null,
+            null);
+        WorkspaceService.LockedPermissionSnapshot authorization =
+            new WorkspaceService.LockedPermissionSnapshot(
+                Map.of(17, Set.of()), Map.of(17, Set.of()));
+        when(workspaceService.lockAndRequirePermissionsSnapshot(eq(7), any()))
+            .thenReturn(authorization);
+        when(principalService.resolveLocked(7, version, authorization))
+            .thenReturn(principal);
+        when(nodeExecutor.execute(any(), eq(trigger))).thenReturn(
+            new WorkflowStepTransition(
+                WorkflowStepTransition.Continuation.IMMEDIATE,
+                WorkflowEdge.Outcome.NEXT));
+        when(workflowRunMapper.nextSequence(7, 31L)).thenReturn(2);
+        when(workflowRunMapper.advanceRun(7, 31L, "trigger", "end")).thenReturn(1);
+
+        WorkflowStepTransactionService.StepResult result = service.execute(
+            7, 31L, "trigger", schemaV2);
+
+        assertTrue(result.executed());
+        InOrder scopeOrder = inOrder(
+            workflowRunMapper,
+            automationExecutor,
+            recordPolicyService,
+            nodeExecutor);
+        scopeOrder.verify(workflowRunMapper).getByIdForUpdate(7, 31L);
+        scopeOrder.verify(automationExecutor).runAs(
+            eq(7), eq(principal.principal()), eq("member"), any());
+        scopeOrder.verify(recordPolicyService).stopReason(run, schemaV2, 17);
+        scopeOrder.verify(automationExecutor).runAs(
+            eq(7), eq(principal.principal()), eq("member"), any());
+        scopeOrder.verify(nodeExecutor).execute(any(), eq(trigger));
+    }
+
+    @Test
+    void schemaV2ActionDiscoveryAndResolutionRunInsideActorScopes() {
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
+        RuleAction action = new RuleAction();
+        action.setType("notify");
+        action.setTargetUserId(23);
+        WorkflowNode.Action node = new WorkflowNode.Action("action", action);
+        WorkflowEdge edge = new WorkflowEdge(
+            "action-end", "action", "end", WorkflowEdge.Outcome.NEXT);
+        CompiledWorkflow schemaV2 = new CompiledWorkflow(
+            2,
+            "action",
+            Map.of("action", node),
+            Map.of("action", NodeType.ACTION),
+            Map.of("action", Map.of(WorkflowEdge.Outcome.NEXT, edge)),
+            java.util.List.of("action"),
+            java.util.List.of(),
+            null,
+            null,
+            null);
+        WorkflowActionBindingService.Discovery discovery =
+            new WorkflowActionBindingService.Discovery(23);
+        WorkspaceService.LockedPermissionSnapshot authorization =
+            new WorkspaceService.LockedPermissionSnapshot(
+                Map.of(17, Set.of(), 23, Set.of()),
+                Map.of(17, Set.of(), 23, Set.of()));
+        when(principalService.resolve(7, version)).thenReturn(principal);
+        when(bindingService.discover(run, action, schemaV2)).thenReturn(discovery);
+        when(workspaceService.lockAndRequirePermissionsSnapshot(eq(7), any()))
+            .thenReturn(authorization);
+        when(principalService.resolveLocked(7, version, authorization))
+            .thenReturn(principal);
+        when(bindingService.resolveLocked(
+            run, action, discovery, authorization, schemaV2)).thenReturn(action);
+        when(nodeExecutor.execute(any(), any())).thenReturn(
+            new WorkflowStepTransition(
+                WorkflowStepTransition.Continuation.IMMEDIATE,
+                WorkflowEdge.Outcome.NEXT));
+        when(workflowRunMapper.nextSequence(7, 31L)).thenReturn(2);
+        when(workflowRunMapper.advanceRun(7, 31L, "action", "end")).thenReturn(1);
+
+        WorkflowStepTransactionService.StepResult result = service.execute(
+            7, 31L, "action", schemaV2);
+
+        assertTrue(result.executed());
+        InOrder scopeOrder = inOrder(automationExecutor, bindingService);
+        scopeOrder.verify(automationExecutor).runAs(
+            eq(7), eq(principal.principal()), eq("member"), any());
+        scopeOrder.verify(bindingService).discover(run, action, schemaV2);
+        scopeOrder.verify(automationExecutor).runAs(
+            eq(7), eq(principal.principal()), eq("member"), any());
+        scopeOrder.verify(automationExecutor).runAs(
+            eq(7), eq(principal.principal()), eq("member"), any());
+        scopeOrder.verify(bindingService).resolveLocked(
+            run, action, discovery, authorization, schemaV2);
     }
 
     @Test

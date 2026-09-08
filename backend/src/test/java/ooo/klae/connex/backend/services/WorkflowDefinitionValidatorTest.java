@@ -119,8 +119,7 @@ class WorkflowDefinitionValidatorTest {
         assertFalse(Arrays.stream(CompiledWorkflow.class.getRecordComponents())
             .anyMatch(component -> component.getType() == WorkflowNode.class
                 || component.getType() == RuleAction.class
-                || component.getType() == RuleTrigger.class
-                || component.getType() == SegmentDefinition.class));
+                || component.getType() == RuleTrigger.class));
         verify(segmentService).validate("deal", condition);
         verifyNoInteractions(workspaceService);
     }

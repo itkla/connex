@@ -7,6 +7,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -45,6 +46,7 @@ public class WorkflowStepTransactionService {
     private final WorkflowExecutionPrincipalService principalService;
     private final WorkflowRecordGuard recordGuard;
     private final WorkflowRecordPolicyService recordPolicyService;
+    private final AutomationExecutor automationExecutor;
     private final WorkflowNodeExecutor nodeExecutor;
     private final WorkflowActionBindingService bindingService;
     private final WorkspaceService workspaceService;
@@ -102,10 +104,11 @@ public class WorkflowStepTransactionService {
                 "The pinned workflow definition is inconsistent.",
                 true);
         }
-        WorkflowActionBindingService.Discovery discovery = node instanceof WorkflowNode.Action action
-                && compiled.schemaVersion() >= 2
-            ? discoverActionTarget(discoveredRun, compiled, action)
-            : new WorkflowActionBindingService.Discovery(null);
+        WorkflowActionBindingService.Discovery discovery =
+            node instanceof WorkflowNode.Action action && compiled.schemaVersion() >= 2
+                ? discoverActionTargetAsPrincipal(
+                    workspaceId, version, discoveredRun, compiled, action)
+                : new WorkflowActionBindingService.Discovery(null);
         WorkspaceService.LockedPermissionSnapshot authorization = compiled.schemaVersion() >= 2
             ? lockAuthorization(workspaceId, version, discovery)
             : null;
@@ -132,21 +135,25 @@ public class WorkflowStepTransactionService {
                 true);
         }
         if (compiled.schemaVersion() >= 2) {
-            String stopReason = recordPolicyService.stopReason(
-                run, compiled, principal.attributionUserId());
+            String stopReason = runAs(run, principal,
+                () -> recordPolicyService.stopReason(
+                    run, compiled, principal.attributionUserId()));
             if (stopReason != null) {
                 return stopBeforeNode(
                     run, nodeType, leaseOwner, startedAt, stopReason);
             }
         } else {
-            recordGuard.requireAccessible(run);
+            runAs(run, principal, () -> {
+                recordGuard.requireAccessible(run);
+                return null;
+            });
         }
         WorkflowNode executionNode = node;
         if (node instanceof WorkflowNode.Action action && compiled.schemaVersion() >= 2) {
             executionNode = new WorkflowNode.Action(
                 action.id(),
-                bindingService.resolveLocked(
-                    run, action.config(), discovery, authorization, compiled));
+                runAs(run, principal, () -> bindingService.resolveLocked(
+                    run, action.config(), discovery, authorization, compiled)));
         }
         if (node instanceof WorkflowNode.Delay delay) {
             return enterDelay(run, delay, compiled, leaseOwner, startedAt);
@@ -158,10 +165,12 @@ public class WorkflowStepTransactionService {
                 && leaseOwner != null
             ? requireReservedActionStep(run)
             : null;
-        WorkflowStepTransition transition = nodeExecutor.execute(
-            new WorkflowNodeExecutionContext(
-                run, version, compiled, principal, authorization),
-            executionNode);
+        WorkflowNode finalExecutionNode = executionNode;
+        WorkflowStepTransition transition = runAs(run, principal,
+            () -> nodeExecutor.execute(
+                new WorkflowNodeExecutionContext(
+                    run, version, compiled, principal, authorization),
+                finalExecutionNode));
         LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
         WorkflowEdge edge = transition.outcome() == null
             ? null
@@ -214,6 +223,14 @@ public class WorkflowStepTransactionService {
         return new StepResult(true, edge.targetNodeId(), false, false);
     }
 
+    private <T> T runAs(
+            WorkflowRun run,
+            WorkflowExecutionPrincipal principal,
+            Supplier<T> work) {
+        return automationExecutor.runAs(
+            run.getWorkspaceId(), principal.principal(), principal.role(), work);
+    }
+
     private WorkflowActionBindingService.Discovery discoverActionTarget(
             WorkflowRun run,
             CompiledWorkflow compiled,
@@ -229,6 +246,16 @@ public class WorkflowStepTransactionService {
             default -> null;
         };
         return new WorkflowActionBindingService.Discovery(target);
+    }
+
+    private WorkflowActionBindingService.Discovery discoverActionTargetAsPrincipal(
+            int workspaceId,
+            WorkflowVersion version,
+            WorkflowRun run,
+            CompiledWorkflow compiled,
+            WorkflowNode.Action action) {
+        WorkflowExecutionPrincipal principal = principalService.resolve(workspaceId, version);
+        return runAs(run, principal, () -> discoverActionTarget(run, compiled, action));
     }
 
     private static Map<Integer, Set<Permission>> requiredMembers(

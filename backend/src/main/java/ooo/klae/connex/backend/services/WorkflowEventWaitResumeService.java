@@ -38,6 +38,7 @@ public class WorkflowEventWaitResumeService {
     private final WorkflowTraversalService traversalService;
     private final WorkflowExecutionPrincipalService principalService;
     private final WorkflowRecordPolicyService recordPolicyService;
+    private final AutomationExecutor automationExecutor;
     private final WorkspaceService workspaceService;
 
     @Transactional(
@@ -79,8 +80,12 @@ public class WorkflowEventWaitResumeService {
                 "wait_checkpoint_invalid",
                 "The waiting workflow event checkpoint is invalid.");
         }
-        String stopReason = recordPolicyService.stopReason(
-            run, compiled, principal.attributionUserId());
+        String stopReason = automationExecutor.runAs(
+            workspaceId,
+            principal.principal(),
+            principal.role(),
+            () -> recordPolicyService.stopReason(
+                run, compiled, principal.attributionUserId()));
         WorkflowStepRun step = runMapper.getStepByNodeForUpdate(
             workspaceId, runId, run.getCurrentNodeId());
         if (step == null || !"wait".equals(step.getNodeType())

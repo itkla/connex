@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Objects;
 
 import org.springframework.stereotype.Service;
 
@@ -107,6 +108,9 @@ public class WorkflowDateReconciliationService {
             return;
         }
         if ("planned".equals(existing.getState())) {
+            boolean unchangedSchedule = Objects.equals(
+                    existing.getScheduledLocalDate(), schedule.scheduledLocalDate())
+                && Objects.equals(existing.getDueAt(), schedule.dueAt());
             enrollmentMapper.refreshPlanned(
                 workspaceId,
                 existing.getId(),
@@ -114,7 +118,9 @@ public class WorkflowDateReconciliationService {
                 outbox.getWorkflowRuntimeGeneration(),
                 schedule.scheduledLocalDate(),
                 schedule.dueAt());
-            if (schedule.scheduledLocalDate().isBefore(today.minusDays(1))) {
+            boolean persistedYesterday = unchangedSchedule
+                && schedule.scheduledLocalDate().equals(today.minusDays(1));
+            if (schedule.scheduledLocalDate().isBefore(today) && !persistedYesterday) {
                 enrollmentMapper.markMissed(workspaceId, existing.getId(), now);
             }
         } else if ("superseded".equals(existing.getState())

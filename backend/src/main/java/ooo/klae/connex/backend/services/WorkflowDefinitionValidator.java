@@ -897,8 +897,8 @@ public class WorkflowDefinitionValidator {
     ) {
 
         public CompiledWorkflow {
-            nodes = Map.copyOf(nodes);
-            nodeTypes = Map.copyOf(nodeTypes);
+            nodes = Collections.unmodifiableMap(new LinkedHashMap<>(nodes));
+            nodeTypes = Collections.unmodifiableMap(new LinkedHashMap<>(nodeTypes));
             Map<String, Map<WorkflowEdge.Outcome, WorkflowEdge>> transitions = new LinkedHashMap<>();
             outgoing.forEach((nodeId, edges) -> {
                 Map<WorkflowEdge.Outcome, WorkflowEdge> copiedEdges =

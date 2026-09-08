@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,6 +36,7 @@ class WorkflowDelayResumeServiceTest {
     @Mock private WorkflowExecutionPrincipalService principalService;
     @Mock private WorkflowRecordGuard recordGuard;
     @Mock private WorkflowRecordPolicyService recordPolicyService;
+    @Mock private AutomationExecutor automationExecutor;
     @Mock private WorkspaceService workspaceService;
 
     @Test
@@ -46,6 +48,7 @@ class WorkflowDelayResumeServiceTest {
             principalService,
             recordGuard,
             recordPolicyService,
+            automationExecutor,
             workspaceService);
         WorkflowRun run = new WorkflowRun();
         run.setId(31L);
@@ -71,16 +74,26 @@ class WorkflowDelayResumeServiceTest {
             7, Map.of(17, Set.of()))).thenReturn(authorization);
         when(principalService.resolveLocked(7, version, authorization)).thenReturn(
             new WorkflowExecutionPrincipal(actor, "member", 17, 17));
+        when(automationExecutor.runAs(
+                org.mockito.ArgumentMatchers.eq(7),
+                org.mockito.ArgumentMatchers.eq(actor),
+                org.mockito.ArgumentMatchers.eq("member"),
+                any()))
+            .thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(3).get());
         WorkflowNode.Delay delay = new WorkflowNode.Delay(
             "delay", new WorkflowDelayConfig(3_600));
         WorkflowEdge edge = new WorkflowEdge(
             "delay-end", "delay", "end", WorkflowEdge.Outcome.NEXT);
         CompiledWorkflow compiled = new CompiledWorkflow(
+            2,
             "trigger",
             Map.of("delay", delay),
             Map.of("delay", NodeType.DELAY),
             Map.of("delay", Map.of(WorkflowEdge.Outcome.NEXT, edge)),
             List.of("delay"),
+            List.of(),
+            null,
+            null,
             null);
         when(traversalService.compiled(run)).thenReturn(compiled);
         when(runMapper.succeedWaitingDelayStep(
@@ -95,7 +108,8 @@ class WorkflowDelayResumeServiceTest {
 
         assertTrue(service.resume(7, 31L, "owner"));
 
-        verify(recordGuard).requireAccessible(run);
+        verify(recordPolicyService).stopReason(run, compiled, 17);
+        verify(recordGuard, never()).requireAccessible(run);
         verify(runMapper, never()).insertStep(any());
         verify(runMapper).advanceClaimedRun(7, 31L, "delay", "end", "owner");
     }

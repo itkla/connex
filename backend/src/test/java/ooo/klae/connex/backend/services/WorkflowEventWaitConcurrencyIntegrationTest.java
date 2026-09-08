@@ -22,6 +22,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowEventWait;
 import ooo.klae.connex.backend.beans.WorkflowRun;
@@ -244,6 +246,7 @@ class WorkflowEventWaitConcurrencyIntegrationTest extends AbstractServiceTest {
         WorkflowExecutionPrincipalService principals =
             mock(WorkflowExecutionPrincipalService.class);
         WorkflowRecordPolicyService policies = mock(WorkflowRecordPolicyService.class);
+        AutomationExecutor automationExecutor = mock(AutomationExecutor.class);
         WorkspaceService workspaces = mock(WorkspaceService.class);
         WorkspaceService.LockedPermissionSnapshot authorization =
             new WorkspaceService.LockedPermissionSnapshot(
@@ -257,6 +260,9 @@ class WorkflowEventWaitConcurrencyIntegrationTest extends AbstractServiceTest {
             eq(workspace.getId()), any(WorkflowVersion.class), eq(authorization)))
             .thenReturn(principal);
         when(traversal.compiled(any(WorkflowRun.class))).thenReturn(compiled);
+        when(automationExecutor.runAs(
+                eq(workspace.getId()), any(User.class), eq("owner"), any()))
+            .thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(3).get());
         return new WorkflowEventWaitResumeService(
             runMapper,
             versionMapper,
@@ -265,6 +271,7 @@ class WorkflowEventWaitConcurrencyIntegrationTest extends AbstractServiceTest {
             traversal,
             principals,
             policies,
+            automationExecutor,
             workspaces);
     }
 

@@ -33,6 +33,7 @@ public class WorkflowDelayResumeService {
     private final WorkflowExecutionPrincipalService principalService;
     private final WorkflowRecordGuard recordGuard;
     private final WorkflowRecordPolicyService recordPolicyService;
+    private final AutomationExecutor automationExecutor;
     private final WorkspaceService workspaceService;
 
     @Transactional(
@@ -89,8 +90,12 @@ public class WorkflowDelayResumeService {
                 true);
         }
         if (compiled.schemaVersion() >= 2) {
-            String stopReason = recordPolicyService.stopReason(
-                run, compiled, principal.attributionUserId());
+            String stopReason = automationExecutor.runAs(
+                workspaceId,
+                principal.principal(),
+                principal.role(),
+                () -> recordPolicyService.stopReason(
+                    run, compiled, principal.attributionUserId()));
             if (stopReason != null) {
                 LocalDateTime stoppedAt = LocalDateTime.now(ZoneOffset.UTC);
                 if (runMapper.skipExistingStep(

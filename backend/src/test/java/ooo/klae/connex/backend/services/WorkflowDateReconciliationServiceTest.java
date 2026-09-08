@@ -119,6 +119,8 @@ class WorkflowDateReconciliationServiceTest {
                 LocalDate.of(2027, 3, 1),
                 LocalDateTime.of(2027, 3, 1, 9, 0),
                 ZoneId.of("UTC"));
+        existing.setScheduledLocalDate(schedule.scheduledLocalDate());
+        existing.setDueAt(schedule.dueAt());
         when(dealMapper.getDealByIdForUpdate(7, 19)).thenReturn(deal);
         when(enrollmentMapper.getPendingByRecordForUpdate(7, 11, 19))
             .thenReturn(List.of(existing));
@@ -132,6 +134,41 @@ class WorkflowDateReconciliationServiceTest {
         verify(enrollmentMapper).refreshPlanned(
             7, 41L, 29L, 5L, schedule.scheduledLocalDate(), schedule.dueAt());
         verify(enrollmentMapper, never()).markMissed(7, 41L, now);
+    }
+
+    @Test
+    void reconfiguredFutureOccurrenceMovedToYesterdayIsMissed() {
+        LocalDateTime now = LocalDateTime.of(2027, 3, 2, 12, 0);
+        LocalDate sourceDate = LocalDate.of(2027, 3, 31);
+        WorkflowDateEnrollment existing = enrollment(41L, sourceDate, "planned");
+        existing.setScheduledLocalDate(LocalDate.of(2027, 3, 3));
+        existing.setDueAt(LocalDateTime.of(2027, 3, 3, 9, 0));
+        Deal deal = new Deal();
+        deal.setExpectedCloseDate(sourceDate.toString());
+        WorkflowDateScheduleService.Schedule changedSchedule =
+            new WorkflowDateScheduleService.Schedule(
+                sourceDate,
+                LocalDate.of(2027, 3, 1),
+                LocalDateTime.of(2027, 3, 1, 9, 0),
+                ZoneId.of("UTC"));
+        when(dealMapper.getDealByIdForUpdate(7, 19)).thenReturn(deal);
+        when(enrollmentMapper.getPendingByRecordForUpdate(7, 11, 19))
+            .thenReturn(List.of(existing));
+        when(enrollmentMapper.currentTimestamp(7, 11)).thenReturn(now);
+        when(scheduleService.resolve(sourceDate, trigger)).thenReturn(changedSchedule);
+        when(enrollmentMapper.getByPeriodForUpdate(
+            7, 11, 19, "expectedCloseDate", sourceDate)).thenReturn(existing);
+
+        service.reconcile(outbox, version, trigger);
+
+        verify(enrollmentMapper).refreshPlanned(
+            7,
+            41L,
+            29L,
+            5L,
+            changedSchedule.scheduledLocalDate(),
+            changedSchedule.dueAt());
+        verify(enrollmentMapper).markMissed(7, 41L, now);
     }
 
     private static WorkflowDateEnrollment enrollment(
