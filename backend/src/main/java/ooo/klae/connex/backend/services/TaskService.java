@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Predicate;
@@ -181,10 +182,29 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_CREATE)
     public Task create(Task task) {
+        return create(task, null);
+    }
+
+    /** Creates a task using an assignee membership locked before a workflow run root. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.TASK_CREATE)
+    public Task createWithLockedAssignee(
+            Task task,
+            WorkspaceService.LockedPermissionSnapshot authorization) {
+        Objects.requireNonNull(authorization, "authorization")
+            .requireMember(requireAssigneeId(task));
+        return create(task, authorization);
+    }
+
+    private Task create(
+            Task task,
+            WorkspaceService.LockedPermissionSnapshot authorization) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = currentActorOrNull();
         task.setWorkspaceId(workspaceId);
-        lockAssignee(task, workspaceId);
+        if (authorization == null) {
+            lockAssignee(task, workspaceId);
+        }
         validateLinkedRecords(task, workspaceId);
         lockTaskBoard(workspaceId);
         task.setStatus(task.isCompleted() ? STATUS_DONE : STATUS_TODO);

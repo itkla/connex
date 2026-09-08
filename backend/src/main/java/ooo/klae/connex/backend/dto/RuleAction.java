@@ -1,9 +1,11 @@
 package ooo.klae.connex.backend.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+import tools.jackson.databind.JsonNode;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -63,4 +65,29 @@ public class RuleAction {
     /** Immutable revision selected by a {@code send_message} action. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Integer campaignMessageVersion;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private WorkflowValueRef targetUserRef;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private WorkflowValueRef dueDateRef;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private WorkflowTextTemplate titleTemplate;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private WorkflowTextTemplate bodyTemplate;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Size(max = 48)
+    private String field;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private JsonNode value;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private WorkflowValueRef valueRef;
+
+    @JsonIgnore
+    private String resolvedDueDate;
 }

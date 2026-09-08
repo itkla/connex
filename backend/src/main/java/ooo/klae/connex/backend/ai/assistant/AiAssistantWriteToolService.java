@@ -1118,6 +1118,10 @@ public class AiAssistantWriteToolService {
         return deal == null ? 0 : deal.getId();
     }
 
+    private static int id(Company company) {
+        return company == null ? 0 : company.getId();
+    }
+
     private static int id(User user) {
         return user == null ? 0 : user.getId();
     }

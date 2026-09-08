@@ -27,8 +27,37 @@ public record WorkflowListItemDto(
     Integer createdById,
     Integer updatedById,
     LocalDateTime createdAt,
-    LocalDateTime updatedAt
+    LocalDateTime updatedAt,
+    @JsonInclude(Include.NON_NULL) RuleTrigger trigger
 ) {
+
+    public WorkflowListItemDto(
+            int id,
+            String name,
+            String description,
+            boolean enabled,
+            String runtimeOwner,
+            LocalDateTime archivedAt,
+            LocalDateTime intakePausedAt,
+            Integer intakePausedById,
+            int draftRevision,
+            String recordType,
+            String executionMode,
+            Integer runAsUserId,
+            ActiveVersion activeVersion,
+            int nodeCount,
+            int actionCount,
+            LatestRun latestRun,
+            Integer createdById,
+            Integer updatedById,
+            LocalDateTime createdAt,
+            LocalDateTime updatedAt) {
+        this(
+            id, name, description, enabled, runtimeOwner, archivedAt, intakePausedAt,
+            intakePausedById, draftRevision, recordType, executionMode, runAsUserId,
+            activeVersion, nodeCount, actionCount, latestRun, createdById, updatedById,
+            createdAt, updatedAt, null);
+    }
 
     /** Immutable active-version metadata without graph payloads. */
     @JsonInclude(Include.ALWAYS)

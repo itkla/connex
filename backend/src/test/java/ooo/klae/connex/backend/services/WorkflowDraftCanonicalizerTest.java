@@ -352,6 +352,16 @@ class WorkflowDraftCanonicalizerTest {
     }
 
     @Test
+    void schemaV1CanonicalBytesOmitEverySchemaV2Component() {
+        String canonical = canonicalize(minimalDefinition(), canvas("end")).definitionJson();
+
+        assertFalse(canonical.contains("\"inputs\""));
+        assertFalse(canonical.contains("\"enrollment\""));
+        assertFalse(canonical.contains("\"stopConditions\""));
+        assertFalse(canonical.contains("\"config\":null"));
+    }
+
+    @Test
     void anActionThatSetsAResponseDeadlineCanonicalizesWithIt() {
         String withSla = definition(
             "[{\"type\":\"ACTION\",\"id\":\"action-1\","

@@ -17,7 +17,9 @@ public record WorkflowEdge(
     public enum Outcome {
         NEXT,
         YES,
-        NO;
+        NO,
+        COMPLETED,
+        TIMEOUT;
 
         @JsonValue
         public String value() {

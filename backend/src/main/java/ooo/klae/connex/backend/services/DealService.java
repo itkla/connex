@@ -1244,7 +1244,7 @@ public class DealService {
             throw new BadRequestException("Invalid deal expected close date: " + expectedCloseDate);
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal before = dealMapper.getDealById(workspaceId, id);
+        Deal before = dealMapper.getDealByIdForUpdate(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Deal not found");
         dealMapper.updateExpectedCloseDate(workspaceId, id, expectedCloseDate);
         Deal after = dealMapper.getDealById(workspaceId, id);
@@ -1829,10 +1829,32 @@ public class DealService {
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal updateOwner(int dealId, Integer ownerId) {
+        return updateOwner(dealId, ownerId, null);
+    }
+
+    /** Updates ownership using a target membership locked before a workflow run root. */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal updateOwnerWithLockedMember(
+            int dealId,
+            Integer ownerId,
+            WorkspaceService.LockedPermissionSnapshot authorization) {
+        if (ownerId != null) {
+            Objects.requireNonNull(authorization, "authorization").requireMember(ownerId);
+        }
+        return updateOwner(dealId, ownerId, authorization);
+    }
+
+    private Deal updateOwner(
+            int dealId,
+            Integer ownerId,
+            WorkspaceService.LockedPermissionSnapshot authorization) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
-        if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        if (ownerId != null && authorization == null) {
+            workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        }
         dealMapper.updateOwner(workspaceId, dealId, ownerId);
         if (ownerId != null) {
             dealMapper.removeCollaborator(workspaceId, dealId, ownerId);

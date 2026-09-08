@@ -6,6 +6,15 @@ import com.fasterxml.jackson.annotation.JsonValue;
 
 /** Stable machine-readable workflow validation, simulation, and path diagnostic codes. */
 public enum WorkflowDiagnosticCode {
+    MANUAL_ENTRY_INVALID,
+    MANUAL_ENTRY_DISABLED,
+    INPUT_DEFINITION_INVALID,
+    INPUT_REQUIRED,
+    INPUT_UNKNOWN,
+    INPUT_TYPE_INVALID,
+    BINDING_INVALID,
+    BINDING_UNRESOLVED,
+    STEP_OUTPUT_NOT_DOMINATING,
     CANVAS_NODE_POSITION_REQUIRED,
     TRIGGER_COUNT_INVALID,
     ENTRY_NODE_REQUIRED,

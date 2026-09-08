@@ -6,7 +6,7 @@
   <sql id="runColumns">
     id, workspace_id, workflow_id, workflow_version_id, status, trigger_type,
     trigger_event, trigger_key, record_type, record_id, dedupe_key, trigger_outbox_id,
-    execution_mode, actor_user_id, attribution_user_id, current_node_id, wait_kind,
+    execution_mode, actor_user_id, attribution_user_id, launch_inputs_json, current_node_id, wait_kind,
     resume_at, lease_owner, lease_until, dispatch_count, cancel_requested_at,
     failure_node_id, failure_code, failure_message, started_at, finished_at, updated_at
   </sql>
@@ -15,7 +15,7 @@
     wr.id, wr.workspace_id, wr.workflow_id, wr.workflow_version_id, wr.status,
     wr.trigger_type, wr.trigger_event, wr.trigger_key, wr.record_type, wr.record_id,
     wr.dedupe_key, wr.trigger_outbox_id, wr.execution_mode, wr.actor_user_id,
-    wr.attribution_user_id, wr.current_node_id, wr.wait_kind, wr.resume_at,
+    wr.attribution_user_id, wr.launch_inputs_json, wr.current_node_id, wr.wait_kind, wr.resume_at,
     wr.lease_owner, wr.lease_until, wr.dispatch_count, wr.cancel_requested_at,
     wr.failure_node_id, wr.failure_code, wr.failure_message,
     wr.started_at, wr.finished_at, wr.updated_at,
@@ -26,7 +26,7 @@
   <sql id="stepColumns">
     id, workspace_id, workflow_run_id, sequence_number, node_id, node_type, status,
     attempt_count, retry_safety, selected_outcome, selected_edge_id, next_node_id,
-    action_outcome, action_reference_id,
+    action_outcome, action_reference_id, action_outputs_json,
     failure_code, failure_message, started_at, finished_at
   </sql>
 
@@ -34,11 +34,11 @@
     INSERT INTO workflow_run
       (workspace_id, workflow_id, workflow_version_id, status, trigger_type,
        trigger_event, trigger_key, record_type, record_id, dedupe_key, trigger_outbox_id,
-       execution_mode, actor_user_id, attribution_user_id, current_node_id, started_at)
+       execution_mode, actor_user_id, attribution_user_id, launch_inputs_json, current_node_id, started_at)
     VALUES
       (#{workspaceId}, #{workflowId}, #{workflowVersionId}, #{status}, #{triggerType},
        #{triggerEvent}, #{triggerKey}, #{recordType}, #{recordId}, #{dedupeKey},
-       #{triggerOutboxId}, #{executionMode}, #{actorUserId}, #{attributionUserId},
+       #{triggerOutboxId}, #{executionMode}, #{actorUserId}, #{attributionUserId}, #{launchInputsJson},
        #{currentNodeId}, #{startedAt})
   </insert>
 
@@ -97,12 +97,12 @@
     INSERT INTO workflow_step_run
       (workspace_id, workflow_run_id, sequence_number, node_id, node_type, status,
        attempt_count, retry_safety, selected_outcome, selected_edge_id, next_node_id,
-       action_outcome, action_reference_id,
+       action_outcome, action_reference_id, action_outputs_json,
        failure_code, failure_message, started_at, finished_at)
     VALUES
       (#{workspaceId}, #{workflowRunId}, #{sequenceNumber}, #{nodeId}, #{nodeType},
        #{status}, #{attemptCount}, #{retrySafety}, #{selectedOutcome}, #{selectedEdgeId},
-       #{nextNodeId}, #{actionOutcome}, #{actionReferenceId}, #{failureCode},
+       #{nextNodeId}, #{actionOutcome}, #{actionReferenceId}, #{actionOutputsJson}, #{failureCode},
        #{failureMessage}, #{startedAt}, #{finishedAt})
   </insert>
 
@@ -133,6 +133,7 @@
         next_node_id = NULL,
         action_outcome = NULL,
         action_reference_id = NULL,
+        action_outputs_json = NULL,
         failure_code = NULL,
         failure_message = NULL,
         started_at = #{startedAt},
@@ -182,6 +183,7 @@
         next_node_id = #{nextNodeId},
         action_outcome = #{actionOutcome},
         action_reference_id = #{actionReferenceId},
+        action_outputs_json = #{actionOutputsJson},
         failure_code = NULL,
         failure_message = NULL,
         finished_at = #{finishedAt}

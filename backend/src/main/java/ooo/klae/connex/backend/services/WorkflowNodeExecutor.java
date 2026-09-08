@@ -28,7 +28,8 @@ public class WorkflowNodeExecutor {
                 context.run().getRecordType(),
                 context.run().getRecordId(),
                 node.id(),
-                action.config());
+                action.config(),
+                context.principal().lockedPermissions());
             if (blocker != null) {
                 throw new WorkflowExecutionException(
                     blocker.code().value(),
@@ -43,7 +44,9 @@ public class WorkflowNodeExecutor {
                 context.run().getRecordId(),
                 context.principal().attributionUserId(),
                 context.principal().actorUserId(),
-                context.principal().lockedPermissions());
+                context.principal().lockedPermissions(),
+                context.compiled().schemaVersion(),
+                context.lockedAuthorization());
             WorkflowActionResult actionResult = automationExecutor.runAs(
                 context.run().getWorkspaceId(),
                 context.principal().principal(),

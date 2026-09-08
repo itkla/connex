@@ -80,6 +80,8 @@ import ooo.klae.connex.backend.services.PrivilegedAccountService;
 import ooo.klae.connex.backend.services.WorkflowRunReadService;
 import ooo.klae.connex.backend.services.WorkflowRunOperationService;
 import ooo.klae.connex.backend.services.WorkflowRuntimeOwnershipService;
+import ooo.klae.connex.backend.services.WorkflowCapabilityCatalog;
+import ooo.klae.connex.backend.services.WorkflowManualOptionsService;
 import ooo.klae.connex.backend.services.WorkflowService;
 import ooo.klae.connex.backend.services.WorkflowSimulationService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -113,6 +115,8 @@ class WorkflowControllerTest {
     @MockitoBean private WorkflowRunOperationService workflowRunOperationService;
     @MockitoBean private WorkflowRuntimeOwnershipService runtimeOwnershipService;
     @MockitoBean private WorkflowSimulationService simulationService;
+    @MockitoBean private WorkflowCapabilityCatalog capabilityCatalog;
+    @MockitoBean private WorkflowManualOptionsService manualOptionsService;
     @MockitoBean private WorkspaceService workspaceService;
     @MockitoBean private CompositeClientRegistrationRepository clientRegistrationRepository;
     @MockitoBean private SocialLoginClientRegistrations socialLoginClientRegistrations;

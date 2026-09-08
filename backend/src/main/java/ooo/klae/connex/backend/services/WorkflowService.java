@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
 import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
 import ooo.klae.connex.backend.dto.WorkflowLegacyRuleResolutionDto;
 import ooo.klae.connex.backend.dto.WorkflowListItemDto;
+import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
 import ooo.klae.connex.backend.dto.WorkflowValidationDto;
 import ooo.klae.connex.backend.dto.WorkflowVersionDto;
@@ -345,6 +346,16 @@ public class WorkflowService {
             draft.executionMode(),
             definition);
         boolean canonicalPublication = canonicalPublicationOwner(workflow);
+        if (definition.schemaVersion() >= 2 && !canonicalPublication) {
+            throw new WorkflowDefinitionValidationException(
+                "Schema-v2 workflows require the canonical runtime",
+                new WorkflowDiagnosticDto(
+                    WorkflowDiagnosticCode.LEGACY_PROJECTION_UNSUPPORTED,
+                    null,
+                    null,
+                    "schemaVersion",
+                    Map.of()));
+        }
         Rule projection = canonicalPublication
             ? versionProjection.project(workflow, draft, compiled)
             : project(workflow, draft);
@@ -793,6 +804,15 @@ public class WorkflowService {
         if (canonicalPublicationOwner(workflow)) {
             return null;
         }
+        WorkflowDefinition definition = canonicalizer.parseDefinition(draft.definitionJson());
+        if (definition.schemaVersion() >= 2) {
+            return new WorkflowDiagnosticDto(
+                WorkflowDiagnosticCode.LEGACY_PROJECTION_UNSUPPORTED,
+                null,
+                null,
+                "schemaVersion",
+                Map.of());
+        }
         try {
             project(workflow, draft);
             return null;
@@ -1141,6 +1161,7 @@ public class WorkflowService {
     }
 
     WorkflowDto toDto(Workflow workflow, CanonicalDraft draft) {
+        WorkflowDefinition definition = canonicalizer.parseDefinition(draft.definitionJson());
         return new WorkflowDto(
             workflow.getId(),
             draft.name(),
@@ -1154,13 +1175,14 @@ public class WorkflowService {
             draft.recordType(),
             draft.executionMode(),
             workflow.getDraftRunAsUserId(),
-            canonicalizer.parseDefinition(draft.definitionJson()),
+            definition,
             canonicalizer.parseCanvas(draft.canvasJson()),
             workflow.getActiveVersionId(),
             workflow.getCreatedById(),
             workflow.getUpdatedById(),
             workflow.getCreatedAt(),
-            workflow.getUpdatedAt());
+            workflow.getUpdatedAt(),
+            trigger(definition));
     }
 
     private WorkflowListItemDto toListItem(WorkflowListView workflow) {
@@ -1195,7 +1217,23 @@ public class WorkflowService {
             workflow.getCreatedById(),
             workflow.getUpdatedById(),
             workflow.getCreatedAt(),
-            workflow.getUpdatedAt());
+            workflow.getUpdatedAt(),
+            workflow.getTriggerConfig() == null
+                ? null
+                : definitionCodec.parse(workflow.getTriggerConfig(), RuleTrigger.class));
+    }
+
+    private static RuleTrigger trigger(WorkflowDefinition definition) {
+        if (definition == null || definition.nodes() == null) {
+            return null;
+        }
+        return definition.nodes().stream()
+            .filter(node -> node.id().equals(definition.entryNodeId()))
+            .filter(WorkflowNode.Trigger.class::isInstance)
+            .map(WorkflowNode.Trigger.class::cast)
+            .map(WorkflowNode.Trigger::config)
+            .findFirst()
+            .orElse(null);
     }
 
     private static WorkflowListItemDto.LatestRun latestRun(WorkflowListView workflow) {

@@ -17,10 +17,12 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.WorkflowCreateRequest;
+import ooo.klae.connex.backend.dto.WorkflowCatalogDto;
 import ooo.klae.connex.backend.dto.WorkflowDto;
 import ooo.klae.connex.backend.dto.WorkflowDraftRequest;
 import ooo.klae.connex.backend.dto.WorkflowLegacyRuleResolutionDto;
 import ooo.klae.connex.backend.dto.WorkflowListItemDto;
+import ooo.klae.connex.backend.dto.WorkflowManualOptionsDto;
 import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
 import ooo.klae.connex.backend.dto.WorkflowRuntimeOwnerRequest;
 import ooo.klae.connex.backend.dto.WorkflowSimulateRequest;
@@ -28,8 +30,12 @@ import ooo.klae.connex.backend.dto.WorkflowSimulationDto;
 import ooo.klae.connex.backend.dto.WorkflowValidationDto;
 import ooo.klae.connex.backend.dto.WorkflowVersionDto;
 import ooo.klae.connex.backend.services.WorkflowRuntimeOwnershipService;
+import ooo.klae.connex.backend.services.WorkflowCapabilityCatalog;
+import ooo.klae.connex.backend.services.WorkflowManualOptionsService;
 import ooo.klae.connex.backend.services.WorkflowService;
 import ooo.klae.connex.backend.services.WorkflowSimulationService;
+import ooo.klae.connex.backend.tenant.Permission;
+import ooo.klae.connex.backend.tenant.RequirePermission;
 
 /** HTTP lifecycle contract for workspace-scoped versioned workflows. */
 @RestController
@@ -40,6 +46,21 @@ public class WorkflowController {
     private final WorkflowService workflowService;
     private final WorkflowRuntimeOwnershipService runtimeOwnershipService;
     private final WorkflowSimulationService simulationService;
+    private final WorkflowCapabilityCatalog capabilityCatalog;
+    private final WorkflowManualOptionsService manualOptionsService;
+
+    @GetMapping("/catalog")
+    @RequirePermission(Permission.RULE_MANAGE)
+    public WorkflowCatalogDto catalog() {
+        return capabilityCatalog.catalog();
+    }
+
+    @GetMapping("/manual-options")
+    public WorkflowManualOptionsDto manualOptions(
+            @RequestParam String recordType,
+            @RequestParam(required = false) Integer recordId) {
+        return manualOptionsService.options(recordType, recordId);
+    }
 
     @GetMapping
     public List<WorkflowListItemDto> list(

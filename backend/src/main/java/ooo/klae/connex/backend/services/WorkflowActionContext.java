@@ -13,7 +13,9 @@ public record WorkflowActionContext(
     int entityId,
     int targetUserId,
     int actorUserId,
-    Set<Permission> lockedPermissions
+    Set<Permission> lockedPermissions,
+    int schemaVersion,
+    WorkspaceService.LockedPermissionSnapshot lockedAuthorization
 ) implements AutomationActionContext {
 
     public WorkflowActionContext {
@@ -27,7 +29,30 @@ public record WorkflowActionContext(
             String recordType,
             int entityId,
             int targetUserId) {
-        this(workspaceId, runId, nodeId, recordType, entityId, targetUserId, targetUserId, Set.of());
+        this(workspaceId, runId, nodeId, recordType, entityId, targetUserId, targetUserId, Set.of(), 1);
+    }
+
+    public WorkflowActionContext(
+            int workspaceId,
+            long runId,
+            String nodeId,
+            String recordType,
+            int entityId,
+            int targetUserId,
+            int actorUserId,
+            Set<Permission> lockedPermissions,
+            int schemaVersion) {
+        this(
+            workspaceId,
+            runId,
+            nodeId,
+            recordType,
+            entityId,
+            targetUserId,
+            actorUserId,
+            lockedPermissions,
+            schemaVersion,
+            null);
     }
 
     @Override

@@ -24,6 +24,7 @@ public class WorkflowRun {
     private String executionMode;
     private Integer actorUserId;
     private Integer attributionUserId;
+    private String launchInputsJson;
     private String currentNodeId;
     private String waitKind;
     private LocalDateTime resumeAt;

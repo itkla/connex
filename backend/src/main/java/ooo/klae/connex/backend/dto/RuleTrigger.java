@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.util.List;
 
 import jakarta.validation.constraints.Max;
@@ -37,4 +39,22 @@ public class RuleTrigger {
 
     @Size(max = 16)
     private String cadence;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean allowManualRuns;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Size(max = 48)
+    private String dateField;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer offsetDays;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Size(max = 5)
+    private String localTime;
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Size(max = 64)
+    private String timezone;
 }

@@ -73,7 +73,8 @@ class RuleDefinitionValidatorTest {
             BEAN_VALIDATOR,
             new WorkflowDocumentAutomationGate(documentOpen),
             new WorkflowTriggeredSendGate(triggeredSendOpen),
-            systemActor);
+            systemActor,
+            new WorkflowCapabilityCatalog());
     }
 
     @AfterAll

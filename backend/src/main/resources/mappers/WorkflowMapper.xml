@@ -60,6 +60,7 @@
              ) draft_node
              WHERE draft_node.node_type = 'ACTION'
            ) AS action_count,
+           draft_trigger.config AS trigger_config,
            canonical_run.id AS canonical_run_id,
            canonical_run.status AS canonical_run_status,
            canonical_run.started_at AS canonical_run_started_at,
@@ -76,6 +77,21 @@
       ON active_version.workspace_id = w.workspace_id
      AND active_version.workflow_id = w.id
      AND active_version.id = w.active_version_id
+    LEFT JOIN LATERAL (
+      SELECT trigger_node.config
+      FROM JSON_TABLE(
+        w.draft_definition_json,
+        '$.nodes[*]' COLUMNS(
+          node_id VARCHAR(64) PATH '$.id',
+          node_type VARCHAR(16) PATH '$.type',
+          config JSON PATH '$.config'
+        )
+      ) trigger_node
+      WHERE trigger_node.node_id = JSON_UNQUOTE(
+          JSON_EXTRACT(w.draft_definition_json, '$.entryNodeId'))
+        AND trigger_node.node_type = 'TRIGGER'
+      LIMIT 1
+    ) draft_trigger ON TRUE
     LEFT JOIN LATERAL (
       SELECT wr.id, wr.status, wr.started_at, wr.finished_at
       FROM workflow_run wr
@@ -100,6 +116,31 @@
   <select id="getById" resultType="Workflow">
     SELECT <include refid="workflowColumns"/> FROM workflow
     WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </select>
+
+  <select id="listManualOptions" resultType="WorkflowManualOptionView">
+    SELECT w.id AS workflow_id,
+           v.name AS workflow_name,
+           w.enabled,
+           w.runtime_owner,
+           w.archived_at,
+           w.intake_paused_at,
+           v.id AS workflow_version_id,
+           v.version_number,
+           v.record_type,
+           v.execution_mode,
+           v.run_as_user_id,
+           v.created_by_id,
+           v.definition_json,
+           v.definition_hash
+    FROM workflow w
+    JOIN workflow_version v
+      ON v.workspace_id = w.workspace_id
+     AND v.workflow_id = w.id
+     AND v.id = w.active_version_id
+    WHERE w.workspace_id = #{workspaceId}
+      AND v.record_type = #{recordType}
+    ORDER BY v.name, w.id
   </select>
 
   <select id="getByIdForUpdate" resultType="Workflow">

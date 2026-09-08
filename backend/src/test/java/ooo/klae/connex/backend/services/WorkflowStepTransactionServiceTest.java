@@ -49,6 +49,8 @@ class WorkflowStepTransactionServiceTest {
     @Mock private WorkflowExecutionPrincipalService principalService;
     @Mock private WorkflowRecordGuard recordGuard;
     @Mock private WorkflowNodeExecutor nodeExecutor;
+    @Mock private WorkflowActionBindingService bindingService;
+    @Mock private WorkspaceService workspaceService;
 
     private WorkflowStepTransactionService service;
     private WorkflowRun run;
@@ -62,7 +64,9 @@ class WorkflowStepTransactionServiceTest {
             workflowVersionMapper,
             principalService,
             recordGuard,
-            nodeExecutor);
+            nodeExecutor,
+            bindingService,
+            workspaceService);
         run = new WorkflowRun();
         run.setId(31L);
         run.setWorkspaceId(7);

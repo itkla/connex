@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
@@ -10,6 +11,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
     @JsonSubTypes.Type(value = WorkflowNode.Condition.class, name = "CONDITION"),
     @JsonSubTypes.Type(value = WorkflowNode.Action.class, name = "ACTION"),
     @JsonSubTypes.Type(value = WorkflowNode.Delay.class, name = "DELAY"),
+    @JsonSubTypes.Type(value = WorkflowNode.Wait.class, name = "WAIT"),
     @JsonSubTypes.Type(value = WorkflowNode.End.class, name = "END")
 })
 public sealed interface WorkflowNode {
@@ -28,6 +30,18 @@ public sealed interface WorkflowNode {
     /** A bounded duration wait that continues through one next edge. */
     record Delay(String id, WorkflowDelayConfig config) implements WorkflowNode { }
 
+    /** A bounded correlated event wait with completed and timeout branches. */
+    record Wait(String id, WorkflowWaitConfig config) implements WorkflowNode { }
+
     /** A terminal workflow node. */
-    record End(String id) implements WorkflowNode { }
+    record End(
+        String id,
+        @JsonInclude(JsonInclude.Include.NON_NULL) WorkflowEndConfig config
+    ) implements WorkflowNode {
+
+        /** Preserves the schema-v1 terminal-node constructor. */
+        public End(String id) {
+            this(id, null);
+        }
+    }
 }

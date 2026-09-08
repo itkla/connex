@@ -72,9 +72,10 @@ class WorkflowDraftMutationValidationTest {
             VALIDATOR_FACTORY.getValidator(),
             new WorkflowDocumentAutomationGate(true),
             new WorkflowTriggeredSendGate(true),
-            systemActor);
+            systemActor,
+            new WorkflowCapabilityCatalog());
         WorkflowDefinitionValidator definitionValidator =
-            new WorkflowDefinitionValidator(ruleValidator);
+            new WorkflowDefinitionValidator(ruleValidator, new WorkflowCapabilityCatalog());
         RuleDefinitionCodec definitionCodec = new RuleDefinitionCodec(
             JsonMapper.builder().build());
         service = new WorkflowService(
