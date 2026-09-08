@@ -49,6 +49,48 @@ import tools.jackson.databind.ObjectMapper;
 class NotificationReconciliationServiceTest {
 
     @Test
+    void taskReminderUsesDirectCompanyContextAndDeepLink() {
+        NotificationMapper notificationMapper = Mockito.mock(NotificationMapper.class);
+        PreferenceMapper preferenceMapper = Mockito.mock(PreferenceMapper.class);
+        NotificationDispatcher dispatcher = Mockito.mock(NotificationDispatcher.class);
+        TaskReminderCandidate candidate = new TaskReminderCandidate();
+        candidate.setWorkspaceId(7);
+        candidate.setTaskId(91);
+        candidate.setTaskLabel("Review account");
+        candidate.setDueDate("2026-06-23");
+        candidate.setRecipientId(42);
+        candidate.setRecipientTimezone("Asia/Tokyo");
+        candidate.setCompanyId(18);
+        candidate.setCompanyLabel("Acme");
+        when(notificationMapper.findWorkspaceRecipientIds(7)).thenReturn(List.of(42));
+        when(notificationMapper.findReminderNotifications(7, 42)).thenReturn(List.of());
+        when(preferenceMapper.findByWorkspaceAndChannel(7, "in_app")).thenReturn(List.of());
+        when(notificationMapper.findTaskReminderCandidates(7)).thenReturn(List.of(candidate));
+        when(notificationMapper.findDealReminderCandidates(7)).thenReturn(List.of());
+        NotificationReconciliationService service = new NotificationReconciliationService(
+            notificationMapper,
+            Mockito.mock(DuplicateDecisionLockService.class),
+            preferenceMapper,
+            wrap(dispatcher, notificationMapper, preferenceMapper),
+            stateVersions(notificationMapper),
+            new NotificationProperties(),
+            Mockito.mock(ScoringService.class),
+            Mockito.mock(IntroductionService.class),
+            noRiskService(),
+            Clock.fixed(Instant.parse("2026-06-23T15:30:00Z"), ZoneOffset.UTC),
+            new ObjectMapper());
+
+        service.reconcileWorkspace(7, true);
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(dispatcher).dispatch(captor.capture());
+        assertEquals("company", captor.getValue().getContextType());
+        assertEquals(18, captor.getValue().getContextId());
+        assertEquals("Acme", captor.getValue().getContextLabel());
+        assertEquals("/records/companies/18?task=91", captor.getValue().getActionUrl());
+    }
+
+    @Test
     void classifiesWarningCriticalAndInitialBackfillBoundaries() {
         LocalDate today = LocalDate.of(2026, 6, 24);
 

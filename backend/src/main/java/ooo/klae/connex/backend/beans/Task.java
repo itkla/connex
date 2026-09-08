@@ -10,7 +10,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Represents a to-do item assigned to a {@link User} and optionally linked to a {@link Person} or {@link Deal}.
+ * Represents a to-do item assigned to a {@link User} and optionally linked to a {@link Person},
+ * {@link Deal}, or {@link Company}.
  * Tasks have a due date and a completion status.
  * Mapped via {@code TaskMapper} / {@code TaskMapper.xml}.
  */
@@ -29,9 +30,11 @@ public class Task {
     @JsonIdentityReference(alwaysAsId = true)
     private User assignedTo;
     @JsonIdentityReference(alwaysAsId = true)
-    private Person person; // target contact
+    private Person person;
     @JsonIdentityReference(alwaysAsId = true)
     private Deal deal;
+    @JsonIdentityReference(alwaysAsId = true)
+    private Company company;
     private String createdAt;
     private String updatedAt;
     private List<EntityReference> references;
@@ -94,6 +97,14 @@ public class Task {
         this.deal = deal;
     }
 
+    public Company getCompany() {
+        return company;
+    }
+
+    public void setCompany(Company company) {
+        this.company = company;
+    }
+
     public String getCreatedAt() {
         return createdAt;
     }
@@ -110,4 +121,3 @@ public class Task {
         this.updatedAt = updatedAt;
     }
 }
-

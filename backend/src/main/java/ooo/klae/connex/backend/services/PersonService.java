@@ -503,9 +503,31 @@ public class PersonService {
     @Transactional
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person updateOwner(int personId, Integer ownerId) {
+        return updateOwner(personId, ownerId, null);
+    }
+
+    /** Updates ownership using a target membership locked before a workflow run root. */
+    @Transactional
+    @RequirePermission(Permission.PERSON_UPDATE)
+    public Person updateOwnerWithLockedMember(
+            int personId,
+            Integer ownerId,
+            WorkspaceService.LockedPermissionSnapshot authorization) {
+        if (ownerId != null) {
+            Objects.requireNonNull(authorization, "authorization").requireMember(ownerId);
+        }
+        return updateOwner(personId, ownerId, authorization);
+    }
+
+    private Person updateOwner(
+            int personId,
+            Integer ownerId,
+            WorkspaceService.LockedPermissionSnapshot authorization) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Person before = requireOwnedPerson(workspaceId, personId);
-        if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        if (ownerId != null && authorization == null) {
+            workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        }
         personMapper.updateOwner(workspaceId, personId, ownerId);
         auditService.record("person.updateOwner", "person", personId, before.getName(),
             "Updated owner on " + before.getName(),

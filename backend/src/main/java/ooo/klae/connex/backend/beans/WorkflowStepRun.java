@@ -23,6 +23,7 @@ public class WorkflowStepRun {
     private String nextNodeId;
     private String actionOutcome;
     private Long actionReferenceId;
+    private String actionOutputsJson;
     private String failureCode;
     private String failureMessage;
     private LocalDateTime startedAt;

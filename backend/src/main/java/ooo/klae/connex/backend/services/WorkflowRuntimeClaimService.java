@@ -209,6 +209,18 @@ public class WorkflowRuntimeClaimService {
             long expectedVersionId,
             long invocationId,
             int recordId) {
+        return claimManual(
+            workspaceId, workflowId, expectedVersionId, invocationId, recordId, "{}");
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public CanonicalClaim claimManual(
+            int workspaceId,
+            int workflowId,
+            long expectedVersionId,
+            long invocationId,
+            int recordId,
+            String launchInputsJson) {
         workflowTriggerOutboxMapper.ensureWorkspaceGate(workspaceId);
         Workflow workflow = workflowMapper.getByIdForUpdate(workspaceId, workflowId);
         if (!canonicalOwnerCanClaim(workflow)
@@ -217,7 +229,13 @@ public class WorkflowRuntimeClaimService {
             return CanonicalClaim.rejectedClaim();
         }
         WorkflowVersion version = activeVersion(workflow);
-        CompiledWorkflow compiled = compiled(workflow, version);
+        WorkflowDefinition definition = definition(workflow, version);
+        CompiledWorkflow compiled = definitionValidator.validate(
+            version.getRecordType(), version.getExecutionMode(), definition);
+        if ("denied".equals(WorkflowManualEligibilityService.manualEntryMode(
+                definition.schemaVersion(), WorkflowManualEligibilityService.trigger(definition)))) {
+            return CanonicalClaim.rejectedClaim();
+        }
         String triggerKey = Long.toString(invocationId);
         String key = "manual:" + invocationId + ":" + recordId;
         return claimCanonical(
@@ -231,7 +249,8 @@ public class WorkflowRuntimeClaimService {
             recordId,
             new DedupeKeys(key, null, null),
             null,
-            "queued");
+            "queued",
+            launchInputsJson);
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
@@ -310,6 +329,34 @@ public class WorkflowRuntimeClaimService {
             DedupeKeys keys,
             Long triggerOutboxId,
             String initialStatus) {
+        return claimCanonical(
+            workflow,
+            version,
+            compiled,
+            triggerType,
+            triggerEvent,
+            triggerKey,
+            recordType,
+            recordId,
+            keys,
+            triggerOutboxId,
+            initialStatus,
+            null);
+    }
+
+    private CanonicalClaim claimCanonical(
+            Workflow workflow,
+            WorkflowVersion version,
+            CompiledWorkflow compiled,
+            String triggerType,
+            String triggerEvent,
+            String triggerKey,
+            String recordType,
+            int recordId,
+            DedupeKeys keys,
+            Long triggerOutboxId,
+            String initialStatus,
+            String launchInputsJson) {
         if (workflow.getLegacyRuleId() != null) {
             RuleExecution opposite = findRuleExecution(
                 workflow.getWorkspaceId(), workflow.getLegacyRuleId(), keys);
@@ -337,6 +384,10 @@ public class WorkflowRuntimeClaimService {
         run.setExecutionMode(version.getExecutionMode());
         run.setActorUserId(actorUserId(version));
         run.setAttributionUserId(conditionActorId(version));
+        if (compiled.schemaVersion() >= 2) {
+            run.setLaunchInputsJson("manual".equals(triggerType)
+                ? launchInputsJson : "{}");
+        }
         run.setCurrentNodeId(compiled.entryNodeId());
         run.setStartedAt(LocalDateTime.now());
         try {
@@ -440,6 +491,12 @@ public class WorkflowRuntimeClaimService {
     }
 
     private CompiledWorkflow compiled(Workflow workflow, WorkflowVersion version) {
+        WorkflowDefinition definition = definition(workflow, version);
+        return definitionValidator.validate(
+            version.getRecordType(), version.getExecutionMode(), definition);
+    }
+
+    private WorkflowDefinition definition(Workflow workflow, WorkflowVersion version) {
         CanonicalDraft canonical = canonicalizer.canonicalizeDraftJson(
             version.getName(),
             version.getDescription(),
@@ -455,9 +512,7 @@ public class WorkflowRuntimeClaimService {
                 "The active workflow definition failed its integrity check.",
                 true);
         }
-        WorkflowDefinition definition = canonicalizer.parseDefinition(canonical.definitionJson());
-        return definitionValidator.validate(
-            version.getRecordType(), version.getExecutionMode(), definition);
+        return canonicalizer.parseDefinition(canonical.definitionJson());
     }
 
     private boolean entityTriggerMatches(

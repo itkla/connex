@@ -438,6 +438,15 @@ public class WorkspaceService {
         lockAndRequirePermissions(workspaceId, requiredByUser, false);
     }
 
+    /** Locks and returns the exact member authorization snapshot for a later tenant-record write. */
+    public LockedPermissionSnapshot lockAndRequirePermissionsSnapshot(
+            int workspaceId,
+            Map<Integer, Set<Permission>> requiredByUser) {
+        return new LockedPermissionSnapshot(
+            lockAndRequirePermissions(workspaceId, requiredByUser, false),
+            requiredByUser);
+    }
+
     /**
      * Locks the workspace exclusively while revalidating current membership and permissions.
      *
@@ -562,6 +571,19 @@ public class WorkspaceService {
                     }
                 }
             }
+        }
+
+        /** Requires an active membership proven by this transaction's locked snapshot. */
+        public void requireMember(int userId) {
+            if (!effectiveByUser.containsKey(userId)) {
+                throw new ForbiddenException(
+                    "User " + userId + " is not a member of this workspace");
+            }
+        }
+
+        /** Returns the permissions proven for one member by this locked snapshot. */
+        public Set<Permission> permissionsFor(int userId) {
+            return effectiveByUser.getOrDefault(userId, Set.of());
         }
 
         private static Map<Integer, Set<Permission>> immutablePermissionMap(

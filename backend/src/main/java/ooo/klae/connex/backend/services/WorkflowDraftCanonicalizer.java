@@ -176,8 +176,10 @@ public class WorkflowDraftCanonicalizer {
     }
 
     static void validateDefinitionStructure(WorkflowDefinition definition) {
-        if (definition == null || definition.schemaVersion() != 1) {
-            throw new BadRequestException("Workflow definition must use schemaVersion 1");
+        if (definition == null
+                || definition.schemaVersion() < 1
+                || definition.schemaVersion() > 2) {
+            throw new BadRequestException("Workflow definition schemaVersion is unsupported");
         }
         if (definition.nodes() == null) {
             throw new BadRequestException("Workflow nodes are required");

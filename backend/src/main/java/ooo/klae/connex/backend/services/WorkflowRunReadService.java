@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.core.type.TypeReference;
 
 import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.beans.Workflow;
@@ -44,6 +45,8 @@ public class WorkflowRunReadService {
     private static final int DEFAULT_LIMIT = 20;
     private static final int MAX_LIMIT = 50;
     private static final int MAX_CURSOR_LENGTH = 512;
+    private static final TypeReference<java.util.Map<String, Object>> OUTPUTS_TYPE =
+        new TypeReference<>() { };
 
     private final WorkflowMapper workflowMapper;
     private final WorkflowRunMapper workflowRunMapper;
@@ -305,10 +308,22 @@ public class WorkflowRunReadService {
             step.getNextNodeId(),
             step.getActionOutcome(),
             step.getActionReferenceId(),
+            actionOutputs(step.getActionOutputsJson()),
             step.getStartedAt(),
             step.getFinishedAt(),
             duration(step.getStartedAt(), step.getFinishedAt()),
             failure(step.getNodeId(), step.getFailureCode(), step.getFailureMessage()));
+    }
+
+    private java.util.Map<String, Object> actionOutputs(String json) {
+        if (json == null) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, OUTPUTS_TYPE);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Workflow action output is malformed", exception);
+        }
     }
 
     private static WorkflowRunSummaryDto.Failure failure(

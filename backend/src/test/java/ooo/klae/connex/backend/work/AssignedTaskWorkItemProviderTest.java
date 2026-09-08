@@ -17,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.dto.TaskWorkItem;
 import ooo.klae.connex.backend.dto.TaskWorkPage;
@@ -65,6 +66,24 @@ class AssignedTaskWorkItemProviderTest {
             WorkItemAction.complete, "a".repeat(64), null, null, null, null));
 
         verify(taskService).complete(9, "a".repeat(64));
+    }
+
+    @Test
+    void directCompanyTaskOpensItsCompanyContext() {
+        Task task = task(4, "Review account", "2026-08-29", "2026-08-01 00:00:00");
+        Company company = new Company();
+        company.setId(18);
+        task.setCompany(company);
+        when(taskService.findOpenAssignedWork(AS_OF, TODAY, Set.of(), 25))
+            .thenReturn(new TaskWorkPage(
+                List.of(new TaskWorkItem(task, "a".repeat(64))), 1, 1, AS_OF));
+        when(workspaceService.getCurrentPermissions()).thenReturn(Set.of(Permission.TASK_UPDATE));
+        AssignedTaskWorkItemProvider provider = new AssignedTaskWorkItemProvider(
+            taskService, workspaceService, Clock.fixed(AS_OF, ZoneOffset.UTC));
+
+        var result = provider.load(query(Set.of(), 25));
+
+        assertEquals("/records/companies/18?task=4", result.items().getFirst().context().href());
     }
 
     private static Task task(int id, String title, String dueDate, String timestamp) {

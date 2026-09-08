@@ -276,6 +276,14 @@
     FOR UPDATE
   </select>
 
+  <select id="getInvocationByToken" resultType="WorkflowInvocation">
+    SELECT <include refid="invocationColumns"/>
+    FROM workflow_invocation
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND scope_token_hash = #{tokenHash}
+  </select>
+
   <select id="getInvocationForUpdate" resultType="WorkflowInvocation">
     SELECT <include refid="invocationColumns"/>
     FROM workflow_invocation

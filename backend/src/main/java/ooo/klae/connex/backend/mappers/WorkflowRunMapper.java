@@ -98,6 +98,7 @@ public interface WorkflowRunMapper {
         @Param("nextNodeId") String nextNodeId,
         @Param("actionOutcome") String actionOutcome,
         @Param("actionReferenceId") Long actionReferenceId,
+        @Param("actionOutputsJson") String actionOutputsJson,
         @Param("finishedAt") LocalDateTime finishedAt);
 
     int succeedWaitingDelayStep(

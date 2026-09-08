@@ -53,7 +53,8 @@ public class CapabilitiesController {
                 capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY),
                 capabilityRegistry.isAvailable(Capability.DOCUMENT_SIGNATURE),
                 workflowTriggeredSendGate.enabled(),
-                privilegedMfaProperties.isEnforced());
+                privilegedMfaProperties.isEnforced(),
+                2);
     }
 
     private String modeOf(String provider) {
@@ -75,6 +76,7 @@ public class CapabilitiesController {
      * @param documentSignature whether commercial-document signature delivery is available
      * @param workflowTriggeredSend whether triggered workflow delivery is enabled
      * @param privilegedMfaEnforced whether privileged accounts are subject to mandatory MFA
+     * @param workflowDefinitionSchemaVersion highest workflow definition schema understood by this node
      */
     public record CapabilitiesResponse(
             boolean sso,
@@ -88,7 +90,8 @@ public class CapabilitiesController {
             boolean campaignDelivery,
             boolean documentSignature,
             boolean workflowTriggeredSend,
-            boolean privilegedMfaEnforced) {
+            boolean privilegedMfaEnforced,
+            int workflowDefinitionSchemaVersion) {
     }
 
     /**

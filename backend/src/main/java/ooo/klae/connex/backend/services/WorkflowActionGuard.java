@@ -51,8 +51,23 @@ public class WorkflowActionGuard {
             int recordId,
             String nodeId,
             RuleAction action) {
+        return blocker(
+            workspaceId, actorUserId, recordType, recordId, nodeId, action, null);
+    }
+
+    /** Checks an action against permissions already protected by authorization-row locks. */
+    public WorkflowDiagnosticDto blocker(
+            int workspaceId,
+            int actorUserId,
+            String recordType,
+            int recordId,
+            String nodeId,
+            RuleAction action,
+            Set<Permission> lockedPermissions) {
         Set<Permission> required = definitionValidator.actionPermissions(action, recordType);
-        Set<Permission> permissions = workspaceService.permissionsFor(workspaceId, actorUserId);
+        Set<Permission> permissions = lockedPermissions == null
+            ? workspaceService.permissionsFor(workspaceId, actorUserId)
+            : lockedPermissions;
         Permission missing = required.stream()
                 .filter(permission -> !permissions.contains(permission))
                 .sorted()
@@ -74,7 +89,10 @@ public class WorkflowActionGuard {
                 "config.tagId",
                 Map.of());
         }
-        if ("assign_owner".equals(type)
+        if (("assign_owner".equals(type)
+                || "create_task".equals(type)
+                || "notify".equals(type))
+                && action.getTargetUserId() != null
                 && workspaceService.getRole(workspaceId, action.getTargetUserId()) == null) {
             return diagnostic(
                 WorkflowDiagnosticCode.ACTION_TARGET_MEMBER_UNAVAILABLE,

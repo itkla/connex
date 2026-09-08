@@ -276,6 +276,7 @@ public class ScoringService {
                 addCompanySourceTouch(
                     task.getPerson(),
                     task.getDeal(),
+                    task.getCompany(),
                     new SourceTouch(
                         "task",
                         task.getId(),
@@ -570,6 +571,9 @@ public class ScoringService {
         for (Task task : taskMapper.getTasksByDealCompanyIds(workspaceId, companyIds)) {
             tasks.putIfAbsent(task.getId(), task);
         }
+        for (Task task : taskMapper.getTasksByCompanyIds(workspaceId, companyIds)) {
+            tasks.putIfAbsent(task.getId(), task);
+        }
         return List.copyOf(tasks.values());
     }
 
@@ -770,7 +774,8 @@ public class ScoringService {
         for (Task task : tasks) {
             Long timestamp = epoch(task.getCreatedAt());
             if (timestamp != null) {
-                attribute(task.getPerson(), task.getDeal(), new Touch(timestamp, WARMTH_MODEL.taskWeight()),
+                attribute(task.getPerson(), task.getDeal(), task.getCompany(),
+                    new Touch(timestamp, WARMTH_MODEL.taskWeight()),
                     personCompany, processablePersonIds, dealCompany, byCompany);
             }
         }
@@ -1157,6 +1162,16 @@ public class ScoringService {
         }
     }
 
+    private void attribute(Person person, Deal deal, Company company, Touch touch,
+            Map<Integer, Integer> personCompany, Set<Integer> processablePersonIds,
+            Map<Integer, Integer> dealCompany,
+            Map<Integer, List<Touch>> byCompany) {
+        for (Integer companyId : attributedCompanyIds(
+                person, deal, companyId(company), personCompany, processablePersonIds, dealCompany)) {
+            add(byCompany, companyId, touch);
+        }
+    }
+
     private void addCompanySourceTouch(
             Person person,
             Deal deal,
@@ -1165,8 +1180,21 @@ public class ScoringService {
             Set<Integer> processablePersonIds,
             Map<Integer, Integer> dealCompany,
             Map<Integer, List<SourceTouch>> byCompany) {
+        addCompanySourceTouch(
+            person, deal, null, touch, personCompany, processablePersonIds, dealCompany, byCompany);
+    }
+
+    private void addCompanySourceTouch(
+            Person person,
+            Deal deal,
+            Company company,
+            SourceTouch touch,
+            Map<Integer, Integer> personCompany,
+            Set<Integer> processablePersonIds,
+            Map<Integer, Integer> dealCompany,
+            Map<Integer, List<SourceTouch>> byCompany) {
         for (Integer companyId : attributedCompanyIds(
-                person, deal, personCompany, processablePersonIds, dealCompany)) {
+                person, deal, companyId(company), personCompany, processablePersonIds, dealCompany)) {
             byCompany.computeIfAbsent(companyId, key -> new ArrayList<>()).add(touch);
         }
     }
@@ -1174,6 +1202,17 @@ public class ScoringService {
     private Set<Integer> attributedCompanyIds(
             Person person,
             Deal deal,
+            Map<Integer, Integer> personCompany,
+            Set<Integer> processablePersonIds,
+            Map<Integer, Integer> dealCompany) {
+        return attributedCompanyIds(
+            person, deal, null, personCompany, processablePersonIds, dealCompany);
+    }
+
+    private Set<Integer> attributedCompanyIds(
+            Person person,
+            Deal deal,
+            Integer directCompanyId,
             Map<Integer, Integer> personCompany,
             Set<Integer> processablePersonIds,
             Map<Integer, Integer> dealCompany) {
@@ -1189,6 +1228,7 @@ public class ScoringService {
             Integer cid = dealCompany.get(did);
             if (cid != null) companies.add(cid);
         }
+        if (directCompanyId != null) companies.add(directCompanyId);
         return companies;
     }
 
@@ -1206,6 +1246,10 @@ public class ScoringService {
 
     private static Integer dealId(Deal d) {
         return (d == null || d.getId() == 0) ? null : d.getId();
+    }
+
+    private static Integer companyId(Company company) {
+        return (company == null || company.getId() == 0) ? null : company.getId();
     }
 
     private static Long epoch(String s) {

@@ -32,7 +32,7 @@ import lombok.RequiredArgsConstructor;
 /**
  * REST controller for {@code Task} CRUD operations.
  * A Task is a to-do assigned to a {@code User}, optionally linked to a {@code Person} and/or
- * {@code Deal}.
+ * {@code Deal} and/or {@code Company}.
  * Accepts and returns {@code TaskDto}. Delegates to {@code TaskService}.
  */
 
@@ -46,22 +46,25 @@ public class TaskController {
     private final MemberScopeResolver memberScopeResolver;
 
     /**
-     * GET endpoint to retrieve tasks, with optional filtering by assignedToId, personId, or dealId.
+     * GET endpoint to retrieve tasks, with optional filtering by assignedToId, personId, dealId, or companyId.
      * @param assignedToId
      * @param personId
      * @param dealId
+     * @param companyId
      * @return
      */
     @GetMapping
     public List<TaskDto> getTasks(
         @RequestParam(required = false) Integer assignedToId,
         @RequestParam(required = false) Integer personId,
-        @RequestParam(required = false) Integer dealId
+        @RequestParam(required = false) Integer dealId,
+        @RequestParam(required = false) Integer companyId
     ) {
         List<Task> tasks;
         if (assignedToId != null) tasks = taskService.getTasksByAssignedToId(assignedToId);
         else if (personId != null) tasks = taskService.getTasksByPersonId(personId);
         else if (dealId != null) tasks = taskService.getTasksByDealId(dealId);
+        else if (companyId != null) tasks = taskService.getTasksByCompanyId(companyId);
         else throw new BadRequestException("A filter is required; use /api/tasks/page for workspace-wide lists");
         return tasks.stream().map(TaskDto::from).toList();
     }

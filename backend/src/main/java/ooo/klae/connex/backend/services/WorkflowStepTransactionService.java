@@ -1,8 +1,11 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -10,27 +13,34 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.databind.json.JsonMapper;
 
 import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowStepRun;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowNode;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.NodeType;
+import ooo.klae.connex.backend.tenant.Permission;
 
 /** Commits one leased node effect and its durable checkpoint atomically. */
 @Service
 @RequiredArgsConstructor
 public class WorkflowStepTransactionService {
 
+    private static final JsonMapper JSON = JsonMapper.builder().build();
+
     private final WorkflowRunMapper workflowRunMapper;
     private final WorkflowVersionMapper workflowVersionMapper;
     private final WorkflowExecutionPrincipalService principalService;
     private final WorkflowRecordGuard recordGuard;
     private final WorkflowNodeExecutor nodeExecutor;
+    private final WorkflowActionBindingService bindingService;
+    private final WorkspaceService workspaceService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public StepResult execute(
@@ -75,7 +85,24 @@ public class WorkflowStepTransactionService {
                 "The pinned workflow version is unavailable.",
                 true);
         }
-        WorkflowExecutionPrincipal principal = principalService.resolveLocked(workspaceId, version);
+        WorkflowNode node = compiled.node(expectedNodeId);
+        NodeType nodeType = compiled.nodeType(expectedNodeId);
+        if (node == null || nodeType == null) {
+            throw new WorkflowExecutionException(
+                "definition_corrupt",
+                "The pinned workflow definition is inconsistent.",
+                true);
+        }
+        WorkflowActionBindingService.Discovery discovery = node instanceof WorkflowNode.Action action
+                && compiled.schemaVersion() >= 2
+            ? discoverActionTarget(discoveredRun, compiled, action)
+            : new WorkflowActionBindingService.Discovery(null);
+        WorkspaceService.LockedPermissionSnapshot authorization = compiled.schemaVersion() >= 2
+            ? lockAuthorization(workspaceId, version, discovery)
+            : null;
+        WorkflowExecutionPrincipal principal = authorization == null
+            ? principalService.resolveLocked(workspaceId, version)
+            : principalService.resolveLocked(workspaceId, version, authorization);
         WorkflowRun run = leaseOwner == null
             ? workflowRunMapper.getByIdForUpdate(workspaceId, runId)
             : workflowRunMapper.getOwnedByIdForUpdate(workspaceId, runId, leaseOwner);
@@ -88,14 +115,6 @@ public class WorkflowStepTransactionService {
             return StepResult.noOp();
         }
         LocalDateTime startedAt = LocalDateTime.now();
-        WorkflowNode node = compiled.node(expectedNodeId);
-        NodeType nodeType = compiled.nodeType(expectedNodeId);
-        if (node == null || nodeType == null) {
-            throw new WorkflowExecutionException(
-                "definition_corrupt",
-                "The pinned workflow definition is inconsistent.",
-                true);
-        }
         if (!Objects.equals(run.getActorUserId(), principal.actorUserId())
                 || !Objects.equals(run.getAttributionUserId(), principal.attributionUserId())) {
             throw new WorkflowExecutionException(
@@ -104,6 +123,13 @@ public class WorkflowStepTransactionService {
                 true);
         }
         recordGuard.requireAccessible(run);
+        WorkflowNode executionNode = node;
+        if (node instanceof WorkflowNode.Action action && compiled.schemaVersion() >= 2) {
+            executionNode = new WorkflowNode.Action(
+                action.id(),
+                bindingService.resolveLocked(
+                    run, action.config(), discovery, authorization, compiled));
+        }
         if (node instanceof WorkflowNode.Delay delay) {
             return enterDelay(run, delay, compiled, leaseOwner, startedAt);
         }
@@ -112,7 +138,9 @@ public class WorkflowStepTransactionService {
             ? requireReservedActionStep(run)
             : null;
         WorkflowStepTransition transition = nodeExecutor.execute(
-            new WorkflowNodeExecutionContext(run, version, compiled, principal), node);
+            new WorkflowNodeExecutionContext(
+                run, version, compiled, principal, authorization),
+            executionNode);
         LocalDateTime finishedAt = LocalDateTime.now();
         WorkflowEdge edge = transition.outcome() == null
             ? null
@@ -150,6 +178,65 @@ public class WorkflowStepTransactionService {
                 workspaceId, runId, expectedNodeId, edge.targetNodeId(), leaseOwner);
         requireCheckpoint(advanced, "node");
         return new StepResult(true, edge.targetNodeId(), false, false);
+    }
+
+    private WorkflowActionBindingService.Discovery discoverActionTarget(
+            WorkflowRun run,
+            CompiledWorkflow compiled,
+            WorkflowNode.Action action) {
+        if (compiled.schemaVersion() >= 2) {
+            return bindingService.discover(run, action.config(), compiled);
+        }
+        String type = action.config() == null || action.config().getType() == null
+            ? "" : action.config().getType().trim().toLowerCase(Locale.ROOT);
+        Integer target = switch (type) {
+            case "create_task", "notify" -> run.getAttributionUserId();
+            case "assign_owner" -> action.config().getTargetUserId();
+            default -> null;
+        };
+        return new WorkflowActionBindingService.Discovery(target);
+    }
+
+    private static Map<Integer, Set<Permission>> requiredMembers(
+            WorkflowVersion version,
+            WorkflowActionBindingService.Discovery discovery) {
+        int actorMemberId = actorMemberId(version);
+        Map<Integer, Set<Permission>> required = new LinkedHashMap<>();
+        required.put(actorMemberId, Set.of());
+        if (discovery.targetUserId() != null) {
+            required.putIfAbsent(discovery.targetUserId(), Set.of());
+        }
+        return Map.copyOf(required);
+    }
+
+    private WorkspaceService.LockedPermissionSnapshot lockAuthorization(
+            int workspaceId,
+            WorkflowVersion version,
+            WorkflowActionBindingService.Discovery discovery) {
+        try {
+            return workspaceService.lockAndRequirePermissionsSnapshot(
+                workspaceId, requiredMembers(version, discovery));
+        } catch (ForbiddenException exception) {
+            int actorMemberId = actorMemberId(version);
+            String code = workspaceService.getRole(workspaceId, actorMemberId) == null
+                ? "actor_unavailable" : "reference_unavailable";
+            throw new WorkflowExecutionException(
+                code,
+                "A workflow member reference is no longer available.",
+                true);
+        }
+    }
+
+    private static int actorMemberId(WorkflowVersion version) {
+        Integer actorMemberId = "system".equals(version.getExecutionMode())
+            ? version.getCreatedById() : version.getRunAsUserId();
+        if (actorMemberId == null || actorMemberId < 1) {
+            throw new WorkflowExecutionException(
+                "actor_unavailable",
+                "The configured workflow actor is unavailable.",
+                true);
+        }
+        return actorMemberId;
     }
 
     private StepResult enterDelay(
@@ -229,6 +316,7 @@ public class WorkflowStepTransactionService {
                 edge == null ? null : edge.targetNodeId(),
                 transition.actionResult().outcome(),
                 transition.actionResult().referenceId(),
+                outputsJson(transition.actionResult()),
                 finishedAt) != 1) {
             throw new IllegalStateException("Workflow action step was not completed");
         }
@@ -268,9 +356,33 @@ public class WorkflowStepTransactionService {
         step.setNextNodeId(edge == null ? null : edge.targetNodeId());
         step.setActionOutcome(transition.actionResult().outcome());
         step.setActionReferenceId(transition.actionResult().referenceId());
+        step.setActionOutputsJson(outputsJson(transition.actionResult()));
         step.setStartedAt(startedAt);
         step.setFinishedAt(finishedAt);
         return step;
+    }
+
+    private static String outputsJson(WorkflowActionResult result) {
+        if (result.outputs().isEmpty()) {
+            return null;
+        }
+        try {
+            String json = JSON.writeValueAsString(result.outputs());
+            if (json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 4096) {
+                throw new WorkflowExecutionException(
+                    "action_output_invalid",
+                    "The workflow action output exceeds its durable limit.",
+                    false);
+            }
+            return json;
+        } catch (WorkflowExecutionException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new WorkflowExecutionException(
+                "action_output_invalid",
+                "The workflow action output could not be persisted.",
+                false);
+        }
     }
 
     private static void requireCheckpoint(int updated, String checkpoint) {

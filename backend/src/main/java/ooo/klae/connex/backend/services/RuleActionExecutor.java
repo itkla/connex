@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.Activity;
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Notification;
@@ -52,7 +53,11 @@ public class RuleActionExecutor {
     public WorkflowActionResult execute(RuleAction action, AutomationActionContext ctx) {
         String type = action.getType() == null ? "" : action.getType().trim().toLowerCase();
         switch (type) {
-            case "create_task" -> createTask(action, ctx);
+            case "create_task" -> {
+                Task created = createTask(action, ctx);
+                return new WorkflowActionResult(
+                    null, null, java.util.Map.of("taskId", created.getId()));
+            }
             case "log_activity" -> logActivity(action, ctx);
             case "add_tag" -> addTag(action, ctx);
             case "remove_tag" -> removeTag(action, ctx);
@@ -61,6 +66,7 @@ public class RuleActionExecutor {
             case "set_response_due" ->
                 leadResponseSlaService.startFirstResponseClock(ctx.entityId(), action.getDueInHours());
             case "change_stage" -> dealService.changeStage(ctx.entityId(), action.getTargetStageId());
+            case "update_field" -> updateField(action, ctx);
             case "notify" -> notify(action, ctx);
             case "send_message" -> {
                 CampaignTriggeredSendService.EnrollmentResult result =
@@ -99,27 +105,60 @@ public class RuleActionExecutor {
      * its own membership validation, audit, notification, and owner-changed trigger.
      */
     private void assignOwner(RuleAction action, AutomationActionContext ctx) {
+        int targetUserId = ownerTargetUserId(action, ctx);
+        WorkspaceService.LockedPermissionSnapshot authorization =
+            ctx instanceof WorkflowActionContext workflowContext
+                ? workflowContext.lockedAuthorization() : null;
         if ("person".equals(ctx.recordType())) {
-            personService.updateOwner(ctx.entityId(), action.getTargetUserId());
+            if (authorization == null) {
+                personService.updateOwner(ctx.entityId(), targetUserId);
+            } else {
+                personService.updateOwnerWithLockedMember(
+                    ctx.entityId(), targetUserId, authorization);
+            }
+        } else if ("company".equals(ctx.recordType())) {
+            if (authorization == null) {
+                companyService.updateOwner(ctx.entityId(), targetUserId);
+            } else {
+                companyService.updateOwnerWithLockedMember(
+                    ctx.entityId(), targetUserId, authorization);
+            }
         } else {
-            dealService.updateOwner(ctx.entityId(), action.getTargetUserId());
+            if (authorization == null) {
+                dealService.updateOwner(ctx.entityId(), targetUserId);
+            } else {
+                dealService.updateOwnerWithLockedMember(
+                    ctx.entityId(), targetUserId, authorization);
+            }
         }
     }
 
-    private void createTask(RuleAction action, AutomationActionContext ctx) {
+    private Task createTask(RuleAction action, AutomationActionContext ctx) {
         Task task = new Task();
         task.setDescription(action.getTitle());
-        int dueDays = action.getDueInDays() != null && action.getDueInDays() > 0 ? action.getDueInDays() : DEFAULT_DUE_DAYS;
-        task.setDueDate(LocalDateTime.now().toLocalDate().plusDays(dueDays).format(DATE));
+        if (action.getResolvedDueDate() != null) {
+            task.setDueDate(action.getResolvedDueDate());
+        } else {
+            int dueDays = action.getDueInDays() != null && action.getDueInDays() >= 0
+                ? action.getDueInDays() : DEFAULT_DUE_DAYS;
+            task.setDueDate(LocalDateTime.now().toLocalDate().plusDays(dueDays).format(DATE));
+        }
         User assignee = new User();
-        assignee.setId(ctx.targetUserId());
+        assignee.setId(targetUserId(action, ctx));
         task.setAssignedTo(assignee);
         if ("person".equals(ctx.recordType())) {
             task.setPerson(person(ctx.entityId()));
         } else if (attachesToDeal(ctx)) {
             task.setDeal(deal(dealIdFor(ctx)));
+        } else if ("company".equals(ctx.recordType())) {
+            task.setCompany(company(ctx.entityId()));
         }
-        taskService.create(task);
+        if (ctx instanceof WorkflowActionContext workflowContext
+                && workflowContext.lockedAuthorization() != null) {
+            return taskService.createWithLockedAssignee(
+                task, workflowContext.lockedAuthorization());
+        }
+        return taskService.create(task);
     }
 
     private void logActivity(RuleAction action, AutomationActionContext ctx) {
@@ -173,7 +212,7 @@ public class RuleActionExecutor {
     private void notify(RuleAction action, AutomationActionContext ctx) {
         Notification notification = new Notification();
         notification.setWorkspaceId(ctx.workspaceId());
-        notification.setRecipientId(ctx.targetUserId());
+        notification.setRecipientId(targetUserId(action, ctx));
         notification.setType("rule");
         notification.setCategory(ctx.recordType());
         notification.setSeverity(action.getSeverity() != null && !action.getSeverity().isBlank() ? action.getSeverity() : "info");
@@ -185,6 +224,16 @@ public class RuleActionExecutor {
         notification.setDedupeKey(ctx.notificationDedupeKey());
         notification.setTriggeredAt(LocalDateTime.now().format(TIMESTAMP));
         notificationDelivery.deliver(notification);
+    }
+
+    private void updateField(RuleAction action, AutomationActionContext ctx) {
+        if (!"deal".equals(ctx.recordType())
+                || !"expectedCloseDate".equals(action.getField())
+                || action.getValue() == null
+                || !action.getValue().isTextual()) {
+            throw new BadRequestException("Unsupported workflow field update");
+        }
+        dealService.reschedule(ctx.entityId(), action.getValue().textValue());
     }
 
     private static boolean attachesToDeal(AutomationActionContext ctx) {
@@ -220,5 +269,30 @@ public class RuleActionExecutor {
         Deal deal = new Deal();
         deal.setId(id);
         return deal;
+    }
+
+    private static Company company(int id) {
+        Company company = new Company();
+        company.setId(id);
+        return company;
+    }
+
+    private static int targetUserId(RuleAction action, AutomationActionContext context) {
+        if (context instanceof WorkflowActionContext workflowContext
+                && workflowContext.schemaVersion() >= 2
+                && action.getTargetUserId() != null) {
+            return action.getTargetUserId();
+        }
+        return context.targetUserId();
+    }
+
+    private static int ownerTargetUserId(
+            RuleAction action, AutomationActionContext context) {
+        if (context instanceof WorkflowActionContext workflowContext
+                && workflowContext.schemaVersion() >= 2) {
+            return action.getTargetUserId();
+        }
+        return action.getTargetUserId() == null
+            ? context.targetUserId() : action.getTargetUserId();
     }
 }
