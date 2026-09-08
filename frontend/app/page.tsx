@@ -61,9 +61,8 @@ export default async function Home() {
                             <h1
                                 className={`connex-rise font-display text-[clamp(2.25rem,5vw,4rem)] leading-[1.08] tracking-[-0.015em] text-balance text-foreground [line-break:strict] ${HALO}`}
                             >
-                                {t("heroHeadlineLead")}
-                                <br />
-                                {t("heroHeadlineRest")}
+                                <span className="block">{t("heroHeadlineLead")}</span>
+                                <span className="block">{t("heroHeadlineRest")}</span>
                             </h1>
                             <p
                                 className={`connex-rise mt-7 max-w-[46ch] text-lg leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase] ${HALO}`}
