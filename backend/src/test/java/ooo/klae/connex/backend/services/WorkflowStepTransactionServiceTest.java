@@ -384,18 +384,35 @@ class WorkflowStepTransactionServiceTest {
             null);
         WorkflowActionBindingService.Discovery discovery =
             new WorkflowActionBindingService.Discovery(23);
+        AtomicInteger scopeDepth = new AtomicInteger();
         WorkspaceService.LockedPermissionSnapshot authorization =
             new WorkspaceService.LockedPermissionSnapshot(
                 Map.of(17, Set.of(), 23, Set.of()),
                 Map.of(17, Set.of(), 23, Set.of()));
         when(principalService.resolve(7, version)).thenReturn(principal);
-        when(bindingService.discover(run, action, schemaV2)).thenReturn(discovery);
+        when(automationExecutor.runAs(
+                eq(7), eq(principal.principal()), eq("member"), any()))
+            .thenAnswer(invocation -> {
+                scopeDepth.incrementAndGet();
+                try {
+                    return invocation.<Supplier<?>>getArgument(3).get();
+                } finally {
+                    scopeDepth.decrementAndGet();
+                }
+            });
+        when(bindingService.discover(run, action, schemaV2)).thenAnswer(invocation -> {
+            assertTrue(scopeDepth.get() > 0);
+            return discovery;
+        });
         when(workspaceService.lockAndRequirePermissionsSnapshot(eq(7), any()))
             .thenReturn(authorization);
         when(principalService.resolveLocked(7, version, authorization))
             .thenReturn(principal);
         when(bindingService.resolveLocked(
-            run, action, discovery, authorization, schemaV2)).thenReturn(action);
+            run, action, discovery, authorization, schemaV2)).thenAnswer(invocation -> {
+                assertTrue(scopeDepth.get() > 0);
+                return action;
+            });
         when(nodeExecutor.execute(any(), any())).thenReturn(
             new WorkflowStepTransition(
                 WorkflowStepTransition.Continuation.IMMEDIATE,
@@ -407,15 +424,9 @@ class WorkflowStepTransactionServiceTest {
             7, 31L, "action", schemaV2);
 
         assertTrue(result.executed());
-        InOrder scopeOrder = inOrder(automationExecutor, bindingService);
-        scopeOrder.verify(automationExecutor).runAs(
-            eq(7), eq(principal.principal()), eq("member"), any());
-        scopeOrder.verify(bindingService).discover(run, action, schemaV2);
-        scopeOrder.verify(automationExecutor).runAs(
-            eq(7), eq(principal.principal()), eq("member"), any());
-        scopeOrder.verify(automationExecutor).runAs(
-            eq(7), eq(principal.principal()), eq("member"), any());
-        scopeOrder.verify(bindingService).resolveLocked(
+        assertEquals(0, scopeDepth.get());
+        verify(bindingService).discover(run, action, schemaV2);
+        verify(bindingService).resolveLocked(
             run, action, discovery, authorization, schemaV2);
     }
 

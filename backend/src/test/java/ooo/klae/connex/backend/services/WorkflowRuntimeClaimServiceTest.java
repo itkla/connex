@@ -366,7 +366,8 @@ class WorkflowRuntimeClaimServiceTest {
         WorkflowDefinition definition = new WorkflowDefinition(
             1, "trigger", List.of(), List.of());
         when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
-        when(definitionValidator.validate(version.getRecordType(), "user", definition))
+        when(definitionValidator.compileForRuntime(
+            version.getRecordType(), "user", definition))
             .thenReturn(compiled);
         RuleTrigger scheduleTrigger = new RuleTrigger();
         scheduleTrigger.setType("schedule");
@@ -403,7 +404,6 @@ class WorkflowRuntimeClaimServiceTest {
         when(compiled.schemaVersion()).thenReturn(2);
         when(compiled.enrollment()).thenReturn(
             new WorkflowEnrollment(condition, true, 43_200));
-        when(compiled.enrollmentConditionNodeId()).thenReturn(null);
         workflow.setRuntimeGeneration(5L);
         WorkflowTriggerOutbox outbox = new WorkflowTriggerOutbox();
         outbox.setWorkspaceId(7);
@@ -438,7 +438,7 @@ class WorkflowRuntimeClaimServiceTest {
         WorkflowDefinition definition = new WorkflowDefinition(
             1, "trigger", List.of(), List.of());
         when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
-        when(definitionValidator.validate("company", "user", definition))
+        when(definitionValidator.compileForRuntime("company", "user", definition))
             .thenReturn(compiled);
         when(compiled.schemaVersion()).thenReturn(1);
         when(compiled.entryNodeId()).thenReturn("trigger");
@@ -475,7 +475,7 @@ class WorkflowRuntimeClaimServiceTest {
         WorkflowDefinition definition = new WorkflowDefinition(
             1, "trigger", List.of(), List.of());
         when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
-        when(definitionValidator.validate(recordType, "user", definition))
+        when(definitionValidator.compileForRuntime(recordType, "user", definition))
             .thenReturn(compiled);
         when(compiled.entryNodeId()).thenReturn("trigger");
         when(compiled.node("trigger")).thenReturn(

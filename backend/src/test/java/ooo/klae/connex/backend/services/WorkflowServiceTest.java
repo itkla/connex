@@ -1000,7 +1000,12 @@ class WorkflowServiceTest {
         PublishedPair pair = publishedPair("Workflow", true, 4);
         pair.workflow().setIntakePausedAt(LocalDateTime.of(2026, 8, 2, 10, 0));
         pair.workflow().setRuntimeGeneration(12);
-        stubPublishedMutation(pair, null, false);
+        when(workflowMapper.getById(7, pair.workflow().getId())).thenReturn(pair.workflow());
+        when(workflowMapper.getByIdForUpdate(7, pair.workflow().getId()))
+            .thenReturn(pair.workflow());
+        when(workflowVersionMapper.getById(
+            7, pair.workflow().getId(), pair.version().getId())).thenReturn(pair.version());
+        when(ruleMapper.getById(7, pair.rule().getId())).thenReturn(pair.rule());
         stubUserMutation(Set.of(41), Set.of());
         when(workflowMapper.updateIntakePause(7, 101, false, 41)).thenReturn(1);
 

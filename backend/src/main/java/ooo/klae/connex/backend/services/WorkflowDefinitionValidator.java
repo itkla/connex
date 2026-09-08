@@ -76,6 +76,15 @@ public class WorkflowDefinitionValidator {
             recordType, executionMode, definition).requiredPermissions();
     }
 
+    /** Compiles a pinned runtime definition without consulting a request caller's permissions. */
+    public CompiledWorkflow compileForRuntime(
+            String recordType,
+            String executionMode,
+            WorkflowDefinition definition) {
+        return validateForMutationAndCompile(
+            recordType, executionMode, definition).compiled();
+    }
+
     /**
      * Validates only egress-sensitive actions that an incomplete draft is not allowed to persist.
      * Graph completeness remains a publication concern.

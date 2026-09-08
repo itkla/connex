@@ -298,7 +298,6 @@ class WorkflowManualRunServiceTest {
         actor.setId(17);
         actor.setDisplayName("Workflow Owner");
         when(workspaceService.getMembers(7)).thenReturn(List.of(actor));
-        when(workspaceService.getRole(7, 17)).thenReturn("member");
         RuleAction action = new RuleAction();
         action.setType("create_task");
         WorkflowDefinition definition = new WorkflowDefinition(

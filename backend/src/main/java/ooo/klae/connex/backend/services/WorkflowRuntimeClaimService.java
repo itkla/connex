@@ -226,7 +226,7 @@ public class WorkflowRuntimeClaimService {
         }
         WorkflowVersion version = activeVersion(workflow);
         WorkflowDefinition definition = definition(workflow, version);
-        CompiledWorkflow compiled = definitionValidator.validate(
+        CompiledWorkflow compiled = definitionValidator.compileForRuntime(
             version.getRecordType(), version.getExecutionMode(), definition);
         if ("denied".equals(WorkflowManualEligibilityService.manualEntryMode(
                 definition.schemaVersion(), WorkflowManualEligibilityService.trigger(definition)))) {
@@ -591,7 +591,7 @@ public class WorkflowRuntimeClaimService {
 
     private CompiledWorkflow compiled(Workflow workflow, WorkflowVersion version) {
         WorkflowDefinition definition = definition(workflow, version);
-        return definitionValidator.validate(
+        return definitionValidator.compileForRuntime(
             version.getRecordType(), version.getExecutionMode(), definition);
     }
 

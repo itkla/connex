@@ -152,6 +152,26 @@ class WorkflowDefinitionValidatorTest {
     }
 
     @Test
+    void runtimeCompilationDoesNotConsultRequestCallerAuthorization() {
+        RuleAction createTask = action("create_task");
+        createTask.setTitle("Follow up");
+        WorkflowDefinition definition = definition(
+            List.of(
+                new WorkflowNode.Trigger("trigger", entityChange()),
+                new WorkflowNode.Action("task", createTask),
+                new WorkflowNode.End("end")),
+            List.of(
+                edge("trigger-task", "trigger", "task", WorkflowEdge.Outcome.NEXT),
+                edge("task-end", "task", "end", WorkflowEdge.Outcome.NEXT)));
+
+        CompiledWorkflow compiled = validator.compileForRuntime(
+            "deal", "user", definition);
+
+        assertEquals(NodeType.ACTION, compiled.nodeType("task"));
+        verifyNoInteractions(workspaceService);
+    }
+
+    @Test
     void schemaV2ManualTriggerAcceptsTypedInputsAndExplicitActionTargets() {
         RuleTrigger trigger = new RuleTrigger();
         trigger.setType("manual");
