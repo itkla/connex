@@ -38,6 +38,8 @@ import ooo.klae.connex.backend.dto.WorkflowDelayConfig;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
+import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.NodeType;
 
@@ -48,9 +50,12 @@ class WorkflowStepTransactionServiceTest {
     @Mock private WorkflowVersionMapper workflowVersionMapper;
     @Mock private WorkflowExecutionPrincipalService principalService;
     @Mock private WorkflowRecordGuard recordGuard;
+    @Mock private WorkflowRecordPolicyService recordPolicyService;
     @Mock private WorkflowNodeExecutor nodeExecutor;
     @Mock private WorkflowActionBindingService bindingService;
     @Mock private WorkspaceService workspaceService;
+    @Mock private TaskMapper taskMapper;
+    @Mock private WorkflowEventWaitMapper eventWaitMapper;
 
     private WorkflowStepTransactionService service;
     private WorkflowRun run;
@@ -64,9 +69,12 @@ class WorkflowStepTransactionServiceTest {
             workflowVersionMapper,
             principalService,
             recordGuard,
+            recordPolicyService,
             nodeExecutor,
             bindingService,
-            workspaceService);
+            workspaceService,
+            taskMapper,
+            eventWaitMapper);
         run = new WorkflowRun();
         run.setId(31L);
         run.setWorkspaceId(7);

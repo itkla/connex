@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowStepRun;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 
 /** Finalizes a requested cancellation at a claimed node boundary. */
 @Service
@@ -19,6 +20,7 @@ import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 public class WorkflowRunCancellationService {
 
     private final WorkflowRunMapper runMapper;
+    private final WorkflowEventWaitMapper eventWaitMapper;
 
     @Transactional(
         propagation = Propagation.REQUIRES_NEW,
@@ -66,6 +68,11 @@ public class WorkflowRunCancellationService {
                 run.getId(),
                 run.getCurrentNodeId(),
                 finishedAt);
+            if ("event".equals(run.getWaitKind())) {
+                eventWaitMapper.resolveCurrent(
+                    run.getWorkspaceId(), run.getId(), run.getCurrentNodeId(),
+                    "cancelled", finishedAt);
+            }
         }
         if (runMapper.cancelClaimed(
                 run.getWorkspaceId(), run.getId(), leaseOwner, finishedAt) != 1) {

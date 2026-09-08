@@ -19,12 +19,15 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 
 @ExtendWith(MockitoExtension.class)
 class WorkflowRuntimeClaimTransactionTest {
 
     @Mock private WorkflowTriggerOutboxMapper outboxMapper;
     @Mock private WorkflowRunMapper runMapper;
+    @Mock private WorkflowEventWaitMapper eventWaitMapper;
+    @Mock private WorkflowDatePromotionService datePromotionService;
     @Mock private WorkflowRuntimeProperties properties;
     @Mock private WorkflowInterventionRecorder interventionRecorder;
 
@@ -33,7 +36,12 @@ class WorkflowRuntimeClaimTransactionTest {
     @BeforeEach
     void setUp() {
         service = new WorkflowRuntimeClaimTransaction(
-            outboxMapper, runMapper, properties, interventionRecorder);
+            outboxMapper,
+            runMapper,
+            eventWaitMapper,
+            datePromotionService,
+            properties,
+            interventionRecorder);
         lenient().when(properties.maxTriggerDeliveryAttempts()).thenReturn(8);
         lenient().when(properties.maxOutboxLeasesPerWorkspace()).thenReturn(2);
         lenient().when(properties.maxActiveRunsPerWorkspace()).thenReturn(4);

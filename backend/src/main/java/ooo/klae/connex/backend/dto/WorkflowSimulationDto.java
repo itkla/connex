@@ -23,6 +23,7 @@ public record WorkflowSimulationDto(
     /** Terminal simulation classifications. */
     public enum Result {
         WOULD_COMPLETE,
+        WOULD_STOP,
         NOT_ENROLLED,
         WOULD_WAIT,
         BLOCKED;

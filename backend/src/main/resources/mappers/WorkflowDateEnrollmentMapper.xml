@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.WorkflowDateEnrollmentMapper">
+
+  <sql id="columns">
+    id, workspace_id, workflow_id, workflow_version_id, workflow_runtime_generation,
+    record_type, record_id, date_field, source_date, scheduled_local_date, due_at, state,
+    workflow_run_id, queued_at, resolved_at, created_at, updated_at
+  </sql>
+
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workflow_date_enrollment
+      (workspace_id, workflow_id, workflow_version_id, workflow_runtime_generation,
+       record_type, record_id, date_field, source_date, scheduled_local_date, due_at, state,
+       resolved_at)
+    VALUES
+      (#{workspaceId}, #{workflowId}, #{workflowVersionId}, #{workflowRuntimeGeneration},
+       #{recordType}, #{recordId}, #{dateField}, #{sourceDate}, #{scheduledLocalDate}, #{dueAt},
+       #{state}, #{resolvedAt})
+    ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)
+  </insert>
+
+  <select id="currentTimestamp" resultType="java.time.LocalDateTime">
+    SELECT CURRENT_TIMESTAMP(6)
+    FROM workflow
+    WHERE workspace_id = #{workspaceId} AND id = #{workflowId}
+  </select>
+
+  <select id="getScheduleStatus" resultType="WorkflowDateScheduleStatusDto">
+    SELECT CAST(COALESCE(SUM(e.state = 'planned'), 0) AS SIGNED) AS planned_count,
+           CAST(COALESCE(SUM(e.state = 'queued'), 0) AS SIGNED) AS queued_count,
+           CAST(COALESCE(SUM(e.state = 'missed'), 0) AS SIGNED) AS missed_count,
+           MIN(CASE WHEN e.state = 'planned' THEN e.due_at END) AS next_due_at,
+           (
+             SELECT MAX(o.completed_at)
+             FROM workflow_trigger_outbox o
+             WHERE o.workspace_id = w.workspace_id
+               AND o.workflow_id = w.id
+               AND o.workflow_runtime_generation = w.runtime_generation
+               AND o.trigger_type = 'date_reconcile'
+               AND o.status = 'completed'
+           ) AS last_reconciled_at
+    FROM workflow w
+    JOIN workflow_version v
+      ON v.workspace_id = w.workspace_id
+     AND v.workflow_id = w.id
+     AND v.id = w.active_version_id
+     AND v.trigger_type = 'date'
+    LEFT JOIN workflow_date_enrollment e
+      ON e.workspace_id = w.workspace_id
+     AND e.workflow_id = w.id
+     AND e.workflow_runtime_generation = w.runtime_generation
+    WHERE w.workspace_id = #{workspaceId}
+      AND w.id = #{workflowId}
+    GROUP BY w.workspace_id, w.id, w.runtime_generation
+  </select>
+
+  <select id="getByPeriodForUpdate" resultType="WorkflowDateEnrollment">
+    SELECT <include refid="columns"/>
+    FROM workflow_date_enrollment
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND record_type = 'deal'
+      AND record_id = #{recordId}
+      AND date_field = #{dateField}
+      AND source_date = #{sourceDate}
+    FOR UPDATE
+  </select>
+
+  <select id="getByIdForUpdate" resultType="WorkflowDateEnrollment">
+    SELECT <include refid="columns"/>
+    FROM workflow_date_enrollment
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+    FOR UPDATE
+  </select>
+
+  <select id="getPendingByRecordForUpdate" resultType="WorkflowDateEnrollment">
+    SELECT <include refid="columns"/>
+    FROM workflow_date_enrollment
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND record_type = 'deal'
+      AND record_id = #{recordId}
+      AND state IN ('planned', 'queued')
+    ORDER BY id
+    FOR UPDATE
+  </select>
+
+  <update id="supersede">
+    UPDATE workflow_date_enrollment
+    SET state = 'superseded', resolved_at = #{resolvedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND state = 'planned'
+  </update>
+
+  <update id="revive">
+    UPDATE workflow_date_enrollment
+    SET workflow_version_id = #{workflowVersionId},
+        workflow_runtime_generation = #{workflowRuntimeGeneration},
+        scheduled_local_date = #{scheduledLocalDate},
+        due_at = #{dueAt},
+        state = 'planned',
+        queued_at = NULL,
+        resolved_at = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND state = 'superseded'
+      AND queued_at IS NULL
+      AND workflow_run_id IS NULL
+  </update>
+
+  <update id="refreshPlanned">
+    UPDATE workflow_date_enrollment
+    SET workflow_version_id = #{workflowVersionId},
+        workflow_runtime_generation = #{workflowRuntimeGeneration},
+        scheduled_local_date = #{scheduledLocalDate},
+        due_at = #{dueAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND state = 'planned'
+  </update>
+
+  <update id="markMissed">
+    UPDATE workflow_date_enrollment
+    SET state = 'missed', resolved_at = #{resolvedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND state = 'planned'
+  </update>
+
+  <select id="findDuePlannedIdForUpdate" resultType="long">
+    SELECT id
+    FROM workflow_date_enrollment
+    WHERE workspace_id = #{workspaceId}
+      AND state = 'planned'
+      AND due_at &lt;= CURRENT_TIMESTAMP(6)
+    ORDER BY due_at, id
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+  </select>
+
+  <update id="markQueued">
+    UPDATE workflow_date_enrollment
+    SET state = 'queued', queued_at = #{queuedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND state = 'planned'
+  </update>
+
+  <update id="markEnrolled">
+    UPDATE workflow_date_enrollment
+    SET state = 'enrolled', workflow_run_id = #{workflowRunId}, resolved_at = #{resolvedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND state = 'queued'
+  </update>
+
+  <update id="restoreQueuedToPlanned">
+    UPDATE workflow_date_enrollment
+    SET state = 'planned', queued_at = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND state = 'queued'
+      AND workflow_run_id IS NULL
+  </update>
+
+  <update id="markQueuedMissed">
+    UPDATE workflow_date_enrollment
+    SET state = 'missed', resolved_at = #{resolvedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND state = 'queued'
+      AND workflow_run_id IS NULL
+  </update>
+
+  <update id="markQueuedMissedNow">
+    UPDATE workflow_date_enrollment
+    SET state = 'missed', resolved_at = CURRENT_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND state = 'queued'
+      AND workflow_run_id IS NULL
+  </update>
+
+</mapper>

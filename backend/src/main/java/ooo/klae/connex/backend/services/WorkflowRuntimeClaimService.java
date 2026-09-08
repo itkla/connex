@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowRun;
+import ooo.klae.connex.backend.beans.WorkflowDateEnrollment;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleTrigger;
@@ -51,6 +52,7 @@ public class WorkflowRuntimeClaimService {
     private final DealMapper dealMapper;
     private final WorkflowDraftCanonicalizer canonicalizer;
     private final WorkflowDefinitionValidator definitionValidator;
+    private final WorkflowEnrollmentPolicyService enrollmentPolicyService;
     private final WorkflowDedupeKey dedupeKey;
     private final SystemActor systemActor;
 
@@ -254,6 +256,63 @@ public class WorkflowRuntimeClaimService {
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
+    public CanonicalClaim claimDate(
+            WorkflowTriggerOutbox outbox,
+            WorkflowDateEnrollment enrollment) {
+        Workflow workflow = workflowMapper.getByIdForUpdate(
+            outbox.getWorkspaceId(), outbox.getWorkflowId());
+        if (!canonicalOwnerCanClaim(workflow)
+                || workflow.getRuntimeGeneration() != outbox.getWorkflowRuntimeGeneration()
+                || workflow.getActiveVersionId() == null
+                || workflow.getActiveVersionId() != outbox.getWorkflowVersionId()) {
+            return CanonicalClaim.rejectedClaim("date_superseded");
+        }
+        WorkflowVersion version = activeVersion(workflow);
+        CompiledWorkflow compiled = compiled(workflow, version);
+        RuleTrigger trigger = entryTrigger(compiled).config();
+        if (!"date".equals(normalize(trigger.getType()))
+                || enrollment.getWorkflowId() != workflow.getId()
+                || enrollment.getWorkflowVersionId() != version.getId()
+                || enrollment.getWorkflowRuntimeGeneration() != workflow.getRuntimeGeneration()) {
+            return CanonicalClaim.rejectedClaim("date_superseded");
+        }
+        String key = "date:" + workflow.getId() + ":deal:" + enrollment.getRecordId()
+            + ":expectedCloseDate:" + enrollment.getSourceDate();
+        return claimCanonical(
+            workflow,
+            version,
+            compiled,
+            "date",
+            "expectedCloseDate",
+            enrollment.getSourceDate().toString(),
+            "deal",
+            enrollment.getRecordId(),
+            new DedupeKeys(key, null, null),
+            outbox.getId(),
+            "queued",
+            null,
+            enrollment);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public DateReconciliation dateReconciliation(WorkflowTriggerOutbox outbox) {
+        Workflow workflow = workflowMapper.getByIdForUpdate(
+            outbox.getWorkspaceId(), outbox.getWorkflowId());
+        if (!outboxStateMatches(workflow, outbox)) {
+            return null;
+        }
+        WorkflowVersion version = activeVersion(workflow);
+        CompiledWorkflow compiled = compiled(workflow, version);
+        RuleTrigger trigger = entryTrigger(compiled).config();
+        if (!"date_reconcile".equals(outbox.getTriggerType())
+                || !"date".equals(normalize(trigger.getType()))
+                || !"deal".equals(version.getRecordType())) {
+            return null;
+        }
+        return new DateReconciliation(version, trigger);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
     public ScheduleEnrollment outboxScheduleEnrollment(
             WorkflowTriggerOutbox outbox) {
         Workflow workflow = workflowMapper.getByIdForUpdate(
@@ -357,6 +416,36 @@ public class WorkflowRuntimeClaimService {
             Long triggerOutboxId,
             String initialStatus,
             String launchInputsJson) {
+        return claimCanonical(
+            workflow,
+            version,
+            compiled,
+            triggerType,
+            triggerEvent,
+            triggerKey,
+            recordType,
+            recordId,
+            keys,
+            triggerOutboxId,
+            initialStatus,
+            launchInputsJson,
+            null);
+    }
+
+    private CanonicalClaim claimCanonical(
+            Workflow workflow,
+            WorkflowVersion version,
+            CompiledWorkflow compiled,
+            String triggerType,
+            String triggerEvent,
+            String triggerKey,
+            String recordType,
+            int recordId,
+            DedupeKeys keys,
+            Long triggerOutboxId,
+            String initialStatus,
+            String launchInputsJson,
+            WorkflowDateEnrollment dateEnrollment) {
         if (workflow.getLegacyRuleId() != null) {
             RuleExecution opposite = findRuleExecution(
                 workflow.getWorkspaceId(), workflow.getLegacyRuleId(), keys);
@@ -381,6 +470,12 @@ public class WorkflowRuntimeClaimService {
         run.setRecordId(recordId);
         run.setDedupeKey(keys.primary());
         run.setTriggerOutboxId(triggerOutboxId);
+        if (dateEnrollment != null) {
+            run.setDateField(dateEnrollment.getDateField());
+            run.setDateSourceDate(dateEnrollment.getSourceDate());
+            run.setDateScheduledLocalDate(dateEnrollment.getScheduledLocalDate());
+            run.setDateDueAt(dateEnrollment.getDueAt());
+        }
         run.setExecutionMode(version.getExecutionMode());
         run.setActorUserId(actorUserId(version));
         run.setAttributionUserId(conditionActorId(version));
@@ -390,9 +485,27 @@ public class WorkflowRuntimeClaimService {
         }
         run.setCurrentNodeId(compiled.entryNodeId());
         run.setStartedAt(LocalDateTime.now());
+        if (compiled.schemaVersion() >= 2) {
+            WorkflowEnrollmentPolicyService.Decision decision =
+                enrollmentPolicyService.evaluateLocked(
+                    run, compiled, conditionActorId(version));
+            if (!decision.allowed()) {
+                if ("manual".equals(triggerType)) {
+                    return CanonicalClaim.rejectedClaim(decision.reason());
+                }
+                run.setStatus("skipped");
+                run.setStatusReason(decision.reason());
+                run.setCurrentNodeId(null);
+                run.setFinishedAt(run.getStartedAt());
+            }
+        }
         try {
             workflowRunMapper.insertRun(run);
-            return new CanonicalClaim(run, true, false, false);
+            if ("skipped".equals(run.getStatus())) {
+                return new CanonicalClaim(
+                    run, false, false, true, run.getStatusReason());
+            }
+            return new CanonicalClaim(run, true, false, false, run.getStatusReason());
         } catch (DuplicateKeyException exception) {
             WorkflowRun replay = workflowRunMapper.getByDedupe(
                 workflow.getWorkspaceId(), workflow.getId(), keys.primary());
@@ -699,11 +812,24 @@ public class WorkflowRuntimeClaimService {
         WorkflowRun run,
         boolean started,
         boolean replayed,
-        boolean rejected
+        boolean rejected,
+        String statusReason
     ) {
+
+        public CanonicalClaim(
+                WorkflowRun run,
+                boolean started,
+                boolean replayed,
+                boolean rejected) {
+            this(run, started, replayed, rejected, null);
+        }
 
         static CanonicalClaim rejectedClaim() {
             return new CanonicalClaim(null, false, false, true);
+        }
+
+        static CanonicalClaim rejectedClaim(String statusReason) {
+            return new CanonicalClaim(null, false, false, true, statusReason);
         }
 
         static CanonicalClaim replayedWithoutRun() {
@@ -718,6 +844,12 @@ public class WorkflowRuntimeClaimService {
         CompiledWorkflow compiled,
         WorkflowNode.Condition condition,
         int conditionActorId
+    ) { }
+
+    /** Immutable inputs for one generation-pinned date reconciliation target. */
+    public record DateReconciliation(
+        WorkflowVersion version,
+        RuleTrigger trigger
     ) { }
 
     /** Result of one serialized legacy claim. */

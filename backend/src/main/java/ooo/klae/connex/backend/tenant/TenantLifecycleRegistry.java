@@ -265,11 +265,14 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("workflow_invocation", 183));
         raw.add(direct("workflow_recipe_origin", 184));
         raw.add(direct("pipeline", 190));
+        raw.add(direct("workflow_trigger_outbox", 191));
+        raw.add(direct("workflow_event_wait", 192));
+        raw.add(direct("workflow_date_enrollment", 193));
         raw.add(direct("workflow_step_attempt", 194));
         raw.add(direct("workflow_step_run", 195));
         raw.add(direct("workflow_run", 196));
-        raw.add(direct("workflow_trigger_outbox", 197));
         raw.add(direct("workflow_runtime_workspace", 198));
+        raw.add(direct("task_completion_event", 199));
         raw.add(direct("rule_execution", 200));
         raw.add(direct("job_run", 201));
         raw.add(direct("workflow_version", 210));

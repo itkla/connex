@@ -33,6 +33,8 @@ import ooo.klae.connex.backend.dto.WorkflowTextPart;
 import ooo.klae.connex.backend.dto.WorkflowTextTemplate;
 import ooo.klae.connex.backend.dto.WorkflowValueRef;
 import ooo.klae.connex.backend.dto.WorkflowWaitConfig;
+import ooo.klae.connex.backend.dto.WorkflowEnrollment;
+import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -62,10 +64,6 @@ public class WorkflowDefinitionValidator {
             compilation.actions(),
             executionMode,
             definition.schemaVersion());
-        if (definition.nodes().stream().anyMatch(WorkflowNode.Wait.class::isInstance)) {
-            ruleDefinitionValidator.requireSystemPermissions(
-                executionMode, Set.of(Permission.TASK_READ));
-        }
         validateV2Definition(recordType, definition, compilation);
         return compilation.compiled();
     }
@@ -106,9 +104,6 @@ public class WorkflowDefinitionValidator {
             executionMode,
             definition.schemaVersion());
         Set<Permission> completePermissions = new HashSet<>(permissions);
-        if (definition.nodes().stream().anyMatch(WorkflowNode.Wait.class::isInstance)) {
-            completePermissions.add(Permission.TASK_READ);
-        }
         ruleDefinitionValidator.requireSystemPermissions(executionMode, completePermissions);
         validateV2Definition(recordType, definition, compilation);
         return new ValidatedWorkflow(compilation.compiled(), completePermissions);
@@ -176,7 +171,7 @@ public class WorkflowDefinitionValidator {
         CompiledWorkflow compiled = new CompiledWorkflow(
             snapshot.schemaVersion(), trigger.id(), nodes, nodeTypes, outgoing, topologicalOrder,
             snapshot.inputs() == null ? List.of() : snapshot.inputs(),
-            enrollmentConditionNodeId);
+            enrollmentConditionNodeId, snapshot.enrollment(), snapshot.stopConditions());
         return new Compilation(
             compiled,
             trigger,
@@ -481,6 +476,7 @@ public class WorkflowDefinitionValidator {
                 null, null, "schemaVersion", Map.of());
         }
         Map<String, WorkflowInputDefinition> inputs = validateInputs(definition, compilation.trigger());
+        validatePolicies(recordType, definition);
         for (WorkflowNode.Action action : compilation.actions()) {
             validateActionBindings(recordType, action, inputs, compilation.compiled());
         }
@@ -500,6 +496,46 @@ public class WorkflowDefinitionValidator {
                     inputs,
                     compilation.compiled(),
                     false);
+            }
+        }
+    }
+
+    private void validatePolicies(String recordType, WorkflowDefinition definition) {
+        WorkflowEnrollment enrollment = definition.enrollment();
+        if (enrollment != null) {
+            if (enrollment.oneActiveRun() == null
+                    || enrollment.cooldownMinutes() == null
+                    || enrollment.cooldownMinutes() < 0
+                    || enrollment.cooldownMinutes() > 525_600) {
+                throw invalid(
+                    WorkflowDiagnosticCode.CONFIG_FIELD_INVALID,
+                    "Workflow enrollment policy is invalid",
+                    null, null, "enrollment", Map.of());
+            }
+            if (enrollment.condition() != null) {
+                ruleDefinitionValidator.validateWorkflowPolicyCondition(
+                    recordType, enrollment.condition(), "enrollment.condition");
+            }
+        }
+        if (definition.stopConditions() != null) {
+            ruleDefinitionValidator.validateWorkflowPolicyCondition(
+                recordType, definition.stopConditions(), "stopConditions");
+        }
+        for (WorkflowNode node : definition.nodes()) {
+            if (!(node instanceof WorkflowNode.End end) || end.config() == null) {
+                continue;
+            }
+            String outcome = end.config().outcome();
+            String reason = end.config().reason();
+            if (!Set.of("completed", "stopped").contains(outcome)
+                    || "completed".equals(outcome) && reason != null
+                    || "stopped".equals(outcome)
+                        && (reason == null
+                            || !reason.matches("[a-z][a-z0-9_]{0,63}"))) {
+                throw invalid(
+                    WorkflowDiagnosticCode.CONFIG_FIELD_INVALID,
+                    "Workflow end configuration is invalid",
+                    end.id(), null, "config", Map.of());
             }
         }
     }
@@ -856,7 +892,9 @@ public class WorkflowDefinitionValidator {
         Map<String, Map<WorkflowEdge.Outcome, WorkflowEdge>> outgoing,
         List<String> topologicalOrder,
         List<WorkflowInputDefinition> inputs,
-        String enrollmentConditionNodeId
+        String enrollmentConditionNodeId,
+        WorkflowEnrollment enrollment,
+        SegmentDefinition stopConditions
     ) {
 
         public CompiledWorkflow {
@@ -889,7 +927,9 @@ public class WorkflowDefinitionValidator {
                 outgoing,
                 topologicalOrder,
                 List.of(),
-                enrollmentConditionNodeId);
+                enrollmentConditionNodeId,
+                null,
+                null);
         }
 
         /** Returns the immutable node for a stable node id, or {@code null}. */

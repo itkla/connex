@@ -1075,6 +1075,7 @@ public class DealService {
             auditChanges);
         notificationChanges.publish(workspaceId, "deal", deal.getId());
         ruleTriggers.publish(workspaceId, "deal", deal.getId(), "deal.created");
+        ruleTriggers.reconcileDealDate(workspaceId, deal.getId());
         syncClosedReasonMentions(workspaceId, deal);
         return hydrateReferences(workspaceId, deal);
     }
@@ -1147,6 +1148,9 @@ public class DealService {
         ruleTriggers.publish(workspaceId, "deal", id, stageChanged ? "deal.stage_changed" : "deal.updated");
         if (valueChanged) {
             ruleTriggers.publish(workspaceId, "deal", id, "deal.value_changed");
+        }
+        if (!Objects.equals(before.getExpectedCloseDate(), deal.getExpectedCloseDate())) {
+            ruleTriggers.reconcileDealDate(workspaceId, id);
         }
         syncClosedReasonMentions(workspaceId, deal);
         return hydrateReferences(workspaceId, deal);
@@ -1253,6 +1257,9 @@ public class DealService {
             auditService.singleChange("expectedCloseDate", before.getExpectedCloseDate(), expectedCloseDate));
         notificationChanges.publish(workspaceId, "deal", id);
         ruleTriggers.publish(workspaceId, "deal", id, "deal.updated");
+        if (!Objects.equals(before.getExpectedCloseDate(), expectedCloseDate)) {
+            ruleTriggers.reconcileDealDate(workspaceId, id);
+        }
         return hydrateReferences(workspaceId, after);
     }
 
@@ -1402,6 +1409,7 @@ public class DealService {
             "Deleted deal " + before.getName(),
             auditService.diff(before, null, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
+        ruleTriggers.reconcileDealDate(workspaceId, id);
     }
 
     /**

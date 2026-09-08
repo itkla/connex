@@ -415,6 +415,23 @@ public class RuleDefinitionValidator {
         return hasConditions || hasGroups;
     }
 
+    void validateWorkflowPolicyCondition(
+            String recordType, SegmentDefinition condition, String fieldPath) {
+        if (!hasWhen(condition)) {
+            throw invalid(
+                WorkflowDiagnosticCode.CONDITION_EMPTY,
+                "A workflow policy condition must contain at least one condition",
+                null, fieldPath, Map.of());
+        }
+        try {
+            segmentService.validate(recordType, condition);
+        } catch (WorkflowDefinitionValidationException exception) {
+            throw new WorkflowDefinitionValidationException(
+                exception.getMessage(),
+                exception.diagnostic().atNode(null, fieldPath));
+        }
+    }
+
     private Set<Permission> actionPermissions(
             List<Configured<RuleAction>> actions, String recordType) {
         EnumSet<Permission> required = EnumSet.noneOf(Permission.class);

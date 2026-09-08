@@ -11,6 +11,8 @@ public record WorkflowRunSummaryDto(
     String runKey,
     String source,
     String status,
+    String statusReason,
+    DateSchedule dateSchedule,
     String legacyStatus,
     Version version,
     Trigger trigger,
@@ -21,6 +23,24 @@ public record WorkflowRunSummaryDto(
     Failure failure,
     boolean stepDetailAvailable
 ) {
+
+    public WorkflowRunSummaryDto(
+            String runKey,
+            String source,
+            String status,
+            String legacyStatus,
+            Version version,
+            Trigger trigger,
+            RuntimeState runtimeState,
+            LocalDateTime startedAt,
+            LocalDateTime finishedAt,
+            Long durationMs,
+            Failure failure,
+            boolean stepDetailAvailable) {
+        this(
+            runKey, source, status, null, null, legacyStatus, version, trigger,
+            runtimeState, startedAt, finishedAt, durationMs, failure, stepDetailAvailable);
+    }
 
     /** Immutable version evidence for a canonical run. */
     @JsonInclude(Include.ALWAYS)
@@ -46,6 +66,15 @@ public record WorkflowRunSummaryDto(
         String waitKind,
         LocalDateTime resumeAt,
         boolean cancellationRequested
+    ) { }
+
+    /** Date-trigger source and due-time evidence captured on one run. */
+    @JsonInclude(Include.ALWAYS)
+    public record DateSchedule(
+        String dateField,
+        java.time.LocalDate sourceDate,
+        java.time.LocalDate scheduledLocalDate,
+        LocalDateTime dueAt
     ) { }
 
     /** Fixed-code failure evidence without exception text. */

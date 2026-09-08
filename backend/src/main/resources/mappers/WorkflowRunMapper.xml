@@ -4,17 +4,19 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.WorkflowRunMapper">
 
   <sql id="runColumns">
-    id, workspace_id, workflow_id, workflow_version_id, status, trigger_type,
+    id, workspace_id, workflow_id, workflow_version_id, status, status_reason, trigger_type,
     trigger_event, trigger_key, record_type, record_id, dedupe_key, trigger_outbox_id,
+    date_field, date_source_date, date_scheduled_local_date, date_due_at,
     execution_mode, actor_user_id, attribution_user_id, launch_inputs_json, current_node_id, wait_kind,
     resume_at, lease_owner, lease_until, dispatch_count, cancel_requested_at,
     failure_node_id, failure_code, failure_message, started_at, finished_at, updated_at
   </sql>
 
   <sql id="viewColumns">
-    wr.id, wr.workspace_id, wr.workflow_id, wr.workflow_version_id, wr.status,
+    wr.id, wr.workspace_id, wr.workflow_id, wr.workflow_version_id, wr.status, wr.status_reason,
     wr.trigger_type, wr.trigger_event, wr.trigger_key, wr.record_type, wr.record_id,
     wr.dedupe_key, wr.trigger_outbox_id, wr.execution_mode, wr.actor_user_id,
+    wr.date_field, wr.date_source_date, wr.date_scheduled_local_date, wr.date_due_at,
     wr.attribution_user_id, wr.launch_inputs_json, wr.current_node_id, wr.wait_kind, wr.resume_at,
     wr.lease_owner, wr.lease_until, wr.dispatch_count, wr.cancel_requested_at,
     wr.failure_node_id, wr.failure_code, wr.failure_message,
@@ -32,14 +34,17 @@
 
   <insert id="insertRun" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO workflow_run
-      (workspace_id, workflow_id, workflow_version_id, status, trigger_type,
+      (workspace_id, workflow_id, workflow_version_id, status, status_reason, trigger_type,
        trigger_event, trigger_key, record_type, record_id, dedupe_key, trigger_outbox_id,
-       execution_mode, actor_user_id, attribution_user_id, launch_inputs_json, current_node_id, started_at)
+       date_field, date_source_date, date_scheduled_local_date, date_due_at,
+       execution_mode, actor_user_id, attribution_user_id, launch_inputs_json, current_node_id,
+       started_at, finished_at)
     VALUES
-      (#{workspaceId}, #{workflowId}, #{workflowVersionId}, #{status}, #{triggerType},
+      (#{workspaceId}, #{workflowId}, #{workflowVersionId}, #{status}, #{statusReason}, #{triggerType},
        #{triggerEvent}, #{triggerKey}, #{recordType}, #{recordId}, #{dedupeKey},
-       #{triggerOutboxId}, #{executionMode}, #{actorUserId}, #{attributionUserId}, #{launchInputsJson},
-       #{currentNodeId}, #{startedAt})
+       #{triggerOutboxId}, #{dateField}, #{dateSourceDate}, #{dateScheduledLocalDate}, #{dateDueAt},
+       #{executionMode}, #{actorUserId}, #{attributionUserId}, #{launchInputsJson},
+       #{currentNodeId}, #{startedAt}, #{finishedAt})
   </insert>
 
   <select id="getByDedupe" resultType="WorkflowRun">
@@ -208,6 +213,20 @@
       AND status = 'waiting'
   </update>
 
+  <update id="succeedWaitingEventStep">
+    UPDATE workflow_step_run
+    SET status = 'succeeded',
+        selected_outcome = #{selectedOutcome},
+        selected_edge_id = #{selectedEdgeId},
+        next_node_id = #{nextNodeId},
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+      AND node_id = #{nodeId}
+      AND node_type = 'wait'
+      AND status = 'waiting'
+  </update>
+
   <update id="failExistingStep">
     UPDATE workflow_step_run
     SET status = 'failed',
@@ -238,6 +257,21 @@
       AND status IN ('running', 'waiting')
   </update>
 
+  <update id="skipExistingStep">
+    UPDATE workflow_step_run
+    SET status = 'skipped',
+        selected_outcome = NULL,
+        selected_edge_id = NULL,
+        next_node_id = NULL,
+        failure_code = NULL,
+        failure_message = NULL,
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+      AND node_id = #{nodeId}
+      AND status IN ('running', 'waiting')
+  </update>
+
   <select id="countActiveRunLeases" resultType="int">
     SELECT COUNT(*)
     FROM workflow_run
@@ -256,7 +290,34 @@
       AND wr.cancel_requested_at IS NULL
       AND (
         wr.status = 'queued'
-        OR (wr.status = 'waiting' AND wr.resume_at &lt;= CURRENT_TIMESTAMP(6))
+        OR (
+          wr.status = 'waiting'
+          AND (
+            (wr.wait_kind IN ('delay', 'retry')
+              AND wr.resume_at &lt;= CURRENT_TIMESTAMP(6))
+            OR (
+              wr.wait_kind = 'event'
+              AND EXISTS (
+                SELECT 1
+                FROM workflow_event_wait wew
+                WHERE wew.workspace_id = wr.workspace_id
+                  AND wew.workflow_run_id = wr.id
+                  AND wew.node_id = wr.current_node_id
+                  AND wew.resolution IS NULL
+                  AND (
+                    wew.timeout_at &lt;= CURRENT_TIMESTAMP(6)
+                    OR EXISTS (
+                      SELECT 1
+                      FROM task_completion_event tce
+                      WHERE tce.workspace_id = wew.workspace_id
+                        AND tce.task_id = wew.source_task_id
+                        AND tce.occurred_at &lt;= wew.timeout_at
+                    )
+                  )
+              )
+            )
+          )
+        )
         OR (wr.status = 'running' AND wr.lease_until &lt; CURRENT_TIMESTAMP(6))
       )
     ORDER BY
@@ -320,7 +381,34 @@
       )
       AND (
         status = 'queued'
-        OR (status = 'waiting' AND resume_at &lt;= CURRENT_TIMESTAMP(6))
+        OR (
+          status = 'waiting'
+          AND (
+            (wait_kind IN ('delay', 'retry')
+              AND resume_at &lt;= CURRENT_TIMESTAMP(6))
+            OR (
+              wait_kind = 'event'
+              AND EXISTS (
+                SELECT 1
+                FROM workflow_event_wait wew
+                WHERE wew.workspace_id = workflow_run.workspace_id
+                  AND wew.workflow_run_id = workflow_run.id
+                  AND wew.node_id = workflow_run.current_node_id
+                  AND wew.resolution IS NULL
+                  AND (
+                    wew.timeout_at &lt;= CURRENT_TIMESTAMP(6)
+                    OR EXISTS (
+                      SELECT 1
+                      FROM task_completion_event tce
+                      WHERE tce.workspace_id = wew.workspace_id
+                        AND tce.task_id = wew.source_task_id
+                        AND tce.occurred_at &lt;= wew.timeout_at
+                    )
+                  )
+              )
+            )
+          )
+        )
         OR (status = 'running' AND lease_until &lt; CURRENT_TIMESTAMP(6))
       )
   </update>
@@ -350,6 +438,38 @@
       AND id = #{id}
       AND status = 'running'
       AND current_node_id = #{expectedNodeId}
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+      AND cancel_requested_at IS NULL
+  </update>
+
+  <update id="waitForEvent">
+    UPDATE workflow_run
+    SET status = 'waiting',
+        wait_kind = 'event',
+        resume_at = #{timeoutAt},
+        lease_owner = NULL,
+        lease_until = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND current_node_id = #{expectedNodeId}
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+      AND cancel_requested_at IS NULL
+  </update>
+
+  <update id="returnEventWaitToWaiting">
+    UPDATE workflow_run
+    SET status = 'waiting',
+        lease_owner = NULL,
+        lease_until = NULL
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND current_node_id = #{expectedNodeId}
+      AND wait_kind = 'event'
+      AND resume_at IS NOT NULL
       AND lease_owner = #{leaseOwner}
       AND lease_until &gt;= CURRENT_TIMESTAMP(6)
       AND cancel_requested_at IS NULL
@@ -421,6 +541,41 @@
   <update id="completeClaimedRun">
     UPDATE workflow_run
     SET status = 'succeeded',
+        current_node_id = NULL,
+        wait_kind = NULL,
+        resume_at = NULL,
+        lease_owner = NULL,
+        lease_until = NULL,
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND current_node_id = #{expectedNodeId}
+      AND lease_owner = #{leaseOwner}
+      AND lease_until &gt;= CURRENT_TIMESTAMP(6)
+      AND cancel_requested_at IS NULL
+  </update>
+
+  <update id="stopRun">
+    UPDATE workflow_run
+    SET status = 'stopped',
+        status_reason = #{statusReason},
+        current_node_id = NULL,
+        wait_kind = NULL,
+        resume_at = NULL,
+        lease_owner = NULL,
+        lease_until = NULL,
+        finished_at = #{finishedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND status = 'running'
+      AND current_node_id = #{expectedNodeId}
+  </update>
+
+  <update id="stopClaimedRun">
+    UPDATE workflow_run
+    SET status = 'stopped',
+        status_reason = #{statusReason},
         current_node_id = NULL,
         wait_kind = NULL,
         resume_at = NULL,
@@ -552,6 +707,29 @@
     SELECT CURRENT_TIMESTAMP(6)
     FROM workflow
     WHERE workspace_id = #{workspaceId} AND id = #{workflowId}
+  </select>
+
+  <select id="hasActiveEnrollment" resultType="boolean">
+    SELECT EXISTS(
+      SELECT 1
+      FROM workflow_run
+      WHERE workspace_id = #{workspaceId}
+        AND workflow_id = #{workflowId}
+        AND record_type = #{recordType}
+        AND record_id = #{recordId}
+        AND status IN ('queued', 'running', 'waiting', 'intervention_required')
+      LIMIT 1
+    )
+  </select>
+
+  <select id="latestEnrollmentStartedAt" resultType="java.time.LocalDateTime">
+    SELECT MAX(started_at)
+    FROM workflow_run
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_id = #{workflowId}
+      AND record_type = #{recordType}
+      AND record_id = #{recordId}
+      AND status &lt;&gt; 'skipped'
   </select>
 
   <select id="getPage" resultType="WorkflowRunView">

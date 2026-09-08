@@ -90,7 +90,9 @@ class WorkflowDraftMutationValidationTest {
             new LegacyWorkflowGraphConverter(definitionCodec),
             definitionCodec,
             new WorkflowVersionProjection(definitionCodec),
-            mock(WorkflowRuntimeProperties.class));
+            mock(WorkflowRuntimeProperties.class),
+            mock(WorkflowDateIntakeService.class),
+            mock(ooo.klae.connex.backend.mappers.WorkflowDateEnrollmentMapper.class));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaceService.getCurrentUserId()).thenReturn(41);
     }

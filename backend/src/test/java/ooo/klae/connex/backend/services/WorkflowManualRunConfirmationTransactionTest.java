@@ -43,6 +43,7 @@ class WorkflowManualRunConfirmationTransactionTest {
     @Mock private WorkflowDraftCanonicalizer canonicalizer;
     @Mock private WorkflowDefinitionValidator definitionValidator;
     @Mock private WorkflowManualEligibilityService eligibilityService;
+    @Mock private WorkflowEnrollmentPolicyService enrollmentPolicyService;
     @Mock private WorkflowActionBindingService bindingService;
     @Mock private WorkspaceService workspaceService;
     @Spy private ObjectMapper objectMapper = JsonMapper.builder().build();

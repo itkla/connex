@@ -15,6 +15,7 @@ public class WorkflowRunWorker {
 
     private final WorkflowRunMapper runMapper;
     private final WorkflowDelayResumeService delayResumeService;
+    private final WorkflowEventWaitResumeService eventWaitResumeService;
     private final WorkflowTraversalService traversalService;
     private final WorkflowRunCancellationService cancellationService;
     private final WorkflowRunFailureService failureService;
@@ -26,6 +27,11 @@ public class WorkflowRunWorker {
             return;
         }
         if ("delay".equals(claim.resumedWaitKind()) && !resumeDelay(claim)) {
+            cancellationService.finalizeClaimed(
+                claim.workspaceId(), claim.id(), claim.leaseOwner());
+            return;
+        }
+        if ("event".equals(claim.resumedWaitKind()) && !resumeEventWait(claim)) {
             cancellationService.finalizeClaimed(
                 claim.workspaceId(), claim.id(), claim.leaseOwner());
             return;
@@ -54,6 +60,24 @@ public class WorkflowRunWorker {
                     claim.leaseOwner(),
                     NodeType.DELAY,
                     failure);
+            }
+            return false;
+        }
+    }
+
+    private boolean resumeEventWait(WorkflowWorkClaim claim) {
+        WorkflowRun claimedRun = runMapper.getByIdInWorkspace(
+            claim.workspaceId(), claim.id());
+        String expectedNodeId = claimedRun == null
+            ? null : claimedRun.getCurrentNodeId();
+        try {
+            return eventWaitResumeService.resume(
+                claim.workspaceId(), claim.id(), claim.leaseOwner());
+        } catch (RuntimeException failure) {
+            if (expectedNodeId != null) {
+                failureService.failClaimed(
+                    claim.workspaceId(), claim.id(), expectedNodeId,
+                    claim.leaseOwner(), NodeType.WAIT, failure);
             }
             return false;
         }

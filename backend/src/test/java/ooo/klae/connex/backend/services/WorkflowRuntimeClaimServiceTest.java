@@ -19,6 +19,8 @@ import static org.mockito.Mockito.when;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +35,7 @@ import org.springframework.dao.DuplicateKeyException;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.WorkflowDateEnrollment;
 import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
@@ -59,6 +62,7 @@ class WorkflowRuntimeClaimServiceTest {
     @Mock private DealMapper dealMapper;
     @Mock private WorkflowDraftCanonicalizer canonicalizer;
     @Mock private WorkflowDefinitionValidator definitionValidator;
+    @Mock private WorkflowEnrollmentPolicyService enrollmentPolicyService;
     @Mock private SystemActor systemActor;
     @Mock private CompiledWorkflow compiled;
 
@@ -78,6 +82,7 @@ class WorkflowRuntimeClaimServiceTest {
             dealMapper,
             canonicalizer,
             definitionValidator,
+            enrollmentPolicyService,
             new WorkflowDedupeKey(Clock.fixed(
                 Instant.parse("2026-08-03T12:00:00Z"), ZoneOffset.UTC)),
             systemActor);
@@ -237,6 +242,76 @@ class WorkflowRuntimeClaimServiceTest {
     }
 
     @Test
+    void automaticEnrollmentRetainsTheSerializedActiveRunBlocker() {
+        stubCanonicalCompilation();
+        when(compiled.schemaVersion()).thenReturn(2);
+        when(enrollmentPolicyService.evaluateLocked(any(), eq(compiled), eq(17)))
+            .thenReturn(new WorkflowEnrollmentPolicyService.Decision(
+                "active_run_exists", null));
+
+        WorkflowRuntimeClaimService.CanonicalClaim claim = service.claimEntity(11, dispatch);
+
+        ArgumentCaptor<WorkflowRun> persisted = ArgumentCaptor.forClass(WorkflowRun.class);
+        verify(workflowRunMapper).insertRun(persisted.capture());
+        assertTrue(claim.rejected());
+        assertEquals("skipped", persisted.getValue().getStatus());
+        assertEquals("active_run_exists", persisted.getValue().getStatusReason());
+        InOrder order = inOrder(
+            workflowTriggerOutboxMapper,
+            workflowMapper,
+            enrollmentPolicyService,
+            workflowRunMapper);
+        order.verify(workflowTriggerOutboxMapper).ensureWorkspaceGate(7);
+        order.verify(workflowMapper).getByIdForUpdate(7, 11);
+        order.verify(enrollmentPolicyService).evaluateLocked(any(), eq(compiled), eq(17));
+        order.verify(workflowRunMapper).insertRun(any());
+    }
+
+    @Test
+    void dateClaimUsesAWorkflowScopedVersionIndependentSourcePeriodKey() {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("date");
+        trigger.setDateField("expectedCloseDate");
+        trigger.setOffsetDays(-30);
+        trigger.setLocalTime("09:00");
+        trigger.setTimezone("Pacific/Honolulu");
+        trigger.setAllowManualRuns(false);
+        workflow.setRuntimeGeneration(5L);
+        version.setRecordType("deal");
+        stubCanonicalCompilation(trigger);
+        WorkflowTriggerOutbox outbox = new WorkflowTriggerOutbox();
+        outbox.setId(31L);
+        outbox.setWorkspaceId(7);
+        outbox.setWorkflowId(11);
+        outbox.setWorkflowVersionId(19L);
+        outbox.setWorkflowRuntimeGeneration(5L);
+        WorkflowDateEnrollment enrollment = new WorkflowDateEnrollment();
+        enrollment.setWorkflowId(11);
+        enrollment.setWorkflowVersionId(19L);
+        enrollment.setWorkflowRuntimeGeneration(5L);
+        enrollment.setRecordId(43);
+        enrollment.setDateField("expectedCloseDate");
+        enrollment.setSourceDate(LocalDate.of(2027, 3, 31));
+        enrollment.setScheduledLocalDate(LocalDate.of(2027, 3, 1));
+        enrollment.setDueAt(LocalDateTime.of(2027, 3, 1, 19, 0));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.<WorkflowRun>getArgument(0).setId(91L);
+            return null;
+        }).when(workflowRunMapper).insertRun(any());
+
+        WorkflowRuntimeClaimService.CanonicalClaim claim = service.claimDate(
+            outbox, enrollment);
+
+        ArgumentCaptor<WorkflowRun> persisted = ArgumentCaptor.forClass(WorkflowRun.class);
+        verify(workflowRunMapper).insertRun(persisted.capture());
+        assertTrue(claim.started());
+        assertEquals(
+            "date:11:deal:43:expectedCloseDate:2027-03-31",
+            persisted.getValue().getDedupeKey());
+        assertEquals(LocalDate.of(2027, 3, 31), persisted.getValue().getDateSourceDate());
+    }
+
+    @Test
     void durableScheduleClaimChecksThePreUpgradePlaintextLedgerKey() {
         RuleTrigger trigger = new RuleTrigger();
         trigger.setType("schedule");
@@ -278,7 +353,7 @@ class WorkflowRuntimeClaimServiceTest {
         WorkflowDefinition definition = new WorkflowDefinition(
             1, "trigger", List.of(), List.of());
         when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
-        when(definitionValidator.validate("company", "user", definition))
+        when(definitionValidator.validate(version.getRecordType(), "user", definition))
             .thenReturn(compiled);
         RuleTrigger scheduleTrigger = new RuleTrigger();
         scheduleTrigger.setType("schedule");

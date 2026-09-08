@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -65,6 +66,10 @@ class WorkflowManualRunServiceTest {
     @Mock private WorkflowActionRetryPolicy retryPolicy;
     @Mock private WorkflowActionGuard actionGuard;
     @Mock private WorkflowRecordGuard recordGuard;
+    @Mock private WorkflowInputResolver inputResolver;
+    @Mock private WorkflowManualEligibilityService eligibilityService;
+    @Mock private WorkflowEnrollmentPolicyService enrollmentPolicyService;
+    @Mock private WorkflowActionBindingService bindingService;
     @Mock private WorkflowManualRunConfirmationTransaction confirmationTransaction;
     @Mock private WorkflowManualRunDispatchTransaction dispatchTransaction;
     @Mock private WorkflowRunOperationService runOperationService;
@@ -83,6 +88,12 @@ class WorkflowManualRunServiceTest {
     @BeforeEach
     void setUp() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        lenient().when(inputResolver.resolve(anyInt(), any(), any()))
+            .thenReturn(new WorkflowInputResolver.Resolved(Map.of(), List.of()));
+        lenient().when(eligibilityService.evaluate(
+            anyInt(), anyInt(), any(), any(), any()))
+            .thenReturn(new WorkflowManualEligibilityService.Evaluation(
+                "legacy_compatible", 17, List.of()));
     }
 
     @Test

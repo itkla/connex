@@ -326,6 +326,32 @@ class TaskServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void completionEvidenceIsAppendOnlyForEachFalseToTrueTransition() {
+        Task task = newTask(currentUser, null, null);
+
+        taskService.move(task.getId(), "done", 0);
+        assertEquals(1, completionEventCount(task.getId()));
+
+        taskService.move(task.getId(), "todo", 0);
+        assertEquals(1, completionEventCount(task.getId()));
+
+        Task update = updateDraft(taskService.getTaskById(task.getId()), "Complete again");
+        update.setCompleted(true);
+        taskService.update(task.getId(), update);
+        assertEquals(2, completionEventCount(task.getId()));
+
+        taskService.complete(task.getId());
+        assertEquals(2, completionEventCount(task.getId()));
+
+        Task createdCompleted = new Task();
+        createdCompleted.setDescription("Created completed");
+        createdCompleted.setAssignedTo(currentUser);
+        createdCompleted.setCompleted(true);
+        createdCompleted = taskService.create(createdCompleted);
+        assertEquals(0, completionEventCount(createdCompleted.getId()));
+    }
+
+    @Test
     void delete_compactsSourceColumn() {
         Task first = newTask(currentUser, null, null);
         Task deleting = newTask(currentUser, null, null);
@@ -477,5 +503,13 @@ class TaskServiceTest extends AbstractServiceTest {
         update.setDeal(task.getDeal());
         update.setCompany(task.getCompany());
         return update;
+    }
+
+    private int completionEventCount(int taskId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM task_completion_event WHERE workspace_id = ? AND task_id = ?",
+            Integer.class,
+            workspace.getId(),
+            taskId);
     }
 }

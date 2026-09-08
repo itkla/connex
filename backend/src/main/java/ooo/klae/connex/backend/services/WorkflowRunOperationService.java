@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -27,11 +28,12 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 public class WorkflowRunOperationService {
 
     private static final Set<String> TERMINAL_STATUSES = Set.of(
-        "succeeded", "failed", "skipped", "cancelled", "intervention_required");
+        "succeeded", "failed", "skipped", "stopped", "cancelled", "intervention_required");
 
     private final WorkflowMapper workflowMapper;
     private final WorkflowOperationsMapper workflowOperationsMapper;
     private final WorkflowRunMapper runMapper;
+    private final WorkflowEventWaitMapper eventWaitMapper;
     private final WorkflowRuntimeProperties properties;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
@@ -137,6 +139,11 @@ public class WorkflowRunOperationService {
             run.getWorkspaceId(), run.getId(), step.getId(), "cancelled", finishedAt);
         runMapper.cancelExistingStep(
             run.getWorkspaceId(), run.getId(), run.getCurrentNodeId(), finishedAt);
+        if ("event".equals(run.getWaitKind())) {
+            eventWaitMapper.resolveCurrent(
+                run.getWorkspaceId(), run.getId(), run.getCurrentNodeId(),
+                "cancelled", finishedAt);
+        }
     }
 
     private Workflow requireWorkflow(int workspaceId, int workflowId) {

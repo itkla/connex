@@ -43,9 +43,32 @@ public class WorkflowManualRunConfirmationTransaction {
     private final WorkflowDraftCanonicalizer canonicalizer;
     private final WorkflowDefinitionValidator definitionValidator;
     private final WorkflowManualEligibilityService eligibilityService;
+    private final WorkflowEnrollmentPolicyService enrollmentPolicyService;
     private final WorkflowActionBindingService bindingService;
     private final WorkspaceService workspaceService;
     private final ObjectMapper objectMapper;
+
+    public void lockAuthorizationForDispatch(
+            int workspaceId,
+            int workflowId,
+            long expectedVersionId,
+            WorkflowInvocation invocation) {
+        WorkflowVersion version = workflowVersionMapper.getById(
+            workspaceId, workflowId, expectedVersionId);
+        if (version == null || invocation.getWorkflowVersionId() != expectedVersionId) {
+            throw new ConflictException("Workflow version is unavailable");
+        }
+        WorkflowDefinition definition = canonicalizer.parseDefinition(version.getDefinitionJson());
+        Set<Permission> requiredPermissions = definitionValidator.validateForMutation(
+            version.getRecordType(), version.getExecutionMode(), definition);
+        lockAuthorization(
+            workspaceId,
+            invocation.getRequestedById(),
+            version,
+            definition,
+            requiredPermissions,
+            invocation);
+    }
 
     @Transactional
     public WorkflowInvocation confirm(
@@ -70,6 +93,10 @@ public class WorkflowManualRunConfirmationTransaction {
         WorkflowDefinition definition = canonicalizer.parseDefinition(version.getDefinitionJson());
         Set<Permission> requiredPermissions = definitionValidator.validateForMutation(
             version.getRecordType(), version.getExecutionMode(), definition);
+        WorkflowDefinitionValidator.CompiledWorkflow compiled = definition.schemaVersion() >= 2
+            ? definitionValidator.validate(
+                version.getRecordType(), version.getExecutionMode(), definition)
+            : null;
         lockAuthorization(
             workspaceId,
             requesterId,
@@ -77,6 +104,7 @@ public class WorkflowManualRunConfirmationTransaction {
             definition,
             requiredPermissions,
             discoveredInvocation);
+        outboxMapper.ensureWorkspaceGate(workspaceId);
         Workflow workflow = workflowMapper.getByIdForUpdate(workspaceId, workflowId);
         if (workflow == null) {
             throw new ResourceNotFoundException("Workflow not found");
@@ -108,7 +136,10 @@ public class WorkflowManualRunConfirmationTransaction {
         }
         eligibilityService.requireLockedState(
             workflow, invocation.getWorkflowVersionId(), definition);
-        outboxMapper.ensureWorkspaceGate(workspaceId);
+        if (compiled != null) {
+            requireEnrollmentEligible(
+                workspaceId, workflowId, version, compiled, invocation);
+        }
         if (operationsMapper.confirmInvocation(
                 workspaceId,
                 invocation.getId(),
@@ -167,6 +198,41 @@ public class WorkflowManualRunConfirmationTransaction {
                 throw exception;
             }
             throw new ConflictException("Workflow authorization changed; prepare it again");
+        }
+    }
+
+    private void requireEnrollmentEligible(
+            int workspaceId,
+            int workflowId,
+            WorkflowVersion version,
+            WorkflowDefinitionValidator.CompiledWorkflow compiled,
+            WorkflowInvocation invocation) {
+        if (compiled.schemaVersion() < 2) {
+            return;
+        }
+        Integer attributionUserId = "system".equals(version.getExecutionMode())
+            ? version.getCreatedById() : version.getRunAsUserId();
+        if (attributionUserId == null || attributionUserId < 1) {
+            throw new ConflictException("Workflow actor is unavailable");
+        }
+        for (WorkflowInvocationRecord record : operationsMapper.getInvocationRecords(
+                workspaceId, invocation.getId())) {
+            if (!"ready".equals(record.getPreviewStatus())) {
+                continue;
+            }
+            WorkflowRun run = new WorkflowRun();
+            run.setWorkspaceId(workspaceId);
+            run.setWorkflowId(workflowId);
+            run.setWorkflowVersionId(version.getId());
+            run.setRecordType(version.getRecordType());
+            run.setRecordId(record.getRecordId());
+            WorkflowEnrollmentPolicyService.Decision decision =
+                enrollmentPolicyService.evaluateLocked(
+                    run, compiled, attributionUserId);
+            if (!decision.allowed()) {
+                throw new ConflictException(
+                    "Workflow enrollment changed; prepare the scope again: " + decision.reason());
+            }
         }
     }
 

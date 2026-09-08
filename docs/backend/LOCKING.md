@@ -254,6 +254,10 @@ Canonical execution pins an immutable `workflow_version` per run. Node effects/c
 
 `runtime_owner` and the opposite runtime ledger are checked under the same workflow root lock. Preserve the outbox/lease/wait/attempt/cancellation architecture; do not reconstruct traversal from flattened metadata.
 
+Event-wait resume locks actor authorization roots, then the exact workflow run, step, wait, and source task. Task completion already holds the task row when it appends completion evidence. This makes a resolver wait behind an in-flight completion before deciding whether the persisted deadline timed out. Resolution and run advancement remain compare-and-set writes under those locks.
+
+Date reconciliation locks the source deal before that workflow/record's pending date enrollments. Date delivery follows the same deal-before-enrollment order, revalidates the pinned occurrence, and then enters the ordinary workflow claim path. Promotion locks one due enrollment and creates its linked outbox row in the same transaction. Never add a reverse enrollment-to-outbox foreign key; the outbox owns `workflow_date_enrollment_id` so teardown and lock order stay acyclic.
+
 Durable outbox delivery performs non-locking discovery of the outbox target, workflow, and pinned
 version, then locks the pinned actor's authorization roots before any runtime or tenant-record root:
 actor user → workspace → membership → custom role/permissions → workflow runtime workspace gate →

@@ -21,6 +21,7 @@ class WorkflowRunWorkerTest {
 
     @Mock private WorkflowRunMapper runMapper;
     @Mock private WorkflowDelayResumeService delayResumeService;
+    @Mock private WorkflowEventWaitResumeService eventWaitResumeService;
     @Mock private WorkflowTraversalService traversalService;
     @Mock private WorkflowRunCancellationService cancellationService;
     @Mock private WorkflowRunFailureService failureService;
@@ -31,6 +32,7 @@ class WorkflowRunWorkerTest {
         WorkflowRunWorker worker = new WorkflowRunWorker(
             runMapper,
             delayResumeService,
+            eventWaitResumeService,
             traversalService,
             cancellationService,
             failureService,
@@ -60,6 +62,7 @@ class WorkflowRunWorkerTest {
         WorkflowRunWorker worker = new WorkflowRunWorker(
             runMapper,
             delayResumeService,
+            eventWaitResumeService,
             traversalService,
             cancellationService,
             failureService,

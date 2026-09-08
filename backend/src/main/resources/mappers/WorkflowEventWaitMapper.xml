@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper">
+
+  <sql id="waitColumns">
+    id, workspace_id, workflow_run_id, workflow_step_run_id, source_step_run_id,
+    node_id, source_task_id, event_type, timeout_at, resolution, matched_event_id,
+    resolved_at, created_at
+  </sql>
+
+  <insert id="insertTaskCompletionEvent">
+    INSERT INTO task_completion_event (workspace_id, task_id)
+    VALUES (#{workspaceId}, #{taskId})
+  </insert>
+
+  <select id="getEarliestCompletion" resultType="TaskCompletionEvent">
+    SELECT id, workspace_id, task_id, occurred_at, created_at
+    FROM task_completion_event
+    WHERE workspace_id = #{workspaceId}
+      AND task_id = #{taskId}
+      AND occurred_at &lt;= #{timeoutAt}
+    ORDER BY occurred_at, id
+    LIMIT 1
+  </select>
+
+  <insert id="insertWait" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO workflow_event_wait
+      (workspace_id, workflow_run_id, workflow_step_run_id, source_step_run_id,
+       node_id, source_task_id, event_type, timeout_at)
+    VALUES
+      (#{workspaceId}, #{workflowRunId}, #{workflowStepRunId}, #{sourceStepRunId},
+       #{nodeId}, #{sourceTaskId}, #{eventType}, #{timeoutAt})
+  </insert>
+
+  <select id="getByRunNodeForUpdate" resultType="WorkflowEventWait">
+    SELECT <include refid="waitColumns"/>
+    FROM workflow_event_wait
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+      AND node_id = #{nodeId}
+    FOR UPDATE
+  </select>
+
+  <select id="getByRun" resultType="WorkflowEventWait">
+    SELECT <include refid="waitColumns"/>
+    FROM workflow_event_wait
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+    ORDER BY id
+  </select>
+
+  <update id="resolve">
+    UPDATE workflow_event_wait
+    SET resolution = #{resolution},
+        matched_event_id = #{matchedEventId},
+        resolved_at = #{resolvedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+      AND resolution IS NULL
+  </update>
+
+  <update id="resolveCurrent">
+    UPDATE workflow_event_wait
+    SET resolution = #{resolution},
+        matched_event_id = NULL,
+        resolved_at = #{resolvedAt}
+    WHERE workspace_id = #{workspaceId}
+      AND workflow_run_id = #{workflowRunId}
+      AND node_id = #{nodeId}
+      AND resolution IS NULL
+  </update>
+
+</mapper>

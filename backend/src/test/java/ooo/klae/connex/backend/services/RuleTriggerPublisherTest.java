@@ -14,15 +14,18 @@ class RuleTriggerPublisherTest {
     void suppressesTriggerWhileAutomationActive() {
         ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
         WorkflowTriggerIntake intake = mock(WorkflowTriggerIntake.class);
+        WorkflowDateIntakeService dateIntake = mock(WorkflowDateIntakeService.class);
         AutomationScope scope = new AutomationScope();
         RuleTriggerPublisher publisher = new RuleTriggerPublisher(
-            intake, events, scope, new WorkflowDocumentAutomationGate(true));
+            intake, dateIntake, events, scope, new WorkflowDocumentAutomationGate(true));
 
         boolean previous = scope.enter();
         publisher.publish(1, "deal", 5, "deal.stage_changed");
+        publisher.reconcileDealDate(1, 5);
         scope.restore(previous);
         verifyNoInteractions(events);
         verifyNoInteractions(intake);
+        verify(dateIntake).enqueueDeal(1, 5);
 
         publisher.publish(1, "deal", 5, "deal.stage_changed");
         verify(intake).enqueue(any(WorkflowTriggerDispatch.EntityChange.class));
@@ -34,7 +37,11 @@ class RuleTriggerPublisherTest {
         ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
         WorkflowTriggerIntake intake = mock(WorkflowTriggerIntake.class);
         RuleTriggerPublisher publisher = new RuleTriggerPublisher(
-            intake, events, new AutomationScope(), new WorkflowDocumentAutomationGate(false));
+            intake,
+            mock(WorkflowDateIntakeService.class),
+            events,
+            new AutomationScope(),
+            new WorkflowDocumentAutomationGate(false));
 
         publisher.publish(1, "document", 9, "document.approved");
         verifyNoInteractions(events);
@@ -50,7 +57,11 @@ class RuleTriggerPublisherTest {
         ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
         WorkflowTriggerIntake intake = mock(WorkflowTriggerIntake.class);
         RuleTriggerPublisher publisher = new RuleTriggerPublisher(
-            intake, events, new AutomationScope(), new WorkflowDocumentAutomationGate(true));
+            intake,
+            mock(WorkflowDateIntakeService.class),
+            events,
+            new AutomationScope(),
+            new WorkflowDocumentAutomationGate(true));
 
         publisher.publish(1, "document", 9, "document.approved");
 

@@ -175,6 +175,23 @@ public class WorkflowSimulationService {
                 WorkflowDiagnosticCode.TRIGGER_FILTER_NOT_MATCHED));
             return new WorkflowSimulationDto(Result.NOT_ENROLLED, path, List.of());
         }
+        if (compiled.enrollment() != null
+                && compiled.enrollment().condition() != null
+                && !decisionService.matchesPolicy(
+                    workspaceId,
+                    principal.attributionUserId(),
+                    draft.recordType(),
+                    recordId,
+                    compiled.enrollment().condition())) {
+            path.add(new PathStep(
+                trigger.id(),
+                "trigger",
+                "not_enrolled",
+                null,
+                null,
+                WorkflowDiagnosticCode.ENROLLMENT_NOT_MATCHED));
+            return new WorkflowSimulationDto(Result.NOT_ENROLLED, path, List.of());
+        }
         String nodeId = compiled.entryNodeId();
         boolean scheduleEnrollmentConfirmed = false;
         for (int sequence = 0; sequence < MAX_STEPS && nodeId != null; sequence++) {
@@ -184,6 +201,17 @@ public class WorkflowSimulationService {
                 return blocked(
                     path,
                     diagnostic(WorkflowDiagnosticCode.DEFINITION_CORRUPT, nodeId, null));
+            }
+            if (decisionService.matchesPolicy(
+                    workspaceId,
+                    principal.attributionUserId(),
+                    draft.recordType(),
+                    recordId,
+                    compiled.stopConditions())) {
+                path.add(step(
+                    nodeId, nodeType, "would_stop", null, null,
+                    WorkflowDiagnosticCode.CONDITION_MATCHED));
+                return new WorkflowSimulationDto(Result.WOULD_STOP, path, List.of());
             }
             if (node instanceof WorkflowNode.Action action) {
                 ooo.klae.connex.backend.dto.RuleAction guardAction;
@@ -229,6 +257,11 @@ public class WorkflowSimulationService {
                     return blocked(path, blocker);
                 }
             }
+            if (node instanceof WorkflowNode.Wait) {
+                path.add(step(nodeId, nodeType, "would_wait", null, null,
+                    WorkflowDiagnosticCode.DELAY_WAIT));
+                return new WorkflowSimulationDto(Result.WOULD_WAIT, path, List.of());
+            }
             WorkflowNodeDecisionContext context = new WorkflowNodeDecisionContext(
                 workspaceId,
                 principal.attributionUserId(),
@@ -238,10 +271,16 @@ public class WorkflowSimulationService {
                 scheduleEnrollmentConfirmed,
                 compiled);
             WorkflowStepTransition transition = decisionService.decide(context, node);
-            if (node instanceof WorkflowNode.End) {
-                path.add(step(nodeId, nodeType, "would_complete", null, null,
-                    WorkflowDiagnosticCode.END_REACHED));
-                return new WorkflowSimulationDto(Result.WOULD_COMPLETE, path, List.of());
+            if (node instanceof WorkflowNode.End end) {
+                boolean stopped = end.config() != null
+                    && "stopped".equals(end.config().outcome());
+                path.add(step(
+                    nodeId, nodeType, stopped ? "would_stop" : "would_complete",
+                    null, null, WorkflowDiagnosticCode.END_REACHED));
+                return new WorkflowSimulationDto(
+                    stopped ? Result.WOULD_STOP : Result.WOULD_COMPLETE,
+                    path,
+                    List.of());
             }
             if (node instanceof WorkflowNode.Delay) {
                 path.add(step(nodeId, nodeType, "would_wait", null, null,

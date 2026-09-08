@@ -37,6 +37,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
 
@@ -45,6 +46,7 @@ class WorkflowRunReadServiceTest {
 
     @Mock private WorkflowMapper workflowMapper;
     @Mock private WorkflowRunMapper workflowRunMapper;
+    @Mock private WorkflowEventWaitMapper workflowEventWaitMapper;
     @Mock private WorkflowVersionMapper workflowVersionMapper;
     @Mock private RuleMapper ruleMapper;
     @Mock private WorkflowDraftCanonicalizer canonicalizer;
@@ -60,6 +62,7 @@ class WorkflowRunReadServiceTest {
         service = new WorkflowRunReadService(
             workflowMapper,
             workflowRunMapper,
+            workflowEventWaitMapper,
             workflowVersionMapper,
             ruleMapper,
             canonicalizer,

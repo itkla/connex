@@ -27,6 +27,7 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 
 @ExtendWith(MockitoExtension.class)
 class WorkflowRunOperationServiceTest {
@@ -34,6 +35,7 @@ class WorkflowRunOperationServiceTest {
     @Mock private WorkflowMapper workflowMapper;
     @Mock private WorkflowOperationsMapper workflowOperationsMapper;
     @Mock private WorkflowRunMapper runMapper;
+    @Mock private WorkflowEventWaitMapper eventWaitMapper;
     @Mock private WorkflowRuntimeProperties properties;
     @Mock private WorkspaceService workspaceService;
     @Mock private AuditService auditService;
@@ -47,6 +49,7 @@ class WorkflowRunOperationServiceTest {
             workflowMapper,
             workflowOperationsMapper,
             runMapper,
+            eventWaitMapper,
             properties,
             workspaceService,
             auditService);
@@ -94,6 +97,24 @@ class WorkflowRunOperationServiceTest {
         assertTrue(result.cancellationRequested());
         verify(runMapper, never()).requestCancellation(anyInt(), anyLong(), any());
         verifyNoInteractions(auditService);
+    }
+
+    @Test
+    void waitingEventCancellationResolvesTheCorrelatedWaitInTheSameBoundary() {
+        run.setStatus("waiting");
+        run.setCurrentNodeId("wait-task");
+        run.setWaitKind("event");
+        WorkflowStepRun step = new WorkflowStepRun();
+        step.setId(53L);
+        step.setStatus("waiting");
+        when(runMapper.getStepByNodeForUpdate(7, 31L, "wait-task")).thenReturn(step);
+        when(runMapper.cancelImmediately(eq(7), eq(31L), any())).thenReturn(1);
+
+        service.cancel(11, "canonical-31");
+
+        verify(eventWaitMapper).resolveCurrent(
+            eq(7), eq(31L), eq("wait-task"), eq("cancelled"), any());
+        verify(runMapper).cancelImmediately(eq(7), eq(31L), any());
     }
 
     @Test

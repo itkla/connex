@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 public class WorkflowManualRunDispatchTransaction {
 
     private final WorkflowRuntimeClaimService claimService;
+    private final WorkflowManualRunConfirmationTransaction confirmationTransaction;
     private final WorkflowOperationsMapper operationsMapper;
     private final ObjectMapper objectMapper;
 
@@ -32,9 +33,11 @@ public class WorkflowManualRunDispatchTransaction {
             int recordId) {
         WorkflowInvocation invocation = operationsMapper.getInvocation(
             workspaceId, workflowId, invocationId);
-        if (invocation == null) {
+        if (invocation == null || invocation.getRequestedById() == null) {
             return new DispatchResult(null, true);
         }
+        confirmationTransaction.lockAuthorizationForDispatch(
+            workspaceId, workflowId, versionId, invocation);
         WorkflowRuntimeClaimService.CanonicalClaim claim = claimService.claimManual(
             workspaceId,
             workflowId,
@@ -45,7 +48,10 @@ public class WorkflowManualRunDispatchTransaction {
         WorkflowRun run = claim.run();
         if (claim.rejected() || run == null) {
             operationsMapper.markInvocationRecordSkipped(
-                workspaceId, invocationId, recordId, "configuration");
+                workspaceId,
+                invocationId,
+                recordId,
+                claim.statusReason() == null ? "configuration" : claim.statusReason());
             return new DispatchResult(null, true);
         }
         int linked = operationsMapper.linkInvocationRun(

@@ -61,6 +61,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
+import ooo.klae.connex.backend.mappers.WorkflowDateEnrollmentMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.LegacyWorkflowGraphConverter.ConvertedWorkflow;
@@ -80,6 +81,8 @@ class WorkflowServiceTest {
     @Mock private AuditService auditService;
     @Mock private WorkflowDefinitionValidator workflowDefinitionValidator;
     @Mock private WorkflowRuntimeProperties runtimeProperties;
+    @Mock private WorkflowDateIntakeService dateIntakeService;
+    @Mock private WorkflowDateEnrollmentMapper workflowDateEnrollmentMapper;
 
     private WorkflowDraftCanonicalizer canonicalizer;
     private LegacyWorkflowGraphConverter graphConverter;
@@ -102,7 +105,9 @@ class WorkflowServiceTest {
             graphConverter,
             definitionCodec,
             new WorkflowVersionProjection(definitionCodec),
-            runtimeProperties);
+            runtimeProperties,
+            dateIntakeService,
+            workflowDateEnrollmentMapper);
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         lenient().when(workspaceService.getCurrentUserId()).thenReturn(41);
         lenient().when(workspaceService.getCurrentPermissions())

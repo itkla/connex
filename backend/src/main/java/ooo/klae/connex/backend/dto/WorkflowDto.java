@@ -25,7 +25,9 @@ public record WorkflowDto(
     Integer updatedById,
     LocalDateTime createdAt,
     LocalDateTime updatedAt,
-    @JsonInclude(JsonInclude.Include.NON_NULL) RuleTrigger trigger
+    @JsonInclude(JsonInclude.Include.NON_NULL) RuleTrigger trigger,
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    WorkflowDateScheduleStatusDto dateScheduleStatus
 ) {
 
     public WorkflowDto(
@@ -52,6 +54,6 @@ public record WorkflowDto(
             id, name, description, enabled, runtimeOwner, archivedAt, intakePausedAt,
             intakePausedById, draftRevision, recordType, executionMode, runAsUserId,
             definition, canvas, activeVersionId, createdById, updatedById, createdAt,
-            updatedAt, null);
+            updatedAt, null, null);
     }
 }

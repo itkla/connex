@@ -16,6 +16,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -27,13 +28,18 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.WorkflowDateEnrollment;
+import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.WorkflowNode;
+import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
+import ooo.klae.connex.backend.mappers.WorkflowDateEnrollmentMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
@@ -45,8 +51,11 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
     @Mock private WorkflowTriggerOutboxMapper outboxMapper;
     @Mock private WorkflowMapper workflowMapper;
     @Mock private WorkflowVersionMapper versionMapper;
+    @Mock private WorkflowDateEnrollmentMapper dateEnrollmentMapper;
+    @Mock private DealMapper dealMapper;
     @Mock private SegmentMapper segmentMapper;
     @Mock private SegmentService segmentService;
+    @Mock private WorkflowDateReconciliationService dateReconciliationService;
     @Mock private WorkflowRuntimeClaimService claimService;
     @Mock private WorkflowExecutionPrincipalService principalService;
     @Mock private RuleEngineService ruleEngineService;
@@ -63,8 +72,11 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
             outboxMapper,
             workflowMapper,
             versionMapper,
+            dateEnrollmentMapper,
+            dealMapper,
             segmentMapper,
             segmentService,
+            dateReconciliationService,
             claimService,
             principalService,
             ruleEngineService,
@@ -247,6 +259,77 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
             Map.of("limit", 1, "code", "triggered_send_recipient_limit"));
     }
 
+    @Test
+    void matchingDateDeliveryLinksTheClaimedRunBeforeCompletingItsOutbox() {
+        WorkflowTriggerOutbox outbox = dateOutbox();
+        Workflow workflow = matchingWorkflow();
+        WorkflowVersion version = new WorkflowVersion();
+        version.setId(23L);
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
+        WorkflowDateEnrollment enrollment = dateEnrollment();
+        Deal deal = new Deal();
+        deal.setExpectedCloseDate("2027-03-31");
+        WorkflowRun run = new WorkflowRun();
+        run.setId(91L);
+        when(outboxMapper.getById(7, 31L)).thenReturn(outbox);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        when(versionMapper.getById(7, 11, 23L)).thenReturn(version);
+        when(outboxMapper.getOwnedForUpdate(7, 31L, "lease")).thenReturn(outbox);
+        when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
+        when(dealMapper.getDealByIdForUpdate(7, 19)).thenReturn(deal);
+        when(dateEnrollmentMapper.getByIdForUpdate(7, 47L)).thenReturn(enrollment);
+        when(claimService.claimDate(outbox, enrollment)).thenReturn(
+            new WorkflowRuntimeClaimService.CanonicalClaim(run, true, false, false));
+        LocalDateTime resolvedAt = LocalDateTime.of(2027, 3, 1, 19, 0);
+        when(dateEnrollmentMapper.currentTimestamp(7, 11)).thenReturn(resolvedAt);
+        when(dateEnrollmentMapper.markEnrolled(7, 47L, 91L, resolvedAt)).thenReturn(1);
+        when(outboxMapper.complete(7, 31L, "lease")).thenReturn(1);
+
+        assertEquals(
+            WorkflowTriggerOutboxDeliveryService.DeliveryResult.COMPLETED,
+            service.deliver(7, 31L, "lease"));
+
+        InOrder order = inOrder(
+            dealMapper, dateEnrollmentMapper, claimService, outboxMapper);
+        order.verify(dealMapper).getDealByIdForUpdate(7, 19);
+        order.verify(dateEnrollmentMapper).getByIdForUpdate(7, 47L);
+        order.verify(claimService).claimDate(outbox, enrollment);
+        order.verify(dateEnrollmentMapper).markEnrolled(7, 47L, 91L, resolvedAt);
+        order.verify(outboxMapper).complete(7, 31L, "lease");
+    }
+
+    @Test
+    void changedDateSourceTerminalizesTheQueuedOccurrenceWithoutClaiming() {
+        WorkflowTriggerOutbox outbox = dateOutbox();
+        Workflow workflow = matchingWorkflow();
+        WorkflowVersion version = new WorkflowVersion();
+        version.setId(23L);
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
+        WorkflowDateEnrollment enrollment = dateEnrollment();
+        Deal deal = new Deal();
+        deal.setExpectedCloseDate("2027-04-30");
+        when(outboxMapper.getById(7, 31L)).thenReturn(outbox);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        when(versionMapper.getById(7, 11, 23L)).thenReturn(version);
+        when(outboxMapper.getOwnedForUpdate(7, 31L, "lease")).thenReturn(outbox);
+        when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
+        when(dealMapper.getDealByIdForUpdate(7, 19)).thenReturn(deal);
+        when(dateEnrollmentMapper.getByIdForUpdate(7, 47L)).thenReturn(enrollment);
+        LocalDateTime resolvedAt = LocalDateTime.of(2027, 3, 1, 19, 0);
+        when(dateEnrollmentMapper.currentTimestamp(7, 11)).thenReturn(resolvedAt);
+        when(dateEnrollmentMapper.markQueuedMissed(7, 47L, resolvedAt)).thenReturn(1);
+        when(outboxMapper.invalidate(7, 31L, "lease")).thenReturn(1);
+
+        assertEquals(
+            WorkflowTriggerOutboxDeliveryService.DeliveryResult.INVALIDATED,
+            service.deliver(7, 31L, "lease"));
+
+        verify(dateEnrollmentMapper).markQueuedMissed(7, 47L, resolvedAt);
+        verifyNoInteractions(claimService);
+    }
+
     private static WorkflowTriggerOutbox scheduleOutbox() {
         WorkflowTriggerOutbox outbox = new WorkflowTriggerOutbox();
         outbox.setId(31L);
@@ -277,6 +360,37 @@ class WorkflowTriggerOutboxDeliveryServiceTest {
         outbox.setRecordId(19);
         outbox.setOccurredAt(LocalDateTime.of(2026, 8, 2, 12, 0));
         return outbox;
+    }
+
+    private static WorkflowTriggerOutbox dateOutbox() {
+        WorkflowTriggerOutbox outbox = new WorkflowTriggerOutbox();
+        outbox.setId(31L);
+        outbox.setWorkspaceId(7);
+        outbox.setWorkflowId(11);
+        outbox.setWorkflowVersionId(23L);
+        outbox.setWorkflowRuntimeGeneration(5L);
+        outbox.setWorkflowDateEnrollmentId(47L);
+        outbox.setTriggerType("date");
+        outbox.setTriggerEvent("expectedCloseDate");
+        outbox.setTriggerKey("2027-03-31");
+        outbox.setRecordType("deal");
+        outbox.setRecordId(19);
+        return outbox;
+    }
+
+    private static WorkflowDateEnrollment dateEnrollment() {
+        WorkflowDateEnrollment enrollment = new WorkflowDateEnrollment();
+        enrollment.setId(47L);
+        enrollment.setWorkspaceId(7);
+        enrollment.setWorkflowId(11);
+        enrollment.setWorkflowVersionId(23L);
+        enrollment.setWorkflowRuntimeGeneration(5L);
+        enrollment.setRecordType("deal");
+        enrollment.setRecordId(19);
+        enrollment.setDateField("expectedCloseDate");
+        enrollment.setSourceDate(LocalDate.of(2027, 3, 31));
+        enrollment.setState("queued");
+        return enrollment;
     }
 
     private static Workflow matchingWorkflow() {

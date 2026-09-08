@@ -21,9 +21,11 @@ import tools.jackson.core.type.TypeReference;
 import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowRunView;
+import ooo.klae.connex.backend.beans.WorkflowEventWait;
 import ooo.klae.connex.backend.beans.WorkflowStepRun;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.WorkflowRunDetailDto;
+import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowRunPageDto;
 import ooo.klae.connex.backend.dto.WorkflowRunSummaryDto;
 import ooo.klae.connex.backend.dto.WorkflowStepRunDto;
@@ -32,6 +34,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -50,6 +53,7 @@ public class WorkflowRunReadService {
 
     private final WorkflowMapper workflowMapper;
     private final WorkflowRunMapper workflowRunMapper;
+    private final WorkflowEventWaitMapper workflowEventWaitMapper;
     private final WorkflowVersionMapper workflowVersionMapper;
     private final RuleMapper ruleMapper;
     private final WorkflowDraftCanonicalizer canonicalizer;
@@ -161,6 +165,8 @@ public class WorkflowRunReadService {
             "canonical-" + run.getId(),
             "canonical",
             run.getStatus(),
+            run.getStatusReason(),
+            dateSchedule(run),
             null,
             new WorkflowRunSummaryDto.Version(
                 run.getWorkflowVersionId(),
@@ -233,21 +239,30 @@ public class WorkflowRunReadService {
                 "The pinned workflow definition failed its integrity check.",
                 false);
         }
-        List<WorkflowStepRunDto> path = workflowRunMapper.getSteps(workspaceId, runId).stream()
-            .map(this::stepDto)
+        WorkflowDefinition definition = canonicalizer.parseDefinition(canonical.definitionJson());
+        List<WorkflowStepRun> steps = workflowRunMapper.getSteps(workspaceId, runId);
+        java.util.Map<Long, WorkflowStepRun> stepsById = steps.stream().collect(
+            java.util.stream.Collectors.toMap(WorkflowStepRun::getId, step -> step));
+        java.util.Map<String, WorkflowEventWait> waitsByNode = workflowEventWaitMapper
+            .getByRun(workspaceId, runId).stream().collect(
+                java.util.stream.Collectors.toMap(WorkflowEventWait::getNodeId, wait -> wait));
+        List<WorkflowStepRunDto> path = steps.stream()
+            .map(step -> stepDto(step, waitsByNode.get(step.getNodeId()), stepsById))
             .toList();
         return new WorkflowRunDetailDto(
             "canonical-" + runId,
             "canonical",
             workflowId,
             run.getStatus(),
+            run.getStatusReason(),
+            dateSchedule(run),
             null,
             new WorkflowRunDetailDto.Version(
                 version.getId(),
                 version.getVersionNumber(),
                 HexFormat.of().formatHex(version.getDefinitionHash()),
                 version.getPublishedAt(),
-                canonicalizer.parseDefinition(canonical.definitionJson()),
+                definition,
                 canonicalizer.parseCanvas(canonical.canvasJson())),
             new WorkflowRunDetailDto.Execution(
                 run.getExecutionMode(),
@@ -295,7 +310,12 @@ public class WorkflowRunReadService {
             List.of());
     }
 
-    private WorkflowStepRunDto stepDto(WorkflowStepRun step) {
+    private WorkflowStepRunDto stepDto(
+            WorkflowStepRun step,
+            WorkflowEventWait wait,
+            java.util.Map<Long, WorkflowStepRun> stepsById) {
+        WorkflowStepRun source = wait == null
+            ? null : stepsById.get(wait.getSourceStepRunId());
         return new WorkflowStepRunDto(
             step.getSequenceNumber(),
             step.getNodeId(),
@@ -309,6 +329,16 @@ public class WorkflowRunReadService {
             step.getActionOutcome(),
             step.getActionReferenceId(),
             actionOutputs(step.getActionOutputsJson()),
+            wait == null ? null : new WorkflowStepRunDto.Wait(
+                "event",
+                wait.getEventType(),
+                source == null ? null : source.getNodeId(),
+                "taskId",
+                wait.getSourceTaskId(),
+                wait.getTimeoutAt(),
+                wait.getResolution(),
+                wait.getMatchedEventId(),
+                wait.getResolvedAt()),
             step.getStartedAt(),
             step.getFinishedAt(),
             duration(step.getStartedAt(), step.getFinishedAt()),
@@ -330,6 +360,17 @@ public class WorkflowRunReadService {
             String nodeId, String code, String message) {
         return code == null || message == null
             ? null : new WorkflowRunSummaryDto.Failure(nodeId, code, message);
+    }
+
+    private static WorkflowRunSummaryDto.DateSchedule dateSchedule(WorkflowRunView run) {
+        if (!"date".equals(run.getTriggerType())) {
+            return null;
+        }
+        return new WorkflowRunSummaryDto.DateSchedule(
+            run.getDateField(),
+            run.getDateSourceDate(),
+            run.getDateScheduledLocalDate(),
+            run.getDateDueAt());
     }
 
     private static WorkflowRunSummaryDto.Failure legacyFailure(String legacyStatus) {

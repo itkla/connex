@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowStepRun;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 import ooo.klae.connex.backend.services.WorkflowWorkClaim.Kind;
 
 /** Serializes one bounded trigger-or-run lease under the tenant workspace gate. */
@@ -23,6 +24,8 @@ public class WorkflowRuntimeClaimTransaction {
 
     private final WorkflowTriggerOutboxMapper outboxMapper;
     private final WorkflowRunMapper runMapper;
+    private final WorkflowEventWaitMapper eventWaitMapper;
+    private final WorkflowDatePromotionService datePromotionService;
     private final WorkflowRuntimeProperties properties;
     private final WorkflowInterventionRecorder interventionRecorder;
 
@@ -31,7 +34,10 @@ public class WorkflowRuntimeClaimTransaction {
         isolation = Isolation.READ_COMMITTED)
     public WorkflowWorkClaim claimNext(int workspaceId) {
         outboxMapper.ensureWorkspaceGate(workspaceId);
+        datePromotionService.promoteOne(workspaceId);
         finalizeExpiredCancellation(workspaceId);
+        outboxMapper.terminalizeExpiredExhaustedDate(
+            workspaceId, properties.maxTriggerDeliveryAttempts());
         outboxMapper.deadLetterExpiredExhausted(
             workspaceId, properties.maxTriggerDeliveryAttempts());
         String preferred = outboxMapper.getNextQueueForUpdate(workspaceId);
@@ -116,6 +122,11 @@ public class WorkflowRuntimeClaimTransaction {
                 finishedAt);
             runMapper.cancelExistingStep(
                 workspaceId, run.getId(), run.getCurrentNodeId(), finishedAt);
+            if ("event".equals(run.getWaitKind())) {
+                eventWaitMapper.resolveCurrent(
+                    workspaceId, run.getId(), run.getCurrentNodeId(),
+                    "cancelled", finishedAt);
+            }
         }
         if (runMapper.cancelExpired(workspaceId, run.getId(), finishedAt) != 1) {
             throw new IllegalStateException("Expired workflow cancellation was not finalized");

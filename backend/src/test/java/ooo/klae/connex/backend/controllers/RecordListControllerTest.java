@@ -945,7 +945,7 @@ class RecordListControllerTest {
     void tasksWithoutFilterRequirePageEndpoint() {
         TaskController controller = new TaskController(taskService, workspaceService, memberScopeResolver);
 
-        assertThrows(BadRequestException.class, () -> controller.getTasks(null, null, null));
+        assertThrows(BadRequestException.class, () -> controller.getTasks(null, null, null, null));
 
         verify(taskService, never()).getAllTasks();
     }

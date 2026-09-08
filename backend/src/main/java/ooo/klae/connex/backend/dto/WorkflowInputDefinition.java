@@ -11,4 +11,11 @@ public record WorkflowInputDefinition(
     WorkflowInputType type,
     boolean required,
     @JsonInclude(JsonInclude.Include.NON_NULL) JsonNode defaultValue
-) { }
+) {
+
+    public WorkflowInputDefinition {
+        if (defaultValue != null && defaultValue.isNull()) {
+            defaultValue = null;
+        }
+    }
+}

@@ -21,6 +21,7 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
@@ -70,6 +71,7 @@ public class TaskService {
     private final NotificationDelivery notificationDelivery;
     private final NotificationPreferenceService notificationPreferenceService;
     private final RuleTriggerPublisher ruleTriggers;
+    private final WorkflowEventWaitMapper workflowEventWaitMapper;
     private final ObjectMapper objectMapper;
 
     private static final String STATUS_TODO = "todo";
@@ -260,6 +262,7 @@ public class TaskService {
             auditService.diff(before, task, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "task", id);
         if (!before.isCompleted() && task.isCompleted()) {
+            workflowEventWaitMapper.insertTaskCompletionEvent(workspaceId, id);
             ruleTriggers.publish(workspaceId, "task", id, "task.completed");
         }
         List<Integer> mentioned =
@@ -375,6 +378,7 @@ public class TaskService {
             "Completed task " + task.getDescription(),
             auditService.singleChange("completed", task.isCompleted(), true));
         notificationChanges.publish(workspaceId, "task", id);
+        workflowEventWaitMapper.insertTaskCompletionEvent(workspaceId, id);
         ruleTriggers.publish(workspaceId, "task", id, "task.completed");
         return hydrate(workspaceId, completed);
     }
@@ -454,6 +458,7 @@ public class TaskService {
             auditService.diff(before, moved, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "task", id);
         if (toDone && !fromDone) {
+            workflowEventWaitMapper.insertTaskCompletionEvent(workspaceId, id);
             ruleTriggers.publish(workspaceId, "task", id, "task.completed");
         }
         return hydrate(workspaceId, moved);

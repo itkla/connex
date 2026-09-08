@@ -33,6 +33,8 @@ class WorkflowDelayResumeServiceTest {
     @Mock private WorkflowTraversalService traversalService;
     @Mock private WorkflowExecutionPrincipalService principalService;
     @Mock private WorkflowRecordGuard recordGuard;
+    @Mock private WorkflowRecordPolicyService recordPolicyService;
+    @Mock private WorkspaceService workspaceService;
 
     @Test
     void dueResumeCompletesTheExistingDelayStepWithoutInsertingAnother() {
@@ -41,7 +43,9 @@ class WorkflowDelayResumeServiceTest {
             versionMapper,
             traversalService,
             principalService,
-            recordGuard);
+            recordGuard,
+            recordPolicyService,
+            workspaceService);
         WorkflowRun run = new WorkflowRun();
         run.setId(31L);
         run.setWorkspaceId(7);

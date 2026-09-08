@@ -14,6 +14,7 @@ public class WorkflowTriggerOutbox {
     private int workflowId;
     private long workflowVersionId;
     private long workflowRuntimeGeneration;
+    private Long workflowDateEnrollmentId;
     private String triggerType;
     private String triggerEvent;
     private String triggerKey;

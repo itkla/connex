@@ -5,6 +5,7 @@
 
   <sql id="outboxColumns">
     id, workspace_id, workflow_id, workflow_version_id, workflow_runtime_generation,
+    workflow_date_enrollment_id,
     trigger_type, trigger_event, trigger_key, record_type, record_id, occurred_at,
     record_scan_after_id, record_scan_upper_id, schedule_match_count, dedupe_key, status, available_at,
     lease_owner, lease_until, delivery_attempt_count, last_error_code, completed_at,
@@ -52,21 +53,49 @@
     LIMIT #{limit}
   </select>
 
+  <select id="findDateTargets" resultType="WorkflowOutboxTarget">
+    SELECT w.id AS workflow_id,
+           v.id AS workflow_version_id,
+           w.runtime_generation,
+           v.record_type
+    FROM workflow w
+    JOIN workflow_version v
+      ON v.workspace_id = w.workspace_id
+     AND v.workflow_id = w.id
+     AND v.id = w.active_version_id
+    WHERE w.workspace_id = #{workspaceId}
+      AND w.enabled = TRUE
+      AND w.archived_at IS NULL
+      AND w.intake_paused_at IS NULL
+      AND v.trigger_type = 'date'
+      AND v.record_type = 'deal'
+    ORDER BY w.id
+    LIMIT #{limit}
+  </select>
+
   <select id="workspaceIdsPage" resultType="int">
-    SELECT workspace_id
-    FROM workflow_runtime_workspace
-    WHERE workspace_id &gt; #{afterId}
-    ORDER BY workspace_id
+    SELECT ready.workspace_id
+    FROM (
+      SELECT workspace_id FROM workflow_runtime_workspace
+      UNION
+      SELECT workspace_id
+      FROM workflow_date_enrollment
+      WHERE state = 'planned' AND due_at &lt;= CURRENT_TIMESTAMP(6)
+    ) ready
+    WHERE ready.workspace_id &gt; #{afterId}
+    ORDER BY ready.workspace_id
     LIMIT #{limit}
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO workflow_trigger_outbox
       (workspace_id, workflow_id, workflow_version_id, workflow_runtime_generation,
+       workflow_date_enrollment_id,
        trigger_type, trigger_event, trigger_key, record_type, record_id, occurred_at,
        record_scan_after_id, record_scan_upper_id, dedupe_key, status, available_at)
     VALUES
       (#{workspaceId}, #{workflowId}, #{workflowVersionId}, #{workflowRuntimeGeneration},
+       #{workflowDateEnrollmentId},
        #{triggerType}, #{triggerEvent}, #{triggerKey}, #{recordType}, #{recordId},
        #{occurredAt}, #{recordScanAfterId}, #{recordScanUpperId}, #{dedupeKey},
        'pending', CURRENT_TIMESTAMP(6))
@@ -133,6 +162,27 @@
       )
     ORDER BY id
     LIMIT 1
+  </update>
+
+  <update id="terminalizeExpiredExhaustedDate">
+    UPDATE workflow_date_enrollment e
+    JOIN (
+      SELECT workflow_date_enrollment_id
+      FROM workflow_trigger_outbox
+      WHERE workspace_id = #{workspaceId}
+        AND delivery_attempt_count &gt;= #{maxAttempts}
+        AND workflow_date_enrollment_id IS NOT NULL
+        AND (
+          status = 'pending'
+          OR (status = 'leased' AND lease_until &lt; CURRENT_TIMESTAMP(6))
+        )
+      ORDER BY id
+      LIMIT 1
+    ) exhausted ON exhausted.workflow_date_enrollment_id = e.id
+    SET e.state = 'missed', e.resolved_at = CURRENT_TIMESTAMP(6)
+    WHERE e.workspace_id = #{workspaceId}
+      AND e.state = 'queued'
+      AND e.workflow_run_id IS NULL
   </update>
 
   <update id="lease">
