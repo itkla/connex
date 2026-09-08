@@ -7,7 +7,7 @@ export function workflowInputsComplete(definitions: WorkflowInputDefinition[], v
         if (value == null || value === "") return !input.required;
         if (input.type === "user") return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
         if (input.type === "date") return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
-        return typeof value === "string" && value.trim().length > 0 && value.length <= 2_000;
+        return typeof value === "string" && (!input.required || value.trim().length > 0) && value.length <= 2_000;
     });
 }
 

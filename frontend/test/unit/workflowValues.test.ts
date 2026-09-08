@@ -25,6 +25,9 @@ describe("manual workflow inputs", () => {
         expect(workflowInputsComplete(inputs, { assignee: 1.5 })).toBe(false);
         expect(workflowInputsComplete(inputs, { assignee: 7, note: " " })).toBe(false);
         expect(workflowInputsComplete(inputs, { assignee: 7, dueDate: "next week" })).toBe(false);
+        const optionalText: WorkflowInputDefinition[] = [{ key: "context", label: "Context", type: "text", required: false }];
+        expect(workflowInputsComplete(optionalText, { context: " " })).toBe(true);
+        expect(workflowInputsComplete(optionalText, { context: " ".repeat(2_001) })).toBe(false);
     });
 });
 

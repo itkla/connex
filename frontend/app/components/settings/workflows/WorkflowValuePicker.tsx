@@ -13,6 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 export type WorkflowValueOption = { ref: WorkflowValueRef; label: string; valueType: string };
 
+const MAX_TEMPLATE_PARTS = 64;
+
 /** Produces permitted record/input and path-safe output choices from the server capability catalog. */
 export function useWorkflowValueOptions(definition: WorkflowDefinition, catalog: WorkflowCatalog | null, recordType: string, nodeId: string): WorkflowValueOption[] {
     const t = useTranslations("WorkspaceWorkflows");
@@ -81,14 +83,14 @@ export function WorkflowTextValue({ value, template, options, disabled, maximum,
                             }}><XMarkIcon className="size-4" /></IconButton>
                         </div>
                     ))}
-                    <Button variant="ghost" size="inline" disabled={disabled} onClick={() => onChange(undefined, { ...template, parts: [...template.parts, { text: "" }] }, "commit")}><PlusIcon className="size-3" />{t("values.addText")}</Button>
+                    <Button variant="ghost" size="inline" disabled={disabled || template.parts.length >= MAX_TEMPLATE_PARTS} onClick={() => onChange(undefined, { ...template, parts: [...template.parts, { text: "" }] }, "commit")}><PlusIcon className="size-3" />{t("values.addText")}</Button>
                     <Select value={template.missingValue} disabled={disabled} onValueChange={(value) => onChange(undefined, { ...template, missingValue: value === "empty" ? "empty" : "fail" }, "commit")}>
                         <SelectTrigger className="w-full" aria-label={t("values.missingLabel")}><SelectValue /></SelectTrigger>
                         <SelectContent><SelectItem value="fail">{t("values.missingFail")}</SelectItem><SelectItem value="empty">{t("values.missingEmpty")}</SelectItem></SelectContent>
                     </Select>
                 </div>
             )}
-            <WorkflowValuePicker options={options} label={t("values.insertInto", { field: label })} disabled={disabled} onChange={(ref) => onChange(undefined, {
+            <WorkflowValuePicker options={options} label={t("values.insertInto", { field: label })} disabled={disabled || (template?.parts.length ?? 0) >= MAX_TEMPLATE_PARTS} onChange={(ref) => onChange(undefined, {
                 parts: [...(template?.parts ?? (value ? [{ text: value }] : [])), { ref }], missingValue: template?.missingValue ?? "fail",
             }, "commit")} />
         </div>
