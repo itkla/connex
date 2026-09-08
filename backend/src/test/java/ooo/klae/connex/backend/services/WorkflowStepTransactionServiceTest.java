@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -22,6 +24,7 @@ import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Set;
 import java.util.TimeZone;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +34,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,11 +52,15 @@ import ooo.klae.connex.backend.dto.WorkflowEndConfig;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.dto.WorkflowWaitConfig;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.NodeType;
+import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
+import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 @ExtendWith(MockitoExtension.class)
 class WorkflowStepTransactionServiceTest {
@@ -68,6 +76,8 @@ class WorkflowStepTransactionServiceTest {
     @Mock private WorkspaceService workspaceService;
     @Mock private TaskMapper taskMapper;
     @Mock private WorkflowEventWaitMapper eventWaitMapper;
+    @Mock private TenantCatalogResolver tenantCatalogResolver;
+    @Mock private WorkspaceMapper placementWorkspaceMapper;
 
     private WorkflowStepTransactionService service;
     private WorkflowRun run;
@@ -259,6 +269,96 @@ class WorkflowStepTransactionServiceTest {
         scopeOrder.verify(automationExecutor).runAs(
             eq(7), eq(principal.principal()), eq("member"), any());
         scopeOrder.verify(nodeExecutor).execute(any(), eq(trigger));
+    }
+
+    @Test
+    void realActorScopeProtectsPolicyAndRestoresThreadContextAfterSuccessAndFailure() {
+        run.setCurrentNodeId("trigger");
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
+        WorkflowNode.Trigger trigger = new WorkflowNode.Trigger("trigger", null);
+        WorkflowEdge edge = new WorkflowEdge(
+            "trigger-end", "trigger", "end", WorkflowEdge.Outcome.NEXT);
+        CompiledWorkflow schemaV2 = new CompiledWorkflow(
+            2,
+            "trigger",
+            Map.of("trigger", trigger),
+            Map.of("trigger", NodeType.TRIGGER),
+            Map.of("trigger", Map.of(WorkflowEdge.Outcome.NEXT, edge)),
+            java.util.List.of("trigger"),
+            java.util.List.of(),
+            null,
+            null,
+            null);
+        WorkspaceService.LockedPermissionSnapshot authorization =
+            new WorkspaceService.LockedPermissionSnapshot(
+                Map.of(17, Set.of()), Map.of(17, Set.of()));
+        when(workspaceService.lockAndRequirePermissionsSnapshot(eq(7), any()))
+            .thenReturn(authorization);
+        when(principalService.resolveLocked(7, version, authorization))
+            .thenReturn(principal);
+        when(placementWorkspaceMapper.getOrgId(7)).thenReturn(42);
+        when(tenantCatalogResolver.resolveCatalog(42)).thenReturn("connex_workspace_7");
+        when(nodeExecutor.execute(any(), eq(trigger))).thenReturn(
+            new WorkflowStepTransition(
+                WorkflowStepTransition.Continuation.IMMEDIATE,
+                WorkflowEdge.Outcome.NEXT));
+        when(workflowRunMapper.nextSequence(7, 31L)).thenReturn(2);
+        when(workflowRunMapper.advanceRun(7, 31L, "trigger", "end")).thenReturn(1);
+        TenantContext tenantContext = new TenantContext();
+        AutomationScope scope = new AutomationScope();
+        AutomationExecutor realExecutor = new AutomationExecutor(
+            tenantContext,
+            scope,
+            new TenantWorkScope(
+                tenantContext, tenantCatalogResolver, placementWorkspaceMapper));
+        WorkflowStepTransactionService scopedService = new WorkflowStepTransactionService(
+            workflowRunMapper,
+            workflowVersionMapper,
+            principalService,
+            recordGuard,
+            recordPolicyService,
+            realExecutor,
+            nodeExecutor,
+            bindingService,
+            workspaceService,
+            taskMapper,
+            eventWaitMapper);
+        AtomicInteger policyCalls = new AtomicInteger();
+        IllegalStateException expectedFailure = new IllegalStateException("policy failure");
+        when(recordPolicyService.stopReason(run, schemaV2, 17)).thenAnswer(invocation -> {
+            assertEquals(7, tenantContext.getWorkspaceId());
+            assertEquals(42, tenantContext.getOrgId());
+            assertEquals(17, tenantContext.getUserId());
+            assertEquals("member", tenantContext.getRole());
+            assertEquals("connex_workspace_7", tenantContext.getCatalog());
+            assertSame(principal.principal(),
+                SecurityContextHolder.getContext().getAuthentication().getPrincipal());
+            assertTrue(scope.isActive());
+            if (policyCalls.incrementAndGet() == 2) {
+                throw expectedFailure;
+            }
+            return null;
+        });
+
+        SecurityContextHolder.clearContext();
+        try {
+            assertTrue(scopedService.execute(7, 31L, "trigger", schemaV2).executed());
+            assertFalse(tenantContext.isResolved());
+            assertFalse(scope.isActive());
+            assertNull(SecurityContextHolder.getContext().getAuthentication());
+
+            IllegalStateException failure = assertThrows(
+                IllegalStateException.class,
+                () -> scopedService.execute(7, 31L, "trigger", schemaV2));
+            assertSame(expectedFailure, failure);
+            assertFalse(tenantContext.isResolved());
+            assertFalse(scope.isActive());
+            assertNull(SecurityContextHolder.getContext().getAuthentication());
+        } finally {
+            tenantContext.clear();
+            SecurityContextHolder.clearContext();
+        }
     }
 
     @Test
