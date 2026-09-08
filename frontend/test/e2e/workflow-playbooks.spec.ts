@@ -12,15 +12,15 @@ async function selectOption(page: Page, control: Locator, name: string): Promise
     await page.getByRole("option", { name, exact: true }).click();
 }
 
-async function closeInspector(page: Page, mobile: boolean): Promise<void> {
-    if (mobile) await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+async function closeInspector(page: Page, mobile: boolean, closeLabel = "Close"): Promise<void> {
+    if (mobile) await page.getByRole("dialog").getByRole("button", { name: closeLabel, exact: true }).click();
 }
 
 test("keeps deleted input bindings unresolved and fits sixteen preview inputs", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto("/workflows/new?recordType=person&start=manual");
-    await page.getByLabel("Workflow name").fill(`Input identity ${testInfo.testId}`);
+    await page.getByLabel("Workflow name").fill(`Input identity ${testInfo.testId}-${testInfo.retry}`);
     await page.getByRole("button", { name: "Continue to editor" }).click();
     await page.getByRole("button", { name: "Outline", exact: true }).click();
     const outline = page.getByRole("list", { name: "Workflow steps" });
@@ -55,18 +55,18 @@ test("keeps deleted input bindings unresolved and fits sixteen preview inputs", 
     await page.getByRole("button", { name: "Preview", exact: true }).click();
     const dialog = page.getByRole("dialog");
     for (let index = 1; index <= 16; index += 1) {
-        const input = dialog.getByLabel(`Context ${index}`, { exact: true });
+        const input = dialog.getByRole("textbox", { name: `Context ${index}`, exact: true });
         await input.scrollIntoViewIfNeeded();
         await expect(input).toBeInViewport();
     }
     await expect(dialog.getByRole("button", { name: "Preview path", exact: true })).toBeInViewport();
-    await expect(dialog.getByRole("heading")).toBeInViewport();
+    await expect(dialog.getByRole("heading", { name: "Preview a workflow path", exact: true })).toBeInViewport();
 });
 
 test("filters date-start time zones and selects the match with the keyboard @mobile", async ({ page }, testInfo) => {
     const mobile = testInfo.project.name === "mobile-chromium";
     await page.goto("/workflows/new?recordType=deal&start=date");
-    await page.getByLabel("Workflow name").fill(`Date zone ${testInfo.testId}`);
+    await page.getByLabel("Workflow name").fill(`Date zone ${testInfo.testId}-${testInfo.retry}`);
     await page.getByRole("button", { name: "Continue to editor" }).click();
     if (!mobile) await page.getByRole("button", { name: "Outline", exact: true }).click();
     await page.getByRole("list", { name: "Workflow steps" }).getByRole("button").first().click();
@@ -86,7 +86,7 @@ test("authors Japanese launch inputs in dark mode without horizontal overflow @m
     await page.addInitScript(() => window.localStorage.setItem("theme", "dark"));
     await page.goto("/workflows/new?recordType=company&start=manual");
     await expect(page.locator("html")).toHaveClass(/dark/);
-    await page.getByLabel("ワークフロー名", { exact: true }).fill(`会社レビュー ${testInfo.testId}`);
+    await page.getByLabel("ワークフロー名", { exact: true }).fill(`会社レビュー ${testInfo.testId}-${testInfo.retry}`);
     await expect(page.getByRole("button", { name: "レコードから手動で実行", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "エディターに進む", exact: true }).click();
     if (!mobile) await page.getByRole("button", { name: "アウトライン", exact: true }).click();
@@ -97,7 +97,7 @@ test("authors Japanese launch inputs in dark mode without horizontal overflow @m
     await expect(page.getByRole("heading", { name: "実行時の入力", exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath("workflow-ja-dark.png"), fullPage: true });
-    await closeInspector(page, mobile);
+    await closeInspector(page, mobile, "閉じる");
     const created = page.waitForResponse((response) => response.request().method() === "POST"
         && new URL(response.url()).pathname === "/api/workflows");
     await page.getByRole("button", { name: "下書きを保存", exact: true }).click();
@@ -112,7 +112,7 @@ for (const type of ["task", "document"] as const) {
     test(`preserves new ${type} workflows and their existing events @mobile`, async ({ page }, testInfo) => {
         const mobile = testInfo.project.name === "mobile-chromium";
         await page.goto(`/workflows/new?recordType=${type}`);
-        await page.getByLabel("Workflow name").fill(`${type} automation ${testInfo.testId}`);
+        await page.getByLabel("Workflow name").fill(`${type} automation ${testInfo.testId}-${testInfo.retry}`);
         await expect(page.getByRole("button", { name: "Manually from a record", exact: true })).toHaveCount(0);
         await page.getByRole("button", { name: "Continue to editor" }).click();
         if (!mobile) await page.getByRole("button", { name: "Outline", exact: true }).click();
@@ -141,7 +141,7 @@ for (const type of ["person", "company", "deal"] as const) {
         const mobile = testInfo.project.name === "mobile-chromium";
         const record = type === "person" ? fixture.contacts.peek : type === "company" ? fixture.companies.primary : fixture.deals.primary;
         const route = type === "person" ? "contacts" : type === "company" ? "companies" : "deals";
-        const workflowName = `${type} follow-up ${testInfo.testId}`;
+        const workflowName = `${type} follow-up ${testInfo.testId}-${testInfo.retry}`;
         const dueDate = "2026-12-15";
         const consoleErrors: string[] = [];
         page.on("pageerror", (error) => consoleErrors.push(error.message));
@@ -244,9 +244,9 @@ test("resumes a process only after its created task is completed @mobile", async
     test.setTimeout(120_000);
     const record = runFixture(testInfo.project.name).contacts.peek;
     const mobile = testInfo.project.name === "mobile-chromium";
-    const workflowName = `Task completion ${testInfo.testId}`;
-    const firstTitle = `Confirm handoff ${testInfo.testId}`;
-    const nextTitle = `Continue handoff ${testInfo.testId}`;
+    const workflowName = `Task completion ${testInfo.testId}-${testInfo.retry}`;
+    const firstTitle = `Confirm handoff ${testInfo.testId}-${testInfo.retry}`;
+    const nextTitle = `Continue handoff ${testInfo.testId}-${testInfo.retry}`;
     await page.goto("/workflows/new?recordType=person&start=manual");
     await page.getByLabel("Workflow name").fill(workflowName);
     await page.getByRole("button", { name: "Continue to editor" }).click();
@@ -315,7 +315,7 @@ test("resumes a process only after its created task is completed @mobile", async
 
 test("configures a renewal recipe against a deal date and creates it turned off @mobile", async ({ page }, testInfo) => {
     test.setTimeout(120_000);
-    const name = `Renewal preparation ${testInfo.testId}`;
+    const name = `Renewal preparation ${testInfo.testId}-${testInfo.retry}`;
     await page.goto("/workflows/recipes/deal-renewal-preparation");
     await expect(page.getByRole("heading", { name: "Prepare for a renewal", exact: true })).toBeVisible();
     await page.getByLabel("Workflow name", { exact: true }).fill(name);
