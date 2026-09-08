@@ -978,6 +978,24 @@ class WorkflowServiceTest {
     }
 
     @Test
+    void resumeReconcilesDateEnrollmentWithThePersistedRuntimeGeneration() {
+        PublishedPair pair = publishedPair("Workflow", true, 4);
+        pair.workflow().setIntakePausedAt(LocalDateTime.of(2026, 8, 2, 10, 0));
+        pair.workflow().setRuntimeGeneration(12);
+        stubPublishedMutation(pair, null, false);
+        stubUserMutation(Set.of(41), Set.of());
+        when(workflowMapper.updateIntakePause(7, 101, false, 41)).thenReturn(1);
+
+        WorkflowDto resumed = service.resume(101);
+
+        ArgumentCaptor<Workflow> workflow = ArgumentCaptor.forClass(Workflow.class);
+        verify(dateIntakeService).enqueueFull(
+            workflow.capture(), eq(pair.version()), any(WorkflowDefinition.class));
+        assertEquals(12, workflow.getValue().getRuntimeGeneration());
+        assertNull(resumed.intakePausedAt());
+    }
+
+    @Test
     void disableRemainsPossibleAndIdempotentWhenThePersistedUserIdentityIsGone() {
         PublishedPair enabled = publishedPair("Workflow", true, 4, "user", null, 88L);
         stubPublishedMutation(enabled, null, false);

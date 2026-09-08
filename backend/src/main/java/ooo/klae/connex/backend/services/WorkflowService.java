@@ -635,7 +635,6 @@ public class WorkflowService {
                 paused ? "Workflow intake paused" : "Workflow intake resumed",
                 Map.of("paused", paused));
             workflow.setIntakePausedAt(paused ? LocalDateTime.now() : null);
-            workflow.setRuntimeGeneration(workflow.getRuntimeGeneration() + 1);
             if (!paused && workflow.isEnabled() && discoveredActive != null) {
                 dateIntakeService.enqueueFull(workflow, discoveredActive, activeDefinition);
             }
