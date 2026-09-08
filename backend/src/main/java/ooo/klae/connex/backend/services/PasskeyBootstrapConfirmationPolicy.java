@@ -1,10 +1,13 @@
 package ooo.klae.connex.backend.services;
 
+import jakarta.annotation.PostConstruct;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.mappers.UserMapper;
 
 /**
@@ -35,9 +38,21 @@ public class PasskeyBootstrapConfirmationPolicy {
 
     private final PrivilegedAccountService privilegedAccountService;
     private final UserMapper userMapper;
+    private final PrivilegedMfaProperties privilegedMfaProperties;
 
     @Value("${connex.security.privileged-mfa.bootstrap-confirmation.enabled:true}")
     private boolean confirmationEnabled;
+
+    /** Refuses an unattributed exception before this policy can serve enrollment requests. */
+    @PostConstruct
+    public void validateConfiguration() {
+        privilegedMfaProperties.validateBootstrapConfirmation(confirmationEnabled);
+    }
+
+    /** Returns the effective setting shared by enrollment enforcement and the startup audit. */
+    public boolean isConfirmationEnabled() {
+        return confirmationEnabled;
+    }
 
     /**
      * Whether a first-passkey enrollment by this account must carry an emailed confirmation.

@@ -13,6 +13,9 @@ import java.time.ZoneOffset;
 import java.util.HexFormat;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 
@@ -53,6 +56,29 @@ class PrivilegedMfaPropertiesTest {
 
         properties.setChangeActor("security-change-1234");
         assertDoesNotThrow(() -> properties.validate(CLOCK));
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "configuration-default", " configuration-default "})
+    void disablingBootstrapConfirmationRejectsUnattributedActors(String actor) {
+        PrivilegedMfaProperties properties = new PrivilegedMfaProperties();
+        properties.setChangeActor(actor);
+
+        assertTrue(properties.isEnforced());
+        assertThrows(IllegalStateException.class,
+                () -> properties.validateBootstrapConfirmation(false));
+        assertDoesNotThrow(() -> properties.validateBootstrapConfirmation(true));
+    }
+
+    @Test
+    void disablingBootstrapConfirmationRequiresAnExplicitActor() {
+        PrivilegedMfaProperties properties = new PrivilegedMfaProperties();
+        assertThrows(IllegalStateException.class,
+                () -> properties.validateBootstrapConfirmation(false));
+
+        properties.setChangeActor(" security-change-1234 ");
+        assertDoesNotThrow(() -> properties.validateBootstrapConfirmation(false));
     }
 
     @Test

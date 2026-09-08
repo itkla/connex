@@ -78,6 +78,14 @@ public class PrivilegedMfaProperties {
         this.recoveryActor = recoveryActor;
     }
 
+    /** Requires an accountable actor for a first-passkey confirmation exception. */
+    public void validateBootstrapConfirmation(boolean confirmationEnabled) {
+        if (!confirmationEnabled && DEFAULT_ACTOR.equals(getChangeActor())) {
+            throw new IllegalStateException(
+                    "Disabling privileged MFA bootstrap confirmation requires an accountable change actor");
+        }
+    }
+
     public void validate(Clock clock) {
         if (!isEnforced() && DEFAULT_ACTOR.equals(getChangeActor())) {
             throw new IllegalStateException(
