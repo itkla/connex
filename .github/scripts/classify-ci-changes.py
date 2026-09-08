@@ -150,6 +150,8 @@ def classify_paths(paths: list[str], event_name: str = "pull_request") -> tuple[
             continue
 
         if path.startswith("backend/"):
+            if path == "backend/docker-compose.yml":
+                categories["action_pins"] = True
             categories["backend"] = True
             categories["backend_sast"] = True
             categories["cross_stack"] = True

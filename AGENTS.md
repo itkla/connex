@@ -88,3 +88,6 @@ Mechanical low-risk changes do not need reviewer fan-out merely to satisfy a rit
 ## Local development
 
 Use the package guides for commands and verification. The full local stack and deployment procedures live in `docs/DEPLOYMENT.md` and package documentation. In brief: the frontend serves on `:3000`, the backend on `:8080`, local MySQL on `:3306`, and the optional OCR sidecar on `127.0.0.1:8090`.
+
+For Compose network changes, run the rendered guards and disposable runtime reachability smoke
+documented in `docs/DEPLOYMENT.md`; static membership checks alone do not prove traffic isolation.

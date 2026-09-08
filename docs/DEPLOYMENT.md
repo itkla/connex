@@ -109,6 +109,38 @@ the implicit `default` network, attach an edge or auxiliary service to `db` or `
 publish an internal service port to the host. A service that needs a new cross-tier path requires a
 topology review and a matching update to the deployment-network regression test.
 
+The local `backend/docker-compose.yml` also uses explicit networks: DB and its Adminer maintenance
+console share only `db`, and each optional sidecar has its own internal network. Local Java runs on
+the host, so the development DB bridge retains its original normal-bridge behavior and DB/Adminer
+publish only on `127.0.0.1`. Docker suppresses host publications for containers attached exclusively
+to internal networks; an internal DB bridge would break local bootRun. Adminer is a local
+maintenance peer, not a deployed edge service. The optional sidecars keep their existing internal
+boundaries; their declared localhost publications were observed to be non-functional on Docker
+Engine 29.6 and are not included in the DB/Adminer host-access proof. On native Linux with the
+daemon on the same host, the host can instead reach each sidecar's dynamically discovered bridge
+IP. The smoke verifies that route separately; it does not establish it for Desktop or remote daemons.
+[Issue #1606](https://github.com/itkla/connex/issues/1606) tracks a supported sidecar host workflow
+and reconciliation of the existing localhost instructions.
+
+Network changes run both the rendered configuration guards and a disposable TCP reachability smoke:
+
+```bash
+python3 .github/scripts/test_deployment_networks.py
+python3 .github/scripts/smoke_deployment_networks.py
+```
+
+The smoke requires a local Linux Docker Engine 28 or newer and Compose 2.33.1 or newer. Where the daemon requires
+sudo, use `--docker-command 'sudo -n docker'`; configuration rendering still runs without sudo.
+It pulls a pinned Python fixture image and creates unique, temporary Compose projects with the
+actual network definitions, memberships, aliases and gateway priorities. TCP fixture processes
+replace application processes; no application volumes or credentials are used. The test checks
+forbidden paths by IPv4 address, brackets them with live-target positive controls, exercises the
+real backup network resolver and a DB-only maintenance peer, and verifies dev DB/Adminer loopback access on
+ephemeral ports. It removes its containers and networks on success or failure. This proves the
+repository's shared saas/silo/on-prem Compose topology on the tested Docker host. It does not
+represent systemd staging, an independently managed SaaS network, IPv6 reachability, application
+authorization, or backup data restoration as tested.
+
 The default OCR service is reachable only on the private Compose network. Docker Engine 28's isolated
 gateway mode prevents the OCR-only container from reaching the host or external networks. It accepts
 authenticated raw JPEG/PNG/WebP bytes from the backend, returns bounded recognized lines, and has no Caddy route.
