@@ -27,32 +27,36 @@ import { springSmooth } from "@/app/lib/motion";
  * `null` on a server-rendered first paint and would silently animate anyway.
  */
 
-/** Warmth series: climbs, cools, recovers higher, then keeps going as the ridge. */
+/**
+ * Warmth series: climbs, cools, recovers higher, then keeps going as the ridge.
+ *
+ * Every join is C1-continuous and the apex carries a horizontal tangent, so the
+ * mountain reads as one abstract curve: no crater notch, no point at the summit,
+ * and a shallow swell rather than a spike where the series dips.
+ */
 const SPINE =
-    "M 10 884" +
-    " C 56 868, 96 840, 126 802" +
-    " C 152 770, 172 738, 200 710" +
-    " C 220 692, 240 696, 252 718" +
-    " C 262 738, 272 752, 290 758" +
-    " C 314 764, 338 750, 358 726" +
-    " C 384 696, 402 670, 424 650" +
-    " C 520 632, 640 604, 742 566" +
-    " C 892 506, 1030 412, 1136 296" +
-    " C 1206 246, 1276 186, 1330 152" +
-    " L 1358 142 L 1382 152 L 1408 144" +
-    " C 1452 186, 1512 262, 1580 356" +
-    " C 1680 496, 1790 590, 1900 648";
+    "M -20 880" +
+    " C 90 872, 170 848, 236 808" +
+    " C 280 782, 312 754, 344 736" +
+    " C 386 713, 424 722, 462 740" +
+    " C 502 760, 546 762, 590 748" +
+    " C 642 731, 682 708, 726 674" +
+    " C 830 600, 950 508, 1056 408" +
+    " C 1130 340, 1190 268, 1252 218" +
+    " C 1276 198, 1300 188, 1326 188" +
+    " C 1352 188, 1392 212, 1432 254" +
+    " C 1520 346, 1640 470, 1860 620";
 
 /** Everything under the stroke: the mountain mass, and the area under the series. */
-const MASS = `${SPINE} L 1900 900 L 10 900 Z`;
+const MASS = `${SPINE} L 1860 900 L -20 900 Z`;
 
 /** Distant foothills, sitting behind Fuji and washed out by aerial perspective. */
 const FAR_RIDGE =
-    "M -60 800" +
-    " C 160 792, 300 748, 420 706" +
-    " C 500 678, 560 660, 640 672" +
-    " C 740 688, 820 736, 940 768" +
-    " C 1080 802, 1240 814, 1500 818" +
+    "M -60 806" +
+    " C 170 796, 330 742, 470 700" +
+    " C 560 673, 640 668, 726 692" +
+    " C 850 726, 960 774, 1110 800" +
+    " C 1250 824, 1380 830, 1500 832" +
     " L 1500 900 L -60 900 Z";
 
 /** Fractions along the stroke where a reading is marked. */
