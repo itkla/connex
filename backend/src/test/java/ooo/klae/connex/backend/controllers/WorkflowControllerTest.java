@@ -57,6 +57,7 @@ import ooo.klae.connex.backend.dto.WorkflowDraftRequest;
 import ooo.klae.connex.backend.dto.WorkflowDto;
 import ooo.klae.connex.backend.dto.WorkflowLegacyRuleResolutionDto;
 import ooo.klae.connex.backend.dto.WorkflowListItemDto;
+import ooo.klae.connex.backend.dto.WorkflowManualPreparationDto;
 import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
 import ooo.klae.connex.backend.dto.WorkflowRunDetailDto;
 import ooo.klae.connex.backend.dto.WorkflowRunPageDto;
@@ -82,6 +83,7 @@ import ooo.klae.connex.backend.services.WorkflowRunOperationService;
 import ooo.klae.connex.backend.services.WorkflowRuntimeOwnershipService;
 import ooo.klae.connex.backend.services.WorkflowCapabilityCatalog;
 import ooo.klae.connex.backend.services.WorkflowManualOptionsService;
+import ooo.klae.connex.backend.services.WorkflowManualRunService;
 import ooo.klae.connex.backend.services.WorkflowService;
 import ooo.klae.connex.backend.services.WorkflowSimulationService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -97,7 +99,11 @@ import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 @WebMvcTest(
-    controllers = {WorkflowController.class, WorkflowRunController.class},
+    controllers = {
+        WorkflowController.class,
+        WorkflowRunController.class,
+        WorkflowManualRunController.class
+    },
     properties = {
         "connex.sso.enabled=false",
         "connex.request-limits.workflow-max-body-bytes=512"
@@ -117,6 +123,7 @@ class WorkflowControllerTest {
     @MockitoBean private WorkflowSimulationService simulationService;
     @MockitoBean private WorkflowCapabilityCatalog capabilityCatalog;
     @MockitoBean private WorkflowManualOptionsService manualOptionsService;
+    @MockitoBean private WorkflowManualRunService manualRunService;
     @MockitoBean private WorkspaceService workspaceService;
     @MockitoBean private CompositeClientRegistrationRepository clientRegistrationRepository;
     @MockitoBean private SocialLoginClientRegistrations socialLoginClientRegistrations;
@@ -410,6 +417,59 @@ class WorkflowControllerTest {
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.code").value("FORBIDDEN"))
             .andExpect(jsonPath("$.message").value("Requires the RULE_MANAGE permission"));
+    }
+
+    @Test
+    @WithMockUser
+    void blockedManualPreparationIsAReadableSuccessfulResponse() throws Exception {
+        LocalDateTime eligibleAt = LocalDateTime.of(2027, 1, 10, 13, 0);
+        WorkflowManualPreparationDto preparation = new WorkflowManualPreparationDto(
+            31L,
+            42,
+            "Follow through",
+            19L,
+            1,
+            "00".repeat(32),
+            "user",
+            17,
+            "Workflow Owner",
+            "single_record",
+            "single_record",
+            "record",
+            "deal",
+            "scope-token",
+            "11".repeat(32),
+            LocalDateTime.of(2027, 1, 10, 12, 15),
+            1,
+            0,
+            new WorkflowManualPreparationDto.ExpectedSkips(0, 0, 0, 0, 1),
+            List.of(),
+            List.of(new WorkflowManualPreparationDto.Sample(91, "Strategic Renewal")),
+            List.of(),
+            false,
+            List.of("cooldown_active"),
+            List.of(),
+            List.of(),
+            List.of(new WorkflowManualPreparationDto.BlockerDetail(
+                "cooldown_active", eligibleAt)));
+        when(manualRunService.prepare(eq(42), any())).thenReturn(preparation);
+
+        mockMvc.perform(post("/api/workflows/42/manual-runs/prepare")
+                .with(csrf().asHeader())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                    {
+                      "sourceSurface":"record",
+                      "scope":{"kind":"single_record","recordId":91}
+                    }
+                    """))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.readyCount").value(0))
+            .andExpect(jsonPath("$.confirmable").value(false))
+            .andExpect(jsonPath("$.blockers[0]").value("cooldown_active"))
+            .andExpect(jsonPath("$.blockerDetails[0].code").value("cooldown_active"))
+            .andExpect(jsonPath("$.blockerDetails[0].eligibleAt")
+                .value("2027-01-10T13:00:00"));
     }
 
     @Test

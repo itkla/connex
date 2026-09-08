@@ -51,7 +51,9 @@ public class WorkflowManualRunDispatchTransaction {
                 workspaceId,
                 invocationId,
                 recordId,
-                claim.statusReason() == null ? "configuration" : claim.statusReason());
+                claim.statusReason() == null
+                    ? "configuration"
+                    : WorkflowInterventionRecorder.failureCategory(claim.statusReason()));
             return new DispatchResult(null, true);
         }
         int linked = operationsMapper.linkInvocationRun(

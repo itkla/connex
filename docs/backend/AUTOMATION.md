@@ -229,6 +229,8 @@ Schema-v2 definitions declare typed launch inputs and store their resolved value
 
 Action outputs are append-only step evidence. A schema-v2 action may select a target member independently of the workflow actor, but referenced members are discovered and locked before the workflow run. Schema-v1 runs keep their historical actor-target behavior and immutable definition bytes.
 
+Publication performs request-caller authorization together with structural and capability validation. Background claim and traversal compile the pinned definition through the runtime structural/capability entry point, which does not require a request caller; the runtime still locks and revalidates the configured actor, referenced members, record visibility, and each action permission before an effect. Worker code must not call the authoring validation entry point.
+
 ## Event waits, stops, and repeat policy
 
 `WAIT task.completed` correlates to the task id emitted by an earlier `create_task` step. Task completion writes one append-only `task_completion_event` on each false-to-true transition; reopening a task never removes that evidence. The wait resolver locks authorization, run, step, wait, and source task state before choosing the earliest completion at or before the persisted deadline. A completion committed at the deadline wins over timeout. Resolution and run advancement use compare-and-set updates, so cancellation, stop, timeout, completion, and duplicate delivery produce one durable outcome.
@@ -243,7 +245,7 @@ The supported date source is `date.deal.expectedCloseDate`. Publication, enable,
 
 Due planned occurrences are part of workspace readiness even when no ordinary outbox row exists. Promotion creates a `date` outbox row whose `workflow_date_enrollment_id` is the link back to the occurrence. Delivery rechecks the current deal date and pinned enrollment before creating the run. The occurrence id supplies version-independent deduplication, while the run retains its original version and date evidence. Changed or deleted source dates supersede or miss queued work; catch-up admits only the latest supported local-day window so stale historical dates never burst into runs.
 
-`workflow_date_enrollment`, its outbox rows, and date-run fields are tenant export and backup data. Teardown deletes outbox rows before enrollments and enrollments before runs and versions. Migrations `V205` through `V209` add company-linked tasks, typed workflow state, event waits and policies, deal date enrollment, and optional reasons for stopped END nodes; they are append-only and must be applied in order.
+`workflow_date_enrollment`, its outbox rows, and date-run fields are tenant export and backup data. Teardown deletes outbox rows before enrollments and enrollments before runs and versions. Migrations `V205` through `V210` add company-linked tasks, typed workflow state, event waits and policies, deal date enrollment, optional reasons for stopped END nodes, and durable manual enrollment preview reasons; they are append-only and must be applied in order.
 
 ## Durable canonical runtime
 
