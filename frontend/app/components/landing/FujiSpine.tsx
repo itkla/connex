@@ -12,9 +12,9 @@ import { springSmooth } from "@/app/lib/motion";
  * half-bled off the right edge.
  *
  * The mountain is built as an atmospheric scene rather than an outline: a distant
- * foothill ridge behind, a gradient mass for Fuji itself, a filled snow cap, and
- * a mask that dissolves every fill into the page background at the base. Only
- * the strokes stay crisp.
+ * foothill ridge behind, and one unbroken gradient mass for Fuji that runs from
+ * the base straight through to the summit, dissolved into the page background at
+ * the bottom by a mask. Only the strokes stay crisp.
  *
  * Scroll progress drives `pathLength`, so the green line draws itself over the
  * length of the page.
@@ -54,14 +54,6 @@ const FAR_RIDGE =
     " C 740 688, 820 736, 940 768" +
     " C 1080 802, 1240 814, 1500 818" +
     " L 1500 900 L -60 900 Z";
-
-/** Snow line, closed upward so the cap fills; clipped to the mountain mass. */
-const SNOW_CAP =
-    "M 1194 268 L 1214 292 L 1232 258 L 1250 286 L 1268 252" +
-    " L 1288 280 L 1306 248 L 1326 274 L 1344 246 L 1364 270" +
-    " L 1382 244 L 1402 272 L 1420 250 L 1440 282 L 1458 256" +
-    " L 1478 288 L 1496 260 L 1518 292" +
-    " L 1518 90 L 1194 90 Z";
 
 /** Fractions along the stroke where a reading is marked. */
 const MARKS = [0.08, 0.17, 0.29, 0.52, 0.78] as const;
@@ -121,19 +113,6 @@ export default function FujiSpine() {
                         <stop offset="1" className="[stop-color:var(--color-foreground)]" stopOpacity="0.01" />
                     </linearGradient>
 
-                    <linearGradient id="fuji-snow" x1="0" y1="0" x2="0" y2="1">
-                        <stop
-                            offset="0"
-                            className="[stop-color:var(--color-background)] dark:[stop-color:var(--color-foreground)]"
-                            stopOpacity="0.92"
-                        />
-                        <stop
-                            offset="1"
-                            className="[stop-color:var(--color-background)] dark:[stop-color:var(--color-foreground)]"
-                            stopOpacity="0.16"
-                        />
-                    </linearGradient>
-
                     <linearGradient id="fuji-line" x1="0" y1="1" x2="1" y2="0">
                         <stop offset="0" className="[stop-color:var(--color-brand-dark)]" />
                         <stop offset="0.55" className="[stop-color:var(--color-brand)]" />
@@ -150,10 +129,6 @@ export default function FujiSpine() {
                         <rect width="1440" height="900" fill="url(#fuji-haze)" />
                     </mask>
 
-                    <clipPath id="fuji-mass-clip">
-                        <path d={MASS} />
-                    </clipPath>
-
                     <filter id="fuji-bloom" x="-20%" y="-20%" width="140%" height="140%">
                         <feGaussianBlur stdDeviation="7" />
                     </filter>
@@ -162,9 +137,6 @@ export default function FujiSpine() {
                 <g mask="url(#fuji-haze-mask)">
                     <path d={FAR_RIDGE} fill="url(#fuji-far)" />
                     <path d={MASS} fill="url(#fuji-mass)" />
-                    <g clipPath="url(#fuji-mass-clip)">
-                        <path d={SNOW_CAP} fill="url(#fuji-snow)" />
-                    </g>
                 </g>
 
                 <path
