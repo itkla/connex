@@ -268,7 +268,7 @@ export default function FujiSpine() {
                     </filter>
                 </defs>
 
-                <g mask="url(#fuji-haze-mask)">
+                <motion.g mask="url(#fuji-haze-mask)" style={{ opacity: terrainFade }}>
                     <motion.g
                         style={{ x: farPanX, y: farPanY }}
                         className="motion-reduce:[transform:translate(-250px,108px)]!"
@@ -281,7 +281,7 @@ export default function FujiSpine() {
                     >
                         <path d={MASS} fill="url(#fuji-mass)" />
                     </motion.g>
-                </g>
+                </motion.g>
 
                 <motion.g
                     style={{ x: panX, y: panY }}
