@@ -3,9 +3,7 @@ import {
     ArrowUpRightIcon,
     CalendarDaysIcon,
     EnvelopeIcon,
-    IdentificationIcon,
     PencilSquareIcon,
-    TableCellsIcon,
 } from "@heroicons/react/24/outline";
 import { warmthDotClass, warmthSurfaceClasses } from "@/app/lib/utils";
 import { cn } from "@/lib/utils";
@@ -104,46 +102,68 @@ export async function WarmthReadingSurface() {
 }
 
 /**
- * Radar's ranked list: the relationships losing ground, worst first, each with the
- * single next move the product would offer.
+ * A flagged deal with the reasons underneath it.
+ *
+ * `DealRiskService` is deterministic — it has no dependency on `backend.ai`, so this
+ * surface represents behaviour that survives an organisation switching AI off. Each row
+ * is one real factor code (`close_overdue`, `stalled`, `stakeholder_cold`), and warmth
+ * appears here as one contributing factor rather than as the product itself.
  */
-export async function RadarSurface() {
+export async function DealRiskSurface() {
     const t = await getTranslations("CommonHome");
 
-    const rows = [
-        { key: "a", band: "cold" as const },
-        { key: "b", band: "cool" as const },
-        { key: "c", band: "cool" as const },
+    const factors = [
+        { key: "overdue", severity: "high" as const, Icon: CalendarDaysIcon },
+        { key: "quiet", severity: "high" as const, Icon: EnvelopeIcon },
+        { key: "cold", severity: "medium" as const, Icon: null },
     ];
 
     return (
-        <SurfaceFrame label={t("surfaceRadarLabel")} sampleLabel={t("surfaceSample")}>
-            <ul className="divide-y divide-border">
-                {rows.map((row) => (
-                    <li key={row.key} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
-                        <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-foreground">
-                                {t(`surfaceRadarCompany_${row.key}`)}
-                            </p>
-                            <p className="truncate text-xs text-muted-foreground">
-                                {t(`surfaceRadarFact_${row.key}`)}
-                            </p>
-                        </div>
-                        <WarmthChip band={row.band} label={t(`warmthBand_${row.band}`)} />
-                        <span className="inline-flex items-center gap-1 rounded-full bg-brand-light px-2.5 py-1 text-xs font-medium text-foreground">
-                            {t(`surfaceRadarAction_${row.key}`)}
-                            <ArrowUpRightIcon className="size-3" />
-                        </span>
-                    </li>
-                ))}
-            </ul>
+        <SurfaceFrame label={t("surfaceRiskLabel")} sampleLabel={t("surfaceSample")}>
+            <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-5">
+                <div className="min-w-0">
+                    <p className="truncate text-base font-semibold text-foreground">{t("surfaceRiskDealName")}</p>
+                    <p className="mt-0.5 truncate text-sm tabular-nums text-muted-foreground">
+                        {t("surfaceRiskDealMeta")}
+                    </p>
+                </div>
+                <span className="shrink-0 rounded-full bg-warmth-cold/15 px-2.5 py-1 text-xs font-medium text-foreground ring-1 ring-inset ring-warmth-cold/40">
+                    {t("surfaceRiskBadge")}
+                </span>
+            </div>
+            <div className="border-t border-border bg-muted/40 px-5 py-4">
+                <p className="text-xs font-medium text-muted-foreground">{t("surfaceRiskFactorsHeading")}</p>
+                <ul className="mt-3 space-y-2.5">
+                    {factors.map(({ key, severity, Icon }) => (
+                        <li key={key} className="flex items-center gap-3 text-sm">
+                            {Icon ? (
+                                <Icon className="size-4 shrink-0 text-muted-foreground" />
+                            ) : (
+                                <span className={cn("size-4 shrink-0 rounded-full", warmthDotClass("cool"))} />
+                            )}
+                            <span className="min-w-0 flex-1 text-foreground">{t(`surfaceRiskFactor_${key}`)}</span>
+                            <span className="shrink-0 text-xs font-medium text-muted-foreground">
+                                {t(`surfaceRiskSeverity_${severity}`)}
+                            </span>
+                        </li>
+                    ))}
+                </ul>
+                <span className="mt-4 inline-flex items-center gap-1 rounded-full bg-brand-light px-2.5 py-1 text-xs font-medium text-foreground">
+                    {t("surfaceRiskAction")}
+                    <ArrowUpRightIcon className="size-3" />
+                </span>
+            </div>
         </SurfaceFrame>
     );
 }
 
 /**
- * The intro path: the shortest warm route from someone already in the workspace
- * through to a contact at a company nobody has reached yet.
+ * An intro path, with the basis for every hop shown alongside it.
+ *
+ * `WarmPathService` distinguishes recorded interactions from inferred employer
+ * overlap, and the surface preserves that: a shared employer is a weaker signal
+ * than logged contact, and the footer says so. Presenting both as one undifferentiated
+ * "connection" would overstate what the product knows.
  */
 export async function IntroPathSurface() {
     const t = await getTranslations("CommonHome");
@@ -183,87 +203,10 @@ export async function IntroPathSurface() {
                         </li>
                     ))}
                 </ol>
-                <p className="mt-1 border-t border-border pt-4 text-xs text-muted-foreground">
+                <p className="mt-1 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground">
                     {t("surfaceIntroFooter")}
                 </p>
             </div>
         </SurfaceFrame>
-    );
-}
-
-/**
- * One account, three colleagues. The point is not that Connex has an activity feed;
- * it is that the relationship is the workspace's rather than one person's, which is
- * what lets somebody else's history become your intro path.
- */
-export async function SharedAccountSurface() {
-    const t = await getTranslations("CommonHome");
-
-    const entries = ["a", "b", "c"] as const;
-
-    return (
-        <SurfaceFrame label={t("surfaceSharedLabel")} sampleLabel={t("surfaceSample")}>
-            <ul className="divide-y divide-border">
-                {entries.map((key) => (
-                    <li key={key} className="flex items-start gap-3 px-5 py-4">
-                        <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold text-foreground">
-                            {t(`surfaceSharedInitials_${key}`)}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm text-foreground">{t(`surfaceSharedEntry_${key}`)}</p>
-                            <p className="truncate text-xs text-muted-foreground">
-                                {t(`surfaceSharedWho_${key}`)}
-                            </p>
-                        </div>
-                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                            {t(`surfaceSharedWhen_${key}`)}
-                        </span>
-                    </li>
-                ))}
-            </ul>
-        </SurfaceFrame>
-    );
-}
-
-/**
- * Where a workspace's history comes from. Import and card scanning ship today;
- * the Google and Microsoft calendar/mail adapters are gated internal preview under
- * issue #868 pending provider verification, so they are labelled as preview rather
- * than presented as available.
- */
-export async function SourcesSurface() {
-    const t = await getTranslations("CommonHome");
-
-    const sources = [
-        { key: "csv", Icon: TableCellsIcon, preview: false },
-        { key: "cards", Icon: IdentificationIcon, preview: false },
-        { key: "google", Icon: CalendarDaysIcon, preview: true },
-        { key: "microsoft", Icon: EnvelopeIcon, preview: true },
-    ] as const;
-
-    return (
-        <div className="grid gap-3 sm:grid-cols-2">
-            {sources.map(({ key, Icon, preview }) => (
-                <div
-                    key={key}
-                    className="flex items-start gap-3 rounded-xl border border-border bg-card px-4 py-4"
-                >
-                    <Icon className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                        <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-foreground">
-                            {t(`sourceName_${key}`)}
-                            {preview ? (
-                                <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                                    {t("sourcePreview")}
-                                </span>
-                            ) : null}
-                        </p>
-                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                            {t(`sourceBody_${key}`)}
-                        </p>
-                    </div>
-                </div>
-            ))}
-        </div>
     );
 }
