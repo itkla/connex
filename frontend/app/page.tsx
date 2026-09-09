@@ -10,6 +10,8 @@ import LandingFaq from "@/app/components/landing/LandingFaq";
 import {
     DealRiskSurface,
     IntroPathSurface,
+    RadarHorizonSurface,
+    RelationMapSurface,
     WarmthReadingSurface,
 } from "@/app/components/landing/ProductSurfaces";
 import Reveal from "@/app/components/landing/Reveal";
@@ -105,36 +107,44 @@ export default async function Home() {
                         </div>
                     </section>
 
-                    <section>
+                    <section id="features" className="scroll-mt-20">
                         <div className="mx-auto max-w-7xl px-6 py-24 lg:px-8 lg:py-32">
                             <Reveal className="max-w-3xl">
-                                <h2 className={sectionHeading}>{t("caseHeading")}</h2>
-                                <p className={sectionBody}>{t("caseBody")}</p>
+                                <h2 className={sectionHeading}>{t("radarHeading")}</h2>
+                                <p className={sectionBody}>{t("radarBody")}</p>
                             </Reveal>
-                        </div>
-                    </section>
-
-                    <section id="features" className="scroll-mt-20">
-                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-32">
-                            <Reveal>
-                                <h2 className={sectionHeading}>{t("riskHeading")}</h2>
-                                <p className={sectionBody}>{t("riskBody")}</p>
-                            </Reveal>
-                            <Reveal delay={0.08}>
-                                <DealRiskSurface />
+                            <Reveal delay={0.08} className="mt-14">
+                                <RadarHorizonSurface />
                             </Reveal>
                         </div>
                     </section>
 
                     <section className="scroll-mt-20">
-                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-32">
-                            <Reveal className="lg:order-2">
-                                <h2 className={sectionHeading}>{t("introHeading")}</h2>
-                                <p className={sectionBody}>{t("introBody")}</p>
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-[1.15fr_1fr] lg:gap-20 lg:px-8 lg:py-32">
+                            <Reveal>
+                                <RelationMapSurface />
                             </Reveal>
-                            <Reveal delay={0.08} className="lg:order-1">
-                                <IntroPathSurface />
+                            <Reveal delay={0.08}>
+                                <h2 className={sectionHeading}>{t("mapHeading")}</h2>
+                                <p className={sectionBody}>{t("mapBody")}</p>
                             </Reveal>
+                        </div>
+                    </section>
+
+                    <section className="scroll-mt-20">
+                        <div className="mx-auto max-w-7xl px-6 py-24 lg:px-8 lg:py-32">
+                            <Reveal className="max-w-2xl">
+                                <h2 className={sectionHeading}>{t("signalsHeading")}</h2>
+                                <p className={sectionBody}>{t("signalsBody")}</p>
+                            </Reveal>
+                            <div className="mt-14 grid gap-6 lg:grid-cols-5">
+                                <Reveal className="lg:col-span-3">
+                                    <DealRiskSurface />
+                                </Reveal>
+                                <Reveal delay={0.06} className="lg:col-span-2">
+                                    <IntroPathSurface />
+                                </Reveal>
+                            </div>
                         </div>
                     </section>
 
@@ -150,6 +160,7 @@ export default async function Home() {
                         </div>
                     </section>
 
+
                     <section>
                         <div className="mx-auto grid max-w-7xl gap-x-16 gap-y-16 px-6 py-24 md:grid-cols-2 lg:px-8 lg:py-32">
                             <Reveal>
@@ -164,17 +175,13 @@ export default async function Home() {
                     </section>
 
                     <section>
-                        <div className="mx-auto max-w-7xl px-6 py-24 lg:px-8 lg:py-32">
-                            <div className="max-w-4xl">
-                                <Reveal>
-                                    <h2 className={sectionHeading}>{t("faqHeading")}</h2>
-                                </Reveal>
-                                <Reveal delay={0.06}>
-                                    <div className="rounded-2xl bg-background px-4 sm:px-6">
-                                        <LandingFaq />
-                                    </div>
-                                </Reveal>
-                            </div>
+                        <div className="mx-auto grid max-w-7xl gap-x-16 gap-y-8 px-6 py-24 lg:grid-cols-[0.85fr_1.15fr] lg:px-8 lg:py-32">
+                            <Reveal>
+                                <h2 className={`${sectionHeading} lg:sticky lg:top-28`}>{t("faqHeading")}</h2>
+                            </Reveal>
+                            <Reveal delay={0.06}>
+                                <LandingFaq />
+                            </Reveal>
                         </div>
                     </section>
 

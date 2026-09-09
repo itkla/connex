@@ -5,6 +5,7 @@ import {
     EnvelopeIcon,
     PencilSquareIcon,
 } from "@heroicons/react/24/outline";
+import { RadarMark } from "@/app/components/radar/RadarVocabulary";
 import { warmthDotClass, warmthSurfaceClasses } from "@/app/lib/utils";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +24,111 @@ import { cn } from "@/lib/utils";
  * staging holds real tenant data and a marketing page must not imply customers
  * that do not exist yet.
  */
+
+/**
+ * Radar's five deadline columns, in the order `RADAR_HORIZON_BANDS` declares them. Mark shape
+ * names the family and fill names the reading, matching `radarFamilyAccent`.
+ */
+const HORIZON_COLUMNS = [
+    {
+        key: "overdue",
+        marks: [
+            { tone: "cold", family: "relationship_decay" },
+            { tone: "high", family: "deal_risk" },
+            { tone: "cold", family: "relationship_decay" },
+            { tone: "cool", family: "relationship_decay" },
+            { tone: "high", family: "deal_risk" },
+            { tone: "cold", family: "relationship_decay" },
+            { tone: "medium", family: "deal_risk" },
+        ],
+    },
+    {
+        key: "week",
+        marks: [
+            { tone: "cool", family: "relationship_decay" },
+            { tone: "high", family: "deal_risk" },
+            { tone: "medium", family: "deal_risk" },
+            { tone: "cool", family: "relationship_decay" },
+            { tone: "cold", family: "relationship_decay" },
+            { tone: "cool", family: "relationship_decay" },
+            { tone: "warm", family: "relationship_decay" },
+            { tone: "medium", family: "deal_risk" },
+            { tone: "cool", family: "relationship_decay" },
+            { tone: "cold", family: "relationship_decay" },
+            { tone: "high", family: "deal_risk" },
+            { tone: "cool", family: "relationship_decay" },
+            { tone: "warm", family: "relationship_decay" },
+            { tone: "low", family: "deal_risk" },
+        ],
+    },
+    {
+        key: "month",
+        marks: [
+            { tone: "cool", family: "relationship_decay" },
+            { tone: "medium", family: "deal_risk" },
+            { tone: "warm", family: "relationship_decay" },
+            { tone: "cool", family: "relationship_decay" },
+            { tone: "warm", family: "relationship_decay" },
+            { tone: "low", family: "deal_risk" },
+            { tone: "cool", family: "relationship_decay" },
+            { tone: "warm", family: "relationship_decay" },
+            { tone: "medium", family: "deal_risk" },
+        ],
+    },
+    {
+        key: "later",
+        marks: [
+            { tone: "warm", family: "relationship_decay" },
+            { tone: "low", family: "deal_risk" },
+            { tone: "warm", family: "relationship_decay" },
+            { tone: "hot", family: "relationship_decay" },
+            { tone: "low", family: "deal_risk" },
+        ],
+    },
+    {
+        key: "undated",
+        marks: [
+            { tone: "path", family: "warm_path" },
+            { tone: "path", family: "warm_path" },
+            { tone: "path", family: "warm_path" },
+            { tone: "path", family: "warm_path" },
+            { tone: "path", family: "warm_path" },
+            { tone: "path", family: "warm_path" },
+        ],
+    },
+] as const;
+
+/** One example of each family, so the glyph vocabulary is legible without opening the product. */
+const HORIZON_LEGEND = [
+    { family: "relationship_decay", tone: "cool" },
+    { family: "deal_risk", tone: "high" },
+    { family: "warm_path", tone: "path" },
+] as const;
+
+/** SVG fill per warmth band. `warmthDotClass` returns a `bg-*` utility, which an SVG cannot use. */
+const MAP_BAND_FILL = {
+    hot: "[fill:var(--warmth-hot)]",
+    warm: "[fill:var(--warmth-warm)]",
+    cool: "[fill:var(--warmth-cool)]",
+    cold: "[fill:var(--warmth-cold)]",
+} as const;
+
+/** A slice of the relationship map. `you` is a colleague; the rest are CRM records. */
+const MAP_NODES = {
+    company: { x: 210, y: 62, role: "company", band: null },
+    you: { x: 74, y: 168, role: "you", band: null },
+    bridge: { x: 210, y: 178, role: "contact", band: "warm" },
+    target: { x: 340, y: 120, role: "contact", band: "cold" },
+    peer: { x: 330, y: 214, role: "contact", band: "cool" },
+} as const;
+
+const MAP_EDGES = [
+    { from: "you", to: "bridge", strong: true },
+    { from: "bridge", to: "company", strong: true },
+    { from: "bridge", to: "target", strong: false },
+    { from: "company", to: "target", strong: true },
+    { from: "company", to: "peer", strong: true },
+] as const;
 
 const EVIDENCE_ROWS = [
     { key: "meeting", Icon: CalendarDaysIcon },
@@ -214,6 +320,117 @@ export async function IntroPathSurface() {
                     {t("surfaceIntroFooter")}
                 </p>
             </div>
+        </SurfaceFrame>
+    );
+}
+
+/**
+ * Radar's horizon board: every flagged signal placed on the axis of when it starts costing you.
+ *
+ * This renders the product's own {@link RadarMark}, so the glyph vocabulary is identical to the
+ * app — circle for a cooling relationship, diamond for a deal at risk, square for an intro path,
+ * filled by warmth band. `radarHorizon.ts` defines the five columns and states that the deadline
+ * is "the one fact no other surface in the product can assemble across families", which is exactly
+ * the claim this surface is here to make.
+ */
+export async function RadarHorizonSurface() {
+    const t = await getTranslations("CommonHome");
+
+    return (
+        <SurfaceFrame label={t("surfaceRadarLabel")} sampleLabel={t("surfaceSample")}>
+            <div className="grid grid-cols-5 gap-1 bg-muted/40 p-1">
+                {HORIZON_COLUMNS.map((column) => (
+                    <div key={column.key} className="flex flex-col justify-end gap-2 rounded-xl px-2 pt-3 pb-2">
+                        <div className="flex h-20 flex-wrap-reverse content-start gap-1 overflow-hidden">
+                            {column.marks.map((mark, i) => (
+                                <RadarMark key={`${column.key}-${i}`} tone={mark.tone} family={mark.family} />
+                            ))}
+                        </div>
+                        <div className="border-t border-border pt-1.5">
+                            <p className="text-base leading-none font-semibold tabular-nums text-foreground">
+                                {column.marks.length}
+                            </p>
+                            <p className="mt-1 truncate text-xs text-muted-foreground">
+                                {t(`surfaceHorizonBand_${column.key}`)}
+                            </p>
+                        </div>
+                    </div>
+                ))}
+            </div>
+            <ul className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-border px-5 py-3">
+                {HORIZON_LEGEND.map((entry) => (
+                    <li key={entry.family} className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <RadarMark tone={entry.tone} family={entry.family} />
+                        {t(`surfaceHorizonLegend_${entry.family}`)}
+                    </li>
+                ))}
+            </ul>
+        </SurfaceFrame>
+    );
+}
+
+/**
+ * A slice of the relationship map: who the workspace knows, and through whom.
+ *
+ * Drawn as plain SVG rather than mounting `@xyflow/react`, which is a heavy client bundle and
+ * would buy nothing on a static marketing page. Node roles follow the real map's vocabulary —
+ * company, contact, and a colleague on your team — and edges are tinted by the warmth of the tie.
+ */
+export async function RelationMapSurface() {
+    const t = await getTranslations("CommonHome");
+
+    return (
+        <SurfaceFrame label={t("surfaceMapLabel")} sampleLabel={t("surfaceSample")}>
+            <div className="relative">
+                <svg viewBox="0 0 420 250" className="w-full" role="img" aria-label={t("surfaceMapAlt")}>
+                    {MAP_EDGES.map((edge) => (
+                        <line
+                            key={`${edge.from}-${edge.to}`}
+                            x1={MAP_NODES[edge.from].x}
+                            y1={MAP_NODES[edge.from].y}
+                            x2={MAP_NODES[edge.to].x}
+                            y2={MAP_NODES[edge.to].y}
+                            strokeWidth={edge.strong ? 2 : 1}
+                            strokeDasharray={edge.strong ? undefined : "4 4"}
+                            className={edge.strong ? "stroke-brand/50" : "stroke-border"}
+                        />
+                    ))}
+                    {Object.entries(MAP_NODES).map(([key, node]) => (
+                        <g key={key}>
+                            <circle
+                                cx={node.x}
+                                cy={node.y}
+                                r={node.role === "company" ? 21 : 15}
+                                className={cn(
+                                    node.role === "company" ? "fill-muted stroke-border" : "fill-card",
+                                    node.role === "you" ? "stroke-brand" : "stroke-border",
+                                )}
+                                strokeWidth={node.role === "you" ? 2.5 : 1.5}
+                            />
+                            {node.band ? (
+                                <circle
+                                    cx={node.x + 11}
+                                    cy={node.y - 11}
+                                    r={4.5}
+                                    className={cn(MAP_BAND_FILL[node.band], "stroke-card")}
+                                    strokeWidth={2}
+                                />
+                            ) : null}
+                            <text
+                                x={node.x}
+                                y={node.y + (node.role === "company" ? 38 : 32)}
+                                textAnchor="middle"
+                                className="fill-foreground text-[11px] font-medium"
+                            >
+                                {t(`surfaceMapNode_${key}`)}
+                            </text>
+                        </g>
+                    ))}
+                </svg>
+            </div>
+            <p className="border-t border-border px-5 py-3 text-xs leading-relaxed text-muted-foreground">
+                {t("surfaceMapFooter")}
+            </p>
         </SurfaceFrame>
     );
 }
