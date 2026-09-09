@@ -46,6 +46,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CONNEX_SLA_READ_TOKEN: ${{ secrets.CONNEX_SLA_READ_TOKEN }}
+          # Only a publication event supplies corrective-release identity.
+          CONNEX_SLA_RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
+          CONNEX_SLA_RELEASE_SHA: ${{ github.sha }}
         run: python3 .github/scripts/vulnerability-sla.py preflight
 
       - name: Resolve release event metadata
@@ -1038,6 +1041,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CONNEX_SLA_READ_TOKEN: ${{ secrets.CONNEX_SLA_READ_TOKEN }}
+          # Only a publication event supplies corrective-release identity.
+          CONNEX_SLA_RELEASE_TAG: ${{ needs.metadata.outputs.release_mode == 'publish' && github.ref_name || '' }}
+          CONNEX_SLA_RELEASE_SHA: ${{ github.sha }}
         run: python3 .github/scripts/vulnerability-sla.py preflight
 
       - name: Revalidate release tag immediately before promotion
@@ -1088,6 +1094,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CONNEX_SLA_READ_TOKEN: ${{ secrets.CONNEX_SLA_READ_TOKEN }}
+          # Only a publication event supplies corrective-release identity.
+          CONNEX_SLA_RELEASE_TAG: ${{ needs.metadata.outputs.release_mode == 'publish' && github.ref_name || '' }}
+          CONNEX_SLA_RELEASE_SHA: ${{ github.sha }}
         run: python3 .github/scripts/vulnerability-sla.py preflight
 
       - name: Revalidate release tag immediately before publication
