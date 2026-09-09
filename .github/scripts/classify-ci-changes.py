@@ -64,6 +64,12 @@ OCR_DEPENDENCY_FILES = {
     "ocr/uv.lock",
 }
 
+BACKEND_API_LEDGERS = {
+    "docs/backend/api-surface.tsv",
+    "docs/backend/api-lifecycle.tsv",
+    "docs/backend/api-surface-policy.txt",
+}
+
 SECURITY_REGRESSION_DOCUMENTS = {
     "docs/DEPLOYMENT.md",
     "docs/SAST_TRIAGE_LOG.md",
@@ -134,6 +140,9 @@ def classify_paths(paths: list[str], event_name: str = "pull_request") -> tuple[
 
         if path in SECURITY_REGRESSION_DOCUMENTS:
             categories["action_pins"] = True
+
+        if path in BACKEND_API_LEDGERS:
+            categories["backend"] = True
 
         if is_documentation(path) or path in ROOT_METADATA:
             continue

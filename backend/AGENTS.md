@@ -79,6 +79,7 @@ Read the relevant contract before editing that subsystem:
 
 | Work | Required reading |
 |---|---|
+| API mappings, anonymous access, deprecation or retirement | `../docs/backend/API_SURFACE.md` |
 | Security/auth/provider/upload boundary | `../docs/backend/SECURITY_BOUNDARIES.md` |
 | AI, masking, assistant, model-provider egress | `../docs/backend/AI_SECURITY.md` |
 | Business-card upload/OCR/fallback/import | `../docs/backend/BUSINESS_CARD_SCANNING.md`, `../ocr/AGENTS.md` |
