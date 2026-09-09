@@ -79,13 +79,14 @@ const TONE_FAMILY = {
  */
 export async function RadarHorizonSurface() {
     const t = await getTranslations("CommonHome");
+    const band = await getTranslations("Radar.horizon.band");
 
     return (
         <SurfaceFrame label={t("surfaceRadarLabel")} sampleLabel={t("surfaceSample")}>
             <div className="grid grid-cols-5 gap-2 px-4 pt-8 pb-4 sm:gap-4 sm:px-6">
                 {HORIZON.map((column) => (
                     <div key={column.key} className="flex flex-col justify-end gap-3">
-                        <div className="mx-auto flex h-24 w-full max-w-[6.5rem] flex-wrap-reverse content-start justify-center gap-1.5">
+                        <div className="flex h-24 w-full flex-wrap-reverse content-start gap-1.5">
                             {Array.from({ length: column.n }, (_, i) => {
                                 const tone = column.mix[i % column.mix.length];
                                 return (
@@ -97,12 +98,12 @@ export async function RadarHorizonSurface() {
                                 );
                             })}
                         </div>
-                        <div className="border-t border-border pt-2 text-center">
+                        <div className="border-t border-border pt-2">
                             <p className="text-lg leading-none font-semibold tabular-nums text-foreground">
                                 {column.n}
                             </p>
                             <p className="mt-1.5 truncate text-[11px] text-muted-foreground">
-                                {t(`surfaceHorizonBand_${column.key}`)}
+                                {band(column.key)}
                             </p>
                         </div>
                     </div>
