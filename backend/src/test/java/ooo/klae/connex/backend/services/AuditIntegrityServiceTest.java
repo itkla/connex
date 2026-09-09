@@ -9,12 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,6 +24,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.mappers.AuditIntegrityMapper;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
+import ooo.klae.connex.backend.mappers.RoleMapper;
 
 class AuditIntegrityServiceTest extends AbstractServiceTest {
 
@@ -39,13 +42,37 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
     @Autowired private AuthService authService;
     @Autowired private io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
+    @Autowired private RoleMapper roleMapper;
+    private final List<Integer> committedUserIds = new ArrayList<>();
+    private Integer committedRoleId;
+
+    /** Restores the shared approver pool even when the committed boundary test fails. */
+    @AfterEach
+    void cleanUpCommittedSecuritySignalFixtures() {
+        if (committedUserIds.isEmpty()) {
+            return;
+        }
+        authenticateAs(currentUser, workspace.getId());
+        if (committedRoleId != null) {
+            roleMapper.clearPermissions(workspace.getId(), committedRoleId);
+            roleMapper.deleteRole(workspace.getId(), committedRoleId);
+        }
+        for (int userId : committedUserIds.reversed()) {
+            workspaceMapper.removeMember(workspace.getId(), userId);
+            userMapper.delete(userId);
+        }
+    }
+
     @Test
     @org.springframework.transaction.annotation.Transactional(
         propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     void committedRoleMutationsAndActualLoginFailureEmitSecuritySignals() {
-        roleService.createRole(workspace.getId(), currentUser.getId(), "Alert test " + unique(),
-                List.of("AUDIT_READ"));
+        committedUserIds.add(currentUser.getId());
+        committedRoleId = roleService.createRole(
+                workspace.getId(), currentUser.getId(), "Alert test " + unique(),
+                List.of("AUDIT_READ")).getId();
         var target = newUser();
+        committedUserIds.add(target.getId());
         workspaceService.changeMemberRole(workspace.getId(), currentUser.getId(), target.getId(), "admin");
         assertTrue(meterRegistry.get("connex.security.permission.change.timestamp")
                 .tag("scope", "workspace:" + workspace.getId()).gauge().value() > 0);
