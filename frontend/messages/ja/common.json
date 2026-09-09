@@ -90,16 +90,15 @@
     "radarHeading": "手を打つべきことが、一枚に",
     "radarBody": "冷えていく関係、危うい商談、頼めていない紹介が同じ軸に並ぶのはRadarだけです。三つの画面ではなく、一つの期限で見ます。",
     "mapHeading": "築いてきた人脈が、一枚に",
-    "mapBody": "チームが築いてきた人と会社、そのつながりをConnexが地図にします。実線は記録されたやり取り、破線は推測によるつながりで、どちらであるかを必ず示します。",
+    "mapBody": "チームが出会ったすべての人、所属する会社、その間のつながりを一箇所に集め、関係の温かさで色づけます。",
     "signalsHeading": "重要な順に並んだ一覧",
     "signalsBody": "Radarは見つけたものを、損失が近い順に並べます。どの行にも、次に取るべき一手が添えられています。",
-    "surfaceRadarLabel": "Radar",
-    "surfaceMapLabel": "人脈マップ",
-    "surfaceMapAlt": "人と会社が、強さの異なる線でつながれた図。",
     "surfaceWarmthAlt": "時間の経過とともにホットからコールドへ下がる曲線。記録されたやり取りが点で示されている。",
     "surfaceWarmthAxisStart": "最後の接触",
     "surfaceWarmthAxisEnd": "現在",
-    "surfaceQueueLabel": "Radar"
+    "surfaceQueueLabel": "Radar",
+    "surfaceSweepAlt": "レーダーが一周し、各所で兆候が光る様子。",
+    "surfaceNetworkAlt": "温度感によって色づいた人と人のつながりが、ゆるやかに漂う様子。"
   },
   "CommonSidebar": {
     "ariaPrimarySidebar": "メインサイドバー",

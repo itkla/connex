@@ -8,9 +8,9 @@ import LandingFooter from "@/app/components/landing/LandingFooter";
 import FujiSpine from "@/app/components/landing/FujiSpine";
 import LandingFaq from "@/app/components/landing/LandingFaq";
 import {
-    RadarHorizonSurface,
-    RelationMapSurface,
+    LivingNetworkSurface,
     RadarQueueSurface,
+    RadarSweepSurface,
     WarmthDecaySurface,
 } from "@/app/components/landing/ProductSurfaces";
 import Reveal from "@/app/components/landing/Reveal";
@@ -113,7 +113,7 @@ export default async function Home() {
                                 <p className={sectionBody}>{t("radarBody")}</p>
                             </Reveal>
                             <Reveal delay={0.08} className="mt-14">
-                                <RadarHorizonSurface />
+                                <RadarSweepSurface />
                             </Reveal>
                         </div>
                     </section>
@@ -121,7 +121,7 @@ export default async function Home() {
                     <section className="scroll-mt-20">
                         <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-[1.15fr_1fr] lg:gap-20 lg:px-8 lg:py-32">
                             <Reveal>
-                                <RelationMapSurface />
+                                <LivingNetworkSurface />
                             </Reveal>
                             <Reveal delay={0.08}>
                                 <h2 className={sectionHeading}>{t("mapHeading")}</h2>

@@ -90,16 +90,15 @@
     "radarHeading": "One board, everything that needs you",
     "radarBody": "Radar is the only place your cooling relationships, at-risk deals and unmade introductions share an axis. Not three dashboards. One deadline.",
     "mapHeading": "The network you built, on one screen",
-    "mapBody": "Connex maps every person, company and connection your team has earned. Solid ties are interactions you logged. Dashed ties are inferred, and Connex always says which is which.",
+    "mapBody": "Every person your team has met, every company they belong to, every tie between them — held in one place and coloured by how warm it is.",
     "signalsHeading": "The list, in the order that matters",
     "signalsBody": "Radar ranks what it finds by when it starts costing you, and every row carries the one move worth making next.",
-    "surfaceRadarLabel": "Radar",
-    "surfaceMapLabel": "Relationship map",
-    "surfaceMapAlt": "A map of people and companies joined by ties of differing strength.",
     "surfaceWarmthAlt": "A curve falling from hot to cold as time passes, with logged interactions marked along it.",
     "surfaceWarmthAxisStart": "Last contact",
     "surfaceWarmthAxisEnd": "Today",
-    "surfaceQueueLabel": "Radar"
+    "surfaceQueueLabel": "Radar",
+    "surfaceSweepAlt": "A radar sweep with signals lighting up across the field.",
+    "surfaceNetworkAlt": "A drifting constellation of contacts joined by ties, each coloured by how warm it is."
   },
   "CommonSidebar": {
     "ariaPrimarySidebar": "Primary sidebar",

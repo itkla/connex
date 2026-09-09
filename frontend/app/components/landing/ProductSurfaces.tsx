@@ -38,27 +38,7 @@ function SurfaceFrame({
     );
 }
 
-/** SVG fill per warmth band. The `--warmth-*` tokens are the same ones the app's dots use. */
-const BAND_FILL = {
-    hot: "[fill:var(--warmth-hot)]",
-    warm: "[fill:var(--warmth-warm)]",
-    cool: "[fill:var(--warmth-cool)]",
-    cold: "[fill:var(--warmth-cold)]",
-} as const;
-
-/**
- * Radar's five deadline columns. Mark shape names the family and fill names the reading, matching
- * `radarFamilyAccent`; the pile height is the whole point, so the counts are shaped to read as a
- * silhouette rather than to describe any particular workspace.
- */
-const HORIZON = [
-    { key: "overdue", n: 9, mix: ["cold", "high", "cold", "medium", "cool"] },
-    { key: "week", n: 17, mix: ["cool", "high", "medium", "cold", "cool", "warm"] },
-    { key: "month", n: 12, mix: ["cool", "medium", "warm", "cool", "low"] },
-    { key: "later", n: 6, mix: ["warm", "low", "hot", "warm"] },
-    { key: "undated", n: 7, mix: ["path"] },
-] as const;
-
+/** Which Radar family a tone belongs to, mirroring `RADAR_TONE_FAMILY`. */
 const TONE_FAMILY = {
     hot: "relationship_decay",
     warm: "relationship_decay",
@@ -70,119 +50,174 @@ const TONE_FAMILY = {
     path: "warm_path",
 } as const;
 
+/** Blips on the sweep, in polar coordinates: angle in degrees, radius as a fraction of the disc. */
+const BLIPS = [
+    { deg: 18, r: 0.34, tone: "cold", size: 11, delay: 0 },
+    { deg: 74, r: 0.66, tone: "high", size: 13, delay: -0.6 },
+    { deg: 122, r: 0.44, tone: "cool", size: 9, delay: -1.9 },
+    { deg: 168, r: 0.78, tone: "medium", size: 10, delay: -1.1 },
+    { deg: 208, r: 0.29, tone: "warm", size: 8, delay: -2.6 },
+    { deg: 252, r: 0.6, tone: "cool", size: 10, delay: -0.3 },
+    { deg: 297, r: 0.83, tone: "path", size: 9, delay: -2.2 },
+    { deg: 331, r: 0.5, tone: "hot", size: 12, delay: -1.5 },
+] as const;
+
+const BLIP_BG = {
+    hot: "bg-warmth-hot",
+    warm: "bg-warmth-warm",
+    cool: "bg-warmth-cool",
+    cold: "bg-warmth-cold",
+    high: "bg-risk-high",
+    medium: "bg-risk-medium",
+    low: "bg-risk-low",
+    path: "bg-chart-5",
+} as const;
+
 /**
- * Radar's horizon: every flagged signal placed on the axis of when it starts costing you.
+ * The sweep: Connex's namesake surface, drawn as the instrument it is named after.
  *
- * `radarHorizon.ts` calls that deadline "the one fact no other surface in the product can assemble
- * across families", which is the claim this diagram exists to make. The columns carry no row text
- * at all — the pile and the count are the message.
+ * Concentric rings, a conic gradient rotating beneath them, and blips that pulse on their own
+ * offsets so the field never breathes in unison. Everything is CSS, so the animation runs off the
+ * main thread and stops dead under `prefers-reduced-motion`.
  */
-export async function RadarHorizonSurface() {
+export async function RadarSweepSurface() {
     const t = await getTranslations("CommonHome");
-    const band = await getTranslations("Radar.horizon.band");
 
     return (
-        <SurfaceFrame label={t("surfaceRadarLabel")} sampleLabel={t("surfaceSample")}>
-            <div className="grid grid-cols-5 gap-2 px-4 pt-8 pb-4 sm:gap-4 sm:px-6">
-                {HORIZON.map((column) => (
-                    <div key={column.key} className="flex flex-col justify-end gap-3">
-                        <div className="flex h-24 w-full flex-wrap-reverse content-start gap-1.5">
-                            {Array.from({ length: column.n }, (_, i) => {
-                                const tone = column.mix[i % column.mix.length];
-                                return (
-                                    <RadarMark
-                                        key={`${column.key}-${i}`}
-                                        tone={tone}
-                                        family={TONE_FAMILY[tone]}
-                                    />
-                                );
-                            })}
-                        </div>
-                        <div className="border-t border-border pt-2">
-                            <p className="text-lg leading-none font-semibold tabular-nums text-foreground">
-                                {column.n}
-                            </p>
-                            <p className="mt-1.5 truncate text-[11px] text-muted-foreground">
-                                {band(column.key)}
-                            </p>
-                        </div>
-                    </div>
-                ))}
+        <div className="relative mx-auto aspect-square w-full max-w-lg" aria-hidden>
+            <div className="absolute inset-0 rounded-full bg-brand/5 blur-3xl" />
+
+            <div className="absolute inset-0 overflow-hidden rounded-full">
+                <div className="connex-radar-sweep absolute inset-0 origin-center" />
             </div>
-        </SurfaceFrame>
+
+            {[1, 0.74, 0.48, 0.24].map((scale) => (
+                <div
+                    key={scale}
+                    className="absolute rounded-full border border-brand/25 dark:border-brand/20"
+                    style={{
+                        inset: `${((1 - scale) / 2) * 100}%`,
+                    }}
+                />
+            ))}
+
+            <div className="absolute top-1/2 left-0 h-px w-full -translate-y-1/2 bg-brand/15" />
+            <div className="absolute top-0 left-1/2 h-full w-px -translate-x-1/2 bg-brand/15" />
+
+            {BLIPS.map((blip) => {
+                const rad = (blip.deg * Math.PI) / 180;
+                const left = 50 + Math.cos(rad) * blip.r * 50;
+                const top = 50 + Math.sin(rad) * blip.r * 50;
+                return (
+                    <div key={blip.deg} className="absolute" style={{ left: `${left}%`, top: `${top}%` }}>
+                        <span
+                            className={cn(
+                                "connex-blip-ring absolute rounded-full",
+                                BLIP_BG[blip.tone],
+                                "opacity-40",
+                            )}
+                            style={{
+                                width: blip.size * 2.4,
+                                height: blip.size * 2.4,
+                                animationDelay: `${blip.delay}s`,
+                            }}
+                        />
+                        <span
+                            className={cn("connex-blip absolute rounded-full", BLIP_BG[blip.tone])}
+                            style={{
+                                width: blip.size,
+                                height: blip.size,
+                                animationDelay: `${blip.delay}s`,
+                            }}
+                        />
+                    </div>
+                );
+            })}
+
+            <div className="absolute top-1/2 left-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand shadow-[0_0_24px] shadow-brand/60" />
+            <span className="sr-only">{t("surfaceSweepAlt")}</span>
+        </div>
     );
 }
 
-/** A slice of the relationship map. One labelled anchor; the rest is shape. */
-const MAP_NODES = {
-    company: { x: 214, y: 58, r: 24, kind: "company", band: null },
-    you: { x: 62, y: 150, r: 17, kind: "you", band: null },
-    bridge: { x: 196, y: 156, r: 15, kind: "contact", band: "warm" },
-    target: { x: 336, y: 104, r: 15, kind: "contact", band: "cold" },
-    peer: { x: 318, y: 196, r: 15, kind: "contact", band: "cool" },
-    far: { x: 118, y: 214, r: 11, kind: "contact", band: "cool" },
-} as const;
-
-const MAP_EDGES = [
-    { from: "you", to: "bridge", logged: true },
-    { from: "bridge", to: "company", logged: true },
-    { from: "bridge", to: "target", logged: false },
-    { from: "company", to: "target", logged: true },
-    { from: "company", to: "peer", logged: true },
-    { from: "you", to: "far", logged: true },
-    { from: "far", to: "bridge", logged: false },
+/** A constellation of ties. Positions are percentages so the field scales with its container. */
+const CONSTELLATION = [
+    { id: "a", x: 18, y: 30, size: 13, tone: "warm", dx: "6px", dy: "-5px", dur: 11 },
+    { id: "b", x: 42, y: 16, size: 9, tone: "cool", dx: "-5px", dy: "6px", dur: 13 },
+    { id: "c", x: 63, y: 28, size: 17, tone: "hot", dx: "4px", dy: "5px", dur: 9 },
+    { id: "d", x: 84, y: 20, size: 8, tone: "cold", dx: "-6px", dy: "-4px", dur: 15 },
+    { id: "e", x: 30, y: 58, size: 11, tone: "cool", dx: "5px", dy: "4px", dur: 12 },
+    { id: "f", x: 55, y: 52, size: 22, tone: "warm", dx: "-4px", dy: "-6px", dur: 10 },
+    { id: "g", x: 78, y: 62, size: 12, tone: "cool", dx: "6px", dy: "-4px", dur: 14 },
+    { id: "h", x: 14, y: 80, size: 9, tone: "cold", dx: "-5px", dy: "5px", dur: 12 },
+    { id: "i", x: 44, y: 86, size: 14, tone: "hot", dx: "4px", dy: "-6px", dur: 16 },
+    { id: "j", x: 70, y: 88, size: 10, tone: "cool", dx: "-6px", dy: "4px", dur: 11 },
 ] as const;
 
+const TIES = [
+    ["a", "b"], ["b", "c"], ["c", "d"], ["a", "e"], ["e", "f"], ["f", "c"],
+    ["f", "g"], ["g", "d"], ["e", "h"], ["h", "i"], ["i", "f"], ["i", "j"], ["j", "g"],
+] as const;
+
+const NODE_BG = {
+    hot: "bg-warmth-hot",
+    warm: "bg-warmth-warm",
+    cool: "bg-warmth-cool",
+    cold: "bg-warmth-cold",
+} as const;
+
 /**
- * The relationship graph, reduced to nodes and ties.
+ * The network, alive.
  *
- * Drawn as plain SVG rather than mounting `@xyflow/react`, which is a heavy client bundle that
- * would buy nothing on a static page. Solid ties are logged interactions and dashed ties are
- * inferred; the section copy says so, so the picture does not have to.
+ * Ties are drawn once in SVG and the points drift over them on independent clocks, so the field
+ * never pulses in step. The drift is small enough that the ties stay legible without re-laying the
+ * lines every frame, which keeps the whole thing on the compositor.
  */
-export async function RelationMapSurface() {
+export async function LivingNetworkSurface() {
     const t = await getTranslations("CommonHome");
+    const at = (id: string) => CONSTELLATION.find((n) => n.id === id)!;
 
     return (
-        <SurfaceFrame label={t("surfaceMapLabel")} sampleLabel={t("surfaceSample")}>
-            <svg viewBox="0 0 400 260" className="w-full" role="img" aria-label={t("surfaceMapAlt")}>
-                {MAP_EDGES.map((edge) => (
+        <div className="relative aspect-[4/3] w-full" aria-hidden>
+            <div className="absolute inset-0 rounded-[2rem] bg-brand/5 blur-3xl" />
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 size-full">
+                {TIES.map(([from, to]) => (
                     <line
-                        key={`${edge.from}-${edge.to}`}
-                        x1={MAP_NODES[edge.from].x}
-                        y1={MAP_NODES[edge.from].y}
-                        x2={MAP_NODES[edge.to].x}
-                        y2={MAP_NODES[edge.to].y}
-                        strokeWidth={edge.logged ? 1.75 : 1}
-                        strokeDasharray={edge.logged ? undefined : "5 5"}
-                        className={edge.logged ? "stroke-brand/45" : "stroke-border"}
+                        key={`${from}-${to}`}
+                        x1={at(from).x}
+                        y1={at(from).y}
+                        x2={at(to).x}
+                        y2={at(to).y}
+                        vectorEffect="non-scaling-stroke"
+                        strokeWidth="1"
+                        className="stroke-brand/25"
                     />
                 ))}
-                {Object.entries(MAP_NODES).map(([key, node]) => (
-                    <g key={key}>
-                        <circle
-                            cx={node.x}
-                            cy={node.y}
-                            r={node.r}
-                            strokeWidth={node.kind === "you" ? 2.5 : 1.5}
-                            className={cn(
-                                node.kind === "company" ? "fill-muted" : "fill-card",
-                                node.kind === "you" ? "stroke-brand" : "stroke-border",
-                            )}
-                        />
-                        {node.band ? (
-                            <circle
-                                cx={node.x + node.r * 0.72}
-                                cy={node.y - node.r * 0.72}
-                                r={4.5}
-                                strokeWidth={2}
-                                className={cn(BAND_FILL[node.band], "stroke-card")}
-                            />
-                        ) : null}
-                    </g>
-                ))}
             </svg>
-        </SurfaceFrame>
+            {CONSTELLATION.map((node) => (
+                <span
+                    key={node.id}
+                    className="connex-node-drift absolute -translate-x-1/2 -translate-y-1/2"
+                    style={{
+                        left: `${node.x}%`,
+                        top: `${node.y}%`,
+                        ["--drift-x" as string]: node.dx,
+                        ["--drift-y" as string]: node.dy,
+                        animationDuration: `${node.dur}s`,
+                    }}
+                >
+                    <span
+                        className={cn("block rounded-full", NODE_BG[node.tone])}
+                        style={{
+                            width: node.size,
+                            height: node.size,
+                            boxShadow: `0 0 ${node.size * 1.6}px currentColor`,
+                        }}
+                    />
+                </span>
+            ))}
+            <span className="sr-only">{t("surfaceNetworkAlt")}</span>
+        </div>
     );
 }
 
