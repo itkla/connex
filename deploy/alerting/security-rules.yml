@@ -46,3 +46,10 @@ groups:
           severity: critical
         annotations:
           summary: Connex security metrics are unavailable
+      - alert: ConnexBackupTelemetryUnavailable
+        expr: max(absent(up{job="connex-backup"}) or absent(connex_backup_failed{job="connex-backup"})) == 1 or min(up{job="connex-backup"}) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Backup security metrics are unavailable

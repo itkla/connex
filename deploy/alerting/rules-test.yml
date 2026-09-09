@@ -113,3 +113,61 @@ tests:
         exp_alerts:
           - exp_labels: {"severity": "critical"}
             exp_annotations: {"summary": "At least 100 audited authentication failures globally in 5 minutes"}
+
+  - name: missing backup metric despite healthy exporter
+    interval: 1m
+    input_series:
+      - series: 'up{job="connex-backup"}'
+        values: '1+0x5'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ConnexBackupTelemetryUnavailable
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: Backup security metrics are unavailable}
+  - name: failed backup scrape despite a retained healthy sample
+    interval: 1m
+    input_series:
+      - series: 'up{job="connex-backup"}'
+        values: '0+0x5'
+      - series: 'connex_backup_failed{job="connex-backup"}'
+        values: '0+0x5'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ConnexBackupTelemetryUnavailable
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: Backup security metrics are unavailable}
+  - name: backup telemetry entirely absent
+    interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ConnexBackupTelemetryUnavailable
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: Backup security metrics are unavailable}
+  - name: backup telemetry becomes stale
+    interval: 1m
+    input_series:
+      - series: 'up{job="connex-backup"}'
+        values: '1+0x5'
+      - series: 'connex_backup_failed{job="connex-backup"}'
+        values: '0 stale _ _ _ _'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ConnexBackupTelemetryUnavailable
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations: {summary: Backup security metrics are unavailable}
+  - name: healthy backup telemetry
+    interval: 1m
+    input_series:
+      - series: 'up{job="connex-backup"}'
+        values: '1+0x5'
+      - series: 'connex_backup_failed{job="connex-backup"}'
+        values: '0+0x5'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ConnexBackupTelemetryUnavailable
+        exp_alerts: []
