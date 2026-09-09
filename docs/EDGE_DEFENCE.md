@@ -367,6 +367,12 @@ count look comprehensive.
 - **AI:** only request-starting POSTs are coarsely rate limited. Generation polling remains under the
   generic high ceiling; application organization budgets and authorization stay authoritative.
 
+## Reproducible evidence tooling
+
+[EDGE_EVIDENCE.md](EDGE_EVIDENCE.md) provides the read-only zone exporter, tested fail-closed
+event sanitizer, account-owner capture procedure, live HSTS findings and pending approval checklist.
+Tooling availability does not establish account deployment or approve native-event processing.
+
 ## Privacy-safe observability
 
 Use Cloudflare Security Events for daily review during rollout and at least daily on Business after
@@ -389,8 +395,10 @@ CSRF headers, SAML assertions, webhook signatures, invite/unsubscribe/document-a
 tokens, AI content,
 uploaded filenames, and custom request headers. Business does not include Logpush; until an
 approved contract and sanitizer are operating, retain only manually reviewed aggregate rule counts
-and do not export native events. Any future exporter is a separate security/privacy-reviewed change
-with credentials in the secret store and encrypted output in an approved Japan-region sink.
+and do not export native events. The exporter and sanitizer in [EDGE_EVIDENCE.md](EDGE_EVIDENCE.md) require operational
+Security/Privacy approval before use, with credentials in the secret store and encrypted output in
+an approved Japan-region sink. Until that approval and operation are recorded, the aggregate-only
+restriction above remains in force.
 
 Cloudflare is a subprocessor and possible cross-border-processing decision, not merely a DNS
 toggle. Before cutover, complete vendor/privacy review, update the signed DPA subprocessor annex and
