@@ -24,6 +24,31 @@ import { cn } from "@/lib/utils";
  * that do not exist yet.
  */
 
+const EVIDENCE_ROWS = [
+    { key: "meeting", Icon: CalendarDaysIcon },
+    { key: "email", Icon: EnvelopeIcon },
+    { key: "note", Icon: PencilSquareIcon },
+] as const;
+
+/**
+ * Severities mirror `DealRiskService`: `close_overdue` is HIGH, `stalled` is MEDIUM, and
+ * `closing_soon_quiet` (the HIGH staleness variant) cannot fire once the close date has passed.
+ */
+const RISK_FACTORS = [
+    { key: "overdue", severity: "high", Icon: CalendarDaysIcon },
+    { key: "quiet", severity: "medium", Icon: EnvelopeIcon },
+    { key: "cold", severity: "medium", Icon: null },
+] as const;
+
+/**
+ * A warm path is bridge to target. `WarmPathService` ranks a contact the team is already warm
+ * with as the bridge; there is no teammate node, so the miniature does not draw one.
+ */
+const INTRO_STEPS = [
+    { key: "bridge", band: "warm" },
+    { key: "target", band: "cold" },
+] as const;
+
 /** Chrome shared by every surface, so each one reads as a window into the product. */
 function SurfaceFrame({
     label,
@@ -68,12 +93,6 @@ function WarmthChip({ band, label }: { band: "hot" | "warm" | "cool" | "cold"; l
 export async function WarmthReadingSurface() {
     const t = await getTranslations("CommonHome");
 
-    const evidence = [
-        { key: "meeting", Icon: CalendarDaysIcon },
-        { key: "email", Icon: EnvelopeIcon },
-        { key: "note", Icon: PencilSquareIcon },
-    ] as const;
-
     return (
         <SurfaceFrame label={t("surfaceWarmthLabel")} sampleLabel={t("surfaceSample")}>
             <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-5">
@@ -86,7 +105,7 @@ export async function WarmthReadingSurface() {
             <div className="border-t border-border bg-muted/40 px-5 py-4">
                 <p className="text-xs font-medium text-muted-foreground">{t("surfaceEvidenceHeading")}</p>
                 <ul className="mt-3 space-y-2.5">
-                    {evidence.map(({ key, Icon }) => (
+                    {EVIDENCE_ROWS.map(({ key, Icon }) => (
                         <li key={key} className="flex items-center gap-3 text-sm">
                             <Icon className="size-4 shrink-0 text-muted-foreground" />
                             <span className="min-w-0 flex-1 truncate text-foreground">{t(`surfaceEvidence_${key}`)}</span>
@@ -112,12 +131,6 @@ export async function WarmthReadingSurface() {
 export async function DealRiskSurface() {
     const t = await getTranslations("CommonHome");
 
-    const factors = [
-        { key: "overdue", severity: "high" as const, Icon: CalendarDaysIcon },
-        { key: "quiet", severity: "high" as const, Icon: EnvelopeIcon },
-        { key: "cold", severity: "medium" as const, Icon: null },
-    ];
-
     return (
         <SurfaceFrame label={t("surfaceRiskLabel")} sampleLabel={t("surfaceSample")}>
             <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-5">
@@ -134,7 +147,7 @@ export async function DealRiskSurface() {
             <div className="border-t border-border bg-muted/40 px-5 py-4">
                 <p className="text-xs font-medium text-muted-foreground">{t("surfaceRiskFactorsHeading")}</p>
                 <ul className="mt-3 space-y-2.5">
-                    {factors.map(({ key, severity, Icon }) => (
+                    {RISK_FACTORS.map(({ key, severity, Icon }) => (
                         <li key={key} className="flex items-center gap-3 text-sm">
                             {Icon ? (
                                 <Icon className="size-4 shrink-0 text-muted-foreground" />
@@ -168,19 +181,13 @@ export async function DealRiskSurface() {
 export async function IntroPathSurface() {
     const t = await getTranslations("CommonHome");
 
-    const steps = [
-        { key: "you", band: "hot" as const },
-        { key: "bridge", band: "warm" as const },
-        { key: "target", band: "cold" as const },
-    ];
-
     return (
         <SurfaceFrame label={t("surfaceIntroLabel")} sampleLabel={t("surfaceSample")}>
             <div className="px-5 py-5">
                 <ol className="space-y-0">
-                    {steps.map((step, i) => (
+                    {INTRO_STEPS.map((step, i) => (
                         <li key={step.key} className="relative flex gap-4 pb-6 last:pb-0">
-                            {i < steps.length - 1 ? (
+                            {i < INTRO_STEPS.length - 1 ? (
                                 <span
                                     aria-hidden="true"
                                     className="absolute left-[11px] top-6 h-[calc(100%-1.5rem)] w-px bg-linear-to-b from-brand/60 to-border"

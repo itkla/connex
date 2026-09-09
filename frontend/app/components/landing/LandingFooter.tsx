@@ -27,7 +27,7 @@ export default async function LandingFooter() {
                             <Link href="/#features" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navFeatures")}
                             </Link>
-                            <Link href="/#workflow" className="text-muted-foreground transition-colors hover:text-foreground">
+                            <Link href="/#evidence" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navWorkflow")}
                             </Link>
                             <Link href="/docs" className="text-muted-foreground transition-colors hover:text-foreground">
