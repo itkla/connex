@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -82,6 +83,7 @@ class AttachmentScanLifecycleIntegrationTest {
     @Autowired private ObjectStorage storage;
     @Autowired private TenantContext tenantContext;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private SqlSessionTemplate sqlSessionTemplate;
     @MockitoBean private MalwareScannerClient scanner;
 
     private final List<Workspace> fixtureWorkspaces = new ArrayList<>();
@@ -256,8 +258,9 @@ class AttachmentScanLifecycleIntegrationTest {
     void simultaneousPreLockSnapshotsCannotCreateTwoClaims() throws Exception {
         Attachment attachment = legacyAttachment(workspace);
         CountDownLatch discovered = new CountDownLatch(2);
+        AttachmentScanMapper realScans = sqlSessionTemplate.getMapper(AttachmentScanMapper.class);
         doAnswer(invocation -> {
-            Object result = invocation.callRealMethod();
+            Attachment result = realScans.getById(workspace.getId(), attachment.getId());
             discovered.countDown();
             if (!discovered.await(5, TimeUnit.SECONDS)) {
                 throw new IllegalStateException("Concurrent discovery fixture timed out");

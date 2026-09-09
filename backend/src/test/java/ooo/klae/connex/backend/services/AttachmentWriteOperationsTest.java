@@ -31,6 +31,8 @@ import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ScannedUpload;
+import ooo.klae.connex.backend.storage.malware.MalwareScanReport;
+import ooo.klae.connex.backend.storage.malware.MalwareScanVerdict;
 
 /** Verifies attachment writes remain tenant-validated and transaction-bounded. */
 @ExtendWith(MockitoExtension.class)
@@ -104,6 +106,8 @@ class AttachmentWriteOperationsTest {
         User uploader = new User();
         uploader.setId(7);
         ScannedUpload scanned = mock(ScannedUpload.class);
+        when(scanned.report()).thenReturn(
+            new MalwareScanReport(MalwareScanVerdict.CLEAN, null, null, "test-database", false));
         when(dealMapper.exists(5, 43)).thenReturn(true);
         when(managedObjectService.storeInspectedAttachment(5, scanned)).thenReturn(
             new StoredBinary("/api/attachments/content/token.pdf", "file.pdf", "application/pdf", 2));
@@ -123,6 +127,12 @@ class AttachmentWriteOperationsTest {
         assertEquals("deal", attachment.getEntityType());
         assertEquals(43, attachment.getEntityId());
         assertEquals(uploader, attachment.getUploadedBy());
+        assertEquals("clean", attachment.getScanState());
+        assertEquals("ClamAV", attachment.getScanEngine());
+        assertEquals("test-database", attachment.getScanDatabaseVersion());
+        assertNotNull(attachment.getScannedAt());
+        assertNotNull(attachment.getScanExpiresAt());
+        assertEquals(1, attachment.getScanAttempts());
         verify(attachmentMapper).insert(attachment);
     }
 
@@ -132,6 +142,8 @@ class AttachmentWriteOperationsTest {
         uploader.setId(7);
         byte[] content = {1, 2, 3};
         ScannedUpload scanned = mock(ScannedUpload.class);
+        when(scanned.report()).thenReturn(
+            new MalwareScanReport(MalwareScanVerdict.CLEAN, null, null, "test-database", false));
         StoredBinary stored = new StoredBinary(
             "/api/attachments/content/token.jpg", "image.jpg", "image/jpeg", content.length);
         when(aiChatMapper.sessionExists(5, 43)).thenReturn(true);
@@ -149,6 +161,12 @@ class AttachmentWriteOperationsTest {
         Attachment attachment = operations.uploadAssistantSession(5, 43, scanned, uploader);
 
         assertEquals(content.length, attachment.getSize());
+        assertEquals("clean", attachment.getScanState());
+        assertEquals("ClamAV", attachment.getScanEngine());
+        assertEquals("test-database", attachment.getScanDatabaseVersion());
+        assertNotNull(attachment.getScannedAt());
+        assertNotNull(attachment.getScanExpiresAt());
+        assertEquals(1, attachment.getScanAttempts());
         verify(managedObjectService).storeInspectedAttachment(5, scanned);
     }
 
