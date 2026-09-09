@@ -190,3 +190,19 @@ def verifySeederDevtoolsIsolation = tasks.register(
 tasks.named('test') {
 	dependsOn verifySeederDevtoolsIsolation
 }
+
+tasks.register('generateApiSurface', JavaExec) {
+	group = 'documentation'
+	description = 'Regenerates the reviewed HTTP surface and authorization evidence ledgers.'
+	dependsOn tasks.named('testClasses')
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'ooo.klae.connex.backend.apisurface.ApiSurfaceInventory'
+}
+
+tasks.named('test') {
+	inputs.files(fileTree('src/main/java') { include '**/*.java' })
+	inputs.files('build.gradle', '../frontend/next.config.ts',
+		'../docs/backend/api-surface.tsv', '../docs/backend/api-surface-policy.txt',
+		'../docs/backend/api-lifecycle.tsv')
+	inputs.property('apiLifecycleDate', java.time.LocalDate.now(java.time.ZoneOffset.UTC).toString())
+}

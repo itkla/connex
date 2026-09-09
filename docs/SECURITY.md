@@ -192,3 +192,8 @@ Tracked under the security roadmap [#87] and the APPI pathway [#224]. Key open i
 [#249]: https://github.com/itkla/connex/issues/249
 [#1230]: https://github.com/itkla/connex/issues/1230
 [#1286]: https://github.com/itkla/connex/issues/1286
+
+## API inventory and retirement
+
+The generated HTTP surface, authorization-change ledger, anonymous perimeter guard and EOL process
+are documented in [API surface and retirement](backend/API_SURFACE.md) (CHK-054 / SEC-60).
