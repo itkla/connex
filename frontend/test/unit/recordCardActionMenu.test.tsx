@@ -53,6 +53,7 @@ const user: User = {
 };
 
 const router: AppRouterInstance = {
+    bfcacheId: 'record-card-test',
     back: vi.fn(),
     forward: vi.fn(),
     refresh: vi.fn(),
