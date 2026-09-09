@@ -10,61 +10,6 @@ import Reveal from "@/app/components/landing/Reveal";
 const titleClass = "text-lg font-semibold tracking-tight text-foreground";
 const bodyClass = "mt-2 text-[15px] leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]";
 
-const WARMTH_MOTIF_BANDS = ["bg-warmth-cold", "bg-warmth-cool", "bg-warmth-warm", "bg-warmth-hot"];
-
-function WarmthMotif() {
-    return (
-        <div className="mt-7 flex max-w-[260px] items-end gap-1.5" aria-hidden="true">
-            {WARMTH_MOTIF_BANDS.map((band, i) => (
-                <span
-                    key={band}
-                    className={`flex-1 rounded-full ${band}`}
-                    style={{ height: `${10 + i * 8}px` }}
-                />
-            ))}
-        </div>
-    );
-}
-
-function RadarMotif() {
-    return (
-        <svg
-            viewBox="0 0 200 96"
-            className="mt-7 h-24 w-full max-w-[230px]"
-            preserveAspectRatio="xMinYMid meet"
-            fill="none"
-            aria-hidden="true"
-        >
-            {[26, 46, 66].map((r) => (
-                <circle key={r} cx="26" cy="86" r={r} className="stroke-border" strokeWidth="1" />
-            ))}
-            <circle cx="72" cy="52" r="4" className="fill-warmth-cool" />
-            <circle cx="118" cy="34" r="4" className="fill-warmth-cold" />
-            <circle cx="52" cy="70" r="4" className="fill-warmth-warm" />
-            <path d="M 26 86 L 150 18" className="stroke-brand" strokeWidth="1.5" strokeLinecap="round" />
-        </svg>
-    );
-}
-
-function IntroPathMotif() {
-    return (
-        <svg
-            viewBox="0 0 200 96"
-            className="mt-7 h-24 w-full max-w-[230px]"
-            preserveAspectRatio="xMinYMid meet"
-            fill="none"
-            aria-hidden="true"
-        >
-            <path d="M 20 74 L 78 34 L 140 60 L 186 26" className="stroke-border" strokeWidth="1.5" />
-            <path d="M 20 74 L 78 34 L 186 26" className="stroke-brand" strokeWidth="2" strokeLinecap="round" />
-            <circle cx="20" cy="74" r="5.5" className="fill-brand" />
-            <circle cx="78" cy="34" r="5.5" className="fill-background stroke-brand" strokeWidth="2" />
-            <circle cx="140" cy="60" r="4.5" className="fill-background stroke-border" strokeWidth="2" />
-            <circle cx="186" cy="26" r="5.5" className="fill-background stroke-brand" strokeWidth="2" />
-        </svg>
-    );
-}
-
 function HistoryMotif({ nowLabel }: { nowLabel: string }) {
     return (
         <div className="mt-7 flex max-w-sm items-center gap-2 text-xs" aria-hidden="true">
@@ -92,6 +37,25 @@ function IsolationMotif() {
     );
 }
 
+function DeploymentMotif({ labels }: { labels: string[] }) {
+    return (
+        <div className="mt-7 flex flex-wrap gap-1.5" aria-hidden="true">
+            {labels.map((label, i) => (
+                <span
+                    key={label}
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                        i === 0
+                            ? "bg-brand-light text-brand-dark"
+                            : "border border-border bg-muted text-muted-foreground"
+                    }`}
+                >
+                    {label}
+                </span>
+            ))}
+        </div>
+    );
+}
+
 function AuditMotif() {
     return (
         <div className="mt-7 flex flex-wrap items-center gap-3" aria-hidden="true">
@@ -107,14 +71,13 @@ function AuditMotif() {
 
 export default async function FeatureBento() {
     const t = await getTranslations("CommonHome");
+    const deploymentLabels = [t("bentoDeploySaas"), t("bentoDeploySilo"), t("bentoDeployOnPrem")];
 
     const cells = [
-        { key: "Warmth", span: "sm:col-span-2 lg:col-span-7", motif: <WarmthMotif /> },
-        { key: "Radar", span: "sm:col-span-2 lg:col-span-5", motif: <RadarMotif /> },
-        { key: "Intro", span: "sm:col-span-1 lg:col-span-5", motif: <IntroPathMotif /> },
         { key: "History", span: "sm:col-span-1 lg:col-span-7", motif: <HistoryMotif nowLabel={t("bentoHistoryNow")} /> },
-        { key: "Isolation", span: "sm:col-span-1 lg:col-span-4", motif: <IsolationMotif /> },
-        { key: "Audit", span: "sm:col-span-1 lg:col-span-8", motif: <AuditMotif /> },
+        { key: "Deployment", span: "sm:col-span-1 lg:col-span-5", motif: <DeploymentMotif labels={deploymentLabels} /> },
+        { key: "Isolation", span: "sm:col-span-1 lg:col-span-5", motif: <IsolationMotif /> },
+        { key: "Audit", span: "sm:col-span-1 lg:col-span-7", motif: <AuditMotif /> },
     ];
 
     return (

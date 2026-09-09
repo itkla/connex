@@ -8,6 +8,13 @@ import LandingFooter from "@/app/components/landing/LandingFooter";
 import FujiSpine from "@/app/components/landing/FujiSpine";
 import FeatureBento from "@/app/components/landing/FeatureBento";
 import LandingFaq from "@/app/components/landing/LandingFaq";
+import {
+    IntroPathSurface,
+    RadarSurface,
+    SharedAccountSurface,
+    SourcesSurface,
+    WarmthReadingSurface,
+} from "@/app/components/landing/ProductSurfaces";
 import Reveal from "@/app/components/landing/Reveal";
 import type { Metadata } from "next";
 
@@ -113,43 +120,75 @@ export default async function Home() {
                     </section>
 
                     <section id="warmth" className="scroll-mt-20">
-                        <div className="mx-auto max-w-7xl px-6 py-24 lg:px-8 lg:py-32">
-                            <Reveal className="max-w-3xl">
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-32">
+                            <Reveal>
                                 <h2 className={sectionHeading}>{t("warmthHeading")}</h2>
                                 <p className={sectionBody}>{t("warmthBody")}</p>
+                                <div className="mt-8 max-w-sm">
+                                    <div className="flex gap-1.5" aria-hidden="true">
+                                        {WARMTH_BANDS.map((band) => (
+                                            <span key={band.key} className={`h-2 flex-1 rounded-full ${band.token}`} />
+                                        ))}
+                                    </div>
+                                    <div className={`mt-3 flex gap-1.5 text-sm text-muted-foreground ${HALO}`}>
+                                        {WARMTH_BANDS.map((band) => (
+                                            <span key={band.key} className="flex-1 text-center">
+                                                {t(`warmthBand_${band.key}`)}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
                             </Reveal>
-
-                            <Reveal delay={0.08} className="mt-12 max-w-md">
-                                <div className="flex gap-1.5" aria-hidden="true">
-                                    {WARMTH_BANDS.map((band) => (
-                                        <span key={band.key} className={`h-2 flex-1 rounded-full ${band.token}`} />
-                                    ))}
-                                </div>
-                                <div className={`mt-3 flex gap-1.5 text-sm text-muted-foreground ${HALO}`}>
-                                    {WARMTH_BANDS.map((band) => (
-                                        <span key={band.key} className="flex-1 text-center">
-                                            {t(`warmthBand_${band.key}`)}
-                                        </span>
-                                    ))}
-                                </div>
+                            <Reveal delay={0.08}>
+                                <WarmthReadingSurface />
                             </Reveal>
                         </div>
                     </section>
 
                     <section>
-                        <div className="mx-auto flex max-w-7xl justify-end px-6 py-24 lg:px-8 lg:py-32">
-                            <Reveal className="max-w-2xl lg:text-right">
+                        <div className="mx-auto max-w-7xl px-6 py-24 lg:px-8 lg:py-32">
+                            <Reveal className="max-w-2xl">
                                 <h2 className={sectionHeading}>{t("radarHeading")}</h2>
-                                <p className={`${sectionBody} lg:ml-auto`}>{t("radarBody")}</p>
+                                <p className={sectionBody}>{t("radarBody")}</p>
+                            </Reveal>
+                            <Reveal delay={0.08} className="mt-12 max-w-3xl">
+                                <RadarSurface />
                             </Reveal>
                         </div>
                     </section>
 
                     <section>
-                        <div className="mx-auto max-w-3xl px-6 py-24 text-center lg:px-8 lg:py-32">
-                            <Reveal>
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-32">
+                            <Reveal className="lg:order-2">
                                 <h2 className={sectionHeading}>{t("introHeading")}</h2>
-                                <p className={`${sectionBody} mx-auto`}>{t("introBody")}</p>
+                                <p className={sectionBody}>{t("introBody")}</p>
+                            </Reveal>
+                            <Reveal delay={0.08} className="lg:order-1">
+                                <IntroPathSurface />
+                            </Reveal>
+                        </div>
+                    </section>
+
+                    <section>
+                        <div className="mx-auto max-w-7xl px-6 py-24 lg:px-8 lg:py-32">
+                            <Reveal className="max-w-2xl">
+                                <h2 className={sectionHeading}>{t("teamHeading")}</h2>
+                                <p className={sectionBody}>{t("teamBody")}</p>
+                            </Reveal>
+                            <Reveal delay={0.08} className="mt-12 max-w-3xl">
+                                <SharedAccountSurface />
+                            </Reveal>
+                        </div>
+                    </section>
+
+                    <section>
+                        <div className="mx-auto grid max-w-7xl items-start gap-12 px-6 py-24 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-32">
+                            <Reveal>
+                                <h2 className={sectionHeading}>{t("sourcesHeading")}</h2>
+                                <p className={sectionBody}>{t("sourcesBody")}</p>
+                            </Reveal>
+                            <Reveal delay={0.08}>
+                                <SourcesSurface />
                             </Reveal>
                         </div>
                     </section>
