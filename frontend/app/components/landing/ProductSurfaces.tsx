@@ -1,5 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import { RadarMark } from "@/app/components/radar/RadarVocabulary";
+import { RADAR_MARK_FILL, RADAR_MARK_SHAPE } from "@/app/components/radar/radarFamilyAccent";
 import { cn } from "@/lib/utils";
 
 /**
@@ -253,68 +254,62 @@ export async function WarmthDecaySurface() {
     );
 }
 
-/** Severity of each factor stacked into a bar, highest first. */
-const RISK_BARS = [
-    { key: "overdue", weight: 1, tone: "high" },
-    { key: "quiet", weight: 0.62, tone: "medium" },
-    { key: "cold", weight: 0.62, tone: "medium" },
+/**
+ * The signal field: Radar's glyph vocabulary at display scale.
+ *
+ * Shape names the family and fill names the reading, exactly as `radarFamilyAccent` defines it —
+ * a circle is a cooling relationship, a diamond a deal at risk, a square an intro path. Drawing
+ * them large, scattered and unevenly weighted turns the legend into a composition: the eye learns
+ * the alphabet before it meets the board, and the urgent end of the field is visibly heavier.
+ */
+const FIELD_MARKS = [
+    { x: 6, y: 62, size: 30, tone: "cold", o: 100 },
+    { x: 15, y: 30, size: 20, tone: "high", o: 100 },
+    { x: 21, y: 76, size: 15, tone: "medium", o: 85 },
+    { x: 29, y: 46, size: 34, tone: "cool", o: 100 },
+    { x: 38, y: 20, size: 13, tone: "cold", o: 70 },
+    { x: 41, y: 66, size: 22, tone: "high", o: 90 },
+    { x: 50, y: 40, size: 16, tone: "warm", o: 80 },
+    { x: 55, y: 78, size: 12, tone: "cool", o: 60 },
+    { x: 62, y: 28, size: 24, tone: "warm", o: 85 },
+    { x: 69, y: 60, size: 14, tone: "low", o: 65 },
+    { x: 76, y: 36, size: 18, tone: "hot", o: 75 },
+    { x: 83, y: 70, size: 11, tone: "path", o: 55 },
+    { x: 88, y: 22, size: 13, tone: "path", o: 60 },
+    { x: 94, y: 52, size: 9, tone: "path", o: 45 },
 ] as const;
 
-/** Severity uses the product's own `--risk-*` ramp, not the warmth ramp: they mean different things. */
-const RISK_TONE = {
-    high: "bg-risk-high",
-    medium: "bg-risk-medium",
-} as const;
-
 /**
- * Deal risk as a stack of weighted reasons.
+ * Radar's marks, enlarged into a field.
  *
- * Severities follow `DealRiskService`: `close_overdue` is high, `stalled` is medium, and
- * `closing_soon_quiet` — the other high variant — cannot fire once a close date has passed. Bar
- * length is severity, so the diagram shows a deal carrying one hard failure and two softer ones.
+ * Uses the shared shape and fill maps rather than {@link RadarMark} itself, because that component
+ * is deliberately fixed at the small size the product needs; here the size carries the weight.
  */
-export async function DealRiskSurface() {
+export async function SignalFieldSurface() {
     const t = await getTranslations("CommonHome");
 
     return (
-        <SurfaceFrame label={t("surfaceRiskLabel")} sampleLabel={t("surfaceSample")}>
-            <div className="space-y-4 px-5 py-6">
-                {RISK_BARS.map((bar) => (
-                    <div key={bar.key} className="space-y-1.5">
-                        <p className="text-xs text-muted-foreground">{t(`surfaceRiskFactor_${bar.key}`)}</p>
-                        <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                            <div
-                                className={cn("h-full rounded-full", RISK_TONE[bar.tone])}
-                                style={{ width: `${bar.weight * 100}%` }}
-                            />
-                        </div>
-                    </div>
+        <SurfaceFrame label={t("surfaceFieldLabel")} sampleLabel={t("surfaceSample")}>
+            <div className="relative h-64 w-full sm:h-72">
+                {FIELD_MARKS.map((mark) => (
+                    <span
+                        key={`${mark.x}-${mark.y}`}
+                        aria-hidden
+                        className={cn(
+                            "absolute -translate-x-1/2 -translate-y-1/2",
+                            RADAR_MARK_SHAPE[TONE_FAMILY[mark.tone]],
+                            RADAR_MARK_FILL[mark.tone],
+                        )}
+                        style={{
+                            left: `${mark.x}%`,
+                            top: `${mark.y}%`,
+                            width: mark.size,
+                            height: mark.size,
+                            opacity: mark.o / 100,
+                        }}
+                    />
                 ))}
             </div>
-        </SurfaceFrame>
-    );
-}
-
-/**
- * An intro path: you, a contact your team is warm with, and the person you cannot reach.
- *
- * `WarmPathService` ranks a warm CRM contact as the bridge — there is no teammate node in the real
- * model, so the diagram draws the requester, one bridge and one target and nothing else.
- */
-export async function IntroPathSurface() {
-    const t = await getTranslations("CommonHome");
-
-    return (
-        <SurfaceFrame label={t("surfaceIntroLabel")} sampleLabel={t("surfaceSample")}>
-            <svg viewBox="0 0 360 130" className="w-full px-2 py-2" role="img" aria-label={t("surfaceIntroAlt")}>
-                <line x1="62" y1="65" x2="180" y2="65" strokeWidth="2" className="stroke-brand/50" />
-                <line x1="180" y1="65" x2="298" y2="65" strokeWidth="1.25" strokeDasharray="5 5" className="stroke-border" />
-                <circle cx="62" cy="65" r="19" strokeWidth="2.5" className="fill-card stroke-brand" />
-                <circle cx="180" cy="65" r="17" strokeWidth="1.5" className="fill-card stroke-border" />
-                <circle cx={180 + 12} cy={65 - 12} r="5" strokeWidth="2" className={cn(BAND_FILL.warm, "stroke-card")} />
-                <circle cx="298" cy="65" r="17" strokeWidth="1.5" className="fill-card stroke-border" />
-                <circle cx={298 + 12} cy={65 - 12} r="5" strokeWidth="2" className={cn(BAND_FILL.cold, "stroke-card")} />
-            </svg>
         </SurfaceFrame>
     );
 }
