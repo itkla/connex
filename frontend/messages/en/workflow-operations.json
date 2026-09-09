@@ -78,14 +78,16 @@
       "legacyTitle": "Summary only",
       "legacyBody": "This run was carried over from an earlier automation, so only its summary was kept. Connex won't guess which steps it took.",
       "outcome": "Took the {outcome} branch",
-      "attempts": "{count, plural, one {# attempt} other {# attempts}}"
+      "attempts": "{count, plural, one {# attempt} other {# attempts}}",
+      "createdTask": "View created task"
     },
     "nodeType": {
       "trigger": "Trigger",
       "condition": "Condition",
       "action": "Action",
       "delay": "Delay",
-      "end": "End"
+      "end": "End",
+      "wait": "Wait for task"
     },
     "health": {
       "title": "Workflow health",
@@ -152,7 +154,10 @@
       "retry_exhausted": "Connex retried this as many times as it's allowed to.",
       "retry_not_safe": "This step can't be safely retried on its own.",
       "execution_failed": "The step couldn't finish.",
-      "unknown": "This version of Connex can't explain what went wrong. Reload the page, and tell support if it keeps happening."
+      "unknown": "This version of Connex can't explain what went wrong. Reload the page, and tell support if it keeps happening.",
+      "condition_matched": "The record matched the stop conditions.",
+      "date_superseded": "The deal’s expected close date changed.",
+      "task_wait_timeout": "The task was not completed before its deadline."
     },
     "retrySafety": {
       "transactional": "Safe to retry",
@@ -211,8 +216,42 @@
         "prepare": "Couldn't work out which records to run this on. Check the workflow and your selection, then try again.",
         "confirm": "This review expired or the records changed. Review the list again, then start the run.",
         "result": "Couldn't load the result of this run. Try again.",
-        "cancel": "Couldn't cancel the records still to go. Try again."
-      }
+        "cancel": "Couldn't cancel the records still to go. Try again.",
+        "recordSearch": "Could not search records. Change the search to try again.",
+        "members": "Could not load members. Close and reopen to try again."
+      },
+      "createWorkflow": "Create a workflow for this record",
+      "recordLabel": "Record to run on",
+      "recordPlaceholder": "Search records by name",
+      "recordEmpty": "Enter at least two characters to find a record",
+      "editSelection": "Change selection",
+      "newRun": "Prepare another run",
+      "availability": {
+        "workflow_draft_only": "Publish this workflow before running it.",
+        "workflow_disabled": "Enable this workflow to accept new runs.",
+        "workflow_paused": "Resume this workflow to accept new runs.",
+        "workflow_archived": "Restore this workflow before running it.",
+        "workflow_not_canonical": "This workflow is not ready for manual runs. Open it to review its availability.",
+        "workflow_runtime_unavailable": "Workflow execution is not available on this deployment.",
+        "manual_entry_disabled": "The author has not allowed manual runs.",
+        "actor_unavailable": "The configured execution member is unavailable. Ask a workspace administrator to review the workflow.",
+        "caller_permission_missing": "You do not have permission for one or more actions in this workflow.",
+        "actor_permission_missing": "The configured execution member lacks permission for one or more actions.",
+        "record_unavailable": "This record is no longer available for this workflow.",
+        "configuration_unavailable": "Review the workflow configuration before running it.",
+        "entry_condition_not_matched": "The record did not match the entry conditions.",
+        "active_run_exists": "This record already has an active run.",
+        "cooldown_active": "The time before starting again has not elapsed."
+      },
+      "unavailable": "Unavailable",
+      "runsAs": "Executes as {actor}. Assignees and recipients are chosen separately.",
+      "resolvedInputsTitle": "Inputs in this preparation",
+      "effectSamplesTitle": "Expected effects on sampled records",
+      "effectAssignee": "Assignee or recipient: {name}",
+      "effectDueDate": "Due: {date}",
+      "effectUnresolved": "Some values are resolved after an earlier step runs.",
+      "recordOutcomesTitle": "Record outcomes",
+      "eligibleAt": "Can start again: {date}"
     },
     "status": {
       "queued": "Queued",
@@ -222,7 +261,8 @@
       "failed": "Failed",
       "intervention_required": "Needs a person",
       "cancelled": "Cancelled",
-      "skipped": "Skipped"
+      "skipped": "Skipped",
+      "stopped": "Stopped"
     },
     "expectedSkip": {
       "permission": "Permission",
@@ -250,7 +290,10 @@
       "actor_unavailable": "The member this workflow runs as is no longer available.",
       "actor_inactive": "The member this workflow runs as is no longer active.",
       "configuration_missing": "This workflow is missing a setting it needs.",
-      "definition_invalid": "The published version of this workflow has a problem. Open it and fix the issues before running it."
+      "definition_invalid": "The published version of this workflow has a problem. Open it and fix the issues before running it.",
+      "entry_condition_not_matched": "The record did not match the entry conditions.",
+      "active_run_exists": "This record already has an active run.",
+      "cooldown_active": "The time before starting again has not elapsed."
     },
     "recipes": {
       "title": "Workflow recipes",
@@ -270,8 +313,8 @@
       "configureTitle": "What you need to set",
       "configureBody": "Fill in the values below. The trigger and the steps themselves are fixed here — you can change them once the workflow exists.",
       "nameLabel": "Workflow name",
-      "exampleRecordLabel": "Example record ID (optional)",
-      "exampleRecordHelp": "Give a record and the preview shows what would happen to it. Nothing runs.",
+      "exampleRecordLabel": "Example record (optional)",
+      "exampleRecordHelp": "Search for a visible record to preview the recipe. The preview does not make changes.",
       "previewOnlyTitle": "Preview only — nothing will run",
       "previewOnlyBody": "Nothing is created or changed: no workflow, no run, and no task, note, activity, tag, or notification.",
       "preview": "Preview",
@@ -308,23 +351,44 @@
         },
         "deal-won-handoff": {
           "title": "Hand off a won deal",
-          "description": "When a deal is won, log the handoff and create a follow-up task for the owner you choose."
+          "description": "When a deal is won, create a handoff task for the owner you choose and record the handoff after the task is completed."
         },
         "cooling-company-review": {
           "title": "Review a cooling company",
           "description": "On a schedule, find companies whose warmth is cooling and create a task to check in."
+        },
+        "person-qualified-routing": {
+          "title": "Route a contact to the right owner",
+          "description": "When a contact becomes qualified, assign the owner you choose and create a linked follow-up task."
+        },
+        "deal-follow-through": {
+          "title": "Follow through on a deal",
+          "description": "Create a follow-up task and wait for its completion before moving the deal to the stage you choose."
+        },
+        "deal-renewal-preparation": {
+          "title": "Prepare for a renewal",
+          "description": "Use a deal’s expected close date to start a renewal task ahead of time and follow its completion."
         }
-      }
+      },
+      "startBlank": "Build a workflow from scratch",
+      "renewalDateHelp": "This recipe uses the deal’s expected close date. Set a negative day offset to start before that date, and enter an IANA time zone such as Asia/Tokyo or Pacific/Honolulu."
     },
     "sourceEvent": {
       "person": {
-        "job_changed": "Contact employment changed"
+        "job_changed": "Contact employment changed",
+        "lifecycle_changed": "Contact lifecycle changed"
       },
       "deal": {
-        "won": "Deal won"
+        "won": "Deal won",
+        "created": "Deal created"
       },
       "schedule": {
         "daily": "Daily warmth check"
+      },
+      "date": {
+        "deal": {
+          "expectedCloseDate": "Before or after the deal’s expected close date"
+        }
       }
     },
     "actorModel": {
@@ -351,19 +415,29 @@
       "assign_owner": "Assign owner",
       "set_response_due": "Set first-response deadline",
       "change_stage": "Change stage",
-      "notify": "Create notification"
+      "notify": "Create notification",
+      "update_field": "Update expected close date"
     },
     "recipeField": {
       "sourceEvent": "Starts when",
       "recordType": "Record type",
       "actionTypes": "Actions",
       "retryBehavior": "Retries",
+      "enrollmentPolicy": "Conditions for starting again",
+      "stopPolicy": "Conditions for stopping",
+      "dateField": "Date to use",
+      "catchupPolicy": "Handling missed start dates",
       "actorUserId": "Runs as",
       "targetUserId": "Task assignee",
       "taskTitle": "Task title",
       "activityNote": "Activity note",
       "dueInDays": "Due in days",
-      "coolingDays": "Days without contact"
+      "coolingDays": "Days without contact",
+      "targetStageId": "Stage after follow-up",
+      "completionTimeoutDays": "Wait for completion, in days",
+      "offsetDays": "Days from expected close date",
+      "localTime": "Start time",
+      "timezone": "Time zone"
     },
     "parameter": {
       "actorUserId": "Runs as",
@@ -372,7 +446,13 @@
       "activityNote": "Activity note",
       "dueInDays": "Due in days",
       "coolingDays": "Days without contact",
-      "userPlaceholder": "Choose a workspace member"
+      "userPlaceholder": "Choose a workspace member",
+      "stagePlaceholder": "Choose a pipeline stage",
+      "targetStageId": "Stage after follow-up",
+      "completionTimeoutDays": "Wait for completion, in days",
+      "offsetDays": "Days from expected close date",
+      "localTime": "Start time",
+      "timezone": "Time zone"
     },
     "permission": {
       "TASK_CREATE": "Create tasks",
@@ -381,6 +461,20 @@
       "DEAL_UPDATE": "Update deals",
       "COMPANY_UPDATE": "Update companies",
       "PERSON_UPDATE": "Update contacts"
+    },
+    "runReason": {
+      "entry_condition_not_matched": "The record did not match the entry conditions.",
+      "active_run_exists": "This record already has an active run.",
+      "cooldown_active": "The time before starting again has not elapsed.",
+      "condition_matched": "The record matched the stop conditions.",
+      "date_superseded": "The deal’s expected close date changed.",
+      "custom": "Stopped: {reason}",
+      "task_wait_timeout": "The task was not completed before its deadline."
+    },
+    "dateSchedule": {
+      "sourceDate": "Expected close date: {date}",
+      "scheduled": "Scheduled local date: {date}",
+      "dueAt": "Due: {date}"
     }
   }
 }

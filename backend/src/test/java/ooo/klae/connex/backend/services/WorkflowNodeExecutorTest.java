@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -136,7 +137,7 @@ class WorkflowNodeExecutorTest {
             null,
             null,
             Map.of("permission", "TASK_CREATE"));
-        when(actionGuard.blocker(7, 17, "deal", 41, "action", action))
+        when(actionGuard.blocker(7, 17, "deal", 41, "action", action, Set.of()))
             .thenReturn(blocker);
 
         WorkflowExecutionException failure = assertThrows(

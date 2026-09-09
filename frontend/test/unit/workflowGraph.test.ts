@@ -85,6 +85,29 @@ function diagnosticMessageKeys(locale: "en" | "ja"): string[] {
 }
 
 describe("canonical workflow graph editing", () => {
+    it("retains launch inputs and unsaved edits when a delayed canvas viewport event arrives", () => {
+        const initial = document();
+        const history = createWorkflowEditorHistory(initial);
+        const edited: WorkflowEditorDocument = {
+            ...initial,
+            description: "Updated after switching to the outline",
+            definition: {
+                ...initial.definition,
+                schemaVersion: 2,
+                inputs: [{ key: "context", label: "Follow-up context", type: "text", required: true }],
+            },
+        };
+        const committed = workflowEditorReducer(history, { type: "commit", document: edited });
+        const viewport = { x: 10, y: 20, zoom: 0.8 };
+        const moved = workflowEditorReducer(committed, { type: "moveViewport", viewport });
+        expect(moved.present.definition).toEqual(edited.definition);
+        expect(moved.present.description).toBe(edited.description);
+        expect(moved.present.canvas.viewport).toEqual(viewport);
+        expect(moved.past).toEqual(committed.past);
+        expect(moved.baseline).toEqual(history.baseline);
+        expect(workflowEditorReducer(moved, { type: "undo" }).present).toEqual(initial);
+    });
+
     it("offers and configures campaign sends only for authorized user-context person workflows", () => {
         const permissions = new Set([
             "CAMPAIGN_VIEW",
@@ -382,7 +405,7 @@ describe("workflow diagnostic localization", () => {
         if (!match) throw new Error("WorkflowDiagnosticCode enum was not found");
         const codes = match[1].split(",").map((value) => value.trim().toLowerCase()).sort();
 
-        expect(codes).toHaveLength(76);
+        expect(codes).toHaveLength(85);
         expect(diagnosticMessageKeys("en")).toEqual(codes);
         expect(diagnosticMessageKeys("ja")).toEqual(codes);
     });

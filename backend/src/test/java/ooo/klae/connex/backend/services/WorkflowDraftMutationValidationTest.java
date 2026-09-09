@@ -72,9 +72,10 @@ class WorkflowDraftMutationValidationTest {
             VALIDATOR_FACTORY.getValidator(),
             new WorkflowDocumentAutomationGate(true),
             new WorkflowTriggeredSendGate(true),
-            systemActor);
+            systemActor,
+            new WorkflowCapabilityCatalog());
         WorkflowDefinitionValidator definitionValidator =
-            new WorkflowDefinitionValidator(ruleValidator);
+            new WorkflowDefinitionValidator(ruleValidator, new WorkflowCapabilityCatalog());
         RuleDefinitionCodec definitionCodec = new RuleDefinitionCodec(
             JsonMapper.builder().build());
         service = new WorkflowService(
@@ -89,7 +90,9 @@ class WorkflowDraftMutationValidationTest {
             new LegacyWorkflowGraphConverter(definitionCodec),
             definitionCodec,
             new WorkflowVersionProjection(definitionCodec),
-            mock(WorkflowRuntimeProperties.class));
+            mock(WorkflowRuntimeProperties.class),
+            mock(WorkflowDateIntakeService.class),
+            mock(ooo.klae.connex.backend.mappers.WorkflowDateEnrollmentMapper.class));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaceService.getCurrentUserId()).thenReturn(41);
     }

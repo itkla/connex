@@ -22,6 +22,10 @@ public interface WorkflowTriggerOutboxMapper {
         @Param("cadence") String cadence,
         @Param("limit") int limit);
 
+    List<WorkflowOutboxTarget> findDateTargets(
+        @Param("workspaceId") int workspaceId,
+        @Param("limit") int limit);
+
     List<Integer> workspaceIdsPage(
         @Param("afterId") int afterId,
         @Param("limit") int limit);
@@ -41,6 +45,10 @@ public interface WorkflowTriggerOutboxMapper {
     Long findDueIdForUpdate(@Param("workspaceId") int workspaceId);
 
     int deadLetterExpiredExhausted(
+        @Param("workspaceId") int workspaceId,
+        @Param("maxAttempts") int maxAttempts);
+
+    int terminalizeExpiredExhaustedDate(
         @Param("workspaceId") int workspaceId,
         @Param("maxAttempts") int maxAttempts);
 

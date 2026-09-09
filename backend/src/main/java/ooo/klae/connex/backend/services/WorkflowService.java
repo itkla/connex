@@ -32,6 +32,7 @@ import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
 import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
 import ooo.klae.connex.backend.dto.WorkflowLegacyRuleResolutionDto;
 import ooo.klae.connex.backend.dto.WorkflowListItemDto;
+import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
 import ooo.klae.connex.backend.dto.WorkflowValidationDto;
 import ooo.klae.connex.backend.dto.WorkflowVersionDto;
@@ -40,6 +41,7 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
+import ooo.klae.connex.backend.mappers.WorkflowDateEnrollmentMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.LegacyWorkflowGraphConverter.ConvertedWorkflow;
@@ -67,6 +69,8 @@ public class WorkflowService {
     private final RuleDefinitionCodec definitionCodec;
     private final WorkflowVersionProjection versionProjection;
     private final WorkflowRuntimeProperties runtimeProperties;
+    private final WorkflowDateIntakeService dateIntakeService;
+    private final WorkflowDateEnrollmentMapper workflowDateEnrollmentMapper;
 
     /** Lists workflows in the active workspace using the existing deterministic mapper order. */
     @Transactional(readOnly = true)
@@ -96,7 +100,7 @@ public class WorkflowService {
     WorkflowDto createForRecipe(
             WorkflowCreateRequest request,
             int runAsUserId) {
-        return createWithPrincipal(request, runAsUserId, "canonical");
+        return createWithPrincipal(request, runAsUserId, "legacy");
     }
 
     private WorkflowDto createWithPrincipal(
@@ -323,6 +327,9 @@ public class WorkflowService {
                 discovered.getCreatedById(),
                 "System workflow creator account no longer exists");
         }
+        WorkflowDefinition discoveredDefinition = canonicalizer.parseDefinition(
+            canonicalPersistedDraft(discovered).definitionJson());
+        dateIntakeService.ensureWorkspaceGate(workspaceId, discoveredDefinition);
         Workflow workflow = requireWorkflowForUpdate(workspaceId, id);
         requireMutable(workflow);
         requireStableAuthorizationDiscovery(discovered, workflow);
@@ -345,6 +352,16 @@ public class WorkflowService {
             draft.executionMode(),
             definition);
         boolean canonicalPublication = canonicalPublicationOwner(workflow);
+        if (definition.schemaVersion() >= 2 && !canonicalPublication) {
+            throw new WorkflowDefinitionValidationException(
+                "Schema-v2 workflows require the canonical runtime",
+                new WorkflowDiagnosticDto(
+                    WorkflowDiagnosticCode.LEGACY_PROJECTION_UNSUPPORTED,
+                    null,
+                    null,
+                    "schemaVersion",
+                    Map.of()));
+        }
         Rule projection = canonicalPublication
             ? versionProjection.project(workflow, draft, compiled)
             : project(workflow, draft);
@@ -430,7 +447,9 @@ public class WorkflowService {
         }
         workflow.setRuntimeOwner(canonicalPublication ? "canonical" : "legacy");
         workflow.setActiveVersionId(version.getId());
+        workflow.setRuntimeGeneration(workflow.getRuntimeGeneration() + 1);
         workflow.setUpdatedById(actorId);
+        dateIntakeService.enqueueFull(workflow, version, definition);
         auditService.record(
             "workflow.publish",
             ENTITY_TYPE,
@@ -502,6 +521,8 @@ public class WorkflowService {
             requireMutable(discovery.workflow());
         }
         WorkflowVersion discoveredActive = discovery.activeVersion();
+        WorkflowDefinition activeDefinition = discoveredActive == null
+            ? null : canonicalizer.parseDefinition(discoveredActive.getDefinitionJson());
         String executionMode = discoveredActive == null
             ? discovery.workflow().getDraftExecutionMode()
             : discoveredActive.getExecutionMode();
@@ -521,6 +542,9 @@ public class WorkflowService {
             principals.requireExisting(
                 discoveredActive == null ? null : discoveredActive.getCreatedById(),
                 "System workflow creator account no longer exists");
+        }
+        if (enabled) {
+            dateIntakeService.ensureWorkspaceGate(workspaceId, activeDefinition);
         }
         Workflow workflow = requireWorkflowForUpdate(workspaceId, id);
         if (enabled) {
@@ -564,7 +588,11 @@ public class WorkflowService {
             throw new IllegalStateException("Workflow lifecycle was not synchronized");
         }
         workflow.setEnabled(enabled);
+        workflow.setRuntimeGeneration(workflow.getRuntimeGeneration() + 1);
         workflow.setUpdatedById(actorId);
+        if (enabled && discoveredActive != null) {
+            dateIntakeService.enqueueFull(workflow, discoveredActive, activeDefinition);
+        }
         auditService.record(
             enabled ? "workflow.enable" : "workflow.disable",
             ENTITY_TYPE,
@@ -580,8 +608,14 @@ public class WorkflowService {
         int actorId = workspaceService.getCurrentUserId();
         MutationDiscovery discovery = discoverMutation(workspaceId, id, false);
         requireMutable(discovery.workflow());
+        WorkflowVersion discoveredActive = discovery.activeVersion();
+        WorkflowDefinition activeDefinition = discoveredActive == null
+            ? null : canonicalizer.parseDefinition(discoveredActive.getDefinitionJson());
         LockedPrincipals principals = principalLockService.lockUserMutation(
             workspaceId, actorId, discovery.principalIds(), Set.of());
+        if (!paused) {
+            dateIntakeService.ensureWorkspaceGate(workspaceId, activeDefinition);
+        }
         Workflow workflow = requireWorkflowForUpdate(workspaceId, id);
         requireMutable(workflow);
         requireStableAuthorizationDiscovery(discovery.workflow(), workflow);
@@ -600,6 +634,10 @@ public class WorkflowService {
                 workflowLabel(id),
                 paused ? "Workflow intake paused" : "Workflow intake resumed",
                 Map.of("paused", paused));
+            workflow.setIntakePausedAt(paused ? LocalDateTime.now() : null);
+            if (!paused && workflow.isEnabled() && discoveredActive != null) {
+                dateIntakeService.enqueueFull(workflow, discoveredActive, activeDefinition);
+            }
         }
         return toDto(requireWorkflow(workspaceId, id));
     }
@@ -792,6 +830,15 @@ public class WorkflowService {
             Workflow workflow, CanonicalDraft draft) {
         if (canonicalPublicationOwner(workflow)) {
             return null;
+        }
+        WorkflowDefinition definition = canonicalizer.parseDefinition(draft.definitionJson());
+        if (definition.schemaVersion() >= 2) {
+            return new WorkflowDiagnosticDto(
+                WorkflowDiagnosticCode.LEGACY_PROJECTION_UNSUPPORTED,
+                null,
+                null,
+                "schemaVersion",
+                Map.of());
         }
         try {
             project(workflow, draft);
@@ -1141,6 +1188,7 @@ public class WorkflowService {
     }
 
     WorkflowDto toDto(Workflow workflow, CanonicalDraft draft) {
+        WorkflowDefinition definition = canonicalizer.parseDefinition(draft.definitionJson());
         return new WorkflowDto(
             workflow.getId(),
             draft.name(),
@@ -1154,13 +1202,16 @@ public class WorkflowService {
             draft.recordType(),
             draft.executionMode(),
             workflow.getDraftRunAsUserId(),
-            canonicalizer.parseDefinition(draft.definitionJson()),
+            definition,
             canonicalizer.parseCanvas(draft.canvasJson()),
             workflow.getActiveVersionId(),
             workflow.getCreatedById(),
             workflow.getUpdatedById(),
             workflow.getCreatedAt(),
-            workflow.getUpdatedAt());
+            workflow.getUpdatedAt(),
+            trigger(definition),
+            workflowDateEnrollmentMapper.getScheduleStatus(
+                workflow.getWorkspaceId(), workflow.getId()));
     }
 
     private WorkflowListItemDto toListItem(WorkflowListView workflow) {
@@ -1195,7 +1246,23 @@ public class WorkflowService {
             workflow.getCreatedById(),
             workflow.getUpdatedById(),
             workflow.getCreatedAt(),
-            workflow.getUpdatedAt());
+            workflow.getUpdatedAt(),
+            workflow.getTriggerConfig() == null
+                ? null
+                : definitionCodec.parse(workflow.getTriggerConfig(), RuleTrigger.class));
+    }
+
+    private static RuleTrigger trigger(WorkflowDefinition definition) {
+        if (definition == null || definition.nodes() == null) {
+            return null;
+        }
+        return definition.nodes().stream()
+            .filter(node -> node.id().equals(definition.entryNodeId()))
+            .filter(WorkflowNode.Trigger.class::isInstance)
+            .map(WorkflowNode.Trigger.class::cast)
+            .map(WorkflowNode.Trigger::config)
+            .findFirst()
+            .orElse(null);
     }
 
     private static WorkflowListItemDto.LatestRun latestRun(WorkflowListView workflow) {

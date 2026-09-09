@@ -176,8 +176,10 @@ public class WorkflowDraftCanonicalizer {
     }
 
     static void validateDefinitionStructure(WorkflowDefinition definition) {
-        if (definition == null || definition.schemaVersion() != 1) {
-            throw new BadRequestException("Workflow definition must use schemaVersion 1");
+        if (definition == null
+                || definition.schemaVersion() < 1
+                || definition.schemaVersion() > 2) {
+            throw new BadRequestException("Workflow definition schemaVersion is unsupported");
         }
         if (definition.nodes() == null) {
             throw new BadRequestException("Workflow nodes are required");
@@ -391,7 +393,7 @@ public class WorkflowDraftCanonicalizer {
 
     private static <T> T parse(String json, Class<T> type, String message) {
         try {
-            return JSON.readValue(json, type);
+            return JSON.readValue(normalizeOptionalWorkflowFields(json, type), type);
         } catch (JacksonException exception) {
             throw new BadRequestException(message);
         }
@@ -399,9 +401,113 @@ public class WorkflowDraftCanonicalizer {
 
     private static <T> T parse(byte[] json, Class<T> type, String message) {
         try {
-            return JSON.readValue(json, type);
+            return JSON.readValue(normalizeOptionalWorkflowFields(json, type), type);
         } catch (JacksonException exception) {
             throw new BadRequestException(message);
+        }
+    }
+
+    private static byte[] normalizeOptionalWorkflowFields(String json, Class<?> type)
+            throws JacksonException {
+        return type == WorkflowDefinition.class
+            ? normalizeOptionalWorkflowFields(JSON.readTree(json))
+            : json.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static byte[] normalizeOptionalWorkflowFields(byte[] json, Class<?> type)
+            throws JacksonException {
+        return type == WorkflowDefinition.class
+            ? normalizeOptionalWorkflowFields(JSON.readTree(json))
+            : json;
+    }
+
+    private static byte[] normalizeOptionalWorkflowFields(JsonNode definition)
+            throws JacksonException {
+        if (definition instanceof ObjectNode root) {
+            putNullIfMissing(root, "inputs");
+            putNullIfMissing(root, "enrollment");
+            putNullIfMissing(root, "stopConditions");
+            normalizeEnrollment(root.get("enrollment"));
+            JsonNode inputs = root.get("inputs");
+            if (inputs instanceof ArrayNode inputArray) {
+                for (JsonNode input : inputArray) {
+                    if (input instanceof ObjectNode inputObject) {
+                        putNullIfMissing(inputObject, "defaultValue");
+                    }
+                }
+            }
+            JsonNode nodes = root.get("nodes");
+            if (nodes instanceof ArrayNode nodeArray) {
+                nodeArray.forEach(WorkflowDraftCanonicalizer::normalizeNode);
+            }
+        }
+        return JSON.writeValueAsBytes(definition);
+    }
+
+    private static void normalizeEnrollment(JsonNode enrollment) {
+        if (enrollment instanceof ObjectNode object) {
+            putNullIfMissing(object, "condition");
+        }
+    }
+
+    private static void normalizeNode(JsonNode node) {
+        if (!(node instanceof ObjectNode object)) {
+            return;
+        }
+        JsonNode type = object.get("type");
+        if (type != null && type.isTextual() && "END".equals(type.textValue())) {
+            putNullIfMissing(object, "config");
+            JsonNode config = object.get("config");
+            if (config instanceof ObjectNode endConfig) {
+                putNullIfMissing(endConfig, "reason");
+            }
+        }
+        if (type != null && type.isTextual() && "ACTION".equals(type.textValue())) {
+            normalizeAction(object.get("config"));
+        }
+    }
+
+    private static void normalizeAction(JsonNode action) {
+        if (!(action instanceof ObjectNode object)) {
+            return;
+        }
+        normalizeValueRef(object.get("targetUserRef"));
+        normalizeValueRef(object.get("dueDateRef"));
+        normalizeValueRef(object.get("valueRef"));
+        normalizeTemplate(object.get("titleTemplate"));
+        normalizeTemplate(object.get("bodyTemplate"));
+    }
+
+    private static void normalizeTemplate(JsonNode template) {
+        if (!(template instanceof ObjectNode object)) {
+            return;
+        }
+        JsonNode parts = object.get("parts");
+        if (!(parts instanceof ArrayNode array)) {
+            return;
+        }
+        for (JsonNode part : array) {
+            if (part instanceof ObjectNode partObject) {
+                putNullIfMissing(partObject, "text");
+                putNullIfMissing(partObject, "ref");
+                normalizeValueRef(partObject.get("ref"));
+            }
+        }
+    }
+
+    private static void normalizeValueRef(JsonNode reference) {
+        if (!(reference instanceof ObjectNode object)) {
+            return;
+        }
+        putNullIfMissing(object, "key");
+        putNullIfMissing(object, "field");
+        putNullIfMissing(object, "nodeId");
+        putNullIfMissing(object, "output");
+    }
+
+    private static void putNullIfMissing(ObjectNode object, String property) {
+        if (!object.has(property)) {
+            object.putNull(property);
         }
     }
 

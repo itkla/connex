@@ -1075,6 +1075,7 @@ public class DealService {
             auditChanges);
         notificationChanges.publish(workspaceId, "deal", deal.getId());
         ruleTriggers.publish(workspaceId, "deal", deal.getId(), "deal.created");
+        ruleTriggers.reconcileDealDate(workspaceId, deal.getId());
         syncClosedReasonMentions(workspaceId, deal);
         return hydrateReferences(workspaceId, deal);
     }
@@ -1147,6 +1148,9 @@ public class DealService {
         ruleTriggers.publish(workspaceId, "deal", id, stageChanged ? "deal.stage_changed" : "deal.updated");
         if (valueChanged) {
             ruleTriggers.publish(workspaceId, "deal", id, "deal.value_changed");
+        }
+        if (!Objects.equals(before.getExpectedCloseDate(), deal.getExpectedCloseDate())) {
+            ruleTriggers.reconcileDealDate(workspaceId, id);
         }
         syncClosedReasonMentions(workspaceId, deal);
         return hydrateReferences(workspaceId, deal);
@@ -1244,7 +1248,7 @@ public class DealService {
             throw new BadRequestException("Invalid deal expected close date: " + expectedCloseDate);
         }
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal before = dealMapper.getDealById(workspaceId, id);
+        Deal before = dealMapper.getDealByIdForUpdate(workspaceId, id);
         if (before == null) throw new ResourceNotFoundException("Deal not found");
         dealMapper.updateExpectedCloseDate(workspaceId, id, expectedCloseDate);
         Deal after = dealMapper.getDealById(workspaceId, id);
@@ -1253,6 +1257,9 @@ public class DealService {
             auditService.singleChange("expectedCloseDate", before.getExpectedCloseDate(), expectedCloseDate));
         notificationChanges.publish(workspaceId, "deal", id);
         ruleTriggers.publish(workspaceId, "deal", id, "deal.updated");
+        if (!Objects.equals(before.getExpectedCloseDate(), expectedCloseDate)) {
+            ruleTriggers.reconcileDealDate(workspaceId, id);
+        }
         return hydrateReferences(workspaceId, after);
     }
 
@@ -1402,6 +1409,7 @@ public class DealService {
             "Deleted deal " + before.getName(),
             auditService.diff(before, null, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "deal", id);
+        ruleTriggers.reconcileDealDate(workspaceId, id);
     }
 
     /**
@@ -1829,10 +1837,32 @@ public class DealService {
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal updateOwner(int dealId, Integer ownerId) {
+        return updateOwner(dealId, ownerId, null);
+    }
+
+    /** Updates ownership using a target membership locked before a workflow run root. */
+    @Transactional
+    @RequirePermission(Permission.DEAL_UPDATE)
+    public Deal updateOwnerWithLockedMember(
+            int dealId,
+            Integer ownerId,
+            WorkspaceService.LockedPermissionSnapshot authorization) {
+        if (ownerId != null) {
+            Objects.requireNonNull(authorization, "authorization").requireMember(ownerId);
+        }
+        return updateOwner(dealId, ownerId, authorization);
+    }
+
+    private Deal updateOwner(
+            int dealId,
+            Integer ownerId,
+            WorkspaceService.LockedPermissionSnapshot authorization) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
-        if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        if (ownerId != null && authorization == null) {
+            workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        }
         dealMapper.updateOwner(workspaceId, dealId, ownerId);
         if (ownerId != null) {
             dealMapper.removeCollaborator(workspaceId, dealId, ownerId);

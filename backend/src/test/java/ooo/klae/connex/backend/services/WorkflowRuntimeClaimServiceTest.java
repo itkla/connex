@@ -19,7 +19,10 @@ import static org.mockito.Mockito.when;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.TimeZone;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,11 +36,15 @@ import org.springframework.dao.DuplicateKeyException;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.WorkflowDateEnrollment;
 import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.RuleTrigger;
+import ooo.klae.connex.backend.dto.SegmentCondition;
+import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
+import ooo.klae.connex.backend.dto.WorkflowEnrollment;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
@@ -59,6 +66,7 @@ class WorkflowRuntimeClaimServiceTest {
     @Mock private DealMapper dealMapper;
     @Mock private WorkflowDraftCanonicalizer canonicalizer;
     @Mock private WorkflowDefinitionValidator definitionValidator;
+    @Mock private WorkflowEnrollmentPolicyService enrollmentPolicyService;
     @Mock private SystemActor systemActor;
     @Mock private CompiledWorkflow compiled;
 
@@ -78,6 +86,7 @@ class WorkflowRuntimeClaimServiceTest {
             dealMapper,
             canonicalizer,
             definitionValidator,
+            enrollmentPolicyService,
             new WorkflowDedupeKey(Clock.fixed(
                 Instant.parse("2026-08-03T12:00:00Z"), ZoneOffset.UTC)),
             systemActor);
@@ -211,7 +220,7 @@ class WorkflowRuntimeClaimServiceTest {
     }
 
     @Test
-    void claimPinsTheLockedActiveVersionAndEntryNode() {
+    void claimPinsTheLockedActiveVersionEntryNodeAndUtcStartInHonolulu() {
         stubCanonicalCompilation();
         when(workflowRunMapper.getByDedupe(eq(7), eq(11), anyString()))
             .thenReturn(null);
@@ -220,7 +229,14 @@ class WorkflowRuntimeClaimServiceTest {
             return null;
         }).when(workflowRunMapper).insertRun(any());
 
-        WorkflowRuntimeClaimService.CanonicalClaim claim = service.claimEntity(11, dispatch);
+        TimeZone originalTimezone = TimeZone.getDefault();
+        WorkflowRuntimeClaimService.CanonicalClaim claim;
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Honolulu"));
+            claim = service.claimEntity(11, dispatch);
+        } finally {
+            TimeZone.setDefault(originalTimezone);
+        }
 
         ArgumentCaptor<WorkflowRun> run = ArgumentCaptor.forClass(WorkflowRun.class);
         verify(workflowRunMapper).insertRun(run.capture());
@@ -230,10 +246,82 @@ class WorkflowRuntimeClaimServiceTest {
         assertEquals("queued", run.getValue().getStatus());
         assertEquals(7, run.getValue().getWorkspaceId());
         assertEquals(entityDedupeKey(13), run.getValue().getDedupeKey());
+        assertTrue(run.getValue().getStartedAt().isAfter(
+            LocalDateTime.now(ZoneOffset.UTC).minusMinutes(1)));
         verify(workflowTriggerOutboxMapper).ensureWorkspaceGate(7);
         InOrder lockOrder = inOrder(workflowTriggerOutboxMapper, workflowMapper);
         lockOrder.verify(workflowTriggerOutboxMapper).ensureWorkspaceGate(7);
         lockOrder.verify(workflowMapper).getByIdForUpdate(7, 11);
+    }
+
+    @Test
+    void automaticEnrollmentRetainsTheSerializedActiveRunBlocker() {
+        stubCanonicalCompilation();
+        when(compiled.schemaVersion()).thenReturn(2);
+        when(enrollmentPolicyService.evaluateLocked(any(), eq(compiled), eq(17)))
+            .thenReturn(new WorkflowEnrollmentPolicyService.Decision(
+                "active_run_exists", null));
+
+        WorkflowRuntimeClaimService.CanonicalClaim claim = service.claimEntity(11, dispatch);
+
+        ArgumentCaptor<WorkflowRun> persisted = ArgumentCaptor.forClass(WorkflowRun.class);
+        verify(workflowRunMapper).insertRun(persisted.capture());
+        assertTrue(claim.rejected());
+        assertEquals("skipped", persisted.getValue().getStatus());
+        assertEquals("active_run_exists", persisted.getValue().getStatusReason());
+        InOrder order = inOrder(
+            workflowTriggerOutboxMapper,
+            workflowMapper,
+            enrollmentPolicyService,
+            workflowRunMapper);
+        order.verify(workflowTriggerOutboxMapper).ensureWorkspaceGate(7);
+        order.verify(workflowMapper).getByIdForUpdate(7, 11);
+        order.verify(enrollmentPolicyService).evaluateLocked(any(), eq(compiled), eq(17));
+        order.verify(workflowRunMapper).insertRun(any());
+    }
+
+    @Test
+    void dateClaimUsesAWorkflowScopedVersionIndependentSourcePeriodKey() {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("date");
+        trigger.setDateField("expectedCloseDate");
+        trigger.setOffsetDays(-30);
+        trigger.setLocalTime("09:00");
+        trigger.setTimezone("Pacific/Honolulu");
+        trigger.setAllowManualRuns(false);
+        workflow.setRuntimeGeneration(5L);
+        version.setRecordType("deal");
+        stubCanonicalCompilation(trigger);
+        WorkflowTriggerOutbox outbox = new WorkflowTriggerOutbox();
+        outbox.setId(31L);
+        outbox.setWorkspaceId(7);
+        outbox.setWorkflowId(11);
+        outbox.setWorkflowVersionId(19L);
+        outbox.setWorkflowRuntimeGeneration(5L);
+        WorkflowDateEnrollment enrollment = new WorkflowDateEnrollment();
+        enrollment.setWorkflowId(11);
+        enrollment.setWorkflowVersionId(19L);
+        enrollment.setWorkflowRuntimeGeneration(5L);
+        enrollment.setRecordId(43);
+        enrollment.setDateField("expectedCloseDate");
+        enrollment.setSourceDate(LocalDate.of(2027, 3, 31));
+        enrollment.setScheduledLocalDate(LocalDate.of(2027, 3, 1));
+        enrollment.setDueAt(LocalDateTime.of(2027, 3, 1, 19, 0));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            invocation.<WorkflowRun>getArgument(0).setId(91L);
+            return null;
+        }).when(workflowRunMapper).insertRun(any());
+
+        WorkflowRuntimeClaimService.CanonicalClaim claim = service.claimDate(
+            outbox, enrollment);
+
+        ArgumentCaptor<WorkflowRun> persisted = ArgumentCaptor.forClass(WorkflowRun.class);
+        verify(workflowRunMapper).insertRun(persisted.capture());
+        assertTrue(claim.started());
+        assertEquals(
+            "date:11:deal:43:expectedCloseDate:2027-03-31",
+            persisted.getValue().getDedupeKey());
+        assertEquals(LocalDate.of(2027, 3, 31), persisted.getValue().getDateSourceDate());
     }
 
     @Test
@@ -278,7 +366,8 @@ class WorkflowRuntimeClaimServiceTest {
         WorkflowDefinition definition = new WorkflowDefinition(
             1, "trigger", List.of(), List.of());
         when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
-        when(definitionValidator.validate("company", "user", definition))
+        when(definitionValidator.compileForRuntime(
+            version.getRecordType(), "user", definition))
             .thenReturn(compiled);
         RuleTrigger scheduleTrigger = new RuleTrigger();
         scheduleTrigger.setType("schedule");
@@ -300,6 +389,75 @@ class WorkflowRuntimeClaimServiceTest {
         assertTrue(exception.interventionRequired());
     }
 
+    @Test
+    void v2CoolingScheduleUsesTopLevelEnrollmentBeforeItsDirectAction() {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("schedule");
+        trigger.setCadence("daily");
+        stubCanonicalCompilation(trigger);
+        SegmentCondition cooling = new SegmentCondition();
+        cooling.setType("predicate");
+        cooling.setKey("cooling");
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        condition.setConditions(List.of(cooling));
+        when(compiled.schemaVersion()).thenReturn(2);
+        when(compiled.enrollment()).thenReturn(
+            new WorkflowEnrollment(condition, true, 43_200));
+        workflow.setRuntimeGeneration(5L);
+        WorkflowTriggerOutbox outbox = new WorkflowTriggerOutbox();
+        outbox.setWorkspaceId(7);
+        outbox.setWorkflowId(11);
+        outbox.setWorkflowVersionId(19L);
+        outbox.setWorkflowRuntimeGeneration(5L);
+        outbox.setTriggerType("schedule");
+        outbox.setTriggerEvent("daily");
+        outbox.setTriggerKey("20260803");
+        outbox.setRecordType("company");
+
+        WorkflowRuntimeClaimService.ScheduleEnrollment enrollment =
+            service.outboxScheduleEnrollment(outbox);
+
+        assertSame(condition, enrollment.condition());
+        assertEquals(17, enrollment.conditionActorId());
+        verify(compiled, never()).node(null);
+    }
+
+    @Test
+    void v1ScheduleRetainsItsImmediateConditionEnrollment() {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("schedule");
+        trigger.setCadence("daily");
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
+        CanonicalDraft canonical = new CanonicalDraft(
+            "Workflow", null, "company", "user", "{}", "{}", new byte[32]);
+        when(canonicalizer.canonicalizeDraftJson(
+            "Workflow", null, "company", "user", "{}", "{}"))
+            .thenReturn(canonical);
+        WorkflowDefinition definition = new WorkflowDefinition(
+            1, "trigger", List.of(), List.of());
+        when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
+        when(definitionValidator.compileForRuntime("company", "user", definition))
+            .thenReturn(compiled);
+        when(compiled.schemaVersion()).thenReturn(1);
+        when(compiled.entryNodeId()).thenReturn("trigger");
+        when(compiled.node("trigger")).thenReturn(
+            new WorkflowNode.Trigger("trigger", trigger));
+        SegmentDefinition condition = new SegmentDefinition();
+        condition.setMatch("all");
+        when(compiled.enrollmentConditionNodeId()).thenReturn("enrollment");
+        when(compiled.node("enrollment")).thenReturn(
+            new WorkflowNode.Condition("enrollment", condition));
+        WorkflowTriggerDispatch.ScheduleTick tick =
+            new WorkflowTriggerDispatch.ScheduleTick(7, "daily", "20260803");
+
+        WorkflowRuntimeClaimService.ScheduleEnrollment enrollment =
+            service.scheduleEnrollment(11, tick);
+
+        assertSame(condition, enrollment.condition());
+    }
+
     private void stubCanonicalCompilation() {
         stubCanonicalCompilation(entityTrigger());
     }
@@ -307,16 +465,17 @@ class WorkflowRuntimeClaimServiceTest {
     private void stubCanonicalCompilation(RuleTrigger trigger) {
         when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
         when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
+        String recordType = version.getRecordType();
         byte[] hash = new byte[32];
         CanonicalDraft canonical = new CanonicalDraft(
-            "Workflow", null, "company", "user", "{}", "{}", hash);
+            "Workflow", null, recordType, "user", "{}", "{}", hash);
         when(canonicalizer.canonicalizeDraftJson(
-            "Workflow", null, "company", "user", "{}", "{}"))
+            "Workflow", null, recordType, "user", "{}", "{}"))
             .thenReturn(canonical);
         WorkflowDefinition definition = new WorkflowDefinition(
             1, "trigger", List.of(), List.of());
         when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
-        when(definitionValidator.validate("company", "user", definition))
+        when(definitionValidator.compileForRuntime(recordType, "user", definition))
             .thenReturn(compiled);
         when(compiled.entryNodeId()).thenReturn("trigger");
         when(compiled.node("trigger")).thenReturn(

@@ -27,6 +27,7 @@ public class WorkflowListView {
     private LocalDateTime activeVersionPublishedAt;
     private int nodeCount;
     private int actionCount;
+    private String triggerConfig;
     private Long canonicalRunId;
     private String canonicalRunStatus;
     private LocalDateTime canonicalRunStartedAt;

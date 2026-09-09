@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 
+import { workflowDiagnosticTargetsEntry } from "@/app/components/settings/workflows/workflowDiagnosticFields";
 import type { RecordSelectOption } from "@/app/components/records/RecordSelect";
 import { supportsSimulation } from "@/app/components/settings/workflows/vocabulary";
 import {
@@ -40,6 +41,9 @@ import {
 import { toastError, toastSuccess } from "@/app/lib/toast";
 import type {
     WorkflowDiagnostic,
+    WorkflowCatalog,
+    WorkflowInputDefinition,
+    WorkflowInputValue,
     WorkflowDto,
     WorkflowEdgeOutcome,
     WorkflowNode,
@@ -49,6 +53,8 @@ import type {
     WorkflowValidation,
     WorkflowVersion,
 } from "@/app/lib/types";
+import type { WorkflowPolicies } from "@/app/components/settings/workflows/WorkflowPolicyEditor";
+import type { WorkflowSetupValue } from "@/app/components/settings/workflows/WorkflowSetup";
 
 type Inspection =
     | { kind: "version"; version: WorkflowVersion }
@@ -90,11 +96,15 @@ export function useWorkflowEditor({
     activeWorkspaceId,
     switching,
     canRunAsSystem,
+    catalog,
+    returnTo,
 }: {
     workflowId?: number;
     activeWorkspaceId: number | null;
     switching: boolean;
     canRunAsSystem: boolean;
+    catalog?: WorkflowCatalog | null;
+    returnTo?: string | null;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const router = useRouter();
@@ -329,9 +339,9 @@ export function useWorkflowEditor({
 
     useEffect(() => cancelCreationContinuation, [cancelCreationContinuation]);
 
-    const updateDocument = useCallback((document: WorkflowEditorDocument, mode: "transient" | "commit" | "untracked") => {
+    const updateDocument = useCallback((document: WorkflowEditorDocument, mode: "transient" | "commit") => {
         if (creationLockRef.current) return false;
-        dispatch({ type: mode === "transient" ? "replace" : mode === "untracked" ? "untracked" : "commit", document });
+        dispatch({ type: mode === "transient" ? "replace" : "commit", document });
         invalidateDocumentEvidence();
         return true;
     }, [dispatch, invalidateDocumentEvidence]);
@@ -344,7 +354,7 @@ export function useWorkflowEditor({
                 nodes: history.present.definition.nodes.map((candidate) => candidate.id === node.id ? node : candidate),
             },
         };
-        if (node.type === "TRIGGER" && node.config.type === "schedule") {
+        if (node.type === "TRIGGER" && node.config.type === "schedule" && document.definition.schemaVersion === 1) {
             const enrollment = ensureScheduleEnrollment(
                 document.definition,
                 document.canvas,
@@ -362,11 +372,44 @@ export function useWorkflowEditor({
     ) => {
         let document = { ...history.present, [field]: value };
         if (field === "recordType" && typeof value === "string" && value !== history.present.recordType) {
-            const normalized = normalizeWorkflowForRecordType(document.definition, document.canvas, value);
+            const normalized = normalizeWorkflowForRecordType(document.definition, document.canvas, value, document.definition.schemaVersion === 2 ? catalog : null);
             document = { ...document, definition: normalized.definition, canvas: normalized.canvas };
         }
         updateDocument(document, mode);
+    }, [catalog, history.present, updateDocument]);
+
+    const configureNewWorkflow = useCallback((value: WorkflowSetupValue) => {
+        const legacyRecordType = value.recordType === "task" || value.recordType === "document";
+        const graph = legacyRecordType
+            ? createEmptyWorkflowGraph(value.recordType)
+            : createEmptyWorkflowGraph(value.recordType, 2, value.start);
+        updateDocument({ name: value.name, description: value.purpose || null, recordType: value.recordType, executionMode: "user", definition: graph.definition, canvas: graph.canvas }, "commit");
+        setSelectedNodeId(graph.definition.entryNodeId);
+    }, [updateDocument]);
+
+    const changeInputs = useCallback((inputs: WorkflowInputDefinition[], mode: "transient" | "commit") => {
+        updateDocument({ ...history.present, definition: { ...history.present.definition, inputs } }, mode);
     }, [history.present, updateDocument]);
+
+    const changePolicies = useCallback((policies: WorkflowPolicies, mode: "transient" | "commit") => {
+        updateDocument({ ...history.present, definition: { ...history.present.definition, ...policies } }, mode);
+    }, [history.present, updateDocument]);
+
+    const upgradeDefinition = useCallback(() => {
+        const actor = workflow?.runAsUserId ?? workflow?.createdById;
+        const definition = history.present.definition;
+        updateDocument({ ...history.present, definition: {
+            ...definition,
+            schemaVersion: 2,
+            nodes: definition.nodes.map((node) => {
+                if (node.type === "TRIGGER") return { ...node, config: { ...node.config, allowManualRuns: true } };
+                if (node.type === "ACTION" && (node.config.type === "create_task" || node.config.type === "notify")) {
+                    return { ...node, config: { ...node.config, targetUserId: actor ?? node.config.targetUserId, ...(node.config.type === "create_task" ? { dueInDays: node.config.dueInDays ?? 3 } : {}) } };
+                }
+                return node;
+            }),
+        } }, "commit");
+    }, [history.present, updateDocument, workflow]);
 
     const changeName = useCallback((name: string) => {
         updateDocument({ ...history.present, name }, "transient");
@@ -424,8 +467,10 @@ export function useWorkflowEditor({
     }, [history.present, updateDocument]);
 
     const moveViewport = useCallback((viewport: { x: number; y: number; zoom: number }) => {
-        updateDocument({ ...history.present, canvas: { ...history.present.canvas, viewport } }, "untracked");
-    }, [history.present, updateDocument]);
+        if (creationLockRef.current) return;
+        dispatch({ type: "moveViewport", viewport });
+        invalidateDocumentEvidence();
+    }, [dispatch, invalidateDocumentEvidence]);
 
     const reconcileServerWorkflow = useCallback((serverWorkflow: WorkflowDto) => {
         const serverDocument = documentFromWorkflow(serverWorkflow);
@@ -504,7 +549,7 @@ export function useWorkflowEditor({
                 conflictRecoveryGenerationRef.current += 1;
                 setWorkflow(created);
                 dispatch({ type: "markSaved", submittedDocument, document: savedDocument });
-                router.replace(`/workflows/${created.id}`);
+                router.replace(`/workflows/${created.id}${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`);
                 toastSuccess(t("created"));
             } else {
                 const saved = await saveWorkflowDraft(workflow.id, {
@@ -535,7 +580,7 @@ export function useWorkflowEditor({
                 : isCurrentWorkspace(workspaceId) && creationContinuationCurrent;
             if (currentScope && actionGeneration === busyActionGenerationRef.current) setBusyAction(null);
         }
-    }, [activeWorkspaceId, beginConflictRecovery, conflict, dispatch, history.present, isCurrentWorkflow, isCurrentWorkspace, router, scopeReady, t, workflow]);
+    }, [activeWorkspaceId, beginConflictRecovery, conflict, dispatch, history.present, isCurrentWorkflow, isCurrentWorkspace, returnTo, router, scopeReady, t, workflow]);
 
     const validate = useCallback(async () => {
         const workspaceId = activeWorkspaceId;
@@ -633,7 +678,7 @@ export function useWorkflowEditor({
         }
     }, [activeWorkspaceId, isCurrentWorkflow, reconcileServerWorkflow, scopeReady, t, workflow]);
 
-    const runSimulation = useCallback(async (recordId: number) => {
+    const runSimulation = useCallback(async (recordId: number, inputs?: Record<string, WorkflowInputValue>) => {
         const workspaceId = activeWorkspaceId;
         if (!workflow || dirty || workspaceId == null || !scopeReady) return;
         const id = workflow.id;
@@ -645,7 +690,7 @@ export function useWorkflowEditor({
         try {
             const result = await simulateWorkflow(id, workflow.draftRevision, recordId, {
                 headers: { "X-Workspace-Id": String(workspaceId) },
-            });
+            }, inputs);
             if (documentGeneration === documentGenerationRef.current
                 && simulationGeneration === simulationGenerationRef.current
                 && isCurrentWorkflow(id, workspaceId, scopeGeneration)) setSimulation(result);
@@ -708,12 +753,13 @@ export function useWorkflowEditor({
     }, [activeWorkspaceId, history.present.recordType, isCurrentWorkflow, scopeReady, workflow]);
 
     const selectDiagnostic = useCallback((diagnostic: WorkflowDiagnostic) => {
-        if (!diagnostic.nodeId) return;
+        const nodeId = diagnostic.nodeId ?? (workflowDiagnosticTargetsEntry(diagnostic) ? history.present.definition.entryNodeId : null);
+        if (!nodeId) return;
         setInspection(null);
-        setSelectedNodeId(diagnostic.nodeId);
+        setSelectedNodeId(nodeId);
         setFocusFieldPath(diagnostic.fieldPath);
         setFocusRequestId((current) => current + 1);
-    }, []);
+    }, [history.present.definition.entryNodeId]);
 
     const resolveConflict = useCallback((document: WorkflowEditorDocument) => {
         if (!conflict) return;
@@ -784,6 +830,10 @@ export function useWorkflowEditor({
         setFocusFieldPath,
         changeNode,
         changeMetadata,
+        configureNewWorkflow,
+        changeInputs,
+        changePolicies,
+        upgradeDefinition,
         changeName,
         commitTransient,
         undo,

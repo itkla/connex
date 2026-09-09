@@ -57,6 +57,7 @@ import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.Tag;
+import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.Team;
 import ooo.klae.connex.backend.beans.TeamMember;
 import ooo.klae.connex.backend.beans.User;
@@ -223,6 +224,7 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         assertTrue(entries.containsKey("data/activity.jsonl"));
         assertTrue(entries.containsKey("data/note.jsonl"));
         assertTrue(entries.containsKey("data/task.jsonl"));
+        assertTrue(text(entries, "data/task.jsonl").contains("\"company_id\":"));
         assertTrue(entries.containsKey("data/custom_field_definition.jsonl"));
         assertTrue(entries.containsKey("data/custom_field_value.jsonl"));
         assertTrue(entries.containsKey("data/record_creation_template_set.jsonl"));
@@ -661,7 +663,9 @@ class TenantLifecycleDrillIntegrationTest extends AbstractServiceTest {
         Deal deal = newDeal(pipeline, stage, company);
         newActivity(currentUser, visible, deal);
         newNote(currentUser, visible, deal);
-        newTask(currentUser, visible, deal);
+        Task task = newTask(currentUser, visible, deal);
+        jdbcTemplate.update("UPDATE task SET company_id = ? WHERE workspace_id = ? AND id = ?",
+            company.getId(), drillWorkspace.getId(), task.getId());
         Tag tag = newTag();
         personMapper.addTag(
             drillWorkspace.getId(),

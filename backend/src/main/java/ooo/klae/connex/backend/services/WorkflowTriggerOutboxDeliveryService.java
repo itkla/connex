@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -11,14 +12,19 @@ import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
+import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.WorkflowDateEnrollment;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.WorkflowNode;
+import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.SegmentMapper;
+import ooo.klae.connex.backend.mappers.WorkflowDateEnrollmentMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
+import ooo.klae.connex.backend.services.WorkflowRuntimeClaimService.DateReconciliation;
 import ooo.klae.connex.backend.services.WorkflowRuntimeClaimService.ScheduleEnrollment;
 
 /** Converts one owned durable trigger target into legacy effects or queued canonical runs. */
@@ -29,8 +35,11 @@ public class WorkflowTriggerOutboxDeliveryService {
     private final WorkflowTriggerOutboxMapper outboxMapper;
     private final WorkflowMapper workflowMapper;
     private final WorkflowVersionMapper versionMapper;
+    private final WorkflowDateEnrollmentMapper dateEnrollmentMapper;
+    private final DealMapper dealMapper;
     private final SegmentMapper segmentMapper;
     private final SegmentService segmentService;
+    private final WorkflowDateReconciliationService dateReconciliationService;
     private final WorkflowRuntimeClaimService claimService;
     private final WorkflowExecutionPrincipalService principalService;
     private final RuleEngineService ruleEngineService;
@@ -55,13 +64,14 @@ public class WorkflowTriggerOutboxDeliveryService {
         if (outbox == null) {
             return DeliveryResult.STALE;
         }
-        if (!sameTarget(discoveredOutbox, outbox) || !stateMatches(discovered, outbox)) {
+        if (!sameTarget(discoveredOutbox, outbox)) {
             requireUpdated(outboxMapper.invalidate(workspaceId, outboxId, leaseOwner));
             return DeliveryResult.INVALIDATED;
         }
         Workflow workflow = workflowMapper.getByIdForUpdate(
             workspaceId, outbox.getWorkflowId());
         if (!stateMatches(workflow, outbox)) {
+            terminalizeDateOutbox(outbox);
             requireUpdated(outboxMapper.invalidate(workspaceId, outboxId, leaseOwner));
             return DeliveryResult.INVALIDATED;
         }
@@ -74,10 +84,122 @@ public class WorkflowTriggerOutboxDeliveryService {
             deliverSchedule(outbox, leaseOwner, principal);
             return DeliveryResult.COMPLETED;
         }
+        if ("date_reconcile".equals(outbox.getTriggerType())) {
+            deliverDateReconciliation(outbox, leaseOwner);
+            return DeliveryResult.COMPLETED;
+        }
+        if ("date".equals(outbox.getTriggerType())) {
+            return deliverDate(outbox, leaseOwner);
+        }
         throw new WorkflowExecutionException(
             "trigger_type_invalid",
             "The durable workflow trigger type is invalid.",
             true);
+    }
+
+    private void deliverDateReconciliation(
+            WorkflowTriggerOutbox outbox,
+            String leaseOwner) {
+        DateReconciliation reconciliation = claimService.dateReconciliation(outbox);
+        if (reconciliation == null) {
+            requireUpdated(outboxMapper.invalidate(
+                outbox.getWorkspaceId(), outbox.getId(), leaseOwner));
+            return;
+        }
+        WorkflowDateReconciliationService.Page page = dateReconciliationService.reconcile(
+            outbox, reconciliation.version(), reconciliation.trigger());
+        requireUpdated(outboxMapper.saveSchedulePage(
+            outbox.getWorkspaceId(),
+            outbox.getId(),
+            leaseOwner,
+            page.afterId(),
+            0,
+            page.completed()));
+    }
+
+    private DeliveryResult deliverDate(
+            WorkflowTriggerOutbox outbox,
+            String leaseOwner) {
+        Integer recordId = outbox.getRecordId();
+        Long enrollmentId = outbox.getWorkflowDateEnrollmentId();
+        if (recordId == null || enrollmentId == null) {
+            requireUpdated(outboxMapper.invalidate(
+                outbox.getWorkspaceId(), outbox.getId(), leaseOwner));
+            return DeliveryResult.INVALIDATED;
+        }
+        Deal deal = dealMapper.getDealByIdForUpdate(outbox.getWorkspaceId(), recordId);
+        WorkflowDateEnrollment enrollment = dateEnrollmentMapper.getByIdForUpdate(
+            outbox.getWorkspaceId(), enrollmentId);
+        if (!dateTargetMatches(outbox, enrollment, deal)) {
+            terminalizeDateEnrollment(outbox, enrollment);
+            requireUpdated(outboxMapper.invalidate(
+                outbox.getWorkspaceId(), outbox.getId(), leaseOwner));
+            return DeliveryResult.INVALIDATED;
+        }
+        WorkflowRuntimeClaimService.CanonicalClaim claim = claimService.claimDate(
+            outbox, enrollment);
+        if (claim.run() == null) {
+            terminalizeDateEnrollment(outbox, enrollment);
+            requireUpdated(outboxMapper.invalidate(
+                outbox.getWorkspaceId(), outbox.getId(), leaseOwner));
+            return DeliveryResult.INVALIDATED;
+        }
+        java.time.LocalDateTime resolvedAt = dateEnrollmentMapper.currentTimestamp(
+            outbox.getWorkspaceId(), outbox.getWorkflowId());
+        if (resolvedAt == null
+                || dateEnrollmentMapper.markEnrolled(
+                    outbox.getWorkspaceId(), enrollment.getId(),
+                    claim.run().getId(), resolvedAt) != 1) {
+            throw new IllegalStateException("Workflow date enrollment was not linked to its run");
+        }
+        requireUpdated(outboxMapper.complete(
+            outbox.getWorkspaceId(), outbox.getId(), leaseOwner));
+        return DeliveryResult.COMPLETED;
+    }
+
+    private void terminalizeDateOutbox(WorkflowTriggerOutbox outbox) {
+        if (!"date".equals(outbox.getTriggerType())
+                || outbox.getWorkflowDateEnrollmentId() == null) {
+            return;
+        }
+        if (outbox.getRecordId() != null) {
+            dealMapper.getDealByIdForUpdate(outbox.getWorkspaceId(), outbox.getRecordId());
+        }
+        WorkflowDateEnrollment enrollment = dateEnrollmentMapper.getByIdForUpdate(
+            outbox.getWorkspaceId(), outbox.getWorkflowDateEnrollmentId());
+        terminalizeDateEnrollment(outbox, enrollment);
+    }
+
+    private void terminalizeDateEnrollment(
+            WorkflowTriggerOutbox outbox,
+            WorkflowDateEnrollment enrollment) {
+        if (enrollment == null || !"queued".equals(enrollment.getState())) {
+            return;
+        }
+        java.time.LocalDateTime resolvedAt = dateEnrollmentMapper.currentTimestamp(
+            outbox.getWorkspaceId(), outbox.getWorkflowId());
+        if (resolvedAt == null
+                || dateEnrollmentMapper.markQueuedMissed(
+                    outbox.getWorkspaceId(), enrollment.getId(), resolvedAt) != 1) {
+            throw new IllegalStateException("Workflow date enrollment was not terminalized");
+        }
+    }
+
+    private static boolean dateTargetMatches(
+            WorkflowTriggerOutbox outbox,
+            WorkflowDateEnrollment enrollment,
+            Deal deal) {
+        return enrollment != null
+            && "queued".equals(enrollment.getState())
+            && enrollment.getWorkflowId() == outbox.getWorkflowId()
+            && enrollment.getWorkflowVersionId() == outbox.getWorkflowVersionId()
+            && enrollment.getWorkflowRuntimeGeneration()
+                == outbox.getWorkflowRuntimeGeneration()
+            && enrollment.getRecordId() == outbox.getRecordId()
+            && "deal".equals(enrollment.getRecordType())
+            && "expectedCloseDate".equals(enrollment.getDateField())
+            && deal != null
+            && Objects.equals(deal.getExpectedCloseDate(), enrollment.getSourceDate().toString());
     }
 
     private void deliverEntity(
@@ -132,12 +254,13 @@ public class WorkflowTriggerOutboxDeliveryService {
                 && "send_message".equalsIgnoreCase(action.config().getType().trim()));
         int matchedCount = outbox.getScheduleMatchCount();
         for (int recordId : recordIds) {
-            boolean matched = segmentService.matchesEntity(
-                outbox.getWorkspaceId(),
-                enrollment.conditionActorId(),
-                outbox.getRecordType(),
-                enrollment.condition().config(),
-                recordId);
+            boolean matched = enrollment.condition() == null
+                || segmentService.matchesEntity(
+                    outbox.getWorkspaceId(),
+                    enrollment.conditionActorId(),
+                    outbox.getRecordType(),
+                    enrollment.condition(),
+                    recordId);
             if (!matched) {
                 continue;
             }
@@ -206,7 +329,12 @@ public class WorkflowTriggerOutboxDeliveryService {
         return discovered.getWorkflowId() == locked.getWorkflowId()
             && discovered.getWorkflowVersionId() == locked.getWorkflowVersionId()
             && discovered.getWorkflowRuntimeGeneration()
-                == locked.getWorkflowRuntimeGeneration();
+                == locked.getWorkflowRuntimeGeneration()
+            && Objects.equals(
+                discovered.getWorkflowDateEnrollmentId(),
+                locked.getWorkflowDateEnrollmentId())
+            && Objects.equals(discovered.getRecordId(), locked.getRecordId())
+            && Objects.equals(discovered.getTriggerType(), locked.getTriggerType());
     }
 
     private static boolean stateMatches(
@@ -214,6 +342,7 @@ public class WorkflowTriggerOutboxDeliveryService {
         return workflow != null
             && workflow.isEnabled()
             && workflow.getArchivedAt() == null
+            && workflow.getIntakePausedAt() == null
             && workflow.getActiveVersionId() != null
             && workflow.getActiveVersionId() == outbox.getWorkflowVersionId()
             && workflow.getRuntimeGeneration() == outbox.getWorkflowRuntimeGeneration();

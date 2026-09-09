@@ -1064,19 +1064,37 @@ public class NotificationReconciliationService {
             notification.setContextType("person");
             notification.setContextId(candidate.getPersonId());
             notification.setContextLabel(candidate.getPersonLabel());
+        } else if (candidate.getCompanyId() != null) {
+            notification.setContextType("company");
+            notification.setContextId(candidate.getCompanyId());
+            notification.setContextLabel(candidate.getCompanyLabel());
         } else {
             notification.setContextType(null);
             notification.setContextId(null);
         }
         notification.setTitle(CRITICAL.equals(severity) ? "Task overdue" : "Task due soon");
         notification.setBody(candidate.getTaskLabel() + " — Due " + candidate.getDueDate());
-        notification.setActionUrl("/activity/tasks?task=" + candidate.getTaskId());
+        notification.setActionUrl(taskActionUrl(candidate));
         notification.setData(json(Map.of(
             "taskId", candidate.getTaskId(),
             "task", candidate.getTaskLabel(),
             "dueDate", candidate.getDueDate()
         )));
         return notification;
+    }
+
+    private static String taskActionUrl(TaskReminderCandidate candidate) {
+        String taskAnchor = "?task=" + candidate.getTaskId();
+        if (candidate.getDealId() != null) {
+            return "/records/deals/" + candidate.getDealId() + taskAnchor;
+        }
+        if (candidate.getPersonId() != null) {
+            return "/records/contacts/" + candidate.getPersonId() + taskAnchor;
+        }
+        if (candidate.getCompanyId() != null) {
+            return "/records/companies/" + candidate.getCompanyId() + taskAnchor;
+        }
+        return "/activity/tasks" + taskAnchor;
     }
 
     private Notification dealNotification(

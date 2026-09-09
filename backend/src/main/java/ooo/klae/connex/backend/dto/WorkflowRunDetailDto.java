@@ -13,6 +13,8 @@ public record WorkflowRunDetailDto(
     String source,
     int workflowId,
     String status,
+    String statusReason,
+    WorkflowRunSummaryDto.DateSchedule dateSchedule,
     String legacyStatus,
     Version version,
     Execution execution,
@@ -25,6 +27,28 @@ public record WorkflowRunDetailDto(
     boolean stepDetailAvailable,
     List<WorkflowStepRunDto> path
 ) {
+
+    public WorkflowRunDetailDto(
+            String runKey,
+            String source,
+            int workflowId,
+            String status,
+            String legacyStatus,
+            Version version,
+            Execution execution,
+            WorkflowRunSummaryDto.Trigger trigger,
+            WorkflowRunSummaryDto.RuntimeState runtimeState,
+            LocalDateTime startedAt,
+            LocalDateTime finishedAt,
+            Long durationMs,
+            WorkflowRunSummaryDto.Failure failure,
+            boolean stepDetailAvailable,
+            List<WorkflowStepRunDto> path) {
+        this(
+            runKey, source, workflowId, status, null, null, legacyStatus, version,
+            execution, trigger, runtimeState, startedAt, finishedAt, durationMs,
+            failure, stepDetailAvailable, path);
+    }
 
     /** Immutable definition, canvas, and publication evidence for a canonical run. */
     @JsonInclude(Include.ALWAYS)

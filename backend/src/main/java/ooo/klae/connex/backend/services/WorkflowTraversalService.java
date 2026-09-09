@@ -232,7 +232,7 @@ public class WorkflowTraversalService {
                 true);
         }
         WorkflowDefinition definition = canonicalizer.parseDefinition(canonical.definitionJson());
-        return definitionValidator.validate(
+        return definitionValidator.compileForRuntime(
             version.getRecordType(), version.getExecutionMode(), definition);
     }
 

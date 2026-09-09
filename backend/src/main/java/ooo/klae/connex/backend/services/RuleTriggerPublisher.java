@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 public class RuleTriggerPublisher {
 
     private final WorkflowTriggerIntake workflowTriggerIntake;
+    private final WorkflowDateIntakeService dateIntakeService;
     private final ApplicationEventPublisher eventPublisher;
     private final AutomationScope automationScope;
     private final WorkflowDocumentAutomationGate documentAutomationGate;
@@ -43,5 +44,10 @@ public class RuleTriggerPublisher {
             event,
             triggerKey,
             occurredAt));
+    }
+
+    /** Enqueues durable reconciliation after a deal date source is created, changed, or deleted. */
+    public void reconcileDealDate(int workspaceId, int dealId) {
+        dateIntakeService.enqueueDeal(workspaceId, dealId);
     }
 }

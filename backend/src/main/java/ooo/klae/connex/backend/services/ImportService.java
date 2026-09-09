@@ -113,6 +113,7 @@ public class ImportService {
     private final IdentityIntakeService identityIntakeService;
     private final MatchingService matchingService;
     private final DuplicatePreflightService duplicatePreflightService;
+    private final WorkflowDateIntakeService workflowDateIntakeService;
 
     private static final String DEFAULT_TAG_COLOR = "#CCCCCC";
     private static final String DEFAULT_CURRENCY = "USD";
@@ -1138,6 +1139,9 @@ public class ImportService {
         }
 
         int created = beans.size();
+        if (created > 0 || updated > 0) {
+            workflowDateIntakeService.enqueueWorkspaceFull(workspaceId);
+        }
         List<RowError> failed = collectFailures(plan);
         auditImport(
             "deal",

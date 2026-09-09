@@ -9,11 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
@@ -29,6 +31,92 @@ class TaskServiceTest extends AbstractServiceTest {
 
     @Autowired TaskService taskService;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired SqlSessionTemplate sqlSession;
+
+    @Test
+    void directCompanyLinkCanBeCreatedUpdatedReadAndCleared() {
+        Company first = newCompany();
+        Company second = newCompany();
+        Task create = new Task();
+        create.setDescription("Company task");
+        create.setAssignedTo(currentUser);
+        create.setCompany(first);
+
+        Task created = taskService.create(create);
+        assertEquals(first.getId(), created.getCompany().getId());
+        assertEquals(List.of(created.getId()), taskService.getTasksByCompanyId(first.getId())
+            .stream().map(Task::getId).toList());
+
+        Task update = updateDraft(created, "Moved company task");
+        update.setCompany(second);
+        Task moved = taskService.update(created.getId(), update);
+        assertEquals(second.getId(), moved.getCompany().getId());
+        assertTrue(taskService.getTasksByCompanyId(first.getId()).isEmpty());
+
+        Task clear = updateDraft(moved, "Cleared company task");
+        clear.setCompany(null);
+        Task cleared = taskService.update(created.getId(), clear);
+        assertTrue(cleared.getCompany() == null || cleared.getCompany().getId() == 0);
+    }
+
+    @Test
+    void companyFilterIncludesDirectAndDerivedLinksOnce() {
+        Company company = newCompany();
+        var person = newPerson(company);
+        var pipeline = newPipeline();
+        var stage = newStage(pipeline, 0);
+        var deal = newDeal(pipeline, stage, company);
+        Task task = newTask(currentUser, person, deal);
+        Task update = updateDraft(task, task.getDescription());
+        update.setCompany(company);
+        taskService.update(task.getId(), update);
+
+        assertEquals(List.of(task.getId()), taskService.getTasksByCompanyId(company.getId())
+            .stream().map(Task::getId).toList());
+    }
+
+    @Test
+    void foreignAndArchivedCompaniesCannotBeLinkedOrFiltered() {
+        Company active = newCompany();
+        Workspace foreignWorkspace = new Workspace();
+        foreignWorkspace.setName("Foreign " + unique());
+        foreignWorkspace.setSlug("foreign-company-" + unique());
+        workspaceMapper.insert(foreignWorkspace);
+        Company foreign = new Company();
+        foreign.setWorkspaceId(foreignWorkspace.getId());
+        foreign.setName("Foreign company " + unique());
+        companyMapper.insert(foreign);
+        Task foreignCreate = new Task();
+        foreignCreate.setDescription("Foreign company task");
+        foreignCreate.setAssignedTo(currentUser);
+        foreignCreate.setCompany(foreign);
+
+        assertThrows(BadRequestException.class, () -> taskService.create(foreignCreate));
+        assertThrows(ResourceNotFoundException.class,
+            () -> taskService.getTasksByCompanyId(foreign.getId()));
+
+        Task task = newTask(currentUser, null, null);
+        Task foreignUpdate = updateDraft(task, "Foreign company update");
+        foreignUpdate.setCompany(foreign);
+        assertThrows(BadRequestException.class,
+            () -> taskService.update(task.getId(), foreignUpdate));
+        assertTrue(taskService.getTaskById(task.getId()).getCompany() == null);
+
+        Task retained = new Task();
+        retained.setDescription("Retained archived company task");
+        retained.setAssignedTo(currentUser);
+        retained.setCompany(active);
+        retained = taskService.create(retained);
+        assertEquals(1, companyMapper.archive(workspace.getId(), active.getId()));
+        assertEquals(active.getId(), taskService.getTaskById(retained.getId()).getCompany().getId());
+        Task archivedCreate = new Task();
+        archivedCreate.setDescription("Archived company task");
+        archivedCreate.setAssignedTo(currentUser);
+        archivedCreate.setCompany(active);
+        assertThrows(BadRequestException.class, () -> taskService.create(archivedCreate));
+        assertThrows(ResourceNotFoundException.class,
+            () -> taskService.getTasksByCompanyId(active.getId()));
+    }
 
     @Test
     void conditionalDeleteRefusesChangedStateAndDeletesMatchingState() {
@@ -147,6 +235,31 @@ class TaskServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void assignedWorkVersionChangesWhenDirectCompanyLinkChanges() {
+        Company first = newCompany();
+        Company second = newCompany();
+        Task task = newTask(currentUser, null, null);
+        jdbcTemplate.update(
+            "UPDATE task SET company_id = ?, updated_at = '2026-08-30 12:00:00' WHERE id = ?",
+            first.getId(), task.getId());
+        String before = taskService.findOpenAssignedWork(
+            Instant.parse("2026-08-30T12:00:00Z"), 10).items().stream()
+            .filter(item -> item.task().getId() == task.getId())
+            .findFirst().orElseThrow().currentVersion();
+
+        jdbcTemplate.update(
+            "UPDATE task SET company_id = ?, updated_at = '2026-08-30 12:00:00' WHERE id = ?",
+            second.getId(), task.getId());
+        sqlSession.clearCache();
+        String after = taskService.findOpenAssignedWork(
+            Instant.parse("2026-08-30T12:00:00Z"), 10).items().stream()
+            .filter(item -> item.task().getId() == task.getId())
+            .findFirst().orElseThrow().currentVersion();
+
+        assertFalse(before.equals(after));
+    }
+
+    @Test
     void versionAwareCompleteRejectsAConcurrentSourceChange() {
         Task task = newTask(currentUser, null, null);
         String version = taskService.findOpenAssignedWork(
@@ -213,6 +326,32 @@ class TaskServiceTest extends AbstractServiceTest {
         );
         assertEquals(0, taskService.getTaskById(doneSurvivor.getId()).getPosition());
         assertEquals(1, taskService.getTaskById(reopening.getId()).getPosition());
+    }
+
+    @Test
+    void completionEvidenceIsAppendOnlyForEachFalseToTrueTransition() {
+        Task task = newTask(currentUser, null, null);
+
+        taskService.move(task.getId(), "done", 0);
+        assertEquals(1, completionEventCount(task.getId()));
+
+        taskService.move(task.getId(), "todo", 0);
+        assertEquals(1, completionEventCount(task.getId()));
+
+        Task update = updateDraft(taskService.getTaskById(task.getId()), "Complete again");
+        update.setCompleted(true);
+        taskService.update(task.getId(), update);
+        assertEquals(2, completionEventCount(task.getId()));
+
+        taskService.complete(task.getId());
+        assertEquals(2, completionEventCount(task.getId()));
+
+        Task createdCompleted = new Task();
+        createdCompleted.setDescription("Created completed");
+        createdCompleted.setAssignedTo(currentUser);
+        createdCompleted.setCompleted(true);
+        createdCompleted = taskService.create(createdCompleted);
+        assertEquals(0, completionEventCount(createdCompleted.getId()));
     }
 
     @Test
@@ -365,6 +504,15 @@ class TaskServiceTest extends AbstractServiceTest {
         update.setAssignedTo(task.getAssignedTo());
         update.setPerson(task.getPerson());
         update.setDeal(task.getDeal());
+        update.setCompany(task.getCompany());
         return update;
+    }
+
+    private int completionEventCount(int taskId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM task_completion_event WHERE workspace_id = ? AND task_id = ?",
+            Integer.class,
+            workspace.getId(),
+            taskId);
     }
 }

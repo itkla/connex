@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.WorkflowDateEnrollmentMapper;
 import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
 
 /** Records bounded retry or dead-letter state after a durable trigger delivery rollback. */
@@ -22,6 +23,7 @@ import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
 public class WorkflowTriggerOutboxFailureService {
 
     private final WorkflowTriggerOutboxMapper outboxMapper;
+    private final WorkflowDateEnrollmentMapper dateEnrollmentMapper;
     private final WorkflowRuntimeProperties properties;
 
     @Transactional(
@@ -45,6 +47,13 @@ public class WorkflowTriggerOutboxFailureService {
                     >= properties.maxTriggerDeliveryAttempts()) {
             requireUpdated(outboxMapper.deadLetter(
                 workspaceId, outboxId, leaseOwner, code));
+            if ("date".equals(outbox.getTriggerType())
+                    && outbox.getWorkflowDateEnrollmentId() != null
+                    && dateEnrollmentMapper.markQueuedMissedNow(
+                        workspaceId, outbox.getWorkflowDateEnrollmentId()) != 1) {
+                throw new IllegalStateException(
+                    "Dead workflow date enrollment was not terminalized");
+            }
             return;
         }
         requireUpdated(outboxMapper.releaseForRetry(

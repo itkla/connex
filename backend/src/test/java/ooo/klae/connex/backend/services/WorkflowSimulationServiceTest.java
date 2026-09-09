@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -50,6 +51,8 @@ class WorkflowSimulationServiceTest {
     @Mock private WorkflowRecordGuard recordGuard;
     @Mock private WorkflowNodeDecisionService decisionService;
     @Mock private WorkflowActionGuard actionGuard;
+    @Mock private WorkflowInputResolver inputResolver;
+    @Mock private WorkflowActionBindingService bindingService;
 
     private WorkflowSimulationService service;
     private Workflow workflow;
@@ -67,7 +70,9 @@ class WorkflowSimulationServiceTest {
             principalService,
             recordGuard,
             decisionService,
-            actionGuard);
+            actionGuard,
+            inputResolver,
+            bindingService);
         workflow = new Workflow();
         workflow.setId(42);
         workflow.setWorkspaceId(7);
@@ -82,6 +87,8 @@ class WorkflowSimulationServiceTest {
         draft = new CanonicalDraft(
             "Workflow", null, "deal", "user", "{}", "{}", new byte[32]);
         definition = new WorkflowDefinition(1, null, List.of(), List.of());
+        lenient().when(inputResolver.resolve(anyInt(), any(), any()))
+            .thenReturn(new WorkflowInputResolver.Resolved(Map.of(), List.of()));
         User actor = new User();
         actor.setId(41);
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);

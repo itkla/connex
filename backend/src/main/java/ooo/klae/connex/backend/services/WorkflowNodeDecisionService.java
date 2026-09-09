@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.dto.WorkflowEdge;
 import ooo.klae.connex.backend.dto.WorkflowNode;
+import ooo.klae.connex.backend.dto.SegmentDefinition;
 
 /** Selects deterministic workflow transitions without persistence or action side effects. */
 @Service
@@ -48,6 +49,16 @@ public class WorkflowNodeDecisionService {
             "node_unsupported",
             "The active workflow contains an unsupported node.",
             true);
+    }
+
+    public boolean matchesPolicy(
+            int workspaceId,
+            int attributionUserId,
+            String recordType,
+            int recordId,
+            SegmentDefinition definition) {
+        return definition != null && segmentService.matchesEntity(
+            workspaceId, attributionUserId, recordType, definition, recordId);
     }
 
     private static WorkflowStepTransition immediate(WorkflowEdge.Outcome outcome) {

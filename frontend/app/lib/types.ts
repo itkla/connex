@@ -965,6 +965,7 @@ export type BusinessCardRequestErrorKind =
 
 export type CreateTaskPayload = {
     description: string;
+    companyId?: number;
     completed?: boolean;
     dueDate?: string;
     assignedToId: number;
@@ -1000,6 +1001,7 @@ export type TaskStatus = 'todo' | 'in_progress' | 'done';
 
 export type Task = {
     id: number;
+    companyId?: number | null;
     description: string;
     completed: boolean;
     /** Kanban workflow column; kept in lockstep with `completed` (done ⇔ completed) by the server. */
@@ -3711,6 +3713,7 @@ export type ContactTag = {
 
 export type UpdateTaskPayload = {
     description?: string;
+    companyId?: number;
     completed?: boolean;
     dueDate?: string;
     assignedToId?: number;
@@ -4434,6 +4437,30 @@ export type RuleTrigger = {
     targetStageId?: number;
     throttleMinutes?: number;
     cadence?: string;
+    allowManualRuns?: boolean;
+    dateField?: string;
+    offsetDays?: number;
+    localTime?: string;
+    timezone?: string;
+};
+
+export type WorkflowInputType = "text" | "user" | "date";
+export type WorkflowInputValue = string | number | null;
+export type WorkflowInputDefinition = {
+    key: string;
+    label: string;
+    type: WorkflowInputType;
+    required: boolean;
+    defaultValue?: WorkflowInputValue;
+};
+export type WorkflowValueRef =
+    | { source: "launch_input"; key: string }
+    | { source: "record_field"; field: string }
+    | { source: "step_output"; nodeId: string; output: string };
+export type WorkflowTextPart = { text: string } | { ref: WorkflowValueRef };
+export type WorkflowTextTemplate = {
+    parts: WorkflowTextPart[];
+    missingValue: "fail" | "empty";
 };
 
 export type RuleAction = {
@@ -4449,6 +4476,13 @@ export type RuleAction = {
     targetStageId?: number;
     campaignMessageId?: number;
     campaignMessageVersion?: number;
+    targetUserRef?: WorkflowValueRef;
+    dueDateRef?: WorkflowValueRef;
+    titleTemplate?: WorkflowTextTemplate;
+    bodyTemplate?: WorkflowTextTemplate;
+    field?: string;
+    value?: WorkflowInputValue;
+    valueRef?: WorkflowValueRef;
 };
 
 /** A campaign message labeled with its owning campaign for workflow authoring. */
@@ -4544,11 +4578,11 @@ export type WorkflowRetrySafety = "transactional" | "deduplicated" | "none";
 
 export type WorkflowExecutionMode = "user" | "system";
 
-export type WorkflowNodeType = "TRIGGER" | "CONDITION" | "ACTION" | "DELAY" | "END";
+export type WorkflowNodeType = "TRIGGER" | "CONDITION" | "ACTION" | "DELAY" | "WAIT" | "END";
 
 export type WorkflowRuntimeNodeType = Lowercase<WorkflowNodeType>;
 
-export type WorkflowEdgeOutcome = "next" | "yes" | "no";
+export type WorkflowEdgeOutcome = "next" | "yes" | "no" | "completed" | "timeout";
 
 export type WorkflowTriggerNode = {
     id: string;
@@ -4576,9 +4610,21 @@ export type WorkflowDelayNode = {
     };
 };
 
+export type WorkflowWaitNode = {
+    id: string;
+    type: "WAIT";
+    config: {
+        kind: "event";
+        event: "task.completed";
+        source: { nodeId: string; output: "taskId" };
+        timeoutSeconds: number;
+    };
+};
+
 export type WorkflowEndNode = {
     id: string;
     type: "END";
+    config?: { outcome: "completed" | "stopped"; reason?: string };
 };
 
 export type WorkflowNode =
@@ -4586,6 +4632,7 @@ export type WorkflowNode =
     | WorkflowConditionNode
     | WorkflowActionNode
     | WorkflowDelayNode
+    | WorkflowWaitNode
     | WorkflowEndNode;
 
 export type WorkflowEdge = {
@@ -4596,10 +4643,33 @@ export type WorkflowEdge = {
 };
 
 export type WorkflowDefinition = {
-    schemaVersion: 1;
+    schemaVersion: 1 | 2;
+    inputs?: WorkflowInputDefinition[];
+    enrollment?: { condition?: SegmentDefinition; oneActiveRun: boolean; cooldownMinutes: number };
+    stopConditions?: SegmentDefinition;
     entryNodeId: string;
     nodes: WorkflowNode[];
     edges: WorkflowEdge[];
+};
+
+export type WorkflowCatalog = {
+    catchupPolicy?: "latest_occurrence";
+    supportedDateFields?: Array<{ recordType: string; field: string }>;
+    capabilityVersion: number;
+    definitionSchemaVersions: number[];
+    authoringSchemaVersion: number;
+    recordTypes: Array<{ type: string; manual: boolean; event: boolean; schedule: boolean }>;
+    inputTypes: WorkflowInputType[];
+    recordFields: Array<{ recordType: string; key: string; valueType: string; nullable: boolean }>;
+    actions: Array<{
+        type: string;
+        recordTypes: string[];
+        requiredPermissions: string[];
+        retrySafety: WorkflowRetrySafety;
+        sideEffect: string;
+        fields: Array<{ key: string; valueType: string; required: boolean; bindingSources: string[] }>;
+        outputs: Array<{ key: string; valueType: string }>;
+    }>;
 };
 
 export type WorkflowCanvas = {
@@ -4608,6 +4678,8 @@ export type WorkflowCanvas = {
 };
 
 export type WorkflowDto = {
+    dateScheduleStatus?: { plannedCount: number; queuedCount: number; missedCount: number; nextDueAt: string | null; lastReconciledAt: string | null } | null;
+    trigger?: RuleTrigger;
     id: number;
     name: string;
     description: string | null;
@@ -4634,6 +4706,7 @@ export type WorkflowRunStatus =
     | "running"
     | "waiting"
     | "succeeded"
+    | "stopped"
     | "failed"
     | "skipped"
     | "cancelled"
@@ -4674,6 +4747,15 @@ export type WorkflowDraftRequest = WorkflowCreateRequest & {
 };
 
 export type WorkflowDiagnosticCode =
+    | "manual_entry_invalid"
+    | "manual_entry_disabled"
+    | "input_definition_invalid"
+    | "input_required"
+    | "input_unknown"
+    | "input_type_invalid"
+    | "binding_invalid"
+    | "binding_unresolved"
+    | "step_output_not_dominating"
     | "canvas_node_position_required"
     | "trigger_count_invalid"
     | "entry_node_required"
@@ -4770,7 +4852,7 @@ export type WorkflowValidation = {
 };
 
 export type WorkflowSimulation = {
-    result: "would_complete" | "not_enrolled" | "would_wait" | "blocked";
+    result: "would_complete" | "not_enrolled" | "would_wait" | "would_stop" | "blocked";
     path: Array<{
         nodeId: string;
         nodeType: WorkflowRuntimeNodeType;
@@ -4809,6 +4891,8 @@ export type WorkflowRunFailure = {
 };
 
 export type WorkflowRunSummary = {
+    statusReason?: string | null;
+    dateSchedule?: { dateField: string; sourceDate: string; scheduledLocalDate: string; dueAt: string } | null;
     runKey: string;
     source: "canonical" | "legacy";
     status: WorkflowRunWireStatus;
@@ -4820,7 +4904,7 @@ export type WorkflowRunSummary = {
         publishedAt: string;
     } | null;
     trigger: {
-        type: "entity_change" | "schedule" | "manual";
+        type: "entity_change" | "schedule" | "manual" | "date";
         event: string | null;
         recordType: string | null;
         recordId: number | null;
@@ -4838,6 +4922,18 @@ export type WorkflowRunSummary = {
 };
 
 export type WorkflowStepRun = {
+    wait?: {
+        kind: "event";
+        event: "task.completed";
+        sourceNodeId: string;
+        sourceOutput: "taskId";
+        sourceTaskId: number;
+        timeoutAt: string;
+        resolution: "completed" | "timeout" | "cancelled" | "stopped" | null;
+        matchedEventId: number | null;
+        resolvedAt: string | null;
+    } | null;
+    actionOutputs?: Record<string, number | string> | null;
     sequence: number;
     nodeId: string;
     nodeType: WorkflowRuntimeNodeType;
@@ -5024,6 +5120,29 @@ export type WorkflowManualScope = WorkflowManualResolvedScope | {
 export type WorkflowManualPrepareRequest = {
     sourceSurface: WorkflowManualSourceSurface;
     scope: WorkflowManualScope;
+    inputs?: Record<string, WorkflowInputValue>;
+};
+
+export type WorkflowManualOption = {
+    workflowId: number;
+    workflowName: string;
+    workflowVersionId: number;
+    versionNumber: number;
+    definitionHash: string;
+    schemaVersion: number;
+    manualEntryMode: "legacy_compatible" | "only" | "allowed" | "denied";
+    available: boolean;
+    reasons: string[];
+    execution: { mode: WorkflowExecutionMode; actorUserId: number | null; actorLabel: string | null };
+    inputs: WorkflowInputDefinition[];
+    actions: Array<{ nodeId: string; actionType: string; retrySafety: WorkflowRetrySafety }>;
+};
+
+export type WorkflowManualOptions = {
+    recordType: string;
+    recordId: number | null;
+    createHref: string;
+    options: WorkflowManualOption[];
 };
 
 export type WorkflowManualExpectedSkips = {
@@ -5035,6 +5154,9 @@ export type WorkflowManualExpectedSkips = {
 };
 
 export type WorkflowManualPreparation = {
+    blockerDetails?: Array<{ code: string; eligibleAt: string | null }>;
+    resolvedInputs?: Array<{ key: string; label: string; type: WorkflowInputType; value: WorkflowInputValue; displayValue: string; source: "supplied" | "default" }>;
+    effectSamples?: Array<{ recordId: number; nodeId: string; actionType: string; title: string | null; body: string | null; targetUserId: number | null; targetLabel: string | null; dueDate: string | null; retrySafety: WorkflowRetrySafety }>;
     invocationId: number;
     workflowId: number;
     workflowName: string;
@@ -5076,6 +5198,7 @@ export type WorkflowInvocationResult = {
     runningCount: number;
     waitingCount: number;
     succeededCount: number;
+    stoppedCount: number;
     failedCount: number;
     interventionRequiredCount: number;
     cancelledCount: number;
@@ -5319,6 +5442,7 @@ export type InstanceCapabilities = {
     businessCardImport: boolean;
     campaignDelivery: boolean;
     workflowTriggeredSend?: boolean;
+    workflowDefinitionSchemaVersion?: number;
     privilegedMfaEnforced: boolean;
 };
 

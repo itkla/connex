@@ -106,8 +106,22 @@ public class AssignedTaskWorkItemProvider implements WorkItemProvider {
             item.currentVersion(),
             WorkItemProjectionSupport.etag(item.currentVersion()),
             new WorkItemContextDto(
-                "task", task.getId(), task.getDescription(), "/activity/tasks?task=" + task.getId()),
+                "task", task.getId(), task.getDescription(), contextHref(task)),
             List.copyOf(actions));
+    }
+
+    private static String contextHref(Task task) {
+        String taskAnchor = "?task=" + task.getId();
+        if (task.getDeal() != null && task.getDeal().getId() > 0) {
+            return "/records/deals/" + task.getDeal().getId() + taskAnchor;
+        }
+        if (task.getPerson() != null && task.getPerson().getId() > 0) {
+            return "/records/contacts/" + task.getPerson().getId() + taskAnchor;
+        }
+        if (task.getCompany() != null && task.getCompany().getId() > 0) {
+            return "/records/companies/" + task.getCompany().getId() + taskAnchor;
+        }
+        return "/activity/tasks" + taskAnchor;
     }
 
     private static LocalDate parseDate(String value) {

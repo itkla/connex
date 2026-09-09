@@ -96,11 +96,14 @@ describe("workflow operations contracts", () => {
         expect(offeredWorkflowRetryStep(run([step({ retrySafety: "none" })]))).toBeNull();
     });
 
-    it("ships exactly the three approved deterministic recipe keys", () => {
+    it("retains the job-change recipe alongside the five native process recipes", () => {
         expect(WORKFLOW_RECIPE_KEYS).toEqual([
             "person-job-change-follow-up",
             "deal-won-handoff",
             "cooling-company-review",
+            "person-qualified-routing",
+            "deal-follow-through",
+            "deal-renewal-preparation",
         ]);
         expect(WORKFLOW_RECIPE_KEYS.every(isWorkflowRecipeKey)).toBe(true);
         expect(isWorkflowRecipeKey("report-snapshot")).toBe(false);

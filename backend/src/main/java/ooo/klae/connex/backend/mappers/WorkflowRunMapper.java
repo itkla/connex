@@ -98,12 +98,22 @@ public interface WorkflowRunMapper {
         @Param("nextNodeId") String nextNodeId,
         @Param("actionOutcome") String actionOutcome,
         @Param("actionReferenceId") Long actionReferenceId,
+        @Param("actionOutputsJson") String actionOutputsJson,
         @Param("finishedAt") LocalDateTime finishedAt);
 
     int succeedWaitingDelayStep(
         @Param("workspaceId") int workspaceId,
         @Param("workflowRunId") long workflowRunId,
         @Param("nodeId") String nodeId,
+        @Param("selectedEdgeId") String selectedEdgeId,
+        @Param("nextNodeId") String nextNodeId,
+        @Param("finishedAt") LocalDateTime finishedAt);
+
+    int succeedWaitingEventStep(
+        @Param("workspaceId") int workspaceId,
+        @Param("workflowRunId") long workflowRunId,
+        @Param("nodeId") String nodeId,
+        @Param("selectedOutcome") String selectedOutcome,
         @Param("selectedEdgeId") String selectedEdgeId,
         @Param("nextNodeId") String nextNodeId,
         @Param("finishedAt") LocalDateTime finishedAt);
@@ -117,6 +127,12 @@ public interface WorkflowRunMapper {
         @Param("finishedAt") LocalDateTime finishedAt);
 
     int cancelExistingStep(
+        @Param("workspaceId") int workspaceId,
+        @Param("workflowRunId") long workflowRunId,
+        @Param("nodeId") String nodeId,
+        @Param("finishedAt") LocalDateTime finishedAt);
+
+    int skipExistingStep(
         @Param("workspaceId") int workspaceId,
         @Param("workflowRunId") long workflowRunId,
         @Param("nodeId") String nodeId,
@@ -153,6 +169,19 @@ public interface WorkflowRunMapper {
         @Param("expectedNodeId") String expectedNodeId,
         @Param("leaseOwner") String leaseOwner,
         @Param("durationSeconds") int durationSeconds);
+
+    int waitForEvent(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") long id,
+        @Param("expectedNodeId") String expectedNodeId,
+        @Param("leaseOwner") String leaseOwner,
+        @Param("timeoutAt") LocalDateTime timeoutAt);
+
+    int returnEventWaitToWaiting(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") long id,
+        @Param("expectedNodeId") String expectedNodeId,
+        @Param("leaseOwner") String leaseOwner);
 
     int waitForRetry(
         @Param("workspaceId") int workspaceId,
@@ -191,6 +220,21 @@ public interface WorkflowRunMapper {
         @Param("id") long id,
         @Param("expectedNodeId") String expectedNodeId,
         @Param("leaseOwner") String leaseOwner,
+        @Param("finishedAt") LocalDateTime finishedAt);
+
+    int stopRun(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") long id,
+        @Param("expectedNodeId") String expectedNodeId,
+        @Param("statusReason") String statusReason,
+        @Param("finishedAt") LocalDateTime finishedAt);
+
+    int stopClaimedRun(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") long id,
+        @Param("expectedNodeId") String expectedNodeId,
+        @Param("leaseOwner") String leaseOwner,
+        @Param("statusReason") String statusReason,
         @Param("finishedAt") LocalDateTime finishedAt);
 
     int failRun(
@@ -245,6 +289,18 @@ public interface WorkflowRunMapper {
     LocalDateTime currentTimestamp(
         @Param("workspaceId") int workspaceId,
         @Param("workflowId") int workflowId);
+
+    boolean hasActiveEnrollment(
+        @Param("workspaceId") int workspaceId,
+        @Param("workflowId") int workflowId,
+        @Param("recordType") String recordType,
+        @Param("recordId") int recordId);
+
+    LocalDateTime latestEnrollmentStartedAt(
+        @Param("workspaceId") int workspaceId,
+        @Param("workflowId") int workflowId,
+        @Param("recordType") String recordType,
+        @Param("recordId") int recordId);
 
     List<WorkflowRunView> getPage(
         @Param("workspaceId") int workspaceId,

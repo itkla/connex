@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.beans;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -14,6 +15,7 @@ public class WorkflowRun {
     private int workflowId;
     private long workflowVersionId;
     private String status;
+    private String statusReason;
     private String triggerType;
     private String triggerEvent;
     private String triggerKey;
@@ -21,9 +23,14 @@ public class WorkflowRun {
     private int recordId;
     private String dedupeKey;
     private Long triggerOutboxId;
+    private String dateField;
+    private LocalDate dateSourceDate;
+    private LocalDate dateScheduledLocalDate;
+    private LocalDateTime dateDueAt;
     private String executionMode;
     private Integer actorUserId;
     private Integer attributionUserId;
+    private String launchInputsJson;
     private String currentNodeId;
     private String waitKind;
     private LocalDateTime resumeAt;

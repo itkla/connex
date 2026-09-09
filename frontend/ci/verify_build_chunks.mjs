@@ -33,8 +33,8 @@ function emittedPath(reference, buildRoot) {
 
 function declaredAssets(manifest) {
     const assets = [];
-    for (const module of Object.values(manifest.clientModules ?? {})) {
-        assets.push(...(module.chunks ?? []));
+    for (const clientModule of Object.values(manifest.clientModules ?? {})) {
+        assets.push(...(clientModule.chunks ?? []));
     }
     for (const entry of Object.values(manifest.entryCSSFiles ?? {})) {
         for (const stylesheet of entry ?? []) {

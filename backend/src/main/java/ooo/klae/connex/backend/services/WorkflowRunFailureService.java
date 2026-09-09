@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -17,6 +18,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.NodeType;
 
@@ -26,6 +28,7 @@ import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.NodeType;
 public class WorkflowRunFailureService {
 
     private final WorkflowRunMapper workflowRunMapper;
+    private final WorkflowEventWaitMapper eventWaitMapper;
     private final WorkflowInterventionRecorder interventionRecorder;
     private final WorkflowActionRetryPolicy retryPolicy;
     private final WorkflowRuntimeProperties properties;
@@ -51,7 +54,7 @@ public class WorkflowRunFailureService {
                 "The workflow traversal exceeded its bounded node limit.",
                 true);
         }
-        LocalDateTime finishedAt = LocalDateTime.now();
+        LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
         if (sequence >= 0 && sequence <= 49) {
             WorkflowStepRun step = new WorkflowStepRun();
             step.setWorkspaceId(workspaceId);
@@ -106,7 +109,7 @@ public class WorkflowRunFailureService {
         ClassifiedFailure classified = classify(failure);
         WorkflowStepRun step = workflowRunMapper.getStepByNodeForUpdate(
             workspaceId, runId, expectedNodeId);
-        LocalDateTime finishedAt = LocalDateTime.now();
+        LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
         if (nodeType == NodeType.ACTION && step != null) {
             return failAction(
                 run, step, leaseOwner, failure, classified, finishedAt);
@@ -264,7 +267,7 @@ public class WorkflowRunFailureService {
     }
 
     private void cancelClaimed(WorkflowRun run, String leaseOwner) {
-        LocalDateTime finishedAt = LocalDateTime.now();
+        LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
         WorkflowStepRun step = workflowRunMapper.getStepByNodeForUpdate(
             run.getWorkspaceId(), run.getId(), run.getCurrentNodeId());
         if (step != null) {
@@ -272,6 +275,12 @@ public class WorkflowRunFailureService {
                 run.getWorkspaceId(), run.getId(), step.getId(), "cancelled", finishedAt);
             workflowRunMapper.cancelExistingStep(
                 run.getWorkspaceId(), run.getId(), run.getCurrentNodeId(), finishedAt);
+        }
+        if ("event".equals(run.getWaitKind())
+                && eventWaitMapper.resolveCurrent(
+                    run.getWorkspaceId(), run.getId(), run.getCurrentNodeId(),
+                    "cancelled", finishedAt) != 1) {
+            throw new IllegalStateException("Workflow event wait cancellation was not finalized");
         }
         if (workflowRunMapper.cancelClaimed(
                 run.getWorkspaceId(), run.getId(), leaseOwner, finishedAt) != 1) {

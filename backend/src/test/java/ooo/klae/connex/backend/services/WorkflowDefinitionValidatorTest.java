@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -23,6 +24,7 @@ import jakarta.validation.Validator;
 import jakarta.validation.ValidatorFactory;
 
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.dto.RuleAction;
@@ -33,7 +35,13 @@ import ooo.klae.connex.backend.dto.WorkflowDelayConfig;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
+import ooo.klae.connex.backend.dto.WorkflowEndConfig;
+import ooo.klae.connex.backend.dto.WorkflowInputDefinition;
+import ooo.klae.connex.backend.dto.WorkflowInputType;
 import ooo.klae.connex.backend.dto.WorkflowNode;
+import ooo.klae.connex.backend.dto.WorkflowTextPart;
+import ooo.klae.connex.backend.dto.WorkflowTextTemplate;
+import ooo.klae.connex.backend.dto.WorkflowValueRef;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
@@ -69,8 +77,10 @@ class WorkflowDefinitionValidatorTest {
             BEAN_VALIDATOR,
             new WorkflowDocumentAutomationGate(true),
             new WorkflowTriggeredSendGate(true),
-            systemActor);
-        validator = new WorkflowDefinitionValidator(ruleDefinitionValidator);
+            systemActor,
+            new WorkflowCapabilityCatalog());
+        validator = new WorkflowDefinitionValidator(
+            ruleDefinitionValidator, new WorkflowCapabilityCatalog());
     }
 
     @AfterAll
@@ -109,8 +119,7 @@ class WorkflowDefinitionValidatorTest {
         assertFalse(Arrays.stream(CompiledWorkflow.class.getRecordComponents())
             .anyMatch(component -> component.getType() == WorkflowNode.class
                 || component.getType() == RuleAction.class
-                || component.getType() == RuleTrigger.class
-                || component.getType() == SegmentDefinition.class));
+                || component.getType() == RuleTrigger.class));
         verify(segmentService).validate("deal", condition);
         verifyNoInteractions(workspaceService);
     }
@@ -140,6 +149,183 @@ class WorkflowDefinitionValidatorTest {
 
         assertEquals(Set.of(Permission.TASK_CREATE, Permission.DEAL_UPDATE), permissions);
         verifyNoInteractions(workspaceService);
+    }
+
+    @Test
+    void runtimeCompilationDoesNotConsultRequestCallerAuthorization() {
+        RuleAction createTask = action("create_task");
+        createTask.setTitle("Follow up");
+        WorkflowDefinition definition = definition(
+            List.of(
+                new WorkflowNode.Trigger("trigger", entityChange()),
+                new WorkflowNode.Action("task", createTask),
+                new WorkflowNode.End("end")),
+            List.of(
+                edge("trigger-task", "trigger", "task", WorkflowEdge.Outcome.NEXT),
+                edge("task-end", "task", "end", WorkflowEdge.Outcome.NEXT)));
+
+        CompiledWorkflow compiled = validator.compileForRuntime(
+            "deal", "user", definition);
+
+        assertEquals(NodeType.ACTION, compiled.nodeType("task"));
+        verifyNoInteractions(workspaceService);
+    }
+
+    @Test
+    void schemaV2ManualTriggerAcceptsTypedInputsAndExplicitActionTargets() {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("manual");
+        RuleAction task = new RuleAction();
+        task.setType("create_task");
+        task.setTitleTemplate(new WorkflowTextTemplate(
+            List.of(
+                new WorkflowTextPart("Follow up with ", null),
+                new WorkflowTextPart(
+                    null,
+                    new WorkflowValueRef("record_field", null, "name", null, null))),
+            "fail"));
+        task.setTargetUserRef(
+            new WorkflowValueRef("launch_input", "assignee", null, null, null));
+        task.setDueDateRef(
+            new WorkflowValueRef("launch_input", "dueDate", null, null, null));
+        WorkflowDefinition definition = new WorkflowDefinition(
+            2,
+            "trigger",
+            List.of(
+                new WorkflowNode.Trigger("trigger", trigger),
+                new WorkflowNode.Action("task", task),
+                new WorkflowNode.End("end")),
+            List.of(
+                edge("trigger-task", "trigger", "task", WorkflowEdge.Outcome.NEXT),
+                edge("task-end", "task", "end", WorkflowEdge.Outcome.NEXT)),
+            List.of(
+                new WorkflowInputDefinition(
+                    "assignee", "Assignee", WorkflowInputType.USER, true, null),
+                new WorkflowInputDefinition(
+                    "dueDate", "Due date", WorkflowInputType.DATE, true, null)),
+            null,
+            null);
+
+        CompiledWorkflow compiled = validator.validateForMutationAndCompile(
+            "company", "user", definition).compiled();
+
+        assertEquals(2, compiled.schemaVersion());
+        assertEquals(List.of("assignee", "dueDate"),
+            compiled.inputs().stream().map(WorkflowInputDefinition::key).toList());
+    }
+
+    @Test
+    void schemaV2RejectsBlankAutomaticDefaultsAndNonDominatingStepOutputs() {
+        RuleTrigger automatic = entityChange();
+        automatic.setAllowManualRuns(false);
+        RuleAction task = new RuleAction();
+        task.setType("create_task");
+        task.setTitle("Create task");
+        task.setTargetUserId(41);
+        task.setDueInDays(1);
+        WorkflowDefinition blankDefault = new WorkflowDefinition(
+            2,
+            "trigger",
+            List.of(
+                new WorkflowNode.Trigger("trigger", automatic),
+                new WorkflowNode.Action("task", task),
+                new WorkflowNode.End("end")),
+            List.of(
+                edge("trigger-task", "trigger", "task", WorkflowEdge.Outcome.NEXT),
+                edge("task-end", "task", "end", WorkflowEdge.Outcome.NEXT)),
+            List.of(new WorkflowInputDefinition(
+                "note",
+                "Note",
+                WorkflowInputType.TEXT,
+                true,
+                JsonMapper.builder().build().valueToTree("  "))),
+            null,
+            null);
+        WorkflowDefinitionValidationException blank = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> validator.validateForMutation("deal", "user", blankDefault));
+        assertEquals(WorkflowDiagnosticCode.INPUT_REQUIRED, blank.diagnostic().code());
+
+        WorkflowTextTemplate outputTitle = new WorkflowTextTemplate(
+            List.of(new WorkflowTextPart(
+                null,
+                new WorkflowValueRef("step_output", null, null, "task", "taskId"))),
+            "fail");
+        RuleAction notify = new RuleAction();
+        notify.setType("notify");
+        notify.setTitleTemplate(outputTitle);
+        notify.setTargetUserId(41);
+        WorkflowDefinition branchOnlyOutput = new WorkflowDefinition(
+            2,
+            "trigger",
+            List.of(
+                new WorkflowNode.Trigger("trigger", automatic),
+                new WorkflowNode.Condition("condition", condition()),
+                new WorkflowNode.Action("task", task),
+                new WorkflowNode.Action("notify", notify),
+                new WorkflowNode.End("end")),
+            List.of(
+                edge("trigger-condition", "trigger", "condition", WorkflowEdge.Outcome.NEXT),
+                edge("condition-task", "condition", "task", WorkflowEdge.Outcome.YES),
+                edge("condition-notify", "condition", "notify", WorkflowEdge.Outcome.NO),
+                edge("task-notify", "task", "notify", WorkflowEdge.Outcome.NEXT),
+                edge("notify-end", "notify", "end", WorkflowEdge.Outcome.NEXT)),
+            List.of(),
+            null,
+            null);
+        WorkflowDefinitionValidationException dominance = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> validator.validateForMutation("deal", "user", branchOnlyOutput));
+        assertEquals(
+            WorkflowDiagnosticCode.STEP_OUTPUT_NOT_DOMINATING,
+            dominance.diagnostic().code());
+    }
+
+    @Test
+    void schemaV2StoppedEndAcceptsAnOmittedReasonAndValidatesProvidedTokens() {
+        RuleTrigger omittedTrigger = entityChange();
+        omittedTrigger.setAllowManualRuns(true);
+        RuleAction omittedAction = notifyAction();
+        omittedAction.setTargetUserId(41);
+        WorkflowDefinition omitted = new WorkflowDefinition(
+            2,
+            "trigger",
+            List.of(
+                new WorkflowNode.Trigger("trigger", omittedTrigger),
+                new WorkflowNode.Action("action", omittedAction),
+                new WorkflowNode.End(
+                    "end", new WorkflowEndConfig("stopped", null))),
+            List.of(
+                edge("trigger-action", "trigger", "action", WorkflowEdge.Outcome.NEXT),
+                edge("action-end", "action", "end", WorkflowEdge.Outcome.NEXT)),
+            List.of(),
+            null,
+            null);
+
+        assertDoesNotThrow(() -> validator.validateForMutation("deal", "user", omitted));
+
+        RuleTrigger invalidTrigger = entityChange();
+        invalidTrigger.setAllowManualRuns(true);
+        RuleAction invalidAction = notifyAction();
+        invalidAction.setTargetUserId(41);
+        WorkflowDefinition invalid = new WorkflowDefinition(
+            2,
+            "trigger",
+            List.of(
+                new WorkflowNode.Trigger("trigger", invalidTrigger),
+                new WorkflowNode.Action("action", invalidAction),
+                new WorkflowNode.End(
+                    "end", new WorkflowEndConfig("stopped", "Invalid reason"))),
+            List.of(
+                edge("trigger-action", "trigger", "action", WorkflowEdge.Outcome.NEXT),
+                edge("action-end", "action", "end", WorkflowEdge.Outcome.NEXT)),
+            List.of(),
+            null,
+            null);
+        WorkflowDefinitionValidationException failure = assertThrows(
+            WorkflowDefinitionValidationException.class,
+            () -> validator.validateForMutation("deal", "user", invalid));
+        assertEquals(WorkflowDiagnosticCode.CONFIG_FIELD_INVALID, failure.diagnostic().code());
     }
 
     @Test

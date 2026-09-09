@@ -9,5 +9,15 @@ public record WorkflowNodeExecutionContext(
     WorkflowRun run,
     WorkflowVersion version,
     CompiledWorkflow compiled,
-    WorkflowExecutionPrincipal principal
-) { }
+    WorkflowExecutionPrincipal principal,
+    WorkspaceService.LockedPermissionSnapshot lockedAuthorization
+) {
+
+    public WorkflowNodeExecutionContext(
+            WorkflowRun run,
+            WorkflowVersion version,
+            CompiledWorkflow compiled,
+            WorkflowExecutionPrincipal principal) {
+        this(run, version, compiled, principal, null);
+    }
+}

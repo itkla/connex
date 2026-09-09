@@ -60,6 +60,11 @@ public interface WorkflowOperationsMapper {
         @Param("workflowId") int workflowId,
         @Param("tokenHash") byte[] tokenHash);
 
+    WorkflowInvocation getInvocationByToken(
+        @Param("workspaceId") int workspaceId,
+        @Param("workflowId") int workflowId,
+        @Param("tokenHash") byte[] tokenHash);
+
     WorkflowInvocation getInvocationForUpdate(
         @Param("workspaceId") int workspaceId,
         @Param("workflowId") int workflowId,

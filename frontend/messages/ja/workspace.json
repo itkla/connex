@@ -408,7 +408,8 @@
             "assign_owner": "担当者を割り当て",
             "set_response_due": "初回応答期限を設定",
             "send_message": "キャンペーンメッセージを送信",
-            "change_stage": "ステージを移動"
+            "change_stage": "ステージを移動",
+            "update_field": "決着予定日を更新"
         },
         "runAs": {
             "user": {
@@ -512,7 +513,8 @@
             "DEAL_UPDATE": "案件更新",
             "COMPANY_UPDATE": "会社更新",
             "PERSON_UPDATE": "連絡先更新",
-            "additional": "追加のワークスペース権限"
+            "additional": "追加のワークスペース権限",
+            "TASK_READ": "タスクを閲覧"
         },
         "validationReady": "確認が完了しました。この下書きは公開できます。",
         "validationErrorTitle": "公開前に問題を {count} 件修正してください",
@@ -553,19 +555,23 @@
             "condition": "条件",
             "action": "アクション",
             "delay": "待機",
-            "end": "終了"
+            "end": "終了",
+            "wait": "タスクの完了を待つ"
         },
         "inspectorHint": {
             "trigger": "このワークフローが始まるきっかけと、使用する権限を設定します。",
             "condition": "このステップで確認する内容と、それぞれの結果の進み先を設定します。",
             "action": "アクションを1つ選び、必要な項目を入力します。",
             "delay": "この経路を決めた時間だけ一時停止します。",
-            "end": "この経路をここで終了します。"
+            "end": "この経路をここで終了します。",
+            "wait": "前のステップで作成したタスクが完了したら続行し、期限を過ぎたらタイムアウトの経路へ進みます。"
         },
         "branch": {
             "next": "次へ",
             "yes": "はい",
-            "no": "いいえ"
+            "no": "いいえ",
+            "completed": "完了",
+            "timeout": "タイムアウト"
         },
         "canvasA11y": {
             "nodeDescription": "Enterキーでステップを選択します。編集できる場合は矢印キーで移動できます。",
@@ -588,7 +594,8 @@
             "delayHours": "{value}時間待機",
             "delayDays": "{value}日待機",
             "delaySeconds": "{value}秒待機",
-            "end": "この分岐を完了"
+            "end": "この分岐を完了",
+            "manual": "{record}から手動で実行"
         },
         "inspection": {
             "run": "実行 #{run}",
@@ -620,7 +627,8 @@
                 "node": "ステップ",
                 "edge": "分岐接続",
                 "position": "キャンバス位置",
-                "viewport": "キャンバス表示範囲"
+                "viewport": "キャンバス表示範囲",
+                "definitionSettings": "実行時の入力と開始設定"
             }
         },
         "simulation": {
@@ -641,7 +649,8 @@
                 "would_complete": "完了する見込み",
                 "not_enrolled": "登録されない見込み",
                 "would_wait": "ここで待機する見込み",
-                "blocked": "ブロックされています"
+                "blocked": "ブロックされています",
+                "would_stop": "停止予定"
             }
         },
         "close": "閉じる",
@@ -705,7 +714,8 @@
                 "failed": "失敗",
                 "skipped": "スキップ",
                 "cancelled": "キャンセル済み",
-                "intervention_required": "対応が必要"
+                "intervention_required": "対応が必要",
+                "stopped": "停止"
             },
             "reference": "実行 #{run}",
             "legacyReference": "以前の実行 #{run}",
@@ -789,9 +799,195 @@
             "enrollment_not_matched": "レコードは登録されない見込みです。",
             "action_ready": "このアクションは実行可能になる見込みです。",
             "delay_wait": "この位置で待機するため、プレビューを停止します。",
-            "end_reached": "この位置で経路が完了する見込みです。"
+            "end_reached": "この位置で経路が完了する見込みです。",
+            "manual_entry_invalid": "自動ワークフローを手動でも実行できるか選択してください。",
+            "manual_entry_disabled": "このワークフローの手動実行は無効です。",
+            "input_definition_invalid": "入力名、種類、既定値を確認してください。",
+            "input_required": "必須の実行時入力を指定してください。",
+            "input_unknown": "指定された入力はこのワークフローに存在しません。",
+            "input_type_invalid": "入力の種類に合う値を指定してください。",
+            "binding_invalid": "このアクション項目で使用できる値を選択してください。",
+            "binding_unresolved": "このアクションに必要な値を取得できません。",
+            "step_output_not_dominating": "このアクションに至るすべての経路で実行される前のステップを選択してください。"
         },
-        "diagnosticFallback": "この確認内容を説明できませんでした。"
+        "diagnosticFallback": "この確認内容を説明できませんでした。",
+        "register": {
+            "search": "ワークフローの名前や目的で検索",
+            "recordFilter": "対象レコード",
+            "allRecords": "すべてのレコード種類",
+            "stateFilter": "ワークフローの状態",
+            "state": {
+                "all": "すべての状態",
+                "draft": "下書き",
+                "enabled": "有効",
+                "disabled": "無効",
+                "paused": "一時停止中",
+                "attention": "対応が必要"
+            },
+            "noMatchesTitle": "一致するワークフローがありません",
+            "noMatchesBody": "検索条件を変更するか、フィルターを解除してください。",
+            "clearFilters": "フィルターを解除",
+            "noPurpose": "このワークフローで達成する目的を追加してください。"
+        },
+        "setup": {
+            "title": "ワークフローを作成",
+            "description": "開始方法と達成したい目的を選び、必要なステップを組み立てます。",
+            "browseRecipes": "レシピから始める",
+            "startQuestion": "このワークフローをどう開始しますか？",
+            "start": {
+                "manual": {
+                    "title": "レコードから手動で実行",
+                    "body": "必要なときにフォローアップ、会社レビュー、引き継ぎを準備します。"
+                },
+                "entity_change": {
+                    "title": "レコードの変更時",
+                    "body": "連絡先の作成、担当者の変更、案件のステージ変更に対応します。"
+                },
+                "schedule": {
+                    "title": "スケジュールで実行",
+                    "body": "条件に合うレコードを見つけ、定期的な作業を進めます。"
+                },
+                "date": {
+                    "title": "商談の日付を基準に開始",
+                    "body": "商談の決着予定日の前後に、指定した現地時刻で開始します。"
+                }
+            },
+            "recordQuestion": "各実行で対象にするレコードは？",
+            "recordHelp": "各実行の対象は1つのレコードです。レコードの情報を各ステップで利用できます。",
+            "namePlaceholder": "例：会社レビューを準備",
+            "purposeLabel": "このワークフローの目的は？",
+            "purposePlaceholder": "チームが確認できる成果を記述してください。",
+            "purposeHelp": "目的はワークフロー一覧に表示され、利用する場面をチームに伝えます。",
+            "nextTitle": "組み立て、プレビュー、公開",
+            "nextBody": "エディターでタスク、担当者の割り当て、レコードの値、条件分岐を追加します。有効にする前に実際のレコードでプレビューします。",
+            "continue": "エディターに進む",
+            "catalogFailed": "ワークフローのステップ機能を読み込めませんでした。再試行して作成を続けてください。",
+            "catalogUnavailable": "この環境では新しいワークフロー機能を利用できません。",
+            "eventOnlyHelp": "タスクと文書のワークフローは、対応するレコードイベントで開始します。エディターでイベントとアクションを選択してください。",
+            "nextBodyLegacy": "エディターでイベントと対応するアクションを選び、保存して公開します。"
+        },
+        "inputs": {
+            "launchTitle": "この実行の入力値",
+            "launchHelp": "実行を準備すると入力値が固定されます。実行内容を確認する前に値を変更してください。",
+            "pickMember": "メンバーを選択",
+            "noValue": "値なし",
+            "editorTitle": "実行時の入力",
+            "editorHelp": "手動実行の前に必要な情報を入力してもらいます。自動実行では既定値を使うため、必須項目には既定値を設定してください。",
+            "label": "入力項目のラベル",
+            "typeLabel": "値の種類",
+            "type": {
+                "text": "テキスト",
+                "user": "メンバー",
+                "date": "日付"
+            },
+            "required": "必須",
+            "defaultLabel": "既定値（任意）",
+            "noDefault": "既定値なし",
+            "newInput": "新しい入力項目",
+            "remove": "「{name}」を削除",
+            "add": "入力項目を追加",
+            "upgrade": "この下書きで新しいステップ機能を有効にする",
+            "upgradeHelp": "公開済みの動作を保ち、下書きで手動開始と名前付きの値を使えるようにします。公開前に担当者と通知先を確認してください。",
+            "manualOnlyHelp": "公開して有効にすると、この種類のレコードの「ワークフローを実行」から利用できます。レコードの変更やスケジュールでは開始しません。",
+            "allowManual": "手動実行を許可",
+            "allowManualHelp": "レコードの「ワークフローを実行」からも利用できるようにします。手動実行でも権限と業務上の条件を確認します。",
+            "publishDisclosure": "実行時の入力は{count}項目です。公開して有効にすると、選択した開始方法を利用できます。",
+            "returnToRecord": "レコードに戻ってワークフローを実行",
+            "automaticDefaultRequired": "自動開始できるように、この必須入力の既定値を設定してください。"
+        },
+        "values": {
+            "input": "入力 · {name}",
+            "record": "レコード · {name}",
+            "output": "作成済みタスク · {name}",
+            "createdTask": "前のステップのタスク",
+            "insert": "値を挿入",
+            "text": "テキスト",
+            "unavailable": "この値は利用できません",
+            "remove": "この部分を削除",
+            "addText": "テキストを追加",
+            "missingLabel": "値がない場合",
+            "missingFail": "停止して対応を求める",
+            "missingEmpty": "任意のテキストを空にする",
+            "dueSource": "タスクの期限",
+            "relativeDays": "このステップの実行からの日数",
+            "assignee": "担当者",
+            "recipient": "通知先",
+            "useValue": "入力値またはレコードの値を使う",
+            "field": {
+                "id": "レコードID",
+                "name": "名前",
+                "ownerId": "担当者",
+                "email": "メールアドレス",
+                "title": "役職",
+                "companyId": "会社ID",
+                "companyName": "会社名",
+                "industry": "業種",
+                "status": "状態",
+                "expectedCloseDate": "決着予定日"
+            },
+            "insertInto": "{field}に値を挿入",
+            "assigneeValue": "担当者の値",
+            "recipientValue": "受信者の値"
+        },
+        "end": {
+            "outcome": "プロセスの結果",
+            "completed": "完了",
+            "stopped": "停止",
+            "reason": "停止理由",
+            "reasonHelp": "任意です。英小文字から始め、英小文字・数字・アンダースコアで短い理由を入力してください。"
+        },
+        "policies": {
+            "title": "開始と停止の条件",
+            "help": "このレコードの手動開始と自動開始の両方に適用されます。",
+            "oneActive": "レコードごとに同時実行は1件まで",
+            "cooldown": "再開始までの時間（分）",
+            "cooldownHelp": "最後に受け付けた開始から計算します。0にするとすぐに再開始できます。",
+            "entry": "条件に一致する場合のみ開始",
+            "stop": "条件に一致したら停止",
+            "stopHelp": "操作の前と待機の再開時に再確認します。一致すると、失敗にはせず実行を停止します。",
+            "compatibilityEnrollment": "既存のスケジュールでは最初の条件ステップで対象を選びます。開始条件はそのステップで編集してください。",
+            "stopAllWarning": "空の停止条件はすべてのレコードに一致します。公開前に条件を追加するか、「条件に一致したら停止」をオフにしてください。"
+        },
+        "date": {
+            "fieldHelp": "この商談の決着予定日を使います。日付が未設定の商談は対象になりません。",
+            "offset": "決着予定日からの日数",
+            "offsetHelp": "前なら負の数、当日なら0、後なら正の数を入力してください。",
+            "localTime": "開始する現地時刻",
+            "timezone": "タイムゾーン",
+            "timezoneEmpty": "一致するタイムゾーンがありません",
+            "catchupHelp": "新しいスケジュールは当日分から対象にします。停止後の再開時は、計画済みの前日分も実行できます。それ以前は未実行として記録します。夏時間の切替時は最初の有効な時刻、時刻が重複する場合は早い方を使います。",
+            "summary": "決着予定日から{offset, number}日 · {time} {timezone}",
+            "updateFieldHelp": "この商談の決着予定日のみを更新します。",
+            "newDate": "新しい決着予定日",
+            "statusTitle": "日付スケジュール",
+            "status": {
+                "planned": "計画済み",
+                "queued": "待機中",
+                "missed": "未実行"
+            },
+            "nextDue": "次回の予定: {date}",
+            "lastReconciled": "最終確認: {date}",
+            "missedHelp": "未実行の予定は対象期間を過ぎていたため、実行を作成しませんでした。"
+        },
+        "wait": {
+            "source": "完了を待つタスク",
+            "pickTask": "前のステップのタスクを選択",
+            "noTask": "このステップの前にタスク作成を追加してください。この待機に至るすべての経路で実行される必要があります。",
+            "timeoutMinutes": "待機の上限（分）",
+            "branchesHelp": "タスクが完了すると「完了」の経路へ進みます。期限を過ぎると「タイムアウト」の経路へ進みます。",
+            "summary": "タスクの完了 · 最大{minutes, number}分",
+            "previewPending": "タスクの完了待ちです。プレビューでは、どちらの経路へ進むかを判断できません。",
+            "resolution": {
+                "pending": "タスクの完了待ち",
+                "completed": "タスクの完了を確認",
+                "timeout": "タスクの完了期限を超過",
+                "cancelled": "待機をキャンセル",
+                "stopped": "待機中にプロセスを停止"
+            },
+            "deadline": "期限: {date}",
+            "resolvedAt": "確定: {date}",
+            "viewTask": "タスクを表示"
+        }
     },
     "WorkspaceCustomFields": {
         "newField": "フィールドを追加",

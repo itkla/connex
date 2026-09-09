@@ -51,6 +51,7 @@ const RUN_STATUSES: WorkflowRunStatus[] = [
     "failed",
     "skipped",
     "cancelled",
+    "stopped",
     "intervention_required",
 ];
 const FAILURE_CATEGORIES = ["actor", "permission", "reference", "retry", "configuration", "execution"] as const;

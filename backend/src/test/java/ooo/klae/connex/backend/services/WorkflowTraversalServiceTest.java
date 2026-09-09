@@ -77,7 +77,7 @@ class WorkflowTraversalServiceTest {
         WorkflowDefinition definition = new WorkflowDefinition(
             1, "trigger", List.of(), List.of());
         when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
-        when(definitionValidator.validate("company", "user", definition))
+        when(definitionValidator.compileForRuntime("company", "user", definition))
             .thenReturn(compiled);
         when(compiled.nodeType("trigger"))
             .thenReturn(WorkflowDefinitionValidator.NodeType.TRIGGER);

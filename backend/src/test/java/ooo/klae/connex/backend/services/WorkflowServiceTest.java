@@ -61,6 +61,7 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
 import ooo.klae.connex.backend.mappers.RuleMapper;
+import ooo.klae.connex.backend.mappers.WorkflowDateEnrollmentMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.LegacyWorkflowGraphConverter.ConvertedWorkflow;
@@ -80,6 +81,8 @@ class WorkflowServiceTest {
     @Mock private AuditService auditService;
     @Mock private WorkflowDefinitionValidator workflowDefinitionValidator;
     @Mock private WorkflowRuntimeProperties runtimeProperties;
+    @Mock private WorkflowDateIntakeService dateIntakeService;
+    @Mock private WorkflowDateEnrollmentMapper workflowDateEnrollmentMapper;
 
     private WorkflowDraftCanonicalizer canonicalizer;
     private LegacyWorkflowGraphConverter graphConverter;
@@ -102,7 +105,9 @@ class WorkflowServiceTest {
             graphConverter,
             definitionCodec,
             new WorkflowVersionProjection(definitionCodec),
-            runtimeProperties);
+            runtimeProperties,
+            dateIntakeService,
+            workflowDateEnrollmentMapper);
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         lenient().when(workspaceService.getCurrentUserId()).thenReturn(41);
         lenient().when(workspaceService.getCurrentPermissions())
@@ -139,6 +144,24 @@ class WorkflowServiceTest {
         verify(auditService).record(
             eq("workflow.create"), eq("workflow"), eq(101), eq("Workflow 101"),
             eq("Workflow created"), eq(Map.of("draftRevision", 0, "executionMode", "user")));
+    }
+
+    @Test
+    void recipeCreateKeepsLegacyOwnerUntilFirstPublicationAssignsCanonicalPointer()
+            throws Exception {
+        stubUserMutation(Set.of(41, 55), Set.of(55));
+        doAnswer(invocation -> {
+            invocation.<Workflow>getArgument(0).setId(101);
+            return null;
+        }).when(workflowMapper).insert(any(Workflow.class));
+
+        service.createForRecipe(createRequest("user"), 55);
+
+        ArgumentCaptor<Workflow> workflow = ArgumentCaptor.forClass(Workflow.class);
+        verify(workflowMapper).insert(workflow.capture());
+        assertEquals("legacy", workflow.getValue().getRuntimeOwner());
+        assertNull(workflow.getValue().getActiveVersionId());
+        assertEquals(55, workflow.getValue().getDraftRunAsUserId());
     }
 
     @Test
@@ -970,6 +993,29 @@ class WorkflowServiceTest {
         verify(auditService).record(
             eq("workflow.disable"), eq("workflow"), eq(101), eq("Workflow 101"),
             eq("Workflow disabled"), any());
+    }
+
+    @Test
+    void resumeReconcilesDateEnrollmentWithThePersistedRuntimeGeneration() {
+        PublishedPair pair = publishedPair("Workflow", true, 4);
+        pair.workflow().setIntakePausedAt(LocalDateTime.of(2026, 8, 2, 10, 0));
+        pair.workflow().setRuntimeGeneration(12);
+        when(workflowMapper.getById(7, pair.workflow().getId())).thenReturn(pair.workflow());
+        when(workflowMapper.getByIdForUpdate(7, pair.workflow().getId()))
+            .thenReturn(pair.workflow());
+        when(workflowVersionMapper.getById(
+            7, pair.workflow().getId(), pair.version().getId())).thenReturn(pair.version());
+        when(ruleMapper.getById(7, pair.rule().getId())).thenReturn(pair.rule());
+        stubUserMutation(Set.of(41), Set.of());
+        when(workflowMapper.updateIntakePause(7, 101, false, 41)).thenReturn(1);
+
+        WorkflowDto resumed = service.resume(101);
+
+        ArgumentCaptor<Workflow> workflow = ArgumentCaptor.forClass(Workflow.class);
+        verify(dateIntakeService).enqueueFull(
+            workflow.capture(), eq(pair.version()), any(WorkflowDefinition.class));
+        assertEquals(12, workflow.getValue().getRuntimeGeneration());
+        assertNull(resumed.intakePausedAt());
     }
 
     @Test

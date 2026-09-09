@@ -20,6 +20,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.WorkflowRecipeOrigin;
+import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentCondition;
@@ -29,6 +30,8 @@ import ooo.klae.connex.backend.dto.WorkflowCreateRequest;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDto;
 import ooo.klae.connex.backend.dto.WorkflowEdge;
+import ooo.klae.connex.backend.dto.WorkflowEndConfig;
+import ooo.klae.connex.backend.dto.WorkflowEnrollment;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.dto.WorkflowPublishRequest;
 import ooo.klae.connex.backend.dto.WorkflowRecipeDto;
@@ -37,6 +40,7 @@ import ooo.klae.connex.backend.dto.WorkflowRecipeInstallRequest;
 import ooo.klae.connex.backend.dto.WorkflowRecipePreviewDto;
 import ooo.klae.connex.backend.dto.WorkflowRecipePreviewRequest;
 import ooo.klae.connex.backend.dto.WorkflowValidationDto;
+import ooo.klae.connex.backend.dto.WorkflowWaitConfig;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -50,14 +54,18 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 @RequiredArgsConstructor
 public class WorkflowRecipeService {
 
-    private static final int RECIPE_VERSION = 1;
+    private static final int RECIPE_VERSION = 2;
     private static final List<String> RECIPE_ORDER = List.of(
         "person-job-change-follow-up",
         "deal-won-handoff",
-        "cooling-company-review");
+        "cooling-company-review",
+        "person-qualified-routing",
+        "deal-follow-through",
+        "deal-renewal-preparation");
 
     private final WorkflowService workflowService;
     private final WorkflowOperationsMapper operationsMapper;
+    private final PipelineMapper pipelineMapper;
     private final WorkflowDraftCanonicalizer canonicalizer;
     private final WorkflowDefinitionValidator definitionValidator;
     private final WorkflowActionRetryPolicy retryPolicy;
@@ -160,21 +168,33 @@ public class WorkflowRecipeService {
             .map(Enum::name)
             .sorted()
             .toList();
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int requesterId = workspaceService.getCurrentUserId();
         Set<Permission> actorPermissions = material.actorUserId() < 1
             ? Set.of()
-            : workspaceService.permissionsFor(
-                workspaceService.getCurrentWorkspaceId(), material.actorUserId());
+            : workspaceService.permissionsFor(workspaceId, material.actorUserId());
+        Set<Permission> requesterPermissions = workspaceService.permissionsFor(
+            workspaceId, requesterId);
         List<String> missingPermissions = required.stream()
-            .filter(permission -> !actorPermissions.contains(permission))
+            .filter(permission -> !actorPermissions.contains(permission)
+                || !requesterPermissions.contains(permission))
             .map(Enum::name)
             .sorted()
             .toList();
         boolean actorAvailable = material.actorUserId() > 0
-            && workspaceService.getRole(
-                workspaceService.getCurrentWorkspaceId(), material.actorUserId()) != null;
+            && workspaceService.getRole(workspaceId, material.actorUserId()) != null;
         List<String> missing = new ArrayList<>(material.unresolvedParameters());
         if (!actorAvailable && !missing.contains("actorUserId")) {
             missing.add("actorUserId");
+        }
+        if (workspaceService.getRole(workspaceId, material.targetUserId()) == null
+                && !missing.contains("targetUserId")) {
+            missing.add("targetUserId");
+        }
+        if (material.targetStageId() != null
+                && pipelineMapper.getStageById(workspaceId, material.targetStageId()) == null
+                && !missing.contains("targetStageId")) {
+            missing.add("targetStageId");
         }
         boolean canPublish = missing.isEmpty() && missingPermissions.isEmpty();
         WorkflowValidationDto validation = new WorkflowValidationDto(
@@ -199,7 +219,7 @@ public class WorkflowRecipeService {
                 canonical,
                 material.definition(),
                 material.actorUserId(),
-                workspaceService.getCurrentUserId(),
+                requesterId,
                 exampleRecordId);
         return new WorkflowRecipePreviewDto(
             metadata(material.recipeKey()),
@@ -227,6 +247,13 @@ public class WorkflowRecipeService {
         int targetUserId = integer(safeParameters, "targetUserId", fallbackUserId, 1, Integer.MAX_VALUE);
         int dueInDays = integer(safeParameters, "dueInDays", 7, 0, 365);
         int coolingDays = integer(safeParameters, "coolingDays", 30, 30, 365);
+        int targetStageId = integer(
+            safeParameters, "targetStageId", 1, 1, Integer.MAX_VALUE);
+        int completionTimeoutDays = integer(
+            safeParameters, "completionTimeoutDays", 7, 1, 30);
+        int offsetDays = integer(safeParameters, "offsetDays", -30, -365, 365);
+        String localTime = localTime(safeParameters, "localTime", "09:00");
+        String timezone = timezone(safeParameters, "timezone", "UTC");
         String taskTitle = text(safeParameters, "taskTitle", defaultTaskTitle(recipeKey), 255);
         String activityNote = text(
             safeParameters, "activityNote", "Record the completed handoff.", 2000);
@@ -239,14 +266,26 @@ public class WorkflowRecipeService {
             case "person-job-change-follow-up" -> personJobChange(
                 targetUserId, taskTitle, dueInDays);
             case "deal-won-handoff" -> dealWon(
-                targetUserId, taskTitle, activityNote, dueInDays);
+                targetUserId, taskTitle, activityNote, dueInDays, completionTimeoutDays);
             case "cooling-company-review" -> coolingCompany(
                 targetUserId, taskTitle, coolingDays, dueInDays);
+            case "person-qualified-routing" -> personQualifiedRouting(
+                targetUserId, taskTitle, dueInDays);
+            case "deal-follow-through" -> dealFollowThrough(
+                targetUserId, targetStageId, taskTitle, dueInDays, completionTimeoutDays);
+            case "deal-renewal-preparation" -> dealRenewalPreparation(
+                targetUserId,
+                taskTitle,
+                dueInDays,
+                completionTimeoutDays,
+                offsetDays,
+                localTime,
+                timezone);
             default -> throw recipeNotFound();
         };
         String recordType = switch (recipeKey) {
-            case "person-job-change-follow-up" -> "person";
-            case "deal-won-handoff" -> "deal";
+            case "person-job-change-follow-up", "person-qualified-routing" -> "person";
+            case "deal-won-handoff", "deal-follow-through", "deal-renewal-preparation" -> "deal";
             case "cooling-company-review" -> "company";
             default -> throw recipeNotFound();
         };
@@ -259,7 +298,9 @@ public class WorkflowRecipeService {
             definition,
             canvas(definition),
             List.copyOf(unresolved),
-            canonicalParameters(safeParameters));
+            canonicalParameters(safeParameters),
+            targetUserId,
+            "deal-follow-through".equals(recipeKey) ? targetStageId : null);
     }
 
     private WorkflowRecipeDto metadata(String recipeKey) {
@@ -274,7 +315,7 @@ public class WorkflowRecipeService {
             case "deal-won-handoff" -> recipe(
                 recipeKey,
                 "deal.won",
-                List.of("deal"),
+                List.of("deal", "task"),
                 List.of("task", "activity"),
                 List.of("ACTIVITY_CREATE", "TASK_CREATE"),
                 List.of("create_task", "log_activity"));
@@ -282,6 +323,27 @@ public class WorkflowRecipeService {
                 recipeKey,
                 "schedule.daily",
                 List.of("company", "activity"),
+                List.of("task"),
+                List.of("TASK_CREATE"),
+                List.of("create_task"));
+            case "person-qualified-routing" -> recipe(
+                recipeKey,
+                "person.lifecycle_changed",
+                List.of("person"),
+                List.of("owner", "task"),
+                List.of("PERSON_UPDATE", "TASK_CREATE"),
+                List.of("assign_owner", "create_task"));
+            case "deal-follow-through" -> recipe(
+                recipeKey,
+                "deal.created",
+                List.of("deal", "task"),
+                List.of("task", "stage"),
+                List.of("DEAL_UPDATE", "TASK_CREATE"),
+                List.of("create_task", "change_stage"));
+            case "deal-renewal-preparation" -> recipe(
+                recipeKey,
+                "date.deal.expectedCloseDate",
+                List.of("deal", "task"),
                 List.of("task"),
                 List.of("TASK_CREATE"),
                 List.of("create_task"));
@@ -302,7 +364,7 @@ public class WorkflowRecipeService {
         return new WorkflowRecipeDto(
             recipeKey,
             RECIPE_VERSION,
-            1,
+            2,
             "recipes.items." + recipeKey + ".title",
             "recipes.items." + recipeKey + ".description",
             sourceEvent,
@@ -311,7 +373,7 @@ public class WorkflowRecipeService {
             dataWritten,
             requiredParameters(recipeKey),
             requiredPermissions,
-            List.of("sourceEvent", "recordType", "actionTypes", "retryBehavior"),
+            lockedFields(recipeKey),
             requiredParameters(recipeKey),
             sideEffects,
             actions,
@@ -329,10 +391,10 @@ public class WorkflowRecipeService {
             int targetUserId,
             String title,
             int dueInDays) {
-        RuleTrigger trigger = entityTrigger("person.job_changed");
+        RuleTrigger trigger = entityTriggerV2("person.job_changed");
         RuleAction task = task(targetUserId, title, dueInDays);
         return new WorkflowDefinition(
-            1,
+            2,
             "trigger",
             List.of(
                 new WorkflowNode.Trigger("trigger", trigger),
@@ -340,30 +402,41 @@ public class WorkflowRecipeService {
                 new WorkflowNode.End("complete")),
             List.of(
                 edge("trigger-next", "trigger", "follow-up", WorkflowEdge.Outcome.NEXT),
-                edge("follow-up-next", "follow-up", "complete", WorkflowEdge.Outcome.NEXT)));
+                edge("follow-up-next", "follow-up", "complete", WorkflowEdge.Outcome.NEXT)),
+            List.of(),
+            null,
+            null);
     }
 
     private static WorkflowDefinition dealWon(
             int targetUserId,
             String title,
             String activityNote,
-            int dueInDays) {
+            int dueInDays,
+            int completionTimeoutDays) {
         RuleAction activity = new RuleAction();
         activity.setType("log_activity");
         activity.setActivityType("note");
         activity.setBody(activityNote);
         return new WorkflowDefinition(
-            1,
+            2,
             "trigger",
             List.of(
-                new WorkflowNode.Trigger("trigger", entityTrigger("deal.won")),
+                new WorkflowNode.Trigger("trigger", entityTriggerV2("deal.won")),
                 new WorkflowNode.Action("handoff-task", task(targetUserId, title, dueInDays)),
+                waitNode("wait-for-task", "handoff-task", completionTimeoutDays),
                 new WorkflowNode.Action("handoff-activity", activity),
-                new WorkflowNode.End("complete")),
+                new WorkflowNode.End("complete"),
+                stoppedEnd("timed-out", "task_wait_timeout")),
             List.of(
                 edge("trigger-next", "trigger", "handoff-task", WorkflowEdge.Outcome.NEXT),
-                edge("task-next", "handoff-task", "handoff-activity", WorkflowEdge.Outcome.NEXT),
-                edge("activity-next", "handoff-activity", "complete", WorkflowEdge.Outcome.NEXT)));
+                edge("task-next", "handoff-task", "wait-for-task", WorkflowEdge.Outcome.NEXT),
+                edge("wait-completed", "wait-for-task", "handoff-activity", WorkflowEdge.Outcome.COMPLETED),
+                edge("wait-timeout", "wait-for-task", "timed-out", WorkflowEdge.Outcome.TIMEOUT),
+                edge("activity-next", "handoff-activity", "complete", WorkflowEdge.Outcome.NEXT)),
+            List.of(),
+            new WorkflowEnrollment(null, true, 0),
+            fieldCondition("status", "is", "lost"));
     }
 
     private static WorkflowDefinition coolingCompany(
@@ -374,6 +447,7 @@ public class WorkflowRecipeService {
         RuleTrigger trigger = new RuleTrigger();
         trigger.setType("schedule");
         trigger.setCadence("daily");
+        trigger.setAllowManualRuns(true);
         SegmentCondition cooling = new SegmentCondition();
         cooling.setType("predicate");
         cooling.setKey("cooling");
@@ -386,18 +460,111 @@ public class WorkflowRecipeService {
         condition.setConditions(List.of(cooling, noActivity));
         condition.setGroups(List.of());
         return new WorkflowDefinition(
-            1,
+            2,
             "trigger",
             List.of(
                 new WorkflowNode.Trigger("trigger", trigger),
-                new WorkflowNode.Condition("enrollment", condition),
                 new WorkflowNode.Action("review-task", task(targetUserId, title, dueInDays)),
                 new WorkflowNode.End("complete")),
             List.of(
-                edge("trigger-next", "trigger", "enrollment", WorkflowEdge.Outcome.NEXT),
-                edge("enrollment-yes", "enrollment", "review-task", WorkflowEdge.Outcome.YES),
-                edge("enrollment-no", "enrollment", "complete", WorkflowEdge.Outcome.NO),
-                edge("review-next", "review-task", "complete", WorkflowEdge.Outcome.NEXT)));
+                edge("trigger-next", "trigger", "review-task", WorkflowEdge.Outcome.NEXT),
+                edge("review-next", "review-task", "complete", WorkflowEdge.Outcome.NEXT)),
+            List.of(),
+            new WorkflowEnrollment(condition, true, coolingDays * 1440),
+            negated(predicate("cooling", null)));
+    }
+
+    private static WorkflowDefinition personQualifiedRouting(
+            int targetUserId,
+            String title,
+            int dueInDays) {
+        RuleAction owner = new RuleAction();
+        owner.setType("assign_owner");
+        owner.setTargetUserId(targetUserId);
+        SegmentDefinition qualified = fieldCondition("lifecycle", "equals", "QUALIFIED");
+        return new WorkflowDefinition(
+            2,
+            "trigger",
+            List.of(
+                new WorkflowNode.Trigger(
+                    "trigger", entityTriggerV2("person.lifecycle_changed")),
+                new WorkflowNode.Action("assign-owner", owner),
+                new WorkflowNode.Action(
+                    "follow-up-task", task(targetUserId, title, dueInDays)),
+                new WorkflowNode.End("complete")),
+            List.of(
+                edge("trigger-next", "trigger", "assign-owner", WorkflowEdge.Outcome.NEXT),
+                edge("owner-next", "assign-owner", "follow-up-task", WorkflowEdge.Outcome.NEXT),
+                edge("task-next", "follow-up-task", "complete", WorkflowEdge.Outcome.NEXT)),
+            List.of(),
+            new WorkflowEnrollment(qualified, true, 0),
+            negated(fieldCondition("lifecycle", "equals", "QUALIFIED")));
+    }
+
+    private static WorkflowDefinition dealFollowThrough(
+            int targetUserId,
+            int targetStageId,
+            String title,
+            int dueInDays,
+            int completionTimeoutDays) {
+        RuleAction stage = new RuleAction();
+        stage.setType("change_stage");
+        stage.setTargetStageId(targetStageId);
+        return new WorkflowDefinition(
+            2,
+            "trigger",
+            List.of(
+                new WorkflowNode.Trigger("trigger", entityTriggerV2("deal.created")),
+                new WorkflowNode.Action(
+                    "follow-through-task", task(targetUserId, title, dueInDays)),
+                waitNode("wait-for-task", "follow-through-task", completionTimeoutDays),
+                new WorkflowNode.Action("advance-stage", stage),
+                new WorkflowNode.End("complete"),
+                stoppedEnd("timed-out", "task_wait_timeout")),
+            List.of(
+                edge("trigger-next", "trigger", "follow-through-task", WorkflowEdge.Outcome.NEXT),
+                edge("task-next", "follow-through-task", "wait-for-task", WorkflowEdge.Outcome.NEXT),
+                edge("wait-completed", "wait-for-task", "advance-stage", WorkflowEdge.Outcome.COMPLETED),
+                edge("wait-timeout", "wait-for-task", "timed-out", WorkflowEdge.Outcome.TIMEOUT),
+                edge("stage-next", "advance-stage", "complete", WorkflowEdge.Outcome.NEXT)),
+            List.of(),
+            new WorkflowEnrollment(fieldCondition("status", "is", "open"), true, 0),
+            dealClosedCondition());
+    }
+
+    private static WorkflowDefinition dealRenewalPreparation(
+            int targetUserId,
+            String title,
+            int dueInDays,
+            int completionTimeoutDays,
+            int offsetDays,
+            String localTime,
+            String timezone) {
+        RuleTrigger trigger = new RuleTrigger();
+        trigger.setType("date");
+        trigger.setDateField("expectedCloseDate");
+        trigger.setOffsetDays(offsetDays);
+        trigger.setLocalTime(localTime);
+        trigger.setTimezone(timezone);
+        trigger.setAllowManualRuns(false);
+        return new WorkflowDefinition(
+            2,
+            "trigger",
+            List.of(
+                new WorkflowNode.Trigger("trigger", trigger),
+                new WorkflowNode.Action(
+                    "renewal-task", task(targetUserId, title, dueInDays)),
+                waitNode("wait-for-task", "renewal-task", completionTimeoutDays),
+                new WorkflowNode.End("complete"),
+                stoppedEnd("timed-out", "task_wait_timeout")),
+            List.of(
+                edge("trigger-next", "trigger", "renewal-task", WorkflowEdge.Outcome.NEXT),
+                edge("task-next", "renewal-task", "wait-for-task", WorkflowEdge.Outcome.NEXT),
+                edge("wait-completed", "wait-for-task", "complete", WorkflowEdge.Outcome.COMPLETED),
+                edge("wait-timeout", "wait-for-task", "timed-out", WorkflowEdge.Outcome.TIMEOUT)),
+            List.of(),
+            new WorkflowEnrollment(fieldCondition("status", "is", "open"), true, 0),
+            dealClosedCondition());
     }
 
     private static RuleTrigger entityTrigger(String event) {
@@ -405,6 +572,76 @@ public class WorkflowRecipeService {
         trigger.setType("entity_change");
         trigger.setEvents(List.of(event));
         return trigger;
+    }
+
+    private static RuleTrigger entityTriggerV2(String event) {
+        RuleTrigger trigger = entityTrigger(event);
+        trigger.setAllowManualRuns(true);
+        return trigger;
+    }
+
+    private static WorkflowNode.Wait waitNode(
+            String id, String sourceNodeId, int timeoutDays) {
+        return new WorkflowNode.Wait(
+            id,
+            new WorkflowWaitConfig(
+                "event",
+                "task.completed",
+                new WorkflowWaitConfig.Source(sourceNodeId, "taskId"),
+                timeoutDays * 86_400));
+    }
+
+    private static WorkflowNode.End stoppedEnd(String id, String reason) {
+        return new WorkflowNode.End(id, new WorkflowEndConfig("stopped", reason));
+    }
+
+    private static SegmentDefinition fieldCondition(
+            String field, String operator, String value) {
+        SegmentCondition condition = new SegmentCondition();
+        condition.setType("field");
+        condition.setField(field);
+        condition.setOp(operator);
+        condition.setValue(value);
+        SegmentDefinition definition = new SegmentDefinition();
+        definition.setMatch("all");
+        definition.setConditions(List.of(condition));
+        definition.setGroups(List.of());
+        return definition;
+    }
+
+    private static SegmentDefinition predicate(String key, Integer days) {
+        SegmentCondition condition = new SegmentCondition();
+        condition.setType("predicate");
+        condition.setKey(key);
+        condition.setDays(days);
+        SegmentDefinition definition = new SegmentDefinition();
+        definition.setMatch("all");
+        definition.setConditions(List.of(condition));
+        definition.setGroups(List.of());
+        return definition;
+    }
+
+    private static SegmentDefinition negated(SegmentDefinition definition) {
+        definition.setNegate(true);
+        return definition;
+    }
+
+    private static SegmentDefinition dealClosedCondition() {
+        SegmentCondition won = new SegmentCondition();
+        won.setType("field");
+        won.setField("status");
+        won.setOp("is");
+        won.setValue("won");
+        SegmentCondition lost = new SegmentCondition();
+        lost.setType("field");
+        lost.setField("status");
+        lost.setOp("is");
+        lost.setValue("lost");
+        SegmentDefinition definition = new SegmentDefinition();
+        definition.setMatch("any");
+        definition.setConditions(List.of(won, lost));
+        definition.setGroups(List.of());
+        return definition;
     }
 
     private static RuleAction task(int targetUserId, String title, int dueInDays) {
@@ -474,11 +711,34 @@ public class WorkflowRecipeService {
             case "person-job-change-follow-up" -> List.of(
                 "actorUserId", "targetUserId", "taskTitle", "dueInDays");
             case "deal-won-handoff" -> List.of(
-                "actorUserId", "targetUserId", "taskTitle", "activityNote", "dueInDays");
+                "actorUserId", "targetUserId", "taskTitle", "activityNote", "dueInDays",
+                "completionTimeoutDays");
             case "cooling-company-review" -> List.of(
                 "actorUserId", "targetUserId", "taskTitle", "coolingDays", "dueInDays");
+            case "person-qualified-routing" -> List.of(
+                "actorUserId", "targetUserId", "taskTitle", "dueInDays");
+            case "deal-follow-through" -> List.of(
+                "actorUserId", "targetUserId", "targetStageId", "taskTitle", "dueInDays",
+                "completionTimeoutDays");
+            case "deal-renewal-preparation" -> List.of(
+                "actorUserId", "targetUserId", "taskTitle", "offsetDays", "localTime",
+                "timezone", "dueInDays", "completionTimeoutDays");
             default -> throw recipeNotFound();
         };
+    }
+
+    private static List<String> lockedFields(String recipeKey) {
+        List<String> common = new ArrayList<>(List.of(
+            "sourceEvent", "recordType", "actionTypes", "retryBehavior"));
+        if (!"person-job-change-follow-up".equals(recipeKey)) {
+            common.add("enrollmentPolicy");
+            common.add("stopPolicy");
+        }
+        if ("deal-renewal-preparation".equals(recipeKey)) {
+            common.add("dateField");
+            common.add("catchupPolicy");
+        }
+        return List.copyOf(common);
     }
 
     private static boolean parameterMissing(JsonNode value) {
@@ -534,11 +794,33 @@ public class WorkflowRecipeService {
         return result;
     }
 
+    private static String localTime(
+            Map<String, JsonNode> parameters, String key, String fallback) {
+        String result = text(parameters, key, fallback, 5);
+        if (!result.matches("(?:[01]\\d|2[0-3]):[0-5]\\d")) {
+            throw new BadRequestException("Workflow recipe parameter " + key + " is invalid");
+        }
+        return result;
+    }
+
+    private static String timezone(
+            Map<String, JsonNode> parameters, String key, String fallback) {
+        String result = text(parameters, key, fallback, 64);
+        if (!("UTC".equals(result)
+                || java.time.ZoneId.getAvailableZoneIds().contains(result))) {
+            throw new BadRequestException("Workflow recipe parameter " + key + " is invalid");
+        }
+        return result;
+    }
+
     private static String defaultName(String recipeKey) {
         return switch (recipeKey) {
             case "person-job-change-follow-up" -> "Job change follow-up";
             case "deal-won-handoff" -> "Deal won handoff";
             case "cooling-company-review" -> "Cooling company review";
+            case "person-qualified-routing" -> "Qualified contact routing";
+            case "deal-follow-through" -> "Deal follow-through";
+            case "deal-renewal-preparation" -> "Renewal preparation";
             default -> throw recipeNotFound();
         };
     }
@@ -551,6 +833,12 @@ public class WorkflowRecipeService {
                 "Create a handoff task and activity when a deal is won.";
             case "cooling-company-review" ->
                 "Create review tasks for cooling companies on a daily schedule.";
+            case "person-qualified-routing" ->
+                "Assign qualified contacts and create a linked follow-up task.";
+            case "deal-follow-through" ->
+                "Wait for a deal follow-up task before advancing the deal stage.";
+            case "deal-renewal-preparation" ->
+                "Use the deal expected close date to schedule and follow a renewal task.";
             default -> throw recipeNotFound();
         };
     }
@@ -560,6 +848,9 @@ public class WorkflowRecipeService {
             case "person-job-change-follow-up" -> "Follow up after job change";
             case "deal-won-handoff" -> "Complete deal handoff";
             case "cooling-company-review" -> "Review cooling relationship";
+            case "person-qualified-routing" -> "Follow up with qualified contact";
+            case "deal-follow-through" -> "Complete deal follow-through";
+            case "deal-renewal-preparation" -> "Prepare for deal renewal";
             default -> throw recipeNotFound();
         };
     }
@@ -591,6 +882,8 @@ public class WorkflowRecipeService {
         WorkflowDefinition definition,
         WorkflowCanvas canvas,
         List<String> unresolvedParameters,
-        Map<String, String> canonicalParameters
+        Map<String, String> canonicalParameters,
+        int targetUserId,
+        Integer targetStageId
     ) { }
 }

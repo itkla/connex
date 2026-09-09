@@ -16,6 +16,7 @@ public record WorkflowInvocationResultDto(
     int runningCount,
     int waitingCount,
     int succeededCount,
+    int stoppedCount,
     int failedCount,
     int interventionRequiredCount,
     int cancelledCount,

@@ -9,6 +9,7 @@ export default async function NewWorkflowPage() {
     );
     return (
         <WorkflowEditor
+            definitionAuthoringEnabled={capabilities.ok && capabilities.data.workflowDefinitionSchemaVersion === 2}
             triggeredSendEnabled={capabilities.ok
                 && capabilities.data.workflowTriggeredSend === true}
         />

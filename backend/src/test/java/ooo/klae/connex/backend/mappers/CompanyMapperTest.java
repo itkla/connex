@@ -572,6 +572,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         task.setAssignedTo(current);
         task.setPerson(person);
         task.setDeal(deal);
+        task.setCompany(company);
         taskMapper.insert(task);
         Note visible = new Note();
         visible.setWorkspaceId(workspace.getId());
@@ -659,6 +660,7 @@ class CompanyMapperTest extends AbstractMapperTest {
         task.setAssignedTo(user);
         task.setPerson(person);
         task.setDeal(deal);
+        task.setCompany(company);
         taskMapper.insert(task);
         Note visible = new Note();
         visible.setWorkspaceId(workspace.getId());

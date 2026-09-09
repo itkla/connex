@@ -331,7 +331,8 @@
     "save": "保存",
     "descriptionRequired": "説明は必須です",
     "taskUpdated": "タスクを更新しました",
-    "updateFailed": "タスクを更新できませんでした"
+    "updateFailed": "タスクを更新できませんでした",
+    "viewLinkedCompany": "関連する会社を表示"
   },
   "ActivityLibraryTags": {
     "title": "タグ",

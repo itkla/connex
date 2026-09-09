@@ -52,6 +52,10 @@ class TenantScopeArchTest {
         assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(
             "ooo.klae.connex.backend.mappers.WorkflowRunMapper"));
         assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(
+            "ooo.klae.connex.backend.mappers.WorkflowDateEnrollmentMapper"));
+        assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(
+            "ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper"));
+        assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(
             "ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper"));
         assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(
             "ooo.klae.connex.backend.mappers.WorkflowVersionMapper"));

@@ -11,14 +11,17 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Predicate;
 
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
@@ -57,6 +60,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class TaskService {
     private final TaskMapper taskMapper;
+    private final CompanyMapper companyMapper;
     private final DealMapper dealMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
@@ -67,6 +71,7 @@ public class TaskService {
     private final NotificationDelivery notificationDelivery;
     private final NotificationPreferenceService notificationPreferenceService;
     private final RuleTriggerPublisher ruleTriggers;
+    private final WorkflowEventWaitMapper workflowEventWaitMapper;
     private final ObjectMapper objectMapper;
 
     private static final String STATUS_TODO = "todo";
@@ -160,6 +165,15 @@ public class TaskService {
         return referenceService.hydrateTasks(workspaceId, taskMapper.getTasksByDealId(workspaceId, dealId));
     }
 
+    public List<Task> getTasksByCompanyId(int companyId) {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        if (!companyMapper.exists(workspaceId, companyId)) {
+            throw new ResourceNotFoundException("Company not found");
+        }
+        return referenceService.hydrateTasks(
+            workspaceId, taskMapper.getTasksByCompanyId(workspaceId, companyId));
+    }
+
     public Task getTaskById(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Task task = taskMapper.getTaskById(workspaceId, id);
@@ -170,10 +184,29 @@ public class TaskService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.TASK_CREATE)
     public Task create(Task task) {
+        return create(task, null);
+    }
+
+    /** Creates a task using an assignee membership locked before a workflow run root. */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    @RequirePermission(Permission.TASK_CREATE)
+    public Task createWithLockedAssignee(
+            Task task,
+            WorkspaceService.LockedPermissionSnapshot authorization) {
+        Objects.requireNonNull(authorization, "authorization")
+            .requireMember(requireAssigneeId(task));
+        return create(task, authorization);
+    }
+
+    private Task create(
+            Task task,
+            WorkspaceService.LockedPermissionSnapshot authorization) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         User actor = currentActorOrNull();
         task.setWorkspaceId(workspaceId);
-        lockAssignee(task, workspaceId);
+        if (authorization == null) {
+            lockAssignee(task, workspaceId);
+        }
         validateLinkedRecords(task, workspaceId);
         lockTaskBoard(workspaceId);
         task.setStatus(task.isCompleted() ? STATUS_DONE : STATUS_TODO);
@@ -229,6 +262,7 @@ public class TaskService {
             auditService.diff(before, task, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "task", id);
         if (!before.isCompleted() && task.isCompleted()) {
+            workflowEventWaitMapper.insertTaskCompletionEvent(workspaceId, id);
             ruleTriggers.publish(workspaceId, "task", id, "task.completed");
         }
         List<Integer> mentioned =
@@ -344,6 +378,7 @@ public class TaskService {
             "Completed task " + task.getDescription(),
             auditService.singleChange("completed", task.isCompleted(), true));
         notificationChanges.publish(workspaceId, "task", id);
+        workflowEventWaitMapper.insertTaskCompletionEvent(workspaceId, id);
         ruleTriggers.publish(workspaceId, "task", id, "task.completed");
         return hydrate(workspaceId, completed);
     }
@@ -358,6 +393,7 @@ public class TaskService {
             task.getAssignedTo() == null ? null : task.getAssignedTo().getId(),
             task.getPerson() == null ? null : task.getPerson().getId(),
             task.getDeal() == null ? null : task.getDeal().getId(),
+            task.getCompany() == null ? null : task.getCompany().getId(),
             task.getUpdatedAt());
     }
 
@@ -422,6 +458,7 @@ public class TaskService {
             auditService.diff(before, moved, AUDIT_FIELDS));
         notificationChanges.publish(workspaceId, "task", id);
         if (toDone && !fromDone) {
+            workflowEventWaitMapper.insertTaskCompletionEvent(workspaceId, id);
             ruleTriggers.publish(workspaceId, "task", id, "task.completed");
         }
         return hydrate(workspaceId, moved);
@@ -531,6 +568,10 @@ public class TaskService {
         if (task.getDeal() != null && !dealMapper.exists(workspaceId, task.getDeal().getId())) {
             throw new BadRequestException("Task deal must belong to the current workspace");
         }
+        if (task.getCompany() != null
+                && !companyMapper.exists(workspaceId, task.getCompany().getId())) {
+            throw new BadRequestException("Task company must be visible in the current workspace");
+        }
     }
 
     private Task hydrate(int workspaceId, Task task) {
@@ -563,6 +604,10 @@ public class TaskService {
             contextType = "person";
             contextId = task.getPerson().getId();
             actionUrl = "/records/contacts/" + contextId + taskAnchor;
+        } else if (task.getCompany() != null && task.getCompany().getId() > 0) {
+            contextType = "company";
+            contextId = task.getCompany().getId();
+            actionUrl = "/records/companies/" + contextId + taskAnchor;
         }
         for (int recipientId : recipientIds) {
             if (recipientId == actor.getId()) {

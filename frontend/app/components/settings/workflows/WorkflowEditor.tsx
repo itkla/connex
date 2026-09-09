@@ -16,6 +16,8 @@ import WorkflowRunsDialog from "@/app/components/settings/workflows/WorkflowRuns
 import WorkflowSimulationDialog from "@/app/components/settings/workflows/WorkflowSimulationDialog";
 import WorkflowValidationSummary from "@/app/components/settings/workflows/WorkflowValidationSummary";
 import WorkflowVersionsDialog from "@/app/components/settings/workflows/WorkflowVersionsDialog";
+import WorkflowDateScheduleStatus from "@/app/components/settings/workflows/WorkflowDateScheduleStatus";
+import WorkflowSetup from "@/app/components/settings/workflows/WorkflowSetup";
 import { useWorkflowEditor } from "@/app/components/settings/workflows/useWorkflowEditor";
 import { useWorkflowWorkspaceAccess } from "@/app/components/settings/workflows/useWorkflowWorkspaceAccess";
 import { workflowDelayDiagnostics } from "@/app/components/settings/workflows/workflowGraph";
@@ -31,6 +33,7 @@ import {
     getSegmentFields,
     getStagesByPipelineId,
     getWorkflowRun,
+    getWorkflowCatalog,
 } from "@/app/lib/api";
 import { toastError } from "@/app/lib/toast";
 import type {
@@ -40,6 +43,7 @@ import type {
     WorkflowDiagnostic,
     WorkflowDiagnosticCode,
     WorkflowEdgeOutcome,
+    WorkflowCatalog,
 } from "@/app/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -74,15 +78,18 @@ function narrowEditorServerSnapshot(): boolean {
 export default function WorkflowEditor({
     workflowId,
     triggeredSendEnabled,
+    definitionAuthoringEnabled = false,
 }: {
     workflowId?: number;
     triggeredSendEnabled: boolean;
+    definitionAuthoringEnabled?: boolean;
 }) {
     return (
         <ReactFlowProvider>
             <WorkflowEditorBody
                 workflowId={workflowId}
                 triggeredSendEnabled={triggeredSendEnabled}
+                definitionAuthoringEnabled={definitionAuthoringEnabled}
             />
         </ReactFlowProvider>
     );
@@ -91,9 +98,11 @@ export default function WorkflowEditor({
 function WorkflowEditorBody({
     workflowId,
     triggeredSendEnabled,
+    definitionAuthoringEnabled,
 }: {
     workflowId?: number;
     triggeredSendEnabled: boolean;
+    definitionAuthoringEnabled: boolean;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const tr = useTranslations("WorkflowAuthoring");
@@ -107,7 +116,14 @@ function WorkflowEditorBody({
     const { activeWorkspaceId, switching } = useWorkspace();
     const grantedPermissions = useGrantedPermissions();
     const { canRunAsSystem, members } = useWorkflowWorkspaceAccess();
-    const editor = useWorkflowEditor({ workflowId, activeWorkspaceId, switching, canRunAsSystem });
+    const [catalogState, setCatalogState] = useState<{ workspaceId: number; catalog: WorkflowCatalog | null; failed: boolean } | null>(null);
+    const [catalogAttempt, setCatalogAttempt] = useState(0);
+    const [setupWorkspaceId, setSetupWorkspaceId] = useState<number | null>(null);
+    const catalog = catalogState?.workspaceId === activeWorkspaceId ? catalogState.catalog : null;
+    const requestedReturn = searchParams.get("returnTo");
+    const returnTo = requestedReturn && /^\/records\/(contacts|companies|deals)\/[1-9]\d*$/.test(requestedReturn) ? requestedReturn : null;
+    const editor = useWorkflowEditor({ workflowId, activeWorkspaceId, switching, canRunAsSystem, catalog, returnTo });
+    const editingReadOnly = editor.editingReadOnly || (editor.document.definition.schemaVersion === 2 && !catalog);
     const loadedWorkflow = editor.workflow;
     const inspectRun = editor.inspectRun;
     const requestedRunKey = searchParams.get("runKey");
@@ -128,6 +144,20 @@ function WorkflowEditorBody({
     } | null>(null);
     const [campaignMessageOptions, setCampaignMessageOptions] =
         useState<(WorkflowCampaignMessageOptions & { workspaceId: number }) | null>(null);
+
+    useEffect(() => {
+        if (!definitionAuthoringEnabled || !activeWorkspaceId || switching) return;
+        const workspaceId = activeWorkspaceId;
+        const controller = new AbortController();
+        void getWorkflowCatalog({ signal: controller.signal, headers: { "X-Workspace-Id": String(workspaceId) } })
+            .then((catalog) => {
+                if (!controller.signal.aborted) setCatalogState({ workspaceId, catalog, failed: false });
+            })
+            .catch(() => {
+                if (!controller.signal.aborted) setCatalogState({ workspaceId, catalog: null, failed: true });
+            });
+        return () => controller.abort();
+    }, [activeWorkspaceId, catalogAttempt, definitionAuthoringEnabled, switching]);
 
     useEffect(() => {
         if (
@@ -264,7 +294,7 @@ function WorkflowEditorBody({
 
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
-            if (editor.editingReadOnly) return;
+            if (editingReadOnly) return;
             const target = event.target;
             if (target instanceof HTMLElement && (
                 target.isContentEditable
@@ -286,7 +316,7 @@ function WorkflowEditorBody({
         };
         globalThis.addEventListener("keydown", onKeyDown);
         return () => globalThis.removeEventListener("keydown", onKeyDown);
-    }, [editor]);
+    }, [editingReadOnly, editor]);
 
     const selectNode = useCallback((nodeId: string) => {
         editor.setSelectedNodeId(nodeId);
@@ -309,7 +339,10 @@ function WorkflowEditorBody({
         if (!node) return t("unknownNode");
         switch (node.type) {
             case "TRIGGER":
-                return node.config.type === "schedule"
+                return node.config.type === "manual"
+                    ? t("summary.manual", { record: tr(`record.${editor.document.recordType ?? "deal"}`) })
+                    : node.config.type === "date" ? t("date.summary", { offset: node.config.offsetDays ?? -30, time: node.config.localTime ?? "09:00", timezone: node.config.timezone ?? "UTC" })
+                    : node.config.type === "schedule"
                     ? t("summary.schedule", { cadence: tr(`cadence.${node.config.cadence ?? "daily"}`) })
                     : node.config.events?.length
                         ? tr("summaryEntity", {
@@ -321,11 +354,23 @@ function WorkflowEditorBody({
                 const count = node.config.conditions.length + (node.config.groups?.length ?? 0);
                 return count > 0 ? t("conditionSummarySet", { count }) : t("conditionSummaryEmpty");
             }
-            case "ACTION":
-                return node.config.title?.trim()
+            case "ACTION": {
+                const template = node.config.titleTemplate ?? node.config.bodyTemplate;
+                const templateSummary = template?.parts.map((part) => {
+                    if ("text" in part) return part.text;
+                    const ref = part.ref;
+                    const label = ref.source === "launch_input"
+                        ? editor.document.definition.inputs?.find((input) => input.key === ref.key)?.label ?? t("values.unavailable")
+                        : ref.source === "record_field"
+                            ? t.has(`values.field.${ref.field}`) ? t(`values.field.${ref.field}`) : t("values.unavailable")
+                            : t("values.createdTask");
+                    return `[${label}]`;
+                }).join("");
+                return templateSummary || node.config.title?.trim()
                     || node.config.body?.trim()
                     || node.config.activityType?.trim()
                     || tr(`action.${node.config.type}`);
+            }
             case "DELAY": {
                 const seconds = node.config.durationSeconds;
                 if (seconds > 0 && seconds % 86_400 === 0) return t("summary.delayDays", { value: seconds / 86_400 });
@@ -333,10 +378,12 @@ function WorkflowEditorBody({
                 if (seconds > 0 && seconds % 60 === 0) return t("summary.delayMinutes", { value: seconds / 60 });
                 return t("summary.delaySeconds", { value: seconds });
             }
+            case "WAIT":
+                return t("wait.summary", { minutes: Math.round(node.config.timeoutSeconds / 60) });
             case "END":
-                return t("summary.end");
+                return node.config?.outcome === "stopped" ? t("end.stopped") : t("summary.end");
         }
-    }, [editor.document.recordType, nodeById, t, tr]);
+    }, [editor.document.definition.inputs, editor.document.recordType, nodeById, t, tr]);
     const branchLabel = useCallback((outcome: WorkflowEdgeOutcome) => t(`branch.${outcome}`), [t]);
     const diagnosticMessage = useCallback((diagnostic: {
         code: WorkflowDiagnosticCode;
@@ -384,7 +431,7 @@ function WorkflowEditorBody({
         selectedNodeId: editor.selectedNodeId,
         diagnostics: visibleDiagnostics,
         run: editor.run,
-        readOnly: editor.editingReadOnly,
+        readOnly: editingReadOnly,
         focusNodeId: editor.selectedNodeId,
         focusRequestId: editor.focusRequestId,
         nodeLabel,
@@ -404,7 +451,7 @@ function WorkflowEditorBody({
             fields={fields}
             options={options}
             diagnostics={visibleDiagnostics}
-            readOnly={editor.editingReadOnly}
+            readOnly={editingReadOnly}
             canRunAsSystem={canRunAsSystem}
             triggeredSendEnabled={triggeredSendEnabled}
             canConfigureTriggeredSend={canConfigureTriggeredSend}
@@ -415,6 +462,11 @@ function WorkflowEditorBody({
             onNodeChange={editor.changeNode}
             onMetadataChange={editor.changeMetadata}
             onCommitTransient={editor.commitTransient}
+            catalog={editor.document.definition.schemaVersion === 2 ? catalog : null}
+            canUpgrade={definitionAuthoringEnabled && catalog !== null && editor.workflow?.runtimeOwner === "canonical" && ["person", "company", "deal"].includes(editor.document.recordType ?? "")}
+            onUpgrade={editor.upgradeDefinition}
+            onInputsChange={editor.changeInputs}
+            onPoliciesChange={editor.changePolicies}
         />
     );
 
@@ -449,6 +501,27 @@ function WorkflowEditorBody({
     }
     if (editor.loading || switching) return <EditorSkeleton />;
 
+    if (!workflowId && definitionAuthoringEnabled && setupWorkspaceId !== activeWorkspaceId) {
+        if (!catalog) return catalogState?.workspaceId === activeWorkspaceId && catalogState.failed ? (
+            <div className="space-y-3 p-6">
+                <p role="alert">{t("setup.catalogFailed")}</p>
+                <Button variant="outline" onClick={() => setCatalogAttempt((current) => current + 1)}>{t("retry")}</Button>
+            </div>
+        ) : <EditorSkeleton />;
+        const requestedType = searchParams.get("recordType");
+        const requestedStart = searchParams.get("start");
+        return <WorkflowSetup
+            key={activeWorkspaceId}
+            initialRecordType={requestedType === "company" || requestedType === "deal" || requestedType === "task" || requestedType === "document" ? requestedType : "person"}
+            initialStart={requestedStart === "date" && requestedType === "deal" ? "date" : requestedStart === "entity_change" || requestedStart === "schedule" ? requestedStart : "manual"}
+            supportsDateStart={catalog.supportedDateFields?.some((field) => field.recordType === "deal" && field.field === "expectedCloseDate") ?? false}
+            onContinue={(value) => {
+                editor.configureNewWorkflow(value);
+                setSetupWorkspaceId(activeWorkspaceId);
+            }}
+        />;
+    }
+
     return (
         <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-background">
             <WorkflowLifecycleBar
@@ -464,7 +537,7 @@ function WorkflowEditorBody({
                 canUndo={editor.history.past.length > 0 || editor.history.transientBase != null}
                 canRedo={editor.history.future.length > 0}
                 busyAction={editor.busyAction}
-                readOnly={editor.editingReadOnly}
+                readOnly={editingReadOnly}
                 onBack={() => {
                     editor.cancelCreationContinuation();
                     router.push("/workflows");
@@ -484,7 +557,25 @@ function WorkflowEditorBody({
                 }}
                 onOpenRuns={() => setRunsOpen(true)}
             />
+            {editor.document.definition.schemaVersion === 2 && !catalog ? (
+                <div role="alert" className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 text-sm">
+                    <p>{t(definitionAuthoringEnabled ? "setup.catalogFailed" : "setup.catalogUnavailable")}</p>
+                    {definitionAuthoringEnabled ? <Button variant="outline" size="toolbar" onClick={() => setCatalogAttempt((current) => current + 1)}>{t("retry")}</Button> : null}
+                </div>
+            ) : null}
+            {returnTo ? <div className="flex justify-end border-b border-border px-4 py-2"><Button variant="outline" size="toolbar" disabled={editor.dirty} onClick={() => router.push(returnTo)}>{t("inputs.returnToRecord")}</Button></div> : null}
 
+            {editor.document.definition.schemaVersion === 2 ? (
+                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3 text-sm">
+                    <div>
+                        <p className="font-medium text-foreground">{editor.document.description || t("register.noPurpose")}</p>
+                        <p className="mt-1 text-muted-foreground">{nodeSummary(editor.document.definition.entryNodeId)}</p>
+                    </div>
+                    <p className="max-w-md text-muted-foreground">{t("inputs.publishDisclosure", { count: editor.document.definition.inputs?.length ?? 0 })}</p>
+                </div>
+            ) : null}
+
+            {editor.workflow?.dateScheduleStatus ? <WorkflowDateScheduleStatus status={editor.workflow.dateScheduleStatus} /> : null}
             {visibleValidation ? (
                 <WorkflowValidationSummary
                     validation={visibleValidation}
@@ -605,7 +696,10 @@ function WorkflowEditorBody({
                 onOpenChange={setSimulationOpen}
                 onSearch={editor.searchSimulationRecords}
                 onClear={editor.clearSimulation}
-                onSimulate={(recordId) => void editor.runSimulation(recordId)}
+                definition={editor.history.present.definition}
+                inputDefinitions={editor.history.present.definition.inputs ?? []}
+                members={options?.owners ?? []}
+                onSimulate={(recordId, inputs) => void editor.runSimulation(recordId, inputs)}
             />
             <WorkflowVersionsDialog
                 open={versionsOpen}

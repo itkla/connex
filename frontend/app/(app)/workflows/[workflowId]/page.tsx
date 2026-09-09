@@ -12,6 +12,7 @@ export default async function EditWorkflowPage({ params }: { params: Promise<{ w
     const capabilities = await getCapabilitiesResultFromCookie(requestHeaders.get("cookie"));
     return (
         <WorkflowEditor
+            definitionAuthoringEnabled={capabilities.ok && capabilities.data.workflowDefinitionSchemaVersion === 2}
             workflowId={workflowId}
             triggeredSendEnabled={capabilities.ok
                 && capabilities.data.workflowTriggeredSend === true}

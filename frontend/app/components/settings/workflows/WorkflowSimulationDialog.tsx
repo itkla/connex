@@ -6,7 +6,9 @@ import { Loader2Icon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import RecordSelect, { type RecordSelectOption } from "@/app/components/records/RecordSelect";
-import type { WorkflowDiagnosticCode, WorkflowSimulation } from "@/app/lib/types";
+import type { WorkflowDiagnosticCode, WorkflowInputDefinition, WorkflowInputValue, WorkflowDefinition, WorkflowSimulation } from "@/app/lib/types";
+import WorkflowLaunchInputs from "@/app/components/settings/workflows/WorkflowLaunchInputs";
+import { workflowInputsComplete } from "@/app/components/settings/workflows/workflowValues";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -31,6 +33,9 @@ export default function WorkflowSimulationDialog({
     onSearch,
     onClear,
     onSimulate,
+    inputDefinitions,
+    members,
+    definition,
 }: {
     open: boolean;
     records: RecordSelectOption[];
@@ -41,14 +46,19 @@ export default function WorkflowSimulationDialog({
     onOpenChange: (open: boolean) => void;
     onSearch: (query: string) => void;
     onClear: () => void;
-    onSimulate: (recordId: number) => void;
+    onSimulate: (recordId: number, inputs: Record<string, WorkflowInputValue>) => void;
+    inputDefinitions: WorkflowInputDefinition[];
+    members: Array<{ id: number; name: string }>;
+    definition: WorkflowDefinition;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
     const [recordId, setRecordId] = useState("");
+    const [inputs, setInputs] = useState<Record<string, WorkflowInputValue>>({});
 
     const changeOpen = (next: boolean) => {
         if (!next) {
             setRecordId("");
+            setInputs({});
             onClear();
         }
         onOpenChange(next);
@@ -56,21 +66,23 @@ export default function WorkflowSimulationDialog({
 
     return (
         <ResponsiveDialog open={open} onOpenChange={changeOpen}>
-            <ResponsiveDialogContent className="sm:max-w-2xl">
-                <ResponsiveDialogHeader className="px-4 pt-4 sm:px-0 sm:pt-0">
+            <ResponsiveDialogContent className="max-h-[90dvh] sm:flex sm:max-w-2xl sm:flex-col">
+                <ResponsiveDialogHeader className="shrink-0 px-4 pt-4 sm:px-0 sm:pt-0">
                     <ResponsiveDialogTitle className="flex items-center gap-2">
                         <BeakerIcon className="size-5" />
                         {t("simulation.title")}
                     </ResponsiveDialogTitle>
                     <ResponsiveDialogDescription>{t("simulation.description")}</ResponsiveDialogDescription>
                 </ResponsiveDialogHeader>
-                <div className="space-y-4 px-4 sm:px-0">
+                <div className="min-h-0 space-y-4 px-4 sm:overflow-y-auto sm:px-0">
                     {supported ? (
                         <>
                             <div className="rounded-xl border border-brand/30 bg-brand-light p-3 text-sm text-foreground">
                                 <p className="font-medium">{t("simulation.previewOnlyTitle")}</p>
                                 <p className="mt-1 text-muted-foreground">{t("simulation.previewOnlyBody")}</p>
                             </div>
+                            <WorkflowLaunchInputs definitions={inputDefinitions} values={inputs} members={members} disabled={loading}
+                                onChange={(key, value) => { setInputs((current) => ({ ...current, [key]: value })); onClear(); }} />
                             <div className="space-y-1.5">
                                 <Label htmlFor="workflow-simulation-record">{t("simulation.recordLabel")}</Label>
                                 <RecordSelect
@@ -94,18 +106,18 @@ export default function WorkflowSimulationDialog({
                         </div>
                     )}
                     {supported && result ? (
-                        <WorkflowSimulationEvidence result={result} diagnosticMessage={diagnosticMessage} />
+                        <WorkflowSimulationEvidence definition={definition} result={result} diagnosticMessage={diagnosticMessage} />
                     ) : null}
                 </div>
-                <ResponsiveDialogFooter className="border-t border-border px-4 py-4 sm:border-0 sm:px-0 sm:py-0">
+                <ResponsiveDialogFooter className="shrink-0 border-t border-border px-4 py-4 sm:border-0 sm:px-0 sm:py-0">
                     <Button variant="outline" onClick={() => changeOpen(false)}>{t("close")}</Button>
                     {supported ? (
                         <Button
                             variant="brand"
-                            disabled={!recordId || loading}
+                            disabled={!recordId || loading || !workflowInputsComplete(inputDefinitions, inputs)}
                             onClick={() => {
                                 onClear();
-                                onSimulate(Number(recordId));
+                                onSimulate(Number(recordId), inputs);
                             }}
                         >
                             {loading ? <Loader2Icon className="size-4 animate-spin motion-reduce:animate-none" /> : <BeakerIcon className="size-4" />}
@@ -122,8 +134,10 @@ export default function WorkflowSimulationDialog({
 export function WorkflowSimulationEvidence({
     result,
     diagnosticMessage,
+    definition,
 }: {
     result: WorkflowSimulation;
+    definition?: WorkflowDefinition;
     diagnosticMessage: (diagnostic: { code: WorkflowDiagnosticCode; params: Record<string, string> }) => ReactNode;
 }) {
     const t = useTranslations("WorkspaceWorkflows");
@@ -141,6 +155,16 @@ export function WorkflowSimulationEvidence({
                                 {step.outcome ? <Badge variant="secondary">{t(`branch.${step.outcome}`)}</Badge> : null}
                                 <span className="text-muted-foreground">{diagnosticMessage({ code: step.code, params: {} })}</span>
                             </div>
+                            {step.nodeType === "wait" && step.outcome === null ? (
+                                <div className="mt-2 space-y-2 text-sm text-muted-foreground">
+                                    <p>{t("wait.previewPending")}</p>
+                                    <ul className="space-y-1">{(["completed", "timeout"] as const).map((outcome) => {
+                                        const edge = definition?.edges.find((edge) => edge.sourceNodeId === step.nodeId && edge.outcome === outcome);
+                                        const target = definition?.nodes.find((node) => node.id === edge?.targetNodeId);
+                                        return <li key={outcome}>{t(`branch.${outcome}`)}{target ? ` → ${target.type === "ACTION" ? tr(`action.${target.config.type}`) : target.type === "END" ? t(`end.${target.config?.outcome ?? "completed"}`) : t(`nodeType.${target.type.toLowerCase()}`)}` : ""}</li>;
+                                    })}</ul>
+                                </div>
+                            ) : null}
                         </li>
                     ))}
                 </ol>

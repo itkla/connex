@@ -7,6 +7,8 @@ import { LoaderCircle } from 'lucide-react';
 import { toastError, toastSuccess } from '@/app/lib/toast';
 import { EllipsisVerticalIcon, PencilSquareIcon, EyeIcon, PaperClipIcon, ArchiveBoxIcon, ArchiveBoxArrowDownIcon, PlusIcon, UserIcon, UserCircleIcon, BriefcaseIcon, ShareIcon } from '@heroicons/react/24/outline';
 
+import RunWorkflowMenuItem from "@/app/components/records/RunWorkflowMenuItem";
+
 import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
 import {
@@ -325,6 +327,7 @@ export default function CompanyActionsMenu({
                         </IconButton>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
+                        {owned && <RunWorkflowMenuItem record={{ type: "company", id: company.id, label: company.name }} />}
                         {owned && (
                             <DropdownMenuItem
                                 onSelect={(e) => {

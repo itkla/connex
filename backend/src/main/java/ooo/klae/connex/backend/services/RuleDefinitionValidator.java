@@ -39,11 +39,13 @@ public class RuleDefinitionValidator {
 
     private static final Set<String> RECORD_TYPES = Set.of(
         "company", "person", "deal", "task", "document");
-    private static final Set<String> TRIGGER_TYPES = Set.of("entity_change", "schedule");
+    private static final Set<String> TRIGGER_TYPES = Set.of(
+        "entity_change", "schedule", "manual", "date");
     private static final Set<String> EXECUTION_MODES = Set.of("user", "system");
     private static final Set<String> ACTION_TYPES = Set.of(
         "create_task", "log_activity", "add_tag", "remove_tag", "create_note",
-        "assign_owner", "set_response_due", "change_stage", "notify", "send_message");
+        "assign_owner", "set_response_due", "change_stage", "notify", "send_message",
+        "update_field");
     private static final Set<String> CADENCES = Set.of("hourly", "daily", "weekly");
     private static final int MAX_RESPONSE_DUE_IN_HOURS = 24 * 365;
     private static final Set<String> ENTITY_CHANGE_RECORD_TYPES = Set.of(
@@ -61,17 +63,18 @@ public class RuleDefinitionValidator {
     private static final Set<String> DOCUMENT_EVENTS = Set.of(
         "document.approval_requested", "document.approved", "document.rejected",
         "document.finalized", "document.superseded");
-    private static final Map<String, Set<String>> ACTION_RECORD_TYPES = Map.of(
-        "create_task", Set.of("person", "deal", "document"),
-        "log_activity", Set.of("person", "deal", "document"),
-        "add_tag", Set.of("company", "person", "deal"),
-        "remove_tag", Set.of("company", "person", "deal"),
-        "create_note", Set.of("person", "deal", "document"),
-        "assign_owner", Set.of("person", "deal"),
-        "set_response_due", Set.of("person"),
-        "change_stage", Set.of("deal"),
-        "notify", Set.of("company", "person", "deal", "task", "document"),
-        "send_message", Set.of("person"));
+    private static final Map<String, Set<String>> ACTION_RECORD_TYPES = Map.ofEntries(
+        Map.entry("create_task", Set.of("person", "company", "deal", "document")),
+        Map.entry("log_activity", Set.of("person", "deal", "document")),
+        Map.entry("add_tag", Set.of("company", "person", "deal")),
+        Map.entry("remove_tag", Set.of("company", "person", "deal")),
+        Map.entry("create_note", Set.of("person", "deal", "document")),
+        Map.entry("assign_owner", Set.of("person", "company", "deal")),
+        Map.entry("set_response_due", Set.of("person")),
+        Map.entry("change_stage", Set.of("deal")),
+        Map.entry("notify", Set.of("company", "person", "deal", "task", "document")),
+        Map.entry("send_message", Set.of("person")),
+        Map.entry("update_field", Set.of("deal")));
 
     private final SegmentService segmentService;
     private final WorkspaceService workspaceService;
@@ -79,6 +82,7 @@ public class RuleDefinitionValidator {
     private final WorkflowDocumentAutomationGate documentAutomationGate;
     private final WorkflowTriggeredSendGate triggeredSendGate;
     private final SystemActor systemActor;
+    private final WorkflowCapabilityCatalog capabilityCatalog;
 
     String validatePreview(RulePreviewRequest request) {
         String recordType = normalize(request.getRecordType());
@@ -145,6 +149,19 @@ public class RuleDefinitionValidator {
         requireCurrentPermissions(required);
     }
 
+    void validateWorkflowNodes(
+            String recordTypeValue,
+            WorkflowNode.Trigger trigger,
+            List<WorkflowNode.Condition> conditions,
+            List<WorkflowNode.Action> actions,
+            String executionMode,
+            int schemaVersion) {
+        Set<Permission> required = validateWorkflowNodesForMutation(
+            recordTypeValue, trigger, conditions, actions, executionMode, schemaVersion);
+        requireCurrentSystemRole(executionMode);
+        requireCurrentPermissions(required);
+    }
+
     Set<Permission> validateWorkflowNodesForMutation(
             String recordTypeValue,
             WorkflowNode.Trigger trigger,
@@ -169,7 +186,37 @@ public class RuleDefinitionValidator {
             configuredTrigger,
             configuredConditions,
             configuredActions,
-            executionMode);
+            executionMode,
+            1);
+    }
+
+    Set<Permission> validateWorkflowNodesForMutation(
+            String recordTypeValue,
+            WorkflowNode.Trigger trigger,
+            List<WorkflowNode.Condition> conditions,
+            List<WorkflowNode.Action> actions,
+            String executionMode,
+            int schemaVersion) {
+        Configured<RuleTrigger> configuredTrigger = new Configured<>(
+            trigger == null ? null : trigger.id(),
+            trigger == null ? null : trigger.config());
+        List<Configured<SegmentDefinition>> configuredConditions = conditions == null
+            ? null
+            : conditions.stream()
+                .map(condition -> new Configured<>(condition.id(), condition.config()))
+                .toList();
+        List<Configured<RuleAction>> configuredActions = actions == null
+            ? null
+            : actions.stream()
+                .map(action -> new Configured<>(action.id(), action.config()))
+                .toList();
+        return validateConfiguredWorkflowDefinitionForMutation(
+            recordTypeValue,
+            configuredTrigger,
+            configuredConditions,
+            configuredActions,
+            executionMode,
+            schemaVersion);
     }
 
     Set<Permission> validateDraftActionsForMutation(
@@ -226,7 +273,8 @@ public class RuleDefinitionValidator {
             actions == null
                 ? null
                 : actions.stream().map(value -> new Configured<>(null, value)).toList(),
-            executionMode);
+            executionMode,
+            1);
     }
 
     private Set<Permission> validateConfiguredWorkflowDefinitionForMutation(
@@ -234,7 +282,8 @@ public class RuleDefinitionValidator {
             Configured<RuleTrigger> trigger,
             List<Configured<SegmentDefinition>> conditions,
             List<Configured<RuleAction>> actions,
-            String executionMode) {
+            String executionMode,
+            int schemaVersion) {
         if (trigger == null || trigger.value() == null) {
             throw invalid(
                 WorkflowDiagnosticCode.TRIGGER_CONFIG_REQUIRED,
@@ -313,14 +362,14 @@ public class RuleDefinitionValidator {
                     exception.diagnostic().atNode(condition.nodeId(), "config"));
             }
         }
-        validateTrigger(trigger, recordType, !conditions.isEmpty());
-        validateActions(actions, recordType);
+        validateTrigger(trigger, recordType, !conditions.isEmpty(), schemaVersion);
+        validateActions(actions, recordType, schemaVersion);
         Set<Permission> permissions = actionPermissions(actions, recordType);
         requireSystemPermissions(mode, permissions);
         return permissions;
     }
 
-    private void requireSystemPermissions(String mode, Set<Permission> permissions) {
+    void requireSystemPermissions(String mode, Set<Permission> permissions) {
         if (!"system".equals(mode)) {
             return;
         }
@@ -366,6 +415,23 @@ public class RuleDefinitionValidator {
         return hasConditions || hasGroups;
     }
 
+    void validateWorkflowPolicyCondition(
+            String recordType, SegmentDefinition condition, String fieldPath) {
+        if (!hasWhen(condition)) {
+            throw invalid(
+                WorkflowDiagnosticCode.CONDITION_EMPTY,
+                "A workflow policy condition must contain at least one condition",
+                null, fieldPath, Map.of());
+        }
+        try {
+            segmentService.validate(recordType, condition);
+        } catch (WorkflowDefinitionValidationException exception) {
+            throw new WorkflowDefinitionValidationException(
+                exception.getMessage(),
+                exception.diagnostic().atNode(null, fieldPath));
+        }
+    }
+
     private Set<Permission> actionPermissions(
             List<Configured<RuleAction>> actions, String recordType) {
         EnumSet<Permission> required = EnumSet.noneOf(Permission.class);
@@ -391,6 +457,10 @@ public class RuleDefinitionValidator {
     }
 
     private Set<Permission> actionPermissions(String type, String recordType) {
+        Set<Permission> catalogPermissions = capabilityCatalog.permissions(type, recordType);
+        if (!catalogPermissions.isEmpty() || capabilityCatalog.supports(type, recordType)) {
+            return catalogPermissions;
+        }
         return switch (type) {
             case "create_task" -> Set.of(Permission.TASK_CREATE);
             case "log_activity" -> Set.of(Permission.ACTIVITY_CREATE);
@@ -403,6 +473,7 @@ public class RuleDefinitionValidator {
                     Permission.CONSENT_MANAGE);
             case "assign_owner" -> switch (recordType) {
                 case "person" -> Set.of(Permission.PERSON_UPDATE);
+                case "company" -> Set.of(Permission.COMPANY_UPDATE);
                 case "deal" -> Set.of(Permission.DEAL_UPDATE);
                 default -> Set.of();
             };
@@ -417,14 +488,37 @@ public class RuleDefinitionValidator {
     }
 
     private void validateTrigger(
-            Configured<RuleTrigger> trigger, String recordType, boolean hasCondition) {
+            Configured<RuleTrigger> trigger,
+            String recordType,
+            boolean hasCondition,
+            int schemaVersion) {
         RuleTrigger value = trigger.value();
         String type = normalize(value.getType());
-        if (!TRIGGER_TYPES.contains(type)) {
+        if (!TRIGGER_TYPES.contains(type)
+                || schemaVersion == 1 && !Set.of("entity_change", "schedule").contains(type)) {
             throw invalid(
                 WorkflowDiagnosticCode.TRIGGER_TYPE_INVALID,
                 "Invalid trigger type: " + value.getType(),
                 trigger.nodeId(), "config.type", Map.of());
+        }
+        if (schemaVersion == 2 && !"manual".equals(type) && value.getAllowManualRuns() == null) {
+            throw invalid(
+                WorkflowDiagnosticCode.MANUAL_ENTRY_INVALID,
+                "An automatic schema-v2 trigger requires allowManualRuns",
+                trigger.nodeId(), "config.allowManualRuns", Map.of());
+        }
+        if ("manual".equals(type)) {
+            if (schemaVersion != 2) {
+                throw invalid(
+                    WorkflowDiagnosticCode.MANUAL_ENTRY_INVALID,
+                    "Manual triggers require schemaVersion 2",
+                    trigger.nodeId(), "config.type", Map.of());
+            }
+            return;
+        }
+        if ("date".equals(type)) {
+            validateDateTrigger(trigger, recordType);
+            return;
         }
         if ("entity_change".equals(type)) {
             if (!ENTITY_CHANGE_RECORD_TYPES.contains(recordType)) {
@@ -470,7 +564,7 @@ public class RuleDefinitionValidator {
                     "A schedule rule requires a valid cadence",
                     trigger.nodeId(), "config.cadence", Map.of());
             }
-            if (!hasCondition) {
+            if (schemaVersion == 1 && !hasCondition) {
                 throw invalid(
                     WorkflowDiagnosticCode.SCHEDULE_CONDITION_REQUIRED,
                     "A schedule rule requires a WHEN condition",
@@ -479,11 +573,38 @@ public class RuleDefinitionValidator {
         }
     }
 
+    private void validateDateTrigger(Configured<RuleTrigger> trigger, String recordType) {
+        RuleTrigger value = trigger.value();
+        boolean validTime = value.getLocalTime() != null
+            && value.getLocalTime().matches("(?:[01]\\d|2[0-3]):[0-5]\\d");
+        boolean validZone = value.getTimezone() != null
+            && ("UTC".equals(value.getTimezone())
+                || java.time.ZoneId.getAvailableZoneIds().contains(value.getTimezone()));
+        if (!"deal".equals(recordType)
+                || !"expectedCloseDate".equals(value.getDateField())
+                || value.getOffsetDays() == null
+                || value.getOffsetDays() < -365
+                || value.getOffsetDays() > 365
+                || !validTime
+                || !validZone) {
+            throw invalid(
+                WorkflowDiagnosticCode.TRIGGER_TYPE_INVALID,
+                "The date trigger configuration is invalid",
+                trigger.nodeId(), "config", Map.of());
+        }
+    }
+
     private void validateActions(
-            List<Configured<RuleAction>> actions, String recordType) {
+            List<Configured<RuleAction>> actions, String recordType, int schemaVersion) {
         for (Configured<RuleAction> configured : actions) {
             RuleAction action = configured.value();
             String type = normalize(action.getType());
+            if (schemaVersion == 1 && hasV2ActionFields(action)) {
+                throw invalid(
+                    WorkflowDiagnosticCode.BINDING_INVALID,
+                    "Schema-v2 action bindings require schemaVersion 2",
+                    configured.nodeId(), "config", Map.of());
+            }
             if (!ACTION_TYPES.contains(type) || !triggeredSendGate.permits(type)) {
                 throw invalid(
                     WorkflowDiagnosticCode.ACTION_TYPE_INVALID,
@@ -491,7 +612,8 @@ public class RuleDefinitionValidator {
                     configured.nodeId(), "config.type", Map.of());
             }
             Set<String> supportedRecordTypes = ACTION_RECORD_TYPES.get(type);
-            if (supportedRecordTypes == null || !supportedRecordTypes.contains(recordType)) {
+            if (supportedRecordTypes == null || !supportedRecordTypes.contains(recordType)
+                    || schemaVersion == 2 && !capabilityCatalog.supports(type, recordType)) {
                 throw invalid(
                     WorkflowDiagnosticCode.ACTION_RECORD_TYPE_UNSUPPORTED,
                     "'" + type + "' actions are not supported for " + recordType + " rules",
@@ -499,12 +621,29 @@ public class RuleDefinitionValidator {
                     Map.of("actionType", type, "recordType", recordType));
             }
             switch (type) {
-                case "create_task", "notify" -> requireText(
-                    action.getTitle(), configured.nodeId(), "title");
-                case "log_activity" -> requireText(
-                    action.getActivityType(), configured.nodeId(), "activityType");
-                case "create_note" -> requireText(
-                    action.getBody(), configured.nodeId(), "body");
+                case "create_task", "notify" -> {
+                    requireTextOrTemplate(
+                        action.getTitle(), action.getTitleTemplate(), configured.nodeId(), "title");
+                    if (schemaVersion == 2) {
+                        requireExclusiveTarget(action, configured.nodeId());
+                    }
+                    if ("create_task".equals(type) && schemaVersion == 2) {
+                        requireExclusiveDueDate(action, configured.nodeId());
+                    }
+                    if ("notify".equals(type)) {
+                        requireNoConflictingTemplate(
+                            action.getBody(), action.getBodyTemplate(), configured.nodeId(), "body");
+                    }
+                }
+                case "log_activity" -> {
+                    requireText(action.getActivityType(), configured.nodeId(), "activityType");
+                    requireNoConflictingTemplate(
+                        action.getTitle(), action.getTitleTemplate(), configured.nodeId(), "title");
+                    requireNoConflictingTemplate(
+                        action.getBody(), action.getBodyTemplate(), configured.nodeId(), "body");
+                }
+                case "create_note" -> requireTextOrTemplate(
+                    action.getBody(), action.getBodyTemplate(), configured.nodeId(), "body");
                 case "add_tag", "remove_tag" -> {
                     if (action.getTagId() == null) {
                         throw requiredActionField(
@@ -512,13 +651,7 @@ public class RuleDefinitionValidator {
                             configured.nodeId(), "tagId");
                     }
                 }
-                case "assign_owner" -> {
-                    if (action.getTargetUserId() == null) {
-                        throw requiredActionField(
-                            "An assign_owner action requires a targetUserId",
-                            configured.nodeId(), "targetUserId");
-                    }
-                }
+                case "assign_owner" -> requireExclusiveTarget(action, configured.nodeId());
                 case "set_response_due" -> {
                     if (action.getDueInHours() == null || action.getDueInHours() < 1
                             || action.getDueInHours() > MAX_RESPONSE_DUE_IN_HOURS) {
@@ -536,11 +669,94 @@ public class RuleDefinitionValidator {
                     }
                 }
                 case "send_message" -> validateSendMessageAction(configured, recordType);
+                case "update_field" -> validateUpdateField(configured, schemaVersion, recordType);
                 default -> throw invalid(
                     WorkflowDiagnosticCode.ACTION_TYPE_INVALID,
                     "Invalid action type: " + action.getType(),
                     configured.nodeId(), "config.type", Map.of());
             }
+        }
+    }
+
+    private void requireTextOrTemplate(
+            String value,
+            Object templateValue,
+            String nodeId,
+            String field) {
+        boolean literal = value != null && !value.isBlank();
+        boolean template = templateValue != null;
+        if (literal == template) {
+            throw requiredActionField(
+                "An action requires exactly one " + field + " value",
+                nodeId, field);
+        }
+    }
+
+    private void requireNoConflictingTemplate(
+            String value,
+            Object templateValue,
+            String nodeId,
+            String field) {
+        if (value != null && templateValue != null) {
+            throw invalid(
+                WorkflowDiagnosticCode.BINDING_INVALID,
+                "An action field cannot use a literal and template together",
+                nodeId, "config." + field, Map.of());
+        }
+    }
+
+    private static boolean hasV2ActionFields(RuleAction action) {
+        return action.getTargetUserRef() != null
+            || action.getDueDateRef() != null
+            || action.getTitleTemplate() != null
+            || action.getBodyTemplate() != null
+            || action.getField() != null
+            || action.getValue() != null
+            || action.getValueRef() != null;
+    }
+
+    private void requireExclusiveTarget(RuleAction action, String nodeId) {
+        if ((action.getTargetUserId() == null) == (action.getTargetUserRef() == null)
+                || action.getTargetUserId() != null && action.getTargetUserId() < 1) {
+            throw requiredActionField(
+                "An action requires exactly one target user value",
+                nodeId, "targetUserId");
+        }
+    }
+
+    private void requireExclusiveDueDate(RuleAction action, String nodeId) {
+        if ((action.getDueInDays() == null) == (action.getDueDateRef() == null)
+                || action.getDueInDays() != null
+                    && (action.getDueInDays() < 0 || action.getDueInDays() > 365)) {
+            throw requiredActionField(
+                "A create_task action requires exactly one valid due date value",
+                nodeId, "dueInDays");
+        }
+    }
+
+    private void validateUpdateField(
+            Configured<RuleAction> configured, int schemaVersion, String recordType) {
+        RuleAction action = configured.value();
+        if (schemaVersion != 2
+                || !"deal".equals(recordType)
+                || !"expectedCloseDate".equals(action.getField())
+                || (action.getValue() == null) == (action.getValueRef() == null)
+                || action.getValue() != null
+                    && (!action.getValue().isTextual()
+                        || !action.getValue().textValue().matches("\\d{4}-\\d{2}-\\d{2}")
+                        || !validDate(action.getValue().textValue()))) {
+            throw invalid(
+                WorkflowDiagnosticCode.BINDING_INVALID,
+                "The update_field action configuration is invalid",
+                configured.nodeId(), "config", Map.of());
+        }
+    }
+
+    private static boolean validDate(String value) {
+        try {
+            return java.time.LocalDate.parse(value).toString().equals(value);
+        } catch (java.time.DateTimeException exception) {
+            return false;
         }
     }
 

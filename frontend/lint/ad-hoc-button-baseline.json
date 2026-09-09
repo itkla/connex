@@ -150,7 +150,6 @@
     "app/components/settings/workflows/WorkflowRunsDialog.tsx": 4,
     "app/components/settings/workflows/WorkflowValidationSummary.tsx": 1,
     "app/components/settings/workflows/WorkflowVersionsDialog.tsx": 1,
-    "app/components/settings/workflows/WorkflowsPanel.tsx": 1,
     "app/components/settings/workflows/operations/WorkflowRunOperationsDetail.tsx": 6,
     "app/design-system/page.tsx": 5,
     "app/docs/[...slug]/page.tsx": 3,

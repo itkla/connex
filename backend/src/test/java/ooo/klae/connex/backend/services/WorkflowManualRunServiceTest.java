@@ -1,27 +1,35 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -35,6 +43,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowInvocation;
 import ooo.klae.connex.backend.beans.WorkflowInvocationRecord;
+import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.RuleAction;
@@ -42,6 +51,7 @@ import ooo.klae.connex.backend.dto.SegmentDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
 import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
+import ooo.klae.connex.backend.dto.WorkflowEnrollment;
 import ooo.klae.connex.backend.dto.WorkflowInvocationResultDto;
 import ooo.klae.connex.backend.dto.WorkflowManualConfirmRequest;
 import ooo.klae.connex.backend.dto.WorkflowManualPreparationDto;
@@ -65,6 +75,10 @@ class WorkflowManualRunServiceTest {
     @Mock private WorkflowActionRetryPolicy retryPolicy;
     @Mock private WorkflowActionGuard actionGuard;
     @Mock private WorkflowRecordGuard recordGuard;
+    @Mock private WorkflowInputResolver inputResolver;
+    @Mock private WorkflowManualEligibilityService eligibilityService;
+    @Mock private WorkflowEnrollmentPolicyService enrollmentPolicyService;
+    @Mock private WorkflowActionBindingService bindingService;
     @Mock private WorkflowManualRunConfirmationTransaction confirmationTransaction;
     @Mock private WorkflowManualRunDispatchTransaction dispatchTransaction;
     @Mock private WorkflowRunOperationService runOperationService;
@@ -83,6 +97,12 @@ class WorkflowManualRunServiceTest {
     @BeforeEach
     void setUp() {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        lenient().when(inputResolver.resolve(anyInt(), any(), any()))
+            .thenReturn(new WorkflowInputResolver.Resolved(Map.of(), List.of()));
+        lenient().when(eligibilityService.evaluate(
+            anyInt(), anyInt(), any(), any(), any()))
+            .thenReturn(new WorkflowManualEligibilityService.Evaluation(
+                "legacy_compatible", 17, List.of()));
     }
 
     @Test
@@ -258,7 +278,7 @@ class WorkflowManualRunServiceTest {
     }
 
     @Test
-    void preparationLabelsTheActorAndAccessibleSkippedRecordsWithoutLeakingMissingIds() {
+    void preparationUsesUtcExpiryAndLabelsAccessibleSkippedRecordsWithoutLeakingMissingIds() {
         when(workspaceService.getCurrentUserId()).thenReturn(41);
         Workflow workflow = new Workflow();
         workflow.setId(11);
@@ -283,7 +303,6 @@ class WorkflowManualRunServiceTest {
         actor.setId(17);
         actor.setDisplayName("Workflow Owner");
         when(workspaceService.getMembers(7)).thenReturn(List.of(actor));
-        when(workspaceService.getRole(7, 17)).thenReturn("member");
         RuleAction action = new RuleAction();
         action.setType("create_task");
         WorkflowDefinition definition = new WorkflowDefinition(
@@ -296,7 +315,8 @@ class WorkflowManualRunServiceTest {
             null,
             null,
             Map.of("permission", "TASK_CREATE"));
-        when(actionGuard.blocker(7, 17, "deal", 91, "action", action)).thenReturn(blocker);
+        when(actionGuard.blocker(7, 17, "deal", 91, "action", action, null))
+            .thenReturn(blocker);
         doAnswer(call -> {
             if (call.getArgument(2, Integer.class) == 92) {
                 throw new WorkflowExecutionException(
@@ -314,10 +334,17 @@ class WorkflowManualRunServiceTest {
             return null;
         }).when(operationsMapper).insertInvocation(any());
 
-        WorkflowManualPreparationDto result = service.prepare(
-            11,
-            new WorkflowManualPrepareRequest(
-                "record_list", new WorkflowManualScope.PageSelection(List.of(91, 92))));
+        TimeZone originalTimezone = TimeZone.getDefault();
+        WorkflowManualPreparationDto result;
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Pacific/Honolulu"));
+            result = service.prepare(
+                11,
+                new WorkflowManualPrepareRequest(
+                    "record_list", new WorkflowManualScope.PageSelection(List.of(91, 92))));
+        } finally {
+            TimeZone.setDefault(originalTimezone);
+        }
 
         assertEquals("Workflow Owner", result.actorLabel());
         assertEquals(
@@ -325,6 +352,44 @@ class WorkflowManualRunServiceTest {
             result.skippedSamples());
         assertEquals(1, result.expectedSkips().missingReference());
         assertEquals(1, result.expectedSkips().unsupportedContext());
+        ArgumentCaptor<WorkflowInvocation> invocation = ArgumentCaptor.forClass(
+            WorkflowInvocation.class);
+        verify(operationsMapper).insertInvocation(invocation.capture());
+        assertTrue(invocation.getValue().getExpiresAt().isAfter(
+            LocalDateTime.now(ZoneOffset.UTC).plusMinutes(14)));
+    }
+
+    @Test
+    void activeEnrollmentPersistsAnUnconfirmableSkippedPreparation() throws Exception {
+        PreparationCapture capture = prepareBlockedByEnrollment(
+            new WorkflowEnrollmentPolicyService.Decision("active_run_exists", null));
+
+        assertEquals(0, capture.preparation().readyCount());
+        assertFalse(capture.preparation().confirmable());
+        assertEquals(List.of("active_run_exists"), capture.preparation().blockers());
+        assertEquals(
+            List.of(new WorkflowManualPreparationDto.BlockerDetail(
+                "active_run_exists", null)),
+            capture.preparation().blockerDetails());
+        assertEquals("skipped", capture.record().getPreviewStatus());
+        assertEquals("active_run_exists", capture.record().getPreviewReasonCode());
+        assertEquals("skipped", capture.record().getExecutionStatus());
+    }
+
+    @Test
+    void cooldownPersistsEligibilityInTheBlockedPreparation() throws Exception {
+        LocalDateTime eligibleAt = LocalDateTime.of(2027, 1, 10, 13, 0);
+        PreparationCapture capture = prepareBlockedByEnrollment(
+            new WorkflowEnrollmentPolicyService.Decision("cooldown_active", eligibleAt));
+
+        assertEquals(0, capture.preparation().readyCount());
+        assertFalse(capture.preparation().confirmable());
+        assertEquals(List.of("cooldown_active"), capture.preparation().blockers());
+        assertEquals(
+            List.of(new WorkflowManualPreparationDto.BlockerDetail(
+                "cooldown_active", eligibleAt)),
+            capture.preparation().blockerDetails());
+        assertEquals("cooldown_active", capture.record().getPreviewReasonCode());
     }
 
     @Test
@@ -395,12 +460,74 @@ class WorkflowManualRunServiceTest {
         WorkflowDefinition definition = new WorkflowDefinition(
             1, "trigger", List.of(), List.of());
         when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
-        when(workspaceService.getRole(7, 17)).thenReturn("member");
         when(objectMapper.writeValueAsString(any())).thenReturn("{}");
         doAnswer(call -> {
             call.<WorkflowInvocation>getArgument(0).setId(31L);
             return null;
         }).when(operationsMapper).insertInvocation(any());
+    }
+
+    private PreparationCapture prepareBlockedByEnrollment(
+            WorkflowEnrollmentPolicyService.Decision decision) throws Exception {
+        when(workspaceService.getCurrentUserId()).thenReturn(41);
+        Workflow workflow = new Workflow();
+        workflow.setId(11);
+        workflow.setWorkspaceId(7);
+        workflow.setName("Deal workflow");
+        workflow.setEnabled(true);
+        workflow.setRuntimeOwner("canonical");
+        workflow.setActiveVersionId(19L);
+        when(workflowMapper.getById(7, 11)).thenReturn(workflow);
+        WorkflowVersion version = new WorkflowVersion();
+        version.setId(19L);
+        version.setWorkflowId(11);
+        version.setWorkspaceId(7);
+        version.setName("Deal workflow");
+        version.setVersionNumber(1);
+        version.setRecordType("deal");
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
+        version.setDefinitionHash(new byte[32]);
+        version.setDefinitionJson("{}");
+        when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
+        when(workspaceService.getMembers(7)).thenReturn(List.of());
+        WorkflowDefinition definition = new WorkflowDefinition(
+            2,
+            "trigger",
+            List.of(),
+            List.of(),
+            List.of(),
+            new WorkflowEnrollment(null, true, 120),
+            null);
+        WorkflowDefinitionValidator.CompiledWorkflow compiled =
+            mock(WorkflowDefinitionValidator.CompiledWorkflow.class);
+        when(compiled.schemaVersion()).thenReturn(2);
+        when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
+        when(definitionValidator.validate("deal", "user", definition)).thenReturn(compiled);
+        when(enrollmentPolicyService.preview(
+            any(WorkflowRun.class), eq(compiled), eq(17))).thenReturn(decision);
+        Deal deal = new Deal();
+        deal.setId(91);
+        deal.setName("Strategic Renewal");
+        when(dealService.getDealById(91)).thenReturn(deal);
+        when(objectMapper.writeValueAsString(any())).thenReturn("{}");
+        doAnswer(call -> {
+            call.<WorkflowInvocation>getArgument(0).setId(31L);
+            return null;
+        }).when(operationsMapper).insertInvocation(any());
+        List<WorkflowInvocationRecord> persisted = new ArrayList<>();
+        doAnswer(call -> {
+            persisted.addAll(call.getArgument(2));
+            return null;
+        }).when(operationsMapper).insertInvocationRecords(eq(7), eq(31L), any());
+
+        WorkflowManualPreparationDto preparation = service.prepare(
+            11,
+            new WorkflowManualPrepareRequest(
+                "record", new WorkflowManualScope.SingleRecord(91)));
+
+        assertEquals(1, persisted.size());
+        return new PreparationCapture(preparation, persisted.getFirst());
     }
 
     private static WorkflowInvocation invocation(String status) {
@@ -417,4 +544,9 @@ class WorkflowManualRunServiceTest {
         invocation.setConfirmedAt(LocalDateTime.of(2026, 8, 3, 9, 1));
         return invocation;
     }
+
+    private record PreparationCapture(
+        WorkflowManualPreparationDto preparation,
+        WorkflowInvocationRecord record
+    ) { }
 }

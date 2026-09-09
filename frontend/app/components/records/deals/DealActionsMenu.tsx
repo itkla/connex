@@ -20,6 +20,8 @@ import {
     UsersIcon,
 } from '@heroicons/react/24/outline';
 
+import RunWorkflowMenuItem from "@/app/components/records/RunWorkflowMenuItem";
+
 import { useAttachmentUploader } from '@/app/components/attachments/useAttachmentUploader';
 
 import {
@@ -190,6 +192,7 @@ export default function DealActionsMenu({
                         </IconButton>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
+                        <RunWorkflowMenuItem record={{ type: "deal", id: deal.id, label: deal.name }} />
                         <DropdownMenuItem
                             onSelect={(e) => {
                                 e.preventDefault();

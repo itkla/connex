@@ -4,6 +4,7 @@ import PermissionsUnavailablePage from "@/app/components/PermissionsUnavailableP
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import {
     getContacts,
+    getCompanies,
     getCurrentUserResultFromCookie,
     getDeals,
     getEffectivePermissionsResultFromCookie,
@@ -26,13 +27,14 @@ export default async function TasksPage() {
 
     const init = { headers: { cookie: cookie ?? '' }, cache: 'no-store' as const };
 
-    const [tasks, persons, deals, users, permissionsResult, workspaceState] = await Promise.all([
+    const [tasks, persons, deals, users, permissionsResult, workspaceState, companies] = await Promise.all([
         getTasks(init),
         getContacts({}, init),
         getDeals(init),
         getUsers(init),
         getEffectivePermissionsResultFromCookie(cookie),
         getMyWorkspacesFromCookie(cookie),
+        getCompanies(init),
     ]);
     if (!permissionsResult.ok) return <PermissionsUnavailablePage />;
 
@@ -42,6 +44,7 @@ export default async function TasksPage() {
             persons={persons}
             deals={deals}
             users={users}
+            companies={companies}
             currentUserId={user.id}
             canDeleteTasks={permissionsResult.data.includes('TASK_DELETE')}
             originWorkspaceId={workspaceState.activeWorkspaceId}

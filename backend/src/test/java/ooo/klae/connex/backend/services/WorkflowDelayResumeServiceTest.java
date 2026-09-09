@@ -8,6 +8,8 @@ import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,6 +35,9 @@ class WorkflowDelayResumeServiceTest {
     @Mock private WorkflowTraversalService traversalService;
     @Mock private WorkflowExecutionPrincipalService principalService;
     @Mock private WorkflowRecordGuard recordGuard;
+    @Mock private WorkflowRecordPolicyService recordPolicyService;
+    @Mock private AutomationExecutor automationExecutor;
+    @Mock private WorkspaceService workspaceService;
 
     @Test
     void dueResumeCompletesTheExistingDelayStepWithoutInsertingAnother() {
@@ -41,33 +46,54 @@ class WorkflowDelayResumeServiceTest {
             versionMapper,
             traversalService,
             principalService,
-            recordGuard);
+            recordGuard,
+            recordPolicyService,
+            automationExecutor,
+            workspaceService);
         WorkflowRun run = new WorkflowRun();
         run.setId(31L);
         run.setWorkspaceId(7);
         run.setWorkflowId(11);
         run.setWorkflowVersionId(19L);
+        run.setStatus("running");
         run.setCurrentNodeId("delay");
         run.setActorUserId(17);
         run.setAttributionUserId(17);
+        when(runMapper.getByIdInWorkspace(7, 31L)).thenReturn(run);
         when(runMapper.getOwnedByIdForUpdate(7, 31L, "owner")).thenReturn(run);
         WorkflowVersion version = new WorkflowVersion();
         version.setId(19L);
+        version.setExecutionMode("user");
+        version.setRunAsUserId(17);
         when(versionMapper.getById(7, 11, 19L)).thenReturn(version);
         User actor = new User();
         actor.setId(17);
-        when(principalService.resolve(7, version)).thenReturn(
+        WorkspaceService.LockedPermissionSnapshot authorization =
+            org.mockito.Mockito.mock(WorkspaceService.LockedPermissionSnapshot.class);
+        when(workspaceService.lockAndRequirePermissionsSnapshot(
+            7, Map.of(17, Set.of()))).thenReturn(authorization);
+        when(principalService.resolveLocked(7, version, authorization)).thenReturn(
             new WorkflowExecutionPrincipal(actor, "member", 17, 17));
+        when(automationExecutor.runAs(
+                org.mockito.ArgumentMatchers.eq(7),
+                org.mockito.ArgumentMatchers.eq(actor),
+                org.mockito.ArgumentMatchers.eq("member"),
+                any()))
+            .thenAnswer(invocation -> invocation.<Supplier<?>>getArgument(3).get());
         WorkflowNode.Delay delay = new WorkflowNode.Delay(
             "delay", new WorkflowDelayConfig(3_600));
         WorkflowEdge edge = new WorkflowEdge(
             "delay-end", "delay", "end", WorkflowEdge.Outcome.NEXT);
         CompiledWorkflow compiled = new CompiledWorkflow(
+            2,
             "trigger",
             Map.of("delay", delay),
             Map.of("delay", NodeType.DELAY),
             Map.of("delay", Map.of(WorkflowEdge.Outcome.NEXT, edge)),
             List.of("delay"),
+            List.of(),
+            null,
+            null,
             null);
         when(traversalService.compiled(run)).thenReturn(compiled);
         when(runMapper.succeedWaitingDelayStep(
@@ -82,7 +108,8 @@ class WorkflowDelayResumeServiceTest {
 
         assertTrue(service.resume(7, 31L, "owner"));
 
-        verify(recordGuard).requireAccessible(run);
+        verify(recordPolicyService).stopReason(run, compiled, 17);
+        verify(recordGuard, never()).requireAccessible(run);
         verify(runMapper, never()).insertStep(any());
         verify(runMapper).advanceClaimedRun(7, 31L, "delay", "end", "owner");
     }

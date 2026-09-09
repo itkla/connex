@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { toastSuccess } from '@/app/lib/toast';
 import { Loader2Icon } from 'lucide-react';
@@ -122,6 +123,7 @@ export default function EditTaskSheet({
                 assignedToId: draft.assignedToId,
                 personId: draft.personId !== 'none' ? parseInt(draft.personId) : undefined,
                 dealId: draft.dealId !== 'none' ? parseInt(draft.dealId) : undefined,
+                companyId: task.companyId ?? undefined,
                 completed: draft.completed,
             };
             await updateTask(task.id, payload);
@@ -153,6 +155,7 @@ export default function EditTaskSheet({
 
                 <div className="flex-1 overflow-y-auto px-4 py-2">
                     <div className="grid gap-4 pt-6">
+                        {task.companyId ? <Link href={`/records/companies/${task.companyId}`} className="text-sm font-medium text-brand-dark underline underline-offset-4">{t('viewLinkedCompany')}</Link> : null}
                         <div className="grid gap-1.5">
                             <Label htmlFor="task-description">
                                 {t('descriptionLabel')}

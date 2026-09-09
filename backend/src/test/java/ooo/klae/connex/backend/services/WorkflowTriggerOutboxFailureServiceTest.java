@@ -10,12 +10,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
+import ooo.klae.connex.backend.mappers.WorkflowDateEnrollmentMapper;
 import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
 
 @ExtendWith(MockitoExtension.class)
 class WorkflowTriggerOutboxFailureServiceTest {
 
     @Mock private WorkflowTriggerOutboxMapper outboxMapper;
+    @Mock private WorkflowDateEnrollmentMapper dateEnrollmentMapper;
     @Mock private WorkflowRuntimeProperties properties;
 
     @InjectMocks private WorkflowTriggerOutboxFailureService service;

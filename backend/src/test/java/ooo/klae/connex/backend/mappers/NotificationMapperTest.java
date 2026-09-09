@@ -217,6 +217,7 @@ class NotificationMapperTest extends AbstractMapperTest {
         task.setDueDate("2026-06-24");
         task.setAssignedTo(owner);
         task.setDeal(deal);
+        task.setCompany(company);
         taskMapper.insert(task);
 
         TaskReminderCandidate taskCandidate = notificationMapper
@@ -227,6 +228,8 @@ class NotificationMapperTest extends AbstractMapperTest {
             .orElseThrow();
         assertEquals(owner.getId(), taskCandidate.getRecipientId());
         assertEquals(deal.getId(), taskCandidate.getDealId());
+        assertEquals(company.getId(), taskCandidate.getCompanyId());
+        assertEquals(company.getName(), taskCandidate.getCompanyLabel());
 
         Set<Integer> dealRecipients = notificationMapper
             .findDealReminderCandidates(workspace.getId())

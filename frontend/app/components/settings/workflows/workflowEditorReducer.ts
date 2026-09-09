@@ -23,6 +23,12 @@ export type WorkflowMergeConflict =
         serverValue: string | null;
     }
     | {
+        kind: "definitionSettings";
+        key: "definitionSettings";
+        localValue: Pick<WorkflowDefinition, "schemaVersion" | "inputs" | "enrollment" | "stopConditions">;
+        serverValue: Pick<WorkflowDefinition, "schemaVersion" | "inputs" | "enrollment" | "stopConditions">;
+    }
+    | {
         kind: "node";
         key: string;
         localValue: WorkflowNode | null;
@@ -63,7 +69,7 @@ export type WorkflowEditorHistory = {
 export type WorkflowEditorAction =
     | { type: "initialize"; document: WorkflowEditorDocument }
     | { type: "replace"; document: WorkflowEditorDocument }
-    | { type: "untracked"; document: WorkflowEditorDocument }
+    | { type: "moveViewport"; viewport: WorkflowCanvas["viewport"] }
     | { type: "commit"; document: WorkflowEditorDocument }
     | { type: "commitTransient" }
     | { type: "undo" }
@@ -111,10 +117,13 @@ export function workflowEditorReducer(
                 transientBase: state.transientBase ?? structuredClone(state.present),
                 future: [],
             };
-        case "untracked":
+        case "moveViewport":
             return {
                 ...state,
-                present: structuredClone(action.document),
+                present: {
+                    ...state.present,
+                    canvas: { ...state.present.canvas, viewport: { ...action.viewport } },
+                },
             };
         case "commit": {
             const historyBase = state.transientBase ?? state.present;
@@ -270,6 +279,17 @@ export function mergeWorkflowDocuments(
     const executionMode = mergeField("executionMode", base.executionMode, local.executionMode, server.executionMode);
     document.executionMode = executionMode === "system" ? "system" : "user";
 
+    const settings = (definition: WorkflowDefinition) => ({ schemaVersion: definition.schemaVersion, inputs: definition.inputs, enrollment: definition.enrollment, stopConditions: definition.stopConditions });
+    const baseSettings = settings(base.definition);
+    const localSettings = settings(local.definition);
+    const serverSettings = settings(server.definition);
+    const localSettingsChanged = !equal(baseSettings, localSettings);
+    const serverSettingsChanged = !equal(baseSettings, serverSettings);
+    if (localSettingsChanged && serverSettingsChanged && !equal(localSettings, serverSettings)) {
+        conflicts.push({ kind: "definitionSettings", key: "definitionSettings", localValue: localSettings, serverValue: serverSettings });
+    }
+    if (localSettingsChanged && !serverSettingsChanged) document.definition = { ...document.definition, ...localSettings };
+
     const nodes = mergeEntityMap(
         base.definition.nodes,
         local.definition.nodes,
@@ -312,6 +332,11 @@ export function applyWorkflowMergeChoice(
 ): WorkflowEditorDocument {
     const next = structuredClone(document);
     switch (conflict.kind) {
+        case "definitionSettings": {
+            const value = choice === "local" ? conflict.localValue : conflict.serverValue;
+            next.definition = { ...next.definition, ...value };
+            break;
+        }
         case "name": {
             const value = choice === "local" ? conflict.localValue : conflict.serverValue;
             next.name = value ?? "";

@@ -980,6 +980,7 @@ public class AiAssistantWriteToolService {
         state.put("assignedToId", id(task.getAssignedTo()));
         state.put("personId", id(task.getPerson()));
         state.put("dealId", id(task.getDeal()));
+        state.put("companyId", id(task.getCompany()));
         return state;
     }
 
@@ -1115,6 +1116,10 @@ public class AiAssistantWriteToolService {
 
     private static int id(Deal deal) {
         return deal == null ? 0 : deal.getId();
+    }
+
+    private static int id(Company company) {
+        return company == null ? 0 : company.getId();
     }
 
     private static int id(User user) {

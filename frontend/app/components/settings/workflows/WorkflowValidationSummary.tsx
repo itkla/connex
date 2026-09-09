@@ -4,6 +4,7 @@ import { type ReactNode } from "react";
 import { ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import { useTranslations } from "next-intl";
 
+import { workflowDiagnosticTargetsEntry } from "@/app/components/settings/workflows/workflowDiagnosticFields";
 import type { WorkflowDiagnostic, WorkflowValidation } from "@/app/lib/types";
 import { Button } from "@/components/ui/button";
 
@@ -36,7 +37,7 @@ export default function WorkflowValidationSummary({
                     <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
                         {validation.errors.map((diagnostic) => (
                             <li key={`${diagnostic.code}:${diagnostic.nodeId ?? "global"}:${diagnostic.edgeId ?? "no-edge"}:${diagnostic.fieldPath ?? "no-field"}`}>
-                                {diagnostic.nodeId ? (
+                                {diagnostic.nodeId || workflowDiagnosticTargetsEntry(diagnostic) ? (
                                     <Button
                                         variant="link"
                                         size="xs"

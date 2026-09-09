@@ -397,6 +397,7 @@
             <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
             <when test="field == 'email'"><include refid="stringOp"><property name="col" value="email"/></include></when>
             <when test="field == 'phone'"><include refid="stringOp"><property name="col" value="phone"/></include></when>
+            <when test="field == 'lifecycle'"><include refid="stringOp"><property name="col" value="lifecycle_stage"/></include></when>
             <when test="field == 'company'"><include refid="personCompanyOp"/></when>
             <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
             <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>
@@ -429,6 +430,7 @@
             <when test="field == 'title'"><include refid="stringOp"><property name="col" value="title"/></include></when>
             <when test="field == 'email'"><include refid="stringOp"><property name="col" value="email"/></include></when>
             <when test="field == 'phone'"><include refid="stringOp"><property name="col" value="phone"/></include></when>
+            <when test="field == 'lifecycle'"><include refid="stringOp"><property name="col" value="lifecycle_stage"/></include></when>
             <when test="field == 'company'"><include refid="personCompanyOp"/></when>
             <when test="field == 'owner'"><include refid="idOp"><property name="col" value="owner_id"/></include></when>
             <when test="field == 'created'"><include refid="dateOp"><property name="col" value="created_at"/></include></when>

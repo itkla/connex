@@ -352,6 +352,51 @@ class WorkflowDraftCanonicalizerTest {
     }
 
     @Test
+    void schemaV1CanonicalBytesOmitEverySchemaV2Component() {
+        String canonical = canonicalize(minimalDefinition(), canvas("end")).definitionJson();
+
+        assertFalse(canonical.contains("\"inputs\""));
+        assertFalse(canonical.contains("\"enrollment\""));
+        assertFalse(canonical.contains("\"stopConditions\""));
+        assertFalse(canonical.contains("\"config\":null"));
+    }
+
+    @Test
+    void sparseSchemaV2ParsesOptionalRecordsWithoutChangingRequiredBoundaries() {
+        String definition = """
+            {"schemaVersion":2,"entryNodeId":"start","inputs":[
+              {"key":"assignee","label":"Assignee","type":"user","required":true},
+              {"key":"context","label":"Context","type":"text","required":true},
+              {"key":"dueDate","label":"Due date","type":"date","required":true}],
+             "nodes":[
+              {"id":"start","type":"TRIGGER","config":{"type":"manual"}},
+              {"id":"task","type":"ACTION","config":{"type":"create_task",
+                "targetUserRef":{"source":"launch_input","key":"assignee"},
+                "titleTemplate":{"parts":[{"text":"Review "},{"ref":{"source":"record_field","field":"name"}},
+                  {"ref":{"source":"launch_input","key":"context"}}],"missingValue":"fail"},
+                "dueDateRef":{"source":"launch_input","key":"dueDate"}}},
+              {"id":"end","type":"END"}],
+             "edges":[
+              {"id":"start-task","sourceNodeId":"start","targetNodeId":"task","outcome":"next"},
+              {"id":"task-end","sourceNodeId":"task","targetNodeId":"end","outcome":"next"}]}
+            """;
+
+        WorkflowDraftCanonicalizer.CanonicalDraft canonical = canonicalize(
+            definition, canvas("start", "task", "end"));
+        WorkflowDefinition parsed = canonicalizer.parseDefinition(canonical.definitionJson());
+
+        assertEquals(2, parsed.schemaVersion());
+        assertEquals(3, parsed.inputs().size());
+        assertFalse(canonical.definitionJson().contains("\"defaultValue\""));
+        assertFalse(canonical.definitionJson().contains("\"config\":null"));
+        assertFalse(canonical.definitionJson().contains("\"text\":null"));
+        assertFalse(canonical.definitionJson().contains("\"field\":null"));
+        assertThrows(BadRequestException.class, () -> canonicalize(
+            definition.replaceFirst(",\"required\":true", ""),
+            canvas("start", "task", "end")));
+    }
+
+    @Test
     void anActionThatSetsAResponseDeadlineCanonicalizesWithIt() {
         String withSla = definition(
             "[{\"type\":\"ACTION\",\"id\":\"action-1\","

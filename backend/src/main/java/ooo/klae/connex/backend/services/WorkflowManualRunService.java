@@ -6,6 +6,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashSet;
@@ -34,6 +35,8 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowInvocation;
 import ooo.klae.connex.backend.beans.WorkflowInvocationRecord;
+import ooo.klae.connex.backend.beans.WorkflowManualOptionView;
+import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
@@ -82,6 +85,10 @@ public class WorkflowManualRunService {
     private final WorkflowRecordGuard recordGuard;
     private final WorkflowManualRunConfirmationTransaction confirmationTransaction;
     private final WorkflowManualRunDispatchTransaction dispatchTransaction;
+    private final WorkflowInputResolver inputResolver;
+    private final WorkflowManualEligibilityService eligibilityService;
+    private final WorkflowEnrollmentPolicyService enrollmentPolicyService;
+    private final WorkflowActionBindingService bindingService;
     private final WorkflowRunOperationService runOperationService;
     private final PersonService personService;
     private final CompanyService companyService;
@@ -107,14 +114,26 @@ public class WorkflowManualRunService {
         ResolvedScope resolved = resolveScope(
             request.scope(), sourceSurface, requesterId, version.getRecordType());
         WorkflowDefinition definition = canonicalizer.parseDefinition(version.getDefinitionJson());
-        definitionValidator.validate(version.getRecordType(), version.getExecutionMode(), definition);
+        WorkflowDefinitionValidator.CompiledWorkflow compiled = definitionValidator.validate(
+            version.getRecordType(), version.getExecutionMode(), definition);
+        WorkflowInputResolver.Resolved resolvedInputs = inputResolver.resolve(
+            workspaceId, definition.inputs(), request.inputs());
         int actorUserId = actorUserId(version);
         String actorLabel = actorLabel(workspaceId, version, actorUserId);
         List<WorkflowManualPreparationDto.Action> actions = actions(definition);
-        List<String> blockers = operationalBlockers(workflow, version, actorUserId, resolved.ids());
+        List<String> blockers = new ArrayList<>(eligibilityService.evaluate(
+            workspaceId,
+            requesterId,
+            manualCandidate(workflow, version),
+            definition,
+            null).reasons());
+        if (resolved.ids().isEmpty()) blockers.add("scope_empty");
         List<WorkflowInvocationRecord> records = new ArrayList<>();
         List<WorkflowManualPreparationDto.Sample> samples = new ArrayList<>();
         List<WorkflowManualPreparationDto.Sample> skippedSamples = new ArrayList<>();
+        List<WorkflowManualPreparationDto.EffectSample> effectSamples = new ArrayList<>();
+        List<WorkflowManualPreparationDto.BlockerDetail> blockerDetails = new ArrayList<>();
+        Map<Integer, String> memberLabels = memberLabels(workspaceId);
         int missingReferences = 0;
         int configurationSkips = 0;
         int ordinal = 0;
@@ -125,13 +144,54 @@ public class WorkflowManualRunService {
             record.setOrdinal(ordinal++);
             record.setRecordId(recordId);
             record.setExecutionStatus("pending");
-            String skipCode = recordSkipCode(
-                workspaceId, version, actorUserId, recordId, actionNodes);
+            WorkflowEnrollmentPolicyService.Decision enrollmentDecision =
+                enrollmentDecision(
+                    workspaceId,
+                    workflow.getId(),
+                    version,
+                    compiled,
+                    recordId);
+            String skipCode = enrollmentDecision.allowed()
+                ? recordSkipCode(
+                    workspaceId,
+                    version,
+                    definition.schemaVersion(),
+                    actorUserId,
+                    recordId,
+                    actionNodes,
+                    resolvedInputs.values())
+                : enrollmentDecision.reason();
+            if (!enrollmentDecision.allowed() && resolved.ids().size() == 1) {
+                blockers.add(enrollmentDecision.reason());
+                blockerDetails.add(new WorkflowManualPreparationDto.BlockerDetail(
+                    enrollmentDecision.reason(), enrollmentDecision.eligibleAt()));
+            }
             if (skipCode == null) {
                 record.setPreviewStatus("ready");
                 if (samples.size() < MAX_SAMPLES) {
                     samples.add(new WorkflowManualPreparationDto.Sample(
                         recordId, recordLabel(version.getRecordType(), recordId)));
+                    for (WorkflowNode.Action action : actionNodes) {
+                        WorkflowActionBindingService.Preview preview = effectPreview(
+                            workspaceId,
+                            version,
+                            definition.schemaVersion(),
+                            actorUserId,
+                            recordId,
+                            resolvedInputs.values(),
+                            action);
+                        effectSamples.add(new WorkflowManualPreparationDto.EffectSample(
+                            recordId,
+                            action.id(),
+                            action.config().getType(),
+                            preview.title(),
+                            preview.body(),
+                            preview.targetUserId(),
+                            preview.targetUserId() == null
+                                ? null : memberLabels.get(preview.targetUserId()),
+                            preview.dueDate(),
+                            retryPolicy.safety(action.config()).value()));
+                    }
                 }
             } else {
                 record.setPreviewStatus("skipped");
@@ -153,7 +213,7 @@ public class WorkflowManualRunService {
         SECURE_RANDOM.nextBytes(rawToken);
         String scopeToken = Base64.getUrlEncoder().withoutPadding().encodeToString(rawToken);
         String contractJson = scopeContract(
-            request.scope(), resolved, sourceSurface, version.getRecordType());
+            request.scope(), resolved, sourceSurface, version.getRecordType(), resolvedInputs.values());
         byte[] scopeHash = sha256(contractJson.getBytes(StandardCharsets.UTF_8));
         WorkflowInvocation invocation = invocation(
             workspaceId,
@@ -200,7 +260,10 @@ public class WorkflowManualRunService {
             actions,
             blockers.isEmpty() && records.stream().anyMatch(
                 record -> "ready".equals(record.getPreviewStatus())),
-            List.copyOf(blockers));
+            List.copyOf(blockers),
+            resolvedInputs.disclosure(),
+            List.copyOf(effectSamples),
+            List.copyOf(blockerDetails));
     }
 
     @RequirePermission(Permission.RULE_MANAGE)
@@ -269,7 +332,7 @@ public class WorkflowManualRunService {
         }
         operationsMapper.cancelPendingInvocationRecords(workspaceId, invocationId);
         operationsMapper.cancelInvocation(
-            workspaceId, invocationId, LocalDateTime.now());
+            workspaceId, invocationId, LocalDateTime.now(ZoneOffset.UTC));
         return result(workspaceId, workflowId, invocationId);
     }
 
@@ -290,7 +353,7 @@ public class WorkflowManualRunService {
         if (terminalInvocation(status)) {
             if (invocation.getCompletedAt() == null) {
                 operationsMapper.completeInvocationIfActive(
-                    workspaceId, invocationId, status, LocalDateTime.now());
+                    workspaceId, invocationId, status, LocalDateTime.now(ZoneOffset.UTC));
                 invocation = requireInvocationForUpdate(
                     workspaceId, workflowId, invocationId);
                 status = invocationStatus(invocation, counts, records.size());
@@ -314,6 +377,7 @@ public class WorkflowManualRunService {
             count(counts, "running"),
             count(counts, "waiting"),
             count(counts, "succeeded"),
+            count(counts, "stopped"),
             count(counts, "failed"),
             count(counts, "intervention_required"),
             count(counts, "cancelled"),
@@ -514,53 +578,71 @@ public class WorkflowManualRunService {
         return version;
     }
 
-    private List<String> operationalBlockers(
-            Workflow workflow,
-            WorkflowVersion version,
-            int actorUserId,
-            List<Integer> recordIds) {
-        List<String> blockers = new ArrayList<>();
-        if (workflow.getArchivedAt() != null) {
-            blockers.add("workflow_archived");
-        }
-        if (!workflow.isEnabled()) {
-            blockers.add("workflow_disabled");
-        }
-        if (workflow.getIntakePausedAt() != null) {
-            blockers.add("workflow_paused");
-        }
-        if (!"canonical".equals(workflow.getRuntimeOwner())) {
-            blockers.add("workflow_not_canonical");
-        }
-        if (workspaceService.getRole(workflow.getWorkspaceId(), actorUserId) == null
-                && !"system".equals(version.getExecutionMode())) {
-            blockers.add("actor_unavailable");
-        }
-        if (recordIds.isEmpty()) {
-            blockers.add("scope_empty");
-        }
-        return blockers;
+    private static WorkflowManualOptionView manualCandidate(
+            Workflow workflow, WorkflowVersion version) {
+        WorkflowManualOptionView candidate = new WorkflowManualOptionView();
+        candidate.setWorkflowId(workflow.getId());
+        candidate.setWorkflowName(version.getName());
+        candidate.setEnabled(workflow.isEnabled());
+        candidate.setRuntimeOwner(workflow.getRuntimeOwner());
+        candidate.setArchivedAt(workflow.getArchivedAt());
+        candidate.setIntakePausedAt(workflow.getIntakePausedAt());
+        candidate.setWorkflowVersionId(version.getId());
+        candidate.setVersionNumber(version.getVersionNumber());
+        candidate.setRecordType(version.getRecordType());
+        candidate.setExecutionMode(version.getExecutionMode());
+        candidate.setRunAsUserId(version.getRunAsUserId());
+        candidate.setCreatedById(version.getCreatedById());
+        candidate.setDefinitionJson(version.getDefinitionJson());
+        candidate.setDefinitionHash(version.getDefinitionHash());
+        return candidate;
     }
 
     private String recordSkipCode(
             int workspaceId,
             WorkflowVersion version,
+            int schemaVersion,
             int actorUserId,
             int recordId,
-            List<WorkflowNode.Action> actions) {
+            List<WorkflowNode.Action> actions,
+            Map<String, JsonNode> launchInputs) {
         try {
             recordGuard.requireAccessible(workspaceId, version.getRecordType(), recordId);
         } catch (WorkflowExecutionException exception) {
             return "record_not_found";
         }
         for (WorkflowNode.Action node : actions) {
+            ooo.klae.connex.backend.dto.RuleAction action;
+            try {
+                if (schemaVersion >= 2) {
+                    bindingService.preview(
+                        workspaceId,
+                        version.getRecordType(),
+                        recordId,
+                        launchInputs,
+                        node.config());
+                    action = bindingService.resolvePreviewTarget(
+                        workspaceId,
+                        version.getRecordType(),
+                        recordId,
+                        launchInputs,
+                        node.config());
+                } else {
+                    action = node.config();
+                }
+            } catch (WorkflowExecutionException exception) {
+                return "configuration_missing";
+            }
             WorkflowDiagnosticDto blocker = actionGuard.blocker(
                 workspaceId,
                 actorUserId,
                 version.getRecordType(),
                 recordId,
                 node.id(),
-                node.config());
+                action,
+                "system".equals(version.getExecutionMode())
+                    ? systemActor.permissions()
+                    : null);
             if (blocker != null) {
                 return switch (blocker.code()) {
                     case ACTION_PERMISSION_MISSING -> "action_permission_missing";
@@ -570,6 +652,75 @@ public class WorkflowManualRunService {
             }
         }
         return null;
+    }
+
+    private WorkflowEnrollmentPolicyService.Decision enrollmentDecision(
+            int workspaceId,
+            int workflowId,
+            WorkflowVersion version,
+            WorkflowDefinitionValidator.CompiledWorkflow compiled,
+            int recordId) {
+        if (compiled == null || compiled.schemaVersion() < 2) {
+            return new WorkflowEnrollmentPolicyService.Decision(null, null);
+        }
+        WorkflowRun run = new WorkflowRun();
+        run.setWorkspaceId(workspaceId);
+        run.setWorkflowId(workflowId);
+        run.setWorkflowVersionId(version.getId());
+        run.setRecordType(version.getRecordType());
+        run.setRecordId(recordId);
+        Integer attributionUserId = "system".equals(version.getExecutionMode())
+            ? version.getCreatedById() : actorUserId(version);
+        if (attributionUserId == null || attributionUserId < 1) {
+            return new WorkflowEnrollmentPolicyService.Decision(null, null);
+        }
+        try {
+            return enrollmentPolicyService.preview(run, compiled, attributionUserId);
+        } catch (WorkflowExecutionException exception) {
+            return new WorkflowEnrollmentPolicyService.Decision("record_unavailable", null);
+        }
+    }
+
+    private WorkflowActionBindingService.Preview effectPreview(
+            int workspaceId,
+            WorkflowVersion version,
+            int schemaVersion,
+            int actorUserId,
+            int recordId,
+            Map<String, JsonNode> launchInputs,
+            WorkflowNode.Action action) {
+        WorkflowActionBindingService.Preview preview = bindingService.preview(
+            workspaceId,
+            version.getRecordType(),
+            recordId,
+            launchInputs,
+            action.config());
+        if (schemaVersion >= 2) {
+            return preview;
+        }
+        String type = action.config().getType() == null
+            ? "" : action.config().getType().trim().toLowerCase(java.util.Locale.ROOT);
+        Integer target = switch (type) {
+            case "create_task", "notify" -> actorUserId;
+            default -> preview.targetUserId();
+        };
+        String dueDate = preview.dueDate();
+        if ("create_task".equals(type) && dueDate == null) {
+            dueDate = java.time.LocalDate.now().plusDays(3).toString();
+        }
+        return new WorkflowActionBindingService.Preview(
+            preview.title(), preview.body(), target, dueDate);
+    }
+
+    private Map<Integer, String> memberLabels(int workspaceId) {
+        Map<Integer, String> labels = new LinkedHashMap<>();
+        for (User member : workspaceService.getMembers(workspaceId)) {
+            String label = memberLabel(member);
+            if (label != null) {
+                labels.put(member.getId(), label);
+            }
+        }
+        return Map.copyOf(labels);
     }
 
     private List<WorkflowManualPreparationDto.Action> actions(WorkflowDefinition definition) {
@@ -651,7 +802,7 @@ public class WorkflowManualRunService {
         invocation.setReadyCount(ready);
         invocation.setSkippedCount(records.size() - ready);
         invocation.setStatus("prepared");
-        invocation.setExpiresAt(LocalDateTime.now().plusMinutes(15));
+        invocation.setExpiresAt(LocalDateTime.now(ZoneOffset.UTC).plusMinutes(15));
         return invocation;
     }
 
@@ -659,7 +810,8 @@ public class WorkflowManualRunService {
             WorkflowManualScope original,
             ResolvedScope resolved,
             String sourceSurface,
-            String recordType) {
+            String recordType,
+            Map<String, JsonNode> resolvedInputs) {
         Map<String, Object> contract = new LinkedHashMap<>();
         contract.put("scopeKind", resolved.scopeKind());
         contract.put("resolvedScopeKind", resolved.resolvedKind());
@@ -667,6 +819,7 @@ public class WorkflowManualRunService {
         contract.put("recordType", recordType);
         contract.put("recordIds", resolved.ids());
         contract.put("request", original);
+        contract.put("resolvedInputs", resolvedInputs);
         try {
             String json = objectMapper.writeValueAsString(contract);
             if (json.getBytes(StandardCharsets.UTF_8).length > 16_384) {

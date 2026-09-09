@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Set;
 
@@ -18,6 +19,7 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -27,11 +29,12 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 public class WorkflowRunOperationService {
 
     private static final Set<String> TERMINAL_STATUSES = Set.of(
-        "succeeded", "failed", "skipped", "cancelled", "intervention_required");
+        "succeeded", "failed", "skipped", "stopped", "cancelled", "intervention_required");
 
     private final WorkflowMapper workflowMapper;
     private final WorkflowOperationsMapper workflowOperationsMapper;
     private final WorkflowRunMapper runMapper;
+    private final WorkflowEventWaitMapper eventWaitMapper;
     private final WorkflowRuntimeProperties properties;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
@@ -48,7 +51,7 @@ public class WorkflowRunOperationService {
         boolean requested = run.getCancelRequestedAt() != null;
         boolean changed = false;
         if ("queued".equals(priorStatus) || "waiting".equals(priorStatus)) {
-            LocalDateTime finishedAt = LocalDateTime.now();
+            LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
             cancelCurrentStep(run, finishedAt);
             if (runMapper.cancelImmediately(workspaceId, run.getId(), finishedAt) != 1) {
                 throw new IllegalStateException("Workflow run was not cancelled");
@@ -58,7 +61,7 @@ public class WorkflowRunOperationService {
             changed = true;
         } else if ("running".equals(priorStatus)) {
             if (!requested) {
-                LocalDateTime requestedAt = LocalDateTime.now();
+                LocalDateTime requestedAt = LocalDateTime.now(ZoneOffset.UTC);
                 if (runMapper.requestCancellation(
                         workspaceId, run.getId(), requestedAt) != 1) {
                     throw new IllegalStateException("Workflow cancellation was not requested");
@@ -137,6 +140,11 @@ public class WorkflowRunOperationService {
             run.getWorkspaceId(), run.getId(), step.getId(), "cancelled", finishedAt);
         runMapper.cancelExistingStep(
             run.getWorkspaceId(), run.getId(), run.getCurrentNodeId(), finishedAt);
+        if ("event".equals(run.getWaitKind())) {
+            eventWaitMapper.resolveCurrent(
+                run.getWorkspaceId(), run.getId(), run.getCurrentNodeId(),
+                "cancelled", finishedAt);
+        }
     }
 
     private Workflow requireWorkflow(int workspaceId, int workflowId) {

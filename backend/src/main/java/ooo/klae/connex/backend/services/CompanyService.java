@@ -540,9 +540,31 @@ public class CompanyService {
     @Transactional
     @RequirePermission(Permission.COMPANY_UPDATE)
     public Company updateOwner(int companyId, Integer ownerId) {
+        return updateOwner(companyId, ownerId, null);
+    }
+
+    /** Updates ownership using a target membership locked before a workflow run root. */
+    @Transactional
+    @RequirePermission(Permission.COMPANY_UPDATE)
+    public Company updateOwnerWithLockedMember(
+            int companyId,
+            Integer ownerId,
+            WorkspaceService.LockedPermissionSnapshot authorization) {
+        if (ownerId != null) {
+            Objects.requireNonNull(authorization, "authorization").requireMember(ownerId);
+        }
+        return updateOwner(companyId, ownerId, authorization);
+    }
+
+    private Company updateOwner(
+            int companyId,
+            Integer ownerId,
+            WorkspaceService.LockedPermissionSnapshot authorization) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Company before = requireOwnedCompany(workspaceId, companyId);
-        if (ownerId != null) workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        if (ownerId != null && authorization == null) {
+            workspaceService.lockAndRequireMember(workspaceId, ownerId);
+        }
         companyMapper.updateOwner(workspaceId, companyId, ownerId);
         auditService.record("company.updateOwner", "company", companyId, before.getName(),
             "Updated owner on " + before.getName(),

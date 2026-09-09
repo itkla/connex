@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -12,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowStepRun;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
+import ooo.klae.connex.backend.mappers.WorkflowEventWaitMapper;
 
 /** Finalizes a requested cancellation at a claimed node boundary. */
 @Service
@@ -19,6 +21,7 @@ import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 public class WorkflowRunCancellationService {
 
     private final WorkflowRunMapper runMapper;
+    private final WorkflowEventWaitMapper eventWaitMapper;
 
     @Transactional(
         propagation = Propagation.REQUIRES_NEW,
@@ -51,7 +54,7 @@ public class WorkflowRunCancellationService {
     }
 
     private void finalizeLocked(WorkflowRun run, String leaseOwner) {
-        LocalDateTime finishedAt = LocalDateTime.now();
+        LocalDateTime finishedAt = LocalDateTime.now(ZoneOffset.UTC);
         WorkflowStepRun step = runMapper.getStepByNodeForUpdate(
             run.getWorkspaceId(), run.getId(), run.getCurrentNodeId());
         if (step != null) {
@@ -66,6 +69,11 @@ public class WorkflowRunCancellationService {
                 run.getId(),
                 run.getCurrentNodeId(),
                 finishedAt);
+            if ("event".equals(run.getWaitKind())) {
+                eventWaitMapper.resolveCurrent(
+                    run.getWorkspaceId(), run.getId(), run.getCurrentNodeId(),
+                    "cancelled", finishedAt);
+            }
         }
         if (runMapper.cancelClaimed(
                 run.getWorkspaceId(), run.getId(), leaseOwner, finishedAt) != 1) {

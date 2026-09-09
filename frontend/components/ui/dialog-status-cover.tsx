@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef } from 'react';
+import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import PixelCard from '@/components/PixelCard';
 
@@ -46,13 +46,12 @@ export function DialogStatusCover({
     dangerous?: boolean;
     className?: string;
 }) {
-    // Idle keeps the previous palette so pixels fade out smoothly instead of snapping.
-    const lastColorsRef = useRef(PIXEL_GRAY);
-    let colors = lastColorsRef.current;
-    if (status === 'loading') colors = PIXEL_GRAY;
-    else if (status === 'success') colors = dangerous ? PIXEL_RED : PIXEL_GREEN;
-    else if (status === 'error') colors = PIXEL_RED;
-    lastColorsRef.current = colors;
+    const [lastColors, setLastColors] = useState(PIXEL_GRAY);
+    const colors = status === 'loading' ? PIXEL_GRAY
+        : status === 'error' ? PIXEL_RED
+            : status === 'success' ? dangerous ? PIXEL_RED : PIXEL_GREEN
+                : lastColors;
+    if (colors !== lastColors) setLastColors(colors);
 
     return (
         <div aria-hidden className={cn('relative h-24 overflow-hidden', className)}>

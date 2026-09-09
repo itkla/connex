@@ -78,14 +78,16 @@
       "legacyTitle": "概要のみ",
       "legacyBody": "この実行は以前の自動化から引き継いだもので、概要だけが残っています。どのステップを通ったかを推測して表示することはありません。",
       "outcome": "{outcome} の分岐に進みました",
-      "attempts": "{count} 回試行"
+      "attempts": "{count} 回試行",
+      "createdTask": "作成されたタスクを表示"
     },
     "nodeType": {
       "trigger": "トリガー",
       "condition": "条件",
       "action": "アクション",
       "delay": "待機",
-      "end": "終了"
+      "end": "終了",
+      "wait": "タスクの完了を待つ"
     },
     "health": {
       "title": "ワークフローの状態",
@@ -152,7 +154,10 @@
       "retry_exhausted": "許可された回数まで再試行しました。",
       "retry_not_safe": "このステップは単独で安全に再試行できません。",
       "execution_failed": "このステップを完了できませんでした。",
-      "unknown": "このバージョンの Connex では、失敗の内容を説明できません。ページを再読み込みし、それでも続く場合はサポートにご連絡ください。"
+      "unknown": "このバージョンの Connex では、失敗の内容を説明できません。ページを再読み込みし、それでも続く場合はサポートにご連絡ください。",
+      "condition_matched": "レコードが停止条件に一致しました。",
+      "date_superseded": "商談の決着予定日が変更されました。",
+      "task_wait_timeout": "期限までにタスクが完了しませんでした。"
     },
     "retrySafety": {
       "transactional": "安全に再試行できます",
@@ -211,8 +216,42 @@
         "prepare": "対象のレコードを確定できませんでした。ワークフローと選択内容を確認してから、もう一度お試しください。",
         "confirm": "確認の有効期限が切れたか、対象が変わりました。もう一度確認してから実行してください。",
         "result": "この実行の結果を読み込めませんでした。もう一度お試しください。",
-        "cancel": "残りのレコードをキャンセルできませんでした。もう一度お試しください。"
-      }
+        "cancel": "残りのレコードをキャンセルできませんでした。もう一度お試しください。",
+        "recordSearch": "レコードを検索できませんでした。検索内容を変更して再試行してください。",
+        "members": "メンバーを読み込めませんでした。閉じてから開き直してください。"
+      },
+      "createWorkflow": "このレコードのワークフローを作成",
+      "recordLabel": "実行対象のレコード",
+      "recordPlaceholder": "名前でレコードを検索",
+      "recordEmpty": "2文字以上入力してレコードを検索してください",
+      "editSelection": "選択内容を変更",
+      "newRun": "別の実行を準備",
+      "availability": {
+        "workflow_draft_only": "実行する前にワークフローを公開してください。",
+        "workflow_disabled": "新しい実行を受け付けるにはワークフローを有効にしてください。",
+        "workflow_paused": "新しい実行を受け付けるにはワークフローを再開してください。",
+        "workflow_archived": "実行する前にワークフローを復元してください。",
+        "workflow_not_canonical": "このワークフローは手動実行の準備ができていません。設定を開いて確認してください。",
+        "workflow_runtime_unavailable": "この環境ではワークフローを実行できません。",
+        "manual_entry_disabled": "作成者が手動実行を許可していません。",
+        "actor_unavailable": "実行メンバーを利用できません。ワークスペース管理者に設定の確認を依頼してください。",
+        "caller_permission_missing": "ワークフローの一部の操作に必要な権限がありません。",
+        "actor_permission_missing": "実行メンバーに一部の操作の権限がありません。",
+        "record_unavailable": "このレコードはワークフローで利用できなくなりました。",
+        "configuration_unavailable": "実行前にワークフローの設定を確認してください。",
+        "entry_condition_not_matched": "レコードが開始条件に一致しませんでした。",
+        "active_run_exists": "このレコードはすでに実行中です。",
+        "cooldown_active": "再開始までの時間が経過していません。"
+      },
+      "unavailable": "利用できません",
+      "runsAs": "{actor}として実行します。担当者と通知先は別に選択します。",
+      "resolvedInputsTitle": "この準備で使う入力値",
+      "effectSamplesTitle": "サンプルレコードで予定される変更",
+      "effectAssignee": "担当者または通知先：{name}",
+      "effectDueDate": "期限：{date}",
+      "effectUnresolved": "一部の値は、前のステップの実行後に確定します。",
+      "recordOutcomesTitle": "レコードごとの結果",
+      "eligibleAt": "次に開始できる日時：{date}"
     },
     "status": {
       "queued": "順番待ち",
@@ -222,7 +261,8 @@
       "failed": "失敗",
       "intervention_required": "対応が必要",
       "cancelled": "キャンセル済み",
-      "skipped": "スキップ"
+      "skipped": "スキップ",
+      "stopped": "停止"
     },
     "expectedSkip": {
       "permission": "権限",
@@ -250,7 +290,10 @@
       "actor_unavailable": "このワークフローの実行者となるメンバーが見つかりません。",
       "actor_inactive": "このワークフローの実行者となるメンバーは現在無効です。",
       "configuration_missing": "このワークフローに必要な設定が不足しています。",
-      "definition_invalid": "公開中のワークフローに問題があります。開いて問題を解消してから実行してください。"
+      "definition_invalid": "公開中のワークフローに問題があります。開いて問題を解消してから実行してください。",
+      "entry_condition_not_matched": "レコードが開始条件に一致しませんでした。",
+      "active_run_exists": "このレコードはすでに実行中です。",
+      "cooldown_active": "再開始までの時間が経過していません。"
     },
     "recipes": {
       "title": "ワークフローのレシピ",
@@ -270,8 +313,8 @@
       "configureTitle": "設定が必要な項目",
       "configureBody": "以下の値を入力してください。トリガーとステップはここでは変更できませんが、ワークフローの作成後に変更できます。",
       "nameLabel": "ワークフロー名",
-      "exampleRecordLabel": "サンプルのレコード ID（任意）",
-      "exampleRecordHelp": "レコードを指定すると、そのレコードで何が起きるかを確認できます。実行はされません。",
+      "exampleRecordLabel": "プレビューするレコード（任意）",
+      "exampleRecordHelp": "レコードを検索してレシピをプレビューします。プレビューでは変更を行いません。",
       "previewOnlyTitle": "プレビューのみで、実行はされません",
       "previewOnlyBody": "何も作成・変更されません。ワークフローも実行も作られず、タスク・メモ・アクティビティ・タグ・通知も作成されません。",
       "preview": "プレビュー",
@@ -308,23 +351,44 @@
         },
         "deal-won-handoff": {
           "title": "成約案件の引き継ぎ",
-          "description": "案件が成約したとき、引き継ぎ内容を記録し、指定した担当者にフォローアップタスクを作成します。"
+          "description": "案件が成約したとき、指定した担当者に引き継ぎタスクを作成し、タスクの完了後に引き継ぎ内容を記録します。"
         },
         "cooling-company-review": {
           "title": "温度感が下がった会社の確認",
           "description": "スケジュールに従って、温度感が下がっている会社を見つけ、様子を確認するタスクを作成します。"
+        },
+        "person-qualified-routing": {
+          "title": "連絡先の担当者を決める",
+          "description": "連絡先が「見込みあり」になったとき、選択した担当者を割り当て、フォローアップのタスクを作成します。"
+        },
+        "deal-follow-through": {
+          "title": "商談のフォローアップを進める",
+          "description": "フォローアップのタスクを作成し、完了を確認してから商談を指定のステージに進めます。"
+        },
+        "deal-renewal-preparation": {
+          "title": "更新に備える",
+          "description": "商談の決着予定日を基準に、更新準備のタスクを事前に作成し、完了を確認します。"
         }
-      }
+      },
+      "startBlank": "ワークフローを一から作成",
+      "renewalDateHelp": "このレシピは商談の決着予定日を使います。予定日より前に開始する場合は日数をマイナスにしてください。タイムゾーンは Asia/Tokyo や Pacific/Honolulu の形式で入力します。"
     },
     "sourceEvent": {
       "person": {
-        "job_changed": "連絡先の勤務先変更"
+        "job_changed": "連絡先の勤務先変更",
+        "lifecycle_changed": "連絡先のライフサイクル変更"
       },
       "deal": {
-        "won": "案件の成約"
+        "won": "案件の成約",
+        "created": "案件の作成"
       },
       "schedule": {
         "daily": "温度感の日次確認"
+      },
+      "date": {
+        "deal": {
+          "expectedCloseDate": "案件の決着予定日の前後"
+        }
       }
     },
     "actorModel": {
@@ -351,19 +415,29 @@
       "assign_owner": "担当者を割り当て",
       "set_response_due": "初回応答期限を設定",
       "change_stage": "ステージを変更",
-      "notify": "通知を作成"
+      "notify": "通知を作成",
+      "update_field": "決着予定日を更新"
     },
     "recipeField": {
       "sourceEvent": "開始のきっかけ",
       "recordType": "レコード種別",
       "actionTypes": "アクション",
       "retryBehavior": "再試行",
+      "enrollmentPolicy": "再び開始する条件",
+      "stopPolicy": "停止する条件",
+      "dateField": "基準となる日付",
+      "catchupPolicy": "過ぎた開始日の扱い",
       "actorUserId": "実行者",
       "targetUserId": "タスクの担当者",
       "taskTitle": "タスク名",
       "activityNote": "アクティビティの内容",
       "dueInDays": "期限までの日数",
-      "coolingDays": "連絡がない日数"
+      "coolingDays": "連絡がない日数",
+      "targetStageId": "フォローアップ後のステージ",
+      "completionTimeoutDays": "タスクの完了を待つ日数",
+      "offsetDays": "決着予定日からの日数",
+      "localTime": "開始時刻",
+      "timezone": "タイムゾーン"
     },
     "parameter": {
       "actorUserId": "実行者",
@@ -372,7 +446,13 @@
       "activityNote": "アクティビティの内容",
       "dueInDays": "期限までの日数",
       "coolingDays": "連絡がない日数",
-      "userPlaceholder": "ワークスペースメンバーを選択"
+      "userPlaceholder": "ワークスペースメンバーを選択",
+      "stagePlaceholder": "パイプラインのステージを選択",
+      "targetStageId": "フォローアップ後のステージ",
+      "completionTimeoutDays": "タスクの完了を待つ日数",
+      "offsetDays": "決着予定日からの日数",
+      "localTime": "開始時刻",
+      "timezone": "タイムゾーン"
     },
     "permission": {
       "TASK_CREATE": "タスクを作成",
@@ -381,6 +461,20 @@
       "DEAL_UPDATE": "案件を更新",
       "COMPANY_UPDATE": "会社を更新",
       "PERSON_UPDATE": "連絡先を更新"
+    },
+    "runReason": {
+      "entry_condition_not_matched": "レコードが開始条件に一致しませんでした。",
+      "active_run_exists": "このレコードはすでに実行中です。",
+      "cooldown_active": "再開始までの時間が経過していません。",
+      "condition_matched": "レコードが停止条件に一致しました。",
+      "date_superseded": "商談の決着予定日が変更されました。",
+      "custom": "停止: {reason}",
+      "task_wait_timeout": "期限までにタスクが完了しませんでした。"
+    },
+    "dateSchedule": {
+      "sourceDate": "決着予定日: {date}",
+      "scheduled": "予定された現地の日付: {date}",
+      "dueAt": "予定時刻: {date}"
     }
   }
 }

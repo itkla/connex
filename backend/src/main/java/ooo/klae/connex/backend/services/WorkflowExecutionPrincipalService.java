@@ -52,13 +52,43 @@ public class WorkflowExecutionPrincipalService {
             permissions);
     }
 
+    /** Resolves the execution principal from authorization rows already locked by the caller. */
+    public WorkflowExecutionPrincipal resolveLocked(
+            int workspaceId,
+            WorkflowVersion version,
+            WorkspaceService.LockedPermissionSnapshot authorization) {
+        Integer authorizationMemberId = "system".equals(version.getExecutionMode())
+            ? version.getCreatedById() : version.getRunAsUserId();
+        if (authorizationMemberId == null) {
+            throw new WorkflowExecutionException(
+                "actor_unavailable",
+                "The configured workflow actor is unavailable.",
+                true);
+        }
+        authorization.requireMember(authorizationMemberId);
+        Set<Permission> permissions = "system".equals(version.getExecutionMode())
+            ? systemActor.permissions()
+            : authorization.permissionsFor(authorizationMemberId);
+        return resolve(
+            workspaceId,
+            version.getExecutionMode(),
+            version.getRunAsUserId(),
+            version.getCreatedById(),
+            permissions);
+    }
+
     /** Revalidates the configured actor of one saved workflow draft without version persistence. */
     public WorkflowExecutionPrincipal resolveDraft(
             int workspaceId,
             String executionMode,
             Integer runAsUserId,
             Integer createdById) {
-        return resolve(workspaceId, executionMode, runAsUserId, createdById, Set.of());
+        Set<Permission> permissions = "system".equals(executionMode)
+            ? systemActor.permissions()
+            : runAsUserId == null
+                ? Set.of()
+                : workspaceService.permissionsFor(workspaceId, runAsUserId);
+        return resolve(workspaceId, executionMode, runAsUserId, createdById, permissions);
     }
 
     private WorkflowExecutionPrincipal resolve(

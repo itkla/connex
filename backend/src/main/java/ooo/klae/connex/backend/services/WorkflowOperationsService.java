@@ -48,7 +48,7 @@ public class WorkflowOperationsService {
     private static final int MAX_CURSOR_LENGTH = 256;
     private static final Set<String> RUN_STATUSES = Set.of(
         "queued", "running", "waiting", "succeeded", "failed", "skipped",
-        "cancelled", "intervention_required");
+        "stopped", "cancelled", "intervention_required");
     private static final Set<String> FAILURE_CATEGORIES = Set.of(
         "actor", "permission", "reference", "retry", "configuration", "execution");
 

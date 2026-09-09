@@ -45,6 +45,12 @@ class TaskMapperTest extends AbstractMapperTest {
         return task;
     }
 
+    private Task buildForCompany(String description, User assignedTo, Company company) {
+        Task task = build(description, assignedTo, null, null);
+        task.setCompany(company);
+        return task;
+    }
+
     /**
      * Inserts a new task and checks if the generated ID is not zero.
      */
@@ -81,6 +87,7 @@ class TaskMapperTest extends AbstractMapperTest {
         assertEquals(user.getId(), found.getAssignedTo().getId());
         assertEquals(person.getId(), found.getPerson().getId());
         assertEquals(deal.getId(), found.getDeal().getId());
+        assertTrue(found.getCompany() == null || found.getCompany().getId() == 0);
     }
 
     /**
@@ -114,6 +121,50 @@ class TaskMapperTest extends AbstractMapperTest {
         assertNotNull(found);
         assertTrue(found.getPerson() == null || found.getPerson().getId() == 0);
         assertTrue(found.getDeal() == null || found.getDeal().getId() == 0);
+        assertTrue(found.getCompany() == null || found.getCompany().getId() == 0);
+    }
+
+    @Test
+    void directCompanyLinkRoundTripsAndNullsOnHardDelete() {
+        Company company = newCompany();
+        Task task = buildForCompany("Company follow-up", newUser(), company);
+        taskMapper.insert(task);
+
+        Task found = taskMapper.getTaskById(workspace.getId(), task.getId());
+        assertNotNull(found.getCompany());
+        assertEquals(company.getId(), found.getCompany().getId());
+
+        jdbcTemplate.update("DELETE FROM company WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), company.getId());
+
+        Task retained = taskMapper.getTaskByIdForUpdate(workspace.getId(), task.getId());
+        assertNotNull(retained);
+        assertTrue(retained.getCompany() == null || retained.getCompany().getId() == 0);
+    }
+
+    @Test
+    void companyFilterIncludesDirectAndDerivedLinksWithoutDuplicates() {
+        User user = newUser();
+        Company company = newCompany();
+        Person person = newPerson(company);
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, stage, company);
+        Task direct = buildForCompany("direct", user, company);
+        Task throughPerson = build("person", user, person, null);
+        Task throughDeal = build("deal", user, null, deal);
+        Task throughEveryLink = build("every link", user, person, deal);
+        throughEveryLink.setCompany(company);
+        taskMapper.insert(direct);
+        taskMapper.insert(throughPerson);
+        taskMapper.insert(throughDeal);
+        taskMapper.insert(throughEveryLink);
+
+        List<Integer> ids = taskMapper.getTasksByCompanyId(workspace.getId(), company.getId())
+            .stream().map(Task::getId).toList();
+
+        assertEquals(List.of(direct.getId(), throughPerson.getId(), throughDeal.getId(),
+            throughEveryLink.getId()), ids);
     }
 
     /**

@@ -93,17 +93,17 @@ public class SegmentService {
             throw new IllegalArgumentException("Segment evaluation limit must be positive");
         }
         String type = requireSupported(recordType);
-        if (definition == null) {
+        Integer upperId = segmentMapper.maximumEntityId(workspaceId, type);
+        if (upperId == null || upperId < 1) {
             return List.of();
+        }
+        if (definition == null) {
+            return segmentMapper.entityIdsPage(workspaceId, type, 0, upperId, limit);
         }
         int total = countConditions(definition, 1);
         if (total > catalog.maxConditions()) {
             throw new BadRequestException(
                 "A rule may reference at most " + catalog.maxConditions() + " conditions");
-        }
-        Integer upperId = segmentMapper.maximumEntityId(workspaceId, type);
-        if (upperId == null || upperId < 1) {
-            return List.of();
         }
         List<Integer> result = new ArrayList<>(limit);
         int afterId = 0;

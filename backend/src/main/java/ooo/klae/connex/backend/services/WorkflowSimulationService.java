@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.databind.JsonNode;
 
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Workflow;
@@ -53,6 +54,8 @@ public class WorkflowSimulationService {
     private final WorkflowRecordGuard recordGuard;
     private final WorkflowNodeDecisionService decisionService;
     private final WorkflowActionGuard actionGuard;
+    private final WorkflowInputResolver inputResolver;
+    private final WorkflowActionBindingService bindingService;
 
     @Transactional(readOnly = true)
     @RequirePermission(Permission.RULE_MANAGE)
@@ -75,7 +78,8 @@ public class WorkflowSimulationService {
             definition,
             workflow.getDraftRunAsUserId(),
             workflow.getCreatedById(),
-            request.recordId());
+            request.recordId(),
+            request.inputs());
     }
 
     WorkflowSimulationDto simulateDraft(
@@ -84,6 +88,17 @@ public class WorkflowSimulationService {
             Integer runAsUserId,
             Integer createdById,
             int recordId) {
+        return simulateDraft(
+            draft, definition, runAsUserId, createdById, recordId, null);
+    }
+
+    WorkflowSimulationDto simulateDraft(
+            CanonicalDraft draft,
+            WorkflowDefinition definition,
+            Integer runAsUserId,
+            Integer createdById,
+            int recordId,
+            Map<String, JsonNode> inputs) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if ("system".equals(draft.executionMode())
                 && !workspaceService.isBuiltInAdmin(
@@ -91,12 +106,15 @@ public class WorkflowSimulationService {
             throw new ForbiddenException("Requires a built-in admin role in this workspace");
         }
         ValidatedWorkflow validated;
+        WorkflowInputResolver.Resolved resolvedInputs;
         try {
             canonicalizer.requirePublishableCanvas(draft);
             validated = definitionValidator.validateForMutationAndCompile(
                 draft.recordType(),
                 draft.executionMode(),
                 definition);
+            resolvedInputs = inputResolver.resolve(
+                workspaceId, definition.inputs(), inputs);
         } catch (WorkflowDefinitionValidationException exception) {
             return blocked(List.of(), exception.diagnostic());
         }
@@ -125,7 +143,8 @@ public class WorkflowSimulationService {
             draft,
             validated.compiled(),
             principal,
-            recordId);
+            recordId,
+            resolvedInputs.values());
     }
 
     private WorkflowSimulationDto traverse(
@@ -133,7 +152,8 @@ public class WorkflowSimulationService {
             CanonicalDraft draft,
             CompiledWorkflow compiled,
             WorkflowExecutionPrincipal principal,
-            int recordId) {
+            int recordId,
+            Map<String, JsonNode> launchInputs) {
         List<PathStep> path = new ArrayList<>();
         WorkflowNode entry = compiled.node(compiled.entryNodeId());
         if (!(entry instanceof WorkflowNode.Trigger trigger)) {
@@ -155,6 +175,23 @@ public class WorkflowSimulationService {
                 WorkflowDiagnosticCode.TRIGGER_FILTER_NOT_MATCHED));
             return new WorkflowSimulationDto(Result.NOT_ENROLLED, path, List.of());
         }
+        if (compiled.enrollment() != null
+                && compiled.enrollment().condition() != null
+                && !decisionService.matchesPolicy(
+                    workspaceId,
+                    principal.attributionUserId(),
+                    draft.recordType(),
+                    recordId,
+                    compiled.enrollment().condition())) {
+            path.add(new PathStep(
+                trigger.id(),
+                "trigger",
+                "not_enrolled",
+                null,
+                null,
+                WorkflowDiagnosticCode.ENROLLMENT_NOT_MATCHED));
+            return new WorkflowSimulationDto(Result.NOT_ENROLLED, path, List.of());
+        }
         String nodeId = compiled.entryNodeId();
         boolean scheduleEnrollmentConfirmed = false;
         for (int sequence = 0; sequence < MAX_STEPS && nodeId != null; sequence++) {
@@ -165,14 +202,50 @@ public class WorkflowSimulationService {
                     path,
                     diagnostic(WorkflowDiagnosticCode.DEFINITION_CORRUPT, nodeId, null));
             }
+            if (decisionService.matchesPolicy(
+                    workspaceId,
+                    principal.attributionUserId(),
+                    draft.recordType(),
+                    recordId,
+                    compiled.stopConditions())) {
+                path.add(step(
+                    nodeId, nodeType, "would_stop", null, null,
+                    WorkflowDiagnosticCode.CONDITION_MATCHED));
+                return new WorkflowSimulationDto(Result.WOULD_STOP, path, List.of());
+            }
             if (node instanceof WorkflowNode.Action action) {
+                ooo.klae.connex.backend.dto.RuleAction guardAction;
+                try {
+                    guardAction = compiled.schemaVersion() >= 2
+                        ? bindingService.resolvePreviewTarget(
+                            workspaceId,
+                            draft.recordType(),
+                            recordId,
+                            launchInputs,
+                            action.config())
+                        : action.config();
+                } catch (WorkflowExecutionException exception) {
+                    WorkflowDiagnosticDto diagnostic = diagnostic(
+                        WorkflowDiagnosticCode.BINDING_UNRESOLVED,
+                        nodeId,
+                        null);
+                    path.add(new PathStep(
+                        nodeId,
+                        "action",
+                        "blocked",
+                        null,
+                        normalize(action.config().getType()),
+                        diagnostic.code()));
+                    return blocked(path, diagnostic);
+                }
                 WorkflowDiagnosticDto blocker = actionGuard.blocker(
                     workspaceId,
                     principal.actorUserId(),
                     draft.recordType(),
                     recordId,
                     nodeId,
-                    action.config());
+                    guardAction,
+                    principal.lockedPermissions());
                 if (blocker != null) {
                     path.add(new PathStep(
                         nodeId,
@@ -184,6 +257,11 @@ public class WorkflowSimulationService {
                     return blocked(path, blocker);
                 }
             }
+            if (node instanceof WorkflowNode.Wait) {
+                path.add(step(nodeId, nodeType, "would_wait", null, null,
+                    WorkflowDiagnosticCode.DELAY_WAIT));
+                return new WorkflowSimulationDto(Result.WOULD_WAIT, path, List.of());
+            }
             WorkflowNodeDecisionContext context = new WorkflowNodeDecisionContext(
                 workspaceId,
                 principal.attributionUserId(),
@@ -193,10 +271,16 @@ public class WorkflowSimulationService {
                 scheduleEnrollmentConfirmed,
                 compiled);
             WorkflowStepTransition transition = decisionService.decide(context, node);
-            if (node instanceof WorkflowNode.End) {
-                path.add(step(nodeId, nodeType, "would_complete", null, null,
-                    WorkflowDiagnosticCode.END_REACHED));
-                return new WorkflowSimulationDto(Result.WOULD_COMPLETE, path, List.of());
+            if (node instanceof WorkflowNode.End end) {
+                boolean stopped = end.config() != null
+                    && "stopped".equals(end.config().outcome());
+                path.add(step(
+                    nodeId, nodeType, stopped ? "would_stop" : "would_complete",
+                    null, null, WorkflowDiagnosticCode.END_REACHED));
+                return new WorkflowSimulationDto(
+                    stopped ? Result.WOULD_STOP : Result.WOULD_COMPLETE,
+                    path,
+                    List.of());
             }
             if (node instanceof WorkflowNode.Delay) {
                 path.add(step(nodeId, nodeType, "would_wait", null, null,
