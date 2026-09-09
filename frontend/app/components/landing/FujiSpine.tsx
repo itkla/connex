@@ -17,10 +17,16 @@ import { springSmooth } from "@/app/lib/motion";
  *
  * Three things are driven by scroll progress:
  *
- * 1. The camera pans down and left in two planes: the distant foothills travel
- *    at roughly half the rate of Fuji itself, so the scene has depth rather than
- *    sliding as one flat sheet. The summit starts above the viewport, and the
- *    visible curve reads as a rising line with no falloff until the peak arrives.
+ * 1. The scene bookends the page. It holds the hero, clears out entirely while
+ *    the reader is in the content, and returns for the closing call to action,
+ *    by which point the line has visibly travelled. A constant backdrop competed
+ *    with every section; two deliberate appearances do not.
+ *
+ *    While it is on screen the camera pans down and left in two planes: the
+ *    distant foothills travel at roughly half the rate of Fuji itself, so the
+ *    scene has depth rather than sliding as one flat sheet. The summit starts
+ *    above the viewport, so the visible curve reads as a rising line with no
+ *    falloff until the peak arrives.
  * 2. Cloud banks drift across the flanks at differing rates, clipped to the
  *    mountain so they never smudge the open sky behind the copy. They are kept
  *    well below the summit: a clear peak above the cloud line is the whole point.
@@ -159,7 +165,7 @@ export default function FujiSpine() {
     const farPanY = useTransform(eased, [0, 0.7], [0, 108]);
     const farPanX = useTransform(eased, [0, 0.7], [0, -250]);
     const cloudReveal = useTransform(eased, [0, 0.28], [0.5, 1]);
-    const spineFade = useTransform(eased, [0.74, 0.96], [1, 0.6]);
+    const spineFade = useTransform(eased, [0, 0.11, 0.86, 0.96], [1, 0, 0, 1]);
 
     useEffect(() => {
         const path = measureRef.current;
@@ -207,7 +213,13 @@ export default function FujiSpine() {
             className="pointer-events-none fixed inset-0 z-0 overflow-hidden max-md:inset-y-auto max-md:bottom-0 max-md:h-[46vh]"
             aria-hidden="true"
         >
-            <svg viewBox="0 0 1440 1200" fill="none" preserveAspectRatio="xMidYMax slice" className="size-full">
+            <svg
+                viewBox="0 0 1440 1200"
+                fill="none"
+                preserveAspectRatio="xMidYMax slice"
+                className="size-full"
+                style={{ ["--spine-stop" as string]: stopAt }}
+            >
                 <defs>
                     <linearGradient id="fuji-mass" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0" className="[stop-color:var(--color-foreground)]" stopOpacity="0.13" />
@@ -257,15 +269,24 @@ export default function FujiSpine() {
                 </defs>
 
                 <g mask="url(#fuji-haze-mask)">
-                    <motion.g style={{ x: farPanX, y: farPanY }} className="motion-reduce:transform-none!">
+                    <motion.g
+                        style={{ x: farPanX, y: farPanY }}
+                        className="motion-reduce:[transform:translate(-250px,108px)]!"
+                    >
                         <path d={FAR_RIDGE} fill="url(#fuji-far)" />
                     </motion.g>
-                    <motion.g style={{ x: panX, y: panY }} className="motion-reduce:transform-none!">
+                    <motion.g
+                        style={{ x: panX, y: panY }}
+                        className="motion-reduce:[transform:translate(-560px,240px)]!"
+                    >
                         <path d={MASS} fill="url(#fuji-mass)" />
                     </motion.g>
                 </g>
 
-                <motion.g style={{ x: panX, y: panY }} className="motion-reduce:transform-none!">
+                <motion.g
+                    style={{ x: panX, y: panY }}
+                    className="motion-reduce:[transform:translate(-560px,240px)]!"
+                >
                     <path
                         ref={measureRef}
                         d={SPINE}
@@ -288,7 +309,7 @@ export default function FujiSpine() {
 
                     <motion.path
                         d={SPINE}
-                        style={{ pathLength, ["--spine-stop" as string]: stopAt }}
+                        style={{ pathLength }}
                         stroke="url(#fuji-line)"
                         strokeWidth={9}
                         strokeLinejoin="round"
@@ -299,7 +320,7 @@ export default function FujiSpine() {
 
                     <motion.path
                         d={SPINE}
-                        style={{ pathLength, ["--spine-stop" as string]: stopAt }}
+                        style={{ pathLength }}
                         stroke="url(#fuji-line)"
                         strokeWidth={3.25}
                         strokeLinejoin="round"

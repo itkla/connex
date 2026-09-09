@@ -5,11 +5,15 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 
 /**
  * Landing page FAQ. Every answer is checked against what Connex actually ships:
- * the three deployment profiles, the APPI surfaces, the "AI proposes, you apply"
- * contract, CSV import and card scanning, and first-class Japanese.
+ * the hosting options that are genuinely for sale, the APPI surfaces, the
+ * "AI proposes, you apply" contract, CSV import and card scanning, and
+ * first-class Japanese.
+ *
+ * Ordered by what a buyer asks first after the deal-risk pitch — time to value,
+ * then migration — rather than by how the answers are grouped internally.
  */
 
-const QUESTIONS = ["Data", "Appi", "Ai", "Import", "Ja", "Start"] as const;
+const QUESTIONS = ["Start", "Import", "Ja", "Data", "Ai", "Appi"] as const;
 
 export default function LandingFaq() {
     const t = useTranslations("CommonHome");
