@@ -1229,7 +1229,16 @@ unchanged; the rule tests pin this case.
 exports, using `AuditIntegrityService.hasValidIntegrity` and
 `CONNEX_AUDIT_INTEGRITY_HMAC_SECRET`. Modified row content and unverifiable legacy references emit a
 scope-only anomaly timestamp. Existing `AUDIT_READ` and organization-admin gates remain in effect.
-No cross-tenant scanner or privileged read endpoint was added.
+No cross-tenant scanner or privileged read endpoint was added. Verification runs on reads/exports,
+not on every append; its cost scales with returned payload volume and page size, not total chain
+length. Recoverable registry/clock failures lose the observation but do not abort disclosure,
+report a committed mutation as failed, or interrupt later commit callbacks. The diagnostic is the
+static message `Security signal observation failed`, without scope, row content or exception details.
+Fatal JVM errors are not suppressed.
+
+`observeCommittedAudit` follows a successful append return. `append` uses `NESTED`, so that return
+may only release a savepoint inside an uncommitted outer transaction; permission observations wait
+for the outer commit. `appendIndependent` uses `REQUIRES_NEW`, so its observation follows that commit.
 
 This verifies each returned row's HMAC, including its signed previous-hash field. It does **not**
 prove adjacent-chain continuity, detect deletion of entire rows/chains, compare external checkpoints,
