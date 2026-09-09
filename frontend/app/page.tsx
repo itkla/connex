@@ -80,13 +80,13 @@ export default async function Home() {
                     <section className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-7xl flex-col justify-center px-6 pt-12 pb-24 lg:px-8 lg:pt-20">
                         <div className="max-w-3xl">
                             <h1
-                                className={`connex-rise font-display text-[clamp(2.25rem,5vw,4rem)] leading-[1.08] tracking-[-0.015em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase] ${HALO}`}
+                                className={`connex-rise font-display text-[clamp(2.5rem,6.2vw,5rem)] leading-[1.04] tracking-[-0.022em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase] ${HALO}`}
                             >
                                 <span className="block">{t("heroHeadlineLead")}</span>
                                 <span className="block">{t("heroHeadlineRest")}</span>
                             </h1>
                             <p
-                                className={`connex-rise mt-7 max-w-[46ch] text-lg leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase] ${HALO}`}
+                                className={`connex-rise mt-8 max-w-[46ch] text-lg leading-relaxed text-muted-foreground text-pretty sm:text-xl [word-break:auto-phrase] ${HALO}`}
                                 style={{ animationDelay: "90ms" }}
                             >
                                 {t("heroSubtext")}
@@ -106,20 +106,28 @@ export default async function Home() {
                         </div>
                     </section>
 
-                    <section id="features" className="scroll-mt-20">
-                        <div className="mx-auto max-w-7xl px-6 py-24 lg:px-8 lg:py-32">
-                            <Reveal className="max-w-3xl">
+                    <section id="features" className="relative isolate scroll-mt-20 overflow-x-clip">
+                        <div
+                            aria-hidden
+                            className="pointer-events-none absolute inset-x-0 top-1/4 -z-10 mx-auto h-[36rem] max-w-4xl rounded-full bg-brand/8 blur-[120px] dark:bg-brand/10"
+                        />
+                        <div className="mx-auto max-w-7xl px-6 py-28 lg:px-8 lg:py-40">
+                            <Reveal className="mx-auto max-w-2xl text-center">
                                 <h2 className={sectionHeading}>{t("radarHeading")}</h2>
-                                <p className={sectionBody}>{t("radarBody")}</p>
+                                <p className={`${sectionBody} mx-auto`}>{t("radarBody")}</p>
                             </Reveal>
-                            <Reveal delay={0.08} className="mt-14">
+                            <Reveal delay={0.08} className="mt-16">
                                 <RadarSweepSurface />
                             </Reveal>
                         </div>
                     </section>
 
-                    <section className="scroll-mt-20">
-                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-[1.15fr_1fr] lg:gap-20 lg:px-8 lg:py-32">
+                    <section className="relative isolate scroll-mt-20 overflow-x-clip">
+                        <div
+                            aria-hidden
+                            className="pointer-events-none absolute top-1/4 -left-24 -z-10 size-[30rem] rounded-full bg-warmth-warm/8 blur-[110px] dark:bg-warmth-warm/10"
+                        />
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-[1.15fr_1fr] lg:gap-20 lg:px-8 lg:py-28">
                             <Reveal>
                                 <LivingNetworkSurface />
                             </Reveal>
@@ -131,7 +139,7 @@ export default async function Home() {
                     </section>
 
                     <section className="scroll-mt-20">
-                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-[1fr_1.1fr] lg:gap-20 lg:px-8 lg:py-32">
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-[1fr_1.1fr] lg:gap-20 lg:px-8 lg:py-28">
                             <Reveal>
                                 <h2 className={sectionHeading}>{t("signalsHeading")}</h2>
                                 <p className={sectionBody}>{t("signalsBody")}</p>
@@ -142,8 +150,12 @@ export default async function Home() {
                         </div>
                     </section>
 
-                    <section id="evidence" className="scroll-mt-20">
-                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-32">
+                    <section id="evidence" className="relative isolate scroll-mt-20 overflow-x-clip">
+                        <div
+                            aria-hidden
+                            className="pointer-events-none absolute top-1/3 -right-32 -z-10 size-[28rem] rounded-full bg-chart-5/8 blur-[110px] dark:bg-chart-5/10"
+                        />
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-28">
                             <Reveal>
                                 <h2 className={sectionHeading}>{t("evidenceHeading")}</h2>
                                 <p className={sectionBody}>{t("evidenceBody")}</p>
@@ -180,22 +192,24 @@ export default async function Home() {
                     </section>
 
                     <section>
-                        <div className="mx-auto max-w-7xl px-6 pt-12 pb-32 lg:px-8 lg:pb-48">
-                            <Reveal className="max-w-2xl">
-                                <h2
-                                    className={`font-display text-[clamp(2rem,4.5vw,3.5rem)] leading-[1.12] tracking-[-0.015em] text-balance text-foreground [line-break:strict] ${HALO}`}
-                                >
-                                    {t("ctaHeading")}
-                                </h2>
-                                <p className={sectionBody}>{t("ctaSubtext")}</p>
-                                <div className="mt-10 flex flex-wrap items-center gap-3">
-                                    <a href="#features" className={btnPrimary}>
-                                        {t("heroCtaPrimary")}
-                                        <ArrowRightIcon className="size-4" />
-                                    </a>
-                                    <Link href="/docs" className={btnGhost}>
-                                        {t("heroCtaSecondary")}
-                                    </Link>
+                        <div className="mx-auto max-w-7xl px-6 pt-16 pb-28 lg:px-8 lg:pt-24 lg:pb-40">
+                            <Reveal>
+                                <div className="relative isolate overflow-hidden rounded-[2rem] border border-border bg-card px-8 py-16 text-center sm:px-12 lg:py-24">
+                                    <div
+                                        aria-hidden
+                                        className="pointer-events-none absolute -top-1/3 left-1/2 -z-10 size-[34rem] -translate-x-1/2 rounded-full bg-brand/12 blur-[100px] dark:bg-brand/15"
+                                    />
+                                    <h2 className={`${sectionHeading} mx-auto max-w-2xl`}>{t("ctaHeading")}</h2>
+                                    <p className={`${sectionBody} mx-auto`}>{t("ctaSubtext")}</p>
+                                    <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+                                        <a href="#features" className={btnPrimary}>
+                                            {t("heroCtaPrimary")}
+                                            <ArrowRightIcon className="size-4" />
+                                        </a>
+                                        <Link href="/docs" className={btnGhost}>
+                                            {t("heroCtaSecondary")}
+                                        </Link>
+                                    </div>
                                 </div>
                             </Reveal>
                         </div>
