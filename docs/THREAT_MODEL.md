@@ -275,7 +275,7 @@ and the [encryption matrix](ENCRYPTION_GUARANTEE_MATRIX.md); none was executed h
 identity/placement registry, tenant catalogs, keys and support access. **Source reviewed: 2026-09-08.**
 
 **Attack paths:** privileged insider or CI takeover, enable dev/internal escape hatches, misroute
-placement/catalog, reuse a dirty pooled connection, promise customer-only keys while serving plaintext,
+placement/catalog, reuse a dirty pooled connection, overstate key custody while serving plaintext,
 or lose the sole operator and recovery custody during an incident.
 
 **Existing mitigations:** DeploymentProfileValidator requires a known edition outside dev/test/seeder
