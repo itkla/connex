@@ -1,6 +1,9 @@
 # Connex architecture and data-flow threat model
 
 > CHK-004 / SEC-7 · Initial source analysis: **2026-09-08** · Baseline: `c4a7a276f`
+> **Proposed verdict: CHK-004 / SEC-7 — OK at the documentation level only.**
+> **This is not owner approval, not residual-risk acceptance, and not evidence of a demonstrated
+> recurring review history.** Those remain outstanding and are the owner's to give or establish.
 > **Status:** source-reviewed threat analysis; owner review and operational validation pending.
 > Accountable Security Owner: **Hunter Nakagawa, Founder**, as already designated in
 > [SECURITY.md](SECURITY.md). This document records an analysis, not his approval of residual risk.
@@ -250,7 +253,12 @@ checksum together, restore into production/wrong tenant, or over-disclose throug
 restore targets unless deliberately overridden [M44]; full restore validates integrity before
 restoring and reports row counts [M45]. Support export uses POST and attachment/no-store/security
 headers, with same-org active workspace plus AUDIT_READ for entity slices [M46]. Its service checks
-org admin and recent authentication before assembly, with admission and size/time bounds [M47].
+org admin and recent authentication before assembly, with admission and uncompressed-size caps,
+with a **cooperative wall-clock budget checked between sources** [M47]. This budget does not cancel
+in-flight work or cover completion of the final source, ZIP or final buffer copy; a slow final
+source can return a bundle after the budget expires. The separate 20-second query statement
+timeouts provide database query cancellation, as distinguished in
+[SUPPORT_BUNDLE.md](SUPPORT_BUNDLE.md).
 
 **Residual / treatment — High:** these database scripts create **plaintext compressed dumps**, not
 encrypted backups; object storage is separately backed up by the operator. Hashes detect corruption,
@@ -308,10 +316,14 @@ periodic review that did not occur.
 |---|---|---|---|
 | 2026-09-08 | Codex governance lane; source analysis of F01–F10 at c4a7a276f | Initial threat analysis and mitigation file register below; documentation-only checks in the lane report/PR; no runtime or historical periodic review claimed | Independent security review of this PR, then Hunter Nakagawa owner review and operational evidence/treatment decisions; scheduled review 2027-02-13 |
 | 2026-09-08 | Independent Codex security reviewer (`governance_review`), separate agent context | No blocking findings in F01–F10 and selected source checks: edge/auth, tenant interception, upload/scanning, AI scan/dispatch, grants, automation, editions/routing, backup and support gates. Not an exhaustive second verification of all 50 entries; no runtime exercise, owner approval or risk acceptance | Hunter Nakagawa owner review and operational evidence remain pending; scheduled review 2027-02-13 |
+| 2026-09-08 | Independent adversarial reviewer of [PR #1610](https://github.com/itkla/connex/pull/1610), as reported in the review-fix request | Re-tested all 50 implementation citations and found no fabricated or nonexistent mitigation. REQUEST CHANGES: restore the admission template's substitution contract and qualify the support-bundle cooperative budget; both documentation corrections are recorded in this PR | Hunter Nakagawa owner review, residual-risk decisions and demonstrated recurring review history remain outstanding; scheduled review 2027-02-13 |
 
-CHK-004 now has a concrete per-flow source analysis. Its operating review cycle is newly documented;
-owner approval, past periodic-review history and deployment verification remain unconfirmed. Treat
-this as **ready for independent re-test**, not an automatic control pass.
+**Proposed CHK-004 / SEC-7 verdict: OK at the documentation level**, for “a threat analysis
+performed against the actual system architecture and data flows, with review records.” The
+per-flow analysis and independent citation re-test supply that documentation evidence.
+**This is not owner approval, not residual-risk acceptance, and not evidence of a demonstrated
+recurring review history.** Those remain outstanding and are the owner's to give or establish;
+deployment verification also remains unconfirmed. **CHK-001 / SEC-4 remains NG.**
 
 ## Verified mitigation file register
 
@@ -368,7 +380,7 @@ substituting for implementation evidence.
 | M44 | Backup file permissions, checksum validation and target overwrite guards | [connex-backup-lib.sh](../deploy/backup/connex-backup-lib.sh) |
 | M45 | Restore integrity validation before restore/row summary | [connex-restore-full.sh](../deploy/backup/connex-restore-full.sh) |
 | M46 | Support export POST, workspace/org plus AUDIT_READ gate and response headers | [SupportBundleController.java](../backend/src/main/java/ooo/klae/connex/backend/controllers/SupportBundleController.java) |
-| M47 | Support org-admin/recent-auth gate, admission and assembly caps | [SupportBundleService.java](../backend/src/main/java/ooo/klae/connex/backend/services/SupportBundleService.java) |
+| M47 | Support org-admin/recent-auth gate, admission and uncompressed-size caps; cooperative wall-clock budget checked between sources, without in-flight cancellation | [SupportBundleService.java](../backend/src/main/java/ooo/klae/connex/backend/services/SupportBundleService.java) |
 | M48 | Mandatory edition selection and forbidden posture settings | [DeploymentProfileValidator.java](../backend/src/main/java/ooo/klae/connex/backend/config/DeploymentProfileValidator.java) |
 | M49 | Fail-closed organization placement-to-catalog resolution | [TenantCatalogResolver.java](../backend/src/main/java/ooo/klae/connex/backend/tenant/TenantCatalogResolver.java) |
 | M50 | Connection catalog switch/reset and eviction on failure | [TenantRoutingDataSource.java](../backend/src/main/java/ooo/klae/connex/backend/tenant/TenantRoutingDataSource.java) |
