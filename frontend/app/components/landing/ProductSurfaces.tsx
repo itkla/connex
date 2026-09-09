@@ -1,6 +1,5 @@
 import { getTranslations } from "next-intl/server";
 import { RadarMark } from "@/app/components/radar/RadarVocabulary";
-import { RADAR_MARK_FILL, RADAR_MARK_SHAPE } from "@/app/components/radar/radarFamilyAccent";
 import { cn } from "@/lib/utils";
 
 /**
@@ -254,62 +253,103 @@ export async function WarmthDecaySurface() {
     );
 }
 
-/**
- * The signal field: Radar's glyph vocabulary at display scale.
- *
- * Shape names the family and fill names the reading, exactly as `radarFamilyAccent` defines it —
- * a circle is a cooling relationship, a diamond a deal at risk, a square an intro path. Drawing
- * them large, scattered and unevenly weighted turns the legend into a composition: the eye learns
- * the alphabet before it meets the board, and the urgent end of the field is visibly heavier.
- */
-const FIELD_MARKS = [
-    { x: 6, y: 62, size: 30, tone: "cold", o: 100 },
-    { x: 15, y: 30, size: 20, tone: "high", o: 100 },
-    { x: 21, y: 76, size: 15, tone: "medium", o: 85 },
-    { x: 29, y: 46, size: 34, tone: "cool", o: 100 },
-    { x: 38, y: 20, size: 13, tone: "cold", o: 70 },
-    { x: 41, y: 66, size: 22, tone: "high", o: 90 },
-    { x: 50, y: 40, size: 16, tone: "warm", o: 80 },
-    { x: 55, y: 78, size: 12, tone: "cool", o: 60 },
-    { x: 62, y: 28, size: 24, tone: "warm", o: 85 },
-    { x: 69, y: 60, size: 14, tone: "low", o: 65 },
-    { x: 76, y: 36, size: 18, tone: "hot", o: 75 },
-    { x: 83, y: 70, size: 11, tone: "path", o: 55 },
-    { x: 88, y: 22, size: 13, tone: "path", o: 60 },
-    { x: 94, y: 52, size: 9, tone: "path", o: 45 },
-] as const;
+/** SVG fill per Radar tone, mirroring `RADAR_MARK_FILL` for a canvas that cannot use utilities. */
+const TONE_FILL = {
+    hot: "[fill:var(--warmth-hot)]",
+    warm: "[fill:var(--warmth-warm)]",
+    cool: "[fill:var(--warmth-cool)]",
+    cold: "[fill:var(--warmth-cold)]",
+    high: "[fill:var(--risk-high)]",
+    medium: "[fill:var(--risk-medium)]",
+    low: "[fill:var(--risk-low)]",
+    path: "[fill:var(--chart-5)]",
+} as const;
 
 /**
- * Radar's marks, enlarged into a field.
+ * One Radar glyph, drawn in SVG at an arbitrary size.
  *
- * Uses the shared shape and fill maps rather than {@link RadarMark} itself, because that component
- * is deliberately fixed at the small size the product needs; here the size carries the weight.
+ * Shape follows `RADAR_MARK_SHAPE`: a circle is a cooling relationship, a diamond a deal at risk,
+ * a square an intro path.
+ */
+function Glyph({ x, y, size, tone }: { x: number; y: number; size: number; tone: keyof typeof TONE_FILL }) {
+    const family = TONE_FAMILY[tone];
+    const half = size / 2;
+    if (family === "relationship_decay") {
+        return <circle cx={x} cy={y} r={half} className={TONE_FILL[tone]} />;
+    }
+    return (
+        <rect
+            x={x - half}
+            y={y - half}
+            width={size}
+            height={size}
+            rx={size * 0.18}
+            className={TONE_FILL[tone]}
+            transform={family === "deal_risk" ? `rotate(45 ${x} ${y})` : undefined}
+        />
+    );
+}
+
+/** Three detectors, each feeding the same queue. Row order matches the legend copy. */
+const STREAMS = [
+    { key: "relationships", y: 44, tones: ["cold", "cool", "cool", "warm"] },
+    { key: "deals", y: 120, tones: ["high", "medium", "low"] },
+    { key: "intros", y: 196, tones: ["path", "path", "path"] },
+] as const;
+
+/** The merged queue, ordered by urgency rather than by family. */
+const QUEUE = ["cold", "high", "cool", "medium", "path", "cool", "low", "warm"] as const;
+
+/**
+ * Three detectors converging on one board.
+ *
+ * This is the claim `radarHorizon.ts` makes — that the deadline is "the one fact no other surface
+ * in the product can assemble across families" — drawn as a mechanism rather than a legend: three
+ * separate streams enter on the left, and one ordered queue leaves on the right.
  */
 export async function SignalFieldSurface() {
     const t = await getTranslations("CommonHome");
 
     return (
         <SurfaceFrame label={t("surfaceFieldLabel")} sampleLabel={t("surfaceSample")}>
-            <div className="relative h-64 w-full sm:h-72">
-                {FIELD_MARKS.map((mark) => (
-                    <span
-                        key={`${mark.x}-${mark.y}`}
-                        aria-hidden
-                        className={cn(
-                            "absolute -translate-x-1/2 -translate-y-1/2",
-                            RADAR_MARK_SHAPE[TONE_FAMILY[mark.tone]],
-                            RADAR_MARK_FILL[mark.tone],
-                        )}
-                        style={{
-                            left: `${mark.x}%`,
-                            top: `${mark.y}%`,
-                            width: mark.size,
-                            height: mark.size,
-                            opacity: mark.o / 100,
-                        }}
+            <svg viewBox="0 0 420 250" className="w-full" role="img" aria-label={t("surfaceFieldAlt")}>
+                {STREAMS.map((stream) => (
+                    <path
+                        key={`flow-${stream.key}`}
+                        d={`M 150 ${stream.y} C 215 ${stream.y}, 225 125, 288 125`}
+                        fill="none"
+                        strokeWidth="1.25"
+                        className="stroke-border"
                     />
                 ))}
-            </div>
+
+                {STREAMS.map((stream) => (
+                    <g key={stream.key}>
+                        {stream.tones.map((tone, i) => (
+                            <Glyph key={`${stream.key}-${i}`} x={40 + i * 26} y={stream.y} size={15} tone={tone} />
+                        ))}
+                        <text x="30" y={stream.y - 24} className="fill-muted-foreground text-[11px]">
+                            {t(`surfaceFieldStream_${stream.key}`)}
+                        </text>
+                    </g>
+                ))}
+
+                <rect
+                    x="296"
+                    y="26"
+                    width="96"
+                    height="198"
+                    rx="14"
+                    className="fill-muted/50 stroke-border"
+                    strokeWidth="1"
+                />
+                <text x="344" y="17" textAnchor="middle" className="fill-muted-foreground text-[11px]">
+                    {t("surfaceFieldQueue")}
+                </text>
+                {QUEUE.map((tone, i) => (
+                    <Glyph key={`queue-${i}`} x={344} y={50 + i * 23} size={15} tone={tone} />
+                ))}
+            </svg>
         </SurfaceFrame>
     );
 }

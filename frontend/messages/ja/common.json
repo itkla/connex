@@ -91,8 +91,8 @@
     "radarBody": "冷えていく関係、危うい商談、頼めていない紹介が同じ軸に並ぶのはRadarだけです。三つの画面ではなく、一つの期限で見ます。",
     "mapHeading": "築いてきた人脈が、一枚に",
     "mapBody": "チームが築いてきた人と会社、そのつながりをConnexが地図にします。実線は記録されたやり取り、破線は推測によるつながりで、どちらであるかを必ず示します。",
-    "signalsHeading": "三種類の兆候、一つの記号",
-    "signalsBody": "丸は冷えていく関係、菱形は危うい商談、四角はまだ頼めていない紹介。この三つを覚えれば、ボードは一目で読めます。",
+    "signalsHeading": "三つの検知、一つの並び",
+    "signalsBody": "冷えていく関係、勢いを失う商談、頼めていない紹介。別々の仕組みが見つけたものを、損失が近い順に一本の並びにまとめます。",
     "surfaceRadarLabel": "Radar",
     "surfaceHorizonBand_overdue": "期限超過",
     "surfaceHorizonBand_week": "今週",
@@ -104,7 +104,12 @@
     "surfaceWarmthAlt": "時間の経過とともにホットからコールドへ下がる曲線。記録されたやり取りが点で示されている。",
     "surfaceWarmthAxisStart": "最後の接触",
     "surfaceWarmthAxisEnd": "現在",
-    "surfaceFieldLabel": "兆候"
+    "surfaceFieldLabel": "ボードのつくり",
+    "surfaceFieldAlt": "左側の三つの流れ（関係・商談・紹介）が、右側の一つの並びにまとまる図。",
+    "surfaceFieldStream_relationships": "関係",
+    "surfaceFieldStream_deals": "商談",
+    "surfaceFieldStream_intros": "紹介",
+    "surfaceFieldQueue": "Radar"
   },
   "CommonSidebar": {
     "ariaPrimarySidebar": "メインサイドバー",
