@@ -62,9 +62,29 @@ Connex does not usually file with the PPC for customer data — but must move fa
 |---|---|---|
 | **Incident Lead** | Hunter Nakagawa, Founder | Owns the incident end-to-end; makes the reportable-situation call with counsel; single source of truth. |
 | **Technical Responder** | Hunter Nakagawa or an engineer assigned for the incident; no standing on-call rota | Contains, scopes affected data, preserves forensics. |
-| **Customer Liaison** | {{CUSTOMER_LIAISON}} | Notifies affected customers; coordinates their PPC/individual notifications per DPA. |
-| **Legal/Counsel** | {{COUNSEL_CONTACT}} | Confirms triggers, deadlines, report wording. |
-| **Comms** | {{COMMS_CONTACT}} | Public statement / inquiry line if individual notice is by substitute measure. |
+| **Customer Liaison** | **UNASSIGNED — owner decision pending; see below** | Notifies affected customers; coordinates their PPC/individual notifications per DPA. |
+| **Legal/Counsel** | **UNASSIGNED — owner decision pending; see below** | Confirms triggers, deadlines, report wording. |
+| **Comms** | **UNASSIGNED — owner decision pending; see below** | Public statement / inquiry line if individual notice is by substitute measure. |
+
+### Unassigned execution roles — decision register
+
+These are unresolved operational assignments, not placeholders or accepted exceptions. Hunter
+Nakagawa remains accountable under [SECURITY.md](SECURITY.md); accountability does not silently
+appoint him as counsel or as an execution contact. The separate, dated no-deputy acceptance in that
+document remains unchanged. Track appointments and contact verification in [#249].
+
+| Unassigned role | Required appointment/contact evidence | Risk while unfilled | Dated owner-decision status |
+|---|---|---|---|
+| Customer Liaison — executes affected-customer notices and coordinates customer reporting under the DPA | Named authorized person, verified business contact route, access to each signed DPA's notice contacts, coverage and acknowledgement arrangements | Delayed or misdirected customer notices; customer reporting clocks may be missed | 2026-09-08: decision required from Hunter Nakagawa; no appointment or new risk acceptance recorded |
+| Legal/Counsel — advises on triggers, deadlines and report wording | Qualified counsel's real name or retained firm, agreed scope, reachable incident contact and engagement/availability confirmation, held in the controlled contact register | No confirmed legal advice path; erroneous reportability or deadline decisions | 2026-09-08: decision required from Hunter Nakagawa; no counsel engagement or approval recorded |
+| Comms — executes authorized public statements and substitute-notice inquiry handling | Named authorized person, verified business contact route, publication/inquiry access and approval boundaries | Delayed, inconsistent or unauthorized public statements; inquiries may go unanswered | 2026-09-08: decision required from Hunter Nakagawa; no appointment or new risk acceptance recorded |
+
+Do not wait for these assignments to open an incident and escalate through the designated route.
+The Incident Lead must record the execution gap and arrange an actual authorized responder; this
+register does not establish a substitute legal adviser or a second escalation destination.
+Mailbox receipt, administrative recovery and emergency succession remain **not operationally
+verified**. Use the [operator verification procedure](SECURITY.md#operator-verification-procedure)
+to collect evidence; a written procedure is not a passed exercise.
 
 **Designated data-protection contact point** (for publication per Art. 32 — see disclosure page, [#219]): privacy@connexcrm.jp. Named ownership, acknowledgement targets, and the pending operational-verification caveat are defined in [SECURITY.md](SECURITY.md).
 

@@ -20,6 +20,7 @@ APPI groups these into four categories plus external-environment. This is our cu
 ### 2.1 Organizational (組織的)
 - **Tenant isolation as an enforced invariant.** A fail-closed MyBatis interceptor (`TenantScopeInterceptor`) rejects workspace-scoped queries that run without a resolved tenant context; `TenantResolutionInterceptor` resolves and re-validates org/workspace membership per request. Backed by a CI architecture test (`TenantScopeArchTest`).
 - **Append-only audit log.** `audit_log` (Flyway `V1`, workspace-scoped since `V10`) records `action`, `entity_type`/`entity_id`, `actor_id`, `ip_address`, `user_agent`, hashed `session_id`, `request_id`, field-level `changes`, and `created_at`. Row `UPDATE`/`DELETE` are blocked by DB triggers; writes are insert-only. Surfaced to admins in-app.
+- **Threat analysis.** The [architecture and data-flow threat model](THREAT_MODEL.md) records verified implementation controls, residual risks and review records. Initial source analysis is dated 2026-09-08; owner review and operational evidence remain pending.
 - **Incident response.** Documented breach-response runbook (APPI Art. 26): [APPI_BREACH_RESPONSE_RUNBOOK.md](APPI_BREACH_RESPONSE_RUNBOOK.md), [#223].
 - **Vulnerability remediation.** Findings across application code, dependencies, images, infrastructure, GitHub Actions, and third-party services follow the severity-adjusted deadlines, emergency release path, ownership, and fixed-term exception rules in [VULNERABILITY_MANAGEMENT.md](VULNERABILITY_MANAGEMENT.md).
 - **Static analysis.** Pull requests, `main`, merge groups, and weekly scans run fail-closed GitHub CodeQL analysis for backend Java and frontend TypeScript. Critical/High and error-severity findings fail the selected workflow job, but the check is not yet required by `main` branch protection and therefore does not itself prevent merge; current enforcement and self-modification limitations are documented in [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md).
@@ -142,6 +143,40 @@ and verify:
 Record the non-secret transfer status, access-test results, outgoing-owner revocations, required
 rotations, and unresolved gaps in the CHK-001 control issue [#1230]. Never record credentials or key
 material in GitHub.
+
+### Operator verification procedure
+
+**Not yet executed or passed.** Hunter Nakagawa owns recording these checks in [#249], with a
+non-secret summary in [#1230]. Run at the six-month review, after contact/provider/recovery changes,
+and during planned handover. Use synthetic content; keep recovery factors and private contact
+registers out of issues and Git.
+
+1. From an independently operated external mailbox, send a synthetic `[VULNERABILITY]` message to
+   privacy@connexcrm.jp with a unique non-secret exercise identifier and UTC send time. Confirm it
+   appears in the monitored inbox, record receipt time, and reply from the designated mailbox.
+   Confirm that the external sender receives the reply. Record elapsed acknowledgement time and
+   pass/fail separately for delivery, monitored receipt and return receipt. A sent-mail entry or
+   lack of bounce alone does not pass. If incident alerts are configured, separately exercise a
+   clearly labelled `[ACTIVE INCIDENT]` test and record actual alert receipt; do not infer alerts
+   from inbox receipt or claim 24/7 coverage from a daytime test.
+2. In a separate browser session, use the provider's documented non-destructive recovery exercise
+   or an approved test account with equivalent recovery policy. Verify the authorized custodian
+   can locate the recovery procedure, satisfy MFA/recovery requirements, access mailbox
+   administration and restore access. Retain the current working administrator session. If the
+   provider cannot demonstrate real-account recovery safely, record the test-account limitation
+   and leave real administrative recovery unverified. Record provider, policy parity, actor,
+   UTC date, result and private evidence location; never attach recovery codes or credentials.
+3. Emergency succession cannot currently be executed: no independent detector, appointment
+   authority or custody recipient is named. First record those actual appointments and achievable
+   detection/handover deadlines. Then run a tabletop with the owner treated as unavailable: the
+   independent actor detects absence, invokes the documented authority and demonstrates authorized
+   custody/recovery using the same safe procedure. Record failures and elapsed times; a tabletop
+   alone does not prove live credential recovery. The existing no-deputy acceptance is not an
+   appointment or successful drill.
+4. For each check, record expected/observed outcome, actor, timestamp, evidence location, unresolved
+   gap, accountable owner and next review date. Only update the specific operational claim that
+   the evidence supports. Escalate failures through the incident/risk process; do not mark the
+   control operational solely because this checklist exists.
 
 ### Time-bounded risk acceptance: no deputy
 
