@@ -34,12 +34,12 @@ export default function LanguageSwitcher({ align = "end" }: { align?: Align }) {
             <DropdownMenu.Trigger asChild>
                 <button
                     type="button"
-                    aria-label={t("languageLabel")}
+                    aria-label={`${t("languageLabel")}: ${t(active.labelKey)}`}
                     data-pending={isPending ? "" : undefined}
                     className="group inline-flex items-center gap-1.5 rounded-full border border-border bg-background/70 px-3 py-1.5 text-sm font-medium text-foreground outline-none transition-[transform,background-color,border-color] duration-150 ease-out hover:border-border hover:bg-background focus-visible:ring-2 focus-visible:ring-brand active:scale-[0.97] data-[state=open]:border-border data-[state=open]:bg-background data-[pending]:opacity-60"
                 >
                     <GlobeAltIcon className="size-4 text-muted-foreground transition-colors group-hover:text-foreground" />
-                    <span>{t(active.labelKey)}</span>
+                    <span className="max-[400px]:hidden">{t(active.labelKey)}</span>
                     <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform duration-200 ease-out group-data-[state=open]:rotate-180" />
                 </button>
             </DropdownMenu.Trigger>

@@ -1,10 +1,30 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
-import type { ReactNode } from "react";
+import { motion } from "motion/react";
+import { useSyncExternalStore, type ReactNode } from "react";
+import { durationStandard, easeOut } from "@/app/lib/motion";
 
-const EASE = [0.23, 1, 0.32, 1] as const;
+const subscribe = () => () => {};
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
 
+/**
+ * Scroll reveal for marketing sections.
+ *
+ * The hidden starting state is armed only after mount, so the server-rendered
+ * markup is fully visible: a crawler, a printed page, a reader with JavaScript
+ * disabled, or a headless renderer sees the content rather than a stack of
+ * blank sections. `useSyncExternalStore` supplies `false` as the server
+ * snapshot and `true` on the client, so hydration matches and the hidden state
+ * is armed only once the browser is actually driving the page.
+ *
+ * Reduced motion is pinned in CSS (`motion-reduce:` beats the inline style
+ * `motion` writes), not read from `useReducedMotion()`, which returns `null` on
+ * a server-rendered first paint and would let the movement through. It must be
+ * `transform-none`: Tailwind's `translate-y-0` compiles to the `translate`
+ * property, which composes with rather than cancels the `transform` that
+ * `motion` writes.
+ */
 export default function Reveal({
     children,
     delay = 0,
@@ -14,17 +34,17 @@ export default function Reveal({
     delay?: number;
     className?: string;
 }) {
-    const reduce = useReducedMotion();
+    const armed = useSyncExternalStore(subscribe, getClientSnapshot, getServerSnapshot);
 
-    if (reduce) return <div className={className}>{children}</div>;
+    if (!armed) return <div className={className}>{children}</div>;
 
     return (
         <motion.div
-            className={className}
+            className={`motion-reduce:transform-none! motion-reduce:opacity-100! ${className ?? ""}`}
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.3 }}
-            transition={{ duration: 0.6, ease: EASE, delay }}
+            viewport={{ once: true, amount: 0.2 }}
+            transition={{ duration: durationStandard, ease: easeOut, delay }}
         >
             {children}
         </motion.div>

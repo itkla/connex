@@ -23,7 +23,7 @@ export default async function LandingFooter() {
                     </div>
 
                     <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-12">
-                        <nav className="flex flex-col gap-3 text-sm">
+                        <nav aria-label={t("footerNavProduct")} className="flex flex-col gap-3 text-sm">
                             <Link href="/#features" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navFeatures")}
                             </Link>
@@ -37,7 +37,7 @@ export default async function LandingFooter() {
                                 {t("navLogin")}
                             </Link>
                         </nav>
-                        <nav className="flex flex-col gap-3 text-sm">
+                        <nav aria-label={t("footerNavLegal")} className="flex flex-col gap-3 text-sm">
                             <Link href="/privacy" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navPrivacy")}
                             </Link>

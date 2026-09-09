@@ -39,9 +39,7 @@
     "app/components/introductions/IntroRationaleLine.tsx": 1,
     "app/components/introductions/IntroductionsBoard.tsx": 1,
     "app/components/kanban/KanbanBoard.tsx": 3,
-    "app/components/landing/HeroVisual.tsx": 2,
     "app/components/landing/LanguageSwitcher.tsx": 2,
-    "app/components/landing/Reveal.tsx": 1,
     "app/components/library/files/FilesBrowser.tsx": 3,
     "app/components/library/tags/TagDialog.tsx": 1,
     "app/components/library/tags/TagsBrowser.tsx": 5,
@@ -94,7 +92,6 @@
     "app/design-system/page.tsx": 3,
     "app/globals.css": 13,
     "app/onboarding/OnboardingForm.tsx": 1,
-    "app/page.tsx": 3,
     "app/sso/link/SsoLinkForm.tsx": 7,
     "components/PixelCard.css": 2,
     "components/ui/range-calendar.tsx": 3
