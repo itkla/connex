@@ -1183,19 +1183,41 @@ notification path. It adds no application endpoint, database migration or applic
 |---|---|---|
 | Authentication failures, tenant | `ConnexAuthenticationFailureTenantSpike`: at least 20 audited login/password/passkey failures in 5 minutes for one trusted scope | Alertmanager receiver `security-oncall` → operator-owned HTTPS gateway |
 | Authentication failures, global | `ConnexAuthenticationFailureGlobalSpike`: at least 100 audited login/password/passkey failures in 5 minutes, including `unattributed` | Same receiver and gateway |
-| Permission / role change | `ConnexPermissionChange`: any successful committed `workspace.role.create/update/delete`, `workspace.member.role`, `org.member.set` or `org.member.founding_owner`, observed within 15 minutes | Same receiver and gateway |
+| Permission / role change | `ConnexPermissionChange`: any successful committed effective-access action listed below, observed within 15 minutes | Same receiver and gateway |
 | HTTP 5xx rate | `ConnexServerErrorRateSpike`: more than 5% 5xx, with at least 100 HTTP requests in 5 minutes | Same receiver and gateway |
 | Backup failure | `ConnexBackupFailure`: `connex_backup_failed > 0`; any failed full backup, archive or prune unit sets the latch | Same receiver and gateway |
 | Audit integrity | `ConnexAuditIntegrityAnomaly`: any read row fails the existing canonical HMAC verification, or has unverifiable legacy references; latched until application restart | Same receiver and gateway |
+| Backup telemetry failure | `ConnexBackupTelemetryUnavailable`: missing backup metric/job or failed exporter scrape for 2 minutes | Same receiver and gateway |
 | Monitoring failure | `ConnexMetricsUnavailable`: a missing job or failed application scrape for 2 minutes | Same receiver and gateway; independently monitor the monitoring stack itself |
 
 The default rule interval and production scrape interval are 15 seconds. Rule notifications have
-no extra pending period except the monitoring-failure rule. Alertmanager groups by alert name and
-scope, waits 5 seconds initially, groups subsequent changes for 1 minute, and repeats every 4 hours.
+no extra pending period except the application and backup telemetry failure rules. Alertmanager
+groups by alert name and scope, waits 5 seconds initially, groups subsequent changes for 1 minute, and repeats every 4 hours.
 These are best-effort delivery bounds when all components are healthy, not an exactly-once or
 lossless security-event queue. Role changes within one group are coalesced; the audit log retains
 the individual events. No actor, name, email, role name, request URI, exception, HMAC or secret is
 included in the rule payload. Do not add customer-valued external labels to this monitoring job.
+
+### Effective-access action coverage
+
+The permission signal includes `workspace.role.create/update/delete`, `workspace.member.role`,
+`workspace.member.join/remove/leave`, `workspace.invite.accept`, `workspace.invite_link.accept`,
+`org.member.set/remove/founding_owner`, `org.workspace_member.sso_provision`, `org.workspace.create`,
+`workspace.share/unshare`, and `user.delete`. This covers active invitation redemption, SSO grants,
+owner creation, member revocation, and standing record-share changes as well as role definitions.
+Account deletion reports only its audited current scope, not every former membership.
+
+The organization audit action catalogue (`frontend/messages/en/organization.json`) and the actual
+Workspace, Invite, InviteLink, OrgMember, Role, Share and account-deletion producers were checked.
+Pending invite creation/revocation and `workspace.member.decline` do not activate/revoke active
+membership. Team seats and managers currently configure teams without entering authorization
+resolution. `org.sso_user.provision` creates an account; its actual membership grant has the separate
+SSO action above. Domain/SSO configuration controls future admission and authentication, not current
+membership roles. These are deliberately excluded. Machine credential issue/revoke/lifecycle and
+whole workspace/organization teardown are separate security/lifecycle controls, outside this human
+membership/role/share signal; do not infer coverage of them from a permission notification.
+Record ownership assignments and ordinary content edits do not change workspace RBAC grants.
+Future authorization inputs or new audited grant/revocation actions require revisiting this list.
 
 ### Authentication attribution and detection bounds
 
@@ -1297,7 +1319,9 @@ restart the affected process to reset the latch. A bad row read again re-fires i
    `connex-backup.service.d`, `connex-binlog-archive.service.d` and
    `connex-backup-prune.service.d` under `/etc/systemd/system/`. Run `systemctl daemon-reload`.
    Provision an initial `connex-backup.prom` containing `connex_backup_failed 0` so exporter/file
-   absence is distinguishable from success; monitor node_exporter availability and missing files.
+   absence is distinguishable from success. `ConnexBackupTelemetryUnavailable` covers a missing
+   metric/job or failed scrape; verify every expected exporter is configured. A healthy exporter
+   with a stale on-disk zero does not prove the backup scheduler or helper ran.
    The helper atomically writes a latched `1` without forwarding any backup logs. After a successful
    rerun and incident acknowledgement, atomically replace it with `connex_backup_failed 0`.
    Monitor failure of the hook unit itself through the operator scheduler.
@@ -1314,27 +1338,44 @@ are the upstream contracts. The local drill uses Prometheus 3.14.0 and Alertmana
 Use installed, operator-approved `prometheus`, `promtool`, `alertmanager`, and `amtool` binaries.
 The standalone operator drill defaults to bundled synthetic metric fixtures. For application-emission
 evidence, first run the focused backend tests to generate real Micrometer baseline/triggered exposition
-files in `backend/build/security-alerts/`. On the shared lane host:
+files in `backend/build/security-alerts/`. Start at the repository root of a normal checkout.
+For Java evidence, use Java 26 and provision a disposable MySQL database as described in
+[`backend/AGENTS.md`](../backend/AGENTS.md). Supply `CONNEX_DB_URL`, `CONNEX_DB_USERNAME`, and
+`CONNEX_DB_PASSWORD` through the shell or an untracked `backend/.env` derived from
+`backend/.env.example`; never use a production database. Put approved monitoring binaries on `PATH`.
+Set `CONNEX_GRADLE_LOCK` and `CONNEX_STACK_LOCK` to host-wide shared lock files when other builds
+or drills share the host; the defaults below suit an isolated operator/CI host.
 
 ```bash
-source /home/dev/worktrees/sec2-env.sh
-export CONNEX_DB_URL='jdbc:mysql://127.0.0.1:3421/connex_sec2_alerts?sslMode=DISABLED'
-cd /home/dev/worktrees/sec2-alerts/backend
-flock /home/dev/worktrees/gradle.lock bash gradlew test \
-  --tests 'ooo.klae.connex.backend.observability.SecuritySignalMetricsTest' \
-  --tests 'ooo.klae.connex.backend.services.AuditIntegrityServiceTest' \
-  --tests 'ooo.klae.connex.backend.services.AuditIntegrityLockOrderTest' \
-  --tests 'ooo.klae.connex.backend.architecture.*'
-cd ..
+set -euo pipefail
+export CONNEX_GRADLE_LOCK="${CONNEX_GRADLE_LOCK:-/tmp/connex-gradle.lock}"
+export CONNEX_STACK_LOCK="${CONNEX_STACK_LOCK:-/tmp/connex-stack.lock}"
+(
+  cd backend
+  if [ -f .env ]; then
+    set -a
+    source .env
+    set +a
+  fi
+  : "${CONNEX_DB_URL:?Set the disposable test database JDBC URL}"
+  : "${CONNEX_DB_USERNAME:?Set the test database username}"
+  : "${CONNEX_DB_PASSWORD:?Set the test database password}"
+  flock "$CONNEX_GRADLE_LOCK" bash gradlew test \
+    --tests 'ooo.klae.connex.backend.observability.SecuritySignalMetricsTest' \
+    --tests 'ooo.klae.connex.backend.services.AuditIntegrityServiceTest' \
+    --tests 'ooo.klae.connex.backend.services.AuditIntegrityLockOrderTest' \
+    --tests 'ooo.klae.connex.backend.architecture.*'
+)
 promtool test rules deploy/alerting/rules-test.yml
 promtool check config --syntax-only deploy/alerting/prometheus.yml
 amtool check-config deploy/alerting/alertmanager.yml
-flock /home/dev/worktrees/stack.lock python3 deploy/alerting/notification-smoke.py \
-  --prometheus /absolute/path/to/prometheus --alertmanager /absolute/path/to/alertmanager \
-  --fixtures backend/build/security-alerts
+flock "$CONNEX_STACK_LOCK" python3 deploy/alerting/notification-smoke.py \
+  --prometheus "$(command -v prometheus)" --alertmanager "$(command -v alertmanager)" \
+  --fixtures backend/build/security-alerts --membership-fixtures backend/build/security-alerts
 ```
 
-Operators without a Java build can omit `--fixtures` and run the same smoke against bundled
+Operators without a Java build can skip the Java subshell and omit both `--fixtures` and
+`--membership-fixtures`, then run the same smoke against bundled
 `deploy/alerting/fixtures/` samples. The printed `FIXTURES` path distinguishes synthetic-rule delivery
 evidence from Java-generated emission evidence. This standalone mode proves the monitoring chain,
 not the application producers.
@@ -1344,8 +1385,10 @@ runs disposable Prometheus and Alertmanager processes on loopback with the **unc
 receiver routing, using a local HTTP receiver. It substitutes the gateway URL and scrape transport,
 refreshes the timestamp fixture and accelerates scraping to 2 seconds; thresholds and rule interval
 remain unchanged. It tests a below-threshold phase, invokes the actual backup command with a
-missing configuration (exit 64), invokes its `OnFailure` helper, then awaits all eight expected
-firing notifications. It prints `NOTIFICATION` JSON as receiver evidence and fails if an alert is
+missing configuration (exit 64), invokes its `OnFailure` helper, then awaits all nine expected
+firing notifications with the per-action membership fixtures (eight without them). Membership
+fixtures cover every included action and coalesce matching numeric scopes, just like the real rule.
+It prints `NOTIFICATION` JSON as receiver evidence and fails if an alert is
 missing, contains unexpected labels or non-static annotations, or leaks sentinel personal data
 anywhere in the webhook payload. It cleans up its processes.
 The test invokes the hook directly; it does not claim the host's systemd drop-ins were installed.
@@ -1355,8 +1398,8 @@ real audit/role and HMAC boundaries. The test does not send messages to the prod
 To prove the drill detects broken triggers, run the mutation harness under the same stack lock:
 
 ```bash
-flock /home/dev/worktrees/stack.lock python3 deploy/alerting/notification-mutations.py \
-  --prometheus /absolute/path/to/prometheus --alertmanager /absolute/path/to/alertmanager \
+flock "${CONNEX_STACK_LOCK:-/tmp/connex-stack.lock}" python3 deploy/alerting/notification-mutations.py \
+  --prometheus "$(command -v prometheus)" --alertmanager "$(command -v alertmanager)" \
   --fixtures backend/build/security-alerts --output backend/build/alert-mutations
 ```
 
