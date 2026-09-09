@@ -27,7 +27,9 @@ import { springSmooth } from "@/app/lib/motion";
  * 3. The green line draws itself and deliberately stops short of the summit. A
  *    pulsing head rides its growing tip, so the stroke never ends in a bare cap.
  *    The whole scene eases back over the closing sections so the line never
- *    competes with the FAQ controls or the final call to action.
+ *    competes with the FAQ controls or the final call to action. Under reduced
+ *    motion the stroke is pinned to that same stop via `--spine-stop` and the
+ *    head is hidden, because CSS cannot freeze the SVG geometry `motion` drives.
  *
  * Reduced motion is pinned in CSS rather than in JavaScript: `motion-reduce:`
  * rules park the camera, hold the clouds, still the pulse, and force the stroke
@@ -109,7 +111,7 @@ function SpineHead({
     const cx = useTransform(progress, head.stops, head.xs);
     const cy = useTransform(progress, head.stops, head.ys);
     return (
-        <>
+        <g className="motion-reduce:hidden">
             <motion.circle
                 r={16}
                 style={{ cx, cy }}
@@ -122,7 +124,7 @@ function SpineHead({
                 strokeWidth={2.5}
                 vectorEffect="non-scaling-stroke"
             />
-        </>
+        </g>
     );
 }
 
@@ -286,24 +288,24 @@ export default function FujiSpine() {
 
                     <motion.path
                         d={SPINE}
+                        style={{ pathLength, ["--spine-stop" as string]: stopAt }}
                         stroke="url(#fuji-line)"
                         strokeWidth={9}
                         strokeLinejoin="round"
                         strokeLinecap="round"
                         filter="url(#fuji-bloom)"
-                        className="opacity-25 dark:opacity-55 motion-reduce:[stroke-dasharray:none]!"
-                        style={{ pathLength }}
+                        className="opacity-25 dark:opacity-55 motion-reduce:[stroke-dasharray:var(--spine-stop)_1]!"
                     />
 
                     <motion.path
                         d={SPINE}
+                        style={{ pathLength, ["--spine-stop" as string]: stopAt }}
                         stroke="url(#fuji-line)"
                         strokeWidth={3.25}
                         strokeLinejoin="round"
                         strokeLinecap="round"
                         vectorEffect="non-scaling-stroke"
-                        className="motion-reduce:[stroke-dasharray:none]!"
-                        style={{ pathLength }}
+                        className="motion-reduce:[stroke-dasharray:var(--spine-stop)_1]!"
                     />
 
                     {marks.map((point, i) => (

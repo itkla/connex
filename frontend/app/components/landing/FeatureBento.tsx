@@ -10,11 +10,12 @@ import Reveal from "@/app/components/landing/Reveal";
 const titleClass = "text-lg font-semibold tracking-tight text-foreground";
 const bodyClass = "mt-2 text-[15px] leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]";
 
+const WARMTH_MOTIF_BANDS = ["bg-warmth-cold", "bg-warmth-cool", "bg-warmth-warm", "bg-warmth-hot"];
+
 function WarmthMotif() {
-    const bands = ["bg-warmth-cold", "bg-warmth-cool", "bg-warmth-warm", "bg-warmth-hot"];
     return (
         <div className="mt-7 flex max-w-[260px] items-end gap-1.5" aria-hidden="true">
-            {bands.map((band, i) => (
+            {WARMTH_MOTIF_BANDS.map((band, i) => (
                 <span
                     key={band}
                     className={`flex-1 rounded-full ${band}`}

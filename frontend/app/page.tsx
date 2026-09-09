@@ -47,7 +47,7 @@ export async function generateMetadata(): Promise<Metadata> {
     return {
         title: t("metaTitle"),
         description: t("metaDescription"),
-        alternates: { canonical: "/", languages: { en: "/", ja: "/" } },
+        alternates: { canonical: "/" },
         openGraph: {
             title: t("metaTitle"),
             description: t("metaDescription"),
@@ -175,7 +175,7 @@ export default async function Home() {
                                             <span className="font-display text-3xl text-brand-dark">
                                                 {String(i + 1).padStart(2, "0")}
                                             </span>
-                                            <span className="h-px flex-1 bg-gradient-to-r from-brand/50 to-transparent" />
+                                            <span className="h-px flex-1 bg-linear-to-r from-brand/50 to-transparent" />
                                         </div>
                                         <h3 className={`mt-5 text-xl font-semibold text-foreground ${HALO}`}>
                                             {t(`step${step}Title`)}
