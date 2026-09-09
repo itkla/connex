@@ -26,6 +26,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -198,7 +199,11 @@ class AttachmentScanLifecycleIntegrationTest {
         Attachment sibling = reference(workspace, first.getUrl());
         CountDownLatch scannerEntered = new CountDownLatch(1);
         CountDownLatch releaseScanner = new CountDownLatch(1);
+        AtomicInteger scannerCalls = new AtomicInteger();
         when(scanner.scan(any(byte[].class))).thenAnswer(invocation -> {
+            if (scannerCalls.incrementAndGet() > 1) {
+                return report(MalwareScanVerdict.CLEAN);
+            }
             scannerEntered.countDown();
             if (!releaseScanner.await(10, TimeUnit.SECONDS)) {
                 throw new IllegalStateException("Concurrent fixture scanner release timed out");
