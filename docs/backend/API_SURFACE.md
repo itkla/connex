@@ -29,7 +29,14 @@ existing tenant/RBAC architecture tests remain authoritative for that distinctio
 
 [`api-surface-policy.txt`](api-surface-policy.txt) records ordered application matchers and hashes
 of controller, service, filter, security/tenant/configuration sources, dependency/build configuration, application settings and the
-Next.js proxy. These hashes deliberately require review even when a URL stays unchanged: removing
+Next.js proxy. In addition to the existing structural coverage, Java sources in every domain package
+are selected conservatively by authorization-related identifiers: permission, authorization,
+authentication, authority, security context, workspace/auth services, forbidden exceptions, tenant
+context and revalidation calls. This lexical change detector can include comments or unrelated
+identifiers; it does not prove transitive authorization. Floors require at least 350 content-selected
+sources and 500 total Java policy sources, with explicit regressions for AI generation, API credentials
+and provider connections. Removing an entire last authorization reference still changes the ledger
+by removing that source's row. These hashes deliberately require review even when a URL stays unchanged: removing
 an imperative permission check or adding a filter must not silently preserve the approval evidence.
 They are change detectors, not proofs of effective authorization. Review the source diff before
 regenerating. Filter-provided paths use the explicit configuration setters; the SAML request path
@@ -50,7 +57,8 @@ flock /home/dev/worktrees/gradle.lock bash gradlew test \
   --tests 'ooo.klae.connex.backend.integration.ApiSurfaceAnonymousSecurityTest'
 ```
 
-CI's ordinary backend test task runs these guards. Regeneration is never part of an assertion:
+CI's ordinary backend test task runs these guards. The change classifier explicitly routes each of
+the three ledger paths to the backend job even when it is the PR's only changed file. Regeneration is never part of an assertion:
 added, removed or changed rows fail exact comparison until a reviewed ledger update is committed.
 Ledger/source files and the UTC lifecycle date are explicit Gradle test inputs, so edits or a new
 EOL day cannot hide behind an up-to-date test task. The generator and architecture comparison
@@ -87,7 +95,9 @@ individual has accepted a new operational responsibility.
    owner-approved representative window; never record tokens, raw paths, request bodies or PII.
    This repository does not yet establish production usage telemetry for every endpoint.
 3. **Mark.** Apply Java `@Deprecated(since = "YYYY-MM-DD", forRemoval = true)` to the mapped
-   method (or controller when all routes retire). Add each generated representation, including
+   method (or controller when all routes retire). The generator rejects bare annotations, invalid
+   calendar dates and `forRemoval = false` on either the method or controller before emitting mappings.
+   Add each generated representation, including
    implicit HEAD for GET, to [`api-lifecycle.tsv`](api-lifecycle.tsv) with state `deprecated`, owner, EOL,
    migration target and issue. Synthetic OPTIONS is shared by all methods at a path and is not
    owned by an individual retired method; it disappears only when the entire path is removed. Regenerate the inventory. Publish migration instructions and release

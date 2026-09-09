@@ -2,10 +2,13 @@ package ooo.klae.connex.backend.apisurface;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.lang.reflect.AnnotatedElement;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HexFormat;
@@ -45,6 +48,10 @@ public final class ApiSurfaceInventory {
     private static final Pattern RULE = Pattern.compile(
         "\\.requestMatchers\\((.*?)\\)\\s*\\.(permitAll|authenticated|denyAll|hasAuthority)\\((.*?)\\)",
         Pattern.DOTALL);
+    private static final Pattern AUTHORIZATION_SOURCE = Pattern.compile(
+        "\\b\\w*(?:permission|authorization|authentication|authority|authorities|securitycontext|"
+            + "workspaceservice|authservice|forbiddenexception|tenantcontext)\\w*\\b"
+            + "|\\.\\s*revalidate\\w*\\s*\\(", Pattern.CASE_INSENSITIVE);
     private final Map<Class<?>, Map<String, String>> bodies = new TreeMap<>(
         java.util.Comparator.comparing(Class::getName));
     private final List<Rule> rules = new ArrayList<>();
@@ -89,6 +96,7 @@ public final class ApiSurfaceInventory {
                 if (mapping == null) {
                     continue;
                 }
+                boolean deprecated = deprecated(controller, method);
                 RequestMethod[] verbs = mapping.method().length > 0 ? mapping.method()
                     : base != null && base.method().length > 0 ? base.method() : RequestMethod.values();
                 for (String prefix : paths(base)) {
@@ -104,8 +112,7 @@ public final class ApiSurfaceInventory {
                             endpoints.add(new Endpoint(verb, path, controller.getName() + "#" + method.getName(),
                                 posture(verb, path), tenant(verb, path), permissions(controller, method),
                                 conditions(base, mapping, controller), !verb.equals("OPTIONS")
-                                    && (method.isAnnotationPresent(Deprecated.class)
-                                        || controller.isAnnotationPresent(Deprecated.class))));
+                                    && deprecated));
                         }
                     }
                 }
@@ -113,6 +120,30 @@ public final class ApiSurfaceInventory {
         }
         endpoints.addAll(frameworkEndpoints());
         return endpoints.stream().distinct().sorted(java.util.Comparator.comparing(Endpoint::line)).toList();
+    }
+
+    static boolean deprecated(Class<?> controller, Method method) {
+        boolean controllerDeprecated = validDeprecation(controller);
+        boolean methodDeprecated = validDeprecation(method);
+        return controllerDeprecated || methodDeprecated;
+    }
+
+    private static boolean validDeprecation(AnnotatedElement element) {
+        Deprecated annotation = element.getAnnotation(Deprecated.class);
+        if (annotation == null) {
+            return false;
+        }
+        String message = "Mapped endpoint requires @Deprecated(since = \"YYYY-MM-DD\", forRemoval = true): "
+            + element;
+        if (!annotation.forRemoval() || !annotation.since().matches("[0-9]{4}-[0-9]{2}-[0-9]{2}")) {
+            throw new IllegalStateException(message);
+        }
+        try {
+            LocalDate.parse(annotation.since());
+        } catch (DateTimeParseException failure) {
+            throw new IllegalStateException(message, failure);
+        }
+        return true;
     }
 
     /** Compares the declared perimeter, not controller success or domain token validity. */
@@ -266,13 +297,30 @@ public final class ApiSurfaceInventory {
 
     /** Stable evidence pins filters, routing and service authorization as well as mapped URLs. */
     public String policy() throws Exception {
+        return policy(JAVA);
+    }
+
+    String policy(Path javaRoot) throws Exception {
         TreeSet<Path> files = new TreeSet<>();
-        try (var paths = Files.walk(JAVA)) {
-            paths.filter(p -> p.toString().endsWith(".java")).filter(p -> {
-                String name = p.getFileName().toString();
-                return name.contains("Filter") || name.contains("SecurityConfig") || name.equals("WebConfig.java") || p.toString().contains("/config/") || p.toString().contains("/controllers/")
-                    || p.toString().contains("/tenant/") || p.toString().contains("/services/");
-            }).forEach(files::add);
+        int authorizationSources = 0;
+        try (var paths = Files.walk(javaRoot)) {
+            for (Path file : paths.filter(p -> p.toString().endsWith(".java")).toList()) {
+                Path relative = JAVA.resolve(javaRoot.relativize(file));
+                String name = file.getFileName().toString();
+                boolean authorization = AUTHORIZATION_SOURCE.matcher(Files.readString(file)).find();
+                if (authorization) {
+                    authorizationSources++;
+                }
+                if (authorization || name.contains("Filter") || name.contains("SecurityConfig")
+                        || relative.toString().contains("/config/") || relative.toString().contains("/controllers/")
+                        || relative.toString().contains("/tenant/") || relative.toString().contains("/services/")) {
+                    files.add(relative);
+                }
+            }
+        }
+        if (authorizationSources < 350 || files.size() < 500) {
+            throw new IllegalStateException("Policy source coverage shrank: authorization=" + authorizationSources
+                + " (minimum 350), Java=" + files.size() + " (minimum 500)");
         }
         files.add(Path.of("build.gradle"));
         files.add(Path.of("../frontend/next.config.ts"));
@@ -280,7 +328,8 @@ public final class ApiSurfaceInventory {
         StringBuilder result = new StringBuilder("# Generated perimeter and authorization source SHA-256 ledger\n");
         for (Path file : files) {
             result.append(file).append('\t').append(HexFormat.of().formatHex(
-                MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file)))).append('\n');
+                MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file.startsWith(JAVA)
+                    ? javaRoot.resolve(JAVA.relativize(file)) : file)))).append('\n');
         }
         result.append("\n# Ordered application authorization matchers (conditional SSO/OAuth included)\n");
         for (Rule rule : rules) {
