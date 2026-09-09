@@ -27,6 +27,17 @@ class CiChangeClassificationTest(unittest.TestCase):
         categories = self.classify("README.md", "docs/CI_POLICY.md", "frontend/AGENTS.md")
         self.assertFalse(any(categories.values()))
 
+    def test_each_api_ledger_alone_runs_backend(self) -> None:
+        for path in (
+            "docs/backend/api-surface.tsv",
+            "docs/backend/api-lifecycle.tsv",
+            "docs/backend/api-surface-policy.txt",
+        ):
+            with self.subTest(path=path):
+                categories = self.classify(path)
+                self.assertTrue(categories["backend"])
+                self.assertFalse(categories["full"])
+
     def test_runtime_mdx_is_frontend_code_not_documentation(self) -> None:
         categories = self.classify("frontend/app/help/page.mdx")
         self.assertTrue(categories["frontend"])
