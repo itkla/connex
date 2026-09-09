@@ -1,9 +1,9 @@
 # Controlled Partner Admission Checklist
 
-> **Status:** Internal per-engagement checklist. Copy this file's checklist into the engagement issue for **{{PARTNER}}** and work it through; do not edit the template in place to record one partner's state.
+> **Status:** Internal per-engagement checklist. Copy this file's checklist into the engagement issue for **UNASSIGNED PARTNER** and work it through; do not edit the template in place to record one partner's state.
 > **Not legal advice.** Contract, DPA, and notification obligations must be confirmed by counsel and by the signed agreement. Where a signed agreement and this checklist disagree, **the signed agreement governs**.
 >
-> **Owner:** {{OWNER}} · **Partner:** {{PARTNER}} · **Admission decision date:** {{DATE}}
+> **Owner:** UNASSIGNED ADMISSION OWNER · **Partner:** UNASSIGNED PARTNER · **Admission decision date:** UNRECORDED ADMISSION DATE
 
 Related: [INTERNAL_OPERATIONS_RUNBOOK.md](INTERNAL_OPERATIONS_RUNBOOK.md) for the mechanics behind
 every step here, [DEPLOYMENT_EDITIONS.md](DEPLOYMENT_EDITIONS.md) for the deployment shapes,
@@ -35,15 +35,30 @@ including customer-operated on-prem. Do not describe hosted SaaS or a Connex-ope
 end-to-end encrypted, zero-knowledge, or customer-only-key encrypted, and do not tell a partner
 that Connex "cannot see" their data.
 
+## Unassigned engagement entries
+
+This reusable checklist has no selected engagement. The entries below are explicit admission
+blockers, not evidence of a customer, appointment or approval. Complete them in the engagement
+issue before admitting partner data; never infer the admission date from this template's revision.
+
+| Entry / responsibility | Must be filled with | Risk while unfilled | Dated owner-decision status |
+|---|---|---|---|
+| UNASSIGNED ADMISSION OWNER — coordinates prerequisites and records the admission decision | Real named person with admission authority, verified business contact and engagement issue | No accountable execution or escalation path for stop conditions | 2026-09-08: designation required from Hunter Nakagawa as Security Owner; no engagement appointment or approval recorded |
+| UNASSIGNED PARTNER — customer handling operator responsible for its data and notification duties | Signed agreement's legal entity and named authorized privacy/incident representative with verified notice route | Wrong counterparty, absent notice route and unclear customer responsibilities | 2026-09-08: engagement owner must obtain and verify; Hunter Nakagawa's security review pending; no partner identity invented |
+| UNRECORDED ADMISSION DATE — decision-record field maintained by the admission owner | Actual dated approval/refusal, deciding actor and evidence links; associated teardown interval and deadline | Unproven admission and ambiguous retention/teardown deadlines | 2026-09-08: admission owner must record only after a real decision; no approval or date inferred |
+
+Until an admission owner exists, refer security stop conditions to Hunter Nakagawa via the single
+route in [SECURITY.md](SECURITY.md). This does not appoint him as the engagement's admission owner.
+
 ## Admission checklist
 
 ### 1. Commercial and legal
 
-- [ ] Signed commercial agreement with **{{PARTNER}}**'s legal entity, naming the deployment shape.
+- [ ] Signed commercial agreement with **UNASSIGNED PARTNER**'s legal entity, naming the deployment shape.
 - [ ] **DPA (委託契約) executed**, derived from [APPI_DPA_TEMPLATE.md](APPI_DPA_TEMPLATE.md) and
       reviewed by counsel. Bracketed items completed; Connex legal entity named.
 - [ ] **Entrustee posture understood by both sides and written down.** Connex acts as the
-      **entrustee (委託先)**; **{{PARTNER}}** is the handling operator (個人情報取扱事業者) for the CRM
+      **entrustee (委託先)**; **UNASSIGNED PARTNER** is the handling operator (個人情報取扱事業者) for the CRM
       content it loads, and therefore owns PPC reporting and individual notification. Confirm the
       partner's privacy team knows this, not just its procurement team.
 - [ ] Subprocessor annex agreed for a Connex-operated deployment. For a customer-operated
@@ -110,7 +125,7 @@ journalctl -u <backend-unit> | grep -E 'posture enforced|Deployment capability m
 ### 4. Data protection
 
 - [ ] **Special-care data policy acknowledged** — [SPECIAL_CARE_DATA_POLICY.md](SPECIAL_CARE_DATA_POLICY.md).
-      Confirm **{{PARTNER}}** understands it must not load special-care-required personal
+      Confirm **UNASSIGNED PARTNER** understands it must not load special-care-required personal
       information without a lawful basis and required consent, and that classification changes
       handling policy, not the encryption boundary for searchable CRM fields.
 - [ ] **DSR routing agreed in writing** — [APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md](APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md).
@@ -138,7 +153,7 @@ compliance sign-off: **`BUSINESS_CARD_IMPORT` has no setting at all** and is on 
 healthy, and **`BUSINESS_CARD_SCANNING` needs more than its flag** to actually work. Read both
 notes under the table before recording a decision.
 
-| Capability | Operator setting | Default | Decision for {{PARTNER}} |
+| Capability | Operator setting | Default | Decision for UNASSIGNED PARTNER |
 |---|---|---|---|
 | `SSO` | `CONNEX_SSO_ENABLED` | off | |
 | `SOCIAL_LOGIN_GOOGLE` | `connex.social-login.google.enabled` + client id/secret | off | |
@@ -342,7 +357,7 @@ the two owner-only teardown calls — are in the **Offboarding** section of
 - [ ] The partner knows exports are **plaintext at generation** and that protecting the downloaded
       archive is theirs to do.
 - [ ] The export-then-delete window from the signed DPA (template §8 proposes **[30] days**) is
-      recorded here as an actual number: **{{DATE}} + ___ days**.
+      recorded here as an actual number: **UNRECORDED ADMISSION DATE + ___ days**.
 - [ ] The partner knows teardown is **organization-owner-only** (export is organization-*admin*),
       requires step-up with a registered passkey and a case-sensitive slug confirmation, and is
       **refused while any APPI data-subject request is still open** — an unfinished obligation must
@@ -352,7 +367,7 @@ the two owner-only teardown calls — are in the **Offboarding** section of
 ## Blocking conditions
 
 Any one of these **categorically prevents admission**. They are not risks to accept with a note;
-they are stop conditions. Escalate to {{OWNER}} rather than working around them.
+they are stop conditions. Escalate to UNASSIGNED ADMISSION OWNER rather than working around them.
 
 | Condition | Why it blocks |
 |---|---|
@@ -368,10 +383,10 @@ they are stop conditions. Escalate to {{OWNER}} rather than working around them.
 
 | Item | Value |
 |---|---|
-| Partner | {{PARTNER}} |
+| Partner | UNASSIGNED PARTNER |
 | Deployment shape / profile | |
-| Admission owner | {{OWNER}} |
-| Admission date | {{DATE}} |
+| Admission owner | UNASSIGNED ADMISSION OWNER |
+| Admission date | UNRECORDED ADMISSION DATE |
 | Restore drill date and outcome | |
 | Offboarding rehearsal date and who ran it | |
 | Capabilities enabled | |
