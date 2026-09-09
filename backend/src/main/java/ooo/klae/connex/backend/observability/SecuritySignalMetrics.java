@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.beans.AuditLog;
 @Component
 @RequiredArgsConstructor
 public class SecuritySignalMetrics {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SecuritySignalMetrics.class);
     private static final Set<String> ROLE_ACTIONS = Set.of(
             "workspace.role.create", "workspace.role.update", "workspace.role.delete",
             "workspace.member.role", "org.member.set", "org.member.founding_owner");
@@ -27,6 +28,10 @@ public class SecuritySignalMetrics {
 
     /** Records audited failures immediately and successful role mutations only after commit. */
     public void observeAudit(AuditLog entry, boolean independent) {
+        observeSafely(() -> observeAuditWithinBoundary(entry, independent));
+    }
+
+    private void observeAuditWithinBoundary(AuditLog entry, boolean independent) {
         String scope = scope(entry);
         if (entry.getAction() != null && entry.getAction().startsWith("auth.login")
                 && "failure".equals(entry.getOutcome())) {
@@ -36,7 +41,7 @@ public class SecuritySignalMetrics {
                 || !"success".equals(entry.getOutcome())) {
             return;
         }
-        Runnable record = () -> timestamp("permission.change", scope);
+        Runnable record = () -> observeSafely(() -> timestamp("permission.change", scope));
         if (!independent && TransactionSynchronizationManager.isActualTransactionActive()
                 && TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
@@ -52,7 +57,16 @@ public class SecuritySignalMetrics {
 
     /** Records an observed invalid or unverifiable stored HMAC without exporting row content. */
     public void integrityAnomaly(AuditLog entry) {
-        timestamp("audit.integrity.anomaly", scope(entry));
+        observeSafely(() -> timestamp("audit.integrity.anomaly", scope(entry)));
+    }
+
+    /** Keeps recoverable telemetry failures out of committed mutations and audit disclosure. */
+    private void observeSafely(Runnable observation) {
+        try {
+            observation.run();
+        } catch (RuntimeException exception) {
+            log.warn("Security signal observation failed");
+        }
     }
 
     private void timestamp(String signal, String scope) {

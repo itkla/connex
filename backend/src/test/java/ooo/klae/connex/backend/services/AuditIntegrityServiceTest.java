@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -42,6 +43,8 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
     @Autowired private AuthService authService;
     @Autowired private io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
+    @Autowired private org.springframework.transaction.PlatformTransactionManager transactionManager;
+    @Autowired private ooo.klae.connex.backend.observability.SecuritySignalMetrics securitySignalMetrics;
     @Autowired private RoleMapper roleMapper;
     private final List<Integer> committedUserIds = new ArrayList<>();
     private Integer committedRoleId;
@@ -88,6 +91,51 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
                         new org.springframework.mock.web.MockHttpServletResponse()));
         assertEquals(before + 1, counter.count());
         System.out.println("BOUNDARY PASS persisted role grant; persisted membership elevation; actual rejected login increments unattributed counter");
+    }
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional(
+        propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void committedRoleReturnsAndLaterCallbackRunsWhenRegistryThrows() {
+        committedUserIds.add(currentUser.getId());
+        var target = org.springframework.test.util.AopTestUtils.getTargetObject(auditIntegrityService);
+        String roleName = "Failure test " + unique();
+        var later = new java.util.concurrent.atomic.AtomicBoolean();
+        var attempts = new java.util.concurrent.atomic.AtomicInteger();
+        var failing = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        try {
+            failing.config().meterFilter(new io.micrometer.core.instrument.config.MeterFilter() {
+                @Override
+                public io.micrometer.core.instrument.Meter.Id map(io.micrometer.core.instrument.Meter.Id id) {
+                    attempts.incrementAndGet();
+                    throw new IllegalStateException("sensitive-registry-probe");
+                }
+            });
+            org.springframework.test.util.ReflectionTestUtils.setField(target, "securitySignalMetrics",
+                    new ooo.klae.connex.backend.observability.SecuritySignalMetrics(failing, java.time.Clock.systemUTC()));
+            var transaction = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+            assertDoesNotThrow(() -> transaction.executeWithoutResult(status -> {
+                committedRoleId = roleService.createRole(workspace.getId(), currentUser.getId(),
+                        roleName, List.of("AUDIT_READ")).getId();
+                org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                        new org.springframework.transaction.support.TransactionSynchronization() {
+                            @Override
+                            public void afterCommit() {
+                                later.set(true);
+                            }
+                        });
+            }));
+            assertEquals(1, attempts.get());
+            assertTrue(later.get());
+            assertNotNull(roleMapper.findRole(workspace.getId(), committedRoleId));
+            assertTrue(auditLogMapper.findRecent(workspace.getId(), 20, 0).stream()
+                    .anyMatch(row -> "workspace.role.create".equals(row.getAction())
+                            && java.util.Objects.equals(workspace.getId(), row.getEntityId())
+                            && roleName.equals(row.getTargetLabel())));
+        } finally {
+            failing.close();
+            org.springframework.test.util.ReflectionTestUtils.setField(target, "securitySignalMetrics", securitySignalMetrics);
+        }
     }
 
     @Test

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.observability;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -86,6 +87,140 @@ class SecuritySignalMetricsTest {
         assertFalse(scrape.contains("@"));
         Files.writeString(directory.resolve("triggered.prom"), scrape);
         System.out.println("EMISSION PASS authentication workspace:7=20 workspace:8=0 unattributed=100; role grant and membership change; invalid HMAC; no PII");
+    }
+
+    @Test
+    void authenticationRegistryFailureDoesNotEscape() {
+        var failing = failingRegistry();
+        try {
+            assertDoesNotThrow(() -> new SecuritySignalMetrics(failing, Clock.systemUTC())
+                    .observeAudit(entry("auth.login", "failure", 7), true));
+        } finally {
+            failing.close();
+        }
+    }
+
+    @Test
+    void independentPermissionRegistryFailureDoesNotEscape() {
+        var failing = failingRegistry();
+        try {
+            assertDoesNotThrow(() -> new SecuritySignalMetrics(failing, Clock.systemUTC())
+                    .observeAudit(entry("workspace.role.create", "success", 7), true));
+        } finally {
+            failing.close();
+        }
+    }
+
+    @Test
+    void conflictingMeterTypeDoesNotEscape() {
+        var conflicting = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        try {
+            conflicting.counter("connex.security.permission.change.timestamp", "scope", "workspace:7");
+            assertDoesNotThrow(() -> new SecuritySignalMetrics(conflicting, Clock.systemUTC())
+                    .observeAudit(entry("workspace.role.create", "success", 7), true));
+        } finally {
+            conflicting.close();
+        }
+    }
+
+    @Test
+    void deferredClockFailureDoesNotInterruptLaterCallbacks() {
+        Clock failingClock = mock(Clock.class);
+        when(failingClock.instant()).thenThrow(new IllegalStateException("sensitive-clock-probe"));
+        SecuritySignalMetrics failing = new SecuritySignalMetrics(registry, failingClock);
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+        var later = new java.util.concurrent.atomic.AtomicBoolean();
+        try {
+            failing.observeAudit(entry("workspace.role.create", "success", 7), false);
+            TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            later.set(true);
+                        }
+                    });
+            assertDoesNotThrow(() -> TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(sync -> sync.afterCommit()));
+            assertTrue(later.get());
+        } finally {
+            TransactionSynchronizationManager.clear();
+        }
+    }
+
+    @Test
+    void fatalRegistryErrorIsNotSwallowed() {
+        var failing = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        try {
+            failing.config().meterFilter(new io.micrometer.core.instrument.config.MeterFilter() {
+                @Override
+                public io.micrometer.core.instrument.Meter.Id map(io.micrometer.core.instrument.Meter.Id id) {
+                    throw new AssertionError("fatal-probe");
+                }
+            });
+            assertThrows(AssertionError.class, () -> new SecuritySignalMetrics(failing, Clock.systemUTC())
+                    .integrityAnomaly(entry("workspace.role.create", "success", 7)));
+        } finally {
+            failing.close();
+        }
+    }
+
+    @Test
+    void recentRemainsAvailableWhenAnomalyRegistryThrows() {
+        assertDisclosureSurvivesRegistryFailure(false);
+    }
+
+    @Test
+    void exportRemainsAvailableWhenAnomalyRegistryThrows() {
+        assertDisclosureSurvivesRegistryFailure(true);
+    }
+
+    private void assertDisclosureSurvivesRegistryFailure(boolean export) {
+        var failing = failingRegistry();
+        try {
+            AuditLogMapper mapper = mock(AuditLogMapper.class);
+            var properties = new AuditIntegrityProperties();
+            properties.setHmacSecret("test-alert-integrity-secret-at-least-32-chars");
+            var integrity = new AuditIntegrityService(mapper, mock(AuditIntegrityMapper.class),
+                    mock(UserMapper.class), mock(WorkspaceMapper.class), mock(OrganizationMapper.class),
+                    properties, new ObjectMapper(), Clock.systemUTC(),
+                    new SecuritySignalMetrics(failing, Clock.systemUTC()));
+            var tenant = mock(ooo.klae.connex.backend.tenant.TenantContext.class);
+            when(tenant.getWorkspaceId()).thenReturn(7);
+            var service = new ooo.klae.connex.backend.services.AuditService(mapper, integrity,
+                    new ObjectMapper(), tenant, new ooo.klae.connex.backend.util.ClientIpResolver(""),
+                    new ClientAssertedCorrelationPseudonymizer(properties));
+            AuditLog invalid = entry("workspace.role.create", "success", 7);
+            invalid.setSummary("retained [Private](note:42)");
+            invalid.setIntegrityReferenceState("captured");
+            invalid.setRowHash("f".repeat(64));
+            assertFalse(integrity.hasValidIntegrity(invalid));
+            if (export) {
+                when(mapper.findWorkspaceExport(7, 20, 0)).thenReturn(java.util.List.of(invalid));
+                String csv = assertDoesNotThrow(() -> service.exportRecent(20, 0));
+                assertTrue(csv.contains("retained"));
+                assertFalse(csv.contains("Private"));
+            } else {
+                when(mapper.findRecent(7, 20, 0)).thenReturn(java.util.List.of(invalid));
+                var rows = assertDoesNotThrow(() -> service.recent(20, 0));
+                assertEquals(1, rows.size());
+                assertTrue(rows.getFirst().isContentRedacted());
+                assertFalse(rows.getFirst().getSummary().contains("Private"));
+            }
+        } finally {
+            failing.close();
+        }
+    }
+
+    private static io.micrometer.core.instrument.simple.SimpleMeterRegistry failingRegistry() {
+        var failing = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        failing.config().meterFilter(new io.micrometer.core.instrument.config.MeterFilter() {
+            @Override
+            public io.micrometer.core.instrument.Meter.Id map(io.micrometer.core.instrument.Meter.Id id) {
+                throw new IllegalStateException("sensitive-registry-probe");
+            }
+        });
+        return failing;
     }
 
     private static AuditLog entry(String action, String outcome, Integer workspaceId) {
