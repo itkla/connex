@@ -26,6 +26,20 @@ EXPECTED = {
     ('ConnexBackupFailure', ''),
     ('ConnexAuditIntegrityAnomaly', 'workspace:7'),
 }
+SUMMARIES = {
+    'ConnexAuthenticationFailureTenantSpike':
+        'At least 20 audited authentication failures in one tenant in 5 minutes',
+    'ConnexAuthenticationFailureGlobalSpike':
+        'At least 100 audited authentication failures globally in 5 minutes',
+    'ConnexPermissionChange':
+        'A role definition or membership privilege changed within 15 minutes',
+    'ConnexServerErrorRateSpike':
+        'More than 5 percent HTTP 5xx responses with at least 100 requests in 5 minutes',
+    'ConnexBackupFailure':
+        'A backup job failed and requires operator acknowledgement',
+    'ConnexAuditIntegrityAnomaly':
+        'A read audit row has an invalid or unverifiable HMAC',
+}
 
 
 def free_port():
@@ -38,6 +52,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--prometheus', required=True)
     parser.add_argument('--alertmanager', required=True)
+    parser.add_argument('--rules', type=Path, default=ROOT / 'security-rules.yml',
+                        help='Rule file override for trigger mutation testing')
     parser.add_argument('--fixtures', type=Path, default=ROOT / 'fixtures',
                         help='Metric fixtures; pass backend/build/security-alerts for Java emission evidence')
     args = parser.parse_args()
@@ -96,7 +112,7 @@ def main():
             dedicated.pop('authorization')
             (work / 'prometheus.yml').write_text(json.dumps({
                 'global': {'scrape_interval': '2s', 'evaluation_interval': '2s'},
-                'rule_files': [str(ROOT / 'security-rules.yml')],
+                'rule_files': [str(args.rules.resolve())],
                 'alerting': {'alertmanagers': [{'static_configs': [{'targets': [f'127.0.0.1:{alert_port}']}]}]},
                 'scrape_configs': [
                     {'job_name': 'connex', 'static_configs': [{'targets': [f'127.0.0.1:{port}']}]},
@@ -165,6 +181,10 @@ def main():
                             assert set(labels) <= {'alertname', 'severity', 'scope'}, labels
                             identity = (labels['alertname'], labels.get('scope', ''))
                             assert identity in EXPECTED, identity
+                            assert labels['severity'] in {'warning', 'critical'}, labels
+                            assert alert['annotations'] == {
+                                'summary': SUMMARIES[labels['alertname']]
+                            }, alert['annotations']
                             if identity not in seen:
                                 print('NOTIFICATION ' + json.dumps({
                                     'receiver': payload['receiver'], 'status': alert['status'],
@@ -172,7 +192,9 @@ def main():
                                 }, sort_keys=True), flush=True)
                             seen.add(identity)
                     assert seen == EXPECTED, f'Missing notifications: {EXPECTED - seen}'
-                    print('PASS 8 firing notifications; all 5 signals; real HTTP receiver; no PII labels', flush=True)
+                    print('PASS 8 firing notifications; all 5 signals; real HTTP receiver; '
+                          'PII/secret canaries absent from full payload; '
+                          'exact static annotations and bounded labels', flush=True)
             except BaseException:
                 for logfile in work.glob('*.log'):
                     print(logfile.name + '\n' + logfile.read_text()[-4000:])

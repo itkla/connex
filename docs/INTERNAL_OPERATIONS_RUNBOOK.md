@@ -1337,7 +1337,23 @@ refreshes the timestamp fixture and accelerates scraping to 2 seconds; threshold
 remain unchanged. It tests a below-threshold phase, invokes the actual backup command with a
 missing configuration (exit 64), invokes its `OnFailure` helper, then awaits all eight expected
 firing notifications. It prints `NOTIFICATION` JSON as receiver evidence and fails if an alert is
-missing, contains unexpected labels, or leaks sentinel personal data. It cleans up its processes.
+missing, contains unexpected labels or non-static annotations, or leaks sentinel personal data
+anywhere in the webhook payload. It cleans up its processes.
 The test invokes the hook directly; it does not claim the host's systemd drop-ins were installed.
 HTTP counters are simulated server metric samples; Java emission tests separately exercise the
 real audit/role and HMAC boundaries. The test does not send messages to the production gateway.
+
+To prove the drill detects broken triggers, run the mutation harness under the same stack lock:
+
+```bash
+flock /home/dev/worktrees/stack.lock python3 deploy/alerting/notification-mutations.py \
+  --prometheus /absolute/path/to/prometheus --alertmanager /absolute/path/to/alertmanager \
+  --fixtures backend/build/security-alerts --output backend/build/alert-mutations
+```
+
+It first requires the unchanged rules to deliver all eight notifications, then disables each of
+the six trigger expressions independently in a temporary rule file (authentication has tenant
+and global triggers). Each run must fail specifically because that trigger's notifications are
+missing, while every unaffected notification still arrives. Startup/configuration failures do
+not count as killed mutations. The harness preserves each run's output and never edits the
+deployed rule file. Synthetic fixtures remain available by omitting `--fixtures`.
