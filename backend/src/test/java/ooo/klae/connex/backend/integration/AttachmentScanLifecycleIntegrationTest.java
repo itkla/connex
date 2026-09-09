@@ -318,11 +318,55 @@ class AttachmentScanLifecycleIntegrationTest {
         scans.enqueue(workspace.getId(), attachment.getId());
         when(scanner.scan(any(byte[].class))).thenReturn(report(MalwareScanVerdict.CLEAN));
         assertTrue(scan(attachment));
-        jdbc.update("UPDATE attachment SET scan_expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)"
+        jdbc.update("UPDATE attachment SET scan_expires_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND),"
+                + " scan_next_attempt_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)"
                 + " WHERE workspace_id = ? AND id = ?", workspace.getId(), attachment.getId());
 
         assertDenied(attachment);
         assertEquals(List.of(attachment.getId()), scans.findDue(workspace.getId(), 1));
+    }
+
+    @Test
+    void expiredRenewalsCannotStarveAnOlderPendingRetryOrExplicitRescanBacklog() throws Exception {
+        Attachment renewed = legacyAttachment(workspace);
+        Attachment pending = legacyAttachment(workspace);
+        Attachment retry = legacyAttachment(workspace);
+        Attachment explicit = legacyAttachment(workspace);
+        assertTrue(scan(renewed));
+        when(scanner.scan(any(byte[].class))).thenThrow(new ServiceUnavailableException("fixture outage"));
+        assertFalse(scan(retry));
+        scans.enqueue(workspace.getId(), explicit.getId());
+        jdbc.update("UPDATE attachment SET created_at = '2000-01-01' WHERE workspace_id = ?",
+            workspace.getId());
+        jdbc.update("UPDATE attachment SET scan_next_attempt_at = '2001-01-01'"
+            + " WHERE workspace_id = ? AND id = ?", workspace.getId(), retry.getId());
+        jdbc.update("UPDATE attachment SET scan_next_attempt_at = '2002-01-01'"
+            + " WHERE workspace_id = ? AND id = ?", workspace.getId(), explicit.getId());
+        jdbc.update("UPDATE attachment SET scan_expires_at = '2003-01-01', scan_next_attempt_at = NULL"
+            + " WHERE workspace_id = ? AND id = ?", workspace.getId(), renewed.getId());
+        AtomicInteger renewal = new AtomicInteger();
+        doAnswer(invocation -> new MalwareScanReport(
+            MalwareScanVerdict.CLEAN, null, null, "daily-fixture-42", false,
+            Instant.parse("2004-01-01T00:00:00Z").plusSeconds(renewal.getAndIncrement())))
+            .when(scanner).scan(any(byte[].class));
+
+        List<Attachment> oldestFirst = List.of(pending, retry, explicit, renewed);
+        for (int cycle = 0; cycle < 3; cycle++) {
+            for (Attachment expected : oldestFirst) {
+                assertEquals(List.of(expected.getId()), scans.findDue(workspace.getId(), 1),
+                    "Expired renewals must yield to older due work, cycle " + cycle);
+                inContext(firstActor, workspace, () -> {
+                    worker.sweepWorkspace(workspace.getId(), firstActor.getId(), 1);
+                    return null;
+                });
+                Attachment decided = scans.getById(workspace.getId(), expected.getId());
+                assertEquals(decided.getScanExpiresAt(), decided.getScanNextAttemptAt());
+            }
+        }
+        assertEquals(3, decisions(pending));
+        assertEquals(3, decisions(retry));
+        assertEquals(3, decisions(explicit));
+        assertEquals(4, decisions(renewed));
     }
 
     @Test
