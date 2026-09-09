@@ -29,6 +29,7 @@ public class AttachmentScanWorker {
     private final TenantWorkScope workScope;
     private final SystemActor systemActor;
     private final AtomicBoolean running = new AtomicBoolean();
+    private final java.util.Map<String, CatalogCursor> catalogCursors = new java.util.HashMap<>();
 
     /** Gives each workspace one object per sweep; persisted due times order retries and backfill. */
     @Scheduled(fixedDelayString = "${connex.malware-scan.sweep-delay-ms:60000}",
@@ -39,20 +40,49 @@ public class AttachmentScanWorker {
         }
         try {
             int actor = workScope.unrouted(() -> systemActor.user().getId());
-            for (String catalog : placements.activeCatalogs()) {
-                for (int workspaceId : workScope.withCatalog(catalog,
-                        () -> scans.workspaceIdsWithDueTasks(25))) {
-                    try {
-                        workScope.inWorkspace(workspaceId, () -> sweepWorkspace(workspaceId, actor, 1));
-                    } catch (RuntimeException exception) {
-                        org.slf4j.LoggerFactory.getLogger(AttachmentScanWorker.class)
-                            .warn("Attachment scan workspace sweep could not complete workspace={}", workspaceId);
-                    }
-                }
+            var catalogs = placements.activeCatalogs();
+            catalogCursors.keySet().retainAll(catalogs);
+            for (String catalog : catalogs) {
+                sweepCatalog(catalog, actor);
             }
         } finally {
             running.set(false);
         }
+    }
+
+    private void sweepCatalog(String catalog, int actor) {
+        CatalogCursor cursor = catalogCursors.get(catalog);
+        if (cursor == null) {
+            Integer ceiling = workScope.withCatalog(catalog, scans::lastWorkspaceId);
+            if (ceiling == null) {
+                return;
+            }
+            cursor = new CatalogCursor(0, ceiling);
+        }
+        for (int count = 0; count < 25; count++) {
+            CatalogCursor current = cursor;
+            Integer workspaceId = workScope.withCatalog(catalog,
+                () -> scans.nextWorkspaceId(current.afterId(), current.throughId()));
+            if (workspaceId == null) {
+                catalogCursors.remove(catalog);
+                return;
+            }
+            cursor = new CatalogCursor(workspaceId, current.throughId());
+            catalogCursors.put(catalog, cursor);
+            try {
+                workScope.inWorkspace(workspaceId, () -> sweepWorkspace(workspaceId, actor, 1));
+            } catch (RuntimeException exception) {
+                org.slf4j.LoggerFactory.getLogger(AttachmentScanWorker.class)
+                    .warn("Attachment scan workspace sweep could not complete workspace={}", workspaceId);
+            }
+            if (workspaceId == current.throughId()) {
+                catalogCursors.remove(catalog);
+                return;
+            }
+        }
+    }
+
+    private record CatalogCursor(int afterId, int throughId) {
     }
 
     /** Processes a bounded page; committed decisions themselves form the durable resume checkpoint. */

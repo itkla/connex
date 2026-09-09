@@ -92,6 +92,25 @@ class AttachmentQuarantineIntegrationTest {
     }
 
     @Test
+    void unmanagedReferenceLifecycleReturnsExplicitBadRequestWithoutMutation() throws Exception {
+        Workspace workspace = workspace(organization());
+        Attachment attachment = attachment(workspace);
+        MockHttpSession session = login(member(workspace, "admin"));
+        for (String url : List.of("https://external.example/file.txt", "/api/attachments/content/invalid.txt")) {
+            jdbc.update("UPDATE attachment SET url = ? WHERE id = ?", url, attachment.getId());
+            for (String action : ACTIONS) {
+                mockMvc.perform(request(action, attachment.getId()).session(session)
+                        .with(csrf().asHeader()).header("X-Workspace-Id", workspace.getId()))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.message")
+                        .value("Quarantine lifecycle is not applicable to unmanaged attachment references"));
+            }
+            assertEquals("pending", scanMapper.getById(workspace.getId(), attachment.getId()).getScanState());
+            assertEquals(0, eventCount(attachment));
+        }
+    }
+
+    @Test
     void allEndpointsDenyForeignWorkspaceAndForeignOrganizationWithoutChangingAttachment()
             throws Exception {
         Organization organization = organization();
@@ -156,7 +175,7 @@ class AttachmentQuarantineIntegrationTest {
         Attachment awaiting = scanMapper.getById(workspace.getId(), attachment.getId());
         assertEquals("pending", awaiting.getScanState());
         assertNull(awaiting.getScanOwner());
-        assertEquals(false, scanMapper.isReadable(workspace.getId(), attachment.getUrl()));
+        assertEquals(false, scanMapper.isReadable(workspace.getId(), attachment.getUrl(), false));
         perform("quarantine", attachment, session);
         perform("delete", attachment, session);
 
@@ -189,7 +208,7 @@ class AttachmentQuarantineIntegrationTest {
 
         assertNull(scanMapper.getById(workspace.getId(), first.getId()));
         assertEquals("quarantined", scanMapper.getById(workspace.getId(), sibling.getId()).getScanState());
-        assertEquals(false, scanMapper.isReadable(workspace.getId(), sibling.getUrl()));
+        assertEquals(false, scanMapper.isReadable(workspace.getId(), sibling.getUrl(), false));
         assertEquals(0, jdbc.queryForObject(
             "SELECT COUNT(*) FROM object_deletion_queue WHERE workspace_id = ?", Integer.class,
             workspace.getId()));

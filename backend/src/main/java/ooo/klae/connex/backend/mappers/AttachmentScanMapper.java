@@ -9,11 +9,14 @@ import ooo.klae.connex.backend.beans.Attachment;
 public interface AttachmentScanMapper {
     Attachment getById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Attachment lockById(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    boolean isReadable(@Param("workspaceId") int workspaceId, @Param("url") String url);
+    boolean isReadable(@Param("workspaceId") int workspaceId, @Param("url") String url,
+        @Param("allowDisabledProof") boolean allowDisabledProof);
     int quarantine(@Param("workspaceId") int workspaceId, @Param("id") int id);
     int enqueue(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    /** Enumerates only workspace identifiers in the scheduler's already pinned tenant catalog. */
-    List<Integer> workspaceIdsWithDueTasks(@Param("limit") int limit);
+    /** Seeks one workspace identifier in the scheduler's pinned catalog without reading its corpus. */
+    Integer nextWorkspaceId(@Param("afterId") int afterId, @Param("throughId") int throughId);
+    /** Captures the catalog cycle ceiling so new arrivals cannot delay wraparound indefinitely. */
+    Integer lastWorkspaceId();
     List<Integer> findDue(@Param("workspaceId") int workspaceId, @Param("limit") int limit);
     boolean isClaimable(@Param("workspaceId") int workspaceId, @Param("url") String url);
     int claim(@Param("workspaceId") int workspaceId, @Param("url") String url,

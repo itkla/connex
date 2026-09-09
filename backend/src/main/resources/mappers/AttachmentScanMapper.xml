@@ -12,7 +12,10 @@
       AND NOT EXISTS (
         SELECT 1 FROM attachment WHERE workspace_id = #{workspaceId} AND url = #{url}
           AND (scan_state != 'clean' OR scan_engine IS NULL OR scan_database_version IS NULL
-            OR scanned_at IS NULL OR scan_expires_at IS NULL OR scan_expires_at &lt;= UTC_TIMESTAMP(6)))
+            OR scanned_at IS NULL
+            OR (scan_database_version = 'disabled' AND NOT #{allowDisabledProof})
+            OR (scan_database_version != 'disabled'
+              AND (scan_expires_at IS NULL OR scan_expires_at &lt;= UTC_TIMESTAMP(6)))))
   </select>
   <update id="quarantine">
     UPDATE attachment a JOIN attachment target
@@ -27,16 +30,14 @@
       a.scan_next_attempt_at = UTC_TIMESTAMP(6)
     WHERE target.workspace_id = #{workspaceId} AND target.id = #{id}
   </update>
-  <select id="workspaceIdsWithDueTasks" resultType="int">
-    SELECT workspace_id FROM attachment
-    WHERE url LIKE '/api/attachments/content/%'
-    GROUP BY workspace_id
-    HAVING SUM((scan_state IN ('pending', 'error')
-      OR (scan_state = 'scanning' AND scan_lease_until &lt;= UTC_TIMESTAMP(6))
-      OR (scan_state = 'clean' AND (scan_expires_at IS NULL OR scan_expires_at &lt;= UTC_TIMESTAMP(6))))
-      AND (scan_next_attempt_at IS NULL OR scan_next_attempt_at &lt;= UTC_TIMESTAMP(6))) &gt; 0
-    ORDER BY COALESCE(MAX(scan_last_attempt_at), '1970-01-01'), workspace_id
-    LIMIT #{limit}
+  <select id="nextWorkspaceId" resultType="int">
+    SELECT workspace_id FROM attachment FORCE INDEX (idx_attachment_workspace)
+    WHERE workspace_id &gt; #{afterId} AND workspace_id &lt;= #{throughId}
+    ORDER BY workspace_id LIMIT 1
+  </select>
+  <select id="lastWorkspaceId" resultType="int">
+    SELECT workspace_id FROM attachment FORCE INDEX (idx_attachment_workspace)
+    ORDER BY workspace_id DESC LIMIT 1
   </select>
   <select id="findDue" resultType="int">
     SELECT MIN(id) FROM attachment

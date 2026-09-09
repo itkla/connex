@@ -91,6 +91,10 @@ public class AttachmentQuarantineService {
                 || !Objects.equals(attachment.getUrl(), discovered.getUrl())) {
             throw new ResourceNotFoundException("Attachment not found");
         }
+        if (!managedObjectService.isManagedAttachmentUrl(attachment.getUrl())) {
+            throw new BadRequestException(
+                "Quarantine lifecycle is not applicable to unmanaged attachment references");
+        }
         return new LockedAttachment(workspaceId, attachment, references.size());
     }
 

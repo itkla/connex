@@ -45,12 +45,15 @@ public class AttachmentScanTransactions {
     /** Commits one verdict only while its exact claim remains live. */
     @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public boolean decide(Attachment claimed, MalwareScanReport report) {
-        attachments.lockIdsByUrl(claimed.getWorkspaceId(), claimed.getUrl());
+        var survivingIds = attachments.lockIdsByUrl(claimed.getWorkspaceId(), claimed.getUrl());
+        if (survivingIds.isEmpty()) {
+            return false;
+        }
         int changed = scans.decide(claimed.getWorkspaceId(), claimed.getUrl(), claimed.getScanOwner(),
             report.verdict().name().toLowerCase(java.util.Locale.ROOT), report.databaseVersion(),
             report.signature(), LocalDateTime.ofInstant(report.validUntil(), ZoneOffset.UTC));
         if (changed > 0) {
-            audit.recordStrictScoped("malware.decided", "attachment", claimed.getId(),
+            audit.recordStrictScoped("malware.decided", "attachment", survivingIds.getFirst(),
                 claimed.getWorkspaceId(), null, null, "Stored attachment security scan completed",
                 java.util.Map.of("verdict", report.verdict().name()));
         }

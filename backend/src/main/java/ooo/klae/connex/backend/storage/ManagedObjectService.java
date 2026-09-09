@@ -57,6 +57,12 @@ public class ManagedObjectService implements ApplicationRunner {
     @Autowired
     private ooo.klae.connex.backend.mappers.AttachmentScanMapper attachmentScanMapper;
 
+    @Autowired
+    private ooo.klae.connex.backend.storage.malware.MalwareScanProperties malwareScanProperties;
+
+    @Autowired
+    private ooo.klae.connex.backend.config.DeploymentProperties deploymentProperties;
+
     private final ObjectStorage objectStorage;
     private final ObjectDeletionRetryQueue deletionRetryQueue;
     private final UploadPolicy uploadPolicy;
@@ -468,7 +474,10 @@ public class ManagedObjectService implements ApplicationRunner {
     }
 
     private void requireCleanAttachment(int workspaceId, String url) {
-        if (attachmentScanMapper == null || !attachmentScanMapper.isReadable(workspaceId, url)) {
+        boolean allowDisabledProof = malwareScanProperties != null && !malwareScanProperties.isEnabled()
+            && deploymentProperties != null && !deploymentProperties.isConfigured();
+        if (attachmentScanMapper == null
+                || !attachmentScanMapper.isReadable(workspaceId, url, allowDisabledProof)) {
             throw new ResourceNotFoundException("Stored file was not found");
         }
     }
@@ -842,6 +851,11 @@ public class ManagedObjectService implements ApplicationRunner {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is unavailable", exception);
         }
+    }
+
+    /** Reports whether a reference belongs to the managed attachment URL namespace and token grammar. */
+    public boolean isManagedAttachmentUrl(String url) {
+        return managedToken(url, ATTACHMENT_URL_PREFIX).isPresent();
     }
 
     Optional<String> managedAttachmentKey(int workspaceId, String url) {

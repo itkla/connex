@@ -92,7 +92,7 @@ class ManagedObjectServiceTest {
             .when(deletionRetryQueue.prepareUserWrite(anyString()))
             .thenAnswer(invocation -> new ObjectDeletionTombstone(
                 tombstoneIds.getAndIncrement(), invocation.getArgument(0)));
-        org.mockito.Mockito.lenient().when(attachmentScanMapper.isReadable(anyInt(), anyString()))
+        org.mockito.Mockito.lenient().when(attachmentScanMapper.isReadable(anyInt(), anyString(), org.mockito.ArgumentMatchers.anyBoolean()))
             .thenReturn(true);
         service = service(properties);
     }

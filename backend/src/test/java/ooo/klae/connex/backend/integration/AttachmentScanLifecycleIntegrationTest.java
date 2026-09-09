@@ -126,6 +126,70 @@ class AttachmentScanLifecycleIntegrationTest {
         }
     }
 
+    @Autowired private ooo.klae.connex.backend.storage.malware.MalwareScanProperties scanProperties;
+    @Autowired private ooo.klae.connex.backend.config.DeploymentProperties deploymentProperties;
+
+    @Test
+    void workspaceDiscoveryExaminesAtMostOneIndexEntryPerSeek() {
+        for (int i = 0; i < 100; i++) {
+            reference(workspace, "/api/attachments/content/" + UUID.randomUUID() + ".txt");
+        }
+        var parameters = java.util.Map.of("afterId", 0, "throughId", workspace.getId());
+        var statement = sqlSessionTemplate.getConfiguration().getMappedStatement(
+            "ooo.klae.connex.backend.mappers.AttachmentScanMapper.nextWorkspaceId");
+        String sql = statement.getBoundSql(parameters).getSql();
+        String plan = jdbc.queryForObject("EXPLAIN ANALYZE " + sql, String.class, 0, workspace.getId());
+        assertNotNull(plan);
+        System.out.println("WORKSPACE_DISCOVERY_EXPLAIN\n" + plan);
+        var access = java.util.regex.Pattern.compile(
+            "(?m)^.*(?:scan|lookup) on attachment .*actual time=[^\n]*?rows=([0-9]+)").matcher(plan);
+        assertTrue(access.find(), "Expected measured attachment access iterator");
+        assertTrue(Integer.parseInt(access.group(1)) <= 1, "Workspace seek must read at most one entry");
+    }
+
+    @Test
+    void disabledProofRemainsReadableAfterExpiryOnlyWhileScanningIsDisabled() throws Exception {
+        Attachment attachment = legacyAttachment(workspace);
+        scan(attachment);
+        jdbc.update("UPDATE attachment SET scan_database_version = 'disabled',"
+            + " scan_expires_at = '2000-01-01', scanned_at = '1999-12-31' WHERE id = ?", attachment.getId());
+        boolean enabled = scanProperties.isEnabled();
+        String profile = deploymentProperties.getProfile();
+        try {
+            scanProperties.setEnabled(false);
+            assertReadable(attachment);
+            scanProperties.setEnabled(true);
+            assertDenied(attachment);
+            jdbc.update("UPDATE attachment SET scan_expires_at = '2099-01-01' WHERE id = ?", attachment.getId());
+            assertDenied(attachment);
+            scanProperties.setEnabled(false);
+            assertReadable(attachment);
+            deploymentProperties.setProfile("on-prem");
+            assertDenied(attachment);
+            deploymentProperties.setProfile(profile);
+            scans.quarantine(workspace.getId(), attachment.getId());
+            assertDenied(attachment);
+        } finally {
+            scanProperties.setEnabled(enabled);
+            deploymentProperties.setProfile(profile);
+        }
+    }
+
+    @Test
+    void decisionAuditsSurvivingReferenceAfterClaimedReferenceIsDeletedDuringScan() throws Exception {
+        Attachment claimed = legacyAttachment(workspace);
+        Attachment survivor = reference(workspace, claimed.getUrl());
+        when(scanner.scan(any(byte[].class))).thenAnswer(invocation -> {
+            attachments.delete(workspace.getId(), claimed.getId());
+            return report(MalwareScanVerdict.CLEAN);
+        });
+        assertTrue(scan(claimed));
+        assertNull(scans.getById(workspace.getId(), claimed.getId()));
+        assertReadable(survivor);
+        assertEquals(1, decisions(survivor));
+        assertEquals(0, decisions(claimed));
+    }
+
     @Test
     void legacyBytesCannotBeReadOrExportedUntilAnExplicitCleanDecision() throws Exception {
         Attachment attachment = legacyAttachment(workspace);
@@ -284,23 +348,19 @@ class AttachmentScanLifecycleIntegrationTest {
     }
 
     @Test
-    void durableLastAttemptMovesBusyWorkspaceBehindAnUnservedWorkspace() throws Exception {
+    void workspaceSeeksSkipBusyCorpusAndStopAtTheCapturedCycleCeiling() throws Exception {
         Attachment busyFirst = legacyAttachment(workspace);
         legacyAttachment(workspace);
         Workspace waiting = workspace();
         legacyAttachment(waiting);
-        List<Integer> initial = scans.workspaceIdsWithDueTasks(10000);
-        assertTrue(initial.contains(workspace.getId()));
-        assertTrue(initial.contains(waiting.getId()));
-        assertTrue(initial.indexOf(workspace.getId()) < initial.indexOf(waiting.getId()));
-
+        int ceiling = scans.lastWorkspaceId();
+        assertEquals(workspace.getId(), scans.nextWorkspaceId(workspace.getId() - 1, ceiling));
         assertTrue(scan(busyFirst));
-
-        List<Integer> resumed = scans.workspaceIdsWithDueTasks(10000);
-        assertTrue(resumed.contains(workspace.getId()));
-        assertTrue(resumed.contains(waiting.getId()));
-        assertTrue(resumed.indexOf(waiting.getId()) < resumed.indexOf(workspace.getId()));
-        assertEquals(resumed, scans.workspaceIdsWithDueTasks(10000));
+        assertEquals(waiting.getId(), scans.nextWorkspaceId(workspace.getId(), ceiling));
+        Workspace arrival = workspace();
+        legacyAttachment(arrival);
+        assertNull(scans.nextWorkspaceId(waiting.getId(), ceiling));
+        assertEquals(arrival.getId(), scans.nextWorkspaceId(waiting.getId(), scans.lastWorkspaceId()));
     }
 
     @Test
@@ -378,7 +438,7 @@ class AttachmentScanLifecycleIntegrationTest {
         inContext(foreignActor, foreign, () -> {
             assertNull(scans.getById(foreign.getId(), attachment.getId()));
             assertNull(scans.lockById(foreign.getId(), attachment.getId()));
-            assertFalse(scans.isReadable(foreign.getId(), attachment.getUrl()));
+            assertFalse(scans.isReadable(foreign.getId(), attachment.getUrl(), false));
             assertEquals(0, scans.quarantine(foreign.getId(), attachment.getId()));
             assertEquals(0, scans.enqueue(foreign.getId(), attachment.getId()));
             assertFalse(worker.scan(foreign.getId(), attachment.getId(), foreignActor.getId()));

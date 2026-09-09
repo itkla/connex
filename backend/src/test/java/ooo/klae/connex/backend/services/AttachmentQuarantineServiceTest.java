@@ -49,9 +49,27 @@ class AttachmentQuarantineServiceTest {
         attachment.setWorkspaceId(7);
         attachment.setUrl("/api/attachments/content/example.txt");
         attachment.setScanState("quarantined");
+        when(objects.isManagedAttachmentUrl(attachment.getUrl()))
+            .thenReturn(true);
         when(scanMapper.getById(7, 19)).thenReturn(attachment);
         when(scanMapper.lockById(7, 19)).thenReturn(attachment);
         when(attachmentMapper.lockIdsByUrl(7, attachment.getUrl())).thenReturn(List.of(19));
+    }
+
+    @Test
+    void unmanagedReferencesRefuseEveryLifecycleOperation() {
+        attachment.setUrl("https://external.example/file.txt");
+        when(attachmentMapper.lockIdsByUrl(7, attachment.getUrl())).thenReturn(List.of(19));
+        for (java.util.function.IntConsumer operation : List.<java.util.function.IntConsumer>of(
+                service::quarantine, service::rescan, service::release, service::delete)) {
+            var error = assertThrows(BadRequestException.class, () -> operation.accept(19));
+            org.junit.jupiter.api.Assertions.assertEquals(
+                "Quarantine lifecycle is not applicable to unmanaged attachment references", error.getMessage());
+        }
+        verify(scanMapper, never()).quarantine(7, 19);
+        verify(scanMapper, never()).enqueue(7, 19);
+        verify(attachmentMapper, never()).delete(7, 19);
+        verifyNoInteractions(audit, references);
     }
 
     @Test
@@ -66,7 +84,7 @@ class AttachmentQuarantineServiceTest {
         order.verify(scanMapper).quarantine(7, 19);
         order.verify(audit).recordStrict("malware.quarantine", "attachment", 19,
             null, "Quarantined attachment", null);
-        verifyNoInteractions(objects);
+        verify(objects, never()).deleteAttachmentAfterCommit(org.mockito.ArgumentMatchers.anyInt(), any());
     }
 
     @Test
@@ -86,7 +104,7 @@ class AttachmentQuarantineServiceTest {
         service.rescan(19);
 
         verify(scanMapper, org.mockito.Mockito.times(2)).enqueue(7, 19);
-        verifyNoInteractions(objects);
+        verify(objects, never()).deleteAttachmentAfterCommit(org.mockito.ArgumentMatchers.anyInt(), any());
         verify(audit).recordStrict("malware.release_requested", "attachment", 19,
             null, "Requested attachment quarantine release", null);
         verify(audit).recordStrict("malware.rescan", "attachment", 19,
@@ -135,7 +153,7 @@ class AttachmentQuarantineServiceTest {
 
         service.delete(19);
 
-        verifyNoInteractions(objects);
+        verify(objects, never()).deleteAttachmentAfterCommit(org.mockito.ArgumentMatchers.anyInt(), any());
         verify(attachmentMapper).delete(7, 19);
     }
 
@@ -145,7 +163,7 @@ class AttachmentQuarantineServiceTest {
 
         assertThrows(BadRequestException.class, () -> service.delete(19));
 
-        verifyNoInteractions(objects, references, audit);
+        verifyNoInteractions(references, audit);
         verify(attachmentMapper, never()).delete(7, 19);
     }
 }
