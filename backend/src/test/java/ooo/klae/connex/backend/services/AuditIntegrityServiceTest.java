@@ -34,6 +34,49 @@ class AuditIntegrityServiceTest extends AbstractServiceTest {
     @Autowired private AuditLogMapper auditLogMapper;
     @Autowired private AuditIntegrityMapper auditIntegrityMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private RoleService roleService;
+    @Autowired private WorkspaceService workspaceService;
+    @Autowired private AuthService authService;
+    @Autowired private io.micrometer.core.instrument.MeterRegistry meterRegistry;
+
+    @Test
+    @org.springframework.transaction.annotation.Transactional(
+        propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void committedRoleMutationsAndActualLoginFailureEmitSecuritySignals() {
+        roleService.createRole(workspace.getId(), currentUser.getId(), "Alert test " + unique(),
+                List.of("AUDIT_READ"));
+        var target = newUser();
+        workspaceService.changeMemberRole(workspace.getId(), currentUser.getId(), target.getId(), "admin");
+        assertTrue(meterRegistry.get("connex.security.permission.change.timestamp")
+                .tag("scope", "workspace:" + workspace.getId()).gauge().value() > 0);
+        var rows = auditLogMapper.findRecent(workspace.getId(), 20, 0);
+        assertTrue(rows.stream().anyMatch(row -> "workspace.role.create".equals(row.getAction())));
+        assertTrue(rows.stream().anyMatch(row -> "workspace.member.role".equals(row.getAction())));
+        tenantContext.clear();
+        var counter = meterRegistry.counter("connex.security.authentication.failures", "scope", "unattributed");
+        double before = counter.count();
+        assertThrows(org.springframework.security.authentication.BadCredentialsException.class,
+                () -> authService.login(new ooo.klae.connex.backend.dto.LoginDto("missing-" + unique(), "incorrect"),
+                        new org.springframework.mock.web.MockHttpServletRequest(),
+                        new org.springframework.mock.web.MockHttpServletResponse()));
+        assertEquals(before + 1, counter.count());
+        System.out.println("BOUNDARY PASS persisted role grant; persisted membership elevation; actual rejected login increments unattributed counter");
+    }
+
+    @Test
+    void authenticStoredRowPassesAndModifiedHmacPayloadEmitsAnomaly() {
+        String summary = "alert-hmac-" + unique();
+        auditService.record("test.integrity", "company", 1, "Acme", summary, null);
+        AuditLog row = findBySummary(auditLogMapper.findRecent(workspace.getId(), 20, 0), summary);
+        assertTrue(auditIntegrityService.hasValidIntegrity(row));
+        auditService.recent(20, 0);
+        row.setSummary("modified fixture payload");
+        assertFalse(auditIntegrityService.hasValidIntegrity(row));
+        auditIntegrityService.observeStoredIntegrity(row);
+        assertTrue(meterRegistry.get("connex.security.audit.integrity.anomaly.timestamp")
+                .tag("scope", "workspace:" + workspace.getId()).gauge().value() > 0);
+        System.out.println("BOUNDARY PASS database-signed HMAC validates; modified in-memory payload emits anomaly before disclosure");
+    }
 
     @Test
     void workspaceEventsChainByWorkspaceScope() {

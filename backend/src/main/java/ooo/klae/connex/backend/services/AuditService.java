@@ -399,6 +399,7 @@ public class AuditService {
         } else {
             auditIntegrityService.append(entry);
         }
+        auditIntegrityService.observeCommittedAudit(entry, independent);
     }
 
     /**
@@ -664,6 +665,7 @@ public class AuditService {
     }
 
     private void redactAuditEntry(AuditLog entry) {
+        auditIntegrityService.observeStoredIntegrity(entry);
         Integer orgId = entry.getOrgId();
         entry.setUntrustedClientAssertedCorrelationHmac(
             orgId == null || orgId <= 0

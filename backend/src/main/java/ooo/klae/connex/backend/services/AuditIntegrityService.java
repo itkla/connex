@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import tools.jackson.databind.ObjectMapper;
+import ooo.klae.connex.backend.observability.SecuritySignalMetrics;
 
 import lombok.RequiredArgsConstructor;
 
@@ -53,6 +54,7 @@ public class AuditIntegrityService {
     private final AuditIntegrityProperties properties;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final SecuritySignalMetrics securitySignalMetrics;
 
     /**
      * Appends an audit row to its integrity scope.
@@ -132,6 +134,18 @@ public class AuditIntegrityService {
         return entry != null && "captured".equals(entry.getIntegrityReferenceState())
             && entry.getRowHash() != null
             && entry.getRowHash().equals(hmacHex(canonicalPayload(entry)));
+    }
+
+    /** Publishes metadata after the append transaction has returned successfully. */
+    public void observeCommittedAudit(AuditLog entry, boolean independent) {
+        securitySignalMetrics.observeAudit(entry, independent);
+    }
+
+    /** Checks the stored row before any disclosure redaction changes the canonical payload. */
+    public void observeStoredIntegrity(AuditLog entry) {
+        if (!hasValidIntegrity(entry)) {
+            securitySignalMetrics.integrityAnomaly(entry);
+        }
     }
 
     private AuditScope scopeFor(AuditLog entry) {
