@@ -97,8 +97,24 @@ individual has accepted a new operational responsibility.
    version namespace, remove its controllers and public scope rules and retain a deny-all fallback;
    a disabled feature flag alone is not permanent retirement. Set lifecycle rows to `retired` and
    retain them as tombstones. The guard rejects expired mapped endpoints, missing metadata, stale
-   deprecation rows, and any retired method/path that reappears. A CI date check does not switch off
-   an already-running deployment: operators must deploy the removal before EOL.
+   deprecation rows, and retired mappings with the same HTTP method and normalized path template.
+   Lifecycle identity ignores URI-variable names (including catch-all variable names), but preserves
+   regex constraint text, catch-all markers, wildcards and literal path text exactly. For example,
+   `{id}` and `{itemId}` are identical for lifecycle checks; `{id:[0-9]+}` and `{id}` are distinct.
+   This is equality checking, not proof that route matching languages do not overlap: broader
+   wildcards, changed regex constraints, aliases and equivalent regex spellings can escape this check.
+   A CI date check does not switch off an already-running deployment: operators must deploy the
+   removal before EOL.
+
+   **Overlap review policy.** Every added or changed mapping must be compared against same-method
+   retirement tombstones by the domain maintainer and a security reviewer before inventory approval.
+   In particular, `/api/items/**` or `/api/items/{*rest}` can cover a retired `/api/items/{id}`;
+   changed constraints and literal aliases also need explicit overlap assessment. Record the affected
+   tombstones, overlap rationale, and formerly valid URL cases in the tracked work. An overlapping
+   replacement must exclude or explicitly deny retired requests without legacy behavior or side
+   effects, with authenticated and anonymous boundary tests proving that behavior. Retain tombstones;
+   regeneration alone does not approve reactivation. If overlap cannot be ruled out or safely denied,
+   block approval until an explicit owner and security retirement decision resolves it.
 5. **Prove removal.** Test the old paths with a valid formerly authorized credential/session as
    well as anonymously, with their former methods, through both the direct backend and deployed
    proxy. Require 404/410 or an explicit deny with no legacy response or side effect; anonymous
