@@ -92,7 +92,9 @@ For object-storage changes:
 ## Attachment malware decisions
 
 Managed attachment downloads and tenant exports require a fresh persisted CLEAN verdict across all
-same-workspace references to the object URL. The retained-object scan worker has a separate bounded
+same-workspace references to the object URL when scanning is enabled. The unconfigured dev/eval
+exception for synthetic disabled proofs is confined to disabled mode and documented in
+`docs/MALWARE_SCANNING.md`. The retained-object scan worker has a separate bounded
 internal read path for denied bytes; it never returns that stream to a controller. Legacy migration
 requires a CLEAN proof before its deterministic write. Lifecycle states, administrative operations,
 and rollback restrictions are specified in `docs/MALWARE_SCANNING.md`.

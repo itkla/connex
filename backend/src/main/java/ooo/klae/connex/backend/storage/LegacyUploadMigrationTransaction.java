@@ -111,10 +111,10 @@ public class LegacyUploadMigrationTransaction {
      */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void migrateAttachment(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
-        workspaceId(record);
+        int workspaceId = workspaceId(record);
         InspectedUpload upload = uploadContentInspector.inspectLegacyAttachment(
             attachmentSource(record, resolved));
-        ScannedUpload scanned = malwareScanner.scan(upload);
+        ScannedUpload scanned = malwareScanner.scanInWorkspace(upload, workspaceId);
         attachmentWriter.migrate(record, scanned);
     }
 

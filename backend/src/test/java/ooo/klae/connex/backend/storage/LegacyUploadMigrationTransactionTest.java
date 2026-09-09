@@ -59,13 +59,13 @@ class LegacyUploadMigrationTransactionTest {
                 ooo.klae.connex.backend.storage.malware.MalwareScanVerdict.CLEAN,
                 null, null, "test", false));
         when(uploadContentInspector.inspectLegacyAttachment(any(UploadSource.class))).thenReturn(upload);
-        when(malwareScanner.scan(upload)).thenReturn(scanned);
+        when(malwareScanner.scanInWorkspace(upload, 3)).thenReturn(scanned);
 
         migration.migrateAttachment(record, resolved);
 
         var order = inOrder(uploadContentInspector, malwareScanner, attachmentWriter);
         order.verify(uploadContentInspector).inspectLegacyAttachment(any(UploadSource.class));
-        order.verify(malwareScanner).scan(upload);
+        order.verify(malwareScanner).scanInWorkspace(upload, 3);
         order.verify(attachmentWriter).migrate(record, scanned);
     }
 
@@ -76,7 +76,7 @@ class LegacyUploadMigrationTransactionTest {
         InspectedUpload upload = inspected(
             "report.pdf", "application/pdf", "pdf", UploadFormat.PDF, new byte[] {9, 8, 7});
         when(uploadContentInspector.inspectLegacyAttachment(any(UploadSource.class))).thenReturn(upload);
-        when(malwareScanner.scan(upload)).thenThrow(
+        when(malwareScanner.scanInWorkspace(upload, 3)).thenThrow(
             new ooo.klae.connex.backend.exceptions.MalwareDetectedException());
 
         assertThrows(ooo.klae.connex.backend.exceptions.MalwareDetectedException.class,

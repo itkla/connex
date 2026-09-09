@@ -154,7 +154,7 @@ class LegacyUploadMigrationIntegrationTest {
         doAnswer(invocation -> {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
             return invocation.callRealMethod();
-        }).when(malwareScanner).scan(any(UploadContentInspector.InspectedUpload.class));
+        }).when(malwareScanner).scanInWorkspace(any(UploadContentInspector.InspectedUpload.class), org.mockito.ArgumentMatchers.eq(workspace.getId()));
         migration.migrateAttachment(attachmentRecord, resolvedAttachment);
         TestTransaction.start();
 
@@ -164,7 +164,7 @@ class LegacyUploadMigrationIntegrationTest {
         assertNotNull(storedAttachment.getScanDatabaseVersion());
         assertNotNull(storedAttachment.getScannedAt());
         assertEquals(1, storedAttachment.getScanAttempts());
-        verify(malwareScanner).scan(any(UploadContentInspector.InspectedUpload.class));
+        verify(malwareScanner).scanInWorkspace(any(UploadContentInspector.InspectedUpload.class), org.mockito.ArgumentMatchers.eq(workspace.getId()));
         byte[] storedAttachmentBytes;
         try (ManagedContent content = managedObjectService.openAttachment(
                 workspace.getId(), storedAttachment)) {
