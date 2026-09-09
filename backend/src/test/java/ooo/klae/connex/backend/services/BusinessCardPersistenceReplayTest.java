@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -62,6 +63,11 @@ import ooo.klae.connex.backend.dto.BusinessCardScanResponse.Fields;
 import ooo.klae.connex.backend.dto.DuplicatePreflightResponse;
 import ooo.klae.connex.backend.dto.PersonDuplicatePreflightRequest;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
+import ooo.klae.connex.backend.storage.AttachmentScanWorker;
+import ooo.klae.connex.backend.storage.malware.MalwareScannerClient;
+import ooo.klae.connex.backend.storage.malware.MalwareScanReport;
+import ooo.klae.connex.backend.storage.malware.MalwareScanVerdict;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 
@@ -81,6 +87,8 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
     @Autowired private BusinessCardImageValidator imageValidator;
     @Autowired private AttachmentMapper attachmentMapper;
     @Autowired private ManagedObjectService managedObjectService;
+    @Autowired private AttachmentScanWorker attachmentScanWorker;
+    @MockitoBean private MalwareScannerClient malwareScanner;
     @MockitoBean private BusinessCardOcrClient ocrClient;
     @MockitoBean private BusinessCardExtractor extractor;
     @MockitoBean private BusinessCardAiExtractionService aiExtractionService;
@@ -220,6 +228,16 @@ class BusinessCardPersistenceReplayTest extends AbstractServiceTest {
         persistedAttachmentUrl = first.attachment().getUrl();
         Attachment storedCard = attachmentMapper.getById(
             workspace.getId(), first.attachment().getId());
+        assertEquals("pending", storedCard.getScanState());
+        assertThrows(ResourceNotFoundException.class,
+            () -> managedObjectService.openAttachment(workspace.getId(), storedCard));
+        when(malwareScanner.scan(any(byte[].class))).thenReturn(new MalwareScanReport(
+            MalwareScanVerdict.CLEAN, null, null, "daily-replay-fixture", false,
+            java.time.Instant.now().plusSeconds(3600)));
+        assertTrue(attachmentScanWorker.scan(
+            workspace.getId(), storedCard.getId(), currentUser.getId()));
+        assertEquals("clean", attachmentMapper.getById(
+            workspace.getId(), storedCard.getId()).getScanState());
         try (ManagedContent storedContent = managedObjectService.openAttachment(
                 workspace.getId(), storedCard)) {
             assertEquals(validated.content().length, storedContent.contentLength());

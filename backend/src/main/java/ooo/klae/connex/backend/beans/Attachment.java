@@ -22,7 +22,7 @@ import java.util.List;
 @NoArgsConstructor
 public class Attachment {
     private int id;
-    private int workspaceId; // owning workspace
+    private int workspaceId;
     private String entityType;
     private int entityId;
     private String entityLabel;
@@ -35,6 +35,16 @@ public class Attachment {
     private String createdAt;
     private String updatedAt;
     private List<Tag> tags;
+    private String scanState;
+    private String scanEngine;
+    private String scanDatabaseVersion;
+    private String scanSignature;
+    private java.time.LocalDateTime scannedAt;
+    private java.time.LocalDateTime scanExpiresAt;
+    private int scanAttempts;
+    private String scanOwner;
+    private java.time.LocalDateTime scanLeaseUntil;
+    private java.time.LocalDateTime scanNextAttemptAt;
 
     public int getId() {
         return id;

@@ -78,7 +78,7 @@ public class AttachmentWriteOperations {
         }
         StoredBinary stored = managedObjectService.storeInspectedAttachment(workspaceId, scanned);
         return persistStored(
-            workspaceId, "ai_chat_session", sessionId, uploader, stored);
+            workspaceId, "ai_chat_session", sessionId, uploader, stored, scanned);
     }
 
     private Attachment storeAndPersist(
@@ -88,7 +88,7 @@ public class AttachmentWriteOperations {
             ScannedUpload scanned,
             User uploader) {
         StoredBinary stored = managedObjectService.storeInspectedAttachment(workspaceId, scanned);
-        return persistStored(workspaceId, entityType, entityId, uploader, stored);
+        return persistStored(workspaceId, entityType, entityId, uploader, stored, scanned);
     }
 
     private Attachment persistStored(
@@ -96,7 +96,7 @@ public class AttachmentWriteOperations {
             String entityType,
             int entityId,
             User uploader,
-            StoredBinary stored) {
+            StoredBinary stored, ScannedUpload scanned) {
         Attachment attachment = new Attachment();
         attachment.setWorkspaceId(workspaceId);
         attachment.setEntityType(entityType);
@@ -106,6 +106,14 @@ public class AttachmentWriteOperations {
         attachment.setContentType(stored.contentType());
         attachment.setSize(stored.size());
         attachment.setUploadedBy(uploader);
+        attachment.setScanState("clean");
+        attachment.setScanEngine("ClamAV");
+        attachment.setScanDatabaseVersion(scanned.report().databaseVersion());
+        attachment.setScanSignature(scanned.report().signature());
+        attachment.setScannedAt(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
+        attachment.setScanExpiresAt(java.time.LocalDateTime.ofInstant(
+            scanned.report().validUntil(), java.time.ZoneOffset.UTC));
+        attachment.setScanAttempts(1);
         return persist(workspaceId, attachment, true);
     }
 

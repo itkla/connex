@@ -630,3 +630,14 @@ For any transaction/locking change:
 - Failure/retry/idempotency behavior is preserved.
 - Targeted concurrency/architecture tests pass.
 - Independent correctness/concurrency review attempts to find deadlocks, stale authorization, lost updates, and partial side effects.
+
+## Retained attachment malware scanning
+
+Scan claims use READ COMMITTED and short REQUIRES_NEW transactions. Discover the URL without locks,
+lock all same-workspace attachment references using the established URL lock ordering, then lock
+and revalidate the selected row and due predicate. One UUID/database-clock claim covers every
+reference to the object. Provider reads and scanner calls happen outside the transaction. Decision
+writes take the same reference locks and require the exact still-live owner; stale completions cannot
+release successor state. Administrative quarantine uses permission roots before the same attachment
+reference locks and revalidates held permission authority after the target lock. Never acquire
+membership roots after claiming an object. See `docs/MALWARE_SCANNING.md` for expiry/recovery limits.
