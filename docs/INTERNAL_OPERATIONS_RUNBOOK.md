@@ -1164,3 +1164,248 @@ One more that is reported but deliberately non-gating: `checks.auditGuard` in
 there **does not** fail readiness. That is intentional — an application user without the MySQL
 `TRIGGER` privilege cannot see the guards at all and must not be taken out of rotation for it.
 **Alert on it; do not gate on it.**
+
+## Security alert rules and notification drill — CHK-097 / SEC-108
+
+This is a **Shared** control. Connex supplies content-free signals and tested Prometheus /
+Alertmanager configuration in [`deploy/alerting/`](../deploy/alerting/). The deployment operator
+owns scraping, rule evaluation, the notification gateway and its on-call escalation, and scheduled
+audit reads. Installing application code alone does **not** establish this control. Keep the
+control `NG` until the operator records delivery to the actual destination and the coverage below.
+
+The existing user inbox and `EmailNotificationDispatcher` deliver user/workspace notifications,
+including user preferences and workspace SMTP. They are not an appropriate destination for global
+security telemetry or failed backups while Connex is down. This configuration instead connects
+the existing `/api/metrics` surface and backup `OnFailure=` seam to the operator's monitoring
+notification path. It adds no application endpoint, database migration or application dependency.
+
+| Signal | Rule and threshold | Destination |
+|---|---|---|
+| Authentication failures, tenant | `ConnexAuthenticationFailureTenantSpike`: at least 20 audited login/password/passkey failures in 5 minutes for one trusted scope | Alertmanager receiver `security-oncall` → operator-owned HTTPS gateway |
+| Authentication failures, global | `ConnexAuthenticationFailureGlobalSpike`: at least 100 audited login/password/passkey failures in 5 minutes, including `unattributed` | Same receiver and gateway |
+| Permission / role change | `ConnexPermissionChange`: any successful committed effective-access action listed below, observed within 15 minutes | Same receiver and gateway |
+| HTTP 5xx rate | `ConnexServerErrorRateSpike`: more than 5% 5xx, with at least 100 HTTP requests in 5 minutes | Same receiver and gateway |
+| Backup failure | `ConnexBackupFailure`: `connex_backup_failed > 0`; any failed full backup, archive or prune unit sets the latch | Same receiver and gateway |
+| Audit integrity | `ConnexAuditIntegrityAnomaly`: any read row fails the existing canonical HMAC verification, or has unverifiable legacy references; latched until application restart | Same receiver and gateway |
+| Backup telemetry failure | `ConnexBackupTelemetryUnavailable`: missing backup metric/job or failed exporter scrape for 2 minutes | Same receiver and gateway |
+| Monitoring failure | `ConnexMetricsUnavailable`: a missing job or failed application scrape for 2 minutes | Same receiver and gateway; independently monitor the monitoring stack itself |
+
+The default rule interval and production scrape interval are 15 seconds. Rule notifications have
+no extra pending period except the application and backup telemetry failure rules. Alertmanager
+groups by alert name and scope, waits 5 seconds initially, groups subsequent changes for 1 minute, and repeats every 4 hours.
+These are best-effort delivery bounds when all components are healthy, not an exactly-once or
+lossless security-event queue. Role changes within one group are coalesced; the audit log retains
+the individual events. No actor, name, email, role name, request URI, exception, HMAC or secret is
+included in the rule payload. Do not add customer-valued external labels to this monitoring job.
+
+### Effective-access action coverage
+
+The permission signal includes `workspace.role.create/update/delete`, `workspace.member.role`,
+`workspace.member.join/remove/leave`, `workspace.invite.accept`, `workspace.invite_link.accept`,
+`org.member.set/remove/founding_owner`, `org.workspace_member.sso_provision`, `org.workspace.create`,
+`workspace.share/unshare`, and `user.delete`. This covers active invitation redemption, SSO grants,
+owner creation, member revocation, and standing record-share changes as well as role definitions.
+Account deletion reports only its audited current scope, not every former membership.
+
+The organization audit action catalogue (`frontend/messages/en/organization.json`) and the actual
+Workspace, Invite, InviteLink, OrgMember, Role, Share and account-deletion producers were checked.
+Pending invite creation/revocation and `workspace.member.decline` do not activate/revoke active
+membership. Team seats and managers currently configure teams without entering authorization
+resolution. `org.sso_user.provision` creates an account; its actual membership grant has the separate
+SSO action above. Domain/SSO configuration controls future admission and authentication, not current
+membership roles. These are deliberately excluded. Machine credential issue/revoke/lifecycle and
+whole workspace/organization teardown are separate security/lifecycle controls, outside this human
+membership/role/share signal; do not infer coverage of them from a permission notification.
+Record ownership assignments and ordinary content edits do not change workspace RBAC grants.
+Future authorization inputs or new audited grant/revocation actions require revisiting this list.
+
+### Authentication attribution and detection bounds
+
+Unauthenticated `/api/auth/**` requests intentionally bypass tenant resolution. Their failures are
+`unattributed`; a submitted username, workspace header or tenant-looking domain must **never** be
+used to guess tenant ownership. On a pooled backend, the built-in signal establishes the **global**
+rule only. Per-tenant pooled coverage requires the operator's trusted tenant-scoped identity-provider
+telemetry and a separately executed notification test. That source/configuration is not supplied
+by this lane; do not mark pooled tenant coverage verified from the synthetic scoped test fixture.
+
+For a backend serving **exactly one tenant**, append the scrape job in
+[`dedicated-tenant-scrape.json`](../deploy/alerting/dedicated-tenant-scrape.json) to the deployment's
+`scrape_configs`, replacing its target and `workspace:42` with the operator's catalog identifier.
+Use it **instead of** the ordinary Connex scrape job for that target, avoiding double counting.
+It maps only unattributed authentication counters to that scope. A tenant hostname routing into
+a pooled backend does not qualify. The local drill executes this exact relabel configuration
+against Connex's unattributed emitted counter, with only the local transport/target substituted.
+
+Counters are per process and metric series persist for scopes observed during that process's
+lifetime. Scope labels derive from numeric server-side audit scope identifiers, not request text.
+The five-minute estimate uses the first-observed counter until a five-minute baseline exists, then
+Prometheus `increase`, which handles counter resets but extrapolates between samples. Scrape gaps,
+restarts before scrape, failed audit persistence, upstream rejected requests and SSO-provider-only
+failures are outside the audited password/passkey guarantee. Monitor the ingress and identity
+provider separately. A first scrape containing 20 failures must alert even if the next scrape is
+unchanged; the rule tests pin this case.
+
+### HMAC verification bound and scheduled operator reads
+
+`AuditService` verifies the **stored** row before redacting it for workspace/org audit reads and CSV
+exports, using `AuditIntegrityService.hasValidIntegrity` and
+`CONNEX_AUDIT_INTEGRITY_HMAC_SECRET`. Modified row content and unverifiable legacy references emit a
+scope-only anomaly timestamp. Existing `AUDIT_READ` and organization-admin gates remain in effect.
+No cross-tenant scanner or privileged read endpoint was added. Verification runs on reads/exports,
+not on every append; its cost scales with returned payload volume and page size, not total chain
+length. Recoverable registry/clock failures lose the observation but do not abort disclosure,
+report a committed mutation as failed, or interrupt later commit callbacks. The diagnostic is the
+static message `Security signal observation failed`, without scope, row content or exception details.
+Fatal JVM errors are not suppressed.
+
+`observeCommittedAudit` follows a successful append return. `append` uses `NESTED`, so that return
+may only release a savepoint inside an uncommitted outer transaction; permission observations wait
+for the outer commit. `appendIndependent` uses `REQUIRES_NEW`, so its observation follows that commit.
+
+This verifies each returned row's HMAC, including its signed previous-hash field. It does **not**
+prove adjacent-chain continuity, detect deletion of entire rows/chains, compare external checkpoints,
+or scan unread history/system-scope rows. The separate append-only trigger readiness warning is
+not proof of HMAC verification. A complete historic chain audit remains operator-owned.
+
+For unattended recent-row coverage, schedule the following once per minute for **each** workspace
+and organization the operator is authorized to audit. Use a locally protected curl config with a
+current session cookie and the approved base URL; no credentials belong in crontab, command history
+or this repository. An example workspace config contains:
+
+```text
+url = "https://connex.example.invalid/api/audit?limit=200&offset=0"
+header = "X-Workspace-Id: 42"
+cookie = "/etc/connex-alerting/audit-session.cookies"
+```
+
+For organization-only rows, use `/api/orgs/42/audit?limit=200&offset=0` with an organization-admin
+session. Run one config per scope:
+
+```bash
+curl --fail --silent --show-error --max-time 30 \
+  --config /etc/connex-alerting/audit-read-42.curl --output /dev/null
+```
+
+Monitor the scheduled command's nonzero exit, expired session, disabled account and missing runs in
+the operator scheduler. With a successful one-minute read and at most 200 new rows per minute per
+scope, returned recent rows are checked within approximately one minute plus scrape/evaluation and
+notification time. Above that throughput, page the export endpoint (maximum 10,000 per page,
+offset cap 100,000) or use the operator's full-history verifier; the recent-page probe cannot
+promise complete coverage. Record the chosen coverage, account ownership and renewal procedure.
+The local test alters an in-memory copy of a genuinely database-signed row; it never disables
+append-only database guards. After investigating an anomaly, verify repaired/key-correct data and
+restart the affected process to reset the latch. A bad row read again re-fires it.
+
+### Install and operate the notification destination
+
+1. Provision operator-owned Prometheus, Alertmanager and node_exporter on private monitoring
+   networks. These are optional operator services, not dependencies added to Connex. Keep their
+   APIs inaccessible to application users and the public Internet.
+2. Install `security-rules.yml` alongside `prometheus.yml`. Replace the example application target
+   and monitoring addresses. Store the existing `CONNEX_METRICS_SCRAPE_TOKEN` value in
+   `/etc/connex-alerting/metrics-token`, readable only by the Prometheus service. Use verified TLS;
+   never weaken the token endpoint to make scraping work.
+3. Install `alertmanager.yml`. Store the on-call gateway's HTTPS URL in
+   `/etc/connex-alerting/security-webhook-url`, readable only by Alertmanager. The gateway must
+   accept Alertmanager webhook JSON and route receiver `security-oncall` to the operator's security
+   on-call destination. Record the actual destination and acknowledgement/escalation owner in the
+   deployment inventory. Gateway authentication belongs in protected operator configuration;
+   redirects are disabled. A webhook HTTP success proves gateway acceptance, not human receipt.
+4. Configure node_exporter with
+   `--collector.textfile.directory=/var/lib/prometheus/node-exporter`. Install `backup-failure.sh`
+   under `/usr/local/lib/connex-alerting/`, and `connex-backup-alert.service` in
+   `/etc/systemd/system/`. Ensure the textfile directory exists and is writable by the hook service.
+   Install `backup-alert.conf` as `alert.conf` in each of
+   `connex-backup.service.d`, `connex-binlog-archive.service.d` and
+   `connex-backup-prune.service.d` under `/etc/systemd/system/`. Run `systemctl daemon-reload`.
+   Provision an initial `connex-backup.prom` containing `connex_backup_failed 0` so exporter/file
+   absence is distinguishable from success. `ConnexBackupTelemetryUnavailable` covers a missing
+   metric/job or failed scrape; verify every expected exporter is configured. A healthy exporter
+   with a stale on-disk zero does not prove the backup scheduler or helper ran.
+   The helper atomically writes a latched `1` without forwarding any backup logs. After a successful
+   rerun and incident acknowledgement, atomically replace it with `connex_backup_failed 0`.
+   Monitor failure of the hook unit itself through the operator scheduler.
+5. Validate configuration, reload the monitoring services and confirm every intended target is UP.
+   Run the local drill below, then separately perform a controlled deployment drill to the actual
+   gateway/on-call destination. Do not use the local receiver result as evidence of production setup.
+
+Prometheus [alert-rule semantics](https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/)
+and Alertmanager [receiver configuration](https://prometheus.io/docs/alerting/latest/configuration/)
+are the upstream contracts. The local drill uses Prometheus 3.14.0 and Alertmanager 0.34.0 binaries.
+
+### Re-run the notification drill
+
+Use installed, operator-approved `prometheus`, `promtool`, `alertmanager`, and `amtool` binaries.
+The standalone operator drill defaults to bundled synthetic metric fixtures. For application-emission
+evidence, first run the focused backend tests to generate real Micrometer baseline/triggered exposition
+files in `backend/build/security-alerts/`. Start at the repository root of a normal checkout.
+For Java evidence, use Java 26 and provision a disposable MySQL database as described in
+[`backend/AGENTS.md`](../backend/AGENTS.md). Supply `CONNEX_DB_URL`, `CONNEX_DB_USERNAME`, and
+`CONNEX_DB_PASSWORD` through the shell or an untracked `backend/.env` derived from
+`backend/.env.example`; never use a production database. Put approved monitoring binaries on `PATH`.
+Set `CONNEX_GRADLE_LOCK` and `CONNEX_STACK_LOCK` to host-wide shared lock files when other builds
+or drills share the host; the defaults below suit an isolated operator/CI host.
+
+```bash
+set -euo pipefail
+export CONNEX_GRADLE_LOCK="${CONNEX_GRADLE_LOCK:-/tmp/connex-gradle.lock}"
+export CONNEX_STACK_LOCK="${CONNEX_STACK_LOCK:-/tmp/connex-stack.lock}"
+(
+  cd backend
+  if [ -f .env ]; then
+    set -a
+    source .env
+    set +a
+  fi
+  : "${CONNEX_DB_URL:?Set the disposable test database JDBC URL}"
+  : "${CONNEX_DB_USERNAME:?Set the test database username}"
+  : "${CONNEX_DB_PASSWORD:?Set the test database password}"
+  flock "$CONNEX_GRADLE_LOCK" bash gradlew test \
+    --tests 'ooo.klae.connex.backend.observability.SecuritySignalMetricsTest' \
+    --tests 'ooo.klae.connex.backend.services.AuditIntegrityServiceTest' \
+    --tests 'ooo.klae.connex.backend.services.AuditIntegrityLockOrderTest' \
+    --tests 'ooo.klae.connex.backend.architecture.*'
+)
+promtool test rules deploy/alerting/rules-test.yml
+promtool check config --syntax-only deploy/alerting/prometheus.yml
+amtool check-config deploy/alerting/alertmanager.yml
+flock "$CONNEX_STACK_LOCK" python3 deploy/alerting/notification-smoke.py \
+  --prometheus "$(command -v prometheus)" --alertmanager "$(command -v alertmanager)" \
+  --fixtures backend/build/security-alerts --membership-fixtures backend/build/security-alerts
+```
+
+Operators without a Java build can skip the Java subshell and omit both `--fixtures` and
+`--membership-fixtures`, then run the same smoke against bundled
+`deploy/alerting/fixtures/` samples. The printed `FIXTURES` path distinguishes synthetic-rule delivery
+evidence from Java-generated emission evidence. This standalone mode proves the monitoring chain,
+not the application producers.
+
+Inspect JUnit XML for zero failures, errors and skipped tests in the selected classes. The smoke
+runs disposable Prometheus and Alertmanager processes on loopback with the **unchanged** rules and
+receiver routing, using a local HTTP receiver. It substitutes the gateway URL and scrape transport,
+refreshes the timestamp fixture and accelerates scraping to 2 seconds; thresholds and rule interval
+remain unchanged. It tests a below-threshold phase, invokes the actual backup command with a
+missing configuration (exit 64), invokes its `OnFailure` helper, then awaits all nine expected
+firing notifications with the per-action membership fixtures (eight without them). Membership
+fixtures cover every included action and coalesce matching numeric scopes, just like the real rule.
+It prints `NOTIFICATION` JSON as receiver evidence and fails if an alert is
+missing, contains unexpected labels or non-static annotations, or leaks sentinel personal data
+anywhere in the webhook payload. It cleans up its processes.
+The test invokes the hook directly; it does not claim the host's systemd drop-ins were installed.
+HTTP counters are simulated server metric samples; Java emission tests separately exercise the
+real audit/role and HMAC boundaries. The test does not send messages to the production gateway.
+
+To prove the drill detects broken triggers, run the mutation harness under the same stack lock:
+
+```bash
+flock "${CONNEX_STACK_LOCK:-/tmp/connex-stack.lock}" python3 deploy/alerting/notification-mutations.py \
+  --prometheus "$(command -v prometheus)" --alertmanager "$(command -v alertmanager)" \
+  --fixtures backend/build/security-alerts --output backend/build/alert-mutations
+```
+
+It first requires the unchanged rules to deliver all eight notifications, then disables each of
+the six trigger expressions independently in a temporary rule file (authentication has tenant
+and global triggers). Each run must fail specifically because that trigger's notifications are
+missing, while every unaffected notification still arrives. Startup/configuration failures do
+not count as killed mutations. The harness preserves each run's output and never edits the
+deployed rule file. Synthetic fixtures remain available by omitting `--fixtures`.

@@ -1,0 +1,22 @@
+# Install alongside security-rules.yml. Keep all monitoring ports on private networks.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+rule_files:
+  - security-rules.yml
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['127.0.0.1:9093']
+scrape_configs:
+  - job_name: connex
+    scheme: https
+    metrics_path: /api/metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/connex-alerting/metrics-token
+    static_configs:
+      - targets: ['connex.example.invalid']
+  - job_name: connex-backup
+    static_configs:
+      - targets: ['127.0.0.1:9100']

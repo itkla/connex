@@ -1,6 +1,6 @@
 # Connex — Personal-Data Breach Response Runbook (APPI Art. 26)
 
-> **Status:** Process deliverable for the APPI compliance pathway ([#224]) — issue [#223]. Connex now has an org-scoped incident register and audit-scope helper; alerting hooks remain future work, and no standing on-call or verified 24/7 intake exists.
+> **Status:** Process deliverable for the APPI compliance pathway ([#224]) — issue [#223]. Connex now has an org-scoped incident register and audit-scope helper; content-free security alerting hooks and locally tested Prometheus/Alertmanager configuration are supplied in the repository (see [the operations runbook](INTERNAL_OPERATIONS_RUNBOOK.md#re-run-the-notification-drill)). Production installation, scrape/audit-read coverage, actual destination delivery and human escalation remain operator-owned and unverified. No standing on-call or verified 24/7 intake is established; the Shared control remains proposed **NG**.
 > **Not legal advice.** The thresholds, deadlines, and entrustee construction below are framework reasoning and must be confirmed with Japanese counsel and, where relevant, each customer's Data Processing Agreement (DPA, [#93]). When this runbook and a signed DPA disagree, **the DPA governs** for that customer.
 >
 > **Owner:** Hunter Nakagawa, Founder · **Last reviewed:** 2026-08-13 · **Next review:** 2027-02-13 · Review at least every 6 months and after every incident.
