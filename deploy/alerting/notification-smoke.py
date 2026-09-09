@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import re
 import socket
 import subprocess
 import tempfile
@@ -56,10 +57,35 @@ def main():
                         help='Rule file override for trigger mutation testing')
     parser.add_argument('--fixtures', type=Path, default=ROOT / 'fixtures',
                         help='Metric fixtures; pass backend/build/security-alerts for Java emission evidence')
+    parser.add_argument('--membership-fixtures', type=Path,
+                        help='Directory containing per-action Java membership.prom privacy fixtures')
     args = parser.parse_args()
     fixture_dir = args.fixtures
     baseline = (fixture_dir / 'baseline.prom').read_text()
     triggered = (fixture_dir / 'triggered.prom').read_text()
+    expected = set(EXPECTED)
+    if args.membership_fixtures:
+        actions = (
+            'workspace.role.create', 'workspace.role.update', 'workspace.role.delete',
+            'workspace.member.role', 'org.member.set', 'org.member.founding_owner',
+            'workspace.member.join', 'workspace.member.remove', 'workspace.member.leave',
+            'org.member.remove', 'org.workspace_member.sso_provision', 'workspace.invite.accept',
+            'workspace.share', 'workspace.unshare', 'workspace.invite_link.accept',
+            'org.workspace.create', 'user.delete',
+        )
+        samples = set(triggered.splitlines())
+        for action in actions:
+            fixture = (args.membership_fixtures / action / 'membership.prom').read_text()
+            assert 'sensitive' not in fixture and '@' not in fixture, action
+            matches = re.findall(
+                r'^connex_security_permission_change_timestamp\{scope="((?:workspace|organization):[0-9]+)"\} 2\.0E9$',
+                fixture, re.MULTILINE)
+            assert len(matches) == 1, (action, fixture)
+            scope = matches[0]
+            expected.add(('ConnexPermissionChange', scope))
+            samples.update(line for line in fixture.splitlines() if not line.startswith('#'))
+            print(f'MEMBERSHIP FIXTURE PASS {action}: {scope}; no PII', flush=True)
+        triggered = '\n'.join(sorted(samples)) + '\n'
     print('FIXTURES ' + str(fixture_dir.resolve()), flush=True)
     received = queue.Queue()
     phase = threading.Event()
@@ -165,7 +191,7 @@ def main():
                     phase.set()
                     seen = set()
                     deadline = time.monotonic() + 90
-                    while seen != EXPECTED and time.monotonic() < deadline:
+                    while seen != expected and time.monotonic() < deadline:
                         assert all(p.poll() is None for p in processes), 'Monitoring process exited'
                         try:
                             payload = received.get(timeout=1)
@@ -180,7 +206,7 @@ def main():
                             labels = alert['labels']
                             assert set(labels) <= {'alertname', 'severity', 'scope'}, labels
                             identity = (labels['alertname'], labels.get('scope', ''))
-                            assert identity in EXPECTED, identity
+                            assert identity in expected, identity
                             assert labels['severity'] in {'warning', 'critical'}, labels
                             assert alert['annotations'] == {
                                 'summary': SUMMARIES[labels['alertname']]
@@ -191,8 +217,8 @@ def main():
                                     'labels': labels, 'annotations': alert['annotations'],
                                 }, sort_keys=True), flush=True)
                             seen.add(identity)
-                    assert seen == EXPECTED, f'Missing notifications: {EXPECTED - seen}'
-                    print('PASS 8 firing notifications; all 5 signals; real HTTP receiver; '
+                    assert seen == expected, f'Missing notifications: {expected - seen}'
+                    print(f'PASS {len(expected)} firing notifications; all 5 signals; real HTTP receiver; '
                           'PII/secret canaries absent from full payload; '
                           'exact static annotations and bounded labels', flush=True)
             except BaseException:

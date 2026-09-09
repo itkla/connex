@@ -11,6 +11,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import io.micrometer.prometheusmetrics.PrometheusConfig;
@@ -25,6 +27,48 @@ class SecuritySignalMetricsTest {
     private final PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
     private final SecuritySignalMetrics metrics = new SecuritySignalMetrics(registry,
             Clock.fixed(Instant.ofEpochSecond(2_000_000_000), ZoneOffset.UTC));
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "workspace.role.create", "workspace.role.update", "workspace.role.delete",
+            "workspace.member.role", "org.member.set", "org.member.founding_owner",
+            "workspace.member.join", "workspace.member.remove", "workspace.member.leave",
+            "org.member.remove", "org.workspace_member.sso_provision", "workspace.invite.accept",
+            "workspace.share", "workspace.unshare", "workspace.invite_link.accept",
+            "org.workspace.create", "user.delete"
+    })
+    void effectiveAccessActionsWaitForCommitAndExportOnlyScope(String action) throws Exception {
+        AuditLog audit = entry(action, "success", action.startsWith("org.") ? null : 7);
+        audit.setOrgId(42);
+        String scope = action.startsWith("org.") ? "organization:42" : "workspace:7";
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            metrics.observeAudit(audit, false);
+            assertTrue(registry.getMeters().isEmpty());
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.initSynchronization();
+            assertTrue(registry.getMeters().isEmpty());
+            audit.setOutcome("failure");
+            metrics.observeAudit(audit, false);
+            assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
+            audit.setOutcome("success");
+            metrics.observeAudit(audit, false);
+            TransactionSynchronizationManager.getSynchronizations().forEach(sync -> sync.afterCommit());
+            var gauge = registry.get("connex.security.permission.change.timestamp").gauge();
+            assertEquals(2_000_000_000, gauge.value());
+            assertEquals(java.util.List.of(io.micrometer.core.instrument.Tag.of("scope", scope)),
+                    gauge.getId().getTags());
+            String scrape = registry.scrape();
+            assertFalse(scrape.contains("sensitive"));
+            assertFalse(scrape.contains("@"));
+            Path directory = Path.of("build/security-alerts", action);
+            Files.createDirectories(directory);
+            Files.writeString(directory.resolve("membership.prom"), scrape);
+        } finally {
+            TransactionSynchronizationManager.clear();
+        }
+    }
 
     @Test
     void permissionSignalWaitsForCommitAndRollbackDoesNotEmit() {

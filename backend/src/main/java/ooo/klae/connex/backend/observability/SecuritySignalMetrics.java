@@ -19,14 +19,18 @@ import ooo.klae.connex.backend.beans.AuditLog;
 @RequiredArgsConstructor
 public class SecuritySignalMetrics {
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SecuritySignalMetrics.class);
-    private static final Set<String> ROLE_ACTIONS = Set.of(
+    private static final Set<String> PERMISSION_ACTIONS = Set.of(
             "workspace.role.create", "workspace.role.update", "workspace.role.delete",
-            "workspace.member.role", "org.member.set", "org.member.founding_owner");
+            "workspace.member.role", "org.member.set", "org.member.founding_owner",
+            "workspace.member.join", "workspace.member.remove", "workspace.member.leave",
+            "org.member.remove", "org.workspace_member.sso_provision", "workspace.invite.accept",
+            "workspace.share", "workspace.unshare", "workspace.invite_link.accept",
+            "org.workspace.create", "user.delete");
     private final MeterRegistry registry;
     private final Clock clock;
     private final ConcurrentHashMap<String, AtomicLong> timestamps = new ConcurrentHashMap<>();
 
-    /** Records audited failures immediately and successful role mutations only after commit. */
+    /** Records audited failures immediately and successful effective-access mutations only after commit. */
     public void observeAudit(AuditLog entry, boolean independent) {
         observeSafely(() -> observeAuditWithinBoundary(entry, independent));
     }
@@ -37,7 +41,7 @@ public class SecuritySignalMetrics {
                 && "failure".equals(entry.getOutcome())) {
             registry.counter("connex.security.authentication.failures", "scope", scope).increment();
         }
-        if (!ROLE_ACTIONS.contains(entry.getAction() == null ? "" : entry.getAction())
+        if (!PERMISSION_ACTIONS.contains(entry.getAction() == null ? "" : entry.getAction())
                 || !"success".equals(entry.getOutcome())) {
             return;
         }
