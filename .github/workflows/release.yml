@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
+      issues: write
       contents: read
       actions: read
     outputs:
@@ -40,6 +41,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
+
+      - name: Enforce vulnerability custody and remediation SLA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONNEX_SLA_READ_TOKEN: ${{ secrets.CONNEX_SLA_READ_TOKEN }}
+        run: python3 .github/scripts/vulnerability-sla.py preflight
 
       - name: Resolve release event metadata
         id: metadata
@@ -873,6 +880,7 @@ jobs:
     outputs:
       transaction_name: ${{ steps.transaction.outputs.name }}
     permissions:
+      issues: write
       contents: read
       actions: read
       packages: write
@@ -1026,6 +1034,12 @@ jobs:
             done
           done
 
+      - name: Enforce vulnerability custody and remediation SLA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONNEX_SLA_READ_TOKEN: ${{ secrets.CONNEX_SLA_READ_TOKEN }}
+        run: python3 .github/scripts/vulnerability-sla.py preflight
+
       - name: Revalidate release tag immediately before promotion
         env:
           CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
@@ -1059,6 +1073,7 @@ jobs:
     needs: [metadata, promote]
     if: ${{ needs.metadata.outputs.release_mode == 'publish' }}
     permissions:
+      issues: write
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -1068,6 +1083,12 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: ${{ needs.promote.outputs.transaction_name }}
+
+      - name: Enforce vulnerability custody and remediation SLA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONNEX_SLA_READ_TOKEN: ${{ secrets.CONNEX_SLA_READ_TOKEN }}
+        run: python3 .github/scripts/vulnerability-sla.py preflight
 
       - name: Revalidate release tag immediately before publication
         env:
