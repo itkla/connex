@@ -19,7 +19,7 @@ export default function LandingFaq() {
     const t = useTranslations("CommonHome");
 
     return (
-        <Accordion type="single" collapsible className="mt-12 border-t border-border">
+        <Accordion type="single" collapsible className="border-t border-border">
             {QUESTIONS.map((key) => (
                 <AccordionItem key={key} value={key} className="border-b border-border">
                     <AccordionTrigger className="py-5 text-left text-lg font-medium text-foreground hover:no-underline">

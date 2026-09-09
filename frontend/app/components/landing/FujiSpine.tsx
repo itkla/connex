@@ -67,6 +67,12 @@ const SPINE =
 /** Everything under the stroke. Runs past the viewport so the pan never reveals an edge. */
 const MASS = `${SPINE} L 2600 1700 L -400 1700 Z`;
 
+/** How much of the spine is already drawn at the top of the page. */
+const SPINE_START = 0.16;
+
+/** Scroll progress at which the spine finishes drawing. The head sampler must share both. */
+const SPINE_SCROLL_END = 0.96;
+
 /** Distant foothills, washed out by aerial perspective. */
 const FAR_RIDGE =
     "M -78 1054" +
@@ -81,17 +87,19 @@ const MARKS = [0.12, 0.24, 0.4, 0.58] as const;
 
 /** Cloud banks: position in path space, scale, and how far each drifts across the scroll. */
 const CLOUDS = [
-    { x: 1660, y: 486, scale: 1, drift: 210, flip: false, opacity: "opacity-95 dark:opacity-30" },
-    { x: 1380, y: 640, scale: 1.35, drift: -300, flip: true, opacity: "opacity-90 dark:opacity-24" },
-    { x: 1680, y: 806, scale: 1.75, drift: 150, flip: false, opacity: "opacity-75 dark:opacity-16" },
+    { x: 1560, y: 902, scale: 1.15, pace: 1, delay: -12, flip: false, opacity: "opacity-95 dark:opacity-30" },
+    { x: 1320, y: 1010, scale: 1.5, pace: 1.3, delay: -46, flip: true, opacity: "opacity-90 dark:opacity-24" },
+    { x: 1640, y: 1108, scale: 1.9, pace: 1.6, delay: -30, flip: false, opacity: "opacity-75 dark:opacity-16" },
 ] as const;
 
 type Point = { x: number; y: number };
 
-function CloudBank({ cloud, progress }: { cloud: (typeof CLOUDS)[number]; progress: MotionValue<number> }) {
-    const x = useTransform(progress, [0, 1], [0, cloud.drift]);
+function CloudBank({ cloud }: { cloud: (typeof CLOUDS)[number] }) {
     return (
-        <motion.g style={{ x }} className="motion-reduce:transform-none!">
+        <g
+            className="connex-cloud-drift motion-reduce:[animation:none]!"
+            style={{ ["--ambient-scale" as string]: cloud.pace, animationDelay: `${cloud.delay}s` }}
+        >
             <g
                 transform={`translate(${cloud.x} ${cloud.y}) scale(${cloud.flip ? -cloud.scale : cloud.scale} ${cloud.scale})`}
                 className={`[fill:var(--color-background)] dark:[fill:var(--color-foreground)] ${cloud.opacity}`}
@@ -103,7 +111,7 @@ function CloudBank({ cloud, progress }: { cloud: (typeof CLOUDS)[number]; progre
                 <ellipse cx="132" cy="20" rx="44" ry="22" />
                 <ellipse cx="6" cy="28" rx="150" ry="22" />
             </g>
-        </motion.g>
+        </g>
     );
 }
 
@@ -159,13 +167,12 @@ export default function FujiSpine() {
     const { scrollYProgress } = useScroll();
     const eased = useSpring(scrollYProgress, springSmooth);
 
-    const pathLength = useTransform(eased, [0, 0.9], [0.24, stopAt]);
+    const pathLength = useTransform(eased, [0, SPINE_SCROLL_END], [SPINE_START, stopAt]);
     const panY = useTransform(eased, [0, 0.7], [0, 240]);
     const panX = useTransform(eased, [0, 0.7], [0, -560]);
     const farPanY = useTransform(eased, [0, 0.7], [0, 108]);
     const farPanX = useTransform(eased, [0, 0.7], [0, -250]);
-    const cloudReveal = useTransform(eased, [0, 0.28], [0.5, 1]);
-    const spineFade = useTransform(eased, [0, 0.11, 0.86, 0.96], [1, 0, 0, 1]);
+    const terrainFade = useTransform(eased, [0, 0.13, 0.84, 0.95], [1, 0, 0, 1]);
 
     useEffect(() => {
         const path = measureRef.current;
@@ -191,8 +198,8 @@ export default function FujiSpine() {
         const xs: number[] = [];
         const ys: number[] = [];
         for (let i = 0; i <= SAMPLES; i++) {
-            const scrollAt = (i / SAMPLES) * 0.9;
-            const drawn = 0.24 + (scrollAt / 0.9) * (stop - 0.24);
+            const scrollAt = (i / SAMPLES) * SPINE_SCROLL_END;
+            const drawn = SPINE_START + (scrollAt / SPINE_SCROLL_END) * (stop - SPINE_START);
             const { x, y } = path.getPointAtLength(total * drawn);
             stops.push(scrollAt);
             xs.push(x);
@@ -208,8 +215,7 @@ export default function FujiSpine() {
     }, []);
 
     return (
-        <motion.div
-            style={{ opacity: spineFade }}
+        <div
             className="pointer-events-none fixed inset-0 z-0 overflow-hidden max-md:inset-y-auto max-md:bottom-0 max-md:h-[46vh]"
             aria-hidden="true"
         >
@@ -268,7 +274,7 @@ export default function FujiSpine() {
                     </filter>
                 </defs>
 
-                <g mask="url(#fuji-haze-mask)">
+                <motion.g mask="url(#fuji-haze-mask)" style={{ opacity: terrainFade }}>
                     <motion.g
                         style={{ x: farPanX, y: farPanY }}
                         className="motion-reduce:[transform:translate(-250px,108px)]!"
@@ -281,13 +287,14 @@ export default function FujiSpine() {
                     >
                         <path d={MASS} fill="url(#fuji-mass)" />
                     </motion.g>
-                </g>
+                </motion.g>
 
                 <motion.g
                     style={{ x: panX, y: panY }}
                     className="motion-reduce:[transform:translate(-560px,240px)]!"
                 >
-                    <path
+                    <motion.path
+                        style={{ opacity: terrainFade }}
                         ref={measureRef}
                         d={SPINE}
                         stroke="url(#fuji-ridge)"
@@ -299,11 +306,11 @@ export default function FujiSpine() {
 
                     <motion.g
                         clipPath="url(#fuji-mass-clip)"
-                        style={{ opacity: cloudReveal }}
+                        style={{ opacity: terrainFade }}
                         className="motion-reduce:opacity-100!"
                     >
                         {CLOUDS.map((cloud) => (
-                            <CloudBank key={`${cloud.x}-${cloud.y}`} cloud={cloud} progress={eased} />
+                            <CloudBank key={`${cloud.x}-${cloud.y}`} cloud={cloud} />
                         ))}
                     </motion.g>
 
@@ -336,6 +343,6 @@ export default function FujiSpine() {
                     {headPath ? <SpineHead head={headPath} progress={eased} /> : null}
                 </motion.g>
             </svg>
-        </motion.div>
+        </div>
     );
 }

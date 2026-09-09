@@ -1,53 +1,19 @@
 import { getTranslations } from "next-intl/server";
-import {
-    ArrowUpRightIcon,
-    CalendarDaysIcon,
-    EnvelopeIcon,
-    PencilSquareIcon,
-} from "@heroicons/react/24/outline";
-import { warmthDotClass, warmthSurfaceClasses } from "@/app/lib/utils";
+import { RadarMark } from "@/app/components/radar/RadarVocabulary";
 import { cn } from "@/lib/utils";
 
 /**
- * Faithful miniatures of real Connex surfaces for the landing page.
+ * Abstract diagrams of how Connex reasons, for the landing page.
  *
- * These are not screenshots and not decorative diagrams. They render with the
- * product's own warmth helpers (`warmthSurfaceClasses`, `warmthDotClass`), so a
- * band shown here is the same colour it is inside the app, and a change to the
- * domain tokens moves both together.
+ * These are deliberately not screenshots. A marketing page that mimics real UI either lies about
+ * a customer that does not exist or ages badly the moment the product moves; a diagram states the
+ * shape of the idea and lets the surrounding copy carry the words. Text inside a surface is kept
+ * to axis labels and counts.
  *
- * Action pills use `text-foreground` on the tinted brand surface rather than
- * `text-brand-dark`, which measured 3.6:1 against it and failed AA for 12px text.
- *
- * The data is illustrative and every surface says so in its own chrome, because
- * staging holds real tenant data and a marketing page must not imply customers
- * that do not exist yet.
+ * Where the product already owns a visual vocabulary the diagrams borrow it directly — Radar's
+ * {@link RadarMark} and the shared `--warmth-*` tokens — so the abstraction stays truthful to what
+ * the app actually draws.
  */
-
-const EVIDENCE_ROWS = [
-    { key: "meeting", Icon: CalendarDaysIcon },
-    { key: "email", Icon: EnvelopeIcon },
-    { key: "note", Icon: PencilSquareIcon },
-] as const;
-
-/**
- * Severities mirror `DealRiskService`: `close_overdue` is HIGH, `stalled` is MEDIUM, and
- * `closing_soon_quiet` (the HIGH staleness variant) cannot fire once the close date has passed.
- */
-const RISK_FACTORS = [
-    { key: "overdue", severity: "high", Icon: CalendarDaysIcon },
-    { key: "quiet", severity: "medium", Icon: EnvelopeIcon },
-    { key: "cold", severity: "medium", Icon: null },
-] as const;
-
-/**
- * A warm path is bridge to target. `WarmPathService` ranks a contact the team is already warm
- * with as the bridge; there is no teammate node, so the miniature does not draw one.
- */
-const INTRO_STEPS = [
-    { key: "bridge", band: "warm" },
-    { key: "target", band: "cold" },
-] as const;
 
 /** Chrome shared by every surface, so each one reads as a window into the product. */
 function SurfaceFrame({
@@ -63,7 +29,7 @@ function SurfaceFrame({
         <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-[0_28px_70px_-46px] shadow-foreground/25">
             <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
                 <span className="text-sm font-medium text-foreground">{label}</span>
-                <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-foreground/75">
                     {sampleLabel}
                 </span>
             </div>
@@ -72,148 +38,313 @@ function SurfaceFrame({
     );
 }
 
-function WarmthChip({ band, label }: { band: "hot" | "warm" | "cool" | "cold"; label: string }) {
+/** Which Radar family a tone belongs to, mirroring `RADAR_TONE_FAMILY`. */
+const TONE_FAMILY = {
+    hot: "relationship_decay",
+    warm: "relationship_decay",
+    cool: "relationship_decay",
+    cold: "relationship_decay",
+    high: "deal_risk",
+    medium: "deal_risk",
+    low: "deal_risk",
+    path: "warm_path",
+} as const;
+
+/** Blips on the sweep, in polar coordinates: angle in degrees, radius as a fraction of the disc. */
+const BLIPS = [
+    { deg: 18, r: 0.34, tone: "cold", size: 11, delay: 0 },
+    { deg: 74, r: 0.66, tone: "high", size: 13, delay: -0.6 },
+    { deg: 122, r: 0.44, tone: "cool", size: 9, delay: -1.9 },
+    { deg: 168, r: 0.78, tone: "medium", size: 10, delay: -1.1 },
+    { deg: 208, r: 0.29, tone: "warm", size: 8, delay: -2.6 },
+    { deg: 252, r: 0.6, tone: "cool", size: 10, delay: -0.3 },
+    { deg: 297, r: 0.83, tone: "path", size: 9, delay: -2.2 },
+    { deg: 331, r: 0.5, tone: "hot", size: 12, delay: -1.5 },
+] as const;
+
+const BLIP_BG = {
+    hot: "bg-warmth-hot",
+    warm: "bg-warmth-warm",
+    cool: "bg-warmth-cool",
+    cold: "bg-warmth-cold",
+    high: "bg-risk-high",
+    medium: "bg-risk-medium",
+    low: "bg-risk-low",
+    path: "bg-chart-5",
+} as const;
+
+/**
+ * The sweep: Connex's namesake surface, drawn as the instrument it is named after.
+ *
+ * Concentric rings, a conic gradient rotating beneath them, and blips that pulse on their own
+ * offsets so the field never breathes in unison. Everything is CSS, so the animation runs off the
+ * main thread and stops dead under `prefers-reduced-motion`.
+ */
+export async function RadarSweepSurface() {
+    const t = await getTranslations("CommonHome");
+
     return (
-        <span
-            className={cn(
-                "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-                warmthSurfaceClasses(band),
-            )}
-        >
-            <span className={cn("size-2 shrink-0 rounded-full", warmthDotClass(band))} />
-            {label}
-        </span>
+        <div className="relative mx-auto aspect-square w-full max-w-lg" aria-hidden>
+            <div className="absolute inset-0 rounded-full bg-brand/5 blur-3xl" />
+
+            <div className="absolute inset-0 overflow-hidden rounded-full">
+                <div className="connex-radar-sweep absolute inset-0 origin-center" />
+            </div>
+
+            {[1, 0.74, 0.48, 0.24].map((scale) => (
+                <div
+                    key={scale}
+                    className="absolute rounded-full border border-brand/25 dark:border-brand/20"
+                    style={{
+                        inset: `${((1 - scale) / 2) * 100}%`,
+                    }}
+                />
+            ))}
+
+            <div className="absolute top-1/2 left-0 h-px w-full -translate-y-1/2 bg-brand/15" />
+            <div className="absolute top-0 left-1/2 h-full w-px -translate-x-1/2 bg-brand/15" />
+
+            {BLIPS.map((blip) => {
+                const rad = (blip.deg * Math.PI) / 180;
+                const left = 50 + Math.cos(rad) * blip.r * 50;
+                const top = 50 + Math.sin(rad) * blip.r * 50;
+                return (
+                    <div key={blip.deg} className="absolute" style={{ left: `${left}%`, top: `${top}%` }}>
+                        <span
+                            className={cn(
+                                "connex-blip-ring absolute rounded-full",
+                                BLIP_BG[blip.tone],
+                                "opacity-40",
+                            )}
+                            style={{
+                                width: blip.size * 2.4,
+                                height: blip.size * 2.4,
+                                animationDelay: `${blip.delay}s`,
+                            }}
+                        />
+                        <span
+                            className={cn("connex-blip absolute rounded-full", BLIP_BG[blip.tone])}
+                            style={{
+                                width: blip.size,
+                                height: blip.size,
+                                animationDelay: `${blip.delay}s`,
+                            }}
+                        />
+                    </div>
+                );
+            })}
+
+            <div className="absolute top-1/2 left-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand shadow-[0_0_24px] shadow-brand/60" />
+            <span className="sr-only">{t("surfaceSweepAlt")}</span>
+        </div>
     );
 }
 
-/**
- * A warmth reading with the interactions underneath it. This is the surface that
- * substantiates the page's central claim: a reading always shows its evidence.
- */
-export async function WarmthReadingSurface() {
-    const t = await getTranslations("CommonHome");
+/** A constellation of ties. Positions are percentages so the field scales with its container. */
+const CONSTELLATION = [
+    { id: "a", x: 18, y: 30, size: 13, tone: "warm", dx: "6px", dy: "-5px", pace: 1.22 },
+    { id: "b", x: 42, y: 16, size: 9, tone: "cool", dx: "-5px", dy: "6px", pace: 1.44 },
+    { id: "c", x: 63, y: 28, size: 17, tone: "hot", dx: "4px", dy: "5px", pace: 1.0 },
+    { id: "d", x: 84, y: 20, size: 8, tone: "cold", dx: "-6px", dy: "-4px", pace: 1.67 },
+    { id: "e", x: 30, y: 58, size: 11, tone: "cool", dx: "5px", dy: "4px", pace: 1.33 },
+    { id: "f", x: 55, y: 52, size: 22, tone: "warm", dx: "-4px", dy: "-6px", pace: 1.11 },
+    { id: "g", x: 78, y: 62, size: 12, tone: "cool", dx: "6px", dy: "-4px", pace: 1.56 },
+    { id: "h", x: 14, y: 80, size: 9, tone: "cold", dx: "-5px", dy: "5px", pace: 1.33 },
+    { id: "i", x: 44, y: 86, size: 14, tone: "hot", dx: "4px", dy: "-6px", pace: 1.78 },
+    { id: "j", x: 70, y: 88, size: 10, tone: "cool", dx: "-6px", dy: "4px", pace: 1.22 },
+] as const;
 
+const TIES = [
+    ["a", "b"], ["b", "c"], ["c", "d"], ["a", "e"], ["e", "f"], ["f", "c"],
+    ["f", "g"], ["g", "d"], ["e", "h"], ["h", "i"], ["i", "f"], ["i", "j"], ["j", "g"],
+] as const;
+
+/** Look up a point by id. Pure, so it lives at module scope rather than being rebuilt per render. */
+const at = (id: string) => CONSTELLATION.find((node) => node.id === id)!;
+
+const NODE_BG = {
+    hot: "bg-warmth-hot",
+    warm: "bg-warmth-warm",
+    cool: "bg-warmth-cool",
+    cold: "bg-warmth-cold",
+} as const;
+
+/**
+ * The network, alive.
+ *
+ * Ties are drawn once in SVG and the points drift over them on independent clocks, so the field
+ * never pulses in step. The drift is small enough that the ties stay legible without re-laying the
+ * lines every frame, which keeps the whole thing on the compositor.
+ */
+export async function LivingNetworkSurface() {
+    const t = await getTranslations("CommonHome");
+    return (
+        <div className="relative aspect-[4/3] w-full" aria-hidden>
+            <div className="absolute inset-0 rounded-[2rem] bg-brand/5 blur-3xl" />
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 size-full">
+                {TIES.map(([from, to]) => (
+                    <line
+                        key={`${from}-${to}`}
+                        x1={at(from).x}
+                        y1={at(from).y}
+                        x2={at(to).x}
+                        y2={at(to).y}
+                        vectorEffect="non-scaling-stroke"
+                        strokeWidth="1"
+                        className="stroke-brand/25"
+                    />
+                ))}
+            </svg>
+            {CONSTELLATION.map((node) => (
+                <span
+                    key={node.id}
+                    className="connex-node-drift absolute -translate-x-1/2 -translate-y-1/2"
+                    style={{
+                        left: `${node.x}%`,
+                        top: `${node.y}%`,
+                        ["--drift-x" as string]: node.dx,
+                        ["--drift-y" as string]: node.dy,
+                        ["--ambient-scale" as string]: node.pace,
+                    }}
+                >
+                    <span
+                        className={cn("block rounded-full", NODE_BG[node.tone])}
+                        style={{
+                            width: node.size,
+                            height: node.size,
+                            boxShadow: `0 0 ${node.size * 1.6}px currentColor`,
+                        }}
+                    />
+                </span>
+            ))}
+            <span className="sr-only">{t("surfaceNetworkAlt")}</span>
+        </div>
+    );
+}
+
+/** The decay curve itself: warmth falls away faster the longer contact has stopped. */
+const curveY = (x: number) => 34 + 118 * x * x;
+
+/** Where each logged interaction sits on the decay curve, newest last. */
+const DECAY_MARKS = [0.06, 0.19, 0.35, 0.52, 0.78] as const;
+
+/**
+ * Warmth as a decay curve: what the team logged, and how much it still counts.
+ *
+ * `RelationshipWarmthModel` weights an interaction by type and age, so warmth falls away as
+ * contact stops. The curve states that shape directly; the marks are the logged interactions
+ * feeding it, thinning out toward the present.
+ */
+export async function WarmthDecaySurface() {
+    const t = await getTranslations("CommonHome");
     return (
         <SurfaceFrame label={t("surfaceWarmthLabel")} sampleLabel={t("surfaceSample")}>
-            <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-5">
-                <div className="min-w-0">
-                    <p className="truncate text-base font-semibold text-foreground">{t("surfaceContactName")}</p>
-                    <p className="truncate text-sm text-muted-foreground">{t("surfaceContactRole")}</p>
-                </div>
-                <WarmthChip band="cool" label={t("warmthBand_cool")} />
-            </div>
-            <div className="border-t border-border bg-muted/40 px-5 py-4">
-                <p className="text-xs font-medium text-muted-foreground">{t("surfaceEvidenceHeading")}</p>
-                <ul className="mt-3 space-y-2.5">
-                    {EVIDENCE_ROWS.map(({ key, Icon }) => (
-                        <li key={key} className="flex items-center gap-3 text-sm">
-                            <Icon className="size-4 shrink-0 text-muted-foreground" />
-                            <span className="min-w-0 flex-1 truncate text-foreground">{t(`surfaceEvidence_${key}`)}</span>
-                            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                                {t(`surfaceEvidenceWhen_${key}`)}
-                            </span>
-                        </li>
+            <div className="px-5 pt-6 pb-4">
+                <svg viewBox="0 0 360 190" className="w-full" role="img" aria-label={t("surfaceWarmthAlt")}>
+                    <defs>
+                        <linearGradient id="warmth-decay" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0" className="[stop-color:var(--warmth-hot)]" />
+                            <stop offset="0.45" className="[stop-color:var(--warmth-warm)]" />
+                            <stop offset="0.75" className="[stop-color:var(--warmth-cool)]" />
+                            <stop offset="1" className="[stop-color:var(--warmth-cold)]" />
+                        </linearGradient>
+                    </defs>
+                    <line x1="10" y1="162" x2="350" y2="162" className="stroke-border" strokeWidth="1" />
+                    <path
+                        d={`M 10 ${curveY(0)} ${Array.from({ length: 40 }, (_, i) => {
+                            const p = (i + 1) / 40;
+                            return `L ${10 + p * 340} ${curveY(p)}`;
+                        }).join(" ")}`}
+                        fill="none"
+                        stroke="url(#warmth-decay)"
+                        strokeWidth="3"
+                        strokeLinecap="round"
+                    />
+                    {DECAY_MARKS.map((p) => (
+                        <line
+                            key={p}
+                            x1={10 + p * 340}
+                            y1={curveY(p)}
+                            x2={10 + p * 340}
+                            y2={162}
+                            strokeWidth="1"
+                            className="stroke-border"
+                        />
                     ))}
-                </ul>
+                    {DECAY_MARKS.map((p) => (
+                        <circle
+                            key={`dot-${p}`}
+                            cx={10 + p * 340}
+                            cy={curveY(p)}
+                            r="5"
+                            strokeWidth="2.5"
+                            className="fill-card stroke-brand"
+                        />
+                    ))}
+                </svg>
+                <div className="mt-2 flex justify-between text-[11px] text-muted-foreground">
+                    <span>{t("surfaceWarmthAxisStart")}</span>
+                    <span>{t("surfaceWarmthAxisEnd")}</span>
+                </div>
             </div>
         </SurfaceFrame>
     );
 }
 
 /**
- * A flagged deal with the reasons underneath it.
+ * Radar's ranked list, distilled.
  *
- * `DealRiskService` is deterministic — it has no dependency on `backend.ai`, so this
- * surface represents behaviour that survives an organisation switching AI off. Each row
- * is one real factor code (`close_overdue`, `stalled`, `stakeholder_cold`), and warmth
- * appears here as one contributing factor rather than as the product itself.
+ * `RadarSignalCard` renders each row as a mark, a subject, a one-line reading beneath it, and a
+ * single action on the right, divided by hairlines. This keeps that anatomy and drops the words:
+ * the shape of the row is what carries the meaning — every signal is typed, explained and
+ * actionable — so the page shows it instead of asserting it.
+ *
+ * Bar widths are uneven on purpose. A tidy stack of equal blocks reads as a loading skeleton;
+ * ragged ones read as content.
  */
-export async function DealRiskSurface() {
-    const t = await getTranslations("CommonHome");
-
-    return (
-        <SurfaceFrame label={t("surfaceRiskLabel")} sampleLabel={t("surfaceSample")}>
-            <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-5">
-                <div className="min-w-0">
-                    <p className="truncate text-base font-semibold text-foreground">{t("surfaceRiskDealName")}</p>
-                    <p className="mt-0.5 truncate text-sm tabular-nums text-muted-foreground">
-                        {t("surfaceRiskDealMeta")}
-                    </p>
-                </div>
-                <span className="shrink-0 rounded-full bg-warmth-cold/15 px-2.5 py-1 text-xs font-medium text-foreground ring-1 ring-inset ring-warmth-cold/40">
-                    {t("surfaceRiskBadge")}
-                </span>
-            </div>
-            <div className="border-t border-border bg-muted/40 px-5 py-4">
-                <p className="text-xs font-medium text-muted-foreground">{t("surfaceRiskFactorsHeading")}</p>
-                <ul className="mt-3 space-y-2.5">
-                    {RISK_FACTORS.map(({ key, severity, Icon }) => (
-                        <li key={key} className="flex items-center gap-3 text-sm">
-                            {Icon ? (
-                                <Icon className="size-4 shrink-0 text-muted-foreground" />
-                            ) : (
-                                <span className={cn("size-4 shrink-0 rounded-full", warmthDotClass("cool"))} />
-                            )}
-                            <span className="min-w-0 flex-1 text-foreground">{t(`surfaceRiskFactor_${key}`)}</span>
-                            <span className="shrink-0 text-xs font-medium text-muted-foreground">
-                                {t(`surfaceRiskSeverity_${severity}`)}
-                            </span>
-                        </li>
-                    ))}
-                </ul>
-                <span className="mt-4 inline-flex items-center gap-1 rounded-full bg-brand-light px-2.5 py-1 text-xs font-medium text-foreground">
-                    {t("surfaceRiskAction")}
-                    <ArrowUpRightIcon className="size-3" />
-                </span>
-            </div>
-        </SurfaceFrame>
-    );
-}
+const QUEUE_ROWS = [
+    { tone: "cold", subject: 62, reading: 84 },
+    { tone: "high", subject: 47, reading: 71 },
+    { tone: "cool", subject: 68, reading: 55 },
+    { tone: "medium", subject: 40, reading: 78 },
+    { tone: "path", subject: 57, reading: 63 },
+] as const;
 
 /**
- * An intro path, with the basis for every hop shown alongside it.
+ * The queue as the product draws it, minus the copy.
  *
- * `WarmPathService` distinguishes recorded interactions from inferred employer
- * overlap, and the surface preserves that: a shared employer is a weaker signal
- * than logged contact, and the footer says so. Presenting both as one undifferentiated
- * "connection" would overstate what the product knows.
+ * Sizes track `RadarSignalCard`: the mark sits against the first line, the subject bar carries the
+ * weight of a semibold heading, and the reading bar below it is lighter and longer.
  */
-export async function IntroPathSurface() {
+export async function RadarQueueSurface() {
     const t = await getTranslations("CommonHome");
 
     return (
-        <SurfaceFrame label={t("surfaceIntroLabel")} sampleLabel={t("surfaceSample")}>
-            <div className="px-5 py-5">
-                <ol className="space-y-0">
-                    {INTRO_STEPS.map((step, i) => (
-                        <li key={step.key} className="relative flex gap-4 pb-6 last:pb-0">
-                            {i < INTRO_STEPS.length - 1 ? (
-                                <span
-                                    aria-hidden="true"
-                                    className="absolute left-[11px] top-6 h-[calc(100%-1.5rem)] w-px bg-linear-to-b from-brand/60 to-border"
-                                />
-                            ) : null}
-                            <span
-                                className={cn(
-                                    "relative mt-0.5 size-6 shrink-0 rounded-full ring-4 ring-card",
-                                    warmthDotClass(step.band),
-                                )}
+        <SurfaceFrame label={t("surfaceQueueLabel")} sampleLabel={t("surfaceSample")}>
+            <ul aria-hidden className="divide-y divide-border/60">
+                {QUEUE_ROWS.map((row, i) => (
+                    <li
+                        key={row.tone + i}
+                        className={cn(
+                            "flex items-start gap-3 px-4 py-4 sm:px-5",
+                            i === 0 && "bg-muted/40",
+                        )}
+                    >
+                        <RadarMark tone={row.tone} family={TONE_FAMILY[row.tone]} className="mt-1" />
+                        <div className="min-w-0 flex-1 space-y-2">
+                            <div
+                                className="h-2.5 rounded-full bg-foreground/22"
+                                style={{ width: `${row.subject}%` }}
                             />
-                            <div className="min-w-0 flex-1">
-                                <p className="truncate text-sm font-medium text-foreground">
-                                    {t(`surfaceIntroName_${step.key}`)}
-                                </p>
-                                <p className="truncate text-xs text-muted-foreground">
-                                    {t(`surfaceIntroRole_${step.key}`)}
-                                </p>
-                            </div>
-                        </li>
-                    ))}
-                </ol>
-                <p className="mt-1 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground">
-                    {t("surfaceIntroFooter")}
-                </p>
-            </div>
+                            <div
+                                className="h-2 rounded-full bg-foreground/10"
+                                style={{ width: `${row.reading}%` }}
+                            />
+                        </div>
+                        <div className="mt-0.5 h-6 w-16 shrink-0 rounded-full bg-brand-light sm:w-20" />
+                    </li>
+                ))}
+            </ul>
         </SurfaceFrame>
     );
 }
