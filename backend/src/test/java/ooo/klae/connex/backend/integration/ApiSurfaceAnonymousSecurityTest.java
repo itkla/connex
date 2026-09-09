@@ -129,6 +129,8 @@ class ApiSurfaceAnonymousSecurityTest {
     @Test
     void headProfileCannotFallThroughTheAnonymousAuthWildcard() throws Exception {
         var mvc = MockMvcBuilders.standaloneSetup(new Sentinel()).addFilters(security).build();
+        assertEquals(204, mvc.perform(request(HttpMethod.HEAD, "/api/auth/csrf"))
+            .andReturn().getResponse().getStatus(), "Permitted HEAD must reach the sentinel through the same chain");
         int status = mvc.perform(request(HttpMethod.HEAD, "/api/auth/me")).andReturn().getResponse().getStatus();
         assertEquals(401, status, "HEAD inherits the GET profile handler and must require authentication");
     }

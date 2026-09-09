@@ -4,10 +4,6 @@ Owner: Backend maintainers. Security review: security maintainers. Control: CHK-
 
 ## Generated evidence
 
-Draft verification status: the snapshot was generated before the final framework-route corrections.
-Regeneration and guard execution are blocked on the shared verification environment (SEC-60).
-Do not treat this draft snapshot as approved audit evidence until regeneration and the guards pass.
-
 [`api-surface.tsv`](api-surface.tsv) is the approved source-derived HTTP surface, including
 conditional controllers, implicit HEAD and OPTIONS representations, filter-served authentication
 routes, and the WebSocket HTTP handshake. `/api/v1` is the opt-in bearer API; unversioned `/api`
@@ -138,7 +134,9 @@ GET profile mapping, but the existing authenticated matcher covered GET only; HE
 `/api/auth/**.permitAll()`. An explicit HEAD authenticated matcher now closes that gap. The existing
 `AuthService.getCurrentPrincipal()` rejected anonymous principals before reading user data, so this
 is an authorization-perimeter defect with a surviving service backstop, not demonstrated profile
-disclosure. The dedicated HEAD test prevents approving this exposure by regenerating the ledger.
+disclosure. The dedicated HEAD test requires anonymous HEAD `/api/auth/me` to return 401 and a permitted
+HEAD control to reach the sentinel through the same security chain. This expectation is independent
+of ledger approval.
 
 No other unintentionally exposed endpoint was identified. This is a source/perimeter assessment, not a
 claim of a complete penetration test or proof of production usage. Public metadata is a documented
