@@ -158,6 +158,13 @@ class AttachmentServiceTest extends AbstractServiceTest {
         second.setContentType(first.getContentType());
         second.setSize(first.getSize());
         second.setUploadedBy(currentUser);
+        second.setScanState(first.getScanState());
+        second.setScanEngine(first.getScanEngine());
+        second.setScanDatabaseVersion(first.getScanDatabaseVersion());
+        second.setScanSignature(first.getScanSignature());
+        second.setScannedAt(first.getScannedAt());
+        second.setScanExpiresAt(first.getScanExpiresAt());
+        second.setScanAttempts(first.getScanAttempts());
         attachmentMapper.insert(second);
         String token = first.getUrl().substring(first.getUrl().lastIndexOf('/') + 1);
 

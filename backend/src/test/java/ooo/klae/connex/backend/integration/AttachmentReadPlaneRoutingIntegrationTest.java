@@ -33,6 +33,7 @@ import com.zaxxer.hikari.HikariDataSource;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.config.TenantRoutingConfig;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.AttachmentScanMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AttachmentReadService;
@@ -91,11 +92,8 @@ class AttachmentReadPlaneRoutingIntegrationTest {
             statement.execute("CREATE TABLE " + scratchCatalog + ".tag ("
                 + "id INT PRIMARY KEY, workspace_id INT NOT NULL, name VARCHAR(255) NOT NULL, "
                 + "color VARCHAR(32) NULL)");
-            statement.execute("CREATE TABLE " + scratchCatalog + ".attachment ("
-                + "id INT PRIMARY KEY, workspace_id INT NOT NULL, entity_type VARCHAR(32) NOT NULL, "
-                + "entity_id INT NOT NULL, file_name VARCHAR(255) NOT NULL, url VARCHAR(2048) NOT NULL, "
-                + "content_type VARCHAR(255) NULL, size BIGINT NULL, uploaded_by_id INT NULL, "
-                + "created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL)");
+            statement.execute("CREATE TABLE " + scratchCatalog + ".attachment LIKE "
+                + defaultCatalog + ".attachment");
             statement.execute("CREATE TABLE " + scratchCatalog + ".attachment_tag ("
                 + "attachment_id INT NOT NULL, tag_id INT NOT NULL, "
                 + "PRIMARY KEY (attachment_id, tag_id))");
@@ -174,6 +172,12 @@ class AttachmentReadPlaneRoutingIntegrationTest {
             Attachment byUrl = attachmentReadService.getByUrl(
                 workspaceId, "/attachments/control-target.pdf", uploaderId);
 
+            AttachmentScanMapper scans = new SqlSessionTemplate(sqlSessionFactory)
+                .getMapper(AttachmentScanMapper.class);
+            assertEquals(workspaceId, scans.nextWorkspaceId(0, workspaceId));
+            assertEquals(workspaceId + 1, scans.lastWorkspaceId());
+            assertFalse(scans.isReadable(workspaceId, byId.getUrl(), true));
+            assertEquals("pending", byId.getScanState());
             assertEquals(List.of(1, 2, 3, 4), all.stream().map(Attachment::getId).toList());
             assertEquals("Control Uploader", all.get(0).getUploadedBy().getDisplayName());
             assertEquals("Scratch Company", all.get(0).getEntityLabel());
@@ -280,7 +284,8 @@ class AttachmentReadPlaneRoutingIntegrationTest {
         configuration.setMapUnderscoreToCamelCase(true);
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
         for (String resource : List.of(
-                "mappers/AttachmentMapper.xml", "mappers/TagMapper.xml", "mappers/UserMapper.xml")) {
+                "mappers/AttachmentMapper.xml", "mappers/AttachmentScanMapper.xml",
+                "mappers/TagMapper.xml", "mappers/UserMapper.xml")) {
             try (InputStream input = AttachmentReadPlaneRoutingIntegrationTest.class
                     .getClassLoader().getResourceAsStream(resource)) {
                 if (input == null) {
