@@ -100,6 +100,7 @@ public class WorkspaceService {
         EnumSet<Permission> permissions = memberPermissions();
         permissions.addAll(EnumSet.of(
             Permission.COMPANY_DELETE, Permission.PIPELINE_MANAGE, Permission.TAG_MANAGE,
+            Permission.ATTACHMENT_QUARANTINE_MANAGE,
             Permission.PRODUCT_MANAGE, Permission.DOCUMENT_MANAGE, Permission.DOCUMENT_SEND,
             Permission.DOCUMENT_APPROVE,
             Permission.CUSTOM_FIELD_MANAGE, Permission.SHARE_MANAGE, Permission.MEMBER_MANAGE,
@@ -436,6 +437,14 @@ public class WorkspaceService {
             int workspaceId,
             Map<Integer, Set<Permission>> requiredByUser) {
         lockAndRequirePermissions(workspaceId, requiredByUser, false);
+    }
+
+    /** Returns current locked authority for revalidation after acquiring an aggregate row lock. */
+    public LockedPermissionSnapshot lockAndRequirePermissionsSnapshot(
+            int workspaceId,
+            Map<Integer, Set<Permission>> requiredByUser) {
+        return new LockedPermissionSnapshot(
+            lockAndRequirePermissions(workspaceId, requiredByUser, false), requiredByUser);
     }
 
     /**
