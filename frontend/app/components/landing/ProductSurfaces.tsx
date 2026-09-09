@@ -29,7 +29,7 @@ function SurfaceFrame({
         <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-[0_28px_70px_-46px] shadow-foreground/25">
             <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
                 <span className="text-sm font-medium text-foreground">{label}</span>
-                <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                <span className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-foreground/75">
                     {sampleLabel}
                 </span>
             </div>

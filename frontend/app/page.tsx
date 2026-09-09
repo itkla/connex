@@ -92,7 +92,7 @@ export default async function Home() {
                                 {t("heroSubtext")}
                             </p>
                             <div
-                                className="connex-rise mt-10 flex flex-wrap items-center gap-3"
+                                className="connex-rise mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center"
                                 style={{ animationDelay: "180ms" }}
                             >
                                 <a href="#features" className={btnPrimary}>
@@ -111,7 +111,7 @@ export default async function Home() {
                             aria-hidden
                             className="pointer-events-none absolute inset-x-0 top-1/4 -z-10 mx-auto h-[36rem] max-w-4xl rounded-full bg-brand/8 blur-[120px] dark:bg-brand/10"
                         />
-                        <div className="mx-auto max-w-7xl px-6 py-28 lg:px-8 lg:py-40">
+                        <div className="mx-auto max-w-7xl px-6 py-20 sm:py-24 lg:px-8 lg:py-40">
                             <Reveal className="mx-auto max-w-2xl text-center">
                                 <h2 className={sectionHeading}>{t("radarHeading")}</h2>
                                 <p className={`${sectionBody} mx-auto`}>{t("radarBody")}</p>
@@ -127,7 +127,7 @@ export default async function Home() {
                             aria-hidden
                             className="pointer-events-none absolute top-1/4 -left-24 -z-10 size-[30rem] rounded-full bg-warmth-warm/8 blur-[110px] dark:bg-warmth-warm/10"
                         />
-                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-[1.15fr_1fr] lg:gap-20 lg:px-8 lg:py-28">
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-[1.15fr_1fr] lg:gap-20 lg:px-8 lg:py-28">
                             <Reveal>
                                 <LivingNetworkSurface />
                             </Reveal>
@@ -139,7 +139,7 @@ export default async function Home() {
                     </section>
 
                     <section className="scroll-mt-20">
-                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-[1fr_1.1fr] lg:gap-20 lg:px-8 lg:py-28">
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-[1fr_1.1fr] lg:gap-20 lg:px-8 lg:py-28">
                             <Reveal>
                                 <h2 className={sectionHeading}>{t("signalsHeading")}</h2>
                                 <p className={sectionBody}>{t("signalsBody")}</p>
@@ -155,7 +155,7 @@ export default async function Home() {
                             aria-hidden
                             className="pointer-events-none absolute top-1/3 -right-32 -z-10 size-[28rem] rounded-full bg-chart-5/8 blur-[110px] dark:bg-chart-5/10"
                         />
-                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-24 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-28">
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-28">
                             <Reveal>
                                 <h2 className={sectionHeading}>{t("evidenceHeading")}</h2>
                                 <p className={sectionBody}>{t("evidenceBody")}</p>
@@ -168,7 +168,7 @@ export default async function Home() {
 
 
                     <section>
-                        <div className="mx-auto grid max-w-7xl gap-x-16 gap-y-16 px-6 py-24 md:grid-cols-2 lg:px-8 lg:py-32">
+                        <div className="mx-auto grid max-w-7xl gap-x-16 gap-y-12 px-6 py-16 sm:gap-y-16 sm:py-20 md:grid-cols-2 lg:px-8 lg:py-32">
                             <Reveal>
                                 <h2 className={sectionHeading}>{t("teamHeading")}</h2>
                                 <p className={sectionBody}>{t("teamBody")}</p>
@@ -181,7 +181,7 @@ export default async function Home() {
                     </section>
 
                     <section>
-                        <div className="mx-auto grid max-w-7xl gap-x-16 gap-y-8 px-6 py-24 lg:grid-cols-[0.85fr_1.15fr] lg:px-8 lg:py-32">
+                        <div className="mx-auto grid max-w-7xl gap-x-16 gap-y-8 px-6 py-16 sm:py-20 lg:grid-cols-[0.85fr_1.15fr] lg:px-8 lg:py-32">
                             <Reveal>
                                 <h2 className={`${sectionHeading} lg:sticky lg:top-28`}>{t("faqHeading")}</h2>
                             </Reveal>
@@ -192,7 +192,7 @@ export default async function Home() {
                     </section>
 
                     <section>
-                        <div className="mx-auto max-w-7xl px-6 pt-16 pb-28 lg:px-8 lg:pt-24 lg:pb-40">
+                        <div className="mx-auto max-w-7xl px-6 pt-10 pb-20 sm:pt-16 sm:pb-24 lg:px-8 lg:pt-24 lg:pb-40">
                             <Reveal>
                                 <div className="relative isolate overflow-hidden rounded-[2rem] border border-border bg-card px-8 py-16 text-center sm:px-12 lg:py-24">
                                     <div
@@ -201,7 +201,7 @@ export default async function Home() {
                                     />
                                     <h2 className={`${sectionHeading} mx-auto max-w-2xl`}>{t("ctaHeading")}</h2>
                                     <p className={`${sectionBody} mx-auto`}>{t("ctaSubtext")}</p>
-                                    <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+                                    <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center">
                                         <a href="#features" className={btnPrimary}>
                                             {t("heroCtaPrimary")}
                                             <ArrowRightIcon className="size-4" />
