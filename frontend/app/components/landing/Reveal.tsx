@@ -8,7 +8,7 @@ import { durationStandard, easeOut } from "@/app/lib/motion";
 const ARM_MARGIN = 1.05;
 
 /** Force a reveal if the observer never reports, so nothing can stay hidden indefinitely. */
-const SAFETY_MS = 2500;
+const SAFETY_MS = 4000;
 
 /**
  * Scroll reveal for marketing sections.
@@ -51,7 +51,14 @@ export default function Reveal({
 
         setState("armed");
         const release = () => setState("open");
+
+        // The fallback exists for renderers that lay the page out without ever scrolling. A single
+        // scroll proves the environment is interactive and the observer will fire on its own, so
+        // the timer is cancelled rather than opening every below-fold section behind the reader.
         const timer = window.setTimeout(release, SAFETY_MS);
+        const cancelFallback = () => window.clearTimeout(timer);
+        window.addEventListener("scroll", cancelFallback, { once: true, passive: true });
+
         const observer = new IntersectionObserver(
             (entries) => {
                 if (entries.some((entry) => entry.isIntersecting)) release();
@@ -62,6 +69,7 @@ export default function Reveal({
 
         return () => {
             window.clearTimeout(timer);
+            window.removeEventListener("scroll", cancelFallback);
             observer.disconnect();
         };
     }, []);

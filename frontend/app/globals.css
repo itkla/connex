@@ -207,6 +207,7 @@
   --motion-ambient-sweep: 7s;
   --motion-ambient-pulse: 3.4s;
   --motion-ambient-drift: 9s;
+  --motion-ambient-cloud: 74s;
   --motion-ease-hand: cubic-bezier(0.34, 1.56, 0.64, 1);
   --motion-ease-calm: cubic-bezier(0.32, 0.72, 0, 1);
   --sidebar: oklch(0.985 0 0);
@@ -683,6 +684,7 @@ table[data-density="compact"] :is(thead, tbody) :is(th, td) {
   animation-timing-function: linear;
   animation-iteration-count: infinite;
   animation-direction: alternate;
+  animation-duration: calc(var(--motion-ambient-cloud) * var(--ambient-scale, 1));
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -723,7 +725,11 @@ table[data-density="compact"] :is(thead, tbody) :is(th, td) {
 
 .connex-blip { animation: connex-blip var(--motion-ambient-pulse) ease-in-out infinite; }
 .connex-blip-ring { animation: connex-blip-ring var(--motion-ambient-pulse) ease-out infinite; }
-.connex-node-drift { animation: connex-node-drift var(--motion-ambient-drift) ease-in-out infinite; }
+.connex-node-drift {
+  animation: connex-node-drift var(--motion-ambient-drift) ease-in-out infinite;
+  /* Each point stretches the shared token so the field never breathes in unison. */
+  animation-duration: calc(var(--motion-ambient-drift) * var(--ambient-scale, 1));
+}
 
 @media (prefers-reduced-motion: reduce) {
   .connex-radar-sweep,

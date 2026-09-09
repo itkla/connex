@@ -67,6 +67,12 @@ const SPINE =
 /** Everything under the stroke. Runs past the viewport so the pan never reveals an edge. */
 const MASS = `${SPINE} L 2600 1700 L -400 1700 Z`;
 
+/** How much of the spine is already drawn at the top of the page. */
+const SPINE_START = 0.16;
+
+/** Scroll progress at which the spine finishes drawing. The head sampler must share both. */
+const SPINE_SCROLL_END = 0.96;
+
 /** Distant foothills, washed out by aerial perspective. */
 const FAR_RIDGE =
     "M -78 1054" +
@@ -81,9 +87,9 @@ const MARKS = [0.12, 0.24, 0.4, 0.58] as const;
 
 /** Cloud banks: position in path space, scale, and how far each drifts across the scroll. */
 const CLOUDS = [
-    { x: 1560, y: 902, scale: 1.15, seconds: 74, delay: -12, flip: false, opacity: "opacity-95 dark:opacity-30" },
-    { x: 1320, y: 1010, scale: 1.5, seconds: 96, delay: -46, flip: true, opacity: "opacity-90 dark:opacity-24" },
-    { x: 1640, y: 1108, scale: 1.9, seconds: 118, delay: -30, flip: false, opacity: "opacity-75 dark:opacity-16" },
+    { x: 1560, y: 902, scale: 1.15, pace: 1, delay: -12, flip: false, opacity: "opacity-95 dark:opacity-30" },
+    { x: 1320, y: 1010, scale: 1.5, pace: 1.3, delay: -46, flip: true, opacity: "opacity-90 dark:opacity-24" },
+    { x: 1640, y: 1108, scale: 1.9, pace: 1.6, delay: -30, flip: false, opacity: "opacity-75 dark:opacity-16" },
 ] as const;
 
 type Point = { x: number; y: number };
@@ -92,7 +98,7 @@ function CloudBank({ cloud }: { cloud: (typeof CLOUDS)[number] }) {
     return (
         <g
             className="connex-cloud-drift motion-reduce:[animation:none]!"
-            style={{ animationDuration: `${cloud.seconds}s`, animationDelay: `${cloud.delay}s` }}
+            style={{ ["--ambient-scale" as string]: cloud.pace, animationDelay: `${cloud.delay}s` }}
         >
             <g
                 transform={`translate(${cloud.x} ${cloud.y}) scale(${cloud.flip ? -cloud.scale : cloud.scale} ${cloud.scale})`}
@@ -161,7 +167,7 @@ export default function FujiSpine() {
     const { scrollYProgress } = useScroll();
     const eased = useSpring(scrollYProgress, springSmooth);
 
-    const pathLength = useTransform(eased, [0, 0.96], [0.16, stopAt]);
+    const pathLength = useTransform(eased, [0, SPINE_SCROLL_END], [SPINE_START, stopAt]);
     const panY = useTransform(eased, [0, 0.7], [0, 240]);
     const panX = useTransform(eased, [0, 0.7], [0, -560]);
     const farPanY = useTransform(eased, [0, 0.7], [0, 108]);
@@ -192,8 +198,8 @@ export default function FujiSpine() {
         const xs: number[] = [];
         const ys: number[] = [];
         for (let i = 0; i <= SAMPLES; i++) {
-            const scrollAt = (i / SAMPLES) * 0.9;
-            const drawn = 0.24 + (scrollAt / 0.9) * (stop - 0.24);
+            const scrollAt = (i / SAMPLES) * SPINE_SCROLL_END;
+            const drawn = SPINE_START + (scrollAt / SPINE_SCROLL_END) * (stop - SPINE_START);
             const { x, y } = path.getPointAtLength(total * drawn);
             stops.push(scrollAt);
             xs.push(x);

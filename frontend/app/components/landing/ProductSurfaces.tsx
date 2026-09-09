@@ -142,22 +142,25 @@ export async function RadarSweepSurface() {
 
 /** A constellation of ties. Positions are percentages so the field scales with its container. */
 const CONSTELLATION = [
-    { id: "a", x: 18, y: 30, size: 13, tone: "warm", dx: "6px", dy: "-5px", dur: 11 },
-    { id: "b", x: 42, y: 16, size: 9, tone: "cool", dx: "-5px", dy: "6px", dur: 13 },
-    { id: "c", x: 63, y: 28, size: 17, tone: "hot", dx: "4px", dy: "5px", dur: 9 },
-    { id: "d", x: 84, y: 20, size: 8, tone: "cold", dx: "-6px", dy: "-4px", dur: 15 },
-    { id: "e", x: 30, y: 58, size: 11, tone: "cool", dx: "5px", dy: "4px", dur: 12 },
-    { id: "f", x: 55, y: 52, size: 22, tone: "warm", dx: "-4px", dy: "-6px", dur: 10 },
-    { id: "g", x: 78, y: 62, size: 12, tone: "cool", dx: "6px", dy: "-4px", dur: 14 },
-    { id: "h", x: 14, y: 80, size: 9, tone: "cold", dx: "-5px", dy: "5px", dur: 12 },
-    { id: "i", x: 44, y: 86, size: 14, tone: "hot", dx: "4px", dy: "-6px", dur: 16 },
-    { id: "j", x: 70, y: 88, size: 10, tone: "cool", dx: "-6px", dy: "4px", dur: 11 },
+    { id: "a", x: 18, y: 30, size: 13, tone: "warm", dx: "6px", dy: "-5px", pace: 1.22 },
+    { id: "b", x: 42, y: 16, size: 9, tone: "cool", dx: "-5px", dy: "6px", pace: 1.44 },
+    { id: "c", x: 63, y: 28, size: 17, tone: "hot", dx: "4px", dy: "5px", pace: 1.0 },
+    { id: "d", x: 84, y: 20, size: 8, tone: "cold", dx: "-6px", dy: "-4px", pace: 1.67 },
+    { id: "e", x: 30, y: 58, size: 11, tone: "cool", dx: "5px", dy: "4px", pace: 1.33 },
+    { id: "f", x: 55, y: 52, size: 22, tone: "warm", dx: "-4px", dy: "-6px", pace: 1.11 },
+    { id: "g", x: 78, y: 62, size: 12, tone: "cool", dx: "6px", dy: "-4px", pace: 1.56 },
+    { id: "h", x: 14, y: 80, size: 9, tone: "cold", dx: "-5px", dy: "5px", pace: 1.33 },
+    { id: "i", x: 44, y: 86, size: 14, tone: "hot", dx: "4px", dy: "-6px", pace: 1.78 },
+    { id: "j", x: 70, y: 88, size: 10, tone: "cool", dx: "-6px", dy: "4px", pace: 1.22 },
 ] as const;
 
 const TIES = [
     ["a", "b"], ["b", "c"], ["c", "d"], ["a", "e"], ["e", "f"], ["f", "c"],
     ["f", "g"], ["g", "d"], ["e", "h"], ["h", "i"], ["i", "f"], ["i", "j"], ["j", "g"],
 ] as const;
+
+/** Look up a point by id. Pure, so it lives at module scope rather than being rebuilt per render. */
+const at = (id: string) => CONSTELLATION.find((node) => node.id === id)!;
 
 const NODE_BG = {
     hot: "bg-warmth-hot",
@@ -175,8 +178,6 @@ const NODE_BG = {
  */
 export async function LivingNetworkSurface() {
     const t = await getTranslations("CommonHome");
-    const at = (id: string) => CONSTELLATION.find((n) => n.id === id)!;
-
     return (
         <div className="relative aspect-[4/3] w-full" aria-hidden>
             <div className="absolute inset-0 rounded-[2rem] bg-brand/5 blur-3xl" />
@@ -203,7 +204,7 @@ export async function LivingNetworkSurface() {
                         top: `${node.y}%`,
                         ["--drift-x" as string]: node.dx,
                         ["--drift-y" as string]: node.dy,
-                        animationDuration: `${node.dur}s`,
+                        ["--ambient-scale" as string]: node.pace,
                     }}
                 >
                     <span
@@ -221,6 +222,9 @@ export async function LivingNetworkSurface() {
     );
 }
 
+/** The decay curve itself: warmth falls away faster the longer contact has stopped. */
+const curveY = (x: number) => 34 + 118 * x * x;
+
 /** Where each logged interaction sits on the decay curve, newest last. */
 const DECAY_MARKS = [0.06, 0.19, 0.35, 0.52, 0.78] as const;
 
@@ -233,8 +237,6 @@ const DECAY_MARKS = [0.06, 0.19, 0.35, 0.52, 0.78] as const;
  */
 export async function WarmthDecaySurface() {
     const t = await getTranslations("CommonHome");
-    const curveY = (x: number) => 34 + 118 * x * x;
-
     return (
         <SurfaceFrame label={t("surfaceWarmthLabel")} sampleLabel={t("surfaceSample")}>
             <div className="px-5 pt-6 pb-4">
