@@ -54,6 +54,9 @@ public class ManagedObjectService implements ApplicationRunner {
         "^([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?:\\.([a-z0-9]{1,10}))?$"
     );
 
+    @Autowired
+    private ooo.klae.connex.backend.mappers.AttachmentScanMapper attachmentScanMapper;
+
     private final ObjectStorage objectStorage;
     private final ObjectDeletionRetryQueue deletionRetryQueue;
     private final UploadPolicy uploadPolicy;
@@ -319,15 +322,14 @@ public class ManagedObjectService implements ApplicationRunner {
     }
 
     /**
-     * Stores one legacy attachment without malware scanning during the slice-1 migration window.
-     * Slice 2 backfills these bytes; this is the sole permitted unscanned attachment-byte writer.
+     * Stores one legacy attachment only after a clean malware scan.
      */
     StoredBinary storeMigratedAttachment(
             int workspaceId,
             int attachmentId,
             String legacyUrl,
-            InspectedUpload upload) {
-        Objects.requireNonNull(upload, "upload");
+            ScannedUpload scanned) {
+        InspectedUpload upload = Objects.requireNonNull(scanned, "scanned").upload();
         uploadPolicy.validateLength(upload.contentLength());
         byte[] content = upload.content();
         byte[] checksum = upload.sha256();
@@ -455,6 +457,7 @@ public class ManagedObjectService implements ApplicationRunner {
     }
 
     public ManagedContent openAttachment(int workspaceId, Attachment attachment) {
+        requireCleanAttachment(workspaceId, attachment.getUrl());
         String token = requireManagedToken(attachment.getUrl(), ATTACHMENT_URL_PREFIX);
         StoredObject object = getForResponse(attachmentKey(workspaceId, token));
         return new ManagedContent(
@@ -462,6 +465,12 @@ public class ManagedObjectService implements ApplicationRunner {
             uploadPolicy.safeResponseContentType(attachment.getContentType()),
             uploadPolicy.safeResponseFileName(attachment.getFileName())
         );
+    }
+
+    private void requireCleanAttachment(int workspaceId, String url) {
+        if (attachmentScanMapper == null || !attachmentScanMapper.isReadable(workspaceId, url)) {
+            throw new ResourceNotFoundException("Stored file was not found");
+        }
     }
 
     public ManagedContent openPersonImage(
@@ -507,6 +516,7 @@ public class ManagedObjectService implements ApplicationRunner {
         }
         String expectedKey = switch (reference.kind()) {
             case "attachment" -> {
+                requireCleanAttachment(workspaceId, reference.persistedUrl());
                 if (reference.ownerId() != 0) {
                     throw new IllegalStateException("Attachment object owner is invalid");
                 }
@@ -834,7 +844,7 @@ public class ManagedObjectService implements ApplicationRunner {
         }
     }
 
-    private Optional<String> managedAttachmentKey(int workspaceId, String url) {
+    Optional<String> managedAttachmentKey(int workspaceId, String url) {
         return managedToken(url, ATTACHMENT_URL_PREFIX).map(token -> attachmentKey(workspaceId, token));
     }
 

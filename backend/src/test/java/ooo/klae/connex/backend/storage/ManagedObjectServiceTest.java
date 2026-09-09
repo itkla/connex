@@ -67,6 +67,7 @@ import tools.jackson.databind.ObjectMapper;
 @ExtendWith(MockitoExtension.class)
 class ManagedObjectServiceTest {
     @Mock ObjectStorage objectStorage;
+    @Mock ooo.klae.connex.backend.mappers.AttachmentScanMapper attachmentScanMapper;
     @Mock ObjectDeletionRetryQueue deletionRetryQueue;
     @Mock WorkspaceObjectStorageQuotaService quotaService;
     @Mock UserImageReplacementAdmissionService userImageAdmissionService;
@@ -91,6 +92,8 @@ class ManagedObjectServiceTest {
             .when(deletionRetryQueue.prepareUserWrite(anyString()))
             .thenAnswer(invocation -> new ObjectDeletionTombstone(
                 tombstoneIds.getAndIncrement(), invocation.getArgument(0)));
+        org.mockito.Mockito.lenient().when(attachmentScanMapper.isReadable(anyInt(), anyString()))
+            .thenReturn(true);
         service = service(properties);
     }
 
@@ -115,7 +118,7 @@ class ManagedObjectServiceTest {
             uploadPolicy,
             new ImageDecodeAdmissionService(configuredProperties),
             imageValidationExecutor);
-        return new ManagedObjectService(
+        ManagedObjectService configuredService = new ManagedObjectService(
             objectStorage,
             deletionRetryQueue,
             uploadPolicy,
@@ -129,6 +132,9 @@ class ManagedObjectServiceTest {
             readinessNanoTime,
             task -> readinessTasks.add(task),
             () -> readinessSnapshotPublicationHook.run());
+        org.springframework.test.util.ReflectionTestUtils.setField(
+            configuredService, "attachmentScanMapper", attachmentScanMapper);
+        return configuredService;
     }
 
     /** Builds the real upload inspector used by document-artifact boundary tests. */
@@ -324,7 +330,7 @@ class ManagedObjectServiceTest {
     @Test
     void migrationKeysAreStableAcrossRetriesAndDistinctAcrossRecords() {
         byte[] bytes = "legacy attachment".getBytes(StandardCharsets.UTF_8);
-        InspectedUpload upload = inspected(bytes);
+        ScannedUpload upload = scanned(bytes);
 
         StoredBinary first = inTransaction(() -> service.storeMigratedAttachment(
             17, 23, "/attachments/person/legacy.pdf", upload));
@@ -347,7 +353,7 @@ class ManagedObjectServiceTest {
                 17,
                 23,
                 "/attachments/person/legacy.pdf",
-                inspected("legacy attachment".getBytes(StandardCharsets.UTF_8)));
+                scanned("legacy attachment".getBytes(StandardCharsets.UTF_8)));
 
             verify(deletionRetryQueue).prepareTenantWrite(
                 org.mockito.ArgumentMatchers.eq(17), anyString());
@@ -367,7 +373,7 @@ class ManagedObjectServiceTest {
                 17,
                 23,
                 "/attachments/person/legacy.pdf",
-                inspected("legacy attachment".getBytes(StandardCharsets.UTF_8)));
+                scanned("legacy attachment".getBytes(StandardCharsets.UTF_8)));
             String token = stored.url().substring(stored.url().lastIndexOf('/') + 1);
 
             verify(deletionRetryQueue).prepareTenantWrite(
@@ -391,7 +397,7 @@ class ManagedObjectServiceTest {
                 17,
                 23,
                 "/attachments/person/legacy.pdf",
-                inspected(bytes));
+                scanned(bytes));
 
             assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
             verify(deletionRetryQueue).cancelTenantInCurrentTransaction(
@@ -415,7 +421,7 @@ class ManagedObjectServiceTest {
                 17,
                 23,
                 "/attachments/person/legacy.pdf",
-                inspected(bytes));
+                scanned(bytes));
             String token = stored.url().substring(stored.url().lastIndexOf('/') + 1);
             String key = "workspaces/17/attachments/" + token;
 

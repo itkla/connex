@@ -15,6 +15,16 @@
     <result property="size" column="size"/>
     <result property="createdAt" column="created_at"/>
     <result property="updatedAt" column="updated_at"/>
+    <result property="scanState" column="scan_state"/>
+    <result property="scanEngine" column="scan_engine"/>
+    <result property="scanDatabaseVersion" column="scan_database_version"/>
+    <result property="scanSignature" column="scan_signature"/>
+    <result property="scannedAt" column="scanned_at"/>
+    <result property="scanExpiresAt" column="scan_expires_at"/>
+    <result property="scanAttempts" column="scan_attempts"/>
+    <result property="scanOwner" column="scan_owner"/>
+    <result property="scanLeaseUntil" column="scan_lease_until"/>
+    <result property="scanNextAttemptAt" column="scan_next_attempt_at"/>
     <association property="uploadedBy" javaType="User">
       <id property="id" column="uploaded_by_id"/>
       <result property="displayName" column="uploaded_by_name"/>
@@ -28,7 +38,9 @@
 
   <sql id="attachmentColumns">
     a.id, a.workspace_id, a.entity_type, a.entity_id, a.file_name, a.url, a.content_type, a.size,
-    a.uploaded_by_id, a.created_at, a.updated_at
+    a.uploaded_by_id, a.created_at, a.updated_at, a.scan_state, a.scan_engine,
+    a.scan_database_version, a.scan_signature, a.scanned_at, a.scan_expires_at, a.scan_attempts,
+    a.scan_owner, a.scan_lease_until, a.scan_next_attempt_at
   </sql>
 
   <sql id="attachmentColumnsWithUploader">
@@ -345,9 +357,10 @@
   </insert>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">
-    INSERT INTO attachment (workspace_id, entity_type, entity_id, file_name, url, content_type, size, uploaded_by_id)
+    INSERT INTO attachment (workspace_id, entity_type, entity_id, file_name, url, content_type, size, scan_state, scan_engine, scan_database_version, scan_signature, scanned_at, scan_expires_at, scan_attempts, uploaded_by_id)
     VALUES (
-      #{workspaceId}, #{entityType}, #{entityId}, #{fileName}, #{url}, #{contentType}, #{size},
+      #{workspaceId}, #{entityType}, #{entityId}, #{fileName}, #{url}, #{contentType}, #{size}, COALESCE(#{scanState}, 'pending'), #{scanEngine},
+      #{scanDatabaseVersion}, #{scanSignature}, #{scannedAt}, #{scanExpiresAt}, #{scanAttempts},
       <choose>
         <when test="uploadedBy != null">#{uploadedBy.id}</when>
         <otherwise>NULL</otherwise>

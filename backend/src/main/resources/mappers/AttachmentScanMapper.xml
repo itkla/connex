@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ooo.klae.connex.backend.mappers.AttachmentScanMapper">
+  <select id="getById" resultMap="ooo.klae.connex.backend.mappers.AttachmentMapper.AttachmentResult">
+    SELECT a.* FROM attachment a WHERE a.workspace_id = #{workspaceId} AND a.id = #{id}
+  </select>
+  <select id="lockById" resultMap="ooo.klae.connex.backend.mappers.AttachmentMapper.AttachmentResult">
+    SELECT a.* FROM attachment a WHERE a.workspace_id = #{workspaceId} AND a.id = #{id} FOR UPDATE
+  </select>
+  <select id="isReadable" resultType="boolean">
+    SELECT EXISTS(SELECT 1 FROM attachment WHERE workspace_id = #{workspaceId} AND url = #{url})
+      AND NOT EXISTS (
+        SELECT 1 FROM attachment WHERE workspace_id = #{workspaceId} AND url = #{url}
+          AND (scan_state != 'clean' OR scan_engine IS NULL OR scan_database_version IS NULL
+            OR scanned_at IS NULL OR scan_expires_at IS NULL OR scan_expires_at &lt;= UTC_TIMESTAMP(6)))
+  </select>
+  <update id="quarantine">
+    UPDATE attachment a JOIN attachment target
+      ON target.workspace_id = a.workspace_id AND target.url = a.url
+    SET a.scan_state = 'quarantined', a.scan_owner = NULL, a.scan_lease_until = NULL
+    WHERE target.workspace_id = #{workspaceId} AND target.id = #{id}
+  </update>
+  <update id="enqueue">
+    UPDATE attachment a JOIN attachment target
+      ON target.workspace_id = a.workspace_id AND target.url = a.url
+    SET a.scan_state = 'pending', a.scan_owner = NULL, a.scan_lease_until = NULL,
+      a.scan_next_attempt_at = UTC_TIMESTAMP(6)
+    WHERE target.workspace_id = #{workspaceId} AND target.id = #{id}
+  </update>
+  <select id="workspaceIdsWithDueTasks" resultType="int">
+    SELECT workspace_id FROM attachment
+    WHERE url LIKE '/api/attachments/content/%'
+    GROUP BY workspace_id
+    HAVING SUM((scan_state IN ('pending', 'error')
+      OR (scan_state = 'scanning' AND scan_lease_until &lt;= UTC_TIMESTAMP(6))
+      OR (scan_state = 'clean' AND (scan_expires_at IS NULL OR scan_expires_at &lt;= UTC_TIMESTAMP(6))))
+      AND (scan_next_attempt_at IS NULL OR scan_next_attempt_at &lt;= UTC_TIMESTAMP(6))) &gt; 0
+    ORDER BY COALESCE(MAX(scan_last_attempt_at), '1970-01-01'), workspace_id
+    LIMIT #{limit}
+  </select>
+  <select id="findDue" resultType="int">
+    SELECT MIN(id) FROM attachment
+    WHERE workspace_id = #{workspaceId} AND url LIKE '/api/attachments/content/%'
+    GROUP BY url
+    HAVING SUM(scan_state = 'quarantined') = 0
+      AND SUM(scan_state = 'scanning' AND scan_lease_until &gt; UTC_TIMESTAMP(6)) = 0
+      AND SUM((scan_state IN ('pending', 'error', 'scanning')
+        OR (scan_state = 'clean' AND (scan_expires_at IS NULL OR scan_expires_at &lt;= UTC_TIMESTAMP(6))))
+        AND (scan_next_attempt_at IS NULL OR scan_next_attempt_at &lt;= UTC_TIMESTAMP(6))) &gt; 0
+    ORDER BY MIN(COALESCE(scan_next_attempt_at, '1970-01-01')), MIN(id)
+    LIMIT #{limit}
+  </select>
+  <select id="isClaimable" resultType="boolean">
+    SELECT COUNT(*) &gt; 0 AND SUM(scan_state = 'quarantined') = 0
+      AND SUM(scan_state = 'scanning' AND scan_lease_until &gt; UTC_TIMESTAMP(6)) = 0
+      AND SUM((scan_state IN ('pending', 'error', 'scanning')
+        OR (scan_state = 'clean' AND (scan_expires_at IS NULL OR scan_expires_at &lt;= UTC_TIMESTAMP(6))))
+        AND (scan_next_attempt_at IS NULL OR scan_next_attempt_at &lt;= UTC_TIMESTAMP(6))) &gt; 0
+    FROM attachment WHERE workspace_id = #{workspaceId} AND url = #{url}
+  </select>
+  <update id="claim">
+    UPDATE attachment SET scan_state = 'scanning', scan_owner = #{owner},
+      scan_lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 5 MINUTE),
+      scan_attempts = scan_attempts + 1, scan_last_attempt_at = UTC_TIMESTAMP(6)
+    WHERE workspace_id = #{workspaceId} AND url = #{url}
+  </update>
+  <update id="decide">
+    UPDATE attachment SET scan_state = #{state}, scan_engine = 'ClamAV',
+      scan_database_version = #{version}, scan_signature = #{signature},
+      scanned_at = UTC_TIMESTAMP(6), scan_expires_at = #{expiresAt},
+      scan_owner = NULL, scan_lease_until = NULL, scan_next_attempt_at = NULL
+    WHERE workspace_id = #{workspaceId} AND url = #{url} AND scan_owner = #{owner}
+      AND scan_state = 'scanning' AND scan_lease_until &gt; UTC_TIMESTAMP(6)
+  </update>
+  <update id="retry">
+    UPDATE attachment SET scan_state = 'error', scan_owner = NULL, scan_lease_until = NULL,
+      scan_next_attempt_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL LEAST(3600, 30 * scan_attempts) SECOND)
+    WHERE workspace_id = #{workspaceId} AND url = #{url} AND scan_owner = #{owner}
+      AND scan_state = 'scanning'
+  </update>
+  <update id="recordLegacyClean">
+    UPDATE attachment SET scan_state = 'clean', scan_engine = 'ClamAV',
+      scan_database_version = #{report.databaseVersion}, scan_signature = #{report.signature},
+      scanned_at = UTC_TIMESTAMP(6), scan_expires_at = #{expiresAt},
+      scan_attempts = scan_attempts + 1, scan_last_attempt_at = UTC_TIMESTAMP(6), scan_owner = NULL, scan_lease_until = NULL,
+      scan_next_attempt_at = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+</mapper>
