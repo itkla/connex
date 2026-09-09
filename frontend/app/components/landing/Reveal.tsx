@@ -27,6 +27,12 @@ const SAFETY_MS = 4000;
  * every section below the first screen permanently blank; that is a real failure mode, not a
  * theoretical one, and it is why this does not use `whileInView`.
  *
+ * The timer is a deliberate trade-off, not a free win: a reader who sits on the hero longer than
+ * {@link SAFETY_MS} without scrolling loses the reveal on the sections below. The first scroll
+ * cancels it, because a scroll proves the observer is live, so the cost lands only on readers who
+ * never scroll — for whom the animation was never going to play anyway. Content staying visible is
+ * worth more than the animation.
+ *
  * Reduced motion is pinned in CSS (`motion-reduce:` beats the inline style `motion` writes), not
  * read from `useReducedMotion()`, which returns `null` on a server-rendered first paint. It must be
  * `transform-none`: Tailwind's `translate-y-0` compiles to the `translate` property, which composes
