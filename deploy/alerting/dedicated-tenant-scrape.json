@@ -1,0 +1,33 @@
+{
+  "job_name": "connex-dedicated-tenant",
+  "scheme": "https",
+  "metrics_path": "/api/metrics",
+  "authorization": {
+    "type": "Bearer",
+    "credentials_file": "/etc/connex-alerting/metrics-token"
+  },
+  "static_configs": [
+    {
+      "targets": [
+        "dedicated-backend.example.invalid"
+      ]
+    }
+  ],
+  "relabel_configs": [
+    {
+      "target_label": "job",
+      "replacement": "connex"
+    }
+  ],
+  "metric_relabel_configs": [
+    {
+      "source_labels": [
+        "__name__",
+        "scope"
+      ],
+      "regex": "connex_security_authentication_failures_total;unattributed",
+      "target_label": "scope",
+      "replacement": "workspace:42"
+    }
+  ]
+}
