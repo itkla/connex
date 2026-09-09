@@ -12,7 +12,7 @@ import {
     IntroPathSurface,
     RadarHorizonSurface,
     RelationMapSurface,
-    WarmthReadingSurface,
+    WarmthDecaySurface,
 } from "@/app/components/landing/ProductSurfaces";
 import Reveal from "@/app/components/landing/Reveal";
 import type { Metadata } from "next";
@@ -155,7 +155,7 @@ export default async function Home() {
                                 <p className={sectionBody}>{t("evidenceBody")}</p>
                             </Reveal>
                             <Reveal delay={0.08}>
-                                <WarmthReadingSurface />
+                                <WarmthDecaySurface />
                             </Reveal>
                         </div>
                     </section>
