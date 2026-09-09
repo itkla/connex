@@ -91,8 +91,8 @@
     "radarBody": "Radar is the only place your cooling relationships, at-risk deals and unmade introductions share an axis. Not three dashboards. One deadline.",
     "mapHeading": "The network you built, on one screen",
     "mapBody": "Connex maps every person, company and connection your team has earned. Solid ties are interactions you logged. Dashed ties are inferred, and Connex always says which is which.",
-    "signalsHeading": "Three detectors, one queue",
-    "signalsBody": "Cooling relationships, deals losing momentum, introductions nobody asked for. Three separate engines, sorted into a single list by what will cost you soonest.",
+    "signalsHeading": "The list, in the order that matters",
+    "signalsBody": "Radar ranks what it finds by when it starts costing you, and every row carries the one move worth making next.",
     "surfaceRadarLabel": "Radar",
     "surfaceHorizonBand_overdue": "Overdue",
     "surfaceHorizonBand_week": "This week",
@@ -104,12 +104,7 @@
     "surfaceWarmthAlt": "A curve falling from hot to cold as time passes, with logged interactions marked along it.",
     "surfaceWarmthAxisStart": "Last contact",
     "surfaceWarmthAxisEnd": "Today",
-    "surfaceFieldLabel": "How the board is built",
-    "surfaceFieldAlt": "Three streams of signals on the left — relationships, deals and introductions — merging into a single ordered list on the right.",
-    "surfaceFieldStream_relationships": "Relationships",
-    "surfaceFieldStream_deals": "Deals",
-    "surfaceFieldStream_intros": "Introductions",
-    "surfaceFieldQueue": "Radar"
+    "surfaceQueueLabel": "Radar"
   },
   "CommonSidebar": {
     "ariaPrimarySidebar": "Primary sidebar",

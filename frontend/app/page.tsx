@@ -10,7 +10,7 @@ import LandingFaq from "@/app/components/landing/LandingFaq";
 import {
     RadarHorizonSurface,
     RelationMapSurface,
-    SignalFieldSurface,
+    RadarQueueSurface,
     WarmthDecaySurface,
 } from "@/app/components/landing/ProductSurfaces";
 import Reveal from "@/app/components/landing/Reveal";
@@ -137,7 +137,7 @@ export default async function Home() {
                                 <p className={sectionBody}>{t("signalsBody")}</p>
                             </Reveal>
                             <Reveal delay={0.08}>
-                                <SignalFieldSurface />
+                                <RadarQueueSurface />
                             </Reveal>
                         </div>
                     </section>

@@ -253,103 +253,60 @@ export async function WarmthDecaySurface() {
     );
 }
 
-/** SVG fill per Radar tone, mirroring `RADAR_MARK_FILL` for a canvas that cannot use utilities. */
-const TONE_FILL = {
-    hot: "[fill:var(--warmth-hot)]",
-    warm: "[fill:var(--warmth-warm)]",
-    cool: "[fill:var(--warmth-cool)]",
-    cold: "[fill:var(--warmth-cold)]",
-    high: "[fill:var(--risk-high)]",
-    medium: "[fill:var(--risk-medium)]",
-    low: "[fill:var(--risk-low)]",
-    path: "[fill:var(--chart-5)]",
-} as const;
-
 /**
- * One Radar glyph, drawn in SVG at an arbitrary size.
+ * Radar's ranked list, distilled.
  *
- * Shape follows `RADAR_MARK_SHAPE`: a circle is a cooling relationship, a diamond a deal at risk,
- * a square an intro path.
+ * `RadarSignalCard` renders each row as a mark, a subject, a one-line reading beneath it, and a
+ * single action on the right, divided by hairlines. This keeps that anatomy and drops the words:
+ * the shape of the row is what carries the meaning — every signal is typed, explained and
+ * actionable — so the page shows it instead of asserting it.
+ *
+ * Bar widths are uneven on purpose. A tidy stack of equal blocks reads as a loading skeleton;
+ * ragged ones read as content.
  */
-function Glyph({ x, y, size, tone }: { x: number; y: number; size: number; tone: keyof typeof TONE_FILL }) {
-    const family = TONE_FAMILY[tone];
-    const half = size / 2;
-    if (family === "relationship_decay") {
-        return <circle cx={x} cy={y} r={half} className={TONE_FILL[tone]} />;
-    }
-    return (
-        <rect
-            x={x - half}
-            y={y - half}
-            width={size}
-            height={size}
-            rx={size * 0.18}
-            className={TONE_FILL[tone]}
-            transform={family === "deal_risk" ? `rotate(45 ${x} ${y})` : undefined}
-        />
-    );
-}
-
-/** Three detectors, each feeding the same queue. Row order matches the legend copy. */
-const STREAMS = [
-    { key: "relationships", y: 44, tones: ["cold", "cool", "cool", "warm"] },
-    { key: "deals", y: 120, tones: ["high", "medium", "low"] },
-    { key: "intros", y: 196, tones: ["path", "path", "path"] },
+const QUEUE_ROWS = [
+    { tone: "cold", subject: 62, reading: 84 },
+    { tone: "high", subject: 47, reading: 71 },
+    { tone: "cool", subject: 68, reading: 55 },
+    { tone: "medium", subject: 40, reading: 78 },
+    { tone: "path", subject: 57, reading: 63 },
 ] as const;
 
-/** The merged queue, ordered by urgency rather than by family. */
-const QUEUE = ["cold", "high", "cool", "medium", "path", "cool", "low", "warm"] as const;
-
 /**
- * Three detectors converging on one board.
+ * The queue as the product draws it, minus the copy.
  *
- * This is the claim `radarHorizon.ts` makes — that the deadline is "the one fact no other surface
- * in the product can assemble across families" — drawn as a mechanism rather than a legend: three
- * separate streams enter on the left, and one ordered queue leaves on the right.
+ * Sizes track `RadarSignalCard`: the mark sits against the first line, the subject bar carries the
+ * weight of a semibold heading, and the reading bar below it is lighter and longer.
  */
-export async function SignalFieldSurface() {
+export async function RadarQueueSurface() {
     const t = await getTranslations("CommonHome");
 
     return (
-        <SurfaceFrame label={t("surfaceFieldLabel")} sampleLabel={t("surfaceSample")}>
-            <svg viewBox="0 0 420 250" className="w-full" role="img" aria-label={t("surfaceFieldAlt")}>
-                {STREAMS.map((stream) => (
-                    <path
-                        key={`flow-${stream.key}`}
-                        d={`M 150 ${stream.y} C 215 ${stream.y}, 225 125, 288 125`}
-                        fill="none"
-                        strokeWidth="1.25"
-                        className="stroke-border"
-                    />
+        <SurfaceFrame label={t("surfaceQueueLabel")} sampleLabel={t("surfaceSample")}>
+            <ul aria-hidden className="divide-y divide-border/60">
+                {QUEUE_ROWS.map((row, i) => (
+                    <li
+                        key={row.tone + i}
+                        className={cn(
+                            "flex items-start gap-3 px-4 py-4 sm:px-5",
+                            i === 0 && "bg-muted/40",
+                        )}
+                    >
+                        <RadarMark tone={row.tone} family={TONE_FAMILY[row.tone]} className="mt-1" />
+                        <div className="min-w-0 flex-1 space-y-2">
+                            <div
+                                className="h-2.5 rounded-full bg-foreground/22"
+                                style={{ width: `${row.subject}%` }}
+                            />
+                            <div
+                                className="h-2 rounded-full bg-foreground/10"
+                                style={{ width: `${row.reading}%` }}
+                            />
+                        </div>
+                        <div className="mt-0.5 h-6 w-16 shrink-0 rounded-full bg-brand-light sm:w-20" />
+                    </li>
                 ))}
-
-                {STREAMS.map((stream) => (
-                    <g key={stream.key}>
-                        {stream.tones.map((tone, i) => (
-                            <Glyph key={`${stream.key}-${i}`} x={40 + i * 26} y={stream.y} size={15} tone={tone} />
-                        ))}
-                        <text x="30" y={stream.y - 24} className="fill-muted-foreground text-[11px]">
-                            {t(`surfaceFieldStream_${stream.key}`)}
-                        </text>
-                    </g>
-                ))}
-
-                <rect
-                    x="296"
-                    y="26"
-                    width="96"
-                    height="198"
-                    rx="14"
-                    className="fill-muted/50 stroke-border"
-                    strokeWidth="1"
-                />
-                <text x="344" y="17" textAnchor="middle" className="fill-muted-foreground text-[11px]">
-                    {t("surfaceFieldQueue")}
-                </text>
-                {QUEUE.map((tone, i) => (
-                    <Glyph key={`queue-${i}`} x={344} y={50 + i * 23} size={15} tone={tone} />
-                ))}
-            </svg>
+            </ul>
         </SurfaceFrame>
     );
 }
