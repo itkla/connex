@@ -8,6 +8,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.net.CookieManager;
+import java.net.CookiePolicy;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
@@ -19,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
@@ -28,6 +36,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.test.context.transaction.TestTransaction;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -36,15 +45,18 @@ import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.CsrfBootstrapDto;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.AttachmentScanMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import tools.jackson.databind.ObjectMapper;
 
 /** Exercises every quarantine endpoint through authentication, permission, tenant and SQL boundaries. */
-@SpringBootTest
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = {"server.address=127.0.0.1", "server.servlet.session.cookie.secure=false"})
 @Transactional
 @UnenrolledPrivilegedFixture
 class AttachmentQuarantineIntegrationTest {
@@ -61,6 +73,8 @@ class AttachmentQuarantineIntegrationTest {
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private TenantContext tenantContext;
+    @Autowired private ObjectMapper objectMapper;
+    @LocalServerPort private int port;
 
     private MockMvc mockMvc;
 
@@ -181,6 +195,101 @@ class AttachmentQuarantineIntegrationTest {
             workspace.getId()));
         perform("release", sibling, session);
         assertEquals("pending", scanMapper.getById(workspace.getId(), sibling.getId()).getScanState());
+    }
+
+    @Test
+    void realHttpRequestsEnforceSessionsCsrfAndWorkspaceBeforeQuarantineLifecycle() throws Exception {
+        Organization organization = organization();
+        Workspace owning = workspace(organization);
+        Workspace foreign = workspace(organization);
+        User admin = member(owning, "admin");
+        Attachment attachment = attachment(owning);
+        TestTransaction.flagForCommit();
+        TestTransaction.end();
+
+        try (HttpClient authenticated = httpClient(); HttpClient anonymous = httpClient()) {
+            HttpResponse<String> login = authenticated.send(
+                HttpRequest.newBuilder(httpUri("/api/auth/login"))
+                    .timeout(Duration.ofSeconds(15))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(
+                        java.util.Map.of("username", admin.getUsername(), "password", PASSWORD))))
+                    .build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, login.statusCode());
+            CsrfBootstrapDto authenticatedCsrf = httpCsrf(authenticated);
+            CsrfBootstrapDto anonymousCsrf = httpCsrf(anonymous);
+            try {
+                for (String action : ACTIONS) {
+                    String method = "delete".equals(action) ? "DELETE" : "POST";
+                    String path = "/api/attachments/" + attachment.getId() + "/"
+                        + ("delete".equals(action) ? "quarantine" : action);
+                    assertEquals(401, http(anonymous, method, path, owning.getId(), anonymousCsrf).statusCode());
+                    assertEquals(403, http(authenticated, method, path, foreign.getId(), authenticatedCsrf).statusCode());
+                    assertEquals(403, authenticated.send(HttpRequest.newBuilder(httpUri(path))
+                        .timeout(Duration.ofSeconds(15))
+                        .header("X-Workspace-Id", Integer.toString(owning.getId()))
+                        .method(method, HttpRequest.BodyPublishers.noBody()).build(),
+                        HttpResponse.BodyHandlers.ofString()).statusCode());
+                }
+                assertEquals(0, eventCount(attachment));
+                for (String action : List.of("quarantine", "rescan", "quarantine", "release", "quarantine")) {
+                    HttpResponse<String> response = http(authenticated, "POST",
+                        "/api/attachments/" + attachment.getId() + "/" + action,
+                        owning.getId(), authenticatedCsrf);
+                    assertEquals(204, response.statusCode());
+                    assertEquals("", response.body());
+                    assertEquals("quarantine".equals(action) ? "quarantined" : "pending",
+                        scanMapper.getById(owning.getId(), attachment.getId()).getScanState());
+                }
+                assertEquals(204, http(authenticated, "DELETE",
+                    "/api/attachments/" + attachment.getId() + "/quarantine",
+                    owning.getId(), authenticatedCsrf).statusCode());
+                assertNull(scanMapper.getById(owning.getId(), attachment.getId()));
+                assertEquals(6, eventCount(attachment));
+            } finally {
+                http(authenticated, "POST", "/api/auth/logout", owning.getId(), authenticatedCsrf);
+                http(anonymous, "POST", "/api/auth/logout", owning.getId(), anonymousCsrf);
+            }
+        } finally {
+            clearContext();
+            jdbc.update("DELETE FROM SPRING_SESSION WHERE PRINCIPAL_NAME = ?", admin.getUsername());
+            for (Workspace fixture : List.of(owning, foreign)) {
+                jdbc.update("DELETE FROM object_deletion_queue WHERE workspace_id = ?", fixture.getId());
+                jdbc.update("DELETE FROM attachment WHERE workspace_id = ?", fixture.getId());
+                jdbc.update("DELETE FROM workspace_member WHERE workspace_id = ?", fixture.getId());
+                jdbc.update("DELETE FROM workspace WHERE id = ?", fixture.getId());
+            }
+            jdbc.update("DELETE FROM app_user WHERE id = ?", admin.getId());
+            jdbc.update("DELETE FROM organization WHERE id = ?", organization.getId());
+        }
+    }
+
+    private HttpClient httpClient() {
+        return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5))
+            .cookieHandler(new CookieManager(null, CookiePolicy.ACCEPT_ALL)).build();
+    }
+
+    private URI httpUri(String path) {
+        return URI.create("http://127.0.0.1:" + port + path);
+    }
+
+    private CsrfBootstrapDto httpCsrf(HttpClient client) throws Exception {
+        HttpResponse<String> response = client.send(HttpRequest.newBuilder(httpUri("/api/auth/csrf"))
+            .timeout(Duration.ofSeconds(15)).GET().build(), HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, response.statusCode());
+        CsrfBootstrapDto csrf = objectMapper.readValue(response.body(), CsrfBootstrapDto.class);
+        assertNotNull(csrf);
+        assertNotNull(csrf.headerName());
+        assertNotNull(csrf.token());
+        return csrf;
+    }
+
+    private HttpResponse<String> http(HttpClient client, String method, String path,
+            int workspaceId, CsrfBootstrapDto csrf) throws Exception {
+        return client.send(HttpRequest.newBuilder(httpUri(path)).timeout(Duration.ofSeconds(15))
+            .header("X-Workspace-Id", Integer.toString(workspaceId))
+            .header(csrf.headerName(), csrf.token())
+            .method(method, HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private void perform(String action, Attachment attachment, MockHttpSession session) throws Exception {
