@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 
 ROOT = Path(__file__).resolve().parent
@@ -37,10 +38,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--prometheus', required=True)
     parser.add_argument('--alertmanager', required=True)
+    parser.add_argument('--fixtures', type=Path, default=ROOT / 'fixtures',
+                        help='Metric fixtures; pass backend/build/security-alerts for Java emission evidence')
     args = parser.parse_args()
-    fixture_dir = ROOT.parents[1] / 'backend/build/security-alerts'
+    fixture_dir = args.fixtures
     baseline = (fixture_dir / 'baseline.prom').read_text()
     triggered = (fixture_dir / 'triggered.prom').read_text()
+    print('FIXTURES ' + str(fixture_dir.resolve()), flush=True)
     received = queue.Queue()
     phase = threading.Event()
     prom_port, alert_port = free_port(), free_port()
@@ -112,6 +116,20 @@ def main():
                     ]:
                         log = stack.enter_context(open(work / f'{name}.log', 'w'))
                         processes.append(subprocess.Popen(command, stdout=log, stderr=log))
+                    readiness_deadline = time.monotonic() + 180
+                    for monitoring_port in (prom_port, alert_port):
+                        while True:
+                            assert all(p.poll() is None for p in processes), 'Monitoring process exited'
+                            assert time.monotonic() < readiness_deadline, 'Monitoring readiness timed out'
+                            try:
+                                with urllib.request.urlopen(
+                                        f'http://127.0.0.1:{monitoring_port}/-/ready', timeout=2) as response:
+                                    if response.status == 200:
+                                        break
+                            except (urllib.error.URLError, TimeoutError):
+                                pass
+                            time.sleep(1)
+                    print('READY Prometheus and Alertmanager', flush=True)
                     started = time.monotonic()
                     while time.monotonic() - started < 35:
                         assert all(p.poll() is None for p in processes), 'Monitoring process exited'

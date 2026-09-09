@@ -1303,7 +1303,8 @@ are the upstream contracts. The local drill uses Prometheus 3.14.0 and Alertmana
 ### Re-run the notification drill
 
 Use installed, operator-approved `prometheus`, `promtool`, `alertmanager`, and `amtool` binaries.
-First run the focused backend tests to generate real Micrometer baseline/triggered exposition
+The standalone operator drill defaults to bundled synthetic metric fixtures. For application-emission
+evidence, first run the focused backend tests to generate real Micrometer baseline/triggered exposition
 files in `backend/build/security-alerts/`. On the shared lane host:
 
 ```bash
@@ -1320,8 +1321,14 @@ promtool test rules deploy/alerting/rules-test.yml
 promtool check config --syntax-only deploy/alerting/prometheus.yml
 amtool check-config deploy/alerting/alertmanager.yml
 flock /home/dev/worktrees/stack.lock python3 deploy/alerting/notification-smoke.py \
-  --prometheus /absolute/path/to/prometheus --alertmanager /absolute/path/to/alertmanager
+  --prometheus /absolute/path/to/prometheus --alertmanager /absolute/path/to/alertmanager \
+  --fixtures backend/build/security-alerts
 ```
+
+Operators without a Java build can omit `--fixtures` and run the same smoke against bundled
+`deploy/alerting/fixtures/` samples. The printed `FIXTURES` path distinguishes synthetic-rule delivery
+evidence from Java-generated emission evidence. This standalone mode proves the monitoring chain,
+not the application producers.
 
 Inspect JUnit XML for zero failures, errors and skipped tests in the selected classes. The smoke
 runs disposable Prometheus and Alertmanager processes on loopback with the **unchanged** rules and

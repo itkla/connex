@@ -1,0 +1,4 @@
+# TYPE connex_security_authentication_failures_total counter
+connex_security_authentication_failures_total{scope="workspace:7"} 0.0
+connex_security_authentication_failures_total{scope="workspace:8"} 0.0
+connex_security_authentication_failures_total{scope="unattributed"} 0.0
