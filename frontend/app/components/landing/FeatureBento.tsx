@@ -68,9 +68,9 @@ function IntroPathMotif() {
 function HistoryMotif({ nowLabel }: { nowLabel: string }) {
     return (
         <div className="mt-7 flex max-w-sm items-center gap-2 text-xs" aria-hidden="true">
-            <span className="rounded-md border border-border bg-muted px-2.5 py-1 text-muted-foreground">2019</span>
+            <span className="rounded-md border border-border bg-muted px-2.5 py-1 text-foreground/75">2019</span>
             <span className="h-px flex-1 bg-border" />
-            <span className="rounded-md border border-border bg-muted px-2.5 py-1 text-muted-foreground">2023</span>
+            <span className="rounded-md border border-border bg-muted px-2.5 py-1 text-foreground/75">2023</span>
             <span className="h-px flex-1 bg-brand" />
             <span className="rounded-md bg-brand px-2.5 py-1 font-medium text-brand-foreground">{nowLabel}</span>
         </div>
