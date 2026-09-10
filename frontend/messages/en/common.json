@@ -58,7 +58,7 @@
     "faqHeading": "Questions worth asking",
     "faqDataQ": "Where does our data live?",
     "faqDataA": "Each workspace is isolated. Connex runs on our cloud, or entirely on your own infrastructure, where you control the environment and the encryption keys.",
-    "faqAppiQ": "Is Connex ready for APPI?",
+    "faqAppiQ": "How do you handle privacy law?",
     "faqAppiA": "Disclosure, retention, and data requests each have a dedicated surface, a record, and an evidence trail. Independent legal review is still under way, so we would rather show you the mechanisms than claim a certification we do not yet hold.",
     "faqAiQ": "Does the AI change our records?",
     "faqAiA": "Changes to existing records wait for you to apply them. While answering, Connex may add an activity, task, note, or tag straight away. It always says so, and those are reversible.",
@@ -149,7 +149,10 @@
     "mockDealBadge": "At risk",
     "mockDealFactor_overdue": "Close date overdue by 12 days",
     "mockDealFactor_quiet": "No interaction logged in 5 weeks",
-    "mockDealFactor_cold": "Key contact cooling"
+    "mockDealFactor_cold": "Key contact cooling",
+    "mockSeverity_high": "High",
+    "mockSeverity_medium": "Medium",
+    "mockDealAction": "Schedule a follow-up"
   },
   "CommonSidebar": {
     "ariaPrimarySidebar": "Primary sidebar",

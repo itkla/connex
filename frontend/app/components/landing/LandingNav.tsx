@@ -31,7 +31,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
 
     const links = [
         { href: "#features", label: t("navFeatures"), route: false },
-        { href: "#evidence", label: t("navWorkflow"), route: false },
+        { href: "#workflow", label: t("navWorkflow"), route: false },
         { href: "/docs", label: t("navDocs"), route: true },
     ];
 

@@ -192,9 +192,17 @@ export async function DealRiskMock() {
                         <span className="min-w-0 flex-1 truncate text-xs text-foreground">
                             {t(`mockDealFactor_${factor.key}`)}
                         </span>
+                        <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
+                            {t(`mockSeverity_${factor.severity}`)}
+                        </span>
                     </li>
                 ))}
             </ul>
+            <div className="border-t border-border px-4 py-3">
+                <span className="inline-flex items-center rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground">
+                    {t("mockDealAction")}
+                </span>
+            </div>
         </Pane>
     );
 }
