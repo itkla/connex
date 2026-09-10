@@ -8,6 +8,12 @@ import LandingFooter from "@/app/components/landing/LandingFooter";
 import FujiSpine from "@/app/components/landing/FujiSpine";
 import FeatureBento from "@/app/components/landing/FeatureBento";
 import LandingFaq from "@/app/components/landing/LandingFaq";
+import LandingTheme from "@/app/components/landing/LandingTheme";
+import {
+    ContactRecordMock,
+    DealRiskMock,
+    RadarBoardMock,
+} from "@/app/components/landing/ProductMocks";
 import Reveal from "@/app/components/landing/Reveal";
 import type { Metadata } from "next";
 
@@ -21,10 +27,10 @@ const btnGhost =
 const HALO = "[text-shadow:0_0_10px_var(--background),0_0_22px_var(--background)]";
 
 const sectionHeading =
-    `font-display text-[clamp(2rem,4vw,3.25rem)] leading-[1.15] tracking-[-0.01em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase] ${HALO}`;
+    "font-display text-[clamp(2rem,4vw,3.25rem)] leading-[1.15] tracking-[-0.01em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase]";
 
 const sectionBody =
-    `mt-5 max-w-[62ch] text-lg leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase] ${HALO}`;
+    "mt-5 max-w-[62ch] text-lg leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]";
 
 /** The four warmth bands, coldest to hottest, drawn from the shared domain tokens. */
 const WARMTH_BANDS = [
@@ -70,6 +76,7 @@ export default async function Home() {
     const ctaLabel = user ? t("ctaDashboard") : t("ctaGetStarted");
 
     return (
+        <LandingTheme>
         <div className="font-body relative min-h-screen bg-background text-foreground">
             <FujiSpine />
 
@@ -83,7 +90,7 @@ export default async function Home() {
                 <LandingNav ctaHref={ctaHref} ctaLabel={ctaLabel} />
 
                 <main id="main">
-                    <section className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-7xl flex-col justify-center px-6 pt-12 pb-24 lg:px-8 lg:pt-20">
+                    <section className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-7xl flex-col justify-center px-6 pt-12 pb-12 lg:px-8 lg:pt-20 lg:pb-16">
                         <div className="max-w-3xl">
                             <h1
                                 className={`connex-rise font-display text-[clamp(2.25rem,5vw,4rem)] leading-[1.08] tracking-[-0.015em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase] ${HALO}`}
@@ -112,8 +119,17 @@ export default async function Home() {
                         </div>
                     </section>
 
+                    <section aria-label={t("mockRadarLabel")}>
+                        <div className="mx-auto max-w-5xl px-6 pb-16 sm:pb-20 lg:px-8">
+                            <Reveal>
+                                <RadarBoardMock />
+                            </Reveal>
+                        </div>
+                    </section>
+
                     <section id="warmth" className="scroll-mt-20">
-                        <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-32">
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-24">
+                            <div>
                             <Reveal className="max-w-3xl">
                                 <h2 className={sectionHeading}>{t("warmthHeading")}</h2>
                                 <p className={sectionBody}>{t("warmthBody")}</p>
@@ -125,7 +141,7 @@ export default async function Home() {
                                         <span key={band.key} className={`h-2 flex-1 rounded-full ${band.token}`} />
                                     ))}
                                 </div>
-                                <div className={`mt-3 flex gap-1.5 text-sm text-muted-foreground ${HALO}`}>
+                                <div className="mt-3 flex gap-1.5 text-sm text-muted-foreground">
                                     {WARMTH_BANDS.map((band) => (
                                         <span key={band.key} className="flex-1 text-center">
                                             {t(`warmthBand_${band.key}`)}
@@ -133,20 +149,27 @@ export default async function Home() {
                                     ))}
                                 </div>
                             </Reveal>
-                        </div>
-                    </section>
-
-                    <section>
-                        <div className="mx-auto flex max-w-7xl justify-end px-6 py-16 sm:py-20 lg:px-8 lg:py-32">
-                            <Reveal className="max-w-2xl lg:text-right">
-                                <h2 className={sectionHeading}>{t("radarHeading")}</h2>
-                                <p className={`${sectionBody} lg:ml-auto`}>{t("radarBody")}</p>
+                            </div>
+                            <Reveal delay={0.12}>
+                                <ContactRecordMock />
                             </Reveal>
                         </div>
                     </section>
 
                     <section>
-                        <div className="mx-auto max-w-3xl px-6 py-24 text-center lg:px-8 lg:py-32">
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-24">
+                            <Reveal className="lg:order-2">
+                                <h2 className={sectionHeading}>{t("radarHeading")}</h2>
+                                <p className={sectionBody}>{t("radarBody")}</p>
+                            </Reveal>
+                            <Reveal delay={0.08} className="lg:order-1">
+                                <DealRiskMock />
+                            </Reveal>
+                        </div>
+                    </section>
+
+                    <section>
+                        <div className="mx-auto max-w-3xl px-6 py-24 text-center lg:px-8 lg:py-24">
                             <Reveal>
                                 <h2 className={sectionHeading}>{t("introHeading")}</h2>
                                 <p className={`${sectionBody} mx-auto`}>{t("introBody")}</p>
@@ -155,7 +178,7 @@ export default async function Home() {
                     </section>
 
                     <section id="features" className="scroll-mt-20">
-                        <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-32">
+                        <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-24">
                             <Reveal className="max-w-2xl">
                                 <h2 className={sectionHeading}>{t("bentoHeading")}</h2>
                             </Reveal>
@@ -164,7 +187,7 @@ export default async function Home() {
                     </section>
 
                     <section id="workflow" className="scroll-mt-20">
-                        <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-32">
+                        <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-24">
                             <Reveal className="max-w-2xl">
                                 <h2 className={sectionHeading}>{t("stepsHeading")}</h2>
                             </Reveal>
@@ -192,7 +215,7 @@ export default async function Home() {
                     </section>
 
                     <section>
-                        <div className="mx-auto grid max-w-7xl gap-x-16 gap-y-8 px-6 py-16 sm:py-20 lg:grid-cols-[0.85fr_1.15fr] lg:px-8 lg:py-32">
+                        <div className="mx-auto grid max-w-7xl gap-x-16 gap-y-8 px-6 py-16 sm:py-20 lg:grid-cols-[0.85fr_1.15fr] lg:px-8 lg:py-24">
                             <Reveal>
                                 <h2 className={`${sectionHeading} lg:sticky lg:top-28`}>{t("faqHeading")}</h2>
                             </Reveal>
@@ -225,5 +248,6 @@ export default async function Home() {
                 <LandingFooter />
             </div>
         </div>
+        </LandingTheme>
     );
 }
