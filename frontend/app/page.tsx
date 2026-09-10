@@ -10,7 +10,7 @@ import FeatureBento from "@/app/components/landing/FeatureBento";
 import LandingFaq from "@/app/components/landing/LandingFaq";
 import LandingTheme from "@/app/components/landing/LandingTheme";
 import {
-    ContactRecordMock,
+    CompanyRecordMock,
     DealRiskMock,
     RadarBoardMock,
 } from "@/app/components/landing/ProductMocks";
@@ -119,23 +119,33 @@ export default async function Home() {
                         </div>
                     </section>
 
-                    <section aria-label={t("mockRadarLabel")}>
-                        <div className="mx-auto max-w-5xl px-6 pb-16 sm:pb-20 lg:px-8">
+                    <section id="crm" className="scroll-mt-20">
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-24">
                             <Reveal>
-                                <RadarBoardMock />
+                                <h2 className={sectionHeading}>{t("crmHeading")}</h2>
+                                <p className={sectionBody}>{t("crmBody")}</p>
+                            </Reveal>
+                            <Reveal delay={0.08}>
+                                <CompanyRecordMock />
                             </Reveal>
                         </div>
                     </section>
 
                     <section id="warmth" className="scroll-mt-20">
-                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-24">
-                            <div>
+                        <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-24">
                             <Reveal className="max-w-3xl">
-                                <h2 className={sectionHeading}>{t("warmthHeading")}</h2>
-                                <p className={sectionBody}>{t("warmthBody")}</p>
+                                <h2 className={sectionHeading}>{t("signalHeading")}</h2>
+                                <p className={sectionBody}>{t("signalBody")}</p>
                             </Reveal>
-
-                            <Reveal delay={0.08} className="mt-12 max-w-md">
+                            <div className="mt-12 grid gap-6 lg:grid-cols-[1.35fr_1fr]">
+                                <Reveal delay={0.06}>
+                                    <RadarBoardMock />
+                                </Reveal>
+                                <Reveal delay={0.12}>
+                                    <DealRiskMock />
+                                </Reveal>
+                            </div>
+                            <Reveal delay={0.16} className="mt-10 max-w-md">
                                 <div className="flex gap-1.5" aria-hidden="true">
                                     {WARMTH_BANDS.map((band) => (
                                         <span key={band.key} className={`h-2 flex-1 rounded-full ${band.token}`} />
@@ -148,31 +158,6 @@ export default async function Home() {
                                         </span>
                                     ))}
                                 </div>
-                            </Reveal>
-                            </div>
-                            <Reveal delay={0.12}>
-                                <ContactRecordMock />
-                            </Reveal>
-                        </div>
-                    </section>
-
-                    <section>
-                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-24">
-                            <Reveal className="lg:order-2">
-                                <h2 className={sectionHeading}>{t("radarHeading")}</h2>
-                                <p className={sectionBody}>{t("radarBody")}</p>
-                            </Reveal>
-                            <Reveal delay={0.08} className="lg:order-1">
-                                <DealRiskMock />
-                            </Reveal>
-                        </div>
-                    </section>
-
-                    <section>
-                        <div className="mx-auto max-w-3xl px-6 py-24 text-center lg:px-8 lg:py-24">
-                            <Reveal>
-                                <h2 className={sectionHeading}>{t("introHeading")}</h2>
-                                <p className={`${sectionBody} mx-auto`}>{t("introBody")}</p>
                             </Reveal>
                         </div>
                     </section>
