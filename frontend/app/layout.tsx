@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter, Instrument_Serif, Noto_Sans_JP } from "next/font/google";
+import { Inter, Instrument_Serif, Noto_Sans_JP, Noto_Serif_JP } from "next/font/google";
 import { headers } from "next/headers";
 import { connection } from "next/server";
 import { NextIntlClientProvider } from "next-intl";
@@ -26,8 +26,17 @@ const instrumentSerif = Instrument_Serif({
 });
 
 const notoSansJP = Noto_Sans_JP({
-  weight: "400",
+  weight: ["400", "700"],
   variable: "--font-noto-sans-jp",
+  subsets: ["latin"],
+});
+
+// Japanese display face. `.font-display` used to fall back to the body sans, so a Japanese heading
+// and Japanese body copy were the same family at the same weight — English got a serif/sans
+// contrast that Japanese did not. This restores the pairing on both scripts.
+const notoSerifJP = Noto_Serif_JP({
+  weight: ["600"],
+  variable: "--font-noto-serif-jp",
   subsets: ["latin"],
 });
 
@@ -49,7 +58,7 @@ export default async function RootLayout({
     <html
       lang={locale}
       suppressHydrationWarning
-      className={`${inter.variable} ${instrumentSerif.variable} ${notoSansJP.variable} h-full antialiased`}
+      className={`${inter.variable} ${instrumentSerif.variable} ${notoSansJP.variable} ${notoSerifJP.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <ThemeProvider nonce={nonce}>
