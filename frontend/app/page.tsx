@@ -6,13 +6,14 @@ import { getPublicPageUserFromCookie } from "@/app/lib/api";
 import LandingNav from "@/app/components/landing/LandingNav";
 import LandingFooter from "@/app/components/landing/LandingFooter";
 import FujiSpine from "@/app/components/landing/FujiSpine";
+import FeatureBento from "@/app/components/landing/FeatureBento";
 import LandingFaq from "@/app/components/landing/LandingFaq";
+import LandingTheme from "@/app/components/landing/LandingTheme";
 import {
-    LivingNetworkSurface,
-    RadarQueueSurface,
-    RadarSweepSurface,
-    WarmthDecaySurface,
-} from "@/app/components/landing/ProductSurfaces";
+    ContactRecordMock,
+    DealRiskMock,
+    RadarBoardMock,
+} from "@/app/components/landing/ProductMocks";
 import Reveal from "@/app/components/landing/Reveal";
 import type { Metadata } from "next";
 
@@ -26,10 +27,21 @@ const btnGhost =
 const HALO = "[text-shadow:0_0_10px_var(--background),0_0_22px_var(--background)]";
 
 const sectionHeading =
-    `font-display text-[clamp(2rem,4vw,3.25rem)] leading-[1.15] tracking-[-0.01em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase] ${HALO}`;
+    "font-display text-[clamp(2rem,4vw,3.25rem)] leading-[1.15] tracking-[-0.01em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase]";
 
 const sectionBody =
-    `mt-5 max-w-[62ch] text-lg leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase] ${HALO}`;
+    "mt-5 max-w-[62ch] text-lg leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]";
+
+/** The four warmth bands, coldest to hottest, drawn from the shared domain tokens. */
+const WARMTH_BANDS = [
+    { key: "cold", token: "bg-warmth-cold" },
+    { key: "cool", token: "bg-warmth-cool" },
+    { key: "warm", token: "bg-warmth-warm" },
+    { key: "hot", token: "bg-warmth-hot" },
+] as const;
+
+/** The product loop, as three moves. Numbered because it genuinely is a sequence. */
+const STEPS = ["Capture", "Understand", "Act"] as const;
 
 /**
  * Localized metadata for the public landing page. Without this the page inherits
@@ -64,6 +76,7 @@ export default async function Home() {
     const ctaLabel = user ? t("ctaDashboard") : t("ctaGetStarted");
 
     return (
+        <LandingTheme>
         <div className="font-body relative min-h-screen bg-background text-foreground">
             <FujiSpine />
 
@@ -77,16 +90,16 @@ export default async function Home() {
                 <LandingNav ctaHref={ctaHref} ctaLabel={ctaLabel} />
 
                 <main id="main">
-                    <section className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-7xl flex-col justify-center px-6 pt-12 pb-24 lg:px-8 lg:pt-20">
+                    <section className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-7xl flex-col justify-center px-6 pt-12 pb-12 lg:px-8 lg:pt-20 lg:pb-16">
                         <div className="max-w-3xl">
                             <h1
-                                className={`connex-rise font-display text-[clamp(2.5rem,6.2vw,5rem)] leading-[1.04] tracking-[-0.022em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase] ${HALO}`}
+                                className={`connex-rise font-display text-[clamp(2.25rem,5vw,4rem)] leading-[1.08] tracking-[-0.015em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase] ${HALO}`}
                             >
                                 <span className="block">{t("heroHeadlineLead")}</span>
                                 <span className="block">{t("heroHeadlineRest")}</span>
                             </h1>
                             <p
-                                className={`connex-rise mt-8 max-w-[46ch] text-lg leading-relaxed text-muted-foreground text-pretty sm:text-xl [word-break:auto-phrase] ${HALO}`}
+                                className={`connex-rise mt-7 max-w-[46ch] text-lg leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase] ${HALO}`}
                                 style={{ animationDelay: "90ms" }}
                             >
                                 {t("heroSubtext")}
@@ -95,93 +108,114 @@ export default async function Home() {
                                 className="connex-rise mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center"
                                 style={{ animationDelay: "180ms" }}
                             >
-                                <a href="#features" className={btnPrimary}>
-                                    {t("heroCtaPrimary")}
+                                <Link href={ctaHref} className={btnPrimary}>
+                                    {ctaLabel}
                                     <ArrowRightIcon className="size-4" />
-                                </a>
-                                <Link href="/docs" className={btnGhost}>
-                                    {t("heroCtaSecondary")}
                                 </Link>
+                                <a href="#warmth" className={btnGhost}>
+                                    {t("heroSecondaryCta")}
+                                </a>
                             </div>
                         </div>
                     </section>
 
-                    <section id="features" className="relative isolate scroll-mt-20 overflow-x-clip">
-                        <div
-                            aria-hidden
-                            className="pointer-events-none absolute inset-x-0 top-1/4 -z-10 mx-auto h-[36rem] max-w-4xl rounded-full bg-brand/8 blur-[120px] dark:bg-brand/10"
-                        />
-                        <div className="mx-auto max-w-7xl px-6 py-20 sm:py-24 lg:px-8 lg:py-40">
-                            <Reveal className="mx-auto max-w-2xl text-center">
+                    <section aria-label={t("mockRadarLabel")}>
+                        <div className="mx-auto max-w-5xl px-6 pb-16 sm:pb-20 lg:px-8">
+                            <Reveal>
+                                <RadarBoardMock />
+                            </Reveal>
+                        </div>
+                    </section>
+
+                    <section id="warmth" className="scroll-mt-20">
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-24">
+                            <div>
+                            <Reveal className="max-w-3xl">
+                                <h2 className={sectionHeading}>{t("warmthHeading")}</h2>
+                                <p className={sectionBody}>{t("warmthBody")}</p>
+                            </Reveal>
+
+                            <Reveal delay={0.08} className="mt-12 max-w-md">
+                                <div className="flex gap-1.5" aria-hidden="true">
+                                    {WARMTH_BANDS.map((band) => (
+                                        <span key={band.key} className={`h-2 flex-1 rounded-full ${band.token}`} />
+                                    ))}
+                                </div>
+                                <div className="mt-3 flex gap-1.5 text-sm text-muted-foreground">
+                                    {WARMTH_BANDS.map((band) => (
+                                        <span key={band.key} className="flex-1 text-center">
+                                            {t(`warmthBand_${band.key}`)}
+                                        </span>
+                                    ))}
+                                </div>
+                            </Reveal>
+                            </div>
+                            <Reveal delay={0.12}>
+                                <ContactRecordMock />
+                            </Reveal>
+                        </div>
+                    </section>
+
+                    <section>
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-24">
+                            <Reveal className="lg:order-2">
                                 <h2 className={sectionHeading}>{t("radarHeading")}</h2>
-                                <p className={`${sectionBody} mx-auto`}>{t("radarBody")}</p>
+                                <p className={sectionBody}>{t("radarBody")}</p>
                             </Reveal>
-                            <Reveal delay={0.08} className="mt-16">
-                                <RadarSweepSurface />
-                            </Reveal>
-                        </div>
-                    </section>
-
-                    <section className="relative isolate scroll-mt-20 overflow-x-clip">
-                        <div
-                            aria-hidden
-                            className="pointer-events-none absolute top-1/4 -left-24 -z-10 size-[30rem] rounded-full bg-warmth-warm/8 blur-[110px] dark:bg-warmth-warm/10"
-                        />
-                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-[1.15fr_1fr] lg:gap-20 lg:px-8 lg:py-28">
-                            <Reveal>
-                                <LivingNetworkSurface />
-                            </Reveal>
-                            <Reveal delay={0.08}>
-                                <h2 className={sectionHeading}>{t("mapHeading")}</h2>
-                                <p className={sectionBody}>{t("mapBody")}</p>
-                            </Reveal>
-                        </div>
-                    </section>
-
-                    <section className="scroll-mt-20">
-                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-[1fr_1.1fr] lg:gap-20 lg:px-8 lg:py-28">
-                            <Reveal>
-                                <h2 className={sectionHeading}>{t("signalsHeading")}</h2>
-                                <p className={sectionBody}>{t("signalsBody")}</p>
-                            </Reveal>
-                            <Reveal delay={0.08}>
-                                <RadarQueueSurface />
-                            </Reveal>
-                        </div>
-                    </section>
-
-                    <section id="evidence" className="relative isolate scroll-mt-20 overflow-x-clip">
-                        <div
-                            aria-hidden
-                            className="pointer-events-none absolute top-1/3 -right-32 -z-10 size-[28rem] rounded-full bg-chart-5/8 blur-[110px] dark:bg-chart-5/10"
-                        />
-                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-28">
-                            <Reveal>
-                                <h2 className={sectionHeading}>{t("evidenceHeading")}</h2>
-                                <p className={sectionBody}>{t("evidenceBody")}</p>
-                            </Reveal>
-                            <Reveal delay={0.08}>
-                                <WarmthDecaySurface />
-                            </Reveal>
-                        </div>
-                    </section>
-
-
-                    <section>
-                        <div className="mx-auto grid max-w-7xl gap-x-16 gap-y-12 px-6 py-16 sm:gap-y-16 sm:py-20 md:grid-cols-2 lg:px-8 lg:py-32">
-                            <Reveal>
-                                <h2 className={sectionHeading}>{t("teamHeading")}</h2>
-                                <p className={sectionBody}>{t("teamBody")}</p>
-                            </Reveal>
-                            <Reveal delay={0.06}>
-                                <h2 className={sectionHeading}>{t("hostingHeading")}</h2>
-                                <p className={sectionBody}>{t("hostingBody")}</p>
+                            <Reveal delay={0.08} className="lg:order-1">
+                                <DealRiskMock />
                             </Reveal>
                         </div>
                     </section>
 
                     <section>
-                        <div className="mx-auto grid max-w-7xl gap-x-16 gap-y-8 px-6 py-16 sm:py-20 lg:grid-cols-[0.85fr_1.15fr] lg:px-8 lg:py-32">
+                        <div className="mx-auto max-w-3xl px-6 py-24 text-center lg:px-8 lg:py-24">
+                            <Reveal>
+                                <h2 className={sectionHeading}>{t("introHeading")}</h2>
+                                <p className={`${sectionBody} mx-auto`}>{t("introBody")}</p>
+                            </Reveal>
+                        </div>
+                    </section>
+
+                    <section id="features" className="scroll-mt-20">
+                        <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-24">
+                            <Reveal className="max-w-2xl">
+                                <h2 className={sectionHeading}>{t("bentoHeading")}</h2>
+                            </Reveal>
+                            <FeatureBento />
+                        </div>
+                    </section>
+
+                    <section id="workflow" className="scroll-mt-20">
+                        <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-24">
+                            <Reveal className="max-w-2xl">
+                                <h2 className={sectionHeading}>{t("stepsHeading")}</h2>
+                            </Reveal>
+                            <div className="mt-14 grid grid-cols-1 gap-x-10 gap-y-12 md:grid-cols-3">
+                                {STEPS.map((step, i) => (
+                                    <Reveal key={step} delay={i * 0.08}>
+                                        <div className="flex items-center gap-4">
+                                            <span className="font-display text-3xl text-brand-dark">
+                                                {String(i + 1).padStart(2, "0")}
+                                            </span>
+                                            <span className="h-px flex-1 bg-linear-to-r from-brand/50 to-transparent" />
+                                        </div>
+                                        <h3 className={`mt-5 text-xl font-semibold text-foreground ${HALO}`}>
+                                            {t(`step${step}Title`)}
+                                        </h3>
+                                        <p
+                                            className={`mt-2 text-[15px] leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase] ${HALO}`}
+                                        >
+                                            {t(`step${step}Body`)}
+                                        </p>
+                                    </Reveal>
+                                ))}
+                            </div>
+                        </div>
+                    </section>
+
+                    <section>
+                        <div className="mx-auto grid max-w-7xl gap-x-16 gap-y-8 px-6 py-16 sm:py-20 lg:grid-cols-[0.85fr_1.15fr] lg:px-8 lg:py-24">
                             <Reveal>
                                 <h2 className={`${sectionHeading} lg:sticky lg:top-28`}>{t("faqHeading")}</h2>
                             </Reveal>
@@ -192,24 +226,19 @@ export default async function Home() {
                     </section>
 
                     <section>
-                        <div className="mx-auto max-w-7xl px-6 pt-10 pb-20 sm:pt-16 sm:pb-24 lg:px-8 lg:pt-24 lg:pb-40">
-                            <Reveal>
-                                <div className="relative isolate overflow-hidden rounded-[2rem] border border-border bg-card px-8 py-16 text-center sm:px-12 lg:py-24">
-                                    <div
-                                        aria-hidden
-                                        className="pointer-events-none absolute -top-1/3 left-1/2 -z-10 size-[34rem] -translate-x-1/2 rounded-full bg-brand/12 blur-[100px] dark:bg-brand/15"
-                                    />
-                                    <h2 className={`${sectionHeading} mx-auto max-w-2xl`}>{t("ctaHeading")}</h2>
-                                    <p className={`${sectionBody} mx-auto`}>{t("ctaSubtext")}</p>
-                                    <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center">
-                                        <a href="#features" className={btnPrimary}>
-                                            {t("heroCtaPrimary")}
-                                            <ArrowRightIcon className="size-4" />
-                                        </a>
-                                        <Link href="/docs" className={btnGhost}>
-                                            {t("heroCtaSecondary")}
-                                        </Link>
-                                    </div>
+                        <div className="mx-auto max-w-7xl px-6 pt-12 pb-32 lg:px-8 lg:pb-48">
+                            <Reveal className="max-w-2xl">
+                                <h2
+                                    className={`font-display text-[clamp(2rem,4.5vw,3.5rem)] leading-[1.12] tracking-[-0.015em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase] ${HALO}`}
+                                >
+                                    {t("ctaHeading")}
+                                </h2>
+                                <p className={sectionBody}>{t("ctaSubtext")}</p>
+                                <div className="mt-10">
+                                    <Link href={ctaHref} className={btnPrimary}>
+                                        {ctaLabel}
+                                        <ArrowRightIcon className="size-4" />
+                                    </Link>
                                 </div>
                             </Reveal>
                         </div>
@@ -219,5 +248,6 @@ export default async function Home() {
                 <LandingFooter />
             </div>
         </div>
+        </LandingTheme>
     );
 }
