@@ -60,6 +60,92 @@ function WarmthChip({ band, label }: { band: "hot" | "warm" | "cool" | "cold"; l
     );
 }
 
+const COMPANY_CONTACTS = [
+    { key: "a", band: "warm" },
+    { key: "b", band: "cool" },
+    { key: "c", band: "cold" },
+] as const;
+
+const COMPANY_DEALS = [
+    { key: "a", stage: "won" },
+    { key: "b", stage: "open" },
+] as const;
+
+const STAGE_STYLE = {
+    won: "bg-brand-light text-foreground ring-brand/40",
+    open: "bg-muted text-foreground/75 ring-border",
+} as const;
+
+/**
+ * A company record: the CRM surface everything else hangs off.
+ *
+ * Connex is a CRM first — companies, contacts, deals, tasks, notes — and the relationship reading is
+ * an attribute of the people on the record, not a separate product. This pane exists so the page
+ * shows that ordering rather than asserting it.
+ */
+export async function CompanyRecordMock() {
+    const t = await getTranslations("CommonHome");
+
+    return (
+        <Pane label={t("mockCompanyLabel")} sampleLabel={t("mockSample")}>
+            <div className="flex items-start justify-between gap-3 px-4 py-3.5">
+                <div className="min-w-0">
+                    <p className="truncate text-[15px] font-semibold text-foreground">{t("mockCompanyName")}</p>
+                    <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{t("mockCompanyMeta")}</p>
+                </div>
+                <span className="shrink-0 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground">
+                    {t("mockCompanyAction")}
+                </span>
+            </div>
+
+            <div className="border-t border-border px-4 py-3">
+                <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                    {t("mockCompanyPeople")}
+                </p>
+                <ul className="mt-2.5 space-y-2">
+                    {COMPANY_CONTACTS.map((contact) => (
+                        <li key={contact.key} className="flex items-center gap-2.5">
+                            <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+                                {t(`mockCompanyContact_${contact.key}`)}
+                            </span>
+                            <WarmthChip band={contact.band} label={t(`warmthBand_${contact.band}`)} />
+                        </li>
+                    ))}
+                </ul>
+            </div>
+
+            <div className="border-t border-border px-4 py-3">
+                <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                    {t("mockCompanyDeals")}
+                </p>
+                <ul className="mt-2.5 space-y-2">
+                    {COMPANY_DEALS.map((deal) => (
+                        <li key={deal.key} className="flex items-center gap-2.5">
+                            <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+                                {t(`mockCompanyDeal_${deal.key}`)}
+                            </span>
+                            <span
+                                className={cn(
+                                    "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
+                                    STAGE_STYLE[deal.stage],
+                                )}
+                            >
+                                {t(`mockCompanyStage_${deal.stage}`)}
+                            </span>
+                        </li>
+                    ))}
+                </ul>
+            </div>
+
+            <div className="flex items-center gap-2.5 border-t border-border bg-muted/30 px-4 py-3">
+                <span className="size-1.5 shrink-0 rounded-full bg-brand" />
+                <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{t("mockCompanyTask")}</span>
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{t("mockCompanyTaskWhen")}</span>
+            </div>
+        </Pane>
+    );
+}
+
 const RADAR_ROWS = [
     { key: "a", tone: "cold", family: "relationship_decay", band: "cold" },
     { key: "b", tone: "high", family: "deal_risk", band: null },
@@ -104,56 +190,6 @@ export async function RadarBoardMock() {
                         </div>
                         <span className="mt-0.5 shrink-0 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground">
                             {t(`mockRadarAction_${row.key}`)}
-                        </span>
-                    </li>
-                ))}
-            </ul>
-        </Pane>
-    );
-}
-
-const TIMELINE = [
-    { key: "meeting", band: "warm" },
-    { key: "email", band: "warm" },
-    { key: "note", band: "cool" },
-] as const;
-
-/** A contact record: the reading, the employment history behind it, and the activity feed. */
-export async function ContactRecordMock() {
-    const t = await getTranslations("CommonHome");
-
-    return (
-        <Pane label={t("mockContactLabel")} sampleLabel={t("mockSample")}>
-            <div className="flex items-start justify-between gap-3 px-4 py-3.5">
-                <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-foreground">{t("mockContactName")}</p>
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">{t("mockContactRole")}</p>
-                </div>
-                <WarmthChip band="cool" label={t("warmthBand_cool")} />
-            </div>
-            <div className="border-t border-border px-4 py-3">
-                <p className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                    {t("mockContactHistoryHeading")}
-                </p>
-                <div className="mt-2 flex items-center gap-1.5 text-[11px]">
-                    <span className="rounded border border-border bg-muted px-1.5 py-0.5 text-foreground/75">
-                        {t("mockContactPrev")}
-                    </span>
-                    <span className="h-px flex-1 bg-border" />
-                    <span className="rounded border border-brand/40 bg-brand-light px-1.5 py-0.5 font-medium text-foreground">
-                        {t("mockContactNow")}
-                    </span>
-                </div>
-            </div>
-            <ul className="divide-y divide-border/70 border-t border-border">
-                {TIMELINE.map((row) => (
-                    <li key={row.key} className="flex items-center gap-2.5 px-4 py-2.5">
-                        <span className={cn("size-1.5 shrink-0 rounded-full", warmthDotClass(row.band))} />
-                        <span className="min-w-0 flex-1 truncate text-xs text-foreground">
-                            {t(`mockActivity_${row.key}`)}
-                        </span>
-                        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                            {t(`mockActivityWhen_${row.key}`)}
                         </span>
                     </li>
                 ))}

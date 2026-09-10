@@ -113,8 +113,8 @@ export default async function FeatureBento() {
         { key: "Radar", span: "sm:col-span-2 lg:col-span-5", motif: <RadarMotif /> },
         { key: "Intro", span: "sm:col-span-1 lg:col-span-5", motif: <IntroPathMotif /> },
         { key: "History", span: "sm:col-span-1 lg:col-span-7", motif: <HistoryMotif nowLabel={t("bentoHistoryNow")} /> },
-        { key: "Isolation", span: "sm:col-span-1 lg:col-span-4", motif: <IsolationMotif /> },
-        { key: "Audit", span: "sm:col-span-1 lg:col-span-8", motif: <AuditMotif /> },
+        { key: "Isolation", span: "sm:col-span-1 lg:col-span-6", motif: <IsolationMotif /> },
+        { key: "Audit", span: "sm:col-span-1 lg:col-span-6", motif: <AuditMotif /> },
     ];
 
     return (

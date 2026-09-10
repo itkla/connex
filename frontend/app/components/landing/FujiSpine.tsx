@@ -174,6 +174,11 @@ export default function FujiSpine() {
     const farPanX = useTransform(eased, [0, 0.7], [0, -250]);
     const terrainFade = useTransform(eased, [0, 0.13, 0.84, 0.95], [1, 0, 0, 1]);
 
+    // The line never disappears — it is the page's throughline — but at full strength it runs
+    // between the lines of body copy and the bloom halates into the letterforms. Through the
+    // content band it drops to a trace and returns for the closing composition.
+    const lineFade = useTransform(eased, [0, 0.16, 0.82, 0.94], [1, 0.32, 0.32, 1]);
+
     useEffect(() => {
         const path = measureRef.current;
         if (!path) return;
@@ -314,6 +319,7 @@ export default function FujiSpine() {
                         ))}
                     </motion.g>
 
+                    <motion.g style={{ opacity: lineFade }}>
                     <motion.path
                         d={SPINE}
                         style={{ pathLength }}
@@ -322,7 +328,7 @@ export default function FujiSpine() {
                         strokeLinejoin="round"
                         strokeLinecap="round"
                         filter="url(#fuji-bloom)"
-                        className="opacity-25 dark:opacity-55 motion-reduce:[stroke-dasharray:var(--spine-stop)_1]!"
+                        className="opacity-20 dark:opacity-24 motion-reduce:[stroke-dasharray:var(--spine-stop)_1]!"
                     />
 
                     <motion.path
@@ -341,6 +347,7 @@ export default function FujiSpine() {
                     ))}
 
                     {headPath ? <SpineHead head={headPath} progress={eased} /> : null}
+                    </motion.g>
                 </motion.g>
             </svg>
         </div>
