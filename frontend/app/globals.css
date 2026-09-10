@@ -476,7 +476,7 @@
   }
 
   .font-display {
-    font-family: var(--font-instrument-serif), var(--font-noto-sans-jp), Georgia, "Times New Roman", serif;
+    font-family: var(--font-instrument-serif), var(--font-noto-serif-jp), Georgia, "Times New Roman", serif;
   }
 
   .font-body {
