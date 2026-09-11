@@ -97,12 +97,12 @@ export function CustomerWorkspacePreview({ t }: { t: LandingTranslation }) {
     );
 }
 
-/** One annotated record teaches the relationship between the six CRM objects. */
+/** Explains how customer information connects without requiring sample context. */
 export function ConnectedRecordPreview({ t }: { t: LandingTranslation }) {
     return (
-        <figure className="mt-10 border-t border-border">
+        <div className="mt-10 border-t border-border">
             <div className="grid gap-8 py-8 md:grid-cols-[0.8fr_1.7fr] md:gap-16">
-                <div><BuildingOffice2Icon aria-hidden="true" className="mb-4 size-7 text-brand-dark dark:text-brand" /><p className="text-xl font-semibold">{t("sampleCompany")}</p><p className="mt-2 text-base leading-relaxed text-muted-foreground">{t("recordCompanyAnnotation")}</p></div>
+                <div><BuildingOffice2Icon aria-hidden="true" className="mb-4 size-7 text-brand-dark dark:text-brand" /><p className="text-xl font-semibold">{t("recordCompany")}</p><p className="mt-2 text-base leading-relaxed text-muted-foreground">{t("recordCompanyAnnotation")}</p></div>
                 <dl className="grid gap-x-10 gap-y-7 sm:grid-cols-2">
                     {(["Contacts", "Deal", "Activity", "NoteTask"] as const).map((kind) => <div key={kind}>
                         <dt className="font-semibold">{t(`record${kind}`)}</dt>
@@ -110,8 +110,7 @@ export function ConnectedRecordPreview({ t }: { t: LandingTranslation }) {
                     </div>)}
                 </dl>
             </div>
-            <SampleCaption t={t} />
-        </figure>
+        </div>
     );
 }
 
