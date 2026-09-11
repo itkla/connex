@@ -27,30 +27,47 @@ assert_dir_missing() {
     if [ ! -e "$2" ]; then ok "$1"; else fail "$1" "expected $2 to be pruned"; fi
 }
 
+# ctime cannot be set directly, and the reaper reads ctime because that is what a rename updates.
+# So age is exercised through CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS rather than by faking stamps,
+# and ordering is driven by mtime, which `find -printf '%T@'` sorts on.
 setup() {
-    local root="$1"
+    local root="$1" frontend_start="${2:-after}"
     rm -rf "$root"; mkdir -p "$root/staging/.staging/release-quarantine" "$root/proc/$$"
     local state="$root/staging/.staging" q="$root/staging/.staging/release-quarantine"
     printf '%s\n' "$DEPLOYED" > "$state/deployed-sha"
     printf '%s\n' "$ROLLBACK" > "$state/rollback-sha"
     printf '%s\t%s\n' "$DEPLOYED" "$$" > "$state/frontend-running"
-    # Frontend "started" one hour ago.
-    touch -d "@$(( $(date +%s) - 3600 ))" "$root/proc/$$"
-    for s in "$OLD_ONE" "$OLD_TWO" "$DEPLOYED" "$ROLLBACK"; do
-        mkdir -p "$q/$s"; printf 'x\n' > "$q/$s/file"
-        touch -d "@$(( $(date +%s) - 259200 ))" "$q/$s"   # 3 days old
+
+    local entry
+    for entry in "$OLD_ONE" "$OLD_TWO" "$DEPLOYED" "$ROLLBACK"; do
+        mkdir -p "$q/$entry"; printf 'x\n' > "$q/$entry/file"
     done
-    # Distinct mtimes: `sort -rn` is not stable, so equal timestamps would make which entry the
-    # keep-recent window retains a coin flip.
-    mkdir -p "$q/$KEEP_ONE"; touch -d "@$(( $(date +%s) - 200000 ))" "$q/$KEEP_ONE"
-    mkdir -p "$q/$KEEP_TWO"; touch -d "@$(( $(date +%s) - 210000 ))" "$q/$KEEP_TWO"
-    mkdir -p "$q/$YOUNG"; touch -d "@$(( $(date +%s) - 60 ))" "$q/$YOUNG"  # 1 minute old
+    mkdir -p "$q/$KEEP_ONE" "$q/$KEEP_TWO" "$q/$YOUNG"
+    # Distinct mtimes: `sort -rn` is not stable, so equal stamps would make which entry the
+    # keep-recent window retains a coin flip. Newest first: YOUNG, KEEP_ONE, KEEP_TWO, then the rest.
+    touch -d "@$(( $(date +%s) - 60 ))"     "$q/$YOUNG"
+    touch -d "@$(( $(date +%s) - 200000 ))" "$q/$KEEP_ONE"
+    touch -d "@$(( $(date +%s) - 210000 ))" "$q/$KEEP_TWO"
+    for entry in "$OLD_ONE" "$OLD_TWO" "$DEPLOYED" "$ROLLBACK"; do
+        touch -d "@$(( $(date +%s) - 259200 ))" "$q/$entry"
+    done
+
+    if [ "$frontend_start" = "after" ]; then
+        # Frontend restarted after the trees were quarantined: they are reclaimable.
+        sleep 1; touch "$root/proc/$$"
+    else
+        # Frontend predates the quarantine, so it may still hold those trees.
+        touch -d "@$(( $(date +%s) - 3600 ))" "$root/proc/$$"
+    fi
 }
 
 run() {
     local root="$1"; shift
     CONNEX_STAGING_DIR="$root/staging" PROC_ROOT="$root/proc" \
-        CONNEX_STAGING_PRUNE_KEEP_RECENT=2 bash "$PRUNE" "$@"
+        CONNEX_STAGING_PRUNE_KEEP_RECENT=2 \
+        CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS="${MIN_AGE:-0}" \
+        CONNEX_DEPLOY_LOCK_FILE="$root/deploy.lock" \
+        bash "$PRUNE" "$@"
 }
 
 main() {
@@ -76,12 +93,15 @@ main() {
     assert_dir_exists newest_kept_entry_survives "$q/$KEEP_ONE"
     assert_dir_missing older_kept_entry_is_pruned "$q/$KEEP_TWO"
 
-    # A frontend that started before an entry was quarantined may still hold it, so that entry
-    # must survive even though it is old enough.
-    setup "$root"
-    touch -d "@$(( $(date +%s) - 864000 ))" "$root/proc/$$"
+    # A frontend that started before an entry was quarantined may still hold it.
+    setup "$root" before
     run "$root" > "$root/recent.log" 2>&1 || fail recent_frontend_exits_zero "$(tail -3 "$root/recent.log")"
     assert_dir_exists entry_newer_than_frontend_survives "$q/$OLD_ONE"
+
+    # Nothing below the minimum age is a candidate, however idle it looks.
+    setup "$root"
+    MIN_AGE=999999 run "$root" > "$root/age.log" 2>&1 || fail age_gate_exits_zero "$(tail -3 "$root/age.log")"
+    assert_dir_exists age_gate_keeps_everything "$q/$OLD_ONE"
 
     # No readable frontend marker means the reaper cannot prove anything: refuse.
     setup "$root"; rm -f "$root/staging/.staging/frontend-running"
@@ -91,6 +111,22 @@ main() {
         ok refuses_without_frontend_evidence
     fi
     assert_dir_exists refusal_keeps_everything "$q/$OLD_ONE"
+
+    # A tree any live process still references must survive, whatever its age says.
+    setup "$root"
+    ln -sfn "$q/$OLD_ONE" "$root/proc/$$/cwd"
+    run "$root" > "$root/inuse.log" 2>&1 || fail in_use_exits_zero "$(tail -3 "$root/inuse.log")"
+    assert_dir_exists referenced_tree_survives "$q/$OLD_ONE"
+    rm -f "$root/proc/$$/cwd"
+
+    # A mistyped flag must never be read as "delete for real".
+    setup "$root"
+    if run "$root" --dryrun > "$root/badarg.log" 2>&1; then
+        fail unknown_argument_is_rejected "expected non-zero exit"
+    else
+        ok unknown_argument_is_rejected
+    fi
+    assert_dir_exists unknown_argument_removes_nothing "$q/$OLD_ONE"
 
     rm -rf "$root"
     [ "$FAILURES" -eq 0 ] || { printf '\n%s failing assertion(s)\n' "$FAILURES" >&2; return 1; }

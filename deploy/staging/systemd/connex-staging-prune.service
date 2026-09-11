@@ -1,10 +1,10 @@
 [Unit]
 Description=Connex Staging Quarantine Prune
 Documentation=https://github.com/itkla/connex/blob/main/deploy/staging/connex-staging-prune.sh
-# Never run while a deploy is mid-flight: the deploy moves trees into quarantine, and the reaper
-# should only ever see settled state.
+# Deliberately no Conflicts= on the deploy service: that would *stop* an in-flight deploy rather
+# than yield to it. The prune takes the deploy's own lock non-blocking instead, and exits quietly
+# when a deploy holds it.
 After=connex-staging-deploy.service
-Conflicts=connex-staging-deploy.service
 
 [Service]
 Type=oneshot
