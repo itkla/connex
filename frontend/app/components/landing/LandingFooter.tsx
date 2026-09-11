@@ -24,7 +24,7 @@ export default async function LandingFooter() {
 
                     <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:gap-12">
                         <nav aria-label={t("footerNavProduct")} className="flex flex-col gap-3 text-sm">
-                            <Link href="/#features" className="text-muted-foreground transition-colors hover:text-foreground">
+                            <Link href="/#product" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navFeatures")}
                             </Link>
                             <Link href="/#workflow" className="text-muted-foreground transition-colors hover:text-foreground">
