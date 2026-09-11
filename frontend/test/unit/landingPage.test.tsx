@@ -32,16 +32,33 @@ vi.mock("@/app/components/landing/LandingFooter", () => ({ default: () => null }
 let container: HTMLDivElement;
 let root: Root;
 let fetchSpy: ReturnType<typeof vi.fn>;
+let reducedMotion: boolean;
+let pageHidden: boolean;
+let motionListeners: Set<() => void>;
+let notifyIntersection: (visible: boolean, ratio?: number) => void;
 
 beforeEach(() => {
     session.signedIn = false;
     session.locale = "en";
+    reducedMotion = true;
+    pageHidden = false;
+    motionListeners = new Set();
+    notifyIntersection = () => undefined;
     fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     Object.defineProperty(window, "matchMedia", { configurable: true, value: (query: string) => ({
-        matches: true, media: query, addListener: () => undefined, removeListener: () => undefined,
-        addEventListener: () => undefined, removeEventListener: () => undefined,
+        get matches() { return reducedMotion; }, media: query, addListener: () => undefined, removeListener: () => undefined,
+        addEventListener: (_: string, listener: () => void) => motionListeners.add(listener),
+        removeEventListener: (_: string, listener: () => void) => motionListeners.delete(listener),
     }) });
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => pageHidden });
+    vi.stubGlobal("IntersectionObserver", class {
+        constructor(callback: (entries: { isIntersecting: boolean; intersectionRatio: number }[]) => void) {
+            notifyIntersection = (visible, ratio = visible ? 1 : 0) => callback([{ isIntersecting: visible, intersectionRatio: ratio }]);
+        }
+        observe() {}
+        disconnect() {}
+    });
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -50,6 +67,7 @@ beforeEach(() => {
 afterEach(async () => {
     await act(async () => root.unmount());
     container.remove();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
 });
 
@@ -63,7 +81,7 @@ function AskExample() {
 }
 
 function button(label: string) {
-    const result = Array.from(container.querySelectorAll("button")).find((item) => item.textContent === label);
+    const result = Array.from(container.querySelectorAll("button")).find((item) => item.getAttribute("aria-label") === label || item.textContent === label);
     if (!result) throw new Error(`Missing button: ${label}`);
     return result;
 }
@@ -80,6 +98,11 @@ describe.each(["en", "ja"] as const)("landing product story in %s", (locale) => 
         for (const id of ["main", "product", "features", "deploy", "workflow"]) expect(doc.getElementById(id)).not.toBeNull();
         expect(doc.querySelectorAll("h1")).toHaveLength(1);
         expect(doc.querySelectorAll("#features [data-sample-source]")).toHaveLength(2);
+        const conversation = doc.querySelector('[data-ask-phase="complete"]');
+        expect(conversation?.textContent).toContain(messages.askPrompt);
+        expect(conversation?.textContent).toContain(messages.askFinding);
+        expect(conversation?.querySelector("[inert]")).toBeNull();
+        expect(conversation?.querySelector("button")?.closest("[hidden]")).not.toBeNull();
         expect(doc.querySelector("noscript")?.textContent).toContain(messages.attention_risk_who);
         expect(doc.querySelector("noscript")?.textContent).toContain(messages.attention_introduction_who);
         for (const link of doc.querySelectorAll<HTMLAnchorElement>('a[href^="/docs/"]')) {
@@ -133,6 +156,92 @@ describe.each(["en", "ja"] as const)("landing product story in %s", (locale) => 
         }
         expect(fetchSpy).not.toHaveBeenCalled();
     });
+
+    it("plays the sample message and answer once, then leaves the sources usable", async () => {
+        vi.useFakeTimers();
+        reducedMotion = false;
+        const messages = locale === "en" ? en.CommonHome : ja.CommonHome;
+        await act(async () => root.render(localized(<AskExample />, locale)));
+        const conversation = container.querySelector("[data-ask-phase]");
+        await act(async () => notifyIntersection(true, 0.1));
+        expect(conversation?.getAttribute("data-ask-phase")).toBe("complete");
+        await act(async () => notifyIntersection(true));
+        expect(conversation?.getAttribute("data-ask-phase")).toBe("typing");
+        await act(async () => vi.advanceTimersByTime(800));
+        const typing = conversation?.querySelector('p.relative [aria-hidden="true"]')?.textContent;
+        expect(typing?.length).toBeGreaterThan(0);
+        expect(typing?.length).toBeLessThan(messages.askPrompt.length);
+        await act(async () => vi.advanceTimersByTime(800));
+        expect(conversation?.getAttribute("data-ask-phase")).toBe("thinking");
+        expect(conversation?.textContent).toContain(messages.askThinking);
+        await act(async () => vi.advanceTimersByTime(800));
+        expect(conversation?.getAttribute("data-ask-phase")).toBe("responding");
+        await act(async () => vi.advanceTimersByTime(1000));
+        expect(conversation?.getAttribute("data-ask-phase")).toBe("complete");
+        expect(conversation?.querySelector("[inert]")).toBeNull();
+        expect(vi.getTimerCount()).toBe(0);
+        const source = conversation?.querySelector<HTMLDetailsElement>('[data-sample-source="review"]');
+        await act(async () => source?.querySelector("summary")?.click());
+        expect(source?.open).toBe(true);
+        await act(async () => { notifyIntersection(false); notifyIntersection(true); });
+        expect(conversation?.getAttribute("data-ask-phase")).toBe("complete");
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+});
+
+it("resets a conversation when the locale changes during playback", async () => {
+    vi.useFakeTimers();
+    reducedMotion = false;
+    await act(async () => root.render(localized(<AskExample />, "en")));
+    await act(async () => notifyIntersection(true));
+    await act(async () => vi.advanceTimersByTime(400));
+    await act(async () => root.render(localized(<AskExample />, "ja")));
+    const conversation = container.querySelector("[data-ask-phase]");
+    expect(conversation?.getAttribute("data-ask-phase")).toBe("complete");
+    expect(conversation?.textContent).toContain(ja.CommonHome.askPrompt);
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => notifyIntersection(true));
+    await act(async () => vi.advanceTimersByTime(3400));
+    expect(conversation?.getAttribute("data-ask-phase")).toBe("complete");
+    expect(conversation?.textContent).toContain(ja.CommonHome.askFinding);
+});
+
+it("allows replay and immediate skip, and settles when reduced motion changes", async () => {
+    vi.useFakeTimers();
+    reducedMotion = false;
+    await act(async () => root.render(localized(<AskExample />, "en")));
+    const conversation = container.querySelector("[data-ask-phase]");
+    await act(async () => button(en.CommonHome.askReplay).click());
+    expect(conversation?.getAttribute("data-ask-phase")).toBe("typing");
+    await act(async () => button(en.CommonHome.askSkip).click());
+    expect(conversation?.getAttribute("data-ask-phase")).toBe("complete");
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => button(en.CommonHome.askReplay).click());
+    await act(async () => { reducedMotion = true; motionListeners.forEach((listener) => listener()); });
+    expect(conversation?.getAttribute("data-ask-phase")).toBe("complete");
+    expect(vi.getTimerCount()).toBe(0);
+    expect(button(en.CommonHome.askReplay).closest("[hidden]")).not.toBeNull();
+    await act(async () => { reducedMotion = false; motionListeners.forEach((listener) => listener()); notifyIntersection(true); });
+    expect(conversation?.getAttribute("data-ask-phase")).toBe("complete");
+});
+
+it("keeps reduced-motion playback static and cancels work on hiding or unmounting", async () => {
+    vi.useFakeTimers();
+    await act(async () => root.render(localized(<AskExample />, "en")));
+    const conversation = container.querySelector("[data-ask-phase]");
+    await act(async () => notifyIntersection(true));
+    expect(conversation?.getAttribute("data-ask-phase")).toBe("complete");
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => { reducedMotion = false; motionListeners.forEach((listener) => listener()); });
+    await act(async () => button(en.CommonHome.askReplay).click());
+    await act(async () => { pageHidden = true; document.dispatchEvent(new Event("visibilitychange")); });
+    expect(conversation?.getAttribute("data-ask-phase")).toBe("complete");
+    expect(vi.getTimerCount()).toBe(0);
+    pageHidden = false;
+    await act(async () => button(en.CommonHome.askReplay).click());
+    await act(async () => root.render(null));
+    expect(vi.getTimerCount()).toBe(0);
+    expect(motionListeners.size).toBe(0);
 });
 
 it("keeps bilingual keys and dated risk evidence consistent", () => {

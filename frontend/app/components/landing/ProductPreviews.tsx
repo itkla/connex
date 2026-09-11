@@ -1,5 +1,6 @@
-import { ArrowRightIcon, BuildingOffice2Icon, CheckCircleIcon, ChevronDownIcon, DocumentTextIcon, UserGroupIcon } from "@heroicons/react/24/outline";
+import { ArrowRightIcon, BuildingOffice2Icon, CheckCircleIcon, ChevronDownIcon, UserGroupIcon } from "@heroicons/react/24/outline";
 import { cn } from "@/lib/utils";
+import { AskConnexConversation } from "./AskConnexConversation";
 import { SampleEvidence } from "./SampleEvidence";
 import { SAMPLE_WORKSPACE, type LandingTranslation } from "./sampleWorkspace";
 import styles from "./landing.module.css";
@@ -117,16 +118,16 @@ export function ConnectedRecordPreview({ t }: { t: LandingTranslation }) {
 export function AskConnexPreview({ t }: { t: LandingTranslation }) {
     return (
         <figure>
-            <div className="rounded-2xl bg-muted/50 p-5 sm:p-8 lg:p-10">
-                <div className="flex items-center justify-between gap-4 border-b border-border pb-5"><p className="text-lg font-semibold">{t("askBriefTitle")}</p><DocumentTextIcon aria-hidden="true" className="size-6 shrink-0 text-brand-dark dark:text-brand" /></div>
-                <p className="mt-6 text-sm text-muted-foreground">{t("askPrompt")}</p>
-                <p className="mt-4 text-xl font-medium leading-relaxed">{t("askFinding")}</p>
-                <ul className="mt-5 list-disc space-y-3 pl-5 text-base leading-relaxed text-muted-foreground"><li>{t("askFindingReview")}</li><li>{t("askFindingPricing")}</li></ul>
-                <div className="my-6 border-t border-border pt-5"><p className="font-semibold">{t("askNext")}</p><p className="mt-2 text-base leading-relaxed">{t("askNextBody")}</p></div>
-                <p className="mb-2 text-sm text-muted-foreground">{t("askSources")}</p>
-                <SampleEvidence source="review" t={t} />
-                <SampleEvidence source="pricing" t={t} />
-            </div>
+            <AskConnexConversation key={t("askPrompt")} title={t("askBriefTitle")} prompt={t("askPrompt")} userLabel={t("askYou")} assistantLabel={t("askName")} exampleLabel={t("askExample")} thinkingLabel={t("askThinking")} replayLabel={t("askReplay")} skipLabel={t("askSkip")}>
+                <p className={`${styles.askResponsePart} text-xl font-medium leading-relaxed`}>{t("askFinding")}</p>
+                <ul className={`${styles.askResponsePart} mt-5 list-disc space-y-3 pl-5 text-base leading-relaxed text-muted-foreground`}><li>{t("askFindingReview")}</li><li>{t("askFindingPricing")}</li></ul>
+                <div className={`${styles.askResponsePart} my-6 border-t border-border pt-5`}><p className="font-semibold">{t("askNext")}</p><p className="mt-2 text-base leading-relaxed">{t("askNextBody")}</p></div>
+                <div className={styles.askResponsePart}>
+                    <p className="mb-2 text-sm text-muted-foreground">{t("askSources")}</p>
+                    <SampleEvidence source="review" t={t} />
+                    <SampleEvidence source="pricing" t={t} />
+                </div>
+            </AskConnexConversation>
             <SampleCaption t={t} />
         </figure>
     );

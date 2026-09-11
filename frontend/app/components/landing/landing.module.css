@@ -60,7 +60,50 @@
     color: var(--color-brand-dark);
 }
 
+.askPrompt {
+    transition: transform var(--motion-standard) var(--ease-out);
+}
+
+.askConversation[data-ask-phase="typing"] .askPrompt {
+    transform: translateY(0.25rem);
+}
+
+.askConversation:is([data-ask-phase="typing"], [data-ask-phase="thinking"]) .askResponse {
+    visibility: hidden;
+}
+
+.askConversation[data-ask-phase="responding"] .askResponsePart {
+    animation: askResponseArrival var(--motion-standard) var(--ease-out) both;
+}
+
+.askConversation[data-ask-phase="responding"] .askResponsePart:nth-child(3) { animation-delay: var(--motion-standard); }
+.askConversation[data-ask-phase="responding"] .askResponsePart:nth-child(4) { animation-delay: calc(var(--motion-standard) * 2); }
+.askConversation[data-ask-phase="responding"] .askResponsePart:nth-child(5) { animation-delay: calc(var(--motion-standard) * 3); }
+
+.askThinking {
+    animation: askResponseArrival var(--motion-micro) var(--ease-out) both;
+}
+
+@keyframes askResponseArrival {
+    from { opacity: 0; transform: translateY(0.25rem); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
+    .askPrompt {
+        transition: none;
+        transform: none !important;
+    }
+
+    .askResponsePart,
+    .askThinking {
+        animation: none !important;
+    }
+
+    .askResponse {
+        visibility: visible !important;
+    }
+
     .landing :is(a, button, summary) {
         transition: none;
     }

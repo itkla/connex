@@ -102,6 +102,9 @@ Product previews use the dated fictional workspace in
 `frontend/app/components/landing/sampleWorkspace.ts`, never authenticated feature containers.
 Explanatory copy describes the product directly; fictional names belong inside labeled previews,
 without requiring visitors to follow a sample team's story.
+Ask Connex demonstrates a local message-and-response sequence once on arrival, with explicit replay
+and skip controls. It makes no AI requests, keeps the answer's space reserved, and shows the complete
+conversation with reduced motion or without JavaScript.
 Sample citations and practical questions use native `details` disclosures so their content remains
 reachable without JavaScript. The guided example uses the shared segmented control and includes a
 no-JavaScript fallback for the other examples. Only explicit selection changes its displayed example.
