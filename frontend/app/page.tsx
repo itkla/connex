@@ -72,6 +72,7 @@ export default async function Home() {
 
     const ctaHref = user ? "/dashboard" : "/auth/register";
     const ctaLabel = user ? t("ctaDashboard") : t("ctaGetStarted");
+    const heroCtaLabel = user ? t("ctaDashboard") : t("heroCtaPrimary");
 
     return (
         <LandingTheme>
@@ -112,7 +113,7 @@ export default async function Home() {
                                     style={{ animationDelay: "180ms" }}
                                 >
                                     <Link href={ctaHref} className={btnPrimary}>
-                                        {ctaLabel}
+                                        {heroCtaLabel}
                                         <ArrowRightIcon className="size-4" />
                                     </Link>
                                     <a href="#product" className={btnGhost}>
@@ -256,7 +257,7 @@ export default async function Home() {
                                 <p className={sectionBody}>{t("ctaSubtext")}</p>
                                 <div className="mt-10">
                                     <Link href={ctaHref} className={btnPrimary}>
-                                        {ctaLabel}
+                                        {heroCtaLabel}
                                         <ArrowRightIcon className="size-4" />
                                     </Link>
                                 </div>
