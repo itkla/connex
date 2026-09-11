@@ -31,13 +31,13 @@ function Pane({
     return (
         <div
             className={cn(
-                "overflow-hidden rounded-xl border border-border bg-card shadow-[0_20px_60px_-40px] shadow-foreground/40",
+                "overflow-hidden rounded-2xl border border-border bg-card shadow-[0_28px_80px_-48px] shadow-foreground/40",
                 className,
             )}
         >
-            <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-2.5">
+            <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-5 py-3">
                 <span className="text-[13px] font-medium text-foreground">{label}</span>
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-foreground/75">
+                <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground/75">
                     {sampleLabel}
                 </span>
             </div>
@@ -50,7 +50,7 @@ function WarmthChip({ band, label }: { band: "hot" | "warm" | "cool" | "cold"; l
     return (
         <span
             className={cn(
-                "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
+                "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
                 warmthSurfaceClasses(band),
             )}
         >
@@ -88,24 +88,24 @@ export async function CompanyRecordMock() {
 
     return (
         <Pane label={t("mockCompanyLabel")} sampleLabel={t("mockSample")}>
-            <div className="flex items-start justify-between gap-3 px-4 py-3.5">
+            <div className="flex items-start justify-between gap-3 px-5 py-4">
                 <div className="min-w-0">
-                    <p className="truncate text-[15px] font-semibold text-foreground">{t("mockCompanyName")}</p>
-                    <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{t("mockCompanyMeta")}</p>
+                    <p className="truncate text-base font-semibold text-foreground">{t("mockCompanyName")}</p>
+                    <p className="mt-0.5 truncate text-sm text-muted-foreground">{t("mockCompanyMeta")}</p>
                 </div>
                 <span className="shrink-0 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground">
                     {t("mockCompanyAction")}
                 </span>
             </div>
 
-            <div className="border-t border-border px-4 py-3">
-                <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            <div className="border-t border-border px-5 py-3.5">
+                <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                     {t("mockCompanyPeople")}
                 </p>
                 <ul className="mt-2.5 space-y-2">
                     {COMPANY_CONTACTS.map((contact) => (
                         <li key={contact.key} className="flex items-center gap-2.5">
-                            <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+                            <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                                 {t(`mockCompanyContact_${contact.key}`)}
                             </span>
                             <WarmthChip band={contact.band} label={t(`warmthBand_${contact.band}`)} />
@@ -114,19 +114,19 @@ export async function CompanyRecordMock() {
                 </ul>
             </div>
 
-            <div className="border-t border-border px-4 py-3">
-                <p className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            <div className="border-t border-border px-5 py-3.5">
+                <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
                     {t("mockCompanyDeals")}
                 </p>
                 <ul className="mt-2.5 space-y-2">
                     {COMPANY_DEALS.map((deal) => (
                         <li key={deal.key} className="flex items-center gap-2.5">
-                            <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+                            <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                                 {t(`mockCompanyDeal_${deal.key}`)}
                             </span>
                             <span
                                 className={cn(
-                                    "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
+                                    "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
                                     STAGE_STYLE[deal.stage],
                                 )}
                             >
@@ -137,9 +137,9 @@ export async function CompanyRecordMock() {
                 </ul>
             </div>
 
-            <div className="flex items-center gap-2.5 border-t border-border bg-muted/30 px-4 py-3">
+            <div className="flex items-center gap-2.5 border-t border-border bg-muted/30 px-5 py-3.5">
                 <span className="size-1.5 shrink-0 rounded-full bg-brand" />
-                <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{t("mockCompanyTask")}</span>
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground">{t("mockCompanyTask")}</span>
                 <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{t("mockCompanyTaskWhen")}</span>
             </div>
         </Pane>
@@ -165,7 +165,7 @@ export async function RadarBoardMock() {
                     <span
                         key={key}
                         className={cn(
-                            "rounded-md px-2 py-1 text-[11px] font-medium",
+                            "rounded-md px-2 py-1 text-xs font-medium",
                             i === 0 ? "bg-brand-light text-foreground" : "text-muted-foreground",
                         )}
                     >
@@ -175,20 +175,20 @@ export async function RadarBoardMock() {
             </div>
             <ul className="divide-y divide-border/70">
                 {RADAR_ROWS.map((row) => (
-                    <li key={row.key} className="flex items-start gap-3 px-4 py-3">
+                    <li key={row.key} className="flex items-start gap-3 px-5 py-3.5">
                         <RadarMark tone={row.tone} family={row.family} className="mt-1" />
                         <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
-                                <p className="truncate text-[13px] font-semibold text-foreground">
+                                <p className="truncate text-sm font-semibold text-foreground">
                                     {t(`mockRadarSubject_${row.key}`)}
                                 </p>
                                 {row.band ? <WarmthChip band={row.band} label={t(`warmthBand_${row.band}`)} /> : null}
                             </div>
-                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                            <p className="mt-0.5 truncate text-[13px] text-muted-foreground">
                                 {t(`mockRadarReading_${row.key}`)}
                             </p>
                         </div>
-                        <span className="mt-0.5 shrink-0 rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground">
+                        <span className="mt-0.5 shrink-0 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground">
                             {t(`mockRadarAction_${row.key}`)}
                         </span>
                     </li>
@@ -212,30 +212,30 @@ export async function DealRiskMock() {
 
     return (
         <Pane label={t("mockDealLabel")} sampleLabel={t("mockSample")}>
-            <div className="flex items-start justify-between gap-3 px-4 py-3.5">
+            <div className="flex items-start justify-between gap-3 px-5 py-4">
                 <div className="min-w-0">
                     <p className="truncate text-sm font-semibold text-foreground">{t("mockDealName")}</p>
                     <p className="mt-0.5 truncate text-xs tabular-nums text-muted-foreground">{t("mockDealMeta")}</p>
                 </div>
-                <span className="shrink-0 rounded-full bg-risk-high/15 px-2 py-0.5 text-[11px] font-medium text-foreground ring-1 ring-inset ring-risk-high/40">
+                <span className="shrink-0 rounded-full bg-risk-high/15 px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-inset ring-risk-high/40">
                     {t("mockDealBadge")}
                 </span>
             </div>
             <ul className="divide-y divide-border/70 border-t border-border">
                 {DEAL_FACTORS.map((factor) => (
-                    <li key={factor.key} className="flex items-center gap-2.5 px-4 py-2.5">
+                    <li key={factor.key} className="flex items-center gap-2.5 px-5 py-3">
                         <span className={cn("size-1.5 shrink-0 rounded-full", SEVERITY_DOT[factor.severity])} />
                         <span className="min-w-0 flex-1 truncate text-xs text-foreground">
                             {t(`mockDealFactor_${factor.key}`)}
                         </span>
-                        <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
+                        <span className="shrink-0 text-xs font-medium text-muted-foreground">
                             {t(`mockSeverity_${factor.severity}`)}
                         </span>
                     </li>
                 ))}
             </ul>
-            <div className="border-t border-border px-4 py-3">
-                <span className="inline-flex items-center rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground">
+            <div className="border-t border-border px-5 py-3.5">
+                <span className="inline-flex items-center rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground">
                     {t("mockDealAction")}
                 </span>
             </div>
@@ -261,20 +261,20 @@ export async function ActivityTimelineMock() {
 
     return (
         <Pane label={t("mockTimelineLabel")} sampleLabel={t("mockSample")}>
-            <div className="px-4 py-3.5">
-                <p className="truncate text-[15px] font-semibold text-foreground">{t("mockTimelineSubject")}</p>
-                <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{t("mockTimelineMeta")}</p>
+            <div className="px-5 py-4">
+                <p className="truncate text-base font-semibold text-foreground">{t("mockTimelineSubject")}</p>
+                <p className="mt-0.5 truncate text-sm text-muted-foreground">{t("mockTimelineMeta")}</p>
             </div>
             <ul className="divide-y divide-border/70 border-t border-border">
                 {ACTIVITY_ROWS.map((row) => (
-                    <li key={row.key} className="flex items-center gap-2.5 px-4 py-2.5">
+                    <li key={row.key} className="flex items-center gap-2.5 px-5 py-3">
                         <span
                             className={cn(
                                 "size-1.5 shrink-0 rounded-full",
                                 row.band ? warmthDotClass(row.band) : "bg-brand",
                             )}
                         />
-                        <span className="min-w-0 flex-1 text-[13px] text-foreground">
+                        <span className="min-w-0 flex-1 text-sm text-foreground">
                             {t(`mockTimeline_${row.key}`)}
                         </span>
                         <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
@@ -298,20 +298,20 @@ export async function HandoverMock() {
 
     return (
         <Pane label={t("mockHandoverLabel")} sampleLabel={t("mockSample")}>
-            <div className="flex items-center justify-between gap-3 px-4 py-3.5">
+            <div className="flex items-center justify-between gap-3 px-5 py-4">
                 <div className="min-w-0">
-                    <p className="truncate text-[15px] font-semibold text-foreground">{t("mockCompanyName")}</p>
-                    <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{t("mockHandoverOwner")}</p>
+                    <p className="truncate text-base font-semibold text-foreground">{t("mockCompanyName")}</p>
+                    <p className="mt-0.5 truncate text-sm text-muted-foreground">{t("mockHandoverOwner")}</p>
                 </div>
-                <span className="shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[11px] font-medium text-foreground ring-1 ring-inset ring-brand/40">
+                <span className="shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-xs font-medium text-foreground ring-1 ring-inset ring-brand/40">
                     {t("mockHandoverBadge")}
                 </span>
             </div>
             <ul className="divide-y divide-border/70 border-t border-border">
                 {(["history", "deals", "tasks"] as const).map((key) => (
-                    <li key={key} className="flex items-center gap-2.5 px-4 py-2.5">
+                    <li key={key} className="flex items-center gap-2.5 px-5 py-3">
                         <span className="size-1.5 shrink-0 rounded-full bg-brand" />
-                        <span className="min-w-0 flex-1 text-[13px] text-foreground">{t(`mockHandover_${key}`)}</span>
+                        <span className="min-w-0 flex-1 text-sm text-foreground">{t(`mockHandover_${key}`)}</span>
                     </li>
                 ))}
             </ul>

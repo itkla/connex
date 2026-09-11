@@ -28,10 +28,10 @@ const btnGhost =
 const HALO = "[text-shadow:0_0_10px_var(--background),0_0_22px_var(--background)]";
 
 const sectionHeading =
-    "font-display text-[clamp(2rem,4vw,3.25rem)] leading-[1.15] tracking-[-0.01em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase]";
+    "font-display text-[clamp(2.25rem,5vw,4.25rem)] leading-[1.06] tracking-[-0.018em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase]";
 
 const sectionBody =
-    "mt-5 max-w-[62ch] text-lg leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]";
+    "mt-6 max-w-[54ch] text-lg leading-relaxed text-muted-foreground text-pretty sm:text-xl [word-break:auto-phrase]";
 
 /** The product loop, as three moves. Numbered because it genuinely is a sequence. */
 const STEPS = ["Capture", "Understand", "Act"] as const;
@@ -89,14 +89,14 @@ export default async function Home() {
                 <LandingNav ctaHref={ctaHref} ctaLabel={ctaLabel} />
 
                 <main id="main">
-                    <section className="mx-auto max-w-7xl px-6 pt-10 pb-16 lg:px-8 lg:pt-16 lg:pb-24">
+                    <section className="mx-auto max-w-7xl px-6 pt-12 pb-20 lg:px-8 lg:pt-20 lg:pb-32">
                         <div className="grid items-center gap-12 lg:grid-cols-12 lg:gap-12">
-                            <div className="lg:col-span-5">
+                            <div className="lg:col-span-6">
                                 <p className={`connex-rise text-sm font-medium text-muted-foreground ${HALO}`}>
                                     {t("heroEyebrow")}
                                 </p>
                                 <h1
-                                    className={`connex-rise mt-4 font-display text-[clamp(2.25rem,4.6vw,3.75rem)] leading-[1.06] tracking-[-0.02em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase] ${HALO}`}
+                                    className={`connex-rise mt-4 font-display text-[clamp(2.5rem,5.8vw,4.9rem)] leading-[1.02] tracking-[-0.025em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase] ${HALO}`}
                                     style={{ animationDelay: "60ms" }}
                                 >
                                     <span className="block">{t("heroHeadlineLead")}</span>
@@ -121,7 +121,7 @@ export default async function Home() {
                                     </a>
                                 </div>
                             </div>
-                            <div className="connex-rise lg:col-span-7" style={{ animationDelay: "220ms" }}>
+                            <div className="connex-rise lg:col-span-6" style={{ animationDelay: "220ms" }}>
                                 <CompanyRecordMock />
                             </div>
                         </div>
@@ -140,12 +140,12 @@ export default async function Home() {
                     </section>
 
                     <section id="features" className="scroll-mt-20">
-                        <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-24">
-                            <Reveal className="max-w-3xl">
+                        <div className="mx-auto max-w-7xl px-6 py-24 sm:py-32 lg:px-8 lg:py-44">
+                            <Reveal className="mx-auto max-w-3xl text-center">
                                 <h2 className={sectionHeading}>{t("followHeading")}</h2>
-                                <p className={sectionBody}>{t("followBody")}</p>
+                                <p className={`${sectionBody} mx-auto`}>{t("followBody")}</p>
                             </Reveal>
-                            <div className="mt-12 grid gap-6 lg:grid-cols-[1.35fr_1fr]">
+                            <div className="mt-20 grid gap-8 lg:grid-cols-[1.45fr_1fr]">
                                 <Reveal delay={0.06}>
                                     <RadarBoardMock />
                                 </Reveal>
@@ -154,7 +154,7 @@ export default async function Home() {
                                 </Reveal>
                             </div>
                             <Reveal delay={0.16}>
-                                <p className="mt-8 max-w-[60ch] text-sm leading-relaxed text-muted-foreground">
+                                <p className="mx-auto mt-12 max-w-[56ch] text-center text-sm leading-relaxed text-muted-foreground">
                                     {t("followNote")}
                                 </p>
                             </Reveal>
@@ -174,32 +174,34 @@ export default async function Home() {
                     </section>
 
                     <section id="deploy" className="scroll-mt-20">
-                        <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-24">
+                        <div className="mx-auto max-w-7xl px-6 py-24 sm:py-32 lg:px-8 lg:py-44">
                             <Reveal className="max-w-3xl">
                                 <h2 className={sectionHeading}>{t("deployHeading")}</h2>
                                 <p className={sectionBody}>{t("deployBody")}</p>
                             </Reveal>
-                            <div className="mt-12 grid gap-6 md:grid-cols-2">
+                            <div className="mt-20 grid gap-8 md:grid-cols-2">
                                 {DEPLOYMENTS.map((kind, i) => (
                                     <Reveal key={kind} delay={0.06 * (i + 1)}>
-                                        <div className="h-full rounded-2xl border border-border bg-card p-6 lg:p-8">
-                                            <h3 className="text-lg font-semibold text-foreground">
+                                        <div className="h-full rounded-3xl border border-border bg-card p-8 lg:p-12">
+                                            <h3 className="text-2xl font-semibold tracking-tight text-foreground">
                                                 {t(`deploy${kind}Title`)}
                                             </h3>
-                                            <p className="mt-2 text-[15px] leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]">
+                                            <p className="mt-4 text-[17px] leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]">
                                                 {t(`deploy${kind}Body`)}
                                             </p>
                                         </div>
                                     </Reveal>
                                 ))}
                             </div>
-                            <Reveal delay={0.2} className="mt-10">
-                                <h3 className="text-sm font-semibold text-foreground">{t("trustHeading")}</h3>
-                                <ul className="mt-4 grid gap-3 sm:grid-cols-3">
+                            <Reveal delay={0.2} className="mt-20 border-t border-border pt-10">
+                                <h3 className="text-sm font-medium tracking-wide text-muted-foreground uppercase">
+                                    {t("trustHeading")}
+                                </h3>
+                                <ul className="mt-8 grid gap-x-12 gap-y-8 sm:grid-cols-3">
                                     {TRUST_POINTS.map((kind) => (
                                         <li
                                             key={kind}
-                                            className="rounded-xl border border-border px-4 py-3 text-[13px] leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]"
+                                            className="text-[15px] leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]"
                                         >
                                             {t(`trust${kind}`)}
                                         </li>
@@ -210,23 +212,23 @@ export default async function Home() {
                     </section>
 
                     <section id="workflow" className="scroll-mt-20">
-                        <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-24">
+                        <div className="mx-auto max-w-7xl px-6 py-24 sm:py-32 lg:px-8 lg:py-44">
                             <Reveal className="max-w-3xl">
                                 <h2 className={sectionHeading}>{t("startHeading")}</h2>
                             </Reveal>
-                            <div className="mt-12 grid gap-10 sm:grid-cols-3 sm:gap-8">
+                            <div className="mt-20 grid gap-14 sm:grid-cols-3 sm:gap-10">
                                 {STEPS.map((step, i) => (
                                     <Reveal key={step} delay={0.06 * i}>
                                         <div className="flex items-center gap-4">
-                                            <span className="font-display text-2xl leading-none text-brand-dark tabular-nums dark:text-brand">
+                                            <span className="font-display text-4xl leading-none text-brand-dark tabular-nums dark:text-brand">
                                                 {`0${i + 1}`}
                                             </span>
                                             <span className="h-px flex-1 bg-border" />
                                         </div>
-                                        <h3 className="mt-5 text-xl font-semibold text-foreground">
+                                        <h3 className="mt-7 text-2xl font-semibold tracking-tight text-foreground">
                                             {t(`step${step}Title`)}
                                         </h3>
-                                        <p className="mt-2 text-[15px] leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]">
+                                        <p className="mt-3 text-[17px] leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]">
                                             {t(`step${step}Body`)}
                                         </p>
                                     </Reveal>
@@ -247,19 +249,22 @@ export default async function Home() {
                     </section>
 
                     <section>
-                        <div className="mx-auto max-w-7xl px-6 pt-12 pb-32 lg:px-8 lg:pb-48">
-                            <Reveal className="max-w-2xl">
+                        <div className="mx-auto max-w-7xl px-6 pt-12 pb-32 text-center lg:px-8 lg:pt-20 lg:pb-48">
+                            <Reveal>
                                 <h2
-                                    className={`font-display text-[clamp(2rem,4.5vw,3.5rem)] leading-[1.12] tracking-[-0.015em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase] ${HALO}`}
+                                    className={`mx-auto max-w-3xl font-display text-[clamp(2.25rem,5vw,4.25rem)] leading-[1.06] tracking-[-0.018em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase] ${HALO}`}
                                 >
                                     {t("ctaHeading")}
                                 </h2>
-                                <p className={sectionBody}>{t("ctaSubtext")}</p>
-                                <div className="mt-10">
+                                <p className={`${sectionBody} mx-auto ${HALO}`}>{t("ctaSubtext")}</p>
+                                <div className="mt-12 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center">
                                     <Link href={ctaHref} className={btnPrimary}>
                                         {heroCtaLabel}
                                         <ArrowRightIcon className="size-4" />
                                     </Link>
+                                    <a href="#product" className={btnGhost}>
+                                        {t("heroSecondaryCta")}
+                                    </a>
                                 </div>
                             </Reveal>
                         </div>
