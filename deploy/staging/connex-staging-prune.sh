@@ -93,15 +93,36 @@ path_referenced_by_any_process() {
 }
 
 # Seconds since epoch at which the running frontend started, via its PID's /proc entry.
+#
+# The marker is not trusted on its own. Across a crash or reboot it can name a PID the kernel has
+# since handed to something unrelated, and that process's start time would be recent enough to make
+# genuinely old trees look reclaimable. So the PID must still look like the frontend: its recorded
+# SHA must be the committed release, and the process must actually be running out of the release
+# tree. Anything else returns failure, and the caller refuses to prune at all.
 frontend_started_at() {
-    local running pid stat_file
+    local running pid marker_sha proc_dir link
     [ -f "$FRONTEND_RUNNING_MARKER" ] || return 1
     running="$(head -n 1 -- "$FRONTEND_RUNNING_MARKER")" || return 1
+    marker_sha="$(printf '%s' "$running" | cut -f1)" || return 1
     pid="$(printf '%s' "$running" | cut -f2)" || return 1
     [[ "$pid" =~ ^[0-9]+$ ]] || return 1
-    stat_file="${PROC_ROOT:-/proc}/$pid"
-    [ -d "$stat_file" ] || return 1
-    stat -c %Y -- "$stat_file"
+    is_git_sha "$marker_sha" || return 1
+
+    # A marker naming a release other than the committed one is stale by definition.
+    [ "$marker_sha" = "$(read_sha_file "$MARKER" 2>/dev/null)" ] || return 1
+
+    proc_dir="${PROC_ROOT:-/proc}/$pid"
+    [ -d "$proc_dir" ] || return 1
+
+    # The claimed frontend must be running out of its release tree. A recycled PID will not be.
+    local anchored=1 releases="$STATE_DIR/releases/$marker_sha"
+    for link in "$proc_dir/cwd" "$proc_dir/exe"; do
+        link="$(readlink -- "$link" 2>/dev/null)" || continue
+        case "$link" in "$releases"|"$releases"/*) anchored=0 ;; esac
+    done
+    [ "$anchored" -eq 0 ] || return 1
+
+    stat -c %Y -- "$proc_dir"
 }
 
 main() {

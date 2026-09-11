@@ -52,6 +52,10 @@ setup() {
         touch -d "@$(( $(date +%s) - 259200 ))" "$q/$entry"
     done
 
+    # The reaper only trusts the marker PID if it is running out of the committed release tree.
+    mkdir -p "$state/releases/$DEPLOYED"
+    ln -sfn "$state/releases/$DEPLOYED" "$root/proc/$$/cwd"
+
     if [ "$frontend_start" = "after" ]; then
         # Frontend restarted after the trees were quarantined: they are reclaimable.
         sleep 1; touch "$root/proc/$$"
@@ -114,10 +118,10 @@ main() {
 
     # A tree any live process still references must survive, whatever its age says.
     setup "$root"
-    ln -sfn "$q/$OLD_ONE" "$root/proc/$$/cwd"
+    ln -sfn "$q/$OLD_ONE" "$root/proc/$$/exe"
     run "$root" > "$root/inuse.log" 2>&1 || fail in_use_exits_zero "$(tail -3 "$root/inuse.log")"
     assert_dir_exists referenced_tree_survives "$q/$OLD_ONE"
-    rm -f "$root/proc/$$/cwd"
+    rm -f "$root/proc/$$/exe"
 
     # A mistyped flag must never be read as "delete for real".
     setup "$root"
@@ -127,6 +131,16 @@ main() {
         ok unknown_argument_is_rejected
     fi
     assert_dir_exists unknown_argument_removes_nothing "$q/$OLD_ONE"
+
+    # A marker naming a PID that is not the frontend must not be trusted for timing.
+    setup "$root"
+    ln -sfn /tmp "$root/proc/$$/cwd"
+    if run "$root" > "$root/pid.log" 2>&1; then
+        fail refuses_when_marker_pid_is_not_the_frontend "expected non-zero exit"
+    else
+        ok refuses_when_marker_pid_is_not_the_frontend
+    fi
+    assert_dir_exists recycled_pid_keeps_everything "$q/$OLD_ONE"
 
     rm -rf "$root"
     [ "$FAILURES" -eq 0 ] || { printf '\n%s failing assertion(s)\n' "$FAILURES" >&2; return 1; }
