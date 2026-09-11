@@ -158,9 +158,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Lint staging deploy shell tooling
-        run: shellcheck -x deploy/staging/*.sh deploy/staging/tests/run-tests.sh
+        run: shellcheck -x deploy/staging/*.sh deploy/staging/tests/*.sh
       - name: Release-unit, rollback, smoke, recovery, and alert regression tests
         run: bash deploy/staging/tests/run-tests.sh
+      - name: Quarantine prune regression tests
+        run: bash deploy/staging/tests/prune-tests.sh
 
   profile-boot:
     name: Boot every deployment profile
