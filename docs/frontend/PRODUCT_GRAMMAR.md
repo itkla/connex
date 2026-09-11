@@ -90,6 +90,22 @@ Do not read this as licence for other full-height surfaces to skip the page shel
 
 Timeline comment rows are chronology/read-only representations. `CommentsSection` owns composition/thread actions. Do not wrap `NoteContent` itself in a link because its parsed content may contain anchors; use a separate thread handoff.
 
+### Public landing page
+
+The public landing page explains the CRM before demonstrating Ask Connex, Map, Workflows, and
+relationship priorities. It uses its own editorial layout rather than the authenticated page shell.
+Schibsted Grotesk and Source Sans 3 are loaded only for this route, with the existing Noto Sans JP
+fallback; the page inherits the global theme preference. Shared documentation and legal styles stay
+unchanged.
+
+Product previews use the dated fictional workspace in
+`frontend/app/components/landing/sampleWorkspace.ts`, never authenticated feature containers.
+Sample citations and practical questions use native `details` disclosures so their content remains
+reachable without JavaScript. The guided example uses the shared segmented control and includes a
+no-JavaScript fallback for the other examples. Only explicit selection changes its displayed example.
+Legacy anchors `#product`, `#features`, `#deploy` (relationship intelligence), and `#workflow`
+(getting started) remain valid.
+
 ## One composer per object
 
 Reuse the canonical task/activity composers (`TaskDialog`, `ActivityDialog`) through record adapters such as `RecordComposers`. Pass defaults and explicit create callbacks rather than introducing another composer for the same domain object.

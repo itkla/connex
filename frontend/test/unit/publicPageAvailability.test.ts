@@ -13,8 +13,13 @@ vi.mock('next/headers', () => ({
     headers: () => Promise.resolve(new Headers({ cookie: 'NEXT_LOCALE=en' })),
 }));
 
+vi.mock('next/font/google', () => ({
+    Schibsted_Grotesk: () => ({ variable: 'landing-display' }),
+    Source_Sans_3: () => ({ variable: 'landing-body' }),
+}));
+
 vi.mock('next-intl/server', () => ({
-    getTranslations: () => Promise.resolve((key: string) => key),
+    getTranslations: () => Promise.resolve(Object.assign((key: string) => key, { rich: (key: string) => key })),
     getLocale: () => Promise.resolve('en'),
 }));
 

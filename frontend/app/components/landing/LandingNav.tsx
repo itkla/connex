@@ -31,7 +31,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
 
     const links = [
         { href: "/#product", label: t("navProduct"), route: false },
-        { href: "/#deploy", label: t("navDeploy"), route: false },
+        { href: "/#features", label: t("navFeatures"), route: false },
         { href: "/#workflow", label: t("navWorkflow"), route: false },
         { href: "/docs", label: t("navDocs"), route: true },
     ];
@@ -45,7 +45,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                         <span className="text-lg font-bold tracking-tight text-foreground">{t("brand")}</span>
                     </Link>
 
-                    <div className="hidden items-center gap-7 md:flex">
+                    <div data-landing-desktop className="hidden items-center gap-7 md:flex">
                         {links.map((link) =>
                             link.route ? (
                                 <Link
@@ -68,7 +68,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                     </div>
                 </div>
 
-                <div className="hidden items-center gap-3 md:flex">
+                <div data-landing-desktop className="hidden items-center gap-3 md:flex">
                     <ThemeToggle />
                     <LanguageSwitcher />
                     <Link
@@ -85,7 +85,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                     </Link>
                 </div>
 
-                <div className="flex items-center gap-2 md:hidden">
+                <div data-landing-mobile className="flex items-center gap-2 md:hidden">
                     <ThemeToggle />
                     <LanguageSwitcher />
                     <button
@@ -101,7 +101,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
             </nav>
 
             {open && (
-                <div className="border-t border-border bg-background px-6 py-4 duration-(--motion-micro) animate-in fade-in-0 slide-in-from-top-2 motion-reduce:animate-none! md:hidden">
+                <div data-landing-menu className="border-t border-border bg-background px-6 py-4 duration-(--motion-micro) animate-in fade-in-0 slide-in-from-top-2 motion-reduce:animate-none! md:hidden">
                     <div className="flex flex-col gap-1">
                         {links.map((link) =>
                             link.route ? (
