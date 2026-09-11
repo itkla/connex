@@ -1,0 +1,13 @@
+[Unit]
+Description=Connex Staging Quarantine Prune
+Documentation=https://github.com/itkla/connex/blob/main/deploy/staging/connex-staging-prune.sh
+# Deliberately no Conflicts= on the deploy service: that would *stop* an in-flight deploy rather
+# than yield to it. The prune takes the deploy's own lock non-blocking instead, and exits quietly
+# when a deploy holds it.
+After=connex-staging-deploy.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/connex-staging-prune
+User=dev
+Group=dev

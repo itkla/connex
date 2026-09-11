@@ -949,12 +949,13 @@ case_quarantine_occupancy_alerts_above_threshold() (
         dddddddddddddddddddddddddddddddddddddddd \
         eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee \
         ffffffffffffffffffffffffffffffffffffffff
-    for sha in 1 2 3 4 5 6 7 8; do
+    local at_threshold=$QUARANTINE_ALERT_THRESHOLD over_threshold=$((QUARANTINE_ALERT_THRESHOLD + 1))
+    for sha in $(seq 1 "$at_threshold"); do
         mkdir -p "$RELEASE_QUARANTINE_DIR/$(printf '%040d' "$sha")"
     done
     output="$(report_quarantine_occupancy 2>&1)"
     assert_contains quarantine_threshold_is_reported \
-        'Release quarantine occupancy: 8 entries,' \
+        "Release quarantine occupancy: $at_threshold entries," \
         <(printf '%s\n' "$output") || return 1
     assert_absent quarantine_at_threshold_does_not_alert 'ALERT status=warning' \
         <(printf '%s\n' "$output") || return 1
@@ -965,10 +966,10 @@ case_quarantine_occupancy_alerts_above_threshold() (
     assert_file_exists quarantine_transition_moves_ninth_entry \
         "$RELEASE_QUARANTINE_DIR/$candidate/live-sentinel" || return 1
     assert_contains quarantine_over_threshold_reports_count \
-        'Release quarantine occupancy: 9 entries,' \
+        "Release quarantine occupancy: $over_threshold entries," \
         <(printf '%s\n' "$output") || return 1
     assert_contains quarantine_over_threshold_alerts \
-        'ALERT status=warning gate=recovery component=release quarantine_entries=9 threshold=8' \
+        "ALERT status=warning gate=recovery component=release quarantine_entries=$over_threshold threshold=$at_threshold" \
         <(printf '%s\n' "$output") || return 1
 )
 
@@ -983,7 +984,7 @@ case_quarantine_bytes_alert_independently_of_count() (
         'Release quarantine occupancy: 0 entries, 101 bytes;' \
         <(printf '%s\n' "$output") || return 1
     assert_contains quarantine_bytes_trigger_warning_below_count_threshold \
-        'ALERT status=warning gate=recovery component=release quarantine_entries=0 threshold=8 quarantine_bytes=101 byte_threshold=100' \
+        "ALERT status=warning gate=recovery component=release quarantine_entries=0 threshold=$QUARANTINE_ALERT_THRESHOLD quarantine_bytes=101 byte_threshold=100" \
         <(printf '%s\n' "$output") || return 1
 )
 

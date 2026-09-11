@@ -111,11 +111,12 @@ deployed by logic loaded from the older commit. The candidate
    instead of degrading to copy-then-unlink. Mounting the whole `.staging` directory separately is
    safe because both children remain on the same filesystem.
 
-   Quarantine is the script's terminal state. There is no eligibility marker or automatic unlink
-   sweep because a second advisory process scan cannot prove that no unobserved consumer started
-   using the tree. The scan remains only as operator-facing reporting and never authorizes
-   deletion. Every timer run logs quarantine entry and byte occupancy; more than eight entries or
-   more than 8 GiB emits a sanitized warning `ALERT`. Before recovery or build work, the script also
+   Quarantine is terminal **for the deploy script**: it never unlinks an entry, for exactly the
+   reason above. Reclaiming the space is a separate program on its own schedule,
+   `connex-staging-prune`, described under "Reclaiming quarantine" below. Every timer run logs
+   quarantine entry and byte occupancy; more than four entries or more than 1 GiB emits a sanitized
+   warning `ALERT`. Those thresholds sit below the 5 GiB free-space preflight on purpose — set
+   above it, the warning could never fire before the deploy gate had already blocked. Before recovery or build work, the script also
    requires at least 5 GiB free on the filesystem containing `.staging`, failing closed before
    transaction, marker, rollback, or release writes begin under insufficient headroom.
    `.staging/prune-needed` persists only when a candidate could not be moved safely, while a
@@ -190,12 +191,39 @@ For artifact recovery, read `rollback-sha`, then inspect the matching
 `.staging/releases/<sha>/manifest.tsv`. The automatic rollback verifies the manifest, both
 digests, and both embedded identities again before using the pair.
 
+### Reclaiming quarantine
+
+`connex-staging-prune` (`deploy/staging/connex-staging-prune.sh`) runs daily from
+`connex-staging-prune.timer` and is the only thing permitted to unlink a quarantined tree. The
+deploy script's invariant is unchanged.
+
+It removes an entry only when every one of these holds:
+
+1. the entry is under `release-quarantine`, is a plain directory, is not a symlink, and is named as
+   a bare 40-character SHA;
+2. it is not the committed, rollback, or attested-running release;
+3. it is not within the two most recent entries, which are kept for post-mortems;
+4. it is older than `CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS` (default 24h), measured from **ctime** —
+   `rename(2)` preserves mtime, so mtime is when the release was built, not when it was retired;
+5. the running frontend started *after* the entry was quarantined, since a process cannot hold a
+   tree that was already quarantined before that process existed;
+6. no live process references the tree — `/proc` is scanned for cwd, root, exe, open descriptors
+   and mapped files under the path.
+
+It takes the deploy lock non-blocking and exits quietly if a deploy holds it, so it never races the
+rename it reasons about. It refuses outright, removing nothing, if the markers are unreadable or the
+frontend start time cannot be established, and rejects any argument other than `--dry-run`.
+
+```bash
+# Report what would be reclaimed, without touching anything.
+sudo -u dev connex-staging-prune --dry-run
+```
+
 A `release-quarantine/<sha>` entry means the deploy script retired that release from the public
 release set with an atomic rename. It does **not** mean the release is unused. The journal's
 `advisory scan detected no matching consumer` message covers the frontend cgroup and deploy-UID
 processes the timer can inspect; it is useful evidence, but never proof that another UID, service,
-cwd, or open file does not use the tree. Once this terminal-quarantine version is selected by the
-wrapper, its timer path never unlinks the entry: committed cross-version recovery stays in current
+cwd, or open file does not use the tree. The deploy timer path never unlinks the entry: committed cross-version recovery stays in current
 logic, while recorded logic is used only to interpret nonterminal transactions. A timer invocation
 already running an older script is outside that guarantee, so complete the rollout before relying
 on it. More than eight entries or more than 8 GiB produces a warning `ALERT`; schedule deliberate
