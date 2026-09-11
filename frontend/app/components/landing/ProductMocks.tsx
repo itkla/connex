@@ -242,3 +242,79 @@ export async function DealRiskMock() {
         </Pane>
     );
 }
+
+const ACTIVITY_ROWS = [
+    { key: "meeting", band: "warm" },
+    { key: "email", band: "warm" },
+    { key: "note", band: "cool" },
+    { key: "deal", band: null },
+] as const;
+
+/**
+ * The history on a customer, which is what you actually want before the next conversation.
+ *
+ * Deliberately shows a deal event in the same stream as interactions: the argument is that the
+ * record is one timeline, not several tabs.
+ */
+export async function ActivityTimelineMock() {
+    const t = await getTranslations("CommonHome");
+
+    return (
+        <Pane label={t("mockTimelineLabel")} sampleLabel={t("mockSample")}>
+            <div className="px-4 py-3.5">
+                <p className="truncate text-[15px] font-semibold text-foreground">{t("mockTimelineSubject")}</p>
+                <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{t("mockTimelineMeta")}</p>
+            </div>
+            <ul className="divide-y divide-border/70 border-t border-border">
+                {ACTIVITY_ROWS.map((row) => (
+                    <li key={row.key} className="flex items-center gap-2.5 px-4 py-2.5">
+                        <span
+                            className={cn(
+                                "size-1.5 shrink-0 rounded-full",
+                                row.band ? warmthDotClass(row.band) : "bg-brand",
+                            )}
+                        />
+                        <span className="min-w-0 flex-1 text-[13px] text-foreground">
+                            {t(`mockTimeline_${row.key}`)}
+                        </span>
+                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                            {t(`mockTimelineWhen_${row.key}`)}
+                        </span>
+                    </li>
+                ))}
+            </ul>
+        </Pane>
+    );
+}
+
+/**
+ * The same customer after a handover: a new owner, the history unchanged.
+ *
+ * This is the continuity argument the page previously made with a card labelled "Employment
+ * history", which described a mechanism rather than the reason it matters.
+ */
+export async function HandoverMock() {
+    const t = await getTranslations("CommonHome");
+
+    return (
+        <Pane label={t("mockHandoverLabel")} sampleLabel={t("mockSample")}>
+            <div className="flex items-center justify-between gap-3 px-4 py-3.5">
+                <div className="min-w-0">
+                    <p className="truncate text-[15px] font-semibold text-foreground">{t("mockCompanyName")}</p>
+                    <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{t("mockHandoverOwner")}</p>
+                </div>
+                <span className="shrink-0 rounded-full bg-brand-light px-2 py-0.5 text-[11px] font-medium text-foreground ring-1 ring-inset ring-brand/40">
+                    {t("mockHandoverBadge")}
+                </span>
+            </div>
+            <ul className="divide-y divide-border/70 border-t border-border">
+                {(["history", "deals", "tasks"] as const).map((key) => (
+                    <li key={key} className="flex items-center gap-2.5 px-4 py-2.5">
+                        <span className="size-1.5 shrink-0 rounded-full bg-brand" />
+                        <span className="min-w-0 flex-1 text-[13px] text-foreground">{t(`mockHandover_${key}`)}</span>
+                    </li>
+                ))}
+            </ul>
+        </Pane>
+    );
+}

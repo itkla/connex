@@ -6,12 +6,13 @@ import { getPublicPageUserFromCookie } from "@/app/lib/api";
 import LandingNav from "@/app/components/landing/LandingNav";
 import LandingFooter from "@/app/components/landing/LandingFooter";
 import FujiSpine from "@/app/components/landing/FujiSpine";
-import FeatureBento from "@/app/components/landing/FeatureBento";
 import LandingFaq from "@/app/components/landing/LandingFaq";
 import LandingTheme from "@/app/components/landing/LandingTheme";
 import {
+    ActivityTimelineMock,
     CompanyRecordMock,
     DealRiskMock,
+    HandoverMock,
     RadarBoardMock,
 } from "@/app/components/landing/ProductMocks";
 import Reveal from "@/app/components/landing/Reveal";
@@ -32,16 +33,13 @@ const sectionHeading =
 const sectionBody =
     "mt-5 max-w-[62ch] text-lg leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]";
 
-/** The four warmth bands, coldest to hottest, drawn from the shared domain tokens. */
-const WARMTH_BANDS = [
-    { key: "cold", token: "bg-warmth-cold" },
-    { key: "cool", token: "bg-warmth-cool" },
-    { key: "warm", token: "bg-warmth-warm" },
-    { key: "hot", token: "bg-warmth-hot" },
-] as const;
-
 /** The product loop, as three moves. Numbered because it genuinely is a sequence. */
 const STEPS = ["Capture", "Understand", "Act"] as const;
+
+/** The two arrangements that are genuinely for sale. */
+const DEPLOYMENTS = ["Cloud", "Self"] as const;
+
+const TRUST_POINTS = ["Permissions", "Audit", "Data"] as const;
 
 /**
  * Localized metadata for the public landing page. Without this the page inherits
@@ -74,6 +72,7 @@ export default async function Home() {
 
     const ctaHref = user ? "/dashboard" : "/auth/register";
     const ctaLabel = user ? t("ctaDashboard") : t("ctaGetStarted");
+    const heroCtaLabel = user ? t("ctaDashboard") : t("heroCtaPrimary");
 
     return (
         <LandingTheme>
@@ -90,52 +89,61 @@ export default async function Home() {
                 <LandingNav ctaHref={ctaHref} ctaLabel={ctaLabel} />
 
                 <main id="main">
-                    <section className="mx-auto flex min-h-[calc(100dvh-4rem)] max-w-7xl flex-col justify-center px-6 pt-12 pb-12 lg:px-8 lg:pt-20 lg:pb-16">
-                        <div className="max-w-3xl">
-                            <h1
-                                className={`connex-rise font-display text-[clamp(2.25rem,5vw,4rem)] leading-[1.08] tracking-[-0.015em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase] ${HALO}`}
-                            >
-                                <span className="block">{t("heroHeadlineLead")}</span>
-                                <span className="block">{t("heroHeadlineRest")}</span>
-                            </h1>
-                            <p
-                                className={`connex-rise mt-7 max-w-[46ch] text-lg leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase] ${HALO}`}
-                                style={{ animationDelay: "90ms" }}
-                            >
-                                {t("heroSubtext")}
-                            </p>
-                            <div
-                                className="connex-rise mt-10 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center"
-                                style={{ animationDelay: "180ms" }}
-                            >
-                                <Link href={ctaHref} className={btnPrimary}>
-                                    {ctaLabel}
-                                    <ArrowRightIcon className="size-4" />
-                                </Link>
-                                <a href="#warmth" className={btnGhost}>
-                                    {t("heroSecondaryCta")}
-                                </a>
+                    <section className="mx-auto max-w-7xl px-6 pt-10 pb-16 lg:px-8 lg:pt-16 lg:pb-24">
+                        <div className="grid items-center gap-12 lg:grid-cols-12 lg:gap-12">
+                            <div className="lg:col-span-5">
+                                <p className={`connex-rise text-sm font-medium text-muted-foreground ${HALO}`}>
+                                    {t("heroEyebrow")}
+                                </p>
+                                <h1
+                                    className={`connex-rise mt-4 font-display text-[clamp(2.25rem,4.6vw,3.75rem)] leading-[1.06] tracking-[-0.02em] text-balance text-foreground [line-break:strict] [word-break:auto-phrase] ${HALO}`}
+                                    style={{ animationDelay: "60ms" }}
+                                >
+                                    <span className="block">{t("heroHeadlineLead")}</span>
+                                    <span className="block">{t("heroHeadlineRest")}</span>
+                                </h1>
+                                <p
+                                    className={`connex-rise mt-6 max-w-[48ch] text-lg leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase] ${HALO}`}
+                                    style={{ animationDelay: "120ms" }}
+                                >
+                                    {t("heroSubtext")}
+                                </p>
+                                <div
+                                    className="connex-rise mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center"
+                                    style={{ animationDelay: "180ms" }}
+                                >
+                                    <Link href={ctaHref} className={btnPrimary}>
+                                        {heroCtaLabel}
+                                        <ArrowRightIcon className="size-4" />
+                                    </Link>
+                                    <a href="#product" className={btnGhost}>
+                                        {t("heroSecondaryCta")}
+                                    </a>
+                                </div>
+                            </div>
+                            <div className="connex-rise lg:col-span-7" style={{ animationDelay: "220ms" }}>
+                                <CompanyRecordMock />
                             </div>
                         </div>
                     </section>
 
-                    <section id="crm" className="scroll-mt-20">
+                    <section id="product" className="scroll-mt-20">
                         <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-24">
                             <Reveal>
-                                <h2 className={sectionHeading}>{t("crmHeading")}</h2>
-                                <p className={sectionBody}>{t("crmBody")}</p>
+                                <h2 className={sectionHeading}>{t("contextHeading")}</h2>
+                                <p className={sectionBody}>{t("contextBody")}</p>
                             </Reveal>
                             <Reveal delay={0.08}>
-                                <CompanyRecordMock />
+                                <ActivityTimelineMock />
                             </Reveal>
                         </div>
                     </section>
 
-                    <section id="warmth" className="scroll-mt-20">
+                    <section id="features" className="scroll-mt-20">
                         <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-24">
                             <Reveal className="max-w-3xl">
-                                <h2 className={sectionHeading}>{t("signalHeading")}</h2>
-                                <p className={sectionBody}>{t("signalBody")}</p>
+                                <h2 className={sectionHeading}>{t("followHeading")}</h2>
+                                <p className={sectionBody}>{t("followBody")}</p>
                             </Reveal>
                             <div className="mt-12 grid gap-6 lg:grid-cols-[1.35fr_1fr]">
                                 <Reveal delay={0.06}>
@@ -145,52 +153,80 @@ export default async function Home() {
                                     <DealRiskMock />
                                 </Reveal>
                             </div>
-                            <Reveal delay={0.16} className="mt-10 max-w-md">
-                                <div className="flex gap-1.5" aria-hidden="true">
-                                    {WARMTH_BANDS.map((band) => (
-                                        <span key={band.key} className={`h-2 flex-1 rounded-full ${band.token}`} />
-                                    ))}
-                                </div>
-                                <div className="mt-3 flex gap-1.5 text-sm text-muted-foreground">
-                                    {WARMTH_BANDS.map((band) => (
-                                        <span key={band.key} className="flex-1 text-center">
-                                            {t(`warmthBand_${band.key}`)}
-                                        </span>
-                                    ))}
-                                </div>
+                            <Reveal delay={0.16}>
+                                <p className="mt-8 max-w-[60ch] text-sm leading-relaxed text-muted-foreground">
+                                    {t("followNote")}
+                                </p>
                             </Reveal>
                         </div>
                     </section>
 
-                    <section id="features" className="scroll-mt-20">
-                        <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-24">
-                            <Reveal className="max-w-2xl">
-                                <h2 className={sectionHeading}>{t("bentoHeading")}</h2>
+                    <section className="scroll-mt-20">
+                        <div className="mx-auto grid max-w-7xl items-center gap-12 px-6 py-16 sm:py-20 lg:grid-cols-2 lg:gap-16 lg:px-8 lg:py-24">
+                            <Reveal className="lg:order-2">
+                                <h2 className={sectionHeading}>{t("continuityHeading")}</h2>
+                                <p className={sectionBody}>{t("continuityBody")}</p>
                             </Reveal>
-                            <FeatureBento />
+                            <Reveal delay={0.08} className="lg:order-1">
+                                <HandoverMock />
+                            </Reveal>
+                        </div>
+                    </section>
+
+                    <section id="deploy" className="scroll-mt-20">
+                        <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-24">
+                            <Reveal className="max-w-3xl">
+                                <h2 className={sectionHeading}>{t("deployHeading")}</h2>
+                                <p className={sectionBody}>{t("deployBody")}</p>
+                            </Reveal>
+                            <div className="mt-12 grid gap-6 md:grid-cols-2">
+                                {DEPLOYMENTS.map((kind, i) => (
+                                    <Reveal key={kind} delay={0.06 * (i + 1)}>
+                                        <div className="h-full rounded-2xl border border-border bg-card p-6 lg:p-8">
+                                            <h3 className="text-lg font-semibold text-foreground">
+                                                {t(`deploy${kind}Title`)}
+                                            </h3>
+                                            <p className="mt-2 text-[15px] leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]">
+                                                {t(`deploy${kind}Body`)}
+                                            </p>
+                                        </div>
+                                    </Reveal>
+                                ))}
+                            </div>
+                            <Reveal delay={0.2} className="mt-10">
+                                <h3 className="text-sm font-semibold text-foreground">{t("trustHeading")}</h3>
+                                <ul className="mt-4 grid gap-3 sm:grid-cols-3">
+                                    {TRUST_POINTS.map((kind) => (
+                                        <li
+                                            key={kind}
+                                            className="rounded-xl border border-border px-4 py-3 text-[13px] leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]"
+                                        >
+                                            {t(`trust${kind}`)}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </Reveal>
                         </div>
                     </section>
 
                     <section id="workflow" className="scroll-mt-20">
                         <div className="mx-auto max-w-7xl px-6 py-16 sm:py-20 lg:px-8 lg:py-24">
-                            <Reveal className="max-w-2xl">
-                                <h2 className={sectionHeading}>{t("stepsHeading")}</h2>
+                            <Reveal className="max-w-3xl">
+                                <h2 className={sectionHeading}>{t("startHeading")}</h2>
                             </Reveal>
-                            <div className="mt-14 grid grid-cols-1 gap-x-10 gap-y-12 md:grid-cols-3">
+                            <div className="mt-12 grid gap-10 sm:grid-cols-3 sm:gap-8">
                                 {STEPS.map((step, i) => (
-                                    <Reveal key={step} delay={i * 0.08}>
+                                    <Reveal key={step} delay={0.06 * i}>
                                         <div className="flex items-center gap-4">
-                                            <span className="font-display text-3xl text-brand-dark">
-                                                {String(i + 1).padStart(2, "0")}
+                                            <span className="font-display text-2xl leading-none text-brand-dark tabular-nums dark:text-brand">
+                                                {`0${i + 1}`}
                                             </span>
-                                            <span className="h-px flex-1 bg-linear-to-r from-brand/50 to-transparent" />
+                                            <span className="h-px flex-1 bg-border" />
                                         </div>
-                                        <h3 className={`mt-5 text-xl font-semibold text-foreground ${HALO}`}>
+                                        <h3 className="mt-5 text-xl font-semibold text-foreground">
                                             {t(`step${step}Title`)}
                                         </h3>
-                                        <p
-                                            className={`mt-2 text-[15px] leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase] ${HALO}`}
-                                        >
+                                        <p className="mt-2 text-[15px] leading-relaxed text-muted-foreground text-pretty [word-break:auto-phrase]">
                                             {t(`step${step}Body`)}
                                         </p>
                                     </Reveal>
@@ -221,7 +257,7 @@ export default async function Home() {
                                 <p className={sectionBody}>{t("ctaSubtext")}</p>
                                 <div className="mt-10">
                                     <Link href={ctaHref} className={btnPrimary}>
-                                        {ctaLabel}
+                                        {heroCtaLabel}
                                         <ArrowRightIcon className="size-4" />
                                     </Link>
                                 </div>
