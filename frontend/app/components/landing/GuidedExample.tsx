@@ -48,7 +48,7 @@ export default function GuidedExample() {
                     onChange={setExample}
                     ariaLabel={t("attentionChoose")}
                     options={ATTENTION_EXAMPLES.map((value) => ({ value, label: t(`attention_${value}_tab`) }))}
-                    className="max-w-full flex-wrap [&_button]:min-h-11 [&_button]:whitespace-normal"
+                    className="max-w-full flex-wrap [&_button]:min-h-11 [&_button]:whitespace-normal [&_button]:text-foreground"
                 />
                 <p className="text-sm text-muted-foreground">{t("sampleCaption")}</p>
             </div>
