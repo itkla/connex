@@ -15,7 +15,10 @@
 .atmosphere {
     position: absolute;
     inset: 0;
-    background: radial-gradient(ellipse at 78% 65%, color-mix(in oklab, var(--color-brand) 5%, var(--background)), var(--background) 70%);
+    background:
+        radial-gradient(ellipse 45% 55% at 87% 48%, color-mix(in oklab, var(--color-brand-light) 85%, transparent), transparent 75%),
+        radial-gradient(ellipse 48% 40% at 72% 72%, color-mix(in oklab, var(--color-brand) 10%, transparent), transparent 80%),
+        var(--background);
 }
 .landscape {
     position: absolute;
@@ -24,17 +27,19 @@
     height: 100%;
     overflow: visible;
 }
-.outline { stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.outline { stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
 .inkTone { stop-color: var(--color-brand-dark); }
-.cloudWisp { stroke-width: 1; stroke-linecap: round; }
-.cloudTone { stop-color: color-mix(in oklab, var(--color-brand-dark) 35%, var(--background)); }
+.summitTint { stop-color: var(--color-brand-light); }
+.mountainTint { stop-color: var(--color-brand-dark); }
+.cloudGlow { stop-color: var(--background); }
+.cloudTone { stop-color: color-mix(in oklab, var(--color-brand-light) 45%, var(--background)); }
 .hazeTone { stop-color: var(--background); }
 .cloudDrift {
     animation: cloudPassing var(--fuji-drift-far) linear infinite;
     animation-play-state: paused;
 }
-.farClouds { opacity: 0.75; }
-.nearClouds { opacity: 0.75; animation-duration: var(--fuji-drift-near); }
+.farClouds { opacity: 0.65; }
+.nearClouds { opacity: 0.9; animation-duration: var(--fuji-drift-near); }
 .backdrop[data-fuji-motion="running"] .cloudDrift { animation-play-state: running; }
 .copyVeil {
     position: absolute;
@@ -54,7 +59,8 @@
     to { transform: translate3d(1600px, 0, 0); }
 }
 :global(.dark) .inkTone { stop-color: var(--color-brand); }
-:global(.dark) .cloudTone { stop-color: color-mix(in oklab, var(--color-brand) 25%, var(--background)); }
+:global(.dark) .cloudGlow { stop-color: color-mix(in oklab, var(--foreground) 24%, var(--color-brand-light)); }
+:global(.dark) .cloudTone { stop-color: color-mix(in oklab, var(--color-brand-light) 60%, var(--background)); }
 @media (max-width: 63.999rem) {
     .landscape { inset: auto -12% 0 auto; width: 140%; height: 85%; }
     .copyVeil { background: linear-gradient(180deg, var(--background), color-mix(in oklab, var(--background) 88%, transparent) 30%, color-mix(in oklab, var(--background) 45%, transparent) 60%, transparent); }
