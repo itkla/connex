@@ -84,6 +84,8 @@
     "mapHeading": "See how your team’s relationships connect.",
     "mapBody": "Explore connections between your team, companies, and contacts. Search for a person or company and follow their recorded relationship history.",
     "mapMember": "Members",
+    "heroPauseScenery": "Pause scenery",
+    "heroResumeScenery": "Resume scenery",
     "mapWorkspace": "Your workspace",
     "mapCompanies": "Client companies",
     "workflowName": "Workflows",

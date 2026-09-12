@@ -99,7 +99,11 @@ fallback; the page inherits the global theme preference. Shared documentation an
 unchanged.
 
 Product diagrams use labeled icons to explain connections and process, rather than dense mock
-records. The hero uses text and actions, vertically centered in the viewport below navigation.
+records. The hero keeps text and actions vertically centered below navigation, over a decorative
+SVG Mount Fuji scene. Thin cloud layers drift at different speeds and move with scroll depth; a
+pause control freezes the scenery. Reduced motion and no JavaScript show the static illustration.
+Cloud motion pauses outside the hero and in hidden tabs. The slow, linear drift uses landing-only
+multiples of the expressive duration token, separate from interface feedback timings.
 Explanatory copy describes the product directly. Ask Connex and priority examples keep
 their dated fictional evidence in native disclosures, using
 `frontend/app/components/landing/sampleWorkspace.ts`, never authenticated feature containers.

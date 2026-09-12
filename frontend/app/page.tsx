@@ -12,6 +12,8 @@ import LandingFaq from "@/app/components/landing/LandingFaq";
 import GuidedExample from "@/app/components/landing/GuidedExample";
 import { AskConnexPreview, ConnectedRecordPreview, MapPreview, TeamworkPreview, WorkflowPreview } from "@/app/components/landing/ProductPreviews";
 import styles from "@/app/components/landing/landing.module.css";
+import fujiStyles from "@/app/components/landing/fuji.module.css";
+import { FujiBackdrop } from "@/app/components/landing/FujiBackdrop";
 
 const display = Schibsted_Grotesk({ variable: "--font-landing-display", subsets: ["latin"], display: "swap" });
 const body = Source_Sans_3({ variable: "--font-landing-body", subsets: ["latin"], display: "swap" });
@@ -48,15 +50,16 @@ export default async function Home() {
             <a href="#main" className="sr-only rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground focus:not-sr-only focus:absolute focus:left-6 focus:top-4 focus:z-50">{t("skipToContent")}</a>
             <LandingNav ctaHref={ctaHref} ctaLabel={ctaLabel} />
             <main id="main">
-                <section className={`${container} flex min-h-[calc(100svh-4rem-1px)] flex-col justify-center py-16 sm:py-20`} aria-labelledby="hero-title">
-                    <div className="max-w-5xl">
+                <section className={`${fujiStyles.hero} flex min-h-[calc(100svh-4rem-1px)] flex-col justify-center py-16 sm:py-20`} aria-labelledby="hero-title">
+                    <FujiBackdrop pauseLabel={t("heroPauseScenery")} resumeLabel={t("heroResumeScenery")} />
+                    <div className={`${container} ${fujiStyles.copy}`}><div className="max-w-5xl">
                         <h1 id="hero-title" className={styles.heroHeading}><span className="block">{t("heroHeadlineLead")}</span><span className="block">{t("heroHeadlineRest")}</span></h1>
                         <p className={`${description} max-w-[56ch]`}>{t("heroSubtext")}</p>
                         <div className="mt-7 flex flex-wrap items-center gap-3">
                             <Button asChild variant="brand" size="page" className="min-h-11 h-auto whitespace-normal px-6 py-3 text-base"><Link href={ctaHref}>{ctaLabel}<ArrowRightIcon aria-hidden="true" className="size-4" /></Link></Button>
                             <Button asChild variant="ghost" size="page" className="min-h-11 h-auto whitespace-normal px-5 py-3 text-base"><a href="#features">{t("heroSecondaryCta")}<ArrowRightIcon aria-hidden="true" className="size-4" /></a></Button>
                         </div>
-                    </div>
+                    </div></div>
                 </section>
 
                 <section id="product" className={`${container} py-12 sm:py-16 scroll-mt-20 border-t border-border`} aria-labelledby="product-title">

@@ -84,6 +84,8 @@
     "mapHeading": "チームの関係が、どうつながっているか。",
     "mapBody": "チーム、会社、連絡先のつながりを見渡せます。人や会社を検索し、記録したやり取りから関係の履歴をたどれます。",
     "mapMember": "メンバー",
+    "heroPauseScenery": "背景の動きを一時停止",
+    "heroResumeScenery": "背景の動きを再開",
     "mapWorkspace": "ワークスペース",
     "mapCompanies": "会社",
     "workflowName": "ワークフロー",
