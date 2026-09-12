@@ -140,8 +140,12 @@ Pointer selection eases the browser-tab outline into place over standard timing,
 The diagram reveals its selected record, connections, and related nodes over 1.2 seconds using
 landing-only multiples of the expressive token; the explanation and selected state stay immediate.
 Keyboard selection and reduced motion show both the tab and complete panel immediately.
+Landing navigation controls have at least 44px hit areas. Header navigation adapts to its available
+width and the root text size; the shared legal-page header keeps its default layout.
 The teamwork chapter pins its heading, explanation, and illustration together on sufficiently wide,
-tall viewports. Natural scroll progress advances through four scenes without intercepting scrolling;
+tall viewports only when the tallest copy and illustration fit with its heading and footer. Width,
+text size, font loading, and content changes recheck the fit; an inline fallback recovers automatically
+when space becomes sufficient. Natural scroll progress advances through four scenes without intercepting scrolling;
 reading order and focus never change. Mobile, short viewports, reduced motion, and no JavaScript use
 inline passage/illustration pairs. Only visible-section scrolling schedules measurements. Pointer
 scrolling transitions the copy and illustration; keyboard scrolling changes scenes immediately.

@@ -1,4 +1,5 @@
 .story { position: relative; }
+.sizeProbe { position: absolute; width: 1rem; height: 1rem; visibility: hidden; pointer-events: none; }
 .stage { margin-top: 3rem; }
 .footer { display: none; }
 .story svg { display: block; width: 1.5rem; height: 1.5rem; flex-shrink: 0; }
@@ -66,7 +67,7 @@
 :global(.dark) :is(.pipelineRoute, .documentIcon, .approval svg, .artifactTitle svg, .report > svg, .historyRow > svg:last-child) { color: var(--color-brand); }
 
 @media (min-width: 48rem) and (min-height: 40rem) and (prefers-reduced-motion: no-preference) {
-    .story[data-enhanced="true"] {
+    .story:is([data-enhanced="true"], [data-fit-check]) {
         height: calc(var(--team-scenes) * 100svh);
         .frame { position: sticky; top: 4rem; height: calc(100svh - 4rem); display: flex; flex-direction: column; padding-block: 1.5rem; }
         .header { display: grid; grid-template-columns: 1.2fr 1fr; align-items: center; gap: 2rem; }
@@ -92,16 +93,17 @@
         &[data-team-motion="true"] .scene[data-active="true"] { transition-duration: var(--motion-standard), var(--motion-standard), 0s; transition-delay: 0s; }
         &[data-team-motion="true"] .passage[data-active="true"] { transition-duration: var(--motion-standard); }
     }
-    :global(.dark) .story[data-enhanced="true"] .progress > span[data-active="true"] { background: var(--color-brand); }
+    .story[data-fit-check] :is(.scene, .passage) { transition: none !important; }
+    :global(.dark) .story:is([data-enhanced="true"], [data-fit-check]) .progress > span[data-active="true"] { background: var(--color-brand); }
 }
 @media (min-width: 48rem) and (max-width: 63.99rem) {
-    .story[data-enhanced="true"] .header { grid-template-columns: 1fr; gap: 0.75rem; }
-    .story[data-enhanced="true"] .header h2 { max-width: 40rem; }
-    .story[data-enhanced="true"] .stepHeading { font-size: 1.75rem; }
-    .story[data-enhanced="true"] .stepBody { font-size: 1rem; margin-top: 1rem; }
+    .story:is([data-enhanced="true"], [data-fit-check]) .header { grid-template-columns: 1fr; gap: 0.75rem; }
+    .story:is([data-enhanced="true"], [data-fit-check]) .header h2 { max-width: 40rem; }
+    .story:is([data-enhanced="true"], [data-fit-check]) .stepHeading { font-size: 1.75rem; }
+    .story:is([data-enhanced="true"], [data-fit-check]) .stepBody { font-size: 1rem; margin-top: 1rem; }
 }
 @media (min-width: 48rem) and (max-height: 49.99rem) {
-    .story[data-enhanced="true"] {
+    .story:is([data-enhanced="true"], [data-fit-check]) {
         .frame { padding-block: 1rem; }
         .header h2 { font-size: 2rem; }
         .header p { font-size: 1rem; }

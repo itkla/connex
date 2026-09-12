@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import styles from "./teamwork.module.css";
 
 const STORY_QUERY = "(min-width: 48rem) and (min-height: 40rem) and (prefers-reduced-motion: no-preference)";
@@ -18,9 +18,69 @@ type StoryStep = { id: string; content: ReactNode; visual: ReactNode };
 /** Pins a complete chapter while natural scroll progress selects its scene; fallback content stays inline. */
 export function TeamworkStory({ steps, header, caption, scrollLabel }: { steps: StoryStep[]; header: ReactNode; caption: string; scrollLabel: string }) {
     const root = useRef<HTMLDivElement>(null);
-    const enhanced = useSyncExternalStore(subscribeLayout, storySnapshot, serverSnapshot);
+    const eligible = useSyncExternalStore(subscribeLayout, storySnapshot, serverSnapshot);
+    const [fits, setFits] = useState(false);
+    const enhanced = eligible && fits;
     const [active, setActive] = useState(0);
     const [motion, setMotion] = useState(false);
+
+    useLayoutEffect(() => {
+        const element = root.current;
+        if (!eligible || !element) return;
+        const chapter = element.querySelector<HTMLElement>("[data-team-frame]");
+        const unit = element.querySelector<HTMLElement>("[data-team-size]");
+        const heading = element.querySelector<HTMLElement>(`.${styles.header}`);
+        const stage = element.querySelector<HTMLElement>(`.${styles.stage}`);
+        const passages = element.querySelector<HTMLElement>(`.${styles.passages}`);
+        const scenes = element.querySelector<HTMLElement>(`.${styles.scenes}`);
+        const footer = element.querySelector<HTMLElement>(`.${styles.footer}`);
+        if (!chapter || !unit || !heading || !stage || !passages || !scenes || !footer) return;
+        let frame: number | undefined;
+        let disposed = false;
+        const measure = () => {
+            frame = undefined;
+            element.setAttribute("data-fit-check", "");
+            try {
+                const frameStyle = getComputedStyle(chapter);
+                const required = heading.offsetHeight + Math.max(passages.offsetHeight, scenes.offsetHeight)
+                    + footer.offsetHeight + parseFloat(getComputedStyle(stage).marginTop)
+                    + parseFloat(frameStyle.paddingTop) + parseFloat(frameStyle.paddingBottom);
+                setFits(required <= chapter.clientHeight);
+            } finally {
+                element.removeAttribute("data-fit-check");
+            }
+        };
+        const schedule = () => {
+            if (!disposed && frame === undefined) frame = window.requestAnimationFrame(measure);
+        };
+        measure();
+        let width = element.getBoundingClientRect().width;
+        let unitWidth = unit.offsetWidth;
+        // Enhancement changes height itself; only width and text-size changes should remeasure it.
+        const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                if (entry.target === element && entry.contentRect.width !== width) {
+                    width = entry.contentRect.width;
+                    schedule();
+                } else if (entry.target === unit && entry.contentRect.width !== unitWidth) {
+                    unitWidth = entry.contentRect.width;
+                    schedule();
+                }
+            }
+        });
+        observer?.observe(element);
+        observer?.observe(unit);
+        window.addEventListener("resize", schedule);
+        document.fonts?.addEventListener("loadingdone", schedule);
+        void document.fonts?.ready.then(schedule);
+        return () => {
+            disposed = true;
+            observer?.disconnect();
+            if (frame !== undefined) window.cancelAnimationFrame(frame);
+            window.removeEventListener("resize", schedule);
+            document.fonts?.removeEventListener("loadingdone", schedule);
+        };
+    }, [eligible, steps, header, caption, scrollLabel]);
 
     useEffect(() => {
         const element = root.current;
@@ -70,6 +130,7 @@ export function TeamworkStory({ steps, header, caption, scrollLabel }: { steps: 
 
     return (
         <div ref={root} className={styles.story} data-team-story data-enhanced={enhanced} data-team-motion={motion} style={{ "--team-scenes": steps.length } as CSSProperties}>
+            <span className={styles.sizeProbe} data-team-size aria-hidden="true" />
             <div className={styles.frame} data-team-frame>
                 <div className={styles.header}>{header}</div>
                 <div className={styles.stage}>

@@ -3,6 +3,9 @@
     overflow-wrap: anywhere;
 }
 
+.landing header { container-type: inline-size; }
+.landing :is(header, footer) button { min-width: 2.75rem; min-height: 2.75rem; }
+
 .landing h1,
 .landing h2,
 .landing h3 {
@@ -410,7 +413,7 @@
     }
 }
 
-@media (min-width: 48rem) and (max-width: 63.999rem) {
+@container (max-width: 63.999rem) {
     .landing [data-landing-desktop] { display: none; }
     .landing [data-landing-mobile] { display: flex; }
     .landing [data-landing-menu] { display: block; }

@@ -17,6 +17,9 @@ let frames: Map<number, FrameRequestCallback>;
 let nextFrame: number;
 let intersect: (visible: boolean) => void;
 let disconnect = vi.fn<() => void>();
+let resize: (target: Element, width: number) => void;
+let visualHeight: number;
+let resizeDisconnect = vi.fn<() => void>();
 
 beforeEach(() => {
     eligible = true;
@@ -25,12 +28,37 @@ beforeEach(() => {
     mediaListeners = new Set();
     frames = new Map();
     disconnect = vi.fn();
+    resizeDisconnect = vi.fn();
+    visualHeight = 360;
     vi.stubGlobal("innerHeight", 800);
     vi.stubGlobal("matchMedia", () => ({ get matches() { return eligible; }, addEventListener: (_: string, fn: () => void) => mediaListeners.add(fn), removeEventListener: (_: string, fn: () => void) => mediaListeners.delete(fn) }));
     vi.stubGlobal("IntersectionObserver", class {
         constructor(callback: (entries: { isIntersecting: boolean }[]) => void) { intersect = (visible) => callback([{ isIntersecting: visible }]); }
         observe() {}
         disconnect() { disconnect(); }
+    });
+    vi.stubGlobal("ResizeObserver", class {
+        constructor(callback: (entries: { target: Element; contentRect: { width: number } }[]) => void) {
+            resize = (target, width) => callback([{ target, contentRect: { width } }]);
+        }
+        observe() {}
+        disconnect() { resizeDisconnect(); }
+    });
+    vi.spyOn(window, "getComputedStyle").mockImplementation(() => {
+        const style = document.createElement("div").style;
+        style.paddingTop = "16px";
+        style.paddingBottom = "16px";
+        style.marginTop = "24px";
+        return style;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(736);
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(16);
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+        if (this.className.includes("header")) return 80;
+        if (this.className.includes("passages")) return 300;
+        if (this.className.includes("scenes")) return visualHeight;
+        if (this.className.includes("footer")) return 32;
+        return 0;
     });
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => { frames.set(++nextFrame, callback); return nextFrame; });
     vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => { frames.delete(id); });
@@ -110,4 +138,28 @@ it("keeps all passages available when scroll observation is unavailable", async 
     expect(container.querySelector("[data-team-story]")?.getAttribute("data-enhanced")).toBe("false");
     expect(container.querySelectorAll("[data-team-step]")).toHaveLength(4);
     expect(frames.size).toBe(0);
+});
+
+it("falls back for oversized scenes and recovers when text size allows them to fit", async () => {
+    await mount();
+    const story = container.querySelector<HTMLElement>("[data-team-story]")!;
+    const unit = container.querySelector("[data-team-size]")!;
+    expect(story.dataset.enhanced).toBe("true");
+    visualHeight = 900;
+    await act(async () => resize(unit, 32));
+    await flushFrame();
+    expect(story.dataset.enhanced).toBe("false");
+    expect(story.hasAttribute("data-fit-check")).toBe(false);
+    expect(story.querySelectorAll("[data-team-step]")).toHaveLength(4);
+    await act(async () => resize(story, 400));
+    expect(frames.size).toBe(0);
+    visualHeight = 360;
+    await act(async () => resize(unit, 16));
+    await flushFrame();
+    expect(story.dataset.enhanced).toBe("true");
+    await act(async () => window.dispatchEvent(new Event("resize")));
+    expect(frames.size).toBe(1);
+    await act(async () => root.render(null));
+    expect(frames.size).toBe(0);
+    expect(resizeDisconnect).toHaveBeenCalled();
 });
