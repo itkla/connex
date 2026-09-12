@@ -9,7 +9,7 @@ import styles from "./landing.module.css";
 const MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 const TYPING_MS = durationExpressiveMs * 4;
 const THINKING_MS = durationExpressiveMs * 2;
-const RESPONSE_MS = durationStandardMs * 4;
+const RESPONSE_MS = durationStandardMs * 3;
 
 function subscribeMotionPreference(onChange: () => void) {
     const preference = window.matchMedia(MOTION_QUERY);

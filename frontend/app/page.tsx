@@ -60,7 +60,7 @@ export default async function Home() {
                     <CustomerWorkspacePreview t={t} />
                 </section>
 
-                <section id="product" className={`${container} ${chapter} scroll-mt-20 border-t border-border`} aria-labelledby="product-title">
+                <section id="product" className={`${container} py-12 sm:py-16 scroll-mt-20 border-t border-border`} aria-labelledby="product-title">
                     <h2 id="product-title" className={`${styles.heading} max-w-3xl`}>{t("contextHeading")}</h2>
                     <p className={description}>{t("contextBody")}</p>
                     <ConnectedRecordPreview t={t} />
@@ -74,7 +74,7 @@ export default async function Home() {
                     </div>
                     <div className="mt-20 border-t border-border pt-12 sm:mt-28 sm:pt-16">
                         <h3 className="text-xl font-bold text-brand-dark dark:text-brand">{t("mapName")}</h3>
-                        <div className="grid gap-5 lg:grid-cols-2 lg:gap-16"><p className={featureHeading}>{t("mapHeading")}</p><p className={description}>{t("mapBody")}</p></div>
+                        <p className={featureHeading}>{t("mapHeading")}</p><p className={description}>{t("mapBody")}</p>
                         <MapPreview t={t} />
                     </div>
                     <div className="mt-20 border-t border-border pt-12 sm:mt-28 sm:pt-16">
@@ -93,7 +93,6 @@ export default async function Home() {
                     <h2 id="team-title" className={`${styles.heading} max-w-4xl`}>{t("teamHeading")}</h2>
                     <p className={description}>{t("teamBody")}</p>
                     <TeamworkPreview t={t} />
-                    <div className="mt-8 grid gap-5 text-base leading-relaxed text-muted-foreground sm:grid-cols-2 sm:gap-10"><p>{t("teamQuotesBody")}</p><p>{t("teamReportsBody")}</p></div>
                 </section>
 
                 <section id="workflow" className={`${container} ${chapter} scroll-mt-20 border-t border-border`} aria-labelledby="start-title">

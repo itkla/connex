@@ -98,13 +98,16 @@ Schibsted Grotesk and Source Sans 3 are loaded only for this route, with the exi
 fallback; the page inherits the global theme preference. Shared documentation and legal styles stay
 unchanged.
 
-Product previews use the dated fictional workspace in
+Product diagrams use labeled icons to explain connections and process, rather than dense mock
+records. The hero adapts the auth diagram through separate landing markup and styles.
+Explanatory copy describes the product directly. Ask Connex and priority examples keep
+their dated fictional evidence in native disclosures, using
 `frontend/app/components/landing/sampleWorkspace.ts`, never authenticated feature containers.
-Explanatory copy describes the product directly; fictional names belong inside labeled previews,
-without requiring visitors to follow a sample team's story.
 Ask Connex demonstrates a local message-and-response sequence once on arrival, with explicit replay
 and skip controls. It makes no AI requests, keeps the answer's space reserved, and shows the complete
 conversation with reduced motion or without JavaScript.
+The workflow diagram briefly shows trigger-to-action order once on arrival. Its labels remain
+visible throughout; reduced motion shows the static diagram.
 Sample citations and practical questions use native `details` disclosures so their content remains
 reachable without JavaScript. The guided example uses the shared segmented control and includes a
 no-JavaScript fallback for the other examples. Only explicit selection changes its displayed example.

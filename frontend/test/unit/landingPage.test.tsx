@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Home from "@/app/page";
 import GuidedExample from "@/app/components/landing/GuidedExample";
-import { AskConnexPreview } from "@/app/components/landing/ProductPreviews";
+import { AskConnexPreview, WorkflowPreview } from "@/app/components/landing/ProductPreviews";
 import { SAMPLE_WORKSPACE } from "@/app/components/landing/sampleWorkspace";
 import { getArticle } from "@/app/lib/docs/registry";
 import en from "@/messages/en/common.json";
@@ -80,6 +80,11 @@ function AskExample() {
     return <AskConnexPreview t={t} />;
 }
 
+function WorkflowExample() {
+    const t = useTranslations("CommonHome");
+    return <WorkflowPreview t={t} />;
+}
+
 function button(label: string) {
     const result = Array.from(container.querySelectorAll("button")).find((item) => item.getAttribute("aria-label") === label || item.textContent === label);
     if (!result) throw new Error(`Missing button: ${label}`);
@@ -134,6 +139,10 @@ describe.each(["en", "ja"] as const)("landing product story in %s", (locale) => 
         await act(async () => button(m.attention_risk_tab).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
         expect(document.activeElement).toBe(button(m.attention_introduction_tab));
         const source = container.querySelector<HTMLDetailsElement>('[data-sample-source="introduction"]');
+        const evidence = container.querySelector<HTMLDetailsElement>("[data-attention-evidence]");
+        expect(evidence?.open).toBe(false);
+        await act(async () => evidence?.querySelector("summary")?.click());
+        expect(evidence?.open).toBe(true);
         expect(source?.open).toBe(false);
         await act(async () => source?.querySelector("summary")?.click());
         expect(source?.open).toBe(true);
@@ -147,6 +156,10 @@ describe.each(["en", "ja"] as const)("landing product story in %s", (locale) => 
     it("opens each Ask Connex source onto its matching local activity", async () => {
         const messages = locale === "en" ? en : ja;
         await act(async () => root.render(localized(<AskExample />, locale)));
+        const evidence = container.querySelector<HTMLDetailsElement>("[data-ask-sources]");
+        expect(evidence?.open).toBe(false);
+        await act(async () => evidence?.querySelector("summary")?.click());
+        expect(evidence?.open).toBe(true);
         for (const source of ["review", "pricing"] as const) {
             const details = container.querySelector<HTMLDetailsElement>(`[data-sample-source="${source}"]`);
             await act(async () => details?.querySelector("summary")?.click());
@@ -180,6 +193,7 @@ describe.each(["en", "ja"] as const)("landing product story in %s", (locale) => 
         expect(conversation?.getAttribute("data-ask-phase")).toBe("complete");
         expect(conversation?.querySelector("[inert]")).toBeNull();
         expect(vi.getTimerCount()).toBe(0);
+        await act(async () => conversation?.querySelector<HTMLDetailsElement>("[data-ask-sources]")?.querySelector("summary")?.click());
         const source = conversation?.querySelector<HTMLDetailsElement>('[data-sample-source="review"]');
         await act(async () => source?.querySelector("summary")?.click());
         expect(source?.open).toBe(true);
@@ -187,6 +201,40 @@ describe.each(["en", "ja"] as const)("landing product story in %s", (locale) => 
         expect(conversation?.getAttribute("data-ask-phase")).toBe("complete");
         expect(fetchSpy).not.toHaveBeenCalled();
     });
+});
+
+it("shows the workflow order once without hiding labels or repeating on scroll", async () => {
+    vi.useFakeTimers();
+    reducedMotion = false;
+    await act(async () => root.render(localized(<WorkflowExample />, "en")));
+    const sequence = container.querySelector("[data-workflow-active]");
+    await act(async () => notifyIntersection(true, 0.1));
+    expect(sequence?.getAttribute("data-workflow-active")).toBe("false");
+    await act(async () => notifyIntersection(true));
+    expect(sequence?.getAttribute("data-workflow-active")).toBe("true");
+    expect(sequence?.textContent).toContain(en.CommonHome.workflow_task_title);
+    expect(sequence?.querySelector("[hidden], [inert]")).toBeNull();
+    await act(async () => vi.advanceTimersByTime(1100));
+    expect(sequence?.getAttribute("data-workflow-active")).toBe("false");
+    await act(async () => { notifyIntersection(false); notifyIntersection(true); });
+    expect(sequence?.getAttribute("data-workflow-active")).toBe("false");
+    expect(vi.getTimerCount()).toBe(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+});
+
+it("keeps the workflow static with reduced motion and cancels its sequence when hidden", async () => {
+    vi.useFakeTimers();
+    await act(async () => root.render(localized(<WorkflowExample />, "ja")));
+    const sequence = container.querySelector("[data-workflow-active]");
+    await act(async () => notifyIntersection(true));
+    expect(sequence?.getAttribute("data-workflow-active")).toBe("false");
+    await act(async () => { reducedMotion = false; motionListeners.forEach((listener) => listener()); notifyIntersection(true); });
+    expect(sequence?.getAttribute("data-workflow-active")).toBe("true");
+    await act(async () => { pageHidden = true; document.dispatchEvent(new Event("visibilitychange")); });
+    expect(sequence?.getAttribute("data-workflow-active")).toBe("false");
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => root.render(null));
+    expect(motionListeners.size).toBe(0);
 });
 
 it("resets a conversation when the locale changes during playback", async () => {
