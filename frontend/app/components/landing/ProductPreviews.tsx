@@ -120,7 +120,7 @@ export function WorkflowPreview({ t }: { t: LandingTranslation }) {
                     {nodes.map(({ id, icon: Icon, label, position }) => <div key={id} className={`${styles.workflowBox} ${position}`} data-workflow-node={id}>
                         <span className={styles.workflowBoxIcon}><Icon aria-hidden="true" /></span>
                         <p>{t(label)}</p>
-                        {id === "task" && <span className={`${styles.workflowBranchLabel} text-brand-dark dark:text-brand`}>{t("workflow_yes")}</span>}
+                        {id === "task" && <span className={`${styles.workflowBranchLabel} text-foreground`}>{t("workflow_yes")}</span>}
                         {id === "activity" && <span className={`${styles.workflowBranchLabel} text-muted-foreground`}>{t("workflow_no")}</span>}
                     </div>)}
                 </div>

@@ -131,6 +131,7 @@ describe.each(["en", "ja"] as const)("landing product story in %s", (locale) => 
         expect(conversation?.querySelector("button")?.closest("[hidden]")).not.toBeNull();
         expect(doc.querySelector("#deploy noscript")?.textContent).toContain(messages.attention_risk_who);
         expect(doc.querySelector("#deploy noscript")?.textContent).toContain(messages.attention_introduction_who);
+        expect(doc.querySelector("#deploy button")).toBeNull();
         for (const link of doc.querySelectorAll<HTMLAnchorElement>('a[href^="/docs/"]')) {
             const [category, article] = link.pathname.replace("/docs/", "").split("/");
             expect(getArticle(category, article), link.pathname).toBeDefined();

@@ -1,11 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useTranslations } from "next-intl";
 import { ArrowRightIcon, CalendarDaysIcon, ChevronDownIcon, ClockIcon, ExclamationCircleIcon, UserGroupIcon, UserIcon } from "@heroicons/react/24/outline";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SampleEvidence } from "./SampleEvidence";
 import { ATTENTION_EXAMPLES, ATTENTION_SOURCES, type AttentionExample, type LandingTranslation } from "./sampleWorkspace";
+
+const subscribe = () => () => {};
+const clientSnapshot = () => true;
+const serverSnapshot = () => false;
 
 function SignalVisual({ example }: { example: AttentionExample }) {
     if (example === "introduction") return <div className="flex items-center justify-center gap-5 text-brand-dark dark:text-brand" aria-hidden="true"><UserGroupIcon className="size-16" /><ArrowRightIcon className="size-8" /><UserIcon className="size-16" /></div>;
@@ -41,17 +45,18 @@ function Example({ example, t }: { example: AttentionExample; t: LandingTranslat
 /** The signal reads visually first; the recorded example remains available on request. */
 export default function GuidedExample() {
     const t = useTranslations("CommonHome");
+    const hydrated = useSyncExternalStore(subscribe, clientSnapshot, serverSnapshot);
     const [example, setExample] = useState<AttentionExample>("cooling");
 
     return (
         <div className="mt-10 rounded-2xl bg-muted/60 p-5 sm:p-8 lg:p-10">
-            <SegmentedControl
+            {hydrated && <SegmentedControl
                 value={example}
                 onChange={setExample}
                 ariaLabel={t("attentionChoose")}
                 options={ATTENTION_EXAMPLES.map((value) => ({ value, label: t(`attention_${value}_tab`) }))}
                 className="max-w-full flex-wrap [&_button]:min-h-11 [&_button]:whitespace-normal [&_button]:text-foreground"
-            />
+            />}
             <div className="mt-8" aria-live="polite" aria-atomic="true"><Example key={example} example={example} t={t} /></div>
             <noscript>
                 {ATTENTION_EXAMPLES.filter((value) => value !== "cooling").map((value) => <div key={value} className="mt-12"><Example example={value} t={t} /></div>)}

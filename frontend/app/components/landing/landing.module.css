@@ -10,8 +10,8 @@
     text-wrap: balance;
 }
 
-.landing :is(a, summary):focus-visible {
-    outline: 2px solid var(--color-brand);
+.landing :is(a, button, summary):focus-visible {
+    outline: 2px solid var(--foreground);
     outline-offset: 4px;
 }
 
@@ -51,7 +51,7 @@
     transition: none;
 }
 .recordTab[data-slot="tabs-trigger"]:active { scale: 1; }
-.recordTab[data-slot="tabs-trigger"]:focus-visible { z-index: 2; outline: 2px solid var(--color-brand); outline-offset: -4px; box-shadow: none; }
+.recordTab[data-slot="tabs-trigger"]:focus-visible { z-index: 2; outline: 2px solid var(--foreground); outline-offset: -4px; box-shadow: none; }
 .recordTab[data-state="inactive"]:hover { background: var(--background); }
 .recordTab::before {
     content: "";
@@ -79,7 +79,7 @@
     border-radius: 0 0 var(--radius-xl) var(--radius-xl);
     background: var(--background);
 }
-.recordPanel:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 4px; }
+.recordPanel:focus-visible { outline: 2px solid var(--foreground); outline-offset: 4px; }
 .recordDetail {
     display: grid;
     grid-template-columns: 1fr 1fr;
