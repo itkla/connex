@@ -206,18 +206,78 @@
     "pricing": {
       "heading": "Pricing",
       "body": "A plan for the way your team works.",
+      "compare": "Compare the plans.",
+      "allFeatures": "Every plan includes all product features, including Ask Connex, Workflows, relationship intelligence, quotes, and reporting. Choose the capacity and hosting that fit your team.",
+      "feature": "Feature",
+      "included": "Included",
+      "notIncluded": "Not included",
+      "aiNote": "Ask Connex requires an enabled AI provider and the appropriate workspace permissions. Relationship insights depend on the history your team records.",
+      "aiDocs": "How AI works",
+      "groups": {
+        "capacity": "Capacity",
+        "features": "Product features",
+        "hosting": "Hosting"
+      },
+      "features": {
+        "workspaces": "Workspaces",
+        "seats": "Included seats",
+        "customers": "Included customers",
+        "extraCustomers": "Additional customer capacity",
+        "ask": "Ask Connex limits",
+        "crm": "Companies, contacts, deals & activities",
+        "relationships": "Radar, Map & Introductions",
+        "workflows": "Workflows",
+        "insights": "Quotes, Analytics & Reports",
+        "roles": "Workspace roles & permissions",
+        "saas": "Shared SaaS hosting",
+        "silo": "Dedicated Silo environment",
+        "onPrem": "On-premises deployment"
+      },
       "free": {
         "name": "Free",
-        "body": "For getting your customer work organized."
+        "body": "For getting your customer work organized.",
+        "includes": "Included in Free",
+        "highlights": {
+          "workspaces": "1 workspace",
+          "seats": "1 user",
+          "customers": "5 customers",
+          "ask": "Standard Ask Connex limits"
+        }
       },
       "pro": {
         "name": "Pro",
         "body": "For teams building their customer relationships.",
-        "hosting": "SaaS, hosted by Connex."
+        "hosting": "SaaS, hosted by Connex.",
+        "includes": "More room for your team",
+        "highlights": {
+          "workspaces": "5 workspaces",
+          "seats": "2 seats included",
+          "customers": "20 customers included",
+          "extraCustomers": "Buy additional customer capacity",
+          "clientWorkspaces": "Join client workspaces",
+          "ask": "Higher Ask Connex limits"
+        }
       },
       "enterprise": {
         "name": "Enterprise",
-        "body": "A dedicated Silo environment operated by Connex, or an on-premises installation you manage."
+        "body": "A dedicated Silo environment operated by Connex, or an on-premises installation you manage.",
+        "includes": "Tailored to your contract",
+        "highlights": {
+          "capacity": "Workspace, seat & customer limits set by contract",
+          "ask": "Ask Connex allowance set by contract",
+          "silo": "Dedicated Silo environment",
+          "onPrem": "On-premises deployment"
+        }
+      },
+      "values": {
+        "one": "1",
+        "two": "2",
+        "five": "5",
+        "twenty": "20",
+        "standard": "Standard",
+        "higher": "Higher",
+        "custom": "By contract",
+        "addOn": "Add-on"
       }
     },
     "teamHandover": "Shared history",

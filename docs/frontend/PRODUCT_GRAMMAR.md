@@ -99,8 +99,13 @@ fallback; the page inherits the global theme preference. Shared documentation an
 unchanged.
 
 Pricing appears immediately before practical questions, with Free, Pro, and Enterprise plans.
-Pro is hosted SaaS; Enterprise covers Silo and on-premises deployment. Prices and unspecified
-plan entitlements are omitted. Account actions keep the page's existing session-aware destination.
+Every plan includes all product features; capacity and hosting distinguish the plans. Free includes
+1 workspace, 1 user, and 5 customers. Pro is hosted SaaS with 5 workspaces, 2 included seats,
+20 included customers, optional additional customer capacity, client-workspace participation, and
+higher Ask Connex limits. Enterprise covers Silo and on-premises deployment, with capacity set by
+contract. Prices and numeric AI allowances are omitted. The feature lists and comparison are
+presentation only; they do not enforce billing or quotas. Account actions keep the page's existing
+session-aware destination.
 
 Product diagrams use labeled icons to explain connections and process, rather than dense mock
 records. The hero keeps text and actions vertically centered below navigation, over a decorative
