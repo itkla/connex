@@ -32,7 +32,8 @@ export default function LandingNav({ ctaHref, ctaLabel, preLaunch = false }: { c
     const links = [
         { href: "/#product", label: t("navProduct"), route: false },
         { href: "/#features", label: t("navFeatures"), route: false },
-        { href: "/#workflow", label: t("navWorkflow"), route: false },
+        { href: "/#pricing", label: t("navPricing"), route: false },
+        { href: "/#faq", label: t("navFaq"), route: false },
         { href: "/docs", label: t("navDocs"), route: true },
     ];
 

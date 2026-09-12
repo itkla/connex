@@ -127,7 +127,7 @@ export default async function Home() {
                     <LandingPricing t={t} ctaHref={ctaHref} ctaLabel={ctaLabel} preLaunch={preLaunch} />
                 </section>
 
-                <section className={`${container} ${chapter} grid gap-8 lg:grid-cols-[0.7fr_1.3fr] lg:gap-16`} aria-labelledby="faq-title">
+                <section id="faq" className={`${container} ${chapter} grid gap-8 scroll-mt-20 lg:grid-cols-[0.7fr_1.3fr] lg:gap-16`} aria-labelledby="faq-title">
                     <h2 id="faq-title" className={styles.heading}>{t("faqHeading")}</h2>
                     <LandingFaq t={t} />
                 </section>

@@ -108,6 +108,9 @@ Next.js endpoint confirms Resend persistence. JavaScript is required for submiss
 the fields stay disabled and a noscript notice explains this. The rest of the page stays server-rendered.
 See [deployment configuration](../DEPLOYMENT.md#pre-launch-email-signups) for provider setup and bounds.
 Landing chapters and feature subsections are separated by whitespace rather than horizontal rules.
+The header links to Product, Features, Pricing, FAQ, and Docs in both landing modes and in the mobile
+menu. Section links retain their sticky-header scroll offset; the Getting started chapter and its
+existing `#workflow` anchor remain available lower on the page.
 Chapter padding is 3rem on mobile and 4rem from the small breakpoint; feature subsections use 4rem
 and 5rem gaps respectively. Component boundaries retain their own structure. The landing footer
 omits dividers while the shared footer's default legal-page presentation stays unchanged.
