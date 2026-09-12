@@ -51,7 +51,7 @@ export function ConnectedRecordPreview({ t }: { t: LandingTranslation }) {
 export function AskConnexPreview({ t }: { t: LandingTranslation }) {
     return (
         <figure aria-label={t("askExample")}>
-            <AskConnexConversation key={t("askPrompt")} title={t("askBriefTitle")} prompt={t("askPrompt")} userLabel={t("askYou")} assistantLabel={t("askName")} exampleLabel={t("askExample")} thinkingLabel={t("askThinking")} replayLabel={t("askReplay")} skipLabel={t("askSkip")}>
+            <AskConnexConversation key={t("askPrompt")} title={t("askResponseTitle")} prompt={t("askPrompt")} userLabel={t("askYou")} assistantLabel={t("askName")} exampleLabel={t("askExample")} thinkingLabel={t("askThinking")} replayLabel={t("askReplay")} skipLabel={t("askSkip")}>
                 <p className={`${styles.askResponsePart} text-xl font-medium leading-relaxed`}>{t("askFinding")}</p>
                 <div className={`${styles.askResponsePart} mt-5 flex items-start gap-3 text-base leading-relaxed`}><ArrowUpRightIcon aria-hidden="true" className="mt-1 size-5 shrink-0 text-brand-dark dark:text-brand" /><p>{t("askNextBody")}</p></div>
                 <details className={`${styles.askResponsePart} group mt-5 border-t border-border`} data-ask-sources>

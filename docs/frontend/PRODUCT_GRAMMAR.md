@@ -154,8 +154,11 @@ Explanatory copy describes the product directly. Ask Connex and priority example
 their dated fictional evidence in native disclosures, using
 `frontend/app/components/landing/sampleWorkspace.ts`, never authenticated feature containers.
 Ask Connex demonstrates a local message-and-response sequence once on arrival, with explicit replay
-and skip controls. It makes no AI requests, keeps the answer's space reserved, and shows the complete
-conversation with reduced motion or without JavaScript.
+and skip controls. Its copy presents a conversational assistant for finding records, understanding
+deals, and creating tasks, notes, or activities; deal-stage and record-owner changes require review
+and explicit application. The fictional conversation checks a renewal and reports a follow-up task
+created within the example. It makes no AI requests or CRM writes, keeps the answer's space reserved,
+and shows the complete conversation with reduced motion or without JavaScript.
 The Map example keeps the workspace at the center, with two branches through members and client
 companies to their contacts. Node shape and size distinguish each level; mobile rotates the branches
 vertically rather than packing more dots into the same space.
