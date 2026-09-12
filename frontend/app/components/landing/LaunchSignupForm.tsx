@@ -53,8 +53,8 @@ export function LaunchSignupForm({ id }: { id: string }) {
                 <fieldset disabled={!hydrated || status === "pending"}>
                     <label htmlFor={`${id}-email`} className="sr-only">{t("emailLabel")}</label>
                     <div className="flex flex-col gap-3 sm:flex-row">
-                        <Input id={`${id}-email`} name="email" type="email" autoComplete="email" inputMode="email" required maxLength={254} placeholder={t("emailPlaceholder")} aria-invalid={status === "invalid" || undefined} aria-describedby={`${id}-privacy${failed ? ` ${id}-error` : ""}`} className="h-12 flex-1 rounded-xl bg-background px-4 text-base shadow-none md:text-base" />
-                        <Button type="submit" variant="brand" size="page" className="h-auto min-h-12 whitespace-normal px-6 py-3 text-base">
+                        <Input id={`${id}-email`} name="email" type="email" autoComplete="email" inputMode="email" required maxLength={254} placeholder={t("emailPlaceholder")} aria-invalid={status === "invalid" || undefined} aria-describedby={`${id}-privacy${failed ? ` ${id}-error` : ""}`} className="h-auto min-h-12 rounded-xl bg-background px-4 text-base shadow-none sm:flex-1 md:text-base" />
+                        <Button type="submit" variant="brand" size="page" className="h-auto min-h-12 whitespace-normal px-6 py-2 text-base">
                             {t(status === "pending" ? "submitting" : "submit")}<ArrowRightIcon aria-hidden="true" className="size-4" />
                         </Button>
                     </div>
