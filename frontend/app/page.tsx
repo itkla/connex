@@ -2,6 +2,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { Schibsted_Grotesk, Source_Sans_3 } from "next/font/google";
 import { getTranslations } from "next-intl/server";
+import { resolvePreLaunch } from "@/app/lib/landingMode";
 import { ArrowRightIcon } from "@heroicons/react/24/outline";
 import type { Metadata } from "next";
 import { Button } from "@/components/ui/button";
@@ -43,8 +44,9 @@ export async function generateMetadata(): Promise<Metadata> {
 
 /** Public session resolution selects CTAs; transport failures leave the whole page readable. */
 export default async function Home() {
-    const preLaunch = (process.env.CONNEX_LANDING_MODE ?? "prelaunch") === "prelaunch";
-    const cookie = (await headers()).get("cookie");
+    const requestHeaders = await headers();
+    const preLaunch = resolvePreLaunch({ host: requestHeaders.get("host") });
+    const cookie = requestHeaders.get("cookie");
     const user = preLaunch ? null : await getPublicPageUserFromCookie(cookie);
     const t = await getTranslations("CommonHome");
     const ctaHref = user ? "/dashboard" : "/auth/register";
