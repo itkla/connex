@@ -205,31 +205,35 @@
     },
     "pricing": {
       "heading": "Pricing",
-      "body": "A plan for the way your team works.",
+      "body": "All CRM features included. Choose the capacity and service your team needs.",
       "compare": "Compare the plans.",
-      "allFeatures": "Every plan includes all product features, including Ask Connex, Workflows, relationship intelligence, quotes, and reporting. Choose the capacity and hosting that fit your team.",
+      "allFeatures": "Every plan includes the complete CRM, including Ask Connex, Workflows, relationship intelligence, quotes, and reporting. Capacity, company-managed SSO, and service levels differ.",
       "feature": "Feature",
       "included": "Included",
       "notIncluded": "Not included",
-      "aiNote": "Ask Connex requires an enabled AI provider and the appropriate workspace permissions. Relationship insights depend on the history your team records.",
+      "aiNote": "Ask Connex requires AI configuration and the appropriate permissions. Free has a small monthly allowance; Pro has a larger organization-wide pool that grows with paid seats, with administrator-approved top-ups. Enterprise uses a contracted allowance or customer-funded AI, depending on deployment.",
       "aiDocs": "How AI works",
       "groups": {
         "capacity": "Capacity",
-        "features": "Product features",
-        "hosting": "Hosting"
+        "features": "CRM features",
+        "services": "Identity and support",
+        "hosting": "Deployment"
       },
       "features": {
+        "seats": "Included full-member seats",
+        "extraSeats": "Additional full-member seats",
+        "records": "Contacts and companies",
+        "extraRecords": "Additional record capacity",
         "workspaces": "Workspaces",
-        "seats": "Included seats",
-        "customers": "Included customers",
-        "extraCustomers": "Additional customer capacity",
-        "ask": "Ask Connex limits",
+        "ask": "Ask Connex allowance",
         "crm": "Companies, contacts, deals & activities",
         "relationships": "Radar, Map & Introductions",
         "workflows": "Workflows",
         "insights": "Quotes, Analytics & Reports",
         "roles": "Workspace roles & permissions",
-        "saas": "Shared SaaS hosting",
+        "sso": "Company-managed SSO",
+        "support": "Support",
+        "saas": "Shared cloud",
         "silo": "Dedicated Silo environment",
         "onPrem": "On-premises deployment"
       },
@@ -238,10 +242,10 @@
         "body": "For getting your customer work organized.",
         "includes": "Included in Free",
         "highlights": {
+          "seats": "1 full-member seat",
           "workspaces": "1 workspace",
-          "seats": "1 user",
-          "customers": "5 customers",
-          "ask": "Standard Ask Connex limits"
+          "records": "250 contacts and companies combined",
+          "ask": "Small monthly Ask Connex allowance"
         }
       },
       "pro": {
@@ -250,35 +254,46 @@
         "hosting": "SaaS, hosted by Connex.",
         "includes": "More room for your team",
         "highlights": {
-          "workspaces": "5 workspaces",
-          "seats": "2 seats included",
-          "customers": "20 customers included",
-          "extraCustomers": "Buy additional customer capacity",
-          "clientWorkspaces": "Join client workspaces",
-          "ask": "Higher Ask Connex limits"
+          "seats": "2 full-member seats included",
+          "workspaces": "Up to 5 workspaces",
+          "records": "10,000 contacts and companies combined",
+          "expansion": "Add seats and record capacity",
+          "ask": "AI pool grows with paid seats",
+          "clientWorkspaces": "Join client workspaces"
         }
       },
       "enterprise": {
         "name": "Enterprise",
-        "body": "A dedicated Silo environment operated by Connex, or an on-premises installation you manage.",
+        "body": "For organizations with specific identity, hosting, and support needs.",
         "includes": "Tailored to your contract",
         "highlights": {
-          "capacity": "Workspace, seat & customer limits set by contract",
-          "ask": "Ask Connex allowance set by contract",
-          "silo": "Dedicated Silo environment",
-          "onPrem": "On-premises deployment"
+          "sso": "Company-managed SSO",
+          "hosting": "Shared cloud, Silo or on-premises options",
+          "capacity": "Contracted seats, records & AI allowance",
+          "support": "Contracted support and deployment services"
         }
       },
       "values": {
         "one": "1",
         "two": "2",
-        "five": "5",
-        "twenty": "20",
-        "standard": "Standard",
-        "higher": "Higher",
+        "five": "Up to 5",
+        "recordsFree": "250",
+        "recordsPro": "10,000",
+        "smallMonthly": "Small monthly",
+        "sharedPool": "Shared pool",
         "custom": "By contract",
-        "addOn": "Add-on"
-      }
+        "upgrade": "Upgrade to Pro",
+        "perSeat": "Fixed per-seat",
+        "addOn": "Add-on",
+        "selfService": "Self-service",
+        "productSupport": "Product support",
+        "quoted": "Quoted option"
+      },
+      "combinedTotal": "Combined total",
+      "poolingNote": "Your Pro subscription belongs to your organization. Its seats, combined record allowance, and AI pool are shared across your organization’s own workspaces. Each full member counts once, even across multiple workspaces.",
+      "subscriptionNote": "Pro includes two full-member seats, with a fixed charge per additional seat. Expand record capacity while staying on Pro.",
+      "usageNote": "Storage, automation/API throughput, sending, and AI consumption have separate usage allowances, even though the same CRM tools are available on every plan.",
+      "serviceNote": "Pro support covers product setup and troubleshooting. Enterprise software, deployment arrangements, support scope, and operator responsibilities are specified in the contract; Silo and on-premises options are quoted separately."
     },
     "teamHandover": "Shared history",
     "startHeading": "Start with the customers you know.",

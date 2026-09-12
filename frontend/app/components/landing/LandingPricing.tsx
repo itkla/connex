@@ -4,29 +4,34 @@ import { Button } from "@/components/ui/button";
 import type { LandingTranslation } from "./sampleWorkspace";
 
 const OPTIONS = [
-    { key: "free", Icon: UserIcon, highlights: ["workspaces", "seats", "customers", "ask"] },
-    { key: "pro", Icon: CloudIcon, highlights: ["workspaces", "seats", "customers", "extraCustomers", "clientWorkspaces", "ask"] },
-    { key: "enterprise", Icon: BuildingOffice2Icon, highlights: ["capacity", "ask", "silo", "onPrem"] },
+    { key: "free", Icon: UserIcon, highlights: ["seats", "workspaces", "records", "ask"] },
+    { key: "pro", Icon: CloudIcon, highlights: ["seats", "workspaces", "records", "expansion", "ask", "clientWorkspaces"] },
+    { key: "enterprise", Icon: BuildingOffice2Icon, highlights: ["sso", "hosting", "capacity", "support"] },
 ] as const;
 type Plan = typeof OPTIONS[number]["key"];
-type ComparisonValue = boolean | "one" | "two" | "five" | "twenty" | "standard" | "higher" | "custom" | "addOn";
+type ComparisonValue = boolean | "one" | "two" | "five" | "recordsFree" | "recordsPro" | "smallMonthly" | "sharedPool" | "custom" | "upgrade" | "perSeat" | "addOn" | "selfService" | "productSupport" | "quoted";
 type ComparisonRow = { feature: string; values: Record<Plan, ComparisonValue> };
 const INCLUDED = { free: true, pro: true, enterprise: true } as const;
 const COMPARISON = [
     { group: "capacity", rows: [
-        { feature: "workspaces", values: { free: "one", pro: "five", enterprise: "custom" } },
         { feature: "seats", values: { free: "one", pro: "two", enterprise: "custom" } },
-        { feature: "customers", values: { free: "five", pro: "twenty", enterprise: "custom" } },
-        { feature: "extraCustomers", values: { free: false, pro: "addOn", enterprise: "custom" } },
-        { feature: "ask", values: { free: "standard", pro: "higher", enterprise: "custom" } },
+        { feature: "extraSeats", values: { free: "upgrade", pro: "perSeat", enterprise: "custom" } },
+        { feature: "records", values: { free: "recordsFree", pro: "recordsPro", enterprise: "custom" } },
+        { feature: "extraRecords", values: { free: "upgrade", pro: "addOn", enterprise: "custom" } },
+        { feature: "workspaces", values: { free: "one", pro: "five", enterprise: "custom" } },
+        { feature: "ask", values: { free: "smallMonthly", pro: "sharedPool", enterprise: "custom" } },
     ] },
     { group: "features", rows: [
         ...["crm", "relationships", "workflows", "insights", "roles"].map((feature) => ({ feature, values: INCLUDED })),
     ] },
+    { group: "services", rows: [
+        { feature: "sso", values: { free: false, pro: false, enterprise: true } },
+        { feature: "support", values: { free: "selfService", pro: "productSupport", enterprise: "custom" } },
+    ] },
     { group: "hosting", rows: [
-        { feature: "saas", values: { free: true, pro: true, enterprise: false } },
-        { feature: "silo", values: { free: false, pro: false, enterprise: true } },
-        { feature: "onPrem", values: { free: false, pro: false, enterprise: true } },
+        { feature: "saas", values: INCLUDED },
+        { feature: "silo", values: { free: false, pro: false, enterprise: "quoted" } },
+        { feature: "onPrem", values: { free: false, pro: false, enterprise: "quoted" } },
     ] },
 ] as const satisfies readonly { group: string; rows: readonly ComparisonRow[] }[];
 
@@ -66,10 +71,14 @@ export default function LandingPricing({ t, ctaHref, ctaLabel }: { t: LandingTra
                     </article>
                 ))}
             </div>
+            <div id="pricing-pooling-note" className="mt-8 max-w-[85ch] space-y-3 text-base leading-relaxed text-muted-foreground">
+                <p>{t("pricing.poolingNote")}</p>
+                <p>{t("pricing.subscriptionNote")}</p>
+            </div>
             <div className="mt-16 sm:mt-20">
                 <h3 id="pricing-comparison-title" className="text-3xl tracking-tight sm:text-4xl">{t("pricing.compare")}</h3>
                 <p className="mt-4 max-w-[70ch] text-base leading-relaxed text-muted-foreground sm:text-lg">{t("pricing.allFeatures")}</p>
-                <table aria-labelledby="pricing-comparison-title" aria-describedby="pricing-ai-note" className="mt-8 w-full table-fixed border-collapse text-sm sm:text-base">
+                <table aria-labelledby="pricing-comparison-title" aria-describedby="pricing-pooling-note pricing-ai-note pricing-service-note" className="mt-8 w-full table-fixed border-collapse text-sm sm:text-base">
                     <colgroup><col className="w-1/3 sm:w-2/5" /><col /><col /><col /></colgroup>
                     <thead>
                         <tr className="border-b border-border">
@@ -82,7 +91,7 @@ export default function LandingPricing({ t, ctaHref, ctaLabel }: { t: LandingTra
                             <tr><th scope="rowgroup" colSpan={4} className="border-b border-border bg-muted/50 px-3 py-3 text-left text-sm font-semibold">{t(`pricing.groups.${group}`)}</th></tr>
                             {rows.map(({ feature, values }) => (
                                 <tr key={feature} data-pricing-feature={feature} className="border-b border-border">
-                                    <th scope="row" className="py-4 pr-3 text-left font-normal leading-relaxed">{t(`pricing.features.${feature}`)}</th>
+                                    <th scope="row" className="py-4 pr-3 text-left font-normal leading-relaxed">{t(`pricing.features.${feature}`)}{feature === "records" && <span className="mt-1 block text-xs text-muted-foreground">{t("pricing.combinedTotal")}</span>}</th>
                                     {OPTIONS.map(({ key }) => <td key={key} data-pricing-plan={key} className={`px-1 py-4 text-center text-xs leading-relaxed sm:text-base ${key === "pro" ? "bg-brand/5" : ""}`}><FeatureStatus value={values[key]} t={t} /></td>)}
                                 </tr>
                             ))}
@@ -90,6 +99,8 @@ export default function LandingPricing({ t, ctaHref, ctaLabel }: { t: LandingTra
                     ))}
                 </table>
                 <p id="pricing-ai-note" className="mt-5 max-w-[75ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.aiNote")} <Link href="/docs/relationship-intelligence/ai-insights" className="text-foreground underline underline-offset-4">{t("pricing.aiDocs")}</Link></p>
+                <p className="mt-3 max-w-[75ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.usageNote")}</p>
+                <p id="pricing-service-note" className="mt-3 max-w-[75ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.serviceNote")}</p>
             </div>
         </>
     );

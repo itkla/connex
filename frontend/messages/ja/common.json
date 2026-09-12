@@ -205,31 +205,35 @@
     },
     "pricing": {
       "heading": "料金プラン",
-      "body": "チームの働き方に合ったプランを。",
+      "body": "CRMの全機能を、すべてのプランで。チームに合った利用枠とサービスを選べます。",
       "compare": "プランを比較する。",
-      "allFeatures": "Freeを含むすべてのプランで、Ask Connex、ワークフロー、関係性の分析、見積書、レポートなどの全機能を利用できます。チームに合った利用枠と環境を選べます。",
+      "allFeatures": "Ask Connex、ワークフロー、関係性の分析、見積書、レポートなど、CRMの全機能をすべてのプランで利用できます。利用枠、会社が管理するSSO、サービス内容がプランごとに異なります。",
       "feature": "機能",
       "included": "利用できます",
       "notIncluded": "含まれません",
-      "aiNote": "Ask Connexの利用には、有効なAIプロバイダーの設定とワークスペースでの権限が必要です。関係性に関する分析は、チームが記録した履歴に基づきます。",
+      "aiNote": "Ask Connexの利用にはAIの設定と適切な権限が必要です。Freeには少量の月間利用枠があり、Proでは有料メンバー数に応じて増える組織共通の枠を利用できます。管理者の承認による追加購入にも対応します。Enterpriseは利用環境に応じて、契約で定めた利用枠または顧客負担のAIを利用します。",
       "aiDocs": "AIの仕組みを見る",
       "groups": {
         "capacity": "利用枠",
-        "features": "製品の機能",
+        "features": "CRM機能",
+        "services": "認証とサポート",
         "hosting": "利用環境"
       },
       "features": {
+        "seats": "含まれる通常メンバー数",
+        "extraSeats": "通常メンバーの追加",
+        "records": "連絡先・会社",
+        "extraRecords": "連絡先・会社の枠の追加",
         "workspaces": "ワークスペース数",
-        "seats": "含まれるユーザー数",
-        "customers": "含まれる顧客数",
-        "extraCustomers": "顧客枠の追加",
         "ask": "Ask Connexの利用枠",
         "crm": "会社・連絡先・案件・活動",
         "relationships": "レーダー・マップ・紹介",
         "workflows": "ワークフロー",
         "insights": "見積書・分析・レポート",
         "roles": "ワークスペースのロール・権限",
-        "saas": "共有のSaaS環境",
+        "sso": "会社が管理するSSO",
+        "support": "サポート",
+        "saas": "共有クラウド",
         "silo": "専用環境（Silo）",
         "onPrem": "オンプレミスでの運用"
       },
@@ -238,10 +242,10 @@
         "body": "顧客に関わる仕事を整理したい方に。",
         "includes": "Freeに含まれる利用枠",
         "highlights": {
+          "seats": "通常メンバー1人",
           "workspaces": "1ワークスペース",
-          "seats": "1ユーザー",
-          "customers": "5顧客",
-          "ask": "標準のAsk Connex利用枠"
+          "records": "連絡先・会社を合計250件",
+          "ask": "少量のAsk Connex月間利用枠"
         }
       },
       "pro": {
@@ -250,35 +254,46 @@
         "hosting": "Connexが運用するSaaS。",
         "includes": "チームの仕事に、より広い利用枠を",
         "highlights": {
-          "workspaces": "5ワークスペース",
-          "seats": "2ユーザー分の利用枠を含む",
-          "customers": "20顧客分の利用枠を含む",
-          "extraCustomers": "顧客枠を追加購入可能",
-          "clientWorkspaces": "顧客のワークスペースに参加可能",
-          "ask": "より多いAsk Connex利用枠"
+          "seats": "通常メンバー2人分を含む",
+          "workspaces": "最大5ワークスペース",
+          "records": "連絡先・会社を合計10,000件",
+          "expansion": "メンバーとレコード枠を追加可能",
+          "ask": "有料メンバー数に応じて増えるAI利用枠",
+          "clientWorkspaces": "顧客のワークスペースに参加可能"
         }
       },
       "enterprise": {
         "name": "Enterprise",
-        "body": "Connexが運用する専用環境（Silo）と、自社で運用するオンプレミスから選べます。",
+        "body": "認証、利用環境、サポートに個別の要件がある組織に。",
         "includes": "契約に合わせた構成",
         "highlights": {
-          "capacity": "ワークスペース・ユーザー・顧客の上限は契約ごとに設定",
-          "ask": "Ask Connexの利用枠は契約ごとに設定",
-          "silo": "専用環境（Silo）",
-          "onPrem": "オンプレミスでの運用"
+          "sso": "会社が管理するSSO",
+          "hosting": "共有クラウド・Silo・オンプレミスから選択",
+          "capacity": "メンバー・レコード・AIの利用枠は契約で設定",
+          "support": "契約に応じたサポートと導入サービス"
         }
       },
       "values": {
         "one": "1",
         "two": "2",
-        "five": "5",
-        "twenty": "20",
-        "standard": "標準",
-        "higher": "より多い",
+        "five": "最大5",
+        "recordsFree": "250",
+        "recordsPro": "10,000",
+        "smallMonthly": "少量・月間",
+        "sharedPool": "組織で共有",
         "custom": "契約ごと",
-        "addOn": "追加購入"
-      }
+        "upgrade": "Proへ移行",
+        "perSeat": "1人ごと定額",
+        "addOn": "追加購入",
+        "selfService": "セルフサービス",
+        "productSupport": "製品サポート",
+        "quoted": "個別見積もり"
+      },
+      "combinedTotal": "連絡先と会社の合計",
+      "poolingNote": "Proは組織単位の契約です。ユーザー数、連絡先・会社の合計枠、AIの利用枠は、自社のワークスペース全体で共有します。同じメンバーが複数のワークスペースを利用しても、1人分として数えます。",
+      "subscriptionNote": "Proには通常メンバー2人分の利用枠が含まれます。追加メンバーには1人ごとの定額料金がかかります。連絡先・会社の枠も、Proのまま拡張できます。",
+      "usageNote": "全プランで同じCRM機能を使えますが、ストレージ、自動化やAPIの処理量、送信、AIの消費量には、それぞれ利用枠があります。",
+      "serviceNote": "Proのサポートは、製品の設定や問題の解決を対象とします。Enterpriseでは、ソフトウェア、利用環境、サポート範囲、運用者の責任を契約で定めます。Siloとオンプレミスの導入・運用条件は個別見積もりです。"
     },
     "teamHandover": "共有する履歴",
     "startHeading": "いま知っている顧客から、始める。",

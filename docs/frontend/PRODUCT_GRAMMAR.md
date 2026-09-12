@@ -99,13 +99,21 @@ fallback; the page inherits the global theme preference. Shared documentation an
 unchanged.
 
 Pricing appears immediately before practical questions, with Free, Pro, and Enterprise plans.
-Every plan includes all product features; capacity and hosting distinguish the plans. Free includes
-1 workspace, 1 user, and 5 customers. Pro is hosted SaaS with 5 workspaces, 2 included seats,
-20 included customers, optional additional customer capacity, client-workspace participation, and
-higher Ask Connex limits. Enterprise covers Silo and on-premises deployment, with capacity set by
-contract. Prices and numeric AI allowances are omitted. The feature lists and comparison are
-presentation only; they do not enforce billing or quotas. Account actions keep the page's existing
-session-aware destination.
+The approved pricing draft includes all CRM features on every plan; company-managed SSO is reserved
+for Enterprise and does not restrict ordinary account sign-in. Free includes 1 full-member seat,
+1 workspace, and 250 contacts and companies combined. Pro is hosted SaaS with 2 included full-member
+seats, up to 5 workspaces, and 10,000 combined contacts and companies. Additional seats have a fixed
+per-seat charge; records can expand on Pro. Pro supports client-workspace participation, without
+implying that those workspaces share the customer's subscription pool. Seats, records, and AI usage
+belong to the paying organization and are pooled across its own workspaces; a full member counts once.
+Free has a small monthly AI allowance; Pro's larger organization pool grows with paid seats and
+allows administrator-approved top-ups. Enterprise capacity, inference funding, and support are
+contracted. Enterprise supports shared cloud as well as separately quoted Silo/on-premises options.
+Free support is self-service; Pro support covers product setup/troubleshooting; Enterprise services
+and operator responsibilities are contract-scoped. Prices, numeric AI allowances, and unspecified
+resource allowances are omitted. These are marketing definitions only: they do not implement
+commercial entitlements, subscription billing, monthly grants, or top-up purchasing. Account actions
+keep the page's existing session-aware destination.
 
 Product diagrams use labeled icons to explain connections and process, rather than dense mock
 records. The hero keeps text and actions vertically centered below navigation, over a decorative
