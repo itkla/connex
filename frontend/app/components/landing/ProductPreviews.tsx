@@ -5,31 +5,6 @@ import { WorkflowSequence } from "./WorkflowSequence";
 import type { LandingTranslation } from "./sampleWorkspace";
 import styles from "./landing.module.css";
 
-/** Landing-only interpretation of the auth diagram: a shared record and two connected groups. */
-export function CustomerWorkspacePreview({ t }: { t: LandingTranslation }) {
-    return (
-        <figure className="mt-10 sm:mt-12" aria-label={t("customerVisualLabel")}>
-            <div className={styles.heroScene}>
-                <svg className={styles.diagramLines} viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-                    <path d="M50 50 C66 40 76 30 82 17 M50 50 C36 62 26 72 18 83" vectorEffect="non-scaling-stroke" />
-                </svg>
-                <div className={styles.heroCompany}>
-                    <span className={styles.heroCompanyIcon}><BuildingOffice2Icon aria-hidden="true" className="size-7" /></span>
-                    <div><p className="text-lg font-semibold sm:text-xl">{t("recordCompany")}</p><p className="mt-1 text-sm text-muted-foreground">{t("heroRecordContext")}</p></div>
-                </div>
-                <div className={styles.heroContact}>
-                    <span className={styles.heroAvatar}><UserIcon aria-hidden="true" className="size-7" /></span>
-                    <p className={styles.heroContactLabel}>{t("recordContacts")}</p>
-                </div>
-                <div className={styles.heroTeam}>
-                    <span className={styles.heroAvatar}><UserGroupIcon aria-hidden="true" className="size-7" /></span>
-                    <p className={styles.heroTeamLabel}>{t("heroYourTeam")}</p>
-                </div>
-            </div>
-        </figure>
-    );
-}
-
 export function ConnectedRecordPreview({ t }: { t: LandingTranslation }) {
     const records = [
         [BuildingOffice2Icon, "recordCompany"], [UserGroupIcon, "recordContacts"], [CurrencyYenIcon, "recordDeal"],

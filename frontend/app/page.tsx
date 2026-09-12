@@ -10,7 +10,7 @@ import LandingNav from "@/app/components/landing/LandingNav";
 import LandingFooter from "@/app/components/landing/LandingFooter";
 import LandingFaq from "@/app/components/landing/LandingFaq";
 import GuidedExample from "@/app/components/landing/GuidedExample";
-import { AskConnexPreview, ConnectedRecordPreview, CustomerWorkspacePreview, MapPreview, TeamworkPreview, WorkflowPreview } from "@/app/components/landing/ProductPreviews";
+import { AskConnexPreview, ConnectedRecordPreview, MapPreview, TeamworkPreview, WorkflowPreview } from "@/app/components/landing/ProductPreviews";
 import styles from "@/app/components/landing/landing.module.css";
 
 const display = Schibsted_Grotesk({ variable: "--font-landing-display", subsets: ["latin"], display: "swap" });
@@ -48,7 +48,7 @@ export default async function Home() {
             <a href="#main" className="sr-only rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground focus:not-sr-only focus:absolute focus:left-6 focus:top-4 focus:z-50">{t("skipToContent")}</a>
             <LandingNav ctaHref={ctaHref} ctaLabel={ctaLabel} />
             <main id="main">
-                <section className={`${container} pt-12 pb-16 sm:pt-20 lg:pb-24`} aria-labelledby="hero-title">
+                <section className={`${container} flex min-h-[calc(100svh-4rem-1px)] flex-col justify-center py-16 sm:py-20`} aria-labelledby="hero-title">
                     <div className="max-w-5xl">
                         <h1 id="hero-title" className={styles.heroHeading}><span className="block">{t("heroHeadlineLead")}</span><span className="block">{t("heroHeadlineRest")}</span></h1>
                         <p className={`${description} max-w-[56ch]`}>{t("heroSubtext")}</p>
@@ -57,7 +57,6 @@ export default async function Home() {
                             <Button asChild variant="ghost" size="page" className="min-h-11 h-auto whitespace-normal px-5 py-3 text-base"><a href="#features">{t("heroSecondaryCta")}<ArrowRightIcon aria-hidden="true" className="size-4" /></a></Button>
                         </div>
                     </div>
-                    <CustomerWorkspacePreview t={t} />
                 </section>
 
                 <section id="product" className={`${container} py-12 sm:py-16 scroll-mt-20 border-t border-border`} aria-labelledby="product-title">

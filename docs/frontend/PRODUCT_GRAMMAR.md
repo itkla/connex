@@ -99,7 +99,7 @@ fallback; the page inherits the global theme preference. Shared documentation an
 unchanged.
 
 Product diagrams use labeled icons to explain connections and process, rather than dense mock
-records. The hero adapts the auth diagram through separate landing markup and styles.
+records. The hero uses text and actions, vertically centered in the viewport below navigation.
 Explanatory copy describes the product directly. Ask Connex and priority examples keep
 their dated fictional evidence in native disclosures, using
 `frontend/app/components/landing/sampleWorkspace.ts`, never authenticated feature containers.

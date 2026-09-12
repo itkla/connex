@@ -32,87 +32,9 @@
     letter-spacing: -0.035em;
 }
 
-.heroScene,
 .mapScene {
     position: relative;
     isolation: isolate;
-}
-
-.heroScene {
-    height: 22rem;
-    max-width: 54rem;
-    margin-inline: auto;
-}
-
-.heroCompany {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    width: clamp(15rem, 28vw, 21rem);
-    padding: 1.25rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-xl);
-    background: var(--card);
-    transform: translate(-50%, -50%);
-}
-.heroCompanyIcon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 3rem;
-    height: 3rem;
-    flex-shrink: 0;
-    border-radius: var(--radius-lg);
-    background: color-mix(in oklab, var(--color-brand) 12%, var(--card));
-    color: var(--color-brand-dark);
-}
-.heroContact,
-.heroTeam {
-    position: absolute;
-    width: 4rem;
-    height: 4rem;
-    transform: translate(-50%, -50%);
-}
-.heroContact { left: 82%; top: 17%; }
-.heroTeam { left: 18%; top: 83%; }
-.heroAvatar {
-    display: flex;
-    width: 100%;
-    height: 100%;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--color-brand-dark);
-    border-radius: 50%;
-    background: var(--card);
-    color: var(--color-brand-dark);
-}
-.heroContact .heroAvatar { background: var(--color-brand); color: var(--color-brand-foreground); border-color: var(--color-brand); }
-.heroContactLabel,
-.heroTeamLabel {
-    position: absolute;
-    top: 50%;
-    width: max-content;
-    font-size: 1rem;
-    font-weight: 500;
-    transform: translateY(-50%);
-}
-.heroContactLabel { right: calc(100% + 1rem); }
-.heroTeamLabel { left: calc(100% + 1rem); }
-
-.diagramLines {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    fill: none;
-    stroke: var(--color-brand-dark);
-    stroke-width: 1.5;
-}
-
-.mapScene {
     height: 26rem;
     max-width: 72rem;
     margin-inline: auto;
@@ -285,9 +207,6 @@
     to { clip-path: inset(0 0 0 0); }
 }
 
-:global(.dark) .diagramLines { stroke: var(--color-brand); }
-:global(.dark) :is(.heroCompanyIcon, .heroTeam .heroAvatar) { color: var(--color-brand); }
-:global(.dark) .heroTeam .heroAvatar { border-color: var(--color-brand); }
 :global(.dark) :is(.mapMember, .mapMemberKey, .workflowBoxIcon) { color: var(--color-brand); }
 :global(.dark) .workflowFlow { stroke: var(--color-brand); }
 :global(.dark) .workflowActivity .workflowBoxIcon { color: var(--muted-foreground); }
@@ -295,11 +214,6 @@
 :global(.dark) .mapTeamLine { stroke: var(--color-brand); }
 
 @media (max-width: 39.999rem) {
-    .heroScene { height: 20rem; }
-    .heroCompany { padding: 1rem; gap: 0.75rem; }
-    .heroContact, .heroTeam { width: 3.5rem; height: 3.5rem; }
-    .heroContactLabel, .heroTeamLabel { font-size: 0.875rem; }
-
     .mapScene { height: 42rem; max-width: 28rem; }
     .mapHorizontalLines { display: none; }
     .mapVerticalLines { display: block; }
