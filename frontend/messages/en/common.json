@@ -121,7 +121,7 @@
       "noHistory": "Relationships without recorded history show “No history.”"
     },
     "askName": "Ask Connex",
-    "askHeading": "An assistant that moves work forward.",
+    "askHeading": "An agentic assistant that moves work forward.",
     "askBody": "Find customer records, work through a deal, and create tasks, notes, or activities through conversation. Review proposed changes to deal stages and record owners before applying them.",
     "askAvailability": "AI availability depends on your workspace configuration and your organization’s AI provider. Answers can be incomplete; review the sources.",
     "askResponseTitle": "Follow-up task created",
