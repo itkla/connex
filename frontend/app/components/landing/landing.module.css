@@ -40,7 +40,6 @@
     padding: 0.5rem 0.5rem 0;
     border: 1px solid var(--border);
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-    background: var(--muted);
 }
 .recordTab[data-slot="tabs-trigger"] {
     height: auto;
