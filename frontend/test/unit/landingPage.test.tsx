@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Home from "@/app/page";
 import GuidedExample from "@/app/components/landing/GuidedExample";
-import { AskConnexPreview, WorkflowPreview } from "@/app/components/landing/ProductPreviews";
+import { AskConnexPreview, ConnectedRecordPreview, WorkflowPreview } from "@/app/components/landing/ProductPreviews";
 import { SAMPLE_WORKSPACE } from "@/app/components/landing/sampleWorkspace";
 import { getArticle } from "@/app/lib/docs/registry";
 import en from "@/messages/en/common.json";
@@ -85,6 +85,11 @@ function WorkflowExample() {
     return <WorkflowPreview t={t} />;
 }
 
+function ConnectedExample() {
+    const t = useTranslations("CommonHome");
+    return <ConnectedRecordPreview t={t} />;
+}
+
 function button(label: string) {
     const result = Array.from(container.querySelectorAll("button")).find((item) => item.getAttribute("aria-label") === label || item.textContent === label);
     if (!result) throw new Error(`Missing button: ${label}`);
@@ -108,12 +113,49 @@ describe.each(["en", "ja"] as const)("landing product story in %s", (locale) => 
         expect(conversation?.textContent).toContain(messages.askFinding);
         expect(conversation?.querySelector("[inert]")).toBeNull();
         expect(conversation?.querySelector("button")?.closest("[hidden]")).not.toBeNull();
-        expect(doc.querySelector("noscript")?.textContent).toContain(messages.attention_risk_who);
-        expect(doc.querySelector("noscript")?.textContent).toContain(messages.attention_introduction_who);
+        expect(doc.querySelector("#deploy noscript")?.textContent).toContain(messages.attention_risk_who);
+        expect(doc.querySelector("#deploy noscript")?.textContent).toContain(messages.attention_introduction_who);
         for (const link of doc.querySelectorAll<HTMLAnchorElement>('a[href^="/docs/"]')) {
             const [category, article] = link.pathname.replace("/docs/", "").split("/");
             expect(getArticle(category, article), link.pathname).toBeDefined();
         }
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("keeps all six record explanations readable without JavaScript", () => {
+        const m = locale === "en" ? en.CommonHome.connectedRecords : ja.CommonHome.connectedRecords;
+        const html = renderToStaticMarkup(localized(<ConnectedExample />, locale));
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        expect(doc.querySelector<HTMLElement>('[role="tablist"]')?.style.display).toBe("none");
+        expect(doc.querySelector('[role="tabpanel"]')?.textContent).toContain(m.company.body);
+        for (const id of ["contacts", "deals", "activities", "notes", "tasks"] as const) {
+            expect(doc.querySelector("noscript")?.textContent).toContain(m[id].heading);
+            expect(doc.querySelector("noscript")?.textContent).toContain(m[id].body);
+        }
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("reveals the selected record explanation by pointer and keyboard", async () => {
+        const m = locale === "en" ? en.CommonHome.connectedRecords : ja.CommonHome.connectedRecords;
+        await act(async () => root.render(localized(<ConnectedExample />, locale)));
+        expect(container.querySelectorAll('[role="tab"]')).toHaveLength(6);
+        expect(container.querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain(m.company.body);
+        for (const id of ["contacts", "deals", "activities", "notes", "tasks"] as const) {
+            const tab = button(m[id].label);
+            await act(async () => tab.dispatchEvent(new MouseEvent("mousedown", { button: 0, bubbles: true })));
+            expect(tab.getAttribute("aria-selected")).toBe("true");
+            const panel = container.querySelector('[role="tabpanel"]:not([hidden])');
+            expect(panel?.getAttribute("aria-labelledby")).toBe(tab.id);
+            expect(panel?.textContent).toContain(m[id].body);
+            expect(container.querySelectorAll('[role="tabpanel"]:not([hidden])')).toHaveLength(1);
+        }
+        await act(async () => button(m.tasks.label).focus());
+        await act(async () => {
+            button(m.tasks.label).dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+        expect(document.activeElement).toBe(button(m.company.label));
+        expect(button(m.company.label).getAttribute("aria-selected")).toBe("true");
         expect(fetchSpy).not.toHaveBeenCalled();
     });
 

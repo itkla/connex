@@ -1,16 +1,51 @@
 import { ArrowUpRightIcon, BuildingOffice2Icon, ChartBarIcon, ChatBubbleLeftRightIcon, CheckCircleIcon, ChevronDownIcon, ClipboardDocumentListIcon, ClockIcon, CurrencyYenIcon, DocumentCheckIcon, DocumentTextIcon, FunnelIcon, PencilSquareIcon, UserGroupIcon, UserIcon } from "@heroicons/react/24/outline";
 import { AskConnexConversation } from "./AskConnexConversation";
+import { ConnectedRecordTabs } from "./ConnectedRecordTabs";
 import { SampleEvidence } from "./SampleEvidence";
 import { WorkflowSequence } from "./WorkflowSequence";
 import type { LandingTranslation } from "./sampleWorkspace";
 import styles from "./landing.module.css";
 
 export function ConnectedRecordPreview({ t }: { t: LandingTranslation }) {
+    const icons = { company: BuildingOffice2Icon, contacts: UserGroupIcon, deals: CurrencyYenIcon, activities: ChatBubbleLeftRightIcon, notes: PencilSquareIcon, tasks: ClipboardDocumentListIcon };
     const records = [
-        [BuildingOffice2Icon, "recordCompany"], [UserGroupIcon, "recordContacts"], [CurrencyYenIcon, "recordDeal"],
-        [ChatBubbleLeftRightIcon, "recordActivity"], [PencilSquareIcon, "recordNote"], [ClipboardDocumentListIcon, "recordTasks"],
+        { id: "company", related: ["contacts", "deals"] },
+        { id: "contacts", related: ["company", "activities"] },
+        { id: "deals", related: ["company", "contacts"] },
+        { id: "activities", related: ["contacts", "deals"] },
+        { id: "notes", related: ["contacts", "deals"] },
+        { id: "tasks", related: ["contacts", "deals"] },
     ] as const;
-    return <ul className="mt-8 flex flex-wrap gap-x-7 gap-y-4 text-sm font-medium sm:text-base">{records.map(([Icon, label]) => <li key={label} className="flex items-center gap-2"><Icon aria-hidden="true" className="size-5 text-brand-dark dark:text-brand" />{t(label)}</li>)}</ul>;
+    const items = records.map(({ id, related }) => {
+        const Icon = icons[id];
+        return {
+            id,
+            label: t(`connectedRecords.${id}.label`),
+            icon: <Icon aria-hidden="true" className="size-5" />,
+            content: <div className={styles.recordDetail}>
+                <div className="max-w-lg">
+                    <h3 className="text-2xl font-semibold leading-tight tracking-tight sm:text-3xl">{t(`connectedRecords.${id}.heading`)}</h3>
+                    <p className="mt-4 text-base leading-relaxed text-muted-foreground sm:text-lg">{t(`connectedRecords.${id}.body`)}</p>
+                </div>
+                <div className={styles.recordConnections} aria-hidden="true">
+                    <div className={styles.recordPrimary}>
+                        <span className={styles.recordPrimaryIcon}><Icon /></span>
+                        <span>{t(`connectedRecords.${id}.label`)}</span>
+                    </div>
+                    <svg className={styles.recordLines} viewBox="0 0 100 100" preserveAspectRatio="none">
+                        <path d="M0 50 H30 Q50 50 50 30 V25 Q50 20 60 20 H100 M30 50 Q50 50 50 70 V75 Q50 80 60 80 H100" vectorEffect="non-scaling-stroke" />
+                    </svg>
+                    <div className={styles.recordRelated}>
+                        {related.map((relatedId) => {
+                            const RelatedIcon = icons[relatedId];
+                            return <div key={relatedId}><span className={styles.recordRelatedIcon}><RelatedIcon /></span><span>{t(`connectedRecords.${relatedId}.label`)}</span></div>;
+                        })}
+                    </div>
+                </div>
+            </div>,
+        };
+    });
+    return <ConnectedRecordTabs label={t("connectedRecords.choose")} initialValue="company" items={items} />;
 }
 
 export function AskConnexPreview({ t }: { t: LandingTranslation }) {

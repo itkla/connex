@@ -105,6 +105,9 @@ base fades into mist, and soft cloud layers drift at different speeds and move w
 control freezes the scenery. Reduced motion and no JavaScript show the static illustration.
 Cloud motion pauses outside the hero and in hidden tabs. The slow, linear drift uses landing-only
 multiples of the expressive duration token, separate from interface feedback timings.
+The connected-record section uses shared tabs to reveal one explanation and icon diagram at a time.
+All six explanations remain readable without JavaScript; tabs support keyboard selection and wrap
+into two rows on mobile. Its diagrams show supported record connections, not live customer data.
 Explanatory copy describes the product directly. Ask Connex and priority examples keep
 their dated fictional evidence in native disclosures, using
 `frontend/app/components/landing/sampleWorkspace.ts`, never authenticated feature containers.

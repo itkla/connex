@@ -65,6 +65,39 @@
     "ctaHeading": "Bring your customer work together.",
     "contextHeading": "Customer information, connected.",
     "contextBody": "Companies and contacts connect to deals, activities, notes, and tasks, so your team can follow the work and its history.",
+    "connectedRecords": {
+      "choose": "Explore customer records",
+      "company": {
+        "label": "Companies",
+        "heading": "The context behind every customer.",
+        "body": "Bring a company’s contacts, deals, and related history together. Keep profile details and ownership in one place so your team can pick up with context."
+      },
+      "contacts": {
+        "label": "Contacts",
+        "heading": "Know the people behind the company.",
+        "body": "Keep contact details, company connections, and recorded conversations together. See who your team knows and what you last discussed."
+      },
+      "deals": {
+        "label": "Deals",
+        "heading": "Move each deal forward.",
+        "body": "Track value, stage, and expected close date alongside the company and people involved. Keep related activities and next steps close to the deal."
+      },
+      "activities": {
+        "label": "Activities",
+        "heading": "Keep the conversation in context.",
+        "body": "Record calls, emails, and meetings with their date and details. Link each activity to a contact or deal so the history is easy to follow."
+      },
+      "notes": {
+        "label": "Notes",
+        "heading": "Save the details you’ll need again.",
+        "body": "Keep useful context beside a contact or deal, from meeting preparation to customer requirements. Choose private notes or share them with your workspace."
+      },
+      "tasks": {
+        "label": "Tasks",
+        "heading": "Give the next step a place.",
+        "body": "Assign a follow-up, set a due date, and track it through to completion. Link tasks to a contact or deal so the next step stays with the work."
+      }
+    },
     "featuresHeading": "Three ways to work with the bigger picture.",
     "askName": "Ask Connex",
     "askHeading": "Turn recorded context into a useful brief.",
