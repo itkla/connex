@@ -19,6 +19,14 @@ the components are never upgraded independently. The running backend version is 
 
 The frontend image bakes the **internal** backend address (`BACKEND_URL`, default `http://backend:8080`) into its build-time route rewrites, and defaults the server-side fetch base (`API_URL`) to the same. The published Compose bundle overrides `API_URL` with the app-network-only `http://backend-app:8080` alias so recipient-preview SSR reaches the backend from the Docker-DNS-resolved `frontend` peer; browser rewrites retain the baked `backend` service hop. The one image remains portable across deployment modes as long as the bundle names the backend service `backend`. Decoupling this behind an ingress proxy is a follow-up (#499).
 
+## Vulnerability SLA preflight
+
+Release metadata, tag promotion, and publication require a fresh passing vulnerability custody/SLA
+check. Overdue findings, missed 24-hour custody targets, expired exception reviews, and unavailable
+GitHub inventory deny release. Configure `CONNEX_SLA_READ_TOKEN` before release; follow the
+[owner decision and exception protocol](VULNERABILITY_MANAGEMENT.md#automated-enforcement).
+An exception does not bypass existing dependency, CodeQL, signing, or release checks.
+
 ## Cutting a release
 
 Releases are **tag-triggered**. From the qualified commit on `main`:

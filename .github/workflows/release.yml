@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
+      issues: write
       contents: read
       actions: read
     outputs:
@@ -40,6 +41,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
+
+      - name: Enforce vulnerability custody and remediation SLA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONNEX_SLA_READ_TOKEN: ${{ secrets.CONNEX_SLA_READ_TOKEN }}
+          # Only a publication event supplies corrective-release identity.
+          CONNEX_SLA_RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
+          CONNEX_SLA_RELEASE_SHA: ${{ github.sha }}
+        run: python3 .github/scripts/vulnerability-sla.py preflight
 
       - name: Resolve release event metadata
         id: metadata
@@ -873,6 +883,7 @@ jobs:
     outputs:
       transaction_name: ${{ steps.transaction.outputs.name }}
     permissions:
+      issues: write
       contents: read
       actions: read
       packages: write
@@ -1026,6 +1037,15 @@ jobs:
             done
           done
 
+      - name: Enforce vulnerability custody and remediation SLA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONNEX_SLA_READ_TOKEN: ${{ secrets.CONNEX_SLA_READ_TOKEN }}
+          # Only a publication event supplies corrective-release identity.
+          CONNEX_SLA_RELEASE_TAG: ${{ needs.metadata.outputs.release_mode == 'publish' && github.ref_name || '' }}
+          CONNEX_SLA_RELEASE_SHA: ${{ github.sha }}
+        run: python3 .github/scripts/vulnerability-sla.py preflight
+
       - name: Revalidate release tag immediately before promotion
         env:
           CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
@@ -1035,6 +1055,10 @@ jobs:
 
       - name: Promote and verify final tags
         env:
+          GH_TOKEN: ${{ github.token }}
+          CONNEX_SLA_READ_TOKEN: ${{ secrets.CONNEX_SLA_READ_TOKEN }}
+          CONNEX_SLA_RELEASE_TAG: ${{ needs.metadata.outputs.release_mode == 'publish' && github.ref_name || '' }}
+          CONNEX_SLA_RELEASE_SHA: ${{ github.sha }}
           VERSION: ${{ needs.metadata.outputs.version }}
         run: |
           remote_digest() {
@@ -1044,6 +1068,8 @@ jobs:
           for component in backend frontend ocr clamav; do
             image="$(jq -r --arg component "$component" '.images[$component].image' release-manifest.json)"
             digest="$(jq -r --arg component "$component" '.images[$component].digest' release-manifest.json)"
+            # Recheck live expiry after preparation and before each tag promotion.
+            python3 .github/scripts/vulnerability-sla.py preflight
             docker buildx imagetools create --prefer-index=false \
               --tag "${image}:${VERSION}" \
               --tag "${image}:sha-${GITHUB_SHA}" \
@@ -1059,6 +1085,7 @@ jobs:
     needs: [metadata, promote]
     if: ${{ needs.metadata.outputs.release_mode == 'publish' }}
     permissions:
+      issues: write
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -1069,6 +1096,15 @@ jobs:
         with:
           name: ${{ needs.promote.outputs.transaction_name }}
 
+      - name: Enforce vulnerability custody and remediation SLA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONNEX_SLA_READ_TOKEN: ${{ secrets.CONNEX_SLA_READ_TOKEN }}
+          # Only a publication event supplies corrective-release identity.
+          CONNEX_SLA_RELEASE_TAG: ${{ needs.metadata.outputs.release_mode == 'publish' && github.ref_name || '' }}
+          CONNEX_SLA_RELEASE_SHA: ${{ github.sha }}
+        run: python3 .github/scripts/vulnerability-sla.py preflight
+
       - name: Revalidate release tag immediately before publication
         env:
           CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
@@ -1078,6 +1114,9 @@ jobs:
 
       - name: Publish the complete verified release atomically
         env:
+          CONNEX_SLA_READ_TOKEN: ${{ secrets.CONNEX_SLA_READ_TOKEN }}
+          CONNEX_SLA_RELEASE_TAG: ${{ needs.metadata.outputs.release_mode == 'publish' && github.ref_name || '' }}
+          CONNEX_SLA_RELEASE_SHA: ${{ github.sha }}
           CONNEX_RELEASE_ADMIN_TOKEN: ${{ secrets.CONNEX_RELEASE_ADMIN_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -1144,5 +1183,7 @@ jobs:
               "$(sha256sum "/tmp/draft-release/$asset" | cut -d ' ' -f1)"
           done
           bash .github/scripts/verify-release-preconditions.sh "$GITHUB_SHA" "$GITHUB_REF_NAME" "$RELEASE_MODE"
+          # Asset transfer and resumed jobs can outlive corrective authorization.
+          python3 .github/scripts/vulnerability-sla.py preflight
           gh release edit "$GITHUB_REF_NAME" --draft=false "${prerelease_flags[@]}"
           gh release verify "$GITHUB_REF_NAME"
