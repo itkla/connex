@@ -98,9 +98,37 @@
 .recordPrimaryIcon { width: 5.5rem; height: 5.5rem; background: var(--color-brand); color: var(--color-brand-foreground); }
 .recordPrimaryIcon svg { width: 2.75rem; height: 2.75rem; }
 .recordRelated { display: grid; gap: 1.75rem; }
+.recordRelated > div > span:last-child { white-space: nowrap; }
 .recordRelatedIcon { width: 3.5rem; height: 3.5rem; background: var(--muted); color: var(--muted-foreground); }
 .recordRelatedIcon svg { width: 1.75rem; height: 1.75rem; }
 .recordLines { width: 100%; height: 11rem; transform: translateY(-1rem); fill: none; stroke: var(--border); stroke-width: 1.5; }
+
+@media (prefers-reduced-motion: no-preference) {
+    [data-record-motion="pointer"] .recordPanel[data-state="active"] {
+        .recordPrimaryIcon {
+            opacity: 1;
+            transform: scale(1);
+            transition: opacity var(--motion-standard) var(--ease-out), transform var(--motion-standard) var(--ease-out);
+        }
+        .recordLines {
+            clip-path: inset(0);
+            transition: clip-path var(--motion-standard) var(--ease-out);
+        }
+        .recordRelatedIcon {
+            opacity: 1;
+            transform: translateX(0);
+            transition: opacity var(--motion-micro) var(--ease-out), transform var(--motion-micro) var(--ease-out);
+            transition-delay: calc(var(--motion-micro) / 3);
+        }
+        .recordRelated > div:last-child .recordRelatedIcon { transition-delay: calc(var(--motion-micro) * 2 / 3); }
+
+        @starting-style {
+            .recordPrimaryIcon { opacity: 0.6; transform: scale(0.96); }
+            .recordLines { clip-path: inset(0 100% 0 0); }
+            .recordRelatedIcon { opacity: 0; transform: translateX(0.5rem); }
+        }
+    }
+}
 
 @media (max-width: 47.99rem) {
     .recordTabList { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.25rem; }

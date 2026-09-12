@@ -127,6 +127,7 @@ describe.each(["en", "ja"] as const)("landing product story in %s", (locale) => 
         const html = renderToStaticMarkup(localized(<ConnectedExample />, locale));
         const doc = new DOMParser().parseFromString(html, "text/html");
         expect(doc.querySelector<HTMLElement>('[role="tablist"]')?.style.display).toBe("none");
+        expect(doc.querySelector("[data-connected-records]")?.getAttribute("data-record-motion")).toBe("still");
         expect(doc.querySelector('[role="tabpanel"]')?.textContent).toContain(m.company.body);
         for (const id of ["contacts", "deals", "activities", "notes", "tasks"] as const) {
             expect(doc.querySelector("noscript")?.textContent).toContain(m[id].heading);
@@ -139,10 +140,13 @@ describe.each(["en", "ja"] as const)("landing product story in %s", (locale) => 
         const m = locale === "en" ? en.CommonHome.connectedRecords : ja.CommonHome.connectedRecords;
         await act(async () => root.render(localized(<ConnectedExample />, locale)));
         expect(container.querySelectorAll('[role="tab"]')).toHaveLength(6);
+        expect(container.querySelector("[data-connected-records]")?.getAttribute("data-record-motion")).toBe("still");
         expect(container.querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain(m.company.body);
         for (const id of ["contacts", "deals", "activities", "notes", "tasks"] as const) {
             const tab = button(m[id].label);
+            await act(async () => tab.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
             await act(async () => tab.dispatchEvent(new MouseEvent("mousedown", { button: 0, bubbles: true })));
+            expect(container.querySelector("[data-connected-records]")?.getAttribute("data-record-motion")).toBe("pointer");
             expect(tab.getAttribute("aria-selected")).toBe("true");
             const panel = container.querySelector('[role="tabpanel"]:not([hidden])');
             expect(panel?.getAttribute("aria-labelledby")).toBe(tab.id);
@@ -156,6 +160,7 @@ describe.each(["en", "ja"] as const)("landing product story in %s", (locale) => 
         });
         expect(document.activeElement).toBe(button(m.company.label));
         expect(button(m.company.label).getAttribute("aria-selected")).toBe("true");
+        expect(container.querySelector("[data-connected-records]")?.getAttribute("data-record-motion")).toBe("still");
         expect(fetchSpy).not.toHaveBeenCalled();
     });
 
