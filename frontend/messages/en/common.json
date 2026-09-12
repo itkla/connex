@@ -212,7 +212,8 @@
       },
       "pro": {
         "name": "Pro",
-        "body": "Hosted SaaS for teams building their customer relationships."
+        "body": "For teams building their customer relationships.",
+        "hosting": "SaaS, hosted by Connex."
       },
       "enterprise": {
         "name": "Enterprise",

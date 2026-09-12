@@ -212,7 +212,8 @@
       },
       "pro": {
         "name": "Pro",
-        "body": "Connexが運用するSaaSで、チームの顧客との関係づくりを支えます。"
+        "body": "チームで顧客との関係を育てたい方に。",
+        "hosting": "Connexが運用するSaaS。"
       },
       "enterprise": {
         "name": "Enterprise",
