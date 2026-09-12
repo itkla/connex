@@ -15,7 +15,7 @@
 .atmosphere {
     position: absolute;
     inset: 0;
-    background: linear-gradient(180deg, var(--background) 8%, color-mix(in oklab, var(--color-brand) 6%, var(--background)) 72%, var(--background));
+    background: radial-gradient(ellipse at 78% 65%, color-mix(in oklab, var(--color-brand) 5%, var(--background)), var(--background) 70%);
 }
 .landscape {
     position: absolute;
@@ -24,16 +24,10 @@
     height: 100%;
     overflow: visible;
 }
-.stonePeak { stop-color: color-mix(in oklab, var(--color-brand-dark) 48%, var(--background)); }
-.stoneSlope { stop-color: color-mix(in oklab, var(--color-brand-dark) 28%, var(--background)); }
-.stoneFoot { stop-color: var(--background); }
-.snowPeak { stop-color: color-mix(in oklab, var(--color-brand-dark) 12%, var(--background)); }
-.snowFoot { stop-color: color-mix(in oklab, var(--color-brand-dark) 16%, var(--background)); }
-.ridgeShadow { fill: var(--color-brand-dark); opacity: 0.08; }
-.ridgeLight { fill: var(--background); opacity: 0.15; }
-.ridgeDetail { stroke: var(--color-brand-dark); stroke-width: 1; opacity: 0.06; }
-.snowGullies { fill: var(--background); opacity: 0.6; }
-.cloudTone { stop-color: color-mix(in oklab, var(--color-brand-light) 35%, var(--background)); }
+.outline { stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.inkTone { stop-color: var(--color-brand-dark); }
+.cloudWisp { stroke-width: 1; stroke-linecap: round; }
+.cloudTone { stop-color: color-mix(in oklab, var(--color-brand-dark) 35%, var(--background)); }
 .hazeTone { stop-color: var(--background); }
 .cloudDrift {
     animation: cloudPassing var(--fuji-drift-far) linear infinite;
@@ -59,12 +53,8 @@
     from { transform: translate3d(0, 0, 0); }
     to { transform: translate3d(1600px, 0, 0); }
 }
-:global(.dark) .stonePeak { stop-color: color-mix(in oklab, var(--color-brand-dark) 42%, var(--background)); }
-:global(.dark) .stoneSlope { stop-color: color-mix(in oklab, var(--color-brand-dark) 22%, var(--background)); }
-:global(.dark) .snowPeak { stop-color: color-mix(in oklab, var(--color-brand-dark) 62%, var(--background)); }
-:global(.dark) .snowFoot { stop-color: color-mix(in oklab, var(--color-brand-dark) 30%, var(--background)); }
-:global(.dark) .snowGullies { fill: var(--color-brand-light); opacity: 0.3; }
-:global(.dark) .cloudTone { stop-color: color-mix(in oklab, var(--color-brand-light) 45%, var(--background)); }
+:global(.dark) .inkTone { stop-color: var(--color-brand); }
+:global(.dark) .cloudTone { stop-color: color-mix(in oklab, var(--color-brand) 25%, var(--background)); }
 @media (max-width: 63.999rem) {
     .landscape { inset: auto -12% 0 auto; width: 140%; height: 85%; }
     .copyVeil { background: linear-gradient(180deg, var(--background), color-mix(in oklab, var(--background) 88%, transparent) 30%, color-mix(in oklab, var(--background) 45%, transparent) 60%, transparent); }
