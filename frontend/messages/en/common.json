@@ -171,7 +171,38 @@
     "source_close_date": "August 30, 2026 · expected close",
     "source_close_body": "The renewal is worth ¥8,400,000 and remains in Negotiating. Its expected close was August 30. At the September 11 snapshot, that date is 12 days overdue.",
     "teamHeading": "Keep the work and its history together.",
-    "teamBody": "Move deals through your pipeline, prepare quotes with approval controls, and review progress in Analytics and Reports. Shared activity and ownership history keep handovers clear.",
+    "teamBody": "From the first deal to the next handover, keep each step connected to the customer.",
+    "teamStory": {
+      "scroll": "Scroll to follow the work",
+      "deals": {
+        "heading": "Move the deal forward.",
+        "body": "Track each deal through your pipeline, with its owner, value, and next steps close at hand."
+      },
+      "quotes": {
+        "heading": "Turn the deal into a quote.",
+        "body": "Generate a quote from deal information. Review the document and apply your team’s approval controls before finalizing it."
+      },
+      "progress": {
+        "heading": "See how the work is progressing.",
+        "body": "Review trends in Analytics and bring findings together in Reports to share with your team."
+      },
+      "handover": {
+        "heading": "Pass on the work, with its context.",
+        "body": "Change the record owner while keeping recorded activity and ownership history together, so the next person can pick up with context."
+      },
+      "visual": {
+        "new": "New",
+        "proposal": "Proposal",
+        "won": "Won",
+        "review": "Approval review",
+        "analytics": "Analytics",
+        "reports": "Reports",
+        "owner": "Record owner changes",
+        "customerRecord": "Customer record",
+        "ownership": "Ownership history",
+        "caption": "Product illustration"
+      }
+    },
     "teamHandover": "Shared history",
     "startHeading": "Start with the customers you know.",
     "stepCaptureTitle": "Import companies and contacts",

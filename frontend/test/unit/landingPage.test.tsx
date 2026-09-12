@@ -106,6 +106,14 @@ describe.each(["en", "ja"] as const)("landing product story in %s", (locale) => 
             expect(doc.body.textContent).toContain(heading);
         }
         for (const id of ["main", "product", "features", "deploy", "workflow"]) expect(doc.getElementById(id)).not.toBeNull();
+        const teamwork = doc.querySelector("[data-team-story]");
+        expect(teamwork?.getAttribute("data-enhanced")).toBe("false");
+        expect(teamwork?.querySelectorAll("[data-team-step]")).toHaveLength(4);
+        for (const id of ["deals", "quotes", "progress", "handover"] as const) {
+            const step = teamwork?.querySelector(`[data-team-step="${id}"]`);
+            expect(step?.textContent).toContain(messages.teamStory[id].heading);
+            expect(step?.textContent).toContain(messages.teamStory[id].body);
+        }
         expect(doc.querySelectorAll("h1")).toHaveLength(1);
         expect(doc.querySelectorAll("#features [data-sample-source]")).toHaveLength(2);
         const conversation = doc.querySelector('[data-ask-phase="complete"]');

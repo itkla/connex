@@ -1,4 +1,4 @@
-import { ArrowUpRightIcon, BuildingOffice2Icon, ChartBarIcon, ChatBubbleLeftRightIcon, CheckCircleIcon, ChevronDownIcon, ClipboardDocumentListIcon, ClockIcon, CurrencyYenIcon, DocumentCheckIcon, DocumentTextIcon, FunnelIcon, PencilSquareIcon, UserGroupIcon, UserIcon } from "@heroicons/react/24/outline";
+import { ArrowUpRightIcon, BuildingOffice2Icon, ChatBubbleLeftRightIcon, CheckCircleIcon, ChevronDownIcon, ClipboardDocumentListIcon, ClockIcon, CurrencyYenIcon, DocumentTextIcon, FunnelIcon, PencilSquareIcon, UserGroupIcon, UserIcon } from "@heroicons/react/24/outline";
 import { AskConnexConversation } from "./AskConnexConversation";
 import { ConnectedRecordTabs } from "./ConnectedRecordTabs";
 import { SampleEvidence } from "./SampleEvidence";
@@ -132,9 +132,4 @@ export function WorkflowPreview({ t }: { t: LandingTranslation }) {
             </details>
         </figure>
     );
-}
-
-export function TeamworkPreview({ t }: { t: LandingTranslation }) {
-    const artifacts = [[CurrencyYenIcon, "teamDeals"], [DocumentCheckIcon, "teamQuotes"], [ChartBarIcon, "teamProgress"], [UserGroupIcon, "teamHandover"]] as const;
-    return <ul className="mt-10 grid grid-cols-2 gap-x-8 gap-y-10 border-t border-border pt-10 sm:grid-cols-4">{artifacts.map(([Icon, label]) => <li key={label}><Icon aria-hidden="true" className="size-10 text-brand-dark sm:size-12 dark:text-brand" /><p className="mt-4 text-base font-medium sm:text-lg">{t(label)}</p></li>)}</ul>;
 }

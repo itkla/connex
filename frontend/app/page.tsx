@@ -10,7 +10,8 @@ import LandingNav from "@/app/components/landing/LandingNav";
 import LandingFooter from "@/app/components/landing/LandingFooter";
 import LandingFaq from "@/app/components/landing/LandingFaq";
 import GuidedExample from "@/app/components/landing/GuidedExample";
-import { AskConnexPreview, ConnectedRecordPreview, MapPreview, TeamworkPreview, WorkflowPreview } from "@/app/components/landing/ProductPreviews";
+import { AskConnexPreview, ConnectedRecordPreview, MapPreview, WorkflowPreview } from "@/app/components/landing/ProductPreviews";
+import { TeamworkPreview } from "@/app/components/landing/TeamworkPreview";
 import styles from "@/app/components/landing/landing.module.css";
 import fujiStyles from "@/app/components/landing/fuji.module.css";
 import { FujiBackdrop } from "@/app/components/landing/FujiBackdrop";
@@ -92,9 +93,10 @@ export default async function Home() {
                 </section>
 
                 <section className={`${container} ${chapter}`} aria-labelledby="team-title">
-                    <h2 id="team-title" className={`${styles.heading} max-w-4xl`}>{t("teamHeading")}</h2>
-                    <p className={description}>{t("teamBody")}</p>
-                    <TeamworkPreview t={t} />
+                    <TeamworkPreview t={t} header={<>
+                        <h2 id="team-title" className={`${styles.heading} max-w-4xl`}>{t("teamHeading")}</h2>
+                        <p className={description}>{t("teamBody")}</p>
+                    </>} />
                 </section>
 
                 <section id="workflow" className={`${container} ${chapter} scroll-mt-20 border-t border-border`} aria-labelledby="start-title">
