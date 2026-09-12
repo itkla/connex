@@ -5,6 +5,11 @@
 
 .landing header { container-type: inline-size; }
 .landing :is(header, footer) button { min-width: 2.75rem; min-height: 2.75rem; }
+.landing :is(header nav, footer > div) { padding-inline: 1.25rem; }
+
+@media (min-width: 40rem) {
+    .landing :is(header nav, footer > div) { padding-inline: 2rem; }
+}
 
 .landing h1,
 .landing h2,
