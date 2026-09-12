@@ -69,6 +69,7 @@ independently enforces the same contracts:
 
 | Route class | Edge ceiling | Application contract |
 |---|---:|---|
+| `/api/launch-signups` | 4 KiB | Next.js launch signup handler; fixed 4,096-byte ceiling, 3-second body deadline, same-origin JSON only |
 | `/api/imports` and descendants | 64 MiB | `CONNEX_IMPORT_MAX_BODY_BYTES=67108864` |
 | Attachment, assistant-attachment, user/person image, and company-logo upload routes | 27 MiB | A 27 MiB multipart envelope around `ObjectStorageProperties.maxUploadBytes`, whose default stored object maximum is 25 MiB |
 | `/api/business-cards` and descendants | 12 MiB | `CONNEX_BUSINESS_CARD_MAX_BODY_BYTES=12582912`; decoded card bytes remain separately limited to 8 MiB |

@@ -40,6 +40,20 @@
 	}
 
 	route {
+		@launch_signups path /api/launch-signups
+		handle @launch_signups {
+			request_body {
+				max_size 4096
+			}
+			reverse_proxy frontend:3000 {
+				header_up X-Connex-Client-IP {client_ip}
+				header_up X-Forwarded-For {client_ip}
+				header_up -CF-Connecting-IP
+				header_up -Cookie
+				header_up -Authorization
+			}
+		}
+
 		@imports path /api/imports /api/imports/*
 		handle @imports {
 			request_body {

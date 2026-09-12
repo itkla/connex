@@ -79,6 +79,7 @@ function readBooleanProp(props: unknown, name: string): boolean | undefined {
 
 afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
 });
 
 describe('public pages stay readable while the backend is unreachable', () => {
@@ -93,6 +94,7 @@ describe('public pages stay readable while the backend is unreachable', () => {
     });
 
     it('renders the landing page with the signed-out call to action instead of failing', async () => {
+        vi.stubEnv('CONNEX_LANDING_MODE', 'product');
         stubFetchRejecting(new TypeError('fetch failed'));
 
         const tree = await Home();

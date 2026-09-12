@@ -302,6 +302,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
         caddyfile = CADDYFILE_PATH.read_text(encoding="utf-8")
         self.assertEqual(
             [
+                "@launch_signups",
                 "@imports",
                 "@uploads",
                 "@business_cards",
@@ -317,6 +318,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
             direct_route_handles(),
         )
         expected_limits = {
+            "@launch_signups": "4096",
             "@imports": "{$CONNEX_IMPORT_MAX_BODY_BYTES:67108864}",
             "@uploads": "{$CONNEX_UPLOAD_MAX_BODY_BYTES:28311552}",
             "@business_cards": "{$CONNEX_BUSINESS_CARD_MAX_BODY_BYTES:12582912}",
@@ -352,6 +354,16 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
         self.assertIn(["header_up", "X-Forwarded-For", "{client_ip}"], lines)
         self.assertIn(["header_up", "-CF-Connecting-IP"], lines)
         self.assertEqual(9, lines.count(["import", "backend_proxy"]))
+
+    def test_launch_signups_use_frontend_without_application_credentials(self) -> None:
+        caddyfile = CADDYFILE_PATH.read_text(encoding="utf-8")
+        block = caddyfile.split("handle @launch_signups {", 1)[1].split("@imports path", 1)[0]
+        self.assertIn("@launch_signups path /api/launch-signups", caddyfile)
+        self.assertIn("reverse_proxy frontend:3000", block)
+        self.assertIn("header_up X-Connex-Client-IP {client_ip}", block)
+        self.assertIn("header_up -Cookie", block)
+        self.assertIn("header_up -Authorization", block)
+        self.assertNotIn("import backend_proxy", block)
 
     def test_authoritative_cloudflare_rate_rules_and_exclusions_are_documented(self) -> None:
         edge_defence = EDGE_DEFENCE_PATH.read_text(encoding="utf-8")

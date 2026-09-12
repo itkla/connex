@@ -25,7 +25,7 @@ function ThemeToggle() {
     );
 }
 
-export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; ctaLabel: string }) {
+export default function LandingNav({ ctaHref, ctaLabel, preLaunch = false }: { ctaHref: string; ctaLabel: string; preLaunch?: boolean }) {
     const t = useTranslations("CommonHome");
     const [open, setOpen] = useState(false);
 
@@ -71,7 +71,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                 <div data-landing-desktop className="hidden items-center gap-3 md:flex">
                     <ThemeToggle />
                     <LanguageSwitcher />
-                    <Link
+                    {!preLaunch && <><Link
                         href="/auth/login"
                         className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
                     >
@@ -82,7 +82,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                         className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-(--motion-micro) ease-out hover:bg-brand-hover active:scale-[0.97]"
                     >
                         {ctaLabel}
-                    </Link>
+                    </Link></>}
                 </div>
 
                 <div data-landing-mobile className="flex items-center gap-2 md:hidden">
@@ -124,7 +124,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                                 </a>
                             ),
                         )}
-                        <Link
+                        {!preLaunch && <><Link
                             href="/auth/login"
                             onClick={() => setOpen(false)}
                             className="rounded-lg px-2 py-2.5 text-base font-medium text-foreground transition-colors hover:bg-muted"
@@ -137,7 +137,7 @@ export default function LandingNav({ ctaHref, ctaLabel }: { ctaHref: string; cta
                             className="mt-2 rounded-full bg-brand px-4 py-3 text-center text-base font-semibold text-brand-foreground transition-transform duration-(--motion-micro) active:scale-[0.98] motion-reduce:active:scale-100"
                         >
                             {ctaLabel}
-                        </Link>
+                        </Link></>}
                     </div>
                 </div>
             )}

@@ -7,7 +7,7 @@ import LanguageSwitcher from "./LanguageSwitcher";
  * Holds the brand mark, primary navigation, legal links, and the language
  * switcher.
  */
-export default async function LandingFooter({ withDividers = true }: { withDividers?: boolean }) {
+export default async function LandingFooter({ withDividers = true, showLogin = true }: { withDividers?: boolean; showLogin?: boolean }) {
     const t = await getTranslations("CommonHome");
 
     return (
@@ -33,9 +33,9 @@ export default async function LandingFooter({ withDividers = true }: { withDivid
                             <Link href="/docs" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navDocs")}
                             </Link>
-                            <Link href="/auth/login" className="text-muted-foreground transition-colors hover:text-foreground">
+                            {showLogin && <Link href="/auth/login" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navLogin")}
-                            </Link>
+                            </Link>}
                         </nav>
                         <nav aria-label={t("footerNavLegal")} className="flex flex-col gap-3 text-sm">
                             <Link href="/privacy" className="text-muted-foreground transition-colors hover:text-foreground">

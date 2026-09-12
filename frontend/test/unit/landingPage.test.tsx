@@ -38,6 +38,7 @@ let motionListeners: Set<() => void>;
 let notifyIntersection: (visible: boolean, ratio?: number) => void;
 
 beforeEach(() => {
+    vi.stubEnv("CONNEX_LANDING_MODE", "product");
     session.signedIn = false;
     session.locale = "en";
     reducedMotion = true;
@@ -69,6 +70,7 @@ afterEach(async () => {
     container.remove();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
 });
 
 function localized(element: ReactElement, locale: "en" | "ja") {
@@ -97,6 +99,28 @@ function button(label: string) {
 }
 
 describe.each(["en", "ja"] as const)("landing product story in %s", (locale) => {
+    it("shows launch signup forms on the same page without account actions", async () => {
+        vi.stubEnv("CONNEX_LANDING_MODE", "prelaunch");
+        session.locale = locale;
+        session.signedIn = true;
+        const messages = locale === "en" ? en.CommonHome : ja.CommonHome;
+        const doc = new DOMParser().parseFromString(renderToStaticMarkup(localized(await Home(), locale)), "text/html");
+        expect(doc.querySelectorAll("[data-launch-signup] form")).toHaveLength(2);
+        expect(doc.querySelectorAll('a[href="/auth/register"], a[href="/dashboard"], a[href="/auth/login"]')).toHaveLength(0);
+        expect(doc.body.textContent).not.toContain("Resend");
+        expect(doc.body.textContent).toContain(messages.prelaunch.closingHeading);
+        expect(doc.querySelector("#pricing button")).toBeNull();
+        for (const id of ["launch-signup", "launch-signup-closing"]) {
+            const form = doc.querySelector(`#${id} form`);
+            const input = form?.querySelector<HTMLInputElement>('input[type="email"]');
+            expect(input?.required).toBe(true);
+            expect(form?.querySelector("label")?.htmlFor).toBe(input?.id);
+            expect(form?.querySelector("fieldset")?.disabled).toBe(true);
+            expect(form?.querySelector("noscript")?.textContent).toContain(messages.prelaunch.noJavaScript);
+        }
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
     it("renders the CRM breadth and every feature before JavaScript, with working anchors and docs paths", async () => {
         session.locale = locale;
         const messages = locale === "en" ? en.CommonHome : ja.CommonHome;

@@ -97,6 +97,16 @@ and relationship priorities. It uses its own editorial layout rather than the au
 Schibsted Grotesk and Source Sans 3 are loaded only for this route, with the existing Noto Sans JP
 fallback; the page inherits the global theme preference. Shared documentation and legal styles stay
 unchanged.
+The same homepage has a pre-launch mode, selected by server-side `CONNEX_LANDING_MODE=prelaunch`
+(the default). Its hero and closing invitation collect an email for the launch notification; navigation
+and pricing omit account actions. `product` restores the existing session-aware signup/dashboard CTAs.
+Pre-launch rendering does not resolve a CRM session. The hero keeps only its headline, product
+description, and email form; a short notification note links to privacy without naming infrastructure.
+Forms use shared Input and Button controls, accessible labels, native email validation,
+inline retryable errors, and live confirmation only after the
+Next.js endpoint confirms Resend persistence. JavaScript is required for submission; before hydration
+the fields stay disabled and a noscript notice explains this. The rest of the page stays server-rendered.
+See [deployment configuration](../DEPLOYMENT.md#pre-launch-email-signups) for provider setup and bounds.
 Landing chapters and feature subsections are separated by whitespace rather than horizontal rules.
 Chapter padding is 3rem on mobile and 4rem from the small breakpoint; feature subsections use 4rem
 and 5rem gaps respectively. Component boundaries retain their own structure. The landing footer

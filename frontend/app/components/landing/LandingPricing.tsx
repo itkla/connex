@@ -42,19 +42,19 @@ function FeatureStatus({ value, t }: { value: ComparisonValue; t: LandingTransla
 }
 
 /** Shows plan comparisons without prices or plan selection at signup. */
-export default function LandingPricing({ t, ctaHref, ctaLabel }: { t: LandingTranslation; ctaHref: string; ctaLabel: string }) {
+export default function LandingPricing({ t, ctaHref, ctaLabel, preLaunch = false }: { t: LandingTranslation; ctaHref: string; ctaLabel: string; preLaunch?: boolean }) {
     return (
         <>
             <div className="mt-10 grid gap-5 lg:mt-12 lg:grid-cols-3 lg:gap-y-0">
                 {OPTIONS.map(({ key, Icon, highlights }) => (
-                    <article key={key} className={`flex min-w-0 flex-col rounded-xl border p-6 sm:p-8 lg:row-span-5 lg:grid lg:grid-rows-subgrid ${key === "pro" ? "border-brand/40 bg-brand/5" : "border-border"}`}>
+                    <article key={key} className={`flex min-w-0 flex-col rounded-xl border p-6 sm:p-8 lg:grid lg:grid-rows-subgrid ${preLaunch ? "lg:row-span-4" : "lg:row-span-5"} ${key === "pro" ? "border-brand/40 bg-brand/5" : "border-border"}`}>
                         <Icon aria-hidden="true" className="size-8 text-brand-dark dark:text-brand" />
                         <h3 className="mt-6 text-3xl tracking-tight">{t(`pricing.${key}.name`)}</h3>
                         <p className="mt-3 text-base leading-relaxed text-muted-foreground">
                             {t(`pricing.${key}.body`)}
                             {key === "pro" && <span className="mt-3 block text-sm">{t("pricing.pro.hosting")}</span>}
                         </p>
-                        <div className="mb-8 mt-7 flex-1 border-t border-border pt-6">
+                        <div className={`mt-7 flex-1 border-t border-border pt-6 ${preLaunch ? "" : "mb-8"}`}>
                             <p className="text-sm font-medium">{t(`pricing.${key}.includes`)}</p>
                             <ul className="mt-4 space-y-3">
                                 {highlights.map((feature) => (
@@ -65,11 +65,11 @@ export default function LandingPricing({ t, ctaHref, ctaLabel }: { t: LandingTra
                                 ))}
                             </ul>
                         </div>
-                        <Button asChild={key !== "enterprise"} disabled={key === "enterprise"} variant={key === "pro" ? "brand" : "outline"} size="page" className="h-auto min-h-11 w-full whitespace-normal px-5 py-3 text-base">
+                        {!preLaunch && <Button asChild={key !== "enterprise"} disabled={key === "enterprise"} variant={key === "pro" ? "brand" : "outline"} size="page" className="h-auto min-h-11 w-full whitespace-normal px-5 py-3 text-base">
                             {key === "enterprise"
                                 ? <>{t("pricing.enterprise.cta")}<ArrowRightIcon aria-hidden="true" className="size-4 shrink-0" /></>
                                 : <Link href={ctaHref}>{ctaLabel}<ArrowRightIcon aria-hidden="true" className="size-4 shrink-0" /></Link>}
-                        </Button>
+                        </Button>}
                     </article>
                 ))}
             </div>

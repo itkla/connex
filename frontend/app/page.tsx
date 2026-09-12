@@ -17,6 +17,7 @@ import { WarmthPreview } from "@/app/components/landing/WarmthPreview";
 import styles from "@/app/components/landing/landing.module.css";
 import fujiStyles from "@/app/components/landing/fuji.module.css";
 import { FujiBackdrop } from "@/app/components/landing/FujiBackdrop";
+import { LaunchSignupForm } from "@/app/components/landing/LaunchSignupForm";
 
 const display = Schibsted_Grotesk({ variable: "--font-landing-display", subsets: ["latin"], display: "swap" });
 const body = Source_Sans_3({ variable: "--font-landing-body", subsets: ["latin"], display: "swap" });
@@ -42,8 +43,9 @@ export async function generateMetadata(): Promise<Metadata> {
 
 /** Public session resolution selects CTAs; transport failures leave the whole page readable. */
 export default async function Home() {
+    const preLaunch = (process.env.CONNEX_LANDING_MODE ?? "prelaunch") === "prelaunch";
     const cookie = (await headers()).get("cookie");
-    const user = await getPublicPageUserFromCookie(cookie);
+    const user = preLaunch ? null : await getPublicPageUserFromCookie(cookie);
     const t = await getTranslations("CommonHome");
     const ctaHref = user ? "/dashboard" : "/auth/register";
     const ctaLabel = user ? t("ctaDashboard") : t("heroCtaPrimary");
@@ -51,17 +53,17 @@ export default async function Home() {
     return (
         <div className={`${styles.landing} ${display.variable} ${body.variable} min-h-screen bg-background text-foreground`}>
             <a href="#main" className="sr-only rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground focus:not-sr-only focus:absolute focus:left-6 focus:top-4 focus:z-50">{t("skipToContent")}</a>
-            <LandingNav ctaHref={ctaHref} ctaLabel={ctaLabel} />
+            <LandingNav ctaHref={ctaHref} ctaLabel={ctaLabel} preLaunch={preLaunch} />
             <main id="main">
                 <section className={`${fujiStyles.hero} flex min-h-[calc(100svh-4rem-1px)] flex-col justify-center py-16 sm:py-20`} aria-labelledby="hero-title">
                     <FujiBackdrop pauseLabel={t("heroPauseScenery")} resumeLabel={t("heroResumeScenery")} />
                     <div className={`${container} ${fujiStyles.copy}`}><div className="max-w-5xl">
                         <h1 id="hero-title" className={styles.heroHeading}><span className="block">{t("heroHeadlineLead")}</span><span className="block">{t("heroHeadlineRest")}</span></h1>
                         <p className={`${description} max-w-[56ch]`}>{t("heroSubtext")}</p>
-                        <div className="mt-7 flex flex-wrap items-center gap-3">
+                        {preLaunch ? <div className="mt-7"><LaunchSignupForm id="launch-signup" /></div> : <div className="mt-7 flex flex-wrap items-center gap-3">
                             <Button asChild variant="brand" size="page" className="min-h-11 h-auto whitespace-normal px-6 py-3 text-base"><Link href={ctaHref}>{ctaLabel}<ArrowRightIcon aria-hidden="true" className="size-4" /></Link></Button>
                             <Button asChild variant="ghost" size="page" className="min-h-11 h-auto whitespace-normal px-5 py-3 text-base"><a href="#features">{t("heroSecondaryCta")}<ArrowRightIcon aria-hidden="true" className="size-4" /></a></Button>
-                        </div>
+                        </div>}
                     </div></div>
                 </section>
 
@@ -122,7 +124,7 @@ export default async function Home() {
                 <section id="pricing" className={`${container} ${chapter} scroll-mt-20`} aria-labelledby="pricing-title">
                     <h2 id="pricing-title" className={styles.heading}>{t("pricing.heading")}</h2>
                     <p className={description}>{t("pricing.body")}</p>
-                    <LandingPricing t={t} ctaHref={ctaHref} ctaLabel={ctaLabel} />
+                    <LandingPricing t={t} ctaHref={ctaHref} ctaLabel={ctaLabel} preLaunch={preLaunch} />
                 </section>
 
                 <section className={`${container} ${chapter} grid gap-8 lg:grid-cols-[0.7fr_1.3fr] lg:gap-16`} aria-labelledby="faq-title">
@@ -131,10 +133,10 @@ export default async function Home() {
                 </section>
 
                 <section className="bg-brand/10" aria-labelledby="closing-title">
-                    <div className={`${container} ${chapter}`}><h2 id="closing-title" className={`${styles.heading} max-w-3xl`}>{t("ctaHeading")}</h2><div className="mt-7"><Button asChild variant="brand" size="page" className="min-h-11 h-auto whitespace-normal px-6 py-3 text-base"><Link href={ctaHref}>{ctaLabel}<ArrowRightIcon aria-hidden="true" className="size-4" /></Link></Button></div></div>
+                    <div className={`${container} ${chapter}`}><h2 id="closing-title" className={`${styles.heading} max-w-3xl`}>{t(preLaunch ? "prelaunch.closingHeading" : "ctaHeading")}</h2><div className="mt-7">{preLaunch ? <LaunchSignupForm id="launch-signup-closing" /> : <Button asChild variant="brand" size="page" className="min-h-11 h-auto whitespace-normal px-6 py-3 text-base"><Link href={ctaHref}>{ctaLabel}<ArrowRightIcon aria-hidden="true" className="size-4" /></Link></Button>}</div></div>
                 </section>
             </main>
-            <LandingFooter withDividers={false} />
+            <LandingFooter withDividers={false} showLogin={!preLaunch} />
         </div>
     );
 }
