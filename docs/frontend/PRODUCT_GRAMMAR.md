@@ -106,6 +106,9 @@ their dated fictional evidence in native disclosures, using
 Ask Connex demonstrates a local message-and-response sequence once on arrival, with explicit replay
 and skip controls. It makes no AI requests, keeps the answer's space reserved, and shows the complete
 conversation with reduced motion or without JavaScript.
+The Map example keeps the workspace at the center, with two branches through members and client
+companies to their contacts. Node shape and size distinguish each level; mobile rotates the branches
+vertically rather than packing more dots into the same space.
 The workflow diagram shows a value condition with Yes/No branches, tracing the example Yes path
 from left to right once on arrival. Its labels and both routes remain visible throughout; reduced
 motion shows the static diagram.

@@ -5,12 +5,6 @@ import { WorkflowSequence } from "./WorkflowSequence";
 import type { LandingTranslation } from "./sampleWorkspace";
 import styles from "./landing.module.css";
 
-type DiagramIcon = typeof BuildingOffice2Icon;
-
-function RecordSymbol({ icon: Icon, label, className = "" }: { icon: DiagramIcon; label: string; className?: string }) {
-    return <div className={`${styles.recordSymbol} ${className}`}><span className={styles.symbolIcon}><Icon aria-hidden="true" /></span><span className="relative mx-auto mt-3 block w-fit bg-background px-1 text-sm font-medium sm:text-base">{label}</span></div>;
-}
-
 /** Landing-only interpretation of the auth diagram: a shared record and two connected groups. */
 export function CustomerWorkspacePreview({ t }: { t: LandingTranslation }) {
     return (
@@ -61,23 +55,33 @@ export function AskConnexPreview({ t }: { t: LandingTranslation }) {
     );
 }
 
-/** Connection types remain readable through line style and labels, without a fictional cast. */
+/** Two sparse branches preserve the real Map's workspace-to-contact hierarchy. */
 export function MapPreview({ t }: { t: LandingTranslation }) {
+    const nodes = [
+        { kind: "member", icon: UserIcon, appearance: styles.mapMember, positions: [styles.mapMemberFirst, styles.mapMemberSecond] },
+        { kind: "company", icon: BuildingOffice2Icon, appearance: styles.mapCompany, positions: [styles.mapCompanyFirst, styles.mapCompanySecond] },
+        { kind: "contact", icon: UserIcon, appearance: styles.mapContact, positions: [styles.mapContactFirst, styles.mapContactSecond, styles.mapContactThird, styles.mapContactFourth] },
+    ];
+    const legend = [[UserIcon, "mapMember", styles.mapMemberKey], [BuildingOffice2Icon, "mapCompanies", styles.mapCompanyKey], [UserIcon, "mapContact", styles.mapContactKey]] as const;
     return (
         <figure className="mt-10" aria-label={t("mapVisualLabel")}>
-            <div className={styles.mapScene}>
-                <svg className={styles.diagramLines} viewBox="0 0 1000 400" preserveAspectRatio="none" aria-hidden="true">
-                    <path d="M250 60 C120 180 200 210 200 325 M750 60 C880 180 800 210 800 325" strokeDasharray="5 6" />
-                    <path d="M500 180 C500 260 200 240 200 325 M500 180 V325 M500 180 C500 260 800 240 800 325" />
+            <div className={styles.mapScene} aria-hidden="true">
+                <svg className={`${styles.mapLines} ${styles.mapHorizontalLines}`} viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <path className={styles.mapTeamLine} d="M34 50 H66 M18 50 H34 M66 50 H82" vectorEffect="non-scaling-stroke" />
+                    <path d="M18 50 C11 50 11 25 4 25 M18 50 C11 50 11 75 4 75 M82 50 C89 50 89 25 96 25 M82 50 C89 50 89 75 96 75" vectorEffect="non-scaling-stroke" />
                 </svg>
-                <RecordSymbol icon={UserIcon} label={t("mapMember")} className={styles.mapMemberFirst} />
-                <RecordSymbol icon={UserIcon} label={t("mapMember")} className={styles.mapMemberSecond} />
-                <RecordSymbol icon={BuildingOffice2Icon} label={t("recordCompany")} className={styles.mapCompany} />
-                {[styles.mapContactFirst, styles.mapContactSecond, styles.mapContactThird].map((position) => <RecordSymbol key={position} icon={UserIcon} label={t("mapContact")} className={position} />)}
+                <svg className={`${styles.mapLines} ${styles.mapVerticalLines}`} viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <path className={styles.mapTeamLine} d="M50 32 V68 M50 18 V32 M50 68 V82" vectorEffect="non-scaling-stroke" />
+                    <path d="M50 18 C50 11 24 12 24 5 M50 18 C50 11 76 12 76 5 M50 82 C50 89 24 88 24 95 M50 82 C50 89 76 88 76 95" vectorEffect="non-scaling-stroke" />
+                </svg>
+                <div className={`${styles.mapNode} ${styles.mapWorkspace}`} data-map-node="workspace">
+                    <BuildingOffice2Icon />
+                    <span className={styles.mapWorkspaceLabel}>{t("mapWorkspace")}</span>
+                </div>
+                {nodes.flatMap(({ kind, icon: Icon, appearance, positions }) => positions.map((position) => <div key={position} className={`${styles.mapNode} ${appearance} ${position}`} data-map-node={kind}><Icon /></div>))}
             </div>
             <figcaption className="mt-5 flex flex-wrap justify-center gap-x-8 gap-y-3 text-sm text-muted-foreground">
-                <span className="flex items-center gap-2"><span aria-hidden="true" className="w-7 border-t border-brand-dark dark:border-brand" />{t("mapEmployment")}</span>
-                <span className="flex items-center gap-2"><span aria-hidden="true" className="w-7 border-t border-dashed border-brand-dark dark:border-brand" />{t("mapInteraction")}</span>
+                {legend.map(([Icon, label, appearance]) => <span key={label} className="flex items-center gap-2"><span aria-hidden="true" className={`${styles.mapLegendIcon} ${appearance}`}><Icon /></span>{t(label)}</span>)}
             </figcaption>
         </figure>
     );
