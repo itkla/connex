@@ -76,8 +76,11 @@ function clientKey(request: Request): string | null {
     // Caddy overwrites this dedicated header; generic forwarded headers are not client identity.
     const forwarded = request.headers.get("x-connex-client-ip");
     if (forwarded) {
-        if (!isIP(forwarded)) return null;
-        return isIP(forwarded) === 6 ? new URL(`http://[${forwarded}]`).hostname : forwarded;
+        const version = isIP(forwarded);
+        if (!version) return null;
+        if (version !== 6) return forwarded;
+        const address = `http://[${forwarded}]`;
+        return URL.canParse(address) ? new URL(address).hostname : null;
     }
     return process.env.NODE_ENV === "production" ? null : "direct-development";
 }

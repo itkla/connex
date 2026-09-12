@@ -313,6 +313,13 @@ describe("request validation and availability", () => {
         expect(response.status).toBe(503);
         expect(fetcher).not.toHaveBeenCalled();
     });
+
+    it.each(["not-an-ip", "fe80::1%eth0"])("rejects an unusable proxy identity %s without throwing or contacting the provider", async (identity) => {
+        const response = await submit(request(undefined, { "X-Connex-Client-IP": identity }));
+        expect(response.status).toBe(503);
+        expect(await response.json()).toEqual({ error: "unavailable" });
+        expect(fetcher).not.toHaveBeenCalled();
+    });
 });
 
 describe("bounded provider calls and throttles", () => {
