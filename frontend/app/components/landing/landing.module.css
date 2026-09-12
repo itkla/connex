@@ -48,18 +48,28 @@
     border: 1px solid transparent;
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     font-size: 1rem;
-    transition: color var(--motion-micro), background-color var(--motion-micro);
+    transition: none;
 }
 .recordTab[data-slot="tabs-trigger"]:active { scale: 1; }
 .recordTab[data-slot="tabs-trigger"]:focus-visible { z-index: 2; outline: 2px solid var(--color-brand); outline-offset: -4px; box-shadow: none; }
 .recordTab[data-state="inactive"]:hover { background: var(--background); }
-.recordTab[data-state="active"] {
-    z-index: 1;
-    border-color: var(--border);
+.recordTab::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    pointer-events: none;
+    border: 1px solid var(--border);
     border-bottom-color: var(--background);
+    border-radius: inherit;
     background: var(--background);
-    color: var(--foreground);
+    opacity: 0;
+    transform: scaleY(0.9);
+    transform-origin: bottom;
+    transition: none;
 }
+.recordTab[data-state="active"] { z-index: 1; color: var(--foreground); }
+.recordTab[data-state="active"]::before { opacity: 1; transform: scaleY(1); }
+.recordTab:focus-visible::before { outline: inherit; outline-offset: inherit; }
 .recordTab[data-state="active"] svg { color: var(--color-brand-dark); }
 .recordTab > span[aria-hidden] { display: none; }
 :global(.dark) .recordTab[data-state="active"] svg { color: var(--color-brand); }
@@ -89,43 +99,47 @@
     font-weight: 500;
     text-align: center;
 }
-.recordPrimary, .recordRelated > div { display: grid; justify-items: center; gap: 0.75rem; }
+.recordPrimary, .recordRelated > div { display: grid; justify-items: center; gap: 0.75rem; transition: none; }
 .recordPrimaryIcon, .recordRelatedIcon {
     display: grid;
     place-items: center;
     border-radius: var(--radius-xl);
 }
-.recordPrimaryIcon { width: 5.5rem; height: 5.5rem; background: var(--color-brand); color: var(--color-brand-foreground); }
+.recordPrimaryIcon { width: 5.5rem; height: 5.5rem; background: var(--color-brand); color: var(--color-brand-foreground); transition: none; }
 .recordPrimaryIcon svg { width: 2.75rem; height: 2.75rem; }
 .recordRelated { display: grid; gap: 1.75rem; }
 .recordRelated > div > span:last-child { white-space: nowrap; }
 .recordRelatedIcon { width: 3.5rem; height: 3.5rem; background: var(--muted); color: var(--muted-foreground); }
 .recordRelatedIcon svg { width: 1.75rem; height: 1.75rem; }
-.recordLines { width: 100%; height: 11rem; transform: translateY(-1rem); fill: none; stroke: var(--border); stroke-width: 1.5; }
+.recordLines { width: 100%; height: 11rem; transform: translateY(-1rem); fill: none; stroke: var(--border); stroke-width: 1.5; transition: none; }
 
 @media (prefers-reduced-motion: no-preference) {
+    [data-record-motion="pointer"] .recordTab::before {
+        transition: opacity var(--motion-micro) var(--ease-out), transform var(--motion-micro) var(--ease-out);
+    }
+    [data-record-motion="pointer"] .recordTab[data-state="active"]::before { transition-duration: var(--motion-standard); }
     [data-record-motion="pointer"] .recordPanel[data-state="active"] {
         .recordPrimaryIcon {
             opacity: 1;
             transform: scale(1);
-            transition: opacity var(--motion-standard) var(--ease-out), transform var(--motion-standard) var(--ease-out);
+            transition: opacity var(--motion-expressive) var(--ease-out), transform var(--motion-expressive) var(--ease-out);
         }
         .recordLines {
             clip-path: inset(0);
-            transition: clip-path var(--motion-standard) var(--ease-out);
+            transition: clip-path calc(var(--motion-expressive) * 2) linear var(--motion-micro);
         }
-        .recordRelatedIcon {
+        .recordRelated > div {
             opacity: 1;
             transform: translateX(0);
-            transition: opacity var(--motion-micro) var(--ease-out), transform var(--motion-micro) var(--ease-out);
-            transition-delay: calc(var(--motion-micro) / 3);
+            transition: opacity var(--motion-standard) var(--ease-out), transform var(--motion-standard) var(--ease-out);
+            transition-delay: calc(var(--motion-expressive) * 2);
         }
-        .recordRelated > div:last-child .recordRelatedIcon { transition-delay: calc(var(--motion-micro) * 2 / 3); }
+        .recordRelated > div:last-child { transition-delay: calc(var(--motion-expressive) * 2 + var(--motion-micro)); }
 
         @starting-style {
             .recordPrimaryIcon { opacity: 0.6; transform: scale(0.96); }
             .recordLines { clip-path: inset(0 100% 0 0); }
-            .recordRelatedIcon { opacity: 0; transform: translateX(0.5rem); }
+            .recordRelated > div { opacity: 0; transform: translateX(0.5rem); }
         }
     }
 }

@@ -108,8 +108,10 @@ multiples of the expressive duration token, separate from interface feedback tim
 The connected-record section uses shared tabs to reveal one explanation and icon diagram at a time.
 All six explanations remain readable without JavaScript; tabs support keyboard selection and wrap
 into two rows on mobile. Its diagrams show supported record connections, not live customer data.
-Pointer selection reveals the diagram from the selected record through its connections while the
-explanation stays readable. Keyboard selection and reduced motion show the complete panel immediately.
+Pointer selection eases the browser-tab outline into place over standard timing, with a micro exit.
+The diagram reveals its selected record, connections, and related nodes over 1.2 seconds using
+landing-only multiples of the expressive token; the explanation and selected state stay immediate.
+Keyboard selection and reduced motion show both the tab and complete panel immediately.
 Explanatory copy describes the product directly. Ask Connex and priority examples keep
 their dated fictional evidence in native disclosures, using
 `frontend/app/components/landing/sampleWorkspace.ts`, never authenticated feature containers.
