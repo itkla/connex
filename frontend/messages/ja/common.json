@@ -205,28 +205,18 @@
     },
     "pricing": {
       "heading": "料金プラン",
-      "body": "チームに合ったConnexの利用方法を選べます。",
-      "explore": "利用方法を詳しく見る",
-      "cloud": {
-        "name": "クラウド",
-        "body": "サーバーの管理をConnexに任せたいチームに。",
-        "hosting": "共有のクラウド環境",
-        "operation": "Connexが環境を用意し、運用",
-        "control": "ブラウザーから利用"
+      "body": "チームの働き方に合ったプランを。",
+      "free": {
+        "name": "Free",
+        "body": "顧客に関わる仕事を整理したい方に。"
       },
-      "dedicated": {
-        "name": "専用環境",
-        "body": "自社専用の環境が必要な組織に。",
-        "hosting": "自社専用の環境",
-        "operation": "Connexが環境を用意し、運用",
-        "control": "専用のデータベース"
+      "pro": {
+        "name": "Pro",
+        "body": "Connexが運用するSaaSで、チームの顧客との関係づくりを支えます。"
       },
-      "selfHosted": {
-        "name": "自社運用",
-        "body": "自社の設備で、運用も管理したいチームに。",
-        "hosting": "自社のインフラに導入",
-        "operation": "自社で導入・運用を管理",
-        "control": "ネットワークを自社で管理"
+      "enterprise": {
+        "name": "Enterprise",
+        "body": "Connexが運用する専用環境（Silo）と、自社で運用するオンプレミスから選べます。"
       }
     },
     "teamHandover": "共有する履歴",

@@ -205,28 +205,18 @@
     },
     "pricing": {
       "heading": "Pricing",
-      "body": "Choose how you run Connex.",
-      "explore": "Explore deployment options",
-      "cloud": {
-        "name": "Cloud",
-        "body": "For teams that want Connex to handle the hosting.",
-        "hosting": "Shared cloud environment",
-        "operation": "Hosted and operated by Connex",
-        "control": "Access from your browser"
+      "body": "A plan for the way your team works.",
+      "free": {
+        "name": "Free",
+        "body": "For getting your customer work organized."
       },
-      "dedicated": {
-        "name": "Dedicated",
-        "body": "For organizations that need an environment of their own.",
-        "hosting": "An environment for your organization",
-        "operation": "Hosted and operated by Connex",
-        "control": "A dedicated database"
+      "pro": {
+        "name": "Pro",
+        "body": "Hosted SaaS for teams building their customer relationships."
       },
-      "selfHosted": {
-        "name": "Self-hosted",
-        "body": "For teams that manage their own infrastructure.",
-        "hosting": "Run on your infrastructure",
-        "operation": "Deployed and operated by your team",
-        "control": "Your team controls the network"
+      "enterprise": {
+        "name": "Enterprise",
+        "body": "A dedicated Silo environment operated by Connex, or an on-premises installation you manage."
       }
     },
     "teamHandover": "Shared history",

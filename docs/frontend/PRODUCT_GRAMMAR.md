@@ -98,6 +98,10 @@ Schibsted Grotesk and Source Sans 3 are loaded only for this route, with the exi
 fallback; the page inherits the global theme preference. Shared documentation and legal styles stay
 unchanged.
 
+Pricing appears immediately before practical questions, with Free, Pro, and Enterprise plans.
+Pro is hosted SaaS; Enterprise covers Silo and on-premises deployment. Prices and unspecified
+plan entitlements are omitted. Account actions keep the page's existing session-aware destination.
+
 Product diagrams use labeled icons to explain connections and process, rather than dense mock
 records. The hero keeps text and actions vertically centered below navigation, over a decorative
 SVG Mount Fuji skyline with a green gradient fading down from the summit and a plain sky. The
