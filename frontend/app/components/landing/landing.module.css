@@ -38,8 +38,7 @@
     grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 0.25rem;
     padding: 0.5rem 0.5rem 0;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    border-bottom: 1px solid var(--border);
 }
 .recordTab[data-slot="tabs-trigger"] {
     height: auto;
