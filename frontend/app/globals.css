@@ -2,6 +2,9 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* Build caches contain class-like fragments that are not valid CSS utilities. */
+@source not "../.next*/**";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

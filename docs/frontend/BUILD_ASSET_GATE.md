@@ -17,6 +17,8 @@ node ci/verify_build_chunks.mjs .next
 ```
 
 If a build uses another `NEXT_DIST_DIR`, pass that exact directory.
+Use `.next-<name>` for isolated local builds; the frontend Git and Tailwind source exclusions cover
+that prefix so generated chunks and binary caches cannot be scanned as application utility classes.
 
 ## Required invocation sites
 
