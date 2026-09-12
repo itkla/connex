@@ -98,7 +98,28 @@
         "body": "Assign a follow-up, set a due date, and track it through to completion. Link tasks to a contact or deal so the next step stays with the work."
       }
     },
-    "featuresHeading": "Three ways to work with the bigger picture.",
+    "featuresHeading": "Work with the bigger picture.",
+    "warmth": {
+      "name": "Warmth",
+      "heading": "Read the relationship behind the record.",
+      "body": "See how active each customer relationship is, with warmth based on the timing, frequency, and type of recorded interactions.",
+      "evidence": "Open the activities, shared notes, and linked tasks behind each contact or company’s reading.",
+      "docs": "How warmth works",
+      "visualLabel": "How recorded interactions contribute to warmth",
+      "inputs": {
+        "recency": "How recently",
+        "frequency": "How often",
+        "kind": "What kind of interaction"
+      },
+      "scale": "Four warmth bands",
+      "bands": {
+        "cold": "Cold",
+        "cool": "Cool",
+        "warm": "Warm",
+        "hot": "Hot"
+      },
+      "noHistory": "Relationships without recorded history show “No history.”"
+    },
     "askName": "Ask Connex",
     "askHeading": "Turn recorded context into a useful brief.",
     "askBody": "Get a relationship brief or activity summary, with a suggested next step and the records behind it.",

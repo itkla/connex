@@ -13,6 +13,7 @@ import LandingPricing from "@/app/components/landing/LandingPricing";
 import GuidedExample from "@/app/components/landing/GuidedExample";
 import { AskConnexPreview, ConnectedRecordPreview, MapPreview, WorkflowPreview } from "@/app/components/landing/ProductPreviews";
 import { TeamworkPreview } from "@/app/components/landing/TeamworkPreview";
+import { WarmthPreview } from "@/app/components/landing/WarmthPreview";
 import styles from "@/app/components/landing/landing.module.css";
 import fujiStyles from "@/app/components/landing/fuji.module.css";
 import { FujiBackdrop } from "@/app/components/landing/FujiBackdrop";
@@ -84,6 +85,16 @@ export default async function Home() {
                     <div className="mt-16 sm:mt-20">
                         <h3 className="text-xl font-bold text-brand-dark dark:text-brand">{t("workflowName")}</h3><p className={featureHeading}>{t("workflowHeading")}</p><p className={description}>{t("workflowBody")}</p>
                         <WorkflowPreview t={t} />
+                    </div>
+                    <div id="warmth" className="mt-16 grid items-center gap-10 scroll-mt-20 sm:mt-20 lg:grid-cols-[0.8fr_1.2fr] lg:gap-16" aria-labelledby="warmth-title">
+                        <div>
+                            <h3 id="warmth-title" className="text-xl font-bold text-brand-dark dark:text-brand">{t("warmth.name")}</h3>
+                            <p className={featureHeading}>{t("warmth.heading")}</p>
+                            <p className={description}>{t("warmth.body")}</p>
+                            <p className="mt-5 text-base leading-relaxed text-muted-foreground">{t("warmth.evidence")}</p>
+                            <Link href="/docs/relationship-intelligence/warmth" className="mt-5 inline-flex min-h-11 items-center gap-2 text-base font-medium underline underline-offset-4">{t("warmth.docs")}<ArrowRightIcon aria-hidden="true" className="size-4 shrink-0" /></Link>
+                        </div>
+                        <WarmthPreview t={t} />
                     </div>
                 </section>
 

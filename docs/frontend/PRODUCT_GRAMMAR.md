@@ -92,8 +92,8 @@ Timeline comment rows are chronology/read-only representations. `CommentsSection
 
 ### Public landing page
 
-The public landing page explains the CRM before demonstrating Ask Connex, Map, Workflows, and
-relationship priorities. It uses its own editorial layout rather than the authenticated page shell.
+The public landing page explains the CRM before demonstrating Ask Connex, Map, Workflows, Warmth,
+and relationship priorities. It uses its own editorial layout rather than the authenticated page shell.
 Schibsted Grotesk and Source Sans 3 are loaded only for this route, with the existing Noto Sans JP
 fallback; the page inherits the global theme preference. Shared documentation and legal styles stay
 unchanged.
@@ -101,6 +101,10 @@ Landing chapters and feature subsections are separated by whitespace rather than
 Chapter padding is 3rem on mobile and 4rem from the small breakpoint; feature subsections use 4rem
 and 5rem gaps respectively. Component boundaries retain their own structure. The landing footer
 omits dividers while the shared footer's default legal-page presentation stays unchanged.
+Features contains one Warmth subsection: a static, borderless diagram connects recency, frequency,
+and interaction type to the four labeled warmth bands. It explains record-level readings and their
+inspectable history, with no invented customer score. Missing history stays distinct from Cold.
+The following Radar/Introductions chapter owns priorities, risk, and recommended next steps.
 
 Pricing appears immediately before practical questions, with Free, Pro, and Enterprise plans.
 The approved pricing draft includes all CRM features on every plan; company-managed SSO is reserved

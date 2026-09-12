@@ -116,6 +116,14 @@ describe.each(["en", "ja"] as const)("landing product story in %s", (locale) => 
         }
         expect(doc.querySelectorAll("h1")).toHaveLength(1);
         expect(doc.querySelectorAll("#features [data-sample-source]")).toHaveLength(2);
+        const warmth = doc.querySelector("#features #warmth");
+        expect(doc.querySelectorAll("#warmth")).toHaveLength(1);
+        expect(warmth?.textContent).toContain(messages.warmth.heading);
+        expect(warmth?.textContent).toContain(messages.warmth.evidence);
+        expect(warmth?.textContent).toContain(messages.warmth.noHistory);
+        for (const band of ["cold", "cool", "warm", "hot"] as const) {
+            expect(warmth?.querySelector(`[data-warmth-band="${band}"]`)?.textContent).toContain(messages.warmth.bands[band]);
+        }
         const conversation = doc.querySelector('[data-ask-phase="complete"]');
         expect(conversation?.textContent).toContain(messages.askPrompt);
         expect(conversation?.textContent).toContain(messages.askFinding);
