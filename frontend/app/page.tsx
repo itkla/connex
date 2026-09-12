@@ -9,6 +9,7 @@ import { getPublicPageUserFromCookie } from "@/app/lib/api";
 import LandingNav from "@/app/components/landing/LandingNav";
 import LandingFooter from "@/app/components/landing/LandingFooter";
 import LandingFaq from "@/app/components/landing/LandingFaq";
+import LandingPricing from "@/app/components/landing/LandingPricing";
 import GuidedExample from "@/app/components/landing/GuidedExample";
 import { AskConnexPreview, ConnectedRecordPreview, MapPreview, WorkflowPreview } from "@/app/components/landing/ProductPreviews";
 import { TeamworkPreview } from "@/app/components/landing/TeamworkPreview";
@@ -105,6 +106,12 @@ export default async function Home() {
                         {(["Capture", "Understand", "Act"] as const).map((step, index) => <li key={step} className="border-t border-border pt-5"><span className="text-3xl font-semibold text-brand-dark tabular-nums dark:text-brand">{index + 1}</span><h3 className="mt-5 text-xl font-semibold">{t(`step${step}Title`)}</h3><p className="mt-3 text-base leading-relaxed text-muted-foreground">{t(`step${step}Body`)}</p></li>)}
                     </ol>
                     <p className="mt-8 max-w-[70ch] text-base leading-relaxed text-muted-foreground">{t("startNote")}</p>
+                </section>
+
+                <section id="pricing" className={`${container} ${chapter} scroll-mt-20 border-t border-border`} aria-labelledby="pricing-title">
+                    <h2 id="pricing-title" className={styles.heading}>{t("pricing.heading")}</h2>
+                    <p className={description}>{t("pricing.body")}</p>
+                    <LandingPricing t={t} ctaHref={ctaHref} ctaLabel={ctaLabel} />
                 </section>
 
                 <section className={`${container} ${chapter} grid gap-8 lg:grid-cols-[0.7fr_1.3fr] lg:gap-16`} aria-labelledby="faq-title">

@@ -203,6 +203,32 @@
         "caption": "Product illustration"
       }
     },
+    "pricing": {
+      "heading": "Pricing",
+      "body": "Choose how you run Connex.",
+      "explore": "Explore deployment options",
+      "cloud": {
+        "name": "Cloud",
+        "body": "For teams that want Connex to handle the hosting.",
+        "hosting": "Shared cloud environment",
+        "operation": "Hosted and operated by Connex",
+        "control": "Access from your browser"
+      },
+      "dedicated": {
+        "name": "Dedicated",
+        "body": "For organizations that need an environment of their own.",
+        "hosting": "An environment for your organization",
+        "operation": "Hosted and operated by Connex",
+        "control": "A dedicated database"
+      },
+      "selfHosted": {
+        "name": "Self-hosted",
+        "body": "For teams that manage their own infrastructure.",
+        "hosting": "Run on your infrastructure",
+        "operation": "Deployed and operated by your team",
+        "control": "Your team controls the network"
+      }
+    },
     "teamHandover": "Shared history",
     "startHeading": "Start with the customers you know.",
     "stepCaptureTitle": "Import companies and contacts",
