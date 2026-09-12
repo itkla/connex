@@ -21,7 +21,7 @@ export function WorkflowSequence({ children }: { children: ReactNode }) {
                 if (!played && entry.intersectionRatio >= 0.6 && !preference.matches && !document.hidden) {
                     played = true;
                     setActive(true);
-                    timer = setTimeout(finish, durationExpressiveMs * 2 + durationStandardMs);
+                    timer = setTimeout(finish, durationExpressiveMs * 4 + durationStandardMs);
                 } else if (!entry.isIntersecting) finish();
             }
         }, { threshold: 0.6 });

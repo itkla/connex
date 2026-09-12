@@ -154,62 +154,100 @@
 .mapContactSecond { left: 50%; top: 81.25%; }
 .mapContactThird { left: 80%; top: 81.25%; }
 
-.workflowSteps {
+.workflowDiagram {
+    position: relative;
+    isolation: isolate;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 3rem;
-    padding-block: 2rem;
+    grid-template-rows: repeat(4, minmax(5rem, 1fr));
+    column-gap: clamp(1.5rem, 7vw, 7rem);
+    min-height: 22rem;
+    align-items: center;
 }
 
-.workflowStep { position: relative; text-align: center; }
-.workflowIcon {
+.workflowBox {
+    position: relative;
     display: flex;
     align-items: center;
-    justify-content: center;
-    width: 6rem;
-    height: 6rem;
-    margin-inline: auto;
+    justify-self: center;
+    gap: 0.75rem;
+    width: 100%;
+    max-width: 14rem;
+    min-height: 6rem;
+    padding: 1.25rem;
+    border: 1px solid var(--border);
     border-radius: var(--radius-xl);
-    background: color-mix(in oklab, var(--color-brand) 10%, var(--background));
-    color: var(--color-brand-dark);
+    background: var(--card);
+    font-weight: 500;
 }
-.workflowIcon svg { width: 3rem; height: 3rem; }
-.workflowLink {
-    position: absolute;
+.workflowBoxIcon {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    top: 2.25rem;
-    left: calc(100% + 0.5rem);
-    width: 2rem;
+    flex-shrink: 0;
     color: var(--color-brand-dark);
 }
-.workflowLink svg { width: 1.5rem; height: 1.5rem; }
+.workflowBoxIcon svg { width: 1.75rem; height: 1.75rem; }
+.workflowTrigger { grid-column: 1; grid-row: 2 / 4; }
+.workflowCondition { grid-column: 2; grid-row: 2 / 4; }
+.workflowTask { grid-column: 3; grid-row: 1 / 3; }
+.workflowActivity { grid-column: 3; grid-row: 3 / 5; }
+.workflowActivity .workflowBoxIcon { color: var(--muted-foreground); }
+.workflowBranchLabel {
+    position: absolute;
+    top: 50%;
+    right: calc(100% + 0.35rem);
+    padding: 0.25rem;
+    background: var(--background);
+    font-size: 0.875rem;
+    white-space: nowrap;
+    transform: translateY(-50%);
+}
+.workflowConnector {
+    position: absolute;
+    top: 0;
+    width: 50%;
+    height: 100%;
+    z-index: -1;
+    pointer-events: none;
+}
+.workflowLead { left: 0; }
+.workflowYes, .workflowNo { left: 50%; }
+.workflowConnector svg {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke-width: 1.5;
+}
+.workflowTrack { stroke: var(--muted-foreground); }
+.workflowFlow { stroke: var(--color-brand-dark); }
+.workflowNo .workflowTrack { stroke-dasharray: 4 5; }
 
-.workflowSequence[data-workflow-active="true"] .workflowIcon {
+.workflowSequence[data-workflow-active="true"] :is(.workflowTrigger, .workflowCondition, .workflowTask) .workflowBoxIcon {
     animation: workflowStepArrival var(--motion-standard) var(--ease-out) both;
 }
-.workflowSequence[data-workflow-active="true"] .workflowStep:nth-child(2) .workflowIcon { animation-delay: var(--motion-expressive); }
-.workflowSequence[data-workflow-active="true"] .workflowStep:nth-child(3) .workflowIcon { animation-delay: calc(var(--motion-expressive) * 2); }
-.workflowSequence[data-workflow-active="true"] .workflowLink svg {
-    animation: workflowConnection var(--motion-standard) var(--ease-out) both;
+.workflowSequence[data-workflow-active="true"] .workflowCondition .workflowBoxIcon { animation-delay: calc(var(--motion-expressive) * 2); }
+.workflowSequence[data-workflow-active="true"] .workflowTask .workflowBoxIcon { animation-delay: calc(var(--motion-expressive) * 4); }
+.workflowSequence[data-workflow-active="true"] .workflowFlow {
+    animation: workflowConnection var(--motion-expressive) var(--ease-out) both;
     animation-delay: var(--motion-standard);
 }
-.workflowSequence[data-workflow-active="true"] .workflowStep:nth-child(2) .workflowLink svg { animation-delay: calc(var(--motion-expressive) + var(--motion-standard)); }
+.workflowSequence[data-workflow-active="true"] .workflowYes .workflowFlow { animation-delay: calc(var(--motion-expressive) * 2 + var(--motion-standard)); }
 
 @keyframes workflowStepArrival {
     from { opacity: 0.45; transform: scale(0.94); }
     to { opacity: 1; transform: scale(1); }
 }
 @keyframes workflowConnection {
-    from { opacity: 0.25; transform: translateX(-0.25rem); }
-    to { opacity: 1; transform: translateX(0); }
+    from { clip-path: inset(0 100% 0 0); }
+    to { clip-path: inset(0 0 0 0); }
 }
 
 :global(.dark) .diagramLines { stroke: var(--color-brand); }
 :global(.dark) :is(.heroCompanyIcon, .heroTeam .heroAvatar) { color: var(--color-brand); }
 :global(.dark) .heroTeam .heroAvatar { border-color: var(--color-brand); }
-:global(.dark) :is(.symbolIcon, .workflowIcon, .workflowLink) { color: var(--color-brand); }
+:global(.dark) :is(.symbolIcon, .workflowBoxIcon) { color: var(--color-brand); }
+:global(.dark) .workflowFlow { stroke: var(--color-brand); }
+:global(.dark) .workflowActivity .workflowBoxIcon { color: var(--muted-foreground); }
 :global(.dark) .mapCompany .symbolIcon { border-color: var(--color-brand); }
 
 @media (max-width: 39.999rem) {
@@ -218,12 +256,9 @@
     .heroContact, .heroTeam { width: 3.5rem; height: 3.5rem; }
     .heroContactLabel, .heroTeamLabel { font-size: 0.875rem; }
 
-    .workflowSteps { grid-template-columns: 1fr; gap: 3rem; }
-    .workflowStep { display: flex; align-items: center; gap: 1.5rem; text-align: left; }
-    .workflowIcon { width: 4.5rem; height: 4.5rem; margin: 0; flex-shrink: 0; }
-    .workflowIcon svg { width: 2.25rem; height: 2.25rem; }
-    .workflowStep p { margin-top: 0; }
-    .workflowLink { left: 1.25rem; top: calc(100% + 0.75rem); transform: rotate(90deg); }
+    .workflowDiagram { min-height: 20rem; }
+    .workflowBox { flex-direction: column; padding: 0.875rem 0.375rem; gap: 0.625rem; text-align: center; font-size: 0.875rem; }
+    .workflowBranchLabel { font-size: 0.75rem; right: calc(100% + 0.125rem); padding-inline: 0.125rem; }
 }
 
 .askPrompt {
@@ -255,8 +290,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .workflowSequence .workflowIcon,
-    .workflowSequence .workflowLink svg { animation: none !important; }
+    .workflowSequence .workflowBoxIcon,
+    .workflowSequence .workflowFlow { animation: none !important; }
 
     .askPrompt {
         transition: none;

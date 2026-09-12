@@ -1,4 +1,4 @@
-import { ArrowRightIcon, ArrowUpRightIcon, BuildingOffice2Icon, ChartBarIcon, ChatBubbleLeftRightIcon, CheckCircleIcon, ChevronDownIcon, ClipboardDocumentListIcon, ClockIcon, CurrencyYenIcon, DocumentCheckIcon, DocumentTextIcon, PencilSquareIcon, UserGroupIcon, UserIcon } from "@heroicons/react/24/outline";
+import { ArrowUpRightIcon, BuildingOffice2Icon, ChartBarIcon, ChatBubbleLeftRightIcon, CheckCircleIcon, ChevronDownIcon, ClipboardDocumentListIcon, ClockIcon, CurrencyYenIcon, DocumentCheckIcon, DocumentTextIcon, FunnelIcon, PencilSquareIcon, UserGroupIcon, UserIcon } from "@heroicons/react/24/outline";
 import { AskConnexConversation } from "./AskConnexConversation";
 import { SampleEvidence } from "./SampleEvidence";
 import { WorkflowSequence } from "./WorkflowSequence";
@@ -84,17 +84,32 @@ export function MapPreview({ t }: { t: LandingTranslation }) {
 }
 
 export function WorkflowPreview({ t }: { t: LandingTranslation }) {
-    const steps = [[CheckCircleIcon, "trigger"], [ClipboardDocumentListIcon, "task"], [ClockIcon, "activity"]] as const;
+    const connections = [
+        { position: styles.workflowLead, path: "M32 50 H100", highlighted: true },
+        { position: styles.workflowYes, path: "M0 50 H20 Q30 50 30 40 V35 Q30 25 40 25 H68", highlighted: true },
+        { position: styles.workflowNo, path: "M0 50 H20 Q30 50 30 60 V65 Q30 75 40 75 H68", highlighted: false },
+    ];
+    const nodes = [
+        { id: "trigger", icon: CheckCircleIcon, label: "workflow_trigger_title", position: styles.workflowTrigger },
+        { id: "condition", icon: FunnelIcon, label: "workflow_condition_title", position: styles.workflowCondition },
+        { id: "task", icon: ClipboardDocumentListIcon, label: "workflow_task_title", position: styles.workflowTask },
+        { id: "activity", icon: ClockIcon, label: "workflow_activity_title", position: styles.workflowActivity },
+    ] as const;
     return (
-        <figure className="mt-10">
+        <figure className="mt-10" aria-label={t("workflowDiagramLabel")}>
             <WorkflowSequence>
-                <ol className={styles.workflowSteps}>
-                    {steps.map(([Icon, step], index) => <li key={step} className={styles.workflowStep}>
-                        <span className={styles.workflowIcon}><Icon aria-hidden="true" /></span>
-                        <p className="mt-4 text-base font-medium sm:text-lg">{t(`workflow_${step}_title`)}</p>
-                        {index < steps.length - 1 && <span className={styles.workflowLink} aria-hidden="true"><ArrowRightIcon /></span>}
-                    </li>)}
-                </ol>
+                <div className={styles.workflowDiagram}>
+                    {connections.map(({ position, path, highlighted }) => <div key={position} className={`${styles.workflowConnector} ${position}`} aria-hidden="true">
+                        <svg className={styles.workflowTrack} viewBox="0 0 100 100" preserveAspectRatio="none"><path d={path} vectorEffect="non-scaling-stroke" /></svg>
+                        {highlighted && <svg className={styles.workflowFlow} viewBox="0 0 100 100" preserveAspectRatio="none"><path d={path} vectorEffect="non-scaling-stroke" /></svg>}
+                    </div>)}
+                    {nodes.map(({ id, icon: Icon, label, position }) => <div key={id} className={`${styles.workflowBox} ${position}`} data-workflow-node={id}>
+                        <span className={styles.workflowBoxIcon}><Icon aria-hidden="true" /></span>
+                        <p>{t(label)}</p>
+                        {id === "task" && <span className={`${styles.workflowBranchLabel} text-brand-dark dark:text-brand`}>{t("workflow_yes")}</span>}
+                        {id === "activity" && <span className={`${styles.workflowBranchLabel} text-muted-foreground`}>{t("workflow_no")}</span>}
+                    </div>)}
+                </div>
             </WorkflowSequence>
             <figcaption className="mt-6 text-sm text-muted-foreground">{t("workflowRecipe")}</figcaption>
             <details className="group mt-3 max-w-2xl">

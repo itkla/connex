@@ -214,7 +214,7 @@ it("shows the workflow order once without hiding labels or repeating on scroll",
     expect(sequence?.getAttribute("data-workflow-active")).toBe("true");
     expect(sequence?.textContent).toContain(en.CommonHome.workflow_task_title);
     expect(sequence?.querySelector("[hidden], [inert]")).toBeNull();
-    await act(async () => vi.advanceTimersByTime(1100));
+    await act(async () => vi.advanceTimersByTime(1900));
     expect(sequence?.getAttribute("data-workflow-active")).toBe("false");
     await act(async () => { notifyIntersection(false); notifyIntersection(true); });
     expect(sequence?.getAttribute("data-workflow-active")).toBe("false");

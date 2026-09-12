@@ -106,8 +106,9 @@ their dated fictional evidence in native disclosures, using
 Ask Connex demonstrates a local message-and-response sequence once on arrival, with explicit replay
 and skip controls. It makes no AI requests, keeps the answer's space reserved, and shows the complete
 conversation with reduced motion or without JavaScript.
-The workflow diagram briefly shows trigger-to-action order once on arrival. Its labels remain
-visible throughout; reduced motion shows the static diagram.
+The workflow diagram shows a value condition with Yes/No branches, tracing the example Yes path
+from left to right once on arrival. Its labels and both routes remain visible throughout; reduced
+motion shows the static diagram.
 Sample citations and practical questions use native `details` disclosures so their content remains
 reachable without JavaScript. The guided example uses the shared segmented control and includes a
 no-JavaScript fallback for the other examples. Only explicit selection changes its displayed example.

@@ -89,7 +89,7 @@
     "workflowName": "Workflows",
     "workflowHeading": "Keep repeatable work moving.",
     "workflowBody": "Choose a trigger, set conditions, and connect actions. Review a recipe with your team before enabling it.",
-    "workflowRecipe": "Recipe example: hand off a won deal",
+    "workflowRecipe": "Workflow example: route a won deal",
     "workflow_trigger_title": "Deal won",
     "workflow_task_title": "Create handoff task",
     "workflow_activity_title": "Log activity",
@@ -168,7 +168,11 @@
     "teamQuotes": "Quotes",
     "teamProgress": "Analytics & reports",
     "heroRecordContext": "Deals, activities & tasks",
-    "heroYourTeam": "Your team"
+    "heroYourTeam": "Your team",
+    "workflow_condition_title": "High value?",
+    "workflow_yes": "Yes",
+    "workflow_no": "No",
+    "workflowDiagramLabel": "After a deal is won, check its value. High-value deals create a handoff task; other deals log an activity. The highlighted path shows the Yes branch."
   },
   "CommonSidebar": {
     "ariaPrimarySidebar": "Primary sidebar",

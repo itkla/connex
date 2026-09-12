@@ -89,7 +89,7 @@
     "workflowName": "ワークフロー",
     "workflowHeading": "繰り返す仕事を、滞りなく。",
     "workflowBody": "開始のきっかけと条件を決め、処理をつなげます。レシピの内容をチームで確認してから、有効にできます。",
-    "workflowRecipe": "レシピの例：受注した案件の引き継ぎ",
+    "workflowRecipe": "ワークフローの例：受注した案件を金額で振り分け",
     "workflow_trigger_title": "案件を受注",
     "workflow_task_title": "引き継ぎタスクを作成",
     "workflow_activity_title": "活動を記録",
@@ -168,7 +168,11 @@
     "teamQuotes": "見積書",
     "teamProgress": "分析とレポート",
     "heroRecordContext": "案件・活動・タスク",
-    "heroYourTeam": "チーム"
+    "heroYourTeam": "チーム",
+    "workflow_condition_title": "高額の案件？",
+    "workflow_yes": "はい",
+    "workflow_no": "いいえ",
+    "workflowDiagramLabel": "案件の受注後に金額を確認し、高額なら引き継ぎタスクを作成します。それ以外は活動を記録します。強調した線は「はい」の場合の流れです。"
   },
   "CommonSidebar": {
     "ariaPrimarySidebar": "メインサイドバー",
