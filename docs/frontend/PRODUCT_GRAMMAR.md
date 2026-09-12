@@ -100,9 +100,9 @@ unchanged.
 
 Product diagrams use labeled icons to explain connections and process, rather than dense mock
 records. The hero keeps text and actions vertically centered below navigation, over a decorative
-SVG Mount Fuji skyline over a translucent green gradient, with the base fading into mist. Soft
-cloud layers drift at different speeds and move with scroll depth; a pause control freezes the scenery. Reduced motion and no JavaScript
-show the static illustration.
+SVG Mount Fuji skyline with a green gradient fading down from the summit and a plain sky. The
+base fades into mist, and soft cloud layers drift at different speeds and move with scroll depth. A pause
+control freezes the scenery. Reduced motion and no JavaScript show the static illustration.
 Cloud motion pauses outside the hero and in hidden tabs. The slow, linear drift uses landing-only
 multiples of the expressive duration token, separate from interface feedback timings.
 Explanatory copy describes the product directly. Ask Connex and priority examples keep

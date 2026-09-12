@@ -6,7 +6,6 @@ export function FujiBackdrop({ pauseLabel, resumeLabel }: { pauseLabel: string; 
     const skyline = "M160 846 C342 816 481 767 613 700 C762 625 891 518 1039 393 L1094 352 L1107 350 L1112 346 L1121 348 L1134 344 L1149 347 L1161 345 L1173 348 L1184 342 L1194 344 L1202 350 C1289 418 1368 485 1462 547 C1607 643 1747 718 1940 777";
     return (
         <FujiMotion pauseLabel={pauseLabel} resumeLabel={resumeLabel}>
-            <div className={styles.atmosphere} aria-hidden="true" />
             <svg className={styles.landscape} viewBox="0 0 1600 900" fill="none" preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false">
                 <defs>
                     <linearGradient id="fuji-ink" x1="1150" y1="342" x2="1150" y2="846" gradientUnits="userSpaceOnUse">
@@ -15,9 +14,9 @@ export function FujiBackdrop({ pauseLabel, resumeLabel }: { pauseLabel: string; 
                         <stop offset="1" className={styles.inkTone} stopOpacity="0" />
                     </linearGradient>
                     <linearGradient id="fuji-wash" x1="1150" y1="342" x2="1150" y2="880" gradientUnits="userSpaceOnUse">
-                        <stop className={styles.summitTint} stopOpacity="0.05" />
-                        <stop offset="0.32" className={styles.mountainTint} stopOpacity="0.2" />
-                        <stop offset="0.68" className={styles.mountainTint} stopOpacity="0.09" />
+                        <stop className={styles.mountainTint} stopOpacity="0.32" />
+                        <stop offset="0.4" className={styles.mountainTint} stopOpacity="0.14" />
+                        <stop offset="0.72" className={styles.mountainTint} stopOpacity="0.05" />
                         <stop offset="1" className={styles.mountainTint} stopOpacity="0" />
                     </linearGradient>
                     <radialGradient id="fuji-cloud" cx="0.5" cy="0.48" r="0.52">

@@ -12,14 +12,6 @@
     --fuji-drift-far: calc(var(--motion-expressive) * 300);
     --fuji-drift-near: calc(var(--motion-expressive) * 200);
 }
-.atmosphere {
-    position: absolute;
-    inset: 0;
-    background:
-        radial-gradient(ellipse 45% 55% at 87% 48%, color-mix(in oklab, var(--color-brand-light) 85%, transparent), transparent 75%),
-        radial-gradient(ellipse 48% 40% at 72% 72%, color-mix(in oklab, var(--color-brand) 10%, transparent), transparent 80%),
-        var(--background);
-}
 .landscape {
     position: absolute;
     inset: 0;
@@ -29,7 +21,6 @@
 }
 .outline { stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
 .inkTone { stop-color: var(--color-brand-dark); }
-.summitTint { stop-color: var(--color-brand-light); }
 .mountainTint { stop-color: var(--color-brand-dark); }
 .cloudGlow { stop-color: var(--background); }
 .cloudTone { stop-color: color-mix(in oklab, var(--color-brand-light) 45%, var(--background)); }
