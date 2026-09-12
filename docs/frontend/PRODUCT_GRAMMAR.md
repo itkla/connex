@@ -97,6 +97,10 @@ relationship priorities. It uses its own editorial layout rather than the authen
 Schibsted Grotesk and Source Sans 3 are loaded only for this route, with the existing Noto Sans JP
 fallback; the page inherits the global theme preference. Shared documentation and legal styles stay
 unchanged.
+Landing chapters and feature subsections are separated by whitespace rather than horizontal rules.
+Chapter padding is 3rem on mobile and 4rem from the small breakpoint; feature subsections use 4rem
+and 5rem gaps respectively. Component boundaries retain their own structure. The landing footer
+omits dividers while the shared footer's default legal-page presentation stays unchanged.
 
 Pricing appears immediately before practical questions, with Free, Pro, and Enterprise plans.
 The approved pricing draft includes all CRM features on every plan; company-managed SSO is reserved
@@ -112,8 +116,9 @@ contracted. Enterprise supports shared cloud as well as separately quoted Silo/o
 Free support is self-service; Pro support covers product setup/troubleshooting; Enterprise services
 and operator responsibilities are contract-scoped. Prices, numeric AI allowances, and unspecified
 resource allowances are omitted. These are marketing definitions only: they do not implement
-commercial entitlements, subscription billing, monthly grants, or top-up purchasing. Account actions
-keep the page's existing session-aware destination.
+commercial entitlements, subscription billing, monthly grants, or top-up purchasing. Free and Pro
+account actions keep the page's existing session-aware destination. Enterprise says “Contact us”;
+it remains disabled without a destination until a contact address or URL is supplied.
 
 Product diagrams use labeled icons to explain connections and process, rather than dense mock
 records. The hero keeps text and actions vertically centered below navigation, over a decorative

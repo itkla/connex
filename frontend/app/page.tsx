@@ -20,7 +20,7 @@ import { FujiBackdrop } from "@/app/components/landing/FujiBackdrop";
 const display = Schibsted_Grotesk({ variable: "--font-landing-display", subsets: ["latin"], display: "swap" });
 const body = Source_Sans_3({ variable: "--font-landing-body", subsets: ["latin"], display: "swap" });
 const container = "mx-auto max-w-7xl px-5 sm:px-8";
-const chapter = "py-16 sm:py-24 lg:py-28";
+const chapter = "py-12 sm:py-16";
 const description = "mt-5 max-w-[62ch] text-lg leading-relaxed text-muted-foreground sm:text-xl";
 const featureHeading = "mt-4 text-3xl leading-tight tracking-tight sm:text-4xl";
 
@@ -64,7 +64,7 @@ export default async function Home() {
                     </div></div>
                 </section>
 
-                <section id="product" className={`${container} py-12 sm:py-16 scroll-mt-20 border-t border-border`} aria-labelledby="product-title">
+                <section id="product" className={`${container} ${chapter} scroll-mt-20`} aria-labelledby="product-title">
                     <h2 id="product-title" className={`${styles.heading} max-w-3xl`}>{t("contextHeading")}</h2>
                     <p className={description}>{t("contextBody")}</p>
                     <ConnectedRecordPreview t={t} />
@@ -76,18 +76,18 @@ export default async function Home() {
                         <div><h3 className="text-xl font-bold text-brand-dark dark:text-brand">{t("askName")}</h3><p className={featureHeading}>{t("askHeading")}</p><p className={description}>{t("askBody")}</p><p className="mt-5 text-sm leading-relaxed text-muted-foreground">{t("askAvailability")}</p></div>
                         <AskConnexPreview t={t} />
                     </div>
-                    <div className="mt-20 border-t border-border pt-12 sm:mt-28 sm:pt-16">
+                    <div className="mt-16 sm:mt-20">
                         <h3 className="text-xl font-bold text-brand-dark dark:text-brand">{t("mapName")}</h3>
                         <p className={featureHeading}>{t("mapHeading")}</p><p className={description}>{t("mapBody")}</p>
                         <MapPreview t={t} />
                     </div>
-                    <div className="mt-20 border-t border-border pt-12 sm:mt-28 sm:pt-16">
+                    <div className="mt-16 sm:mt-20">
                         <h3 className="text-xl font-bold text-brand-dark dark:text-brand">{t("workflowName")}</h3><p className={featureHeading}>{t("workflowHeading")}</p><p className={description}>{t("workflowBody")}</p>
                         <WorkflowPreview t={t} />
                     </div>
                 </section>
 
-                <section id="deploy" className={`${container} ${chapter} scroll-mt-20 border-t border-border`} aria-labelledby="attention-title">
+                <section id="deploy" className={`${container} ${chapter} scroll-mt-20`} aria-labelledby="attention-title">
                     <h2 id="attention-title" className={`${styles.heading} max-w-4xl`}>{t.rich("attentionHeading", { em: (chunks) => <em className="font-semibold not-italic text-brand-dark dark:text-brand">{chunks}</em> })}</h2>
                     <p className={description}>{t("attentionBody")}</p>
                     <GuidedExample />
@@ -100,15 +100,15 @@ export default async function Home() {
                     </>} />
                 </section>
 
-                <section id="workflow" className={`${container} ${chapter} scroll-mt-20 border-t border-border`} aria-labelledby="start-title">
+                <section id="workflow" className={`${container} ${chapter} scroll-mt-20`} aria-labelledby="start-title">
                     <h2 id="start-title" className={`${styles.heading} max-w-3xl`}>{t("startHeading")}</h2>
                     <ol className="mt-10 grid gap-8 sm:grid-cols-3 sm:gap-10">
-                        {(["Capture", "Understand", "Act"] as const).map((step, index) => <li key={step} className="border-t border-border pt-5"><span className="text-3xl font-semibold text-brand-dark tabular-nums dark:text-brand">{index + 1}</span><h3 className="mt-5 text-xl font-semibold">{t(`step${step}Title`)}</h3><p className="mt-3 text-base leading-relaxed text-muted-foreground">{t(`step${step}Body`)}</p></li>)}
+                        {(["Capture", "Understand", "Act"] as const).map((step, index) => <li key={step}><span className="text-3xl font-semibold text-brand-dark tabular-nums dark:text-brand">{index + 1}</span><h3 className="mt-5 text-xl font-semibold">{t(`step${step}Title`)}</h3><p className="mt-3 text-base leading-relaxed text-muted-foreground">{t(`step${step}Body`)}</p></li>)}
                     </ol>
                     <p className="mt-8 max-w-[70ch] text-base leading-relaxed text-muted-foreground">{t("startNote")}</p>
                 </section>
 
-                <section id="pricing" className={`${container} ${chapter} scroll-mt-20 border-t border-border`} aria-labelledby="pricing-title">
+                <section id="pricing" className={`${container} ${chapter} scroll-mt-20`} aria-labelledby="pricing-title">
                     <h2 id="pricing-title" className={styles.heading}>{t("pricing.heading")}</h2>
                     <p className={description}>{t("pricing.body")}</p>
                     <LandingPricing t={t} ctaHref={ctaHref} ctaLabel={ctaLabel} />
@@ -123,7 +123,7 @@ export default async function Home() {
                     <div className={`${container} ${chapter}`}><h2 id="closing-title" className={`${styles.heading} max-w-3xl`}>{t("ctaHeading")}</h2><div className="mt-7"><Button asChild variant="brand" size="page" className="min-h-11 h-auto whitespace-normal px-6 py-3 text-base"><Link href={ctaHref}>{ctaLabel}<ArrowRightIcon aria-hidden="true" className="size-4" /></Link></Button></div></div>
                 </section>
             </main>
-            <LandingFooter />
+            <LandingFooter withDividers={false} />
         </div>
     );
 }

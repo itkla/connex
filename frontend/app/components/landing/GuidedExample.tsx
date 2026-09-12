@@ -54,7 +54,7 @@ export default function GuidedExample() {
             />
             <div className="mt-8" aria-live="polite" aria-atomic="true"><Example key={example} example={example} t={t} /></div>
             <noscript>
-                {ATTENTION_EXAMPLES.filter((value) => value !== "cooling").map((value) => <div key={value} className="mt-10 border-t border-border pt-10"><Example example={value} t={t} /></div>)}
+                {ATTENTION_EXAMPLES.filter((value) => value !== "cooling").map((value) => <div key={value} className="mt-12"><Example example={value} t={t} /></div>)}
             </noscript>
         </div>
     );

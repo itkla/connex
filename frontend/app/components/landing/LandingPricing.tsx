@@ -65,8 +65,10 @@ export default function LandingPricing({ t, ctaHref, ctaLabel }: { t: LandingTra
                                 ))}
                             </ul>
                         </div>
-                        <Button asChild variant={key === "pro" ? "brand" : "outline"} size="page" className="h-auto min-h-11 w-full whitespace-normal px-5 py-3 text-base">
-                            <Link href={ctaHref}>{ctaLabel}<ArrowRightIcon aria-hidden="true" className="size-4 shrink-0" /></Link>
+                        <Button asChild={key !== "enterprise"} disabled={key === "enterprise"} variant={key === "pro" ? "brand" : "outline"} size="page" className="h-auto min-h-11 w-full whitespace-normal px-5 py-3 text-base">
+                            {key === "enterprise"
+                                ? <>{t("pricing.enterprise.cta")}<ArrowRightIcon aria-hidden="true" className="size-4 shrink-0" /></>
+                                : <Link href={ctaHref}>{ctaLabel}<ArrowRightIcon aria-hidden="true" className="size-4 shrink-0" /></Link>}
                         </Button>
                     </article>
                 ))}

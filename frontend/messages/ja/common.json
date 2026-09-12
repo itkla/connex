@@ -264,6 +264,7 @@
       },
       "enterprise": {
         "name": "Enterprise",
+        "cta": "お問い合わせ",
         "body": "認証、利用環境、サポートに個別の要件がある組織に。",
         "includes": "契約に合わせた構成",
         "highlights": {

@@ -2,7 +2,7 @@
 .stage { margin-top: 3rem; }
 .footer { display: none; }
 .story svg { display: block; width: 1.5rem; height: 1.5rem; flex-shrink: 0; }
-.passage { padding-block: 2.5rem; border-top: 1px solid var(--border); }
+.passage { padding-block: 2.5rem; }
 .copy { max-width: 32rem; }
 .stepHeading { font-size: clamp(1.65rem, 2.8vw, 2.5rem); line-height: 1.18; letter-spacing: -0.025em; }
 .stepBody { margin-top: 1.25rem; font-size: 1.125rem; line-height: 1.65; color: var(--muted-foreground); }
