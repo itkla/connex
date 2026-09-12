@@ -1,5 +1,7 @@
 import { isIP } from "node:net";
 
+import { resolvePreLaunch } from "@/app/lib/landingMode";
+
 export const runtime = "nodejs";
 
 type SignupError = "invalid_email" | "invalid_request" | "rate_limited" | "unavailable";
@@ -245,7 +247,14 @@ export async function POST(request: Request): Promise<Response> {
     }
     const key = process.env.RESEND_API_KEY?.trim();
     const segment = process.env.RESEND_LAUNCH_SEGMENT_ID?.trim();
-    if ((process.env.CONNEX_LANDING_MODE ?? "prelaunch") !== "prelaunch"
+    // Resolved from the request host, exactly as the page is. A deployment whose default mode is
+    // `product` still serves prelaunch on the hosts named in CONNEX_LANDING_PRELAUNCH_HOSTS, and a
+    // form rendered on one of those hosts has to be able to submit.
+    // `Host` is a forbidden header name, so a constructed Request never carries one; fall back to
+    // the request URL, which Next builds from the incoming host. Both resolve identically in
+    // production, and the fallback keeps the check meaningful under test.
+    const requestHost = request.headers.get("host") ?? URL.parse(request.url)?.host ?? null;
+    if (!resolvePreLaunch({ host: requestHost })
         || !key || /\s/.test(key) || !segment || !UUID.test(segment)) return unavailable();
     const client = clientKey(request);
     if (!client) return unavailable();

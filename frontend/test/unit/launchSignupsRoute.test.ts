@@ -308,6 +308,27 @@ describe("request validation and availability", () => {
         expect(fetcher).not.toHaveBeenCalled();
     });
 
+    it("accepts a signup on a host forced to prelaunch even though the deployment default is product", async () => {
+        // The apex serves prelaunch while preview serves the launched product from the same process.
+        // A form rendered on the apex has to be able to submit; gating on the process-wide mode alone
+        // rendered the form and rejected every submission.
+        vi.stubEnv("CONNEX_LANDING_MODE", "product");
+        vi.stubEnv("CONNEX_LANDING_PRELAUNCH_HOSTS", new URL(ORIGIN).host);
+        providerSuccess();
+        const response = await submit();
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ status: "subscribed" });
+    });
+
+    it("still fails closed on a host that is not forced to prelaunch", async () => {
+        vi.stubEnv("CONNEX_LANDING_MODE", "product");
+        vi.stubEnv("CONNEX_LANDING_PRELAUNCH_HOSTS", "some-other-host.example");
+        providerSuccess();
+        const response = await submit();
+        expect(await response.json()).toEqual({ error: "unavailable" });
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
     it("requires the dedicated proxy identity in production, ignoring generic forwarded identities", async () => {
         const response = await submit(request(undefined, { "X-Connex-Client-IP": "", "X-Forwarded-For": "192.0.2.2" }));
         expect(response.status).toBe(503);
