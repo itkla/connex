@@ -90,6 +90,100 @@ Do not read this as licence for other full-height surfaces to skip the page shel
 
 Timeline comment rows are chronology/read-only representations. `CommentsSection` owns composition/thread actions. Do not wrap `NoteContent` itself in a link because its parsed content may contain anchors; use a separate thread handoff.
 
+### Public landing page
+
+The public landing page explains the CRM before demonstrating Ask Connex, Map, Workflows, Warmth,
+and relationship priorities. It uses its own editorial layout rather than the authenticated page shell.
+Schibsted Grotesk and Source Sans 3 are loaded only for this route, with the existing Noto Sans JP
+fallback; the page inherits the global theme preference. Shared documentation and legal styles stay
+unchanged.
+The same homepage has a pre-launch mode, selected by server-side `CONNEX_LANDING_MODE=prelaunch`
+(the default). Its hero and closing invitation collect an email for the launch notification; navigation
+and pricing omit account actions. `product` restores the existing session-aware signup/dashboard CTAs.
+Pre-launch rendering does not resolve a CRM session. The hero keeps only its headline, product
+description, and email form; a short notification note links to privacy without naming infrastructure.
+Forms use shared Input and Button controls, accessible labels, native email validation,
+inline retryable errors, and live confirmation only after the
+Next.js endpoint confirms Resend persistence. JavaScript is required for submission; before hydration
+the fields stay disabled and a noscript notice explains this. The rest of the page stays server-rendered.
+See [deployment configuration](../DEPLOYMENT.md#pre-launch-email-signups) for provider setup and bounds.
+Landing chapters and feature subsections are separated by whitespace rather than horizontal rules.
+The header links to Product, Features, Pricing, FAQ, and Docs in both landing modes and in the mobile
+menu. Section links retain their sticky-header scroll offset; the Getting started chapter and its
+existing `#workflow` anchor remain available lower on the page.
+Chapter padding is 3rem on mobile and 4rem from the small breakpoint; feature subsections use 4rem
+and 5rem gaps respectively. Component boundaries retain their own structure. The landing footer
+omits dividers while the shared footer's default legal-page presentation stays unchanged.
+Landing focus outlines use the foreground token for contrast in both themes. Small workflow branch
+labels use readable text colors; green remains on the route and icons.
+Features contains one Warmth subsection: a static, borderless diagram connects recency, frequency,
+and interaction type to the four labeled warmth bands. It explains record-level readings and their
+inspectable history, with no invented customer score. Missing history stays distinct from Cold.
+The following Radar/Introductions chapter owns priorities, risk, and recommended next steps.
+
+Pricing appears immediately before practical questions, with Free, Pro, and Enterprise plans.
+The approved pricing draft includes all CRM features on every plan; company-managed SSO is reserved
+for Enterprise and does not restrict ordinary account sign-in. Free includes 1 full-member seat,
+1 workspace, and 250 contacts and companies combined. Pro is hosted SaaS with 2 included full-member
+seats, up to 5 workspaces, and 10,000 combined contacts and companies. Additional seats have a fixed
+per-seat charge; records can expand on Pro. Pro supports client-workspace participation, without
+implying that those workspaces share the customer's subscription pool. Seats, records, and AI usage
+belong to the paying organization and are pooled across its own workspaces; a full member counts once.
+Free has a small monthly AI allowance; Pro's larger organization pool grows with paid seats and
+allows administrator-approved top-ups. Enterprise capacity, inference funding, and support are
+contracted. Enterprise supports shared cloud as well as separately quoted Silo/on-premises options.
+Free support is self-service; Pro support covers product setup/troubleshooting; Enterprise services
+and operator responsibilities are contract-scoped. Prices, numeric AI allowances, and unspecified
+resource allowances are omitted. These are marketing definitions only: they do not implement
+commercial entitlements, subscription billing, monthly grants, or top-up purchasing. Free and Pro
+account actions keep the page's existing session-aware destination. Enterprise says “Contact us”;
+it remains disabled without a destination until a contact address or URL is supplied.
+
+Product diagrams use labeled icons to explain connections and process, rather than dense mock
+records. The hero keeps text and actions vertically centered below navigation, over a decorative
+SVG Mount Fuji skyline with a green gradient fading down from the summit and a plain sky. The
+base fades into mist, and soft cloud layers drift at different speeds and move with scroll depth. A pause
+control freezes the scenery. Reduced motion and no JavaScript show the static illustration.
+Cloud motion pauses outside the hero and in hidden tabs. The slow, linear drift uses landing-only
+multiples of the expressive duration token, separate from interface feedback timings.
+The connected-record section uses shared tabs to reveal one explanation and icon diagram at a time.
+All six explanations remain readable without JavaScript; tabs support keyboard selection and wrap
+into two rows on mobile. Its diagrams show supported record connections, not live customer data.
+Pointer selection eases the browser-tab outline into place over standard timing, with a micro exit.
+The diagram reveals its selected record, connections, and related nodes over 1.2 seconds using
+landing-only multiples of the expressive token; the explanation and selected state stay immediate.
+Keyboard selection and reduced motion show both the tab and complete panel immediately.
+Landing navigation controls have at least 44px hit areas. Header navigation adapts to its available
+width and the root text size; the shared legal-page header keeps its default layout.
+The teamwork chapter pins its heading, explanation, and illustration together on sufficiently wide,
+tall viewports only when the tallest copy and illustration fit with its heading and footer. Width,
+text size, font loading, and content changes recheck the fit; an inline fallback recovers automatically
+when space becomes sufficient. Natural scroll progress advances through four scenes without intercepting scrolling;
+reading order and focus never change. Mobile, short viewports, reduced motion, and no JavaScript use
+inline passage/illustration pairs. Only visible-section scrolling schedules measurements. Pointer
+scrolling transitions the copy and illustration; keyboard scrolling changes scenes immediately.
+All artwork is conceptual, with no live data.
+Explanatory copy describes the product directly. Ask Connex and priority examples keep
+their dated fictional evidence in native disclosures, using
+`frontend/app/components/landing/sampleWorkspace.ts`, never authenticated feature containers.
+Ask Connex demonstrates a local message-and-response sequence once on arrival, with explicit replay
+and skip controls. Its copy presents a conversational assistant for finding records, understanding
+deals, and creating tasks, notes, or activities; deal-stage and record-owner changes require review
+and explicit application. The fictional conversation checks a renewal and reports a follow-up task
+created within the example. It makes no AI requests or CRM writes, keeps the answer's space reserved,
+and shows the complete conversation with reduced motion or without JavaScript.
+The Map example keeps the workspace at the center, with two branches through members and client
+companies to their contacts. Node shape and size distinguish each level; mobile rotates the branches
+vertically rather than packing more dots into the same space.
+The workflow diagram shows a value condition with Yes/No branches, tracing the example Yes path
+from left to right once on arrival. Its labels and both routes remain visible throughout; reduced
+motion shows the static diagram.
+Sample citations and practical questions use native `details` disclosures so their content remains
+reachable without JavaScript. The guided example reveals the shared segmented control after hydration and includes a
+no-JavaScript fallback for the other examples. Only explicit selection changes its displayed example.
+Legacy anchors `#product`, `#features`, `#deploy` (relationship intelligence), and `#workflow`
+(getting started) remain valid.
+
 ## One composer per object
 
 Reuse the canonical task/activity composers (`TaskDialog`, `ActivityDialog`) through record adapters such as `RecordComposers`. Pass defaults and explicit create callbacks rather than introducing another composer for the same domain object.

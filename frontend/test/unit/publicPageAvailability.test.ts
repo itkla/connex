@@ -13,8 +13,13 @@ vi.mock('next/headers', () => ({
     headers: () => Promise.resolve(new Headers({ cookie: 'NEXT_LOCALE=en' })),
 }));
 
+vi.mock('next/font/google', () => ({
+    Schibsted_Grotesk: () => ({ variable: 'landing-display' }),
+    Source_Sans_3: () => ({ variable: 'landing-body' }),
+}));
+
 vi.mock('next-intl/server', () => ({
-    getTranslations: () => Promise.resolve((key: string) => key),
+    getTranslations: () => Promise.resolve(Object.assign((key: string) => key, { rich: (key: string) => key })),
     getLocale: () => Promise.resolve('en'),
 }));
 
@@ -74,6 +79,7 @@ function readBooleanProp(props: unknown, name: string): boolean | undefined {
 
 afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
 });
 
 describe('public pages stay readable while the backend is unreachable', () => {
@@ -88,6 +94,7 @@ describe('public pages stay readable while the backend is unreachable', () => {
     });
 
     it('renders the landing page with the signed-out call to action instead of failing', async () => {
+        vi.stubEnv('CONNEX_LANDING_MODE', 'product');
         stubFetchRejecting(new TypeError('fetch failed'));
 
         const tree = await Home();

@@ -39,6 +39,9 @@ services:
       API_URL: http://backend-app:8080
       CONNEX_CSP_MODE: ${CONNEX_CSP_MODE:-enforce}
       CONNEX_CSP_IMAGE_ORIGINS: ${CONNEX_CSP_IMAGE_ORIGINS:-}
+      CONNEX_LANDING_MODE: ${CONNEX_LANDING_MODE:-prelaunch}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_LAUNCH_SEGMENT_ID: ${RESEND_LAUNCH_SEGMENT_ID:-}
     expose:
       - "3000"
     depends_on:

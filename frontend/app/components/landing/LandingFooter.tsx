@@ -7,11 +7,11 @@ import LanguageSwitcher from "./LanguageSwitcher";
  * Holds the brand mark, primary navigation, legal links, and the language
  * switcher.
  */
-export default async function LandingFooter() {
+export default async function LandingFooter({ withDividers = true, showLogin = true }: { withDividers?: boolean; showLogin?: boolean }) {
     const t = await getTranslations("CommonHome");
 
     return (
-        <footer className="border-t border-border bg-card">
+        <footer className={`bg-card ${withDividers ? "border-t border-border" : ""}`}>
             <div className="mx-auto max-w-7xl px-6 py-12 lg:px-8">
                 <div className="flex flex-col gap-8 sm:flex-row sm:items-start sm:justify-between">
                     <div className="max-w-xs">
@@ -33,9 +33,9 @@ export default async function LandingFooter() {
                             <Link href="/docs" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navDocs")}
                             </Link>
-                            <Link href="/auth/login" className="text-muted-foreground transition-colors hover:text-foreground">
+                            {showLogin && <Link href="/auth/login" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navLogin")}
-                            </Link>
+                            </Link>}
                         </nav>
                         <nav aria-label={t("footerNavLegal")} className="flex flex-col gap-3 text-sm">
                             <Link href="/privacy" className="text-muted-foreground transition-colors hover:text-foreground">
@@ -55,7 +55,7 @@ export default async function LandingFooter() {
                     </div>
                 </div>
 
-                <div className="mt-10 border-t border-border pt-6 text-sm text-muted-foreground">{t("footerRights")}</div>
+                <div className={`text-sm text-muted-foreground ${withDividers ? "mt-10 border-t border-border pt-6" : "mt-8"}`}>{t("footerRights")}</div>
             </div>
         </footer>
     );

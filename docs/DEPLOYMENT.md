@@ -11,7 +11,8 @@ managed WAF or customer firewall has been configured outside the repository.
 
 A single [Caddy](../deploy/Caddyfile) ingress fronts everything on one origin:
 
-- `/api/*` (including the `/api/ws` WebSocket) and `/saml2/*` → the backend
+- `/api/launch-signups` → the frontend's public Resend signup endpoint
+- other `/api/*` (including the `/api/ws` WebSocket) and `/saml2/*` → the backend
 - everything else → the frontend
 
 Single-origin means cookies, WebAuthn (RP = the serving host), and realtime all work without a
@@ -39,8 +40,9 @@ name each allowed origin explicitly in the shared policy and this runbook; wildc
 exceptions are forbidden.
 
 ```
-browser ──▶ caddy :80 ─┬─ /api/*, /saml2/*  ─▶ backend:8080 ───▶ db:3306
-                       └─ everything else    ─▶ frontend:3000
+browser ──▶ caddy :80 ─┬─ other /api/*, /saml2/* ─▶ backend:8080 ───▶ db:3306
+                       └─ /api/launch-signups,
+                          everything else       ─▶ frontend:3000
                                                     │
                                                     └──────▶ backend-app:8080 (SSR on app network)
                                                                │
@@ -147,6 +149,48 @@ authenticated raw JPEG/PNG/WebP bytes from the backend, returns bounded recogniz
 Paddle models are fetched from pinned BOS artifacts with SHA-256 verification while the image is
 built, then baked into the image under an explicit model-cache path; the runtime filesystem is
 read-only, and the Paddle runtime never downloads models or calls an external OCR/AI provider.
+
+## Pre-launch email signups
+
+`CONNEX_LANDING_MODE=prelaunch` (default) shows launch-notification email forms on `/`.
+Set it to `product` at launch to restore account-creation/dashboard actions and close the signup endpoint.
+The page itself remains available without a backend connection or Resend configuration.
+
+Configure these **runtime, server-only** values in `frontend/.env.local` for local development,
+or the frontend service environment for deployment (the Compose bundle forwards them from `deploy/.env`):
+
+- `RESEND_API_KEY`: a Resend API key with Contacts access. Never use a `NEXT_PUBLIC_` variable.
+- `RESEND_LAUNCH_SEGMENT_ID`: the UUID of a dedicated **Connex launch** segment created in Resend.
+
+Resend uses [global Contacts and Segments](https://resend.com/docs/dashboard/segments/migrating-from-audiences-to-segments).
+The endpoint looks up the contact before writing and creates one only after an explicit not-found
+response. It verifies identity, opt-in state, and launch-segment membership before returning success.
+It can add an existing opted-in contact to the launch segment.
+It does not change global unsubscribe preferences, infer success from an error message, create a CRM
+account, or send an email. Missing configuration, provider failure, or an unverified result returns an
+unavailable response, preserving the visitor's input for retry. Keep Resend API keys and submitted emails
+out of logs, including the provider's email lookup URL. Use this segment only for the requested launch
+notification; send that announcement through Resend when the release is ready, then remove the dedicated segment and delete launch-only contacts
+once the notification is complete. Preserve contacts used for separately consented purposes.
+
+`POST /api/launch-signups` is a Next.js route, not a Spring API. Caddy routes this **exact path** before
+its backend catch-all, caps the body at **4 KiB**, strips Cookie/Authorization, and overwrites
+`X-Connex-Client-IP` with the client IP resolved from its trusted proxy chain. The frontend port must
+remain private. A different deployment proxy must enforce the same header contract; the production
+handler rejects requests without this validated IP header. Direct local development shares a dev bucket.
+The browser submits same-origin JSON with `credentials: omit`; the endpoint validates Origin/fetch
+metadata, email shape, content type, body length, and the empty honeypot before provider work.
+
+Bounds are process-local: 5 attempts per client per 15 minutes, at most 2,048 client buckets with LRU
+admission, 30 signup attempts per minute globally, and one active provider operation without a queue.
+Provider calls are paced at least 550 ms apart. Request bodies have a 3-second deadline; the complete
+provider operation has an 8-second deadline and each JSON response is capped at 64 KiB. Segment
+membership verification reads at most 100 entries and fails closed if membership cannot be verified.
+Rate limits return 429 with Retry-After; other provider/configuration failures return a generic 503.
+These counters reset on process restart and are not distributed across replicas. A public scaled
+deployment must also apply its shared edge rate controls. Only fixed `https://api.resend.com` endpoints
+are contacted, with redirects disabled and no application credentials forwarded. No browser CSP
+allowlist expansion is needed for these server-side requests.
 
 ## Prerequisites
 
