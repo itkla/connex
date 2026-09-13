@@ -12,14 +12,14 @@ vi.mock("next/font/google", () => ({
     Schibsted_Grotesk: () => ({ variable: "landing-display" }),
     Source_Sans_3: () => ({ variable: "landing-body" }),
 }));
+type CommonNamespace = "AppMetadata" | "CommonHome";
+
 vi.mock("next-intl/server", () => ({
     getLocale: async () => session.locale,
-    getTranslations: async (namespace: string) =>
-        createTranslator({
-            locale: session.locale,
-            messages: session.locale === "en" ? en : ja,
-            namespace,
-        }),
+    getTranslations: async (namespace: CommonNamespace) =>
+        session.locale === "en"
+            ? createTranslator({ locale: "en", messages: en, namespace })
+            : createTranslator({ locale: "ja", messages: ja, namespace }),
 }));
 vi.mock("@/app/lib/api", () => ({ getPublicPageUserFromCookie: async () => null }));
 

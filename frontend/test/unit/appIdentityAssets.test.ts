@@ -6,8 +6,10 @@ import { describe, expect, it, vi } from "vitest";
 import OpenGraphImage, { alt, contentType, size } from "@/app/opengraph-image";
 import en from "@/messages/en/common.json";
 
+type CommonNamespace = "AppMetadata" | "CommonHome";
+
 vi.mock("next-intl/server", () => ({
-    getTranslations: async (namespace: string) =>
+    getTranslations: async (namespace: CommonNamespace) =>
         createTranslator({ locale: "en", messages: en, namespace }),
 }));
 
