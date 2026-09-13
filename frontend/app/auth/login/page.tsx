@@ -1,6 +1,14 @@
+import type { Metadata } from "next";
+import { getTranslations } from "next-intl/server";
+
 import { AuthForm } from "@/app/components/AuthForm";
 import { getCapabilities, toResult } from "@/app/lib/api";
 import { capabilityAvailability } from "@/app/lib/capabilityAvailability";
+
+export async function generateMetadata(): Promise<Metadata> {
+    const t = await getTranslations("AuthLogin");
+    return { title: t("title"), robots: { index: false, follow: false } };
+}
 
 export default async function LoginPage({
     searchParams,

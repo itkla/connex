@@ -1,3 +1,6 @@
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import robots from "@/app/robots";
@@ -121,4 +124,29 @@ describe("sitemap", () => {
         requestFrom("preview.connexcrm.jp");
         expect(await sitemap()).toEqual([]);
     });
+});
+
+const NOINDEX_METADATA = "robots: { index: false, follow: false }";
+
+function metadataSource(route: string): string {
+    return ["page.tsx", "layout.tsx"]
+        .map((file) => join(process.cwd(), "app", route, file))
+        .filter((file) => existsSync(file))
+        .map((file) => readFileSync(file, "utf8"))
+        .join("\n");
+}
+
+function authRoutes(): string[] {
+    return readdirSync(join(process.cwd(), "app", "auth"), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => `auth/${entry.name}`);
+}
+
+describe("sessionless routes", () => {
+    it.each([...authRoutes(), "invite", "invite-link", "sso/link"])(
+        "keeps /%s out of the index",
+        (route) => {
+            expect(metadataSource(route)).toContain(NOINDEX_METADATA);
+        },
+    );
 });
