@@ -201,12 +201,9 @@ describe("registration next step", () => {
         const rendered = await renderAuthForm("register");
 
         expect(toastSuccessMock).toHaveBeenCalledOnce();
-        const [message, options] = toastSuccessMock.mock.calls[0];
-        expect(message).toBe("AuthRegister.successMessage");
-        expect(String((options as { description?: unknown } | undefined)?.description)).toContain(
-            "AuthRegister.verificationNotice",
-        );
-        expect(String((options as { description?: unknown } | undefined)?.description)).toContain("email");
+        expect(toastSuccessMock).toHaveBeenCalledWith("AuthRegister.successMessage", {
+            description: expect.stringContaining('AuthRegister.verificationNotice({"email":'),
+        });
         await rendered.unmount();
     });
 
