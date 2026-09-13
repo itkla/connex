@@ -330,7 +330,7 @@ export default function TimelineRow({
             <Tooltip>
                 <TooltipTrigger asChild>
                     <Avatar size="default">
-                        <AvatarImage src={avatarUrl} />
+                        <AvatarImage src={avatarUrl} alt={avatarName} />
                         <AvatarFallback>
                             <UserIcon className="size-3 text-muted-foreground" />
                         </AvatarFallback>

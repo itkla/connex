@@ -196,6 +196,7 @@
     "contactPhotoUnsupported": "Choose a JPEG, PNG, or WebP profile photo.",
     "contactDuplicateReviewChanged": "A staged contact’s possible duplicates changed. Review that contact again.",
     "logoUnsupported": "Choose a JPEG, PNG, or WebP logo.",
+    "logoAria": "Choose a company logo",
     "contactAddedAnnounce": "{name} added",
     "contactUpdatedAnnounce": "{name} updated",
     "contactRemovedAnnounce": "{name} removed",

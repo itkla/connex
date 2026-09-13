@@ -164,7 +164,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
                                         <TooltipTrigger asChild>
                                             <Link href={`/records/contacts/${e.id}`} className="nodrag transition-transform hover:scale-110">
                                                 <Avatar key={e.id} className="h-7 w-7 bg-card">
-                                                    <AvatarImage src={e.src} />
+                                                    <AvatarImage src={e.src} alt={e.label} />
                                                     <AvatarFallback className="text-[10px]">{(e.label || '?').charAt(0)}</AvatarFallback>
                                                 </Avatar>
                                             </Link>
@@ -188,7 +188,7 @@ function CompanyNodeImpl({ id, data }: NodeProps<CompanyNodeType>) {
                                         <TooltipTrigger asChild>
                                             <Link href={`/users/${r.id}`} className="nodrag transition-transform hover:scale-110">
                                                 <Avatar key={r.id} className="h-7 w-7 bg-card">
-                                                    <AvatarImage src={r.src} />
+                                                    <AvatarImage src={r.src} alt={r.label} />
                                                     <AvatarFallback className="text-[10px]">{(r.label || '?').charAt(0)}</AvatarFallback>
                                                 </Avatar>
                                             </Link>
