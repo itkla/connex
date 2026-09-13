@@ -7,7 +7,7 @@ import LanguageSwitcher from "./LanguageSwitcher";
  * Holds the brand mark, primary navigation, legal links, and the language
  * switcher.
  */
-export default async function LandingFooter({ withDividers = true, showLogin = true }: { withDividers?: boolean; showLogin?: boolean }) {
+export default async function LandingFooter({ withDividers = true, showLogin = true, showDocs = true }: { withDividers?: boolean; showLogin?: boolean; showDocs?: boolean }) {
     const t = await getTranslations("CommonHome");
 
     return (
@@ -30,9 +30,9 @@ export default async function LandingFooter({ withDividers = true, showLogin = t
                             <Link href="/#workflow" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navWorkflow")}
                             </Link>
-                            <Link href="/docs" className="text-muted-foreground transition-colors hover:text-foreground">
+                            {showDocs && <Link href="/docs" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navDocs")}
-                            </Link>
+                            </Link>}
                             {showLogin && <Link href="/auth/login" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navLogin")}
                             </Link>}

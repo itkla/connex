@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "connex-landing",
-  "main": ".open-next/worker.js",
+  "main": "./custom-worker.ts",
   "compatibility_date": "2026-09-01",
   // OpenNext runs Next.js on the Node.js runtime rather than the edge runtime.
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],

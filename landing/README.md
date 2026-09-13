@@ -39,3 +39,35 @@ This app serves 2 message namespaces rather than 38, so a rendered page is ~396 
 
 `RESEND_API_KEY` must be a **Full access** key; the route uses `/contacts`, which a send-only key
 cannot reach. Set it and `RESEND_LAUNCH_SEGMENT_ID` as Worker secrets, never in the repository.
+
+## Regenerating Cloudflare types
+
+`wrangler types` writes `cloudflare-env.d.ts` with the Durable Object typed as
+`import("./custom-worker").SignupLimiter`. That pulls `custom-worker.ts` into the TypeScript program,
+and it imports `./.open-next/worker.js`, which does not exist until an OpenNext build has run — so a
+plain `tsc --noEmit` fails on a clean checkout.
+
+After regenerating, repoint that reference at the class's own module and drop the `mainModule` type:
+
+```
+SIGNUP_LIMITER: DurableObjectNamespace<import("./signup-limiter").SignupLimiter>;
+mainModule: unknown;
+```
+
+`custom-worker.ts` and `.open-next` stay in the tsconfig `exclude` list for the same reason.
+
+## Rate limiting
+
+`SignupLimiter` restores the product application's policy — 5 attempts per client per 15 minutes and
+30 signups per minute overall — which module-level state cannot enforce on Workers, because isolates
+are per-location and short-lived. SQLite-backed Durable Objects are included on the Workers Free
+plan (100,000 requests/day, 5 GB), so this costs nothing.
+
+It differs from the product application in two deliberate ways:
+
+- The reservation is claimed **after** validation rather than before. The object holds each caller for
+  the provider spacing interval, so admitting unvalidated requests would let malformed traffic occupy
+  it. Malformed requests are now rejected before reaching the object rather than spending a caller's
+  allowance.
+- The client address comes from `CF-Connecting-IP`, which Cloudflare sets and a client cannot forge,
+  rather than the `X-Connex-Client-IP` header Caddy writes in front of the product application.

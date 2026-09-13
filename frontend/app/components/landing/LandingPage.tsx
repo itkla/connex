@@ -123,7 +123,7 @@ export async function LandingPage({ preLaunch, ctaHref, ctaLabel }: LandingPageP
                     <div className={`${container} ${chapter}`}><h2 id="closing-title" className={`${styles.heading} max-w-3xl`}>{t(preLaunch ? "prelaunch.closingHeading" : "ctaHeading")}</h2><div className="mt-7">{preLaunch ? <LaunchSignupForm id="launch-signup-closing" /> : <Button asChild variant="brand" size="page" className="min-h-11 h-auto whitespace-normal px-6 py-3 text-base"><Link href={ctaHref}>{ctaLabel}<ArrowRightIcon aria-hidden="true" className="size-4" /></Link></Button>}</div></div>
                 </section>
             </main>
-            <LandingFooter withDividers={false} showLogin={!preLaunch} />
+            <LandingFooter withDividers={false} showLogin={!preLaunch} showDocs={!preLaunch} />
         </div>
     );
 }
