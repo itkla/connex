@@ -4,7 +4,6 @@ import type { NextRequest } from 'next/server';
 import {
     applyFrontendContentSecurityPolicy,
     applyFrontendReportingEndpoints,
-    applyFrontendSecurityHeaders,
     contentSecurityPolicyReportingEndpoint,
     createFrontendContentSecurityPolicy,
     createReportingEndpointsHeader,
@@ -61,8 +60,10 @@ export function proxy(request: NextRequest) {
     requestHeaders.set('x-nonce', nonce);
     requestHeaders.set('Content-Security-Policy', policy);
 
+    // The standard security headers come from `next.config.ts`, which also covers static assets.
+    // Setting them here as well appends a second copy of each, and a repeated `X-Frame-Options` is
+    // not a value browsers are obliged to honour.
     const response = NextResponse.next({ request: { headers: requestHeaders } });
-    applyFrontendSecurityHeaders(response.headers, pathname);
     applyFrontendContentSecurityPolicy(
         response.headers,
         policy,
