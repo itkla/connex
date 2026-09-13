@@ -58,7 +58,7 @@ describe("landing metadata", () => {
         expect(metadata.title).toEqual({ absolute: en.CommonHome.prelaunch.metaTitle });
         expect(metadata.description).toBe(en.CommonHome.prelaunch.metaDescription);
         expect(metadata.openGraph?.title).toBe(en.CommonHome.prelaunch.metaTitle);
-        expect(metadata.twitter?.description).toBe(en.CommonHome.prelaunch.metaDescription);
+        expect(metadata.openGraph?.description).toBe(en.CommonHome.prelaunch.metaDescription);
     });
 
     it("follows the deployment default when the host is not listed", async () => {
@@ -76,11 +76,11 @@ describe("landing metadata", () => {
         expect(metadata.openGraph?.alternateLocale).toEqual(["en_US"]);
     });
 
-    it("names the site and its address, and leaves the card type to the image that exists", async () => {
+    it("names the site and its address, and states no X card so the shipped share image picks it", async () => {
         const metadata = await generateMetadata();
         expect(metadata.openGraph?.siteName).toBe(en.CommonHome.brand);
         expect(metadata.openGraph?.url).toBe("/");
         expect(metadata.alternates?.canonical).toBe("/");
-        expect(metadata.twitter).not.toHaveProperty("card");
+        expect(metadata.twitter).toBeUndefined();
     });
 });

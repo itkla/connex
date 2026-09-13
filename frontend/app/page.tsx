@@ -33,6 +33,9 @@ const featureHeading = "mt-4 text-3xl leading-tight tracking-tight sm:text-4xl";
  * Landing metadata. The host decides which page this address serves, so it also decides what the
  * page may claim: on a prelaunch host the product cannot be visited, and advertising an explorable
  * CRM there would be a promise the page does not keep.
+ *
+ * The X card is left unstated: with a 1200x630 share image shipped at the app root, Next resolves
+ * it to `summary_large_image`, and stating a card here would fix it before that image is known.
  * @returns the landing page's title, description, and social card
  */
 export async function generateMetadata(): Promise<Metadata> {
@@ -57,7 +60,6 @@ export async function generateMetadata(): Promise<Metadata> {
             description: metaDescription,
             ...openGraphLocales(resolveLocale(locale)),
         },
-        twitter: { title: metaTitle, description: metaDescription },
     };
 }
 

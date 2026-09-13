@@ -53,7 +53,11 @@ export const viewport: Viewport = {
  * relative canonical, Open Graph image, and alternate link resolves against — is read from the
  * request rather than from a baked environment value; a single origin would publish another host's
  * address on every page this host served.
- * @returns the default title, description, and Open Graph frame every route inherits
+ *
+ * The inherited Open Graph block carries identity only. A title, description, or URL here would
+ * override the page's own on every route that states one, so each page would share as the site
+ * front door rather than as itself.
+ * @returns the default title, description, and Open Graph identity every route inherits
  */
 export async function generateMetadata(): Promise<Metadata> {
   const [locale, requestHeaders, t, common] = await Promise.all([
@@ -63,20 +67,15 @@ export async function generateMetadata(): Promise<Metadata> {
     getTranslations("CommonHome"),
   ]);
   const origin = requestOrigin(requestHeaders);
-  const title = t("title");
-  const description = t("description");
 
   return {
     metadataBase: origin ? new URL(origin) : null,
-    title: { default: title, template: "%s — Connex" },
-    description,
+    title: { default: t("title"), template: "%s — Connex" },
+    description: t("description"),
     openGraph: {
       type: "website",
       siteName: common("brand"),
-      title,
-      description,
       ...openGraphLocales(resolveLocale(locale)),
-      ...(origin ? { url: origin } : {}),
     },
   };
 }
