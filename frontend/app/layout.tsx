@@ -1,12 +1,15 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Instrument_Serif, Noto_Sans_JP, Noto_Serif_JP } from "next/font/google";
 import { headers } from "next/headers";
 import { connection } from "next/server";
 import { NextIntlClientProvider } from "next-intl";
-import { getLocale } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/app/components/ThemeProvider";
+import { requestOrigin } from "@/app/lib/requestHost";
+import { openGraphLocales } from "@/app/lib/siteMetadata";
+import { resolveLocale } from "@/i18n/config";
 import "./globals.css";
 
 const inter = Inter({
@@ -40,10 +43,43 @@ const notoSerifJP = Noto_Serif_JP({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "Connex",
-  description: "Build Meaningful Connections with your Clients",
+/** The brand colour behind the address bar and the installed app, from `--color-brand`. */
+export const viewport: Viewport = {
+  themeColor: "#73d200",
 };
+
+/**
+ * Site-wide metadata. One process answers for several hostnames, so `metadataBase` — which every
+ * relative canonical, Open Graph image, and alternate link resolves against — is read from the
+ * request rather than from a baked environment value; a single origin would publish another host's
+ * address on every page this host served.
+ * @returns the default title, description, and Open Graph frame every route inherits
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const [locale, requestHeaders, t, common] = await Promise.all([
+    getLocale(),
+    headers(),
+    getTranslations("AppMetadata"),
+    getTranslations("CommonHome"),
+  ]);
+  const origin = requestOrigin(requestHeaders);
+  const title = t("title");
+  const description = t("description");
+
+  return {
+    metadataBase: origin ? new URL(origin) : null,
+    title: { default: title, template: "%s — Connex" },
+    description,
+    openGraph: {
+      type: "website",
+      siteName: common("brand"),
+      title,
+      description,
+      ...openGraphLocales(resolveLocale(locale)),
+      ...(origin ? { url: origin } : {}),
+    },
+  };
+}
 
 export default async function RootLayout({
   children,
