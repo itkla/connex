@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import { ArrowRightIcon, CheckCircleIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { subscribeToLaunch } from "@/app/lib/api";
+import { subscribeToLaunch } from "@/app/lib/launchSignup";
 
 const subscribeHydration = () => () => undefined;
 const clientSnapshot = () => true;

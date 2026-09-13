@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LaunchSignupForm } from "@/app/components/landing/LaunchSignupForm";
-import { subscribeToLaunch } from "@/app/lib/api";
+import { subscribeToLaunch } from "@/app/lib/launchSignup";
 import en from "@/messages/en/common.json";
 import ja from "@/messages/ja/common.json";
 
