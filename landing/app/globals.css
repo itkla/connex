@@ -1,0 +1,7 @@
+@import "../../frontend/app/globals.css";
+
+/* Tailwind infers candidate sources from this file's own package; the markup it must scan lives in
+   `frontend/`, so both shared trees are named explicitly. */
+@source "../../frontend/app/components/landing";
+@source "../../frontend/components/ui";
+@source "../app";
