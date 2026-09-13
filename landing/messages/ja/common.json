@@ -1,0 +1,1293 @@
+{
+  "Filters": {
+    "searchAria": "検索",
+    "clearSearchAria": "検索をクリア",
+    "clear": "クリア",
+    "clearAll": "すべてクリア",
+    "removeFilter": "{label} フィルターを解除",
+    "chipSearch": "検索: {query}",
+    "noMatchesTitle": "一致なし",
+    "noMatchesBody": "検索条件やフィルターを調整してください。",
+    "assignee": "担当者",
+    "creator": "作成者",
+    "contact": "連絡先",
+    "deal": "案件",
+    "company": "会社",
+    "filterSort": "フィルターと並び替え",
+    "filterSortAria": "レコードを絞り込んで並び替える",
+    "filterSortDescription": "一覧の並び順と、表示するレコードを選びます。",
+    "sortBy": "並び替え",
+    "sortAscending": "昇順",
+    "sortDescending": "降順",
+    "done": "完了",
+    "filter": "フィルター",
+    "filterAria": "タスクを絞り込む",
+    "filterDescription": "一覧に表示するタスクを選びます。"
+  },
+  "MemberScope": {
+    "label": "担当者",
+    "ariaLabel": "担当者で絞り込む",
+    "me": "自分",
+    "unassigned": "未割り当て",
+    "clear": "クリア"
+  },
+  "CommonHome": {
+    "brand": "CONNEX",
+    "navFeatures": "機能",
+    "navWorkflow": "はじめ方",
+    "navPricing": "料金プラン",
+    "navFaq": "よくある質問",
+    "navDocs": "ドキュメント",
+    "navLogin": "ログイン",
+    "navMenu": "メニュー",
+    "navPrivacy": "プライバシー",
+    "navDisclosure": "保有個人データの公表",
+    "navTerms": "利用規約",
+    "navTokushoho": "特定商取引法に基づく表記",
+    "ctaDashboard": "ダッシュボードへ",
+    "ctaGetStarted": "はじめる",
+    "languageLabel": "言語",
+    "languageEnglish": "English",
+    "languageJapanese": "日本語",
+    "heroHeadlineLead": "顧客情報を、",
+    "heroHeadlineRest": "次の一手に。",
+    "footerTagline": "顧客情報と日々の対応をつなぐ、チームのためのCRM。",
+    "footerRights": "© 2026 Connex",
+    "toggleLightDarkMode": "ライト／ダークモードに切り替え",
+    "faqAiQ": "AIがレコードを書き換えますか",
+    "faqImportQ": "いまのデータを持ち込めますか",
+    "faqImportA": "会社と連絡先はCSVから取り込み、名刺は読み取りで登録できます。やり取りの履歴は、対象となる人物が登録されたあとに別の手順で取り込みます。",
+    "skipToContent": "本文へスキップ",
+    "footerNavProduct": "プロダクト",
+    "footerNavLegal": "法務",
+    "heroCtaPrimary": "無料ではじめる",
+    "prelaunch": {
+      "closingHeading": "Connexで、新しい一歩を。",
+      "formLabel": "Connexの公開通知を受け取る",
+      "emailLabel": "メールアドレス",
+      "emailPlaceholder": "メールアドレス",
+      "submit": "公開通知を受け取る",
+      "submitting": "登録中…",
+      "privacy": "Connexの公開時にメールでお知らせします。<link>プライバシーポリシー</link>",
+      "successTitle": "公開通知に登録しました。",
+      "successBody": "Connexの準備ができたら、メールでお知らせします。",
+      "invalid": "正しいメールアドレスを入力して、もう一度お試しください。",
+      "error": "登録を確認できませんでした。メールアドレスは入力欄に残っています。少し待って、もう一度お試しください。",
+      "rateLimited": "数分待ってから、もう一度登録をお試しください。",
+      "noJavaScript": "公開通知の登録には、JavaScriptを有効にしてください。"
+    },
+    "navProduct": "製品",
+    "heroSubtext": "Connexは、連絡先、案件、やり取り、フォローアップをひとつのCRMにまとめます。チーム全員が同じ情報をもとに、日々の仕事を進められます。",
+    "heroSecondaryCta": "機能を見る",
+    "ctaHeading": "顧客に関わる仕事を、ひとつに。",
+    "contextHeading": "顧客情報が、つながる。",
+    "contextBody": "会社や連絡先に、案件、活動、メモ、タスクがつながります。チームで仕事の進み具合と経緯を確認できます。",
+    "connectedRecords": {
+      "choose": "顧客情報の種類を選択",
+      "company": {
+        "label": "会社",
+        "heading": "顧客を知るための情報を、一か所に。",
+        "body": "会社の連絡先、案件、関連する活動の履歴をまとめて確認できます。基本情報と担当者がわかるので、チームで経緯を共有しながら仕事を進められます。"
+      },
+      "contacts": {
+        "label": "連絡先",
+        "heading": "会社の先にいる、一人ひとりを知る。",
+        "body": "連絡先の情報と所属する会社、記録したやり取りをまとめて確認できます。チームが誰とつながり、前回どんな話をしたかがわかります。"
+      },
+      "deals": {
+        "label": "案件",
+        "heading": "一つひとつの案件を、前へ。",
+        "body": "金額、ステージ、決着予定日を、会社や関係者の情報とあわせて管理できます。関連する活動や次のタスクも、案件につなげて確認できます。"
+      },
+      "activities": {
+        "label": "活動",
+        "heading": "やり取りを、経緯ごと残す。",
+        "body": "電話、メール、会議の日時や内容を記録できます。連絡先や案件に紐づけることで、これまでのやり取りを振り返りやすくなります。"
+      },
+      "notes": {
+        "label": "メモ",
+        "heading": "また必要になる情報を、手元に。",
+        "body": "会議の準備や顧客の要望などを、連絡先や案件に紐づけて残せます。自分だけのメモにするか、ワークスペースで共有するかを選べます。"
+      },
+      "tasks": {
+        "label": "タスク",
+        "heading": "次にやることを、明確に。",
+        "body": "フォローアップの担当者と期限を決め、完了まで進み具合を確認できます。連絡先や案件に紐づければ、必要な情報と次の行動がつながります。"
+      }
+    },
+    "featuresHeading": "全体を見渡し、仕事を進める。",
+    "warmth": {
+      "name": "温度感",
+      "heading": "記録から、つながりの今を知る。",
+      "body": "記録されたやり取りの新しさ、頻度、種類をもとに、顧客とのつながりを温度感で捉えます。",
+      "evidence": "連絡先や会社の温度感から、根拠となる活動、共有メモ、関連タスクを確認できます。",
+      "docs": "温度感の仕組みを見る",
+      "visualLabel": "記録されたやり取りから温度感がわかる仕組み",
+      "inputs": {
+        "recency": "やり取りの時期",
+        "frequency": "頻度",
+        "kind": "やり取りの種類"
+      },
+      "scale": "4つの温度帯",
+      "bands": {
+        "cold": "コールド",
+        "cool": "クール",
+        "warm": "ウォーム",
+        "hot": "ホット"
+      },
+      "noHistory": "記録がまだないつながりには「履歴なし」と表示します。"
+    },
+    "askName": "Ask Connex",
+    "askHeading": "仕事を前に進める、エージェント型アシスタント。",
+    "askBody": "会話を通じて顧客情報を探し、案件の状況を調べ、タスクやメモ、活動を作成できます。案件のステージや記録の担当者の変更は、提案を確認してから適用できます。",
+    "askAvailability": "AIの利用可否は、ワークスペースの設定と組織のAIプロバイダーによって異なります。回答に不足がある場合もあるため、参照元を確認してください。",
+    "askResponseTitle": "フォローアップタスクを作成しました",
+    "askPrompt": "この契約更新の状況を調べて、フォローアップのタスクを作って",
+    "askYou": "あなた",
+    "askExample": "会話の例",
+    "askThinking": "記録した活動を確認中…",
+    "askReplay": "会話をもう一度見る",
+    "askSkip": "回答をすべて表示",
+    "askFinding": "契約更新は、見直し後の価格の提示待ちです。",
+    "askNextBody": "修正した見積書を送り、新しい判断日を相談するタスクを作成しました。",
+    "askSources": "参照元の活動2件",
+    "mapName": "マップ",
+    "mapHeading": "チームの関係が、どうつながっているか。",
+    "mapBody": "チーム、会社、連絡先のつながりを見渡せます。人や会社を検索し、記録したやり取りから関係の履歴をたどれます。",
+    "mapMember": "メンバー",
+    "heroPauseScenery": "背景の動きを一時停止",
+    "heroResumeScenery": "背景の動きを再開",
+    "mapWorkspace": "ワークスペース",
+    "mapCompanies": "会社",
+    "workflowName": "ワークフロー",
+    "workflowHeading": "繰り返す仕事を、滞りなく。",
+    "workflowBody": "開始のきっかけと条件を決め、処理をつなげます。レシピの内容をチームで確認してから、有効にできます。",
+    "workflowRecipe": "ワークフローの例：受注した案件を金額で振り分け",
+    "workflow_trigger_title": "案件を受注",
+    "workflow_task_title": "引き継ぎタスクを作成",
+    "workflow_activity_title": "活動を記録",
+    "workflowReview": "レシピは無効の状態で作成されます。誰の権限で何を変更するか確認してから、有効にしてください。タスクの作成だけでは、引き継ぎ自体は完了しません。",
+    "attentionHeading": "いま向き合うべき<em>相手</em>がわかる。",
+    "attentionBody": "レーダーで関係の変化や案件のリスクを把握し、紹介機能で次のつながりを探せます。提案の根拠となる記録も確認できます。",
+    "attentionChoose": "優先事項の例を選択",
+    "attention_next": "次の行動",
+    "attention_cooling_tab": "温度感の低下",
+    "attention_risk_tab": "案件のリスク",
+    "attention_introduction_tab": "紹介",
+    "attention_cooling_label": "レーダー · 関係の温度感が低下",
+    "attention_cooling_who": "岡田 真理 · 北川工業",
+    "attention_cooling_why": "8月7日のレビューから5週間、やり取りの記録がありません。契約更新についてフォローアップが必要です。",
+    "attention_cooling_next": "修正した見積書を送ります。",
+    "attention_cooling_limit": "記録されていない会話は判断に反映されません。連絡する前に担当者に確認してください。",
+    "attention_risk_label": "レーダー · 案件のリスク",
+    "attention_risk_who": "北川工業 · 年間契約更新",
+    "attention_risk_why": "完了予定日の8月30日から12日が経過。840万円の更新案件は、交渉中のままです。",
+    "attention_risk_next": "新しい完了予定日を相談します。",
+    "attention_risk_limit": "予定日を過ぎたことは案件を見直す理由になりますが、失注を意味するものではありません。",
+    "attention_introduction_label": "紹介 · 紹介ルート",
+    "attention_introduction_who": "星野 里奈 · 森田 彩を通じて",
+    "attention_introduction_why": "8月21日の通話記録から、彩さんと財務担当の里奈さんとのつながりがわかります。美咲さんは彩さんに紹介を相談できます。",
+    "attention_introduction_next": "メンバーに紹介を相談します。",
+    "attention_introduction_limit": "記録されたつながりは紹介ルートの手がかりです。紹介の成立や相手の同意を保証するものではありません。",
+    "attentionEvidence": "この例の根拠を見る",
+    "sampleCaption": "架空のワークスペース · 2026年9月11日時点",
+    "recordContacts": "連絡先",
+    "recordDeal": "案件",
+    "recordActivity": "活動",
+    "recordTask": "次のタスク",
+    "recordCompany": "会社",
+    "source_review_title": "定例レビュー · 真理・美咲",
+    "source_review_date": "2026年8月7日",
+    "source_review_body": "美咲さんが真理さんとの年間契約更新の打ち合わせを記録。真理さんは、検討を続ける前に見積書の修正を希望。9月11日時点で、その後の真理さんとのやり取りは記録されていません。",
+    "source_pricing_title": "価格についての依頼 · 真理からのメール",
+    "source_pricing_date": "2026年8月5日",
+    "source_pricing_body": "美咲さんがメールを記録。調達部門で比較できるよう、真理さんから2つのサービス案の価格を個別に示してほしいとの依頼。",
+    "source_introduction_title": "財務計画の通話 · 里奈・彩",
+    "source_introduction_date": "2026年8月21日",
+    "source_introduction_body": "彩さんが、北川工業の来四半期の計画について里奈さんと通話した内容を記録。2人の業務上のつながりを示すもので、真理さんとの会話や、紹介への同意の記録ではありません。",
+    "source_close_title": "年間契約更新 · 完了予定日",
+    "source_close_date": "2026年8月30日 · 完了予定日",
+    "source_close_body": "更新案件は840万円で、交渉中のままです。完了予定日は8月30日。9月11日時点で、予定日から12日が経過しています。",
+    "teamHeading": "仕事も、その経緯も、チームで共有。",
+    "teamBody": "案件を進めるときも、担当者に引き継ぐときも。顧客に関わる仕事を、経緯ごとつなげます。",
+    "teamStory": {
+      "scroll": "スクロールして続きを見る",
+      "deals": {
+        "heading": "案件を、次のステージへ。",
+        "body": "担当者、金額、次のタスクを確認しながら、パイプラインで案件の進み具合を管理できます。"
+      },
+      "quotes": {
+        "heading": "案件の情報から、見積書へ。",
+        "body": "案件の情報をもとに見積書を作成できます。内容を確認し、チームで定めた承認の仕組みに沿って確定します。"
+      },
+      "progress": {
+        "heading": "仕事の進み具合を、振り返る。",
+        "body": "分析で傾向を確認し、レポートにまとめてチームで共有できます。"
+      },
+      "handover": {
+        "heading": "仕事と一緒に、経緯も引き継ぐ。",
+        "body": "担当者が変わっても、記録した活動や担当者の履歴を顧客情報と一緒に確認できます。次の担当者も、経緯を把握して仕事を続けられます。"
+      },
+      "visual": {
+        "new": "新規",
+        "proposal": "提案",
+        "won": "受注",
+        "review": "承認の確認",
+        "analytics": "分析",
+        "reports": "レポート",
+        "owner": "レコードの担当者を変更",
+        "customerRecord": "顧客情報",
+        "ownership": "担当者の履歴",
+        "caption": "機能のイメージ"
+      }
+    },
+    "pricing": {
+      "heading": "料金プラン",
+      "body": "CRMの全機能を、すべてのプランで。チームに合った利用枠とサービスを選べます。",
+      "compare": "プランを比較する。",
+      "allFeatures": "Ask Connex、ワークフロー、関係性の分析、見積書、レポートなど、CRMの全機能をすべてのプランで利用できます。利用枠、会社が管理するSSO、サービス内容がプランごとに異なります。",
+      "feature": "機能",
+      "included": "利用できます",
+      "notIncluded": "含まれません",
+      "aiNote": "Ask Connexの利用にはAIの設定と適切な権限が必要です。Freeには少量の月間利用枠があり、Proでは有料メンバー数に応じて増える組織共通の枠を利用できます。管理者の承認による追加購入にも対応します。Enterpriseは利用環境に応じて、契約で定めた利用枠または顧客負担のAIを利用します。",
+      "aiDocs": "AIの仕組みを見る",
+      "groups": {
+        "capacity": "利用枠",
+        "features": "CRM機能",
+        "services": "認証とサポート",
+        "hosting": "利用環境"
+      },
+      "features": {
+        "seats": "含まれる通常メンバー数",
+        "extraSeats": "通常メンバーの追加",
+        "records": "連絡先・会社",
+        "extraRecords": "連絡先・会社の枠の追加",
+        "workspaces": "ワークスペース数",
+        "ask": "Ask Connexの利用枠",
+        "crm": "会社・連絡先・案件・活動",
+        "relationships": "レーダー・マップ・紹介",
+        "workflows": "ワークフロー",
+        "insights": "見積書・分析・レポート",
+        "roles": "ワークスペースのロール・権限",
+        "sso": "会社が管理するSSO",
+        "support": "サポート",
+        "saas": "共有クラウド",
+        "silo": "専用環境（Silo）",
+        "onPrem": "オンプレミスでの運用"
+      },
+      "free": {
+        "name": "Free",
+        "body": "顧客に関わる仕事を整理したい方に。",
+        "includes": "Freeに含まれる利用枠",
+        "highlights": {
+          "seats": "通常メンバー1人",
+          "workspaces": "1ワークスペース",
+          "records": "連絡先・会社を合計250件",
+          "ask": "少量のAsk Connex月間利用枠"
+        }
+      },
+      "pro": {
+        "name": "Pro",
+        "body": "チームで顧客との関係を育てたい方に。",
+        "hosting": "Connexが運用するSaaS。",
+        "includes": "チームの仕事に、より広い利用枠を",
+        "highlights": {
+          "seats": "通常メンバー2人分を含む",
+          "workspaces": "最大5ワークスペース",
+          "records": "連絡先・会社を合計10,000件",
+          "expansion": "メンバーとレコード枠を追加可能",
+          "ask": "有料メンバー数に応じて増えるAI利用枠",
+          "clientWorkspaces": "顧客のワークスペースに参加可能"
+        }
+      },
+      "enterprise": {
+        "name": "Enterprise",
+        "cta": "お問い合わせ",
+        "body": "認証、利用環境、サポートに個別の要件がある組織に。",
+        "includes": "契約に合わせた構成",
+        "highlights": {
+          "sso": "会社が管理するSSO",
+          "hosting": "共有クラウド・Silo・オンプレミスから選択",
+          "capacity": "メンバー・レコード・AIの利用枠は契約で設定",
+          "support": "契約に応じたサポートと導入サービス"
+        }
+      },
+      "values": {
+        "one": "1",
+        "two": "2",
+        "five": "最大5",
+        "recordsFree": "250",
+        "recordsPro": "10,000",
+        "smallMonthly": "少量・月間",
+        "sharedPool": "組織で共有",
+        "custom": "契約ごと",
+        "upgrade": "Proへ移行",
+        "perSeat": "1人ごと定額",
+        "addOn": "追加購入",
+        "selfService": "セルフサービス",
+        "productSupport": "製品サポート",
+        "quoted": "個別見積もり"
+      },
+      "combinedTotal": "連絡先と会社の合計",
+      "poolingNote": "Proは組織単位の契約です。ユーザー数、連絡先・会社の合計枠、AIの利用枠は、自社のワークスペース全体で共有します。同じメンバーが複数のワークスペースを利用しても、1人分として数えます。",
+      "subscriptionNote": "Proには通常メンバー2人分の利用枠が含まれます。追加メンバーには1人ごとの定額料金がかかります。連絡先・会社の枠も、Proのまま拡張できます。",
+      "usageNote": "全プランで同じCRM機能を使えますが、ストレージ、自動化やAPIの処理量、送信、AIの消費量には、それぞれ利用枠があります。",
+      "serviceNote": "Proのサポートは、製品の設定や問題の解決を対象とします。Enterpriseでは、ソフトウェア、利用環境、サポート範囲、運用者の責任を契約で定めます。Siloとオンプレミスの導入・運用条件は個別見積もりです。"
+    },
+    "teamHandover": "共有する履歴",
+    "startHeading": "いま知っている顧客から、始める。",
+    "stepCaptureTitle": "会社と連絡先を取り込む",
+    "stepCaptureBody": "CSVを取り込むか、最初の情報を登録します。連絡先を登録した後で、やり取りの履歴も取り込めます。",
+    "stepUnderstandTitle": "顧客に関わる仕事を整理する",
+    "stepUnderstandBody": "顧客に案件、メモ、タスクをひも付けます。次の行動ごとに担当者を明確にします。",
+    "stepActTitle": "チームで役立つ履歴を残す",
+    "stepActBody": "仕事を進めながら、会話や進捗を記録します。次に関わる人が続きを進められるよう、背景を残します。",
+    "startNote": "顧客管理は、使い始めた日から役立ちます。関係を判断する材料は、チームがやり取りを記録するほど増えていきます。Connexが読み取れるのは、記録された情報です。",
+    "faqHeading": "導入前のよくある質問",
+    "faqReadMore": "詳しく見る",
+    "faqJaQ": "日本語と英語で使えますか？",
+    "faqJaA": "はい。画面全体で日本語と英語に対応しています。メンバーごとに使う言語を選べます。",
+    "faqAiA": "AIの利用可否はワークスペースの設定によって異なります。既存の記録への変更は、提案を確認して適用するまで実行されません。回答中に活動、タスク、メモ、タグを追加することはありますが、追加を明示し、取り消せます。回答と参照元を確認してから利用してください。",
+    "faqDataQ": "アクセスやデータを管理できますか？",
+    "faqDataA": "ワークスペースのロールでアクセスを管理し、監査履歴や、保存期間・データに関する請求を扱う機能を利用できます。クラウドと自社環境での運用に対応しています。データの扱いとプライバシーに関する方針は、プライバシーポリシーをご確認ください。個人情報保護法への適合認証を取得したとするものではありません。",
+    "metaTitle": "Connex — 顧客に関わる仕事を、ひとつに",
+    "metaDescription": "連絡先、案件、やり取り、フォローアップをひとつのCRMに。Ask Connex、マップ、ワークフローと、関係を理解する機能でチームの仕事を支えます。",
+    "recordNote": "メモ",
+    "recordTasks": "タスク",
+    "mapContact": "連絡先",
+    "mapVisualLabel": "中央のワークスペースからメンバー、その先の会社、さらに各社の連絡先へとつながります。2つの枝で階層を示した例です。",
+    "workflowReviewLabel": "有効にする前に確認",
+    "attention_cooling_visual": "最後のやり取りの記録から5週間",
+    "attention_risk_visual": "完了予定から12日超過",
+    "attention_introduction_visual": "記録のあるつながり",
+    "teamDeals": "案件",
+    "teamQuotes": "見積書",
+    "teamProgress": "分析とレポート",
+    "workflow_condition_title": "高額の案件？",
+    "workflow_yes": "はい",
+    "workflow_no": "いいえ",
+    "workflowDiagramLabel": "案件の受注後に金額を確認し、高額なら引き継ぎタスクを作成します。それ以外は活動を記録します。強調した線は「はい」の場合の流れです。"
+  },
+  "CommonSidebar": {
+    "ariaPrimarySidebar": "メインサイドバー",
+    "brand": "CONNEX",
+    "sectionPinnedViews": "固定したビュー",
+    "pinnedViewsUnavailable": "固定したビューを読み込めませんでした。",
+    "retryPinnedViews": "再試行",
+    "sectionRecent": "最近",
+    "sectionIntelligence": "人脈",
+    "sectionRecords": "レコード",
+    "sectionActivity": "活動記録",
+    "sectionInsights": "業績",
+    "sectionMarketing": "マーケティング",
+    "sectionLibrary": "ライブラリ",
+    "sectionWorkspace": "ワークスペース",
+    "navDashboard": "ダッシュボード",
+    "navRadar": "レーダー",
+    "navCalendar": "カレンダー",
+    "navMap": "マップ",
+    "navIntroductions": "紹介",
+    "navAnalytics": "分析",
+    "navReports": "レポート",
+    "navGoals": "目標",
+    "navCompanies": "会社",
+    "navContacts": "連絡先",
+    "navDeals": "案件",
+    "navPipelines": "パイプライン",
+    "navCampaigns": "キャンペーン",
+    "navActivities": "アクティビティ",
+    "navTasks": "タスク",
+    "navNotes": "メモ",
+    "navTags": "タグ",
+    "navFiles": "ファイル",
+    "navWorkflows": "ワークフロー",
+    "navCaptureReviews": "取り込みの確認",
+    "navAuditLog": "監査ログ",
+    "navDocs": "ヘルプドキュメント",
+    "myWork": "マイワーク",
+    "accountSettings": "アカウント設定",
+    "logOut": "ログアウト",
+    "theme": "テーマ",
+    "themeLight": "ライト",
+    "themeDark": "ダーク",
+    "themeSystem": "システム",
+    "language": "言語",
+    "languageEnglish": "英語",
+    "languageJapanese": "日本語",
+    "languageSaveFailed": "言語を更新できませんでした。もう一度お試しください。",
+    "profilePictureAlt": "{name}さんのプロフィール画像",
+    "navProducts": "商品",
+    "navDocuments": "ドキュメント",
+    "navNotifications": "通知",
+    "navApprovalPolicies": "承認ポリシー",
+    "navSearch": "検索"
+  },
+  "CommonContentShell": {
+    "hideSidebar": "サイドバーを非表示",
+    "showSidebar": "サイドバーを表示",
+    "collapseSidebar": "サイドバーを折りたたむ",
+    "expandSidebar": "サイドバーを展開"
+  },
+  "MobileNav": {
+    "barLabel": "メインナビゲーション",
+    "more": "その他",
+    "search": "検索",
+    "tasksBadge": "{count}件の要対応タスク"
+  },
+  "ConfirmDiscard": {
+    "title": "変更を破棄しますか？",
+    "description": "保存されていない変更があります。ここで閉じると失われます。",
+    "discard": "変更を破棄",
+    "keepEditing": "編集を続ける"
+  },
+  "DraftResume": {
+    "activityMessage": "未完了のアクティビティがあります。再開しますか？",
+    "activityMessageNamed": "未完了のアクティビティ：「{label}」を再開しますか？",
+    "dealMessage": "未完了の案件があります。再開しますか？",
+    "dealMessageNamed": "未完了の案件：「{label}」を再開しますか？",
+    "noteMessageNamed": "未完了のメモ：「{label}」を再開しますか？",
+    "taskMessageNamed": "未完了のタスク：「{label}」を再開しますか？",
+    "resumeActivity": "アクティビティを再開",
+    "discardActivity": "アクティビティを破棄",
+    "resumeDeal": "案件を再開",
+    "discardDeal": "案件を破棄",
+    "resumeNote": "メモを再開",
+    "discardNote": "メモを破棄",
+    "resumeTask": "タスクを再開",
+    "discardTask": "タスクを破棄",
+    "resume": "再開",
+    "discard": "破棄"
+  },
+  "RecordDensity": {
+    "ariaLabel": "行の高さ",
+    "comfortable": "ゆったり",
+    "compact": "コンパクト"
+  },
+  "RecordColumns": {
+    "ariaLabel": "列を選択",
+    "label": "列",
+    "title": "表示する列",
+    "reset": "列をリセット",
+    "sorted": "並べ替え中"
+  },
+  "DuplicateWarning": {
+    "heading": "重複の可能性があります",
+    "description": "新しいレコードを作成する前に、完全一致した候補を確認してください。",
+    "checking": "重複を確認しています...",
+    "failed": "重複を確認できませんでした。レコードを作成する前に再試行してください。",
+    "retry": "再試行",
+    "more": "他{count}件",
+    "truncated": "表示可能な候補がほかにもあります。続行する前に情報を絞り込んでください。",
+    "shared": "共有中・確認のみ",
+    "acknowledge": "候補を確認したうえで、新しいレコードを作成します。",
+    "cardResolution": "この名刺の保存方法を選択",
+    "useExisting": "既存の連絡先を使用",
+    "useExistingDescription": "既存の情報を上書きせず、この名刺を一致した連絡先に添付します。",
+    "createSeparate": "別の連絡先を作成",
+    "createSeparateDescription": "完全一致を確認したうえで、この名刺を新しい連絡先として保存します。",
+    "strength": {
+      "STRONG": "識別情報が完全一致",
+      "WEAK": "名前が完全一致"
+    },
+    "evidence": {
+      "EMAIL": "メールが一致",
+      "PHONE": "電話番号が一致",
+      "DOMAIN": "ドメインが一致",
+      "EXTERNAL_ID": "外部IDが一致",
+      "NAME": "正規化した名前が一致",
+      "DEAL_KEY": "案件名と紐づく会社が一致"
+    }
+  },
+  "CommonSearchBar": {
+    "placeholder": "何でも検索",
+    "searching": "検索中...",
+    "noResults": "「{query}」の検索結果はありません",
+    "searchFailed": "検索を実行できませんでした。もう一度お試しください。",
+    "resultsHeading": "「{query}」の検索結果",
+    "groupCompanies": "会社",
+    "groupPeople": "連絡先",
+    "groupDeals": "案件",
+    "groupPipelines": "パイプライン",
+    "groupTags": "タグ",
+    "groupActivities": "アクティビティ",
+    "groupNotes": "メモ",
+    "groupTasks": "タスク",
+    "groupUsers": "ユーザー",
+    "groupAttachments": "ファイル",
+    "groupProducts": "商品",
+    "groupCampaigns": "キャンペーン",
+    "groupReports": "レポート",
+    "groupDocuments": "ドキュメント",
+    "groupDocumentTemplates": "ドキュメントテンプレート",
+    "groupWorkflows": "ワークフロー"
+  },
+  "CommonProfileCard": {
+    "defaultName": "プロフィール名",
+    "defaultDescription": "ここにプロフィールの説明が入ります",
+    "companyName": "Voice Co. Ltd.",
+    "yourConnections": "あなたのつながり",
+    "sampleName": "Tahm Kench",
+    "sampleCompany": "LOL Inc.",
+    "sampleRole": "CTO"
+  },
+  "Temperature": {
+    "hot": "ホット",
+    "warm": "ウォーム",
+    "cool": "クール",
+    "cold": "コールド",
+    "noHistory": "履歴なし",
+    "noHistoryTooltip": "この関係を評価するには、やり取りの履歴がまだ足りません。",
+    "tooltip": "温度感 {score}% · 最終接触 {lastTouch}",
+    "goesCold": "{when} に冷め込み"
+  },
+  "CommonBreadcrumb": {
+    "ariaLabel": "パンくずリスト",
+    "showHidden": "非表示のパンくずリンクを表示",
+    "workspace": "ワークスペース",
+    "settings": "設定",
+    "organization": "組織",
+    "dashboard": "ダッシュボード",
+    "radar": "レーダー",
+    "calendar": "カレンダー",
+    "map": "マップ",
+    "introductions": "紹介",
+    "analytics": "分析",
+    "reports": "レポート",
+    "goals": "目標",
+    "companies": "会社",
+    "contacts": "連絡先",
+    "deals": "案件",
+    "pipelines": "パイプライン",
+    "products": "商品",
+    "approvalPolicies": "承認ポリシー",
+    "campaigns": "キャンペーン",
+    "activities": "アクティビティ",
+    "tasks": "タスク",
+    "notes": "メモ",
+    "documents": "ドキュメント",
+    "tags": "タグ",
+    "files": "ファイル",
+    "notifications": "通知",
+    "search": "検索",
+    "myWork": "マイワーク",
+    "users": "ユーザー",
+    "workflows": "ワークフロー",
+    "auditLog": "監査ログ",
+    "peopleAccess": "メンバーとアクセス権",
+    "crmConfiguration": "CRM設定",
+    "communications": "メールと通知",
+    "auditDiagnostics": "監査ログと診断",
+    "identityAdministrators": "認証と管理者",
+    "aiDataGovernance": "AIとデータガバナンス",
+    "members": "メンバー",
+    "roles": "ロール",
+    "customFields": "カスタムフィールド",
+    "qualification": "評価基準",
+    "email": "メール",
+    "delivery": "配信",
+    "diagnostics": "診断",
+    "captureReviews": "取り込みの確認",
+    "allowedDomains": "許可ドメイン",
+    "singleSignOn": "シングルサインオン",
+    "aiProvider": "AIプロバイダー",
+    "dataRequests": "データリクエスト",
+    "newReport": "新しいレポート",
+    "edit": "編集",
+    "snapshot": "スナップショット",
+    "operations": "実行履歴",
+    "run": "実行",
+    "recipes": "レシピ"
+  },
+  "AskConnex": {
+    "title": "Ask Connex",
+    "assistantAuthor": "Ask Connex",
+    "mobileLabel": "質問",
+    "newChatTitle": "新しい会話",
+    "archive": "アーカイブ",
+    "addContext": "コンテキストを追加",
+    "addRecordContext": "レコードをコンテキストに追加",
+    "attachFile": "ファイルを添付",
+    "close": "Ask Connexを閉じる",
+    "closeWorkspace": "前のページに戻る",
+    "openWorkspace": "全画面で開く",
+    "openWorkspaceAction": "Ask Connexのワークスペースを開く",
+    "width": "パネルの幅",
+    "widthCompact": "標準",
+    "widthComfortable": "広め",
+    "visibilityPrivate": "非公開",
+    "visibilityShared": "共有中",
+    "stateRunning": "回答中",
+    "stateAwaitingApproval": "確認待ち",
+    "stateFailed": "未完了",
+    "contextSummary": "コンテキスト{count}件",
+    "participantCount": "{count}人",
+    "sessionActivity": "最終更新 {time}",
+    "sessionRail": "チャット",
+    "sessionGroups": {
+      "invitations": "招待",
+      "last24h": "過去24時間",
+      "last7d": "過去7日間",
+      "earlier": "それ以前"
+    },
+    "continueFromPartial": "続きから再開",
+    "continuePrompt": "「{question}」への回答の続きをお願いします。",
+    "narrowScope": "対象を絞り込む",
+    "stepCapExceeded": "この質問は、アシスタントが一度に確認できるレコード数を超えていました。対象のレコードや期間を絞って、もう一度お試しください。",
+    "composerAria": "Ask Connexへのメッセージ",
+    "composerHint": "Enterで送信。Shift+Enterで改行します。",
+    "composerPlaceholder": "このレコードやワークスペースについて質問…",
+    "context": "コンテキスト",
+    "contextPage": "現在のページ",
+    "contextPinned": "保持中",
+    "contextSelected": "選択中の{type} {count}件",
+    "contextMentioned": "メンション",
+    "contextFile": "ファイル",
+    "contextUnavailable": "利用不可",
+    "contextUnsupported": "{type}のコンテキストはここに表示されますが、現時点ではAsk Connexに送信されません。",
+    "contextScopeUnsupported": "この全件一致スコープは表示されますが、正確なフィルターまたは保存済みビューを保持できるようになるまでAsk Connexには送信されません。",
+    "contextLimit": "含められるレコードとファイルは合計10件までです。送信前に1件外してください。",
+    "contextNone": "レコードのコンテキストなし",
+    "contextReset": "外したものを戻す",
+    "pinContext": "画面を移動しても{label}を残す",
+    "unpinContext": "{label}を残すのをやめる",
+    "scopeTitle": "確認する範囲",
+    "scopeSummary": "回答する前に{scope}を確認します。範囲を狭めるには上の項目を外してください。",
+    "scopeRecordCounts": {
+      "person": "連絡先{count}件",
+      "company": "会社{count}件",
+      "deal": "案件{count}件"
+    },
+    "scopeFiles": "ファイル{count}件",
+    "scopeConfirm": "このコンテキストで質問",
+    "scopeEdit": "コンテキストを変更",
+    "emptyTitle": "何をお手伝いしましょうか？",
+    "emptyBody": "このレコードやワークスペースについて質問できます。",
+    "formerMember": "以前のメンバー",
+    "contentWithheld": "参照元のレコードの一部がAIで利用できなくなったため、この回答は非表示になっています。",
+    "historySummarized": "以前のメッセージは要約されています",
+    "invitation": "招待",
+    "invitations": "招待",
+    "invite": "招待する",
+    "inviteMember": "ワークスペースのメンバー",
+    "invitePending": "招待中",
+    "join": "参加",
+    "leave": "共有チャットから退出",
+    "manageSharing": "共有を管理",
+    "memberAuthor": "メンバー {id}",
+    "jumpToLatest": "最新のメッセージへ移動",
+    "loadError": "この会話を読み込めませんでした。",
+    "messages": "会話のメッセージ",
+    "newChat": "新しいチャット",
+    "noRecentSessions": "最近のチャットはありません",
+    "noMatchingSessions": "検索に一致するチャットはありません",
+    "moreOptions": "チャットのオプション",
+    "participants": "アクセスできるメンバー",
+    "presence": "参加中",
+    "recentSessions": "最近のチャット",
+    "searchSessions": "チャットを検索",
+    "removeContext": "{label}をコンテキストから外す",
+    "removeFile": "{label}を削除",
+    "removeParticipant": "{name}をこのチャットから削除",
+    "rename": "名前を変更",
+    "renameCancel": "キャンセル",
+    "renameDescription": "後から見つけやすい短い会話名を付けてください。",
+    "renameLabel": "会話名",
+    "renameSave": "保存",
+    "renameSaving": "保存中…",
+    "renameTitle": "チャット名を変更",
+    "retry": "もう一度試す",
+    "send": "メッセージを送信",
+    "shareCancel": "閉じる",
+    "shareConfirm": "セッションを共有",
+    "shareDescription": "共有すると会話全文が開示されます。招待する相手が通常はアクセスできないデータが含まれる可能性があります。相手がアクセスできない参照元は非表示になりますが、回答本文はそのまま共有されます。",
+    "shared": "参加済み",
+    "shareTitle": "このチャットを共有",
+    "suggestedFollowUps": "おすすめのフォローアップ",
+    "tooLong": "メッセージは16,000文字以内で入力してください。",
+    "typing": "{names}が入力中",
+    "unshare": "非公開にする",
+    "stop": "生成を停止",
+    "stopping": "停止中…",
+    "turnAccepted": "リクエストを受け付けました",
+    "turnWorking": "思考中…",
+    "thinkingToggle": "思考内容を表示",
+    "thinkingToggleHide": "思考内容を隠す",
+    "narrationTrail": "作業の経過",
+    "todoPlan": "進め方",
+    "todoStatus": {
+      "pending": "未着手",
+      "active": "進行中",
+      "done": "完了"
+    },
+    "turnStreaming": "回答を作成中…",
+    "turnResolved": "回答の準備ができました",
+    "turnCancelled": "応答を停止しました",
+    "turnFailed": "この回答を完了できませんでした。",
+    "turnProviderUnavailable": "AIプロバイダーから応答がありませんでした。質問の内容が原因ではありません。もう一度お試しください。",
+    "turnInternalError": "回答の作成中にConnex側で問題が発生しました。もう一度お試しください。繰り返す場合は管理者にお知らせください。",
+    "turnUnreadableAnswer": "回答がConnexで読み取れない形式で返されたため、内容は保持していません。もう一度お試しいただくか、質問の表現を変えてください。",
+    "turnStalled": "同じレコードの読み取りが繰り返され、回答が進みませんでした。もう一度お試しいただくか、質問の表現を変えてください。",
+    "turnRanOutOfTime": "この回答は完了前に時間切れになりました。もう一度お試しください。繰り返す場合は、対象を絞った質問をお試しください。",
+    "turnImageUnsupported": "現在のアシスタントモデルは画像を読み取れません。上のコンテキストから画像を外すか、画像対応モデルを選択してください。",
+    "budgetExhausted": "組織の1日あたりのAI利用上限に達しました。しばらくしてから同じ質問をお試しください。",
+    "capacityExhausted": "現在この依頼に使えるAIの余力がありません。しばらくしてから同じ質問をお試しください。",
+    "toolResultBudgetExhausted": "関係データの取得中に、この回答で扱える情報量の上限に達しました。対象レコードや期間を絞って、もう一度お試しください。",
+    "skillBudgetExceeded": "必要な情報は集まりましたが、回答をまとめる余裕がなくなりました。もう一度お試しいただくか、より具体的な質問をお試しください。",
+    "toolOutsideSkillAuthority": "この依頼を完了できませんでした。",
+    "workspaceDisabled": "このワークスペースではAsk Connexが無効になっています。ワークスペース管理者が再び有効にできます。",
+    "contextWindowTooSmall": "この組織で使用しているAIモデルでは、Ask Connexが必要とする情報量を一度に扱えません。組織管理者がより高性能なモデルに変更できます。",
+    "accessRevoked": "回答の作成中に、参照していた情報へのアクセス権が変更されたため、回答を停止し、内容は保持していません。",
+    "restrictionsChanged": "回答の作成中に、このワークスペースでAIが読み取れる範囲が変更されたため、回答を停止し、内容は保持していません。",
+    "partialAnswer": "途中までの回答です。停止するまでにアシスタントが書いた内容を表示しています。",
+    "entryPoint": {
+      "workspace": "このワークスペースについてAsk Connexに質問",
+      "record": "{label}についてAsk Connexに質問",
+      "selection": "選択中の{type} {count}件についてAsk Connexに質問",
+      "recordMenu": {
+        "person": "この連絡先について質問",
+        "company": "この会社について質問",
+        "deal": "この案件について質問"
+      }
+    },
+    "recordTypes": {
+      "person": "連絡先",
+      "company": "会社",
+      "deal": "取引",
+      "task": "タスク",
+      "activity": "アクティビティ",
+      "note": "メモ"
+    },
+    "toolCards": {
+      "outcome": "結果",
+      "recordLink": "{target}を開く",
+      "restrictedTarget": "アクセスできないレコード",
+      "states": {
+        "pending": "承認待ち",
+        "pendingDetail": "まだ何も実行されていません。承認前に操作内容を確認してください。",
+        "executed": "完了",
+        "executedDetail": "この操作はすでに完了しています。",
+        "rejected": "却下済み",
+        "rejectedDetail": "この提案は却下されました。変更は行われていません。",
+        "undone": "取り消し済み",
+        "undoneDetail": "アシスタントが作成したレコードを削除しました。",
+        "failed": "失敗",
+        "failedDetail": "この操作は完了しませんでした。",
+        "expired": "取り消し期限切れ",
+        "expiredDetail": "操作は完了しましたが、取り消し可能な期間は終了しました。"
+      },
+      "change": {
+        "proposedChange": "提案されている変更",
+        "before": "現在",
+        "after": "変更後",
+        "notSet": "未設定",
+        "fieldOwner": "担当者",
+        "fieldStage": "ステージ",
+        "currentUnresolvedOwner": "このワークスペースにいないメンバー",
+        "currentUnresolvedStage": "すでに存在しないステージ",
+        "proposedUnresolved": "すでに存在しません",
+        "stateUnchanged": "すでに同じ値のため、適用しても変わりません。",
+        "stateRecordChanged": "提案のあとにこのレコードが更新されたため、この変更はレビューした内容のままでは適用できません。現在の内容をもとに、改めて依頼してください。",
+        "statePermissionLost": "この変更を行う権限がなくなりました。ワークスペース管理者にご相談ください。",
+        "stateUnresolved": "提案された値がこのワークスペースに見つからないため、この変更は行えません。"
+      },
+      "actions": {
+        "undo": "取り消す",
+        "undoAria": "{target}へのアシスタント操作を取り消す",
+        "undoing": "取り消し中…",
+        "apply": "適用",
+        "applyAria": "{target}への変更を適用する",
+        "applying": "適用しています…",
+        "discard": "破棄",
+        "discardAria": "{target}への変更を破棄する",
+        "discarding": "破棄しています…",
+        "editOnRecord": "レコード上で変更する",
+        "editOnRecordAria": "{target}を開いてそこで変更する"
+      },
+      "failures": {
+        "proposalChanged": "提案の表示後に対象が変更されました。この提案を却下して、新しい提案を依頼してください。",
+        "proposalPermissionLost": "この提案を承認する権限がなくなりました。",
+        "proposalUnavailable": "この提案は利用できなくなりました。権限または対象レコードが変更された可能性があります。",
+        "undoConflict": "アシスタントによる作成後にレコードが変更されたため、安全に取り消せません。",
+        "actionFailed": "操作を完了できませんでした。もう一度お試しください。"
+      },
+      "summaries": {
+        "createActivity": "アクティビティを作成",
+        "createTask": "タスクを作成",
+        "createNote": "メモを作成",
+        "addTag": "既存のタグを追加",
+        "changeDealStage": "取引ステージを変更",
+        "changeDealStageTo": "取引ステージを「{value}」に変更",
+        "assignOwner": "担当者を割り当て",
+        "assignOwnerTo": "担当者を「{value}」に変更",
+        "removeOwner": "現在の担当者を解除",
+        "runWriteTool": "書き込み操作を実行",
+        "requestRejected": "リクエストを却下しました",
+        "requestFailed": "リクエストに失敗しました",
+        "createdRecordRemoved": "作成したレコードを削除しました",
+        "activityCreated": "アクティビティを作成しました",
+        "taskCreated": "タスクを作成しました",
+        "noteCreated": "メモを作成しました",
+        "tagAdded": "タグを追加しました",
+        "tagAlreadyPresent": "タグはすでに追加されています",
+        "dealStageChanged": "取引ステージを変更しました",
+        "ownerRemoved": "担当者を解除しました",
+        "ownerAssigned": "担当者を割り当てました",
+        "requestCompleted": "リクエストが完了しました"
+      },
+      "outcomeFields": {
+        "type": "種別",
+        "subject": "件名",
+        "start": "開始",
+        "description": "タスク",
+        "dueDate": "期限",
+        "title": "タイトル",
+        "visibility": "公開範囲",
+        "tag": "タグ",
+        "stage": "ステージ",
+        "owner": "担当者",
+        "other": "詳細"
+      },
+      "outcomeValues": {
+        "type": {
+          "call": "電話",
+          "email": "メール",
+          "meeting": "打ち合わせ",
+          "note": "メモ",
+          "other": "その他"
+        },
+        "visibility": {
+          "private": "非公開",
+          "workspace": "ワークスペース"
+        }
+      },
+      "openCreated": {
+        "activity": "活動を開く",
+        "task": "タスクを開く",
+        "note": "メモを開く"
+      },
+      "openCreatedAria": {
+        "activity": "この操作で作成された活動を開く",
+        "task": "この操作で作成されたタスクを開く",
+        "note": "この操作で作成されたメモを開く"
+      },
+      "undoWindow": "{deadline}まで取り消せます（{remaining}）。"
+    },
+    "upload": {
+      "progress": "アップロード中 {progress}%",
+      "removing": "削除中…",
+      "failed": "アップロードに失敗しました",
+      "tooLarge": "ファイルサイズが大きすぎます",
+      "unsupported": "このファイル形式には対応していません",
+      "limit": "コンテキストの上限に達しました",
+      "removeFailed": "ファイルを削除できませんでした"
+    },
+    "unavailable": {
+      "permissionTitle": "現在のロールではAsk Connexを利用できません",
+      "permissionBody": "現在のワークスペースロールにはAI機能を利用する権限がありません。",
+      "lookupTitle": "権限の状態を確認できません",
+      "lookupBody": "アシスタントを利用できるロールか確認できませんでした。権限の再読み込み後にもう一度お試しください。",
+      "featureTitle": "Ask Connexを利用できません",
+      "featureBody": "現在このワークスペースではアシスタントを利用できません。利用が必要な場合は、ワークスペース管理者にお問い合わせください。",
+      "uncertainTitle": "この回答が届いたか確認できません",
+      "uncertainBody": "回答を確実に受け取れなかったため、重複を防ぐために再送信を停止しています。新しいチャットを始めるか、このチャットを再読み込みしてください。"
+    },
+    "toast": {
+      "archived": "チャットをアーカイブしました",
+      "renamed": "チャット名を変更しました",
+      "shared": "チャットを共有できるようにしました",
+      "private": "チャットを非公開にしました",
+      "invited": "招待を送信しました",
+      "joined": "共有チャットに参加しました",
+      "left": "共有チャットから退出しました",
+      "participantRemoved": "参加者を削除しました",
+      "requestFailed": "Ask Connexのリクエストに失敗しました",
+      "turnFailed": "Ask Connexはこの回答を完了できませんでした",
+      "turnTimedOut": "Ask Connexがタイムアウトしました",
+      "cancelFailed": "応答を停止できませんでした",
+      "toolActionRefreshFailed": "操作は完了しましたが、最新の状態を読み込めませんでした"
+    },
+    "citations": "参照元",
+    "citationKindPerson": "連絡先",
+    "citationKindCompany": "会社",
+    "citationKindDeal": "取引",
+    "citationFreshness": "{label} — {time}時点",
+    "citationFreshnessUnknown": "{label} — 情報の鮮度は不明",
+    "suggestions": "ここでできること",
+    "dismissSuggestions": "これらの候補を隠す",
+    "jobs": {
+      "relationshipBrief": {
+        "label": "この関係について要点を教えて",
+        "prompt": "この関係について要点をまとめてください。"
+      },
+      "companyBrief": {
+        "label": "この会社について要点を教えて",
+        "prompt": "この会社について要点をまとめてください。"
+      },
+      "relationshipCooling": {
+        "label": "この関係が冷えている理由は？",
+        "prompt": "この関係が冷えつつある理由を説明してください。"
+      },
+      "companyCooling": {
+        "label": "冷えつつある関係は？",
+        "prompt": "この会社で冷えつつある関係と、その理由を教えてください。"
+      },
+      "dealRisk": {
+        "label": "この案件のリスクを説明して",
+        "prompt": "この案件のリスクになっている点を説明してください。"
+      },
+      "contactActivity": {
+        "label": "最近の活動を要約して",
+        "prompt": "この連絡先との最近の活動を要約してください。"
+      },
+      "companyActivity": {
+        "label": "最近の活動を要約して",
+        "prompt": "この会社での最近の活動を要約してください。"
+      },
+      "dealActivity": {
+        "label": "この案件の活動を要約して",
+        "prompt": "この案件の最近の活動を要約してください。"
+      },
+      "companyPipeline": {
+        "label": "注意が必要な案件は？",
+        "prompt": "この会社で注意が必要な案件と、それぞれ何を待っているかを教えてください。"
+      },
+      "dealPipeline": {
+        "label": "この案件は何を待っている？",
+        "prompt": "この案件が何を待っているか、他の案件と比べてどうかを教えてください。"
+      },
+      "relationshipChanges": {
+        "label": "最近の変化は？",
+        "prompt": "ここで最近何が変わったかを教えてください。"
+      },
+      "dealChanges": {
+        "label": "ステージ変更後の変化は？",
+        "prompt": "この案件がステージを移ってから何が変わったかを教えてください。"
+      },
+      "introPath": {
+        "label": "紹介ルートを探して",
+        "prompt": "ここへ紹介してもらえる人と、その根拠を教えてください。"
+      },
+      "meetingPreparation": {
+        "label": "次の打ち合わせの準備をして",
+        "prompt": "ここでの次の打ち合わせに向けて準備してください。"
+      },
+      "meetingFollowUp": {
+        "label": "決定事項と約束を抜き出して",
+        "prompt": "ここでの最近の打ち合わせから、決定事項・約束・担当者を抜き出してください。"
+      },
+      "followUpDraft": {
+        "label": "フォローアップの下書きを作って",
+        "prompt": "送信前に編集できるフォローアップの下書きを作ってください。"
+      },
+      "stakeholderGaps": {
+        "label": "足りない関係者は？",
+        "prompt": "ここでまだ関係が築けていない役割や人物を教えてください。"
+      },
+      "companyReview": {
+        "label": "会社レビューを準備して",
+        "prompt": "この会社のレビューを準備してください。"
+      },
+      "commitments": {
+        "label": "未完了の約束を探して",
+        "prompt": "ここで誰が何を約束し、何が未完了かを教えてください。"
+      },
+      "dataQuality": {
+        "label": "不足している情報を確認して",
+        "prompt": "ここで不足している情報や、矛盾している情報を教えてください。"
+      },
+      "workspaceWorkBrief": {
+        "label": "今日は何をすべき？",
+        "prompt": "今日のやることをまとめてください。"
+      },
+      "workspacePipeline": {
+        "label": "注意が必要な案件は？",
+        "prompt": "注意が必要な案件と、それぞれ何を待っているかを教えてください。"
+      },
+      "workspaceActivity": {
+        "label": "最近の活動を要約して",
+        "prompt": "このワークスペースでの最近の活動を要約してください。"
+      },
+      "workspaceReport": {
+        "label": "質問からレポートを作って",
+        "prompt": "このワークスペースについての質問に答えるレポートを作ってください。"
+      }
+    },
+    "scope": {
+      "title": "フィルター",
+      "description": "この質問が対象とするレコードを選びます。Ask Connex はここで指定した範囲だけを読みます。",
+      "open": "フィルターを追加",
+      "openSet": "フィルター · {count}",
+      "clear": "フィルターをクリア",
+      "done": "完了",
+      "period": {
+        "label": "期間",
+        "modeLabel": "期間の指定方法",
+        "any": "指定なし",
+        "recent": "直近",
+        "range": "日付",
+        "days": "直近 {count} 日",
+        "start": "開始日",
+        "end": "終了日"
+      },
+      "owners": {
+        "label": "担当者",
+        "modeLabel": "対象にする担当者の範囲",
+        "allTeam": "全員",
+        "me": "自分",
+        "members": "選んだメンバー",
+        "none": "選べるメンバーがいません。",
+        "cap": "指定できるメンバーは最大 {count} 人です。別のメンバーを選ぶには、いずれかを解除してください。"
+      },
+      "warmth": {
+        "label": "温度感"
+      },
+      "recordKinds": {
+        "label": "レコード種別",
+        "person": "連絡先",
+        "company": "会社",
+        "deal": "案件"
+      },
+      "dealStatuses": {
+        "label": "案件の状態",
+        "open": "進行中",
+        "won": "受注",
+        "lost": "失注"
+      },
+      "stages": {
+        "label": "ステージ",
+        "cap": "指定できるステージは最大 {count} 個です。別のステージを選ぶには、いずれかを解除してください。"
+      },
+      "savedView": {
+        "label": "保存ビュー"
+      },
+      "chips": {
+        "period": "期間",
+        "owners": "担当者",
+        "ownersMe": "自分のレコード",
+        "warmth": "温度感",
+        "recordKinds": "レコード種別",
+        "dealStatuses": "案件の状態",
+        "stages": "ステージ",
+        "savedView": "保存ビュー"
+      },
+      "problem": {
+        "periodOrder": "開始日は終了日より前にしてください。",
+        "periodLength": "1〜365 日の範囲で指定してください。",
+        "membersMissing": "メンバーを 1 人以上選ぶか、全員に戻してください。"
+      },
+      "options": {
+        "loading": "このワークスペースで選べる名前を読み込んでいます…",
+        "failed": "メンバー・ステージ・保存ビューを読み込めませんでした。",
+        "retry": "再試行"
+      },
+      "preview": {
+        "title": "対象になる範囲",
+        "idle": "フィルターを選ぶと、対象になる範囲が表示されます。",
+        "loading": "対象になる範囲を確認しています…",
+        "matched": "このフィルターに {count} 件のレコードが一致します。",
+        "matchedUnknown": "このフィルターで実行できます。",
+        "matchedUnchecked": "このフィルターが対象にする範囲は確認できませんでした。意図した範囲であることを確かめてから送信してください。",
+        "truncated": "そのうち先頭の {count} 件を読みます。",
+        "capability": "{name} を使います。",
+        "throttled": "短時間に変更が続いたため、件数の更新は少し後になります。",
+        "unavailable": "このワークスペースでは現在 Ask Connex を利用できないため、ここでフィルターを確認できません。",
+        "failed": "対象になる範囲を確認できませんでした。少し時間をおいてお試しください。"
+      },
+      "reasons": {
+        "unknown": "この組み合わせのフィルターには対応できません。いずれかを変更してお試しください。",
+        "other": "指定したフィルターのうち 1 つは、この質問には適用できませんでした。",
+        "deal_status_unsupported_for_attention": "案件のレビューは常に進行中の案件を対象とするため、受注・失注のフィルターは適用されません。",
+        "period_capped": "期間は最長 1 年まで遡れるため、指定された期間のうち古い部分は対象外になります。",
+        "record_kind_ambiguous_for_cohort": "連絡先・会社・案件のどれを対象にするか指定してください。この質問は複数に当てはまります。",
+        "record_kind_outside_declared_scope": "この質問は、フィルターで除外されているレコード種別に関するものです。その種別を追加するか、残した種別について質問してください。",
+        "saved_view_scope_changed": "準備中にその保存ビューが変更されました。もう一度選び直すと最新の内容で実行できます。",
+        "saved_view_scope_unsupported": "その保存ビューをそのまま再現できないため、実行しません。ここでフィルターを指定してください。",
+        "stage_scope_unsupported_for_cohort": "ステージと案件の状態は、案件を含めた場合にのみ適用されます。案件を追加するか、この 2 つのフィルターを外してください。",
+        "tool_cannot_honor_declared_scope": "この質問に答えるには指定されたフィルターの外まで読む必要があるため、中止しました。範囲を広げるか、より狭い質問にしてください。",
+        "warmth_outside_declared_scope": "この質問は、フィルターで除外されている温度帯に関するものです。その温度帯を追加するか、残した温度帯について質問してください。",
+        "warmth_unsupported_for_deals": "温度感は人や会社との関係を表すものなので、案件の絞り込みには使えません。"
+      }
+    },
+    "commandCenter": {
+      "briefsTitle": "ブリーフ",
+      "briefsBody": "タスク、予定、温度感が下がっている関係、対応が必要な案件を、設定した時刻に短くまとめます。",
+      "briefsUnavailable": "このワークスペースではブリーフをまだご利用いただけません。",
+      "loadFailed": "ブリーフとウォッチを読み込めませんでした。",
+      "loadRetry": "再試行",
+      "openLatestBrief": "前回の内容を開く",
+      "dailyLabel": "毎日",
+      "dailyHourLabel": "毎日のブリーフの時刻",
+      "weeklyLabel": "毎週",
+      "weeklyDayLabel": "週次まとめの曜日",
+      "weeklyAt": "の",
+      "weeklyHourLabel": "週次まとめの時刻",
+      "hour": "{hour}時",
+      "weekday": {
+        "1": "月曜日",
+        "2": "火曜日",
+        "3": "水曜日",
+        "4": "木曜日",
+        "5": "金曜日",
+        "6": "土曜日",
+        "7": "日曜日"
+      },
+      "scheduleZoneLabel": "時刻のタイムゾーン",
+      "scheduleZoneEmpty": "該当するタイムゾーンがありません",
+      "scheduleFailed": "ブリーフの配信設定を保存できませんでした",
+      "watchesTitle": "ウォッチ",
+      "watchesEmpty": "まだウォッチはありません。連絡先・会社・案件を開いてウォッチを追加すると、特定の変化があったときにお知らせします。",
+      "watchesUnavailable": "このワークスペースではウォッチが無効になっています。",
+      "watchesHint": "ウォッチは、何が変わり、どのルールが検知したのかをそのままお知らせします。",
+      "watchActions": "ウォッチの操作",
+      "watchFailed": "ウォッチを変更できませんでした",
+      "watchesUsage": "ウォッチは{limit}件中{used}件を使用中です。",
+      "cooldownEvery": "通知は最短{days}日に1回",
+      "expiresNever": "終了日なし",
+      "expiresOnDate": "{date}まで",
+      "pause": "一時停止",
+      "resume": "再開",
+      "delete": "ウォッチを削除",
+      "deleteTitle": "このウォッチを削除しますか？",
+      "deleteBody": "この条件を満たしてもお知らせしなくなります。この操作は元に戻せません。",
+      "deleteBodyNamed": "「{trigger}」でお知らせしなくなります。この操作は元に戻せません。",
+      "statusActive": "有効",
+      "statusPaused": "一時停止中",
+      "neverFired": "未通知",
+      "lastFired": "前回の通知：{date}",
+      "subjectUnavailable": "このレコードは現在ご覧いただけません",
+      "band": {
+        "warm": "ウォーム",
+        "cool": "クール",
+        "cold": "コールド"
+      },
+      "level": {
+        "medium": "中",
+        "high": "高"
+      },
+      "watchTrigger": {
+        "cooling": "温度帯が{band}になったとき",
+        "noInteraction": "{days}日間やり取りがないとき",
+        "commitmentOverdue": "担当者を問わず、このレコードのタスクの期限が過ぎたとき",
+        "dealRisk": "案件のリスクが{level}になったとき",
+        "unknown": "このバージョンでは条件を表示できません"
+      },
+      "watchTypeName": {
+        "relationship_cooling": "温度帯が下がったとき",
+        "no_interaction": "やり取りが途絶えたとき",
+        "commitment_overdue": "担当者を問わずタスクの期限が過ぎたとき",
+        "deal_risk_threshold": "案件のリスクが上がったとき"
+      },
+      "createMenuItem": "このレコードをウォッチ",
+      "createTitle": "ウォッチを追加",
+      "createDescription": "{record}に特定の変化があったときにお知らせします。",
+      "createTypeLabel": "通知する条件",
+      "createBandLabel": "温度帯",
+      "createDaysLabel": "やり取りがない期間",
+      "createDaysOption": "{days}日",
+      "createLevelLabel": "リスクの水準",
+      "createPreviewLabel": "この条件で通知します",
+      "createPreviewNote": "判定は Connex が行います。通知には、どのルールが検知したのかと、その根拠を明記します。なお、状態が別の段階に変わった場合（例: warm から cold）は、上記の間隔を待たずに通知することがあります。",
+      "createCancel": "キャンセル",
+      "createApply": "ウォッチを追加"
+    },
+    "signals": {
+      "relationship_decay": {
+        "label": "このシグナルが出た理由を説明",
+        "prompt": "レーダーは {subject} との関係が冷えつつあると示しています。記録されている内容から、その理由を説明してください。"
+      },
+      "deal_risk": {
+        "label": "このシグナルが出た理由を説明",
+        "prompt": "レーダーは {subject} をリスクありとしています。記録されている内容から、その理由を説明してください。"
+      },
+      "warm_path": {
+        "label": "この紹介ルートを説明",
+        "prompt": "レーダーは {subject} への紹介ルートを見つけました。誰に紹介してもらえるか、その根拠は何かを説明してください。"
+      }
+    },
+    "proposalReview": {
+      "heading": "{count}件の変更を確認してください",
+      "applicable": "{count}件のうち{applicable}件をいま適用できます。",
+      "selected": "{count, plural, =0 {選択されていません} other {#件を選択中}}",
+      "applySelected": "{count}件を適用",
+      "applying": "適用しています…",
+      "include": "{target}への変更を対象に含める",
+      "openFullView": "全画面で確認する",
+      "noneApplicable": "いま適用できる変更はありません。それぞれを開いて理由をご確認ください。",
+      "applied": "{count}件を適用しました",
+      "discarded": "{count}件を破棄しました",
+      "failed": "{count}件は適用できませんでした"
+    }
+  },
+  "SearchLayout": {
+    "title": "検索",
+    "description": "ワークスペース全体を検索"
+  },
+  "askConnex": {
+    "skills": {
+      "relationshipCoolingExplanation": {
+        "name": "関係の冷え込み",
+        "description": "記録された活動と温度感の読み取りから、連絡先や会社とのやり取りが減った理由を説明します。"
+      },
+      "activityDigest": {
+        "name": "活動ダイジェスト",
+        "description": "指定した期間について、対象のレコードに記録された活動を要約します。"
+      },
+      "relationshipBrief": {
+        "name": "関係の要点",
+        "description": "連絡先や会社と話す前に、すでに分かっていることをまとめます。"
+      },
+      "pipelineAttentionReview": {
+        "name": "注意が必要な案件",
+        "description": "進行中の案件を Connex のリスクモデルで確認し、それぞれ何を待っているかを説明します。"
+      },
+      "relationshipChangeSummary": {
+        "name": "変化の要約",
+        "description": "前回確認してからレコードで何が変わったかを報告します。"
+      },
+      "introductionPathExplanation": {
+        "name": "紹介ルート",
+        "description": "誰に紹介してもらえるか、その根拠は何かを説明します。"
+      },
+      "meetingPreparation": {
+        "name": "打ち合わせの準備",
+        "description": "打ち合わせ前に必要な参加者・経緯・未解決の論点をまとめます。"
+      },
+      "meetingFollowUpExtraction": {
+        "name": "打ち合わせのフォローアップ",
+        "description": "打ち合わせの内容から決定事項・約束・担当者を抜き出します。"
+      },
+      "followUpDraft": {
+        "name": "フォローアップの下書き",
+        "description": "送信前に編集できるフォローアップの下書きを作成します。"
+      },
+      "dealRiskReview": {
+        "name": "案件リスクの確認",
+        "description": "案件の経緯と Connex のリスクモデルから、リスクになっている点を説明します。"
+      },
+      "stakeholderGapAnalysis": {
+        "name": "不足している関係者",
+        "description": "案件や会社でまだ関係が築けていない役割や人物を示します。"
+      },
+      "companyReview": {
+        "name": "会社レビュー",
+        "description": "会社の関係・案件・最近の活動から、その会社のレビューを準備します。"
+      },
+      "dailyWorkBrief": {
+        "name": "今日の要点",
+        "description": "今日取り組む価値のある関係構築の仕事をまとめます。"
+      },
+      "commitmentExtraction": {
+        "name": "未完了の約束",
+        "description": "誰が何を約束し、何が未完了かを見つけます。"
+      },
+      "dataQualityReview": {
+        "name": "データ品質の確認",
+        "description": "情報が不足している、または矛盾しているレコードを示します。"
+      },
+      "naturalLanguageReport": {
+        "name": "質問からのレポート",
+        "description": "ワークスペースについての質問に答えるレポートを作成します。"
+      }
+    }
+  }
+}

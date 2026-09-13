@@ -9,7 +9,7 @@ import {
     createFrontendContentSecurityPolicy,
     createReportingEndpointsHeader,
     resolveContentSecurityPolicyMode,
-} from '../frontend/security-headers';
+} from './security-headers';
 
 function createNonce(): string {
     return Buffer.from(crypto.randomUUID()).toString('base64');

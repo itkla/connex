@@ -1,9 +1,9 @@
 import { cookies } from "next/headers";
 import { getRequestConfig } from "next-intl/server";
 
-import { LOCALE_COOKIE, resolveLocale, type Locale } from "../../frontend/i18n/config";
+import { LOCALE_COOKIE, resolveLocale, type Locale } from "./config";
 
-export { defaultLocale, locales, LOCALE_COOKIE, type Locale } from "../../frontend/i18n/config";
+export { defaultLocale, locales, LOCALE_COOKIE, type Locale } from "./config";
 
 /**
  * The prelaunch deployment serves the landing body and the legal pages only, so it loads the two
@@ -12,7 +12,7 @@ export { defaultLocale, locales, LOCALE_COOKIE, type Locale } from "../../fronte
 const namespaces = ["common", "legal"] as const;
 
 async function loadNamespace(locale: Locale, namespace: string): Promise<Record<string, unknown>> {
-    const fragment = (await import(`../../frontend/messages/${locale}/${namespace}.json`)).default;
+    const fragment = (await import(`../messages/${locale}/${namespace}.json`)).default;
     return typeof fragment === "object" && fragment !== null && !Array.isArray(fragment)
         ? (fragment as Record<string, unknown>)
         : {};
