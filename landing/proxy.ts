@@ -12,7 +12,9 @@ import {
 } from './security-headers';
 
 function createNonce(): string {
-    return Buffer.from(crypto.randomUUID()).toString('base64');
+    // `btoa` rather than `Buffer`, so this does not depend on a Node built-in. The UUID is ASCII,
+    // so the emitted value matches the product application's byte for byte.
+    return btoa(crypto.randomUUID());
 }
 
 function browserFacingRequestOrigin(request: NextRequest): string {
