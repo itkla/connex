@@ -32,15 +32,7 @@ const session = vi.hoisted(() => ({ locale: "en" as "en" | "ja", host: "app.conn
 
 vi.mock("next/headers", () => ({ headers: async () => new Headers({ host: session.host }) }));
 vi.mock("next-intl/server", () => ({
-    getTranslations: async (namespace: string) =>
-        createTranslator({
-            locale: session.locale,
-            messages:
-                session.locale === "en"
-                    ? { ...enCommon, ...enDocs, ...enErrors, ...enLegal }
-                    : { ...jaCommon, ...jaDocs, ...jaErrors, ...jaLegal },
-            namespace,
-        }),
+    getTranslations: async (namespace: ServerNamespace) => translator(namespace),
 }));
 vi.mock("@/app/lib/api", () => ({
     getPublicPageUserFromCookie: async () => (session.signedIn ? { id: 1 } : null),
@@ -54,10 +46,25 @@ vi.mock("@/app/components/landing/LandingFooter", () => ({
         showLogin ? <Link href="/auth/login">footer login</Link> : null,
 }));
 
+/** Namespaces the public server components request from `getTranslations`. */
+type ServerNamespace = "Legal" | "CommonHome" | "NotFound";
+
 function catalog(locale: "en" | "ja") {
     return locale === "en"
         ? { ...enCommon, ...enDocs, ...enErrors, ...enLegal }
         : { ...jaCommon, ...jaDocs, ...jaErrors, ...jaLegal };
+}
+
+function translator(namespace: ServerNamespace) {
+    const messages = catalog(session.locale);
+    switch (namespace) {
+        case "Legal":
+            return createTranslator({ locale: session.locale, messages, namespace: "Legal" });
+        case "CommonHome":
+            return createTranslator({ locale: session.locale, messages, namespace: "CommonHome" });
+        case "NotFound":
+            return createTranslator({ locale: session.locale, messages, namespace: "NotFound" });
+    }
 }
 
 function parse(element: ReactElement) {
