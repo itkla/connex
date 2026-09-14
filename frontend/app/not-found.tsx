@@ -19,7 +19,7 @@ export default async function RootNotFound() {
     const nav = await getTranslations('CommonHome');
 
     return (
-        <div className="font-body flex min-h-screen flex-col bg-background text-foreground">
+        <div className="font-body flex min-h-dvh flex-col bg-background text-foreground">
             <LandingNav ctaHref="/auth/register" ctaLabel={nav('ctaGetStarted')} preLaunch={preLaunch} />
             <main className="flex-1">
                 <NotFoundState
