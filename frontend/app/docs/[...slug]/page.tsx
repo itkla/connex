@@ -49,7 +49,7 @@ export async function generateMetadata({
         const category = getCategory(slug[0]);
         if (category) {
             return {
-                title: `${t(`${category.namespace}.title`)} · ${meta("metaTitle")}`,
+                title: { absolute: `${t(`${category.namespace}.title`)} · ${meta("metaTitle")}` },
                 description: t(`${category.namespace}.description`),
             };
         }
@@ -59,12 +59,12 @@ export async function generateMetadata({
         if (resolved) {
             const key = `${resolved.category.namespace}.articles.${resolved.article.slug}`;
             return {
-                title: `${t(`${key}.title`)} · ${meta("metaTitle")}`,
+                title: { absolute: `${t(`${key}.title`)} · ${meta("metaTitle")}` },
                 description: t(`${key}.description`),
             };
         }
     }
-    return { title: meta("metaTitle") };
+    return { title: { absolute: meta("metaTitle") } };
 }
 
 export default async function DocsSlugPage({ params }: { params: Promise<DocsSlugParams> }) {
