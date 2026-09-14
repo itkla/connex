@@ -194,6 +194,7 @@ describe("auth form field errors", () => {
         );
         expect(passwordInput?.attributes.get("aria-invalid")).toBe("true");
         expect(passwordInput?.attributes.get("aria-describedby")).toBe("login-password-error");
+        expect(toastErrorMock).not.toHaveBeenCalled();
         await rendered.unmount();
     });
 
@@ -205,6 +206,7 @@ describe("auth form field errors", () => {
 
         expect(alertText(rendered.elements)).toContain("AuthForm.breachedPassword");
         expect(alertText(rendered.elements)).not.toContain("AuthForm.formHasErrors");
+        expect(toastErrorMock).not.toHaveBeenCalled();
         await rendered.unmount();
     });
 });

@@ -287,7 +287,9 @@ export function AuthForm({
 
             setError(message);
             setFieldErrors(nextFieldErrors);
-            toastError(message);
+            if (!hasFieldErrors) {
+                toastError(message);
+            }
         } finally {
             setSubmitting(false);
         }
