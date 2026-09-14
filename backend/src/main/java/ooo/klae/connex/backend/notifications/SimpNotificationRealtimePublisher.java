@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.session.AccountSessionIndex;
 
 /**
  * In-process realtime publisher targeting the local STOMP simple broker.
@@ -32,9 +33,10 @@ public class SimpNotificationRealtimePublisher implements NotificationRealtimePu
     @Override
     public void send(int recipientId, RealtimeNotificationPayload payload) {
         User recipient = userMapper.getUserById(recipientId);
-        if (recipient == null || recipient.getUsername() == null) {
+        if (recipient == null) {
             return;
         }
-        messagingTemplate.convertAndSendToUser(recipient.getUsername(), NOTIFICATIONS_QUEUE, payload);
+        messagingTemplate.convertAndSendToUser(
+                new AccountSessionIndex(recipient.getId()).getName(), NOTIFICATIONS_QUEUE, payload);
     }
 }

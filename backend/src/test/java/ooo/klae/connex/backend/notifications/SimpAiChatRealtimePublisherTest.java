@@ -23,6 +23,7 @@ class SimpAiChatRealtimePublisherTest {
         SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
         UserMapper userMapper = mock(UserMapper.class);
         User user = new User();
+        user.setId(17);
         user.setUsername("initiator");
         when(userMapper.getUserById(17)).thenReturn(user);
         var publisher = new SimpAiChatRealtimePublisher(
@@ -34,7 +35,7 @@ class SimpAiChatRealtimePublisherTest {
 
         publisher.sendUser(17, frame);
 
-        verify(messagingTemplate).convertAndSendToUser("initiator", "/queue/ai-chat", frame);
+        verify(messagingTemplate).convertAndSendToUser("uid:17", "/queue/ai-chat", frame);
     }
 
     @Test
@@ -77,7 +78,7 @@ class SimpAiChatRealtimePublisherTest {
 
         publisher.sendSession(7, 13, frame);
 
-        verify(messagingTemplate).convertAndSendToUser("owner", "/queue/ai-chat", frame);
-        verify(messagingTemplate).convertAndSendToUser("participant", "/queue/ai-chat", frame);
+        verify(messagingTemplate).convertAndSendToUser("uid:17", "/queue/ai-chat", frame);
+        verify(messagingTemplate).convertAndSendToUser("uid:23", "/queue/ai-chat", frame);
     }
 }

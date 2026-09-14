@@ -6,6 +6,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.messaging.Message;
+import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.MessageHandler;
+import org.springframework.messaging.support.ChannelInterceptor;
+import org.springframework.messaging.support.ExecutorChannelInterceptor;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
@@ -36,8 +41,8 @@ import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
  *
  * <p>The handshake records the authenticating HTTP session id so
  * {@link WebSocketSessionRegistry} can force-close sockets when that session
- * ends, and {@link WebSocketSessionExpiryInterceptor} enforces lazy
- * ({@code expireNow()}) session kills per inbound frame. {@link WebSocketConnectionLimiter}
+ * ends, and {@link WebSocketSessionExpiryInterceptor} checks current session validity
+ * on inbound frames and immediately before outbound delivery. {@link WebSocketConnectionLimiter}
  * caps concurrent sockets per principal so one account cannot flood the shared broker.
  *
  * <p>The handshake also seeds the expected {@code CsrfToken} into the WebSocket
@@ -70,6 +75,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/api/ws")
+                .setHandshakeHandler(new WebSocketAccountHandshakeHandler())
                 .setAllowedOrigins(allowedOrigins)
                 .addInterceptors(
                         new HttpSessionHandshakeInterceptor(List.of()),
@@ -85,9 +91,26 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         registry.setApplicationDestinationPrefixes("/app");
     }
 
+    /** Checks admission once, without repeating store reads for each inbound handler. */
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
-        registration.interceptors(sessionExpiryInterceptor);
+        registration.interceptors(new ChannelInterceptor() {
+            @Override
+            public Message<?> preSend(Message<?> message, MessageChannel channel) {
+                return sessionExpiryInterceptor.preSend(message, channel);
+            }
+        });
+    }
+
+    /** Checks revocation on the delivery executor, outside the publisher's transaction. */
+    @Override
+    public void configureClientOutboundChannel(ChannelRegistration registration) {
+        registration.interceptors(new ExecutorChannelInterceptor() {
+            @Override
+            public Message<?> beforeHandle(Message<?> message, MessageChannel channel, MessageHandler handler) {
+                return sessionExpiryInterceptor.beforeHandle(message, channel, handler);
+            }
+        });
     }
 
     @Override
@@ -96,14 +119,18 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
             @Override
             public void afterConnectionEstablished(WebSocketSession session) throws Exception {
                 boolean admitted = connectionLimiter.tryRegister(session);
+                boolean sessionBound = false;
                 if (admitted && session.getAttributes()
                         .get(HttpSessionHandshakeInterceptor.HTTP_SESSION_ID_ATTR_NAME)
                         instanceof String httpSessionId) {
                     sessionRegistry.register(httpSessionId, session);
+                    sessionBound = true;
                 }
                 super.afterConnectionEstablished(session);
                 if (!admitted) {
                     session.close(CONNECTION_LIMIT_CLOSE_STATUS);
+                } else if (!sessionBound) {
+                    session.close(CloseStatus.POLICY_VIOLATION);
                 }
             }
 
