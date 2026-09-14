@@ -41,22 +41,18 @@ describe("robots", () => {
         }
     });
 
-    it("closes the sessionless routes that hold nothing to index", async () => {
+    it("closes the sessionless prefixes that never render an indexable page", async () => {
         const disallow = disallowedPaths((await robots()).rules);
-        expect(disallow).toEqual(
-            expect.arrayContaining([
-                "/auth/",
-                "/invite",
-                "/invite-link",
-                "/sso/",
-                "/onboarding",
-                "/document-acceptance",
-                "/unsubscribe",
-                "/design-system",
-                "/api/",
-            ]),
-        );
+        expect(disallow).toEqual(expect.arrayContaining(["/onboarding", "/design-system", "/api/"]));
     });
+
+    it.each(["/auth/", "/invite", "/invite-link", "/sso/", "/document-acceptance", "/unsubscribe"])(
+        "leaves %s fetchable so crawlers can read its noindex directive",
+        async (prefix) => {
+            const disallow = disallowedPaths((await robots()).rules);
+            expect(disallow.some((path) => prefix.startsWith(path) || path.startsWith(prefix))).toBe(false);
+        },
+    );
 
     it("welcomes the public marketing, documentation, and legal routes", async () => {
         const rules = (await robots()).rules;
@@ -70,16 +66,23 @@ describe("robots", () => {
         expect((await robots()).sitemap).toBe("https://www.connexcrm.jp/sitemap.xml");
     });
 
-    it("refuses the whole site on a prelaunch host", async () => {
+    it("keeps a prelaunch host crawlable, since the waitlist page is the public face", async () => {
         vi.stubEnv("CONNEX_LANDING_PRELAUNCH_HOSTS", "connexcrm.jp");
         const result = await robots();
-        expect(disallowedPaths(result.rules)).toEqual(["/"]);
-        expect(result.sitemap).toBeUndefined();
+        expect(disallowedPaths(result.rules)).not.toContain("/");
+        expect(result.sitemap).toBe("https://connexcrm.jp/sitemap.xml");
     });
 
-    it("refuses the whole site while the deployment is prelaunch", async () => {
+    it("keeps the site crawlable while the whole deployment is prelaunch", async () => {
         vi.stubEnv("CONNEX_LANDING_MODE", "prelaunch");
+        expect(disallowedPaths((await robots()).rules)).not.toContain("/");
+    });
+
+    it("lets an operator keep a prelaunch host out of search through the noindex list", async () => {
+        vi.stubEnv("CONNEX_LANDING_MODE", "prelaunch");
+        vi.stubEnv("CONNEX_NOINDEX_HOSTS", "connexcrm.jp");
         expect(disallowedPaths((await robots()).rules)).toEqual(["/"]);
+        expect(await sitemap()).toEqual([]);
     });
 
     it("refuses the preview host even when the deployment serves the product", async () => {

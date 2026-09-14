@@ -1,31 +1,20 @@
-import { resolvePreLaunch } from "@/app/lib/landingMode";
 import { PROTECTED_PREFIXES } from "@/app/lib/protectedRoutes";
 import { hostMatchesPatterns } from "@/app/lib/requestHost";
 
 /**
- * Sessionless routes that answer without a workspace but hold nothing a search engine should carry:
- * authentication, invitation acceptance, the onboarding hand-off, one-time email links, and the
- * internal design-system gallery. `/auth/` matters most — route protection appends
- * `?redirect=<path>` to the login page, so every crawled authenticated path would otherwise mint an
- * indexable login duplicate.
+ * Sessionless prefixes that a crawler gains nothing from fetching: the onboarding hand-off redirects
+ * before it renders, the design-system gallery answers 404 outside development, and `/api/` serves no
+ * pages. Sessionless pages that do render — authentication, invitation acceptance, SSO linking, and the
+ * one-time email links — are deliberately absent. Each of them carries a `noindex` directive, and a
+ * crawler only honours `noindex` on a page it is allowed to fetch; closing them here would leave their
+ * URLs indexable without a snippet, which is the duplicate the directive exists to prevent.
  */
-const UNINDEXED_PREFIXES = [
-    "/auth/",
-    "/invite",
-    "/invite-link",
-    "/sso/",
-    "/onboarding",
-    "/document-acceptance",
-    "/unsubscribe",
-    "/design-system",
-    "/api/",
-] as const;
+const CLOSED_PREFIXES = ["/onboarding", "/design-system", "/api/"] as const;
 
 /**
- * Hosts that publish the identical application but must never appear in an index, no matter what
- * the deployment's landing mode says. The preview deployment serves the same build on the public
- * internet, so it is blocked by default rather than by configuration; `CONNEX_NOINDEX_HOSTS` adds
- * to this list and cannot shorten it.
+ * Hosts that publish the identical application but must never appear in an index. The preview
+ * deployment serves the same build on the public internet, so it is blocked by default rather than by
+ * configuration; `CONNEX_NOINDEX_HOSTS` adds to this list and cannot shorten it.
  */
 const ALWAYS_UNINDEXED_HOSTS = "preview.connexcrm.jp";
 
@@ -46,31 +35,24 @@ export const CRAWL_ALLOWED_PATHS = [
  */
 export const CRAWL_DISALLOWED_PATHS: readonly string[] = [
     ...PROTECTED_PREFIXES,
-    ...UNINDEXED_PREFIXES,
+    ...CLOSED_PREFIXES,
 ];
 
 /**
- * Whether a host must refuse crawlers outright. A prelaunch host advertises a product that cannot
- * be visited, and a preview host duplicates the primary host's pages verbatim; both are worse than
- * absent from an index.
+ * Whether a host must refuse crawlers outright. A preview host duplicates the primary host's pages
+ * verbatim, which is worse than being absent from an index. Landing mode plays no part: the prelaunch
+ * page is the product's public face and carries its own accurate title and description, so keeping a
+ * prelaunch host out of search is an operator decision expressed through `CONNEX_NOINDEX_HOSTS`.
  * @param host raw `Host` header value
- * @param mode deployment landing mode
- * @param preLaunchHosts hosts forced to serve the prelaunch page
  * @param noIndexHosts additional hosts that must never be indexed
  * @returns whether `robots.txt` should disallow the whole site for this host
  */
 export function shouldBlockCrawlers({
     host,
-    mode,
-    preLaunchHosts,
     noIndexHosts = process.env.CONNEX_NOINDEX_HOSTS,
 }: {
     host: string | null;
-    mode?: string;
-    preLaunchHosts?: string;
     noIndexHosts?: string;
 }): boolean {
-    if (hostMatchesPatterns(host, ALWAYS_UNINDEXED_HOSTS)) return true;
-    if (hostMatchesPatterns(host, noIndexHosts)) return true;
-    return resolvePreLaunch({ host, mode, preLaunchHosts });
+    return hostMatchesPatterns(host, ALWAYS_UNINDEXED_HOSTS) || hostMatchesPatterns(host, noIndexHosts);
 }
