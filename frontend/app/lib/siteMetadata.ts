@@ -15,8 +15,6 @@ const OPEN_GRAPH_LOCALES: Record<Locale, string> = {
 export function openGraphLocales(locale: Locale): { locale: string; alternateLocale: string[] } {
     return {
         locale: OPEN_GRAPH_LOCALES[locale],
-        alternateLocale: locales
-            .filter((candidate) => candidate !== locale)
-            .map((candidate) => OPEN_GRAPH_LOCALES[candidate]),
+        alternateLocale: locales.flatMap((candidate) => (candidate === locale ? [] : [OPEN_GRAPH_LOCALES[candidate]])),
     };
 }
