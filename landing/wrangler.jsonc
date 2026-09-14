@@ -9,6 +9,11 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "connexcrm.jp", "custom_domain": true },
+    { "pattern": "www.connexcrm.jp", "custom_domain": true }
+  ],
   "observability": {
     "enabled": true
   },
