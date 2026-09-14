@@ -165,7 +165,7 @@ async function resend(
         ...(init?.body ? { body: JSON.stringify(init.body) } : {}),
         cache: "no-store",
         credentials: "omit",
-        redirect: "error",
+        redirect: "manual",
         signal,
     });
     if (response.status === 404 && init?.allowNotFound) {
