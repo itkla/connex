@@ -26,9 +26,10 @@ const PHOTO_PICKERS = [
 ] as const;
 
 const RULE =
-    "A link whose only content is an avatar takes its accessible name from the image: give "
-    + "AvatarImage a real alt, or put the person's name in the link. alt=\"\" is for an avatar that "
-    + "sits beside text the link already exposes (WCAG 2.4.4).";
+    "A link whose only content is an avatar must name itself: put aria-label (or aria-labelledby) on "
+    + "the link. AvatarImage renders no <img> when a person has no photo, so alternative text on the "
+    + "image cannot be the link's only name. alt=\"\" is for an avatar beside text the link already "
+    + "exposes (WCAG 2.4.4).";
 
 /** A link that renders an avatar and hands a screen reader nothing to announce. */
 type UnnamedLink = { file: string; line: number };
@@ -88,22 +89,11 @@ function namesItself(link: ts.JsxElement): boolean {
     );
 }
 
-function hasNonEmptyAlt(image: JsxElementNode): boolean {
-    const alt = attribute(image, "alt");
-    if (alt === undefined || alt.initializer === undefined) return false;
-    if (ts.isStringLiteral(alt.initializer)) return alt.initializer.text.trim().length > 0;
-    if (ts.isJsxExpression(alt.initializer)) {
-        const expression = alt.initializer.expression;
-        if (expression === undefined) return false;
-        return !(ts.isStringLiteralLike(expression) && expression.text.trim().length === 0);
-    }
-    return false;
-}
-
 function rendersTextBesideAvatar(link: ts.JsxElement): boolean {
     let found = false;
     const visit = (node: ts.Node): void => {
         if (isJsxElementNode(node) && tagName(node) === "Avatar") return;
+        if (ts.isJsxAttributes(node)) return;
         if (ts.isJsxText(node) && node.text.trim().length > 0) found = true;
         if (ts.isJsxExpression(node) && node.expression !== undefined) found = true;
         node.forEachChild(visit);
@@ -116,8 +106,9 @@ function rendersTextBesideAvatar(link: ts.JsxElement): boolean {
 type Scan = { findings: UnnamedLink[]; watched: number };
 
 /**
- * Reads every link that renders an avatar and decides whether it exposes a name — its own label,
- * text beside the avatar, or alternative text on the image the link otherwise falls back to.
+ * Reads every link that renders an avatar and decides whether it exposes a name — its own label, or
+ * text beside the avatar. Alternative text on the image does not count, because the image is not
+ * rendered at all for a person without a photo.
  * @param source the file's text
  * @param file the path reported with each finding
  * @returns the nameless links in source order, and how many avatar-bearing links were judged
@@ -133,7 +124,6 @@ export function scanAvatarLinks(source: string, file: string): Scan {
         watched += 1;
         if (namesItself(link)) continue;
         if (rendersTextBesideAvatar(link)) continue;
-        if (images.every(hasNonEmptyAlt)) continue;
         findings.push({
             file,
             line: parsed.getLineAndCharacterOfPosition(link.getStart(parsed)).line + 1,
@@ -192,7 +182,7 @@ describe("avatar link names", () => {
         expect(scanProbe(source)).toHaveLength(1);
     });
 
-    it("accepts an avatar named by its own alternative text", () => {
+    it("catches an avatar-only link that relies on alternative text the image may never render", () => {
         const source = `export const Row = () => (
             <Link href="/records/contacts/1" className="nodrag">
                 <Avatar>
@@ -202,7 +192,20 @@ describe("avatar link names", () => {
             </Link>
         );`;
 
-        expect(scanProbe(source)).toEqual([]);
+        expect(scanProbe(source)).toHaveLength(1);
+    });
+
+    it("does not mistake an attribute beside the avatar for visible text", () => {
+        const source = `export const Row = () => (
+            <Link href="/records/contacts/1">
+                <Avatar>
+                    <AvatarImage src={person.imageUrl} alt={person.name} />
+                </Avatar>
+                <span className={badgeClass} />
+            </Link>
+        );`;
+
+        expect(scanProbe(source)).toHaveLength(1);
     });
 
     it("accepts a decorative avatar beside text the link already exposes", () => {
