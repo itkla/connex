@@ -26,7 +26,7 @@ const UPDATED = "2026-07-01";
 
 export async function generateMetadata(): Promise<Metadata> {
     const t = await getTranslations("Legal");
-    return { title: `${t("tokushoho.title")} — ${t("brand")}`, description: t("tokushoho.metaDescription") };
+    return { title: t("tokushoho.title"), description: t("tokushoho.metaDescription") };
 }
 
 export default async function TokushohoPage() {

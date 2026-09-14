@@ -28,7 +28,7 @@ const UPDATED = "2026-08-21";
 
 export async function generateMetadata(): Promise<Metadata> {
     const t = await getTranslations("Legal");
-    return { title: `${t("privacy.title")} — ${t("brand")}`, description: t("privacy.metaDescription") };
+    return { title: t("privacy.title"), description: t("privacy.metaDescription") };
 }
 
 export default async function PrivacyPage() {

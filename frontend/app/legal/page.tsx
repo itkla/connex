@@ -28,7 +28,7 @@ const UPDATED = "2026-07-01";
 
 export async function generateMetadata(): Promise<Metadata> {
     const t = await getTranslations("Legal");
-    return { title: `${t("terms.title")} — ${t("brand")}`, description: t("terms.metaDescription") };
+    return { title: t("terms.title"), description: t("terms.metaDescription") };
 }
 
 export default async function TermsPage() {
