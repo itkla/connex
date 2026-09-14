@@ -6,8 +6,8 @@ import { requestOrigin } from "@/app/lib/requestHost";
 
 /**
  * `robots.txt`, answered per request. Reading the `Host` header makes this a dynamic route handler,
- * which is what lets one process serve a welcoming `robots.txt` on the primary host and a blanket
- * refusal on the prelaunch and preview hosts it also answers for.
+ * which is what lets one process serve a welcoming `robots.txt` on its public hosts — prelaunch
+ * included — and a blanket refusal on the preview host and any host listed in `CONNEX_NOINDEX_HOSTS`.
  * @returns the crawl rules for the host that asked
  */
 export default async function robots(): Promise<MetadataRoute.Robots> {
