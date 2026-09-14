@@ -172,7 +172,7 @@ describe("auth form failure copy", () => {
 });
 
 describe("auth form field errors", () => {
-    it("announces the failure summary alongside the per-field text", async () => {
+    it("announces the field's own text rather than a generic summary", async () => {
         const { ApiError } = await import("@/app/lib/api");
         loginMock.mockRejectedValueOnce(
             new ApiError(RAW_BACKEND_TEXT, 400, undefined, { password: "Password is too short" }),
@@ -180,18 +180,31 @@ describe("auth form field errors", () => {
 
         const rendered = await renderAuthForm("login");
 
-        expect(alertText(rendered.elements)).toContain("AuthForm.formHasErrors");
+        expect(alertText(rendered.elements)).toContain("Password is too short");
+        expect(alertText(rendered.elements)).not.toContain("AuthForm.formHasErrors");
 
         const fieldError = rendered.elements.find(
             (element) => element.attributes.get("id") === "login-password-error",
         );
         expect(fieldError?.textContent).toBe("Password is too short");
+        expect(fieldError?.attributes.get("role")).toBe("alert");
 
         const passwordInput = rendered.elements.find(
             (element) => element.tagName === "INPUT" && element.attributes.get("id") === "login-password",
         );
         expect(passwordInput?.attributes.get("aria-invalid")).toBe("true");
         expect(passwordInput?.attributes.get("aria-describedby")).toBe("login-password-error");
+        await rendered.unmount();
+    });
+
+    it("announces the breached-password guidance itself", async () => {
+        const { ApiError } = await import("@/app/lib/api");
+        registerMock.mockRejectedValueOnce(new ApiError(RAW_BACKEND_TEXT, 400, "BREACHED_PASSWORD"));
+
+        const rendered = await renderAuthForm("register");
+
+        expect(alertText(rendered.elements)).toContain("AuthForm.breachedPassword");
+        expect(alertText(rendered.elements)).not.toContain("AuthForm.formHasErrors");
         await rendered.unmount();
     });
 });

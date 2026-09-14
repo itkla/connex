@@ -390,7 +390,7 @@ export function AuthForm({
                                             )}
                                         </div>
                                         {fieldError && (
-                                            <p id={errorId} className="mt-1.5 px-1 text-sm text-destructive">
+                                            <p id={errorId} role="alert" className="mt-1.5 px-1 text-sm text-destructive">
                                                 {fieldError}
                                             </p>
                                         )}
@@ -412,7 +412,7 @@ export function AuthForm({
                                 </div>
                             )}
 
-                            {error && (
+                            {error && !hasFieldErrors && (
                                 <p
                                     role="alert"
                                     className="rounded-xl bg-red-50 px-3.5 py-2.5 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300"
