@@ -1,5 +1,6 @@
 {
   "CompaniesDetail": {
+    "unknownUser": "不明",
     "backToAll": "会社一覧",
     "pastRelations": "過去の関係者",
     "noRecordedInteractions": "やり取りの記録がありません",

@@ -1,5 +1,6 @@
 {
   "CompaniesDetail": {
+    "unknownUser": "Unknown",
     "backToAll": "All Companies",
     "pastRelations": "Past Relations",
     "noRecordedInteractions": "No recorded interactions",
