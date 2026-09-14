@@ -28,15 +28,14 @@ import ooo.klae.connex.backend.mappers.UserMapper;
  * <ol>
  *   <li>a known {@code (org, provider, issuer, subject)} link signs the linked user straight in —
  *       the lookup is scoped to the organization, so one org's IdP cannot match another's identity;</li>
- *   <li>otherwise the IdP email must be <em>verified</em> and its domain must be one this
- *       organization owns in its {@code sso_domain} routing list (globally unique), binding the
- *       asserted email to the org so no IdP can assert or claim an address belonging to another org,
- *       and — when the org has set an {@code org_allowed_domain} membership ceiling (#316) — the
+ *   <li>otherwise the IdP email must be <em>verified</em> and its domain must be in this
+ *       organization's {@code sso_domain} routing list (globally unique), and — when the org has
+ *       set an {@code org_allowed_domain} membership ceiling (#316) — the
  *       domain must also satisfy that ceiling, so SSO cannot provision a member the org's own policy
  *       forbids;</li>
  *   <li>a matching existing password account never auto-links — it returns
  *       {@link SsoLoginResult.LinkRequired} so ownership is proven first, and a passwordless account
- *       already federated to a different organization is refused;</li>
+ *       is refused because an email assertion does not prove ownership of its existing login method;</li>
  *   <li>a new email is JIT-provisioned into the connection's workspace and the identity recorded.</li>
  * </ol>
  * The target workspace, organization, and default role are read only from the stored
@@ -79,8 +78,8 @@ public class SsoLoginService {
      * @param displayName the IdP-asserted display name, used when provisioning
      * @return a login outcome, or a link-required outcome when the email collides with a password account
      * @throws ForbiddenException when the organization is being removed, the email is unverified,
-     *         its domain is not owned by this organization, or the account is already federated to
-     *         a different organization
+     *         its domain is not routed to this organization, or an existing passwordless account
+     *         would be linked solely by email
      * @throws BadRequestException when the organization has no SSO connection
      */
     public SsoLoginResult resolve(String provider, String issuer, String subject, String email,
@@ -148,6 +147,8 @@ public class SsoLoginService {
             if (federatedIdentityMapper.countByUserIdExcludingOrg(user.getId(), orgId) > 0) {
                 throw new ForbiddenException("This account is managed by a different organization");
             }
+            throw new ForbiddenException(
+                    "An account already exists for this email. Sign in with the method you first used.");
         } else {
             lockNewJitRoots(
                 connection,
