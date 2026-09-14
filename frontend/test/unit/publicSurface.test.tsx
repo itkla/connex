@@ -132,6 +132,27 @@ describe("public surfaces on a product host", () => {
     });
 });
 
+describe("the real marketing footer", () => {
+    it("drops the login link before launch", async () => {
+        const { default: RealLandingFooter } = await vi.importActual<typeof import("@/app/components/landing/LandingFooter")>(
+            "@/app/components/landing/LandingFooter",
+        );
+        const doc = parse(await RealLandingFooter({ showLogin: false }));
+
+        expect(doc.querySelectorAll(ACCOUNT_LINKS)).toHaveLength(0);
+        expect(doc.querySelectorAll('a[href="/privacy"]')).toHaveLength(1);
+    });
+
+    it("keeps the login link after launch", async () => {
+        const { default: RealLandingFooter } = await vi.importActual<typeof import("@/app/components/landing/LandingFooter")>(
+            "@/app/components/landing/LandingFooter",
+        );
+        const doc = parse(await RealLandingFooter({ showLogin: true }));
+
+        expect(doc.querySelectorAll('a[href="/auth/login"]')).toHaveLength(1);
+    });
+});
+
 describe("the header's compact call to action", () => {
     it.each(["en", "ja"] as const)("anchors to the launch signup before launch in %s", (locale) => {
         session.locale = locale;
@@ -140,7 +161,7 @@ describe("the header's compact call to action", () => {
         const cta = doc.querySelector<HTMLAnchorElement>("[data-landing-mobile] a");
 
         expect(cta?.getAttribute("href")).toBe("/#launch-signup");
-        expect(cta?.textContent).toBe(messages.CommonHome.prelaunch.submit);
+        expect(cta?.textContent).toBe(messages.CommonHome.prelaunch.navCta);
     });
 
     it.each(["en", "ja"] as const)("routes to the product call to action after launch in %s", (locale) => {
@@ -152,6 +173,17 @@ describe("the header's compact call to action", () => {
 
         expect(cta?.getAttribute("href")).toBe("/auth/register");
         expect(cta?.textContent).toBe(label);
+    });
+    it("keeps the language switcher in the phone bar and moves the theme toggle into the menu", () => {
+        const home = catalog("en").CommonHome;
+        const doc = parse(<LandingNav ctaHref="/auth/register" ctaLabel="Get started" preLaunch />);
+        const cluster = doc.querySelector("[data-landing-mobile]");
+        const languageSwitcher = cluster?.querySelector(`button[aria-label^="${home.languageLabel}:"]`);
+        const themeToggle = cluster?.querySelector(`button[aria-label="${home.toggleLightDarkMode}"]`);
+
+        expect(languageSwitcher).not.toBeNull();
+        expect(languageSwitcher?.closest(".hidden")).toBeNull();
+        expect(themeToggle?.parentElement?.className).toContain("hidden sm:flex");
     });
 });
 

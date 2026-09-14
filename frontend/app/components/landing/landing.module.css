@@ -14,10 +14,12 @@
 
 .nav button { min-width: 2.75rem; min-height: 2.75rem; }
 
-.landing :is(header nav, footer > div) { padding-inline: 1.25rem; }
+.nav nav,
+.landing footer > div { padding-inline: 1.25rem; }
 
 @media (min-width: 40rem) {
-    .landing :is(header nav, footer > div) { padding-inline: 2rem; }
+    .nav nav,
+    .landing footer > div { padding-inline: 2rem; }
 }
 
 .landing h1,

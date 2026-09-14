@@ -44,7 +44,7 @@ export default function DocsTopBar({ authed, preLaunch = false }: { authed: bool
     const cta = authed
         ? { href: "/dashboard", label: t("openApp") }
         : preLaunch
-          ? { href: LAUNCH_SIGNUP_HREF, label: home("prelaunch.submit") }
+          ? { href: LAUNCH_SIGNUP_HREF, label: home("prelaunch.navCta") }
           : { href: "/auth/register", label: t("getStarted") };
 
     return (
@@ -73,15 +73,15 @@ export default function DocsTopBar({ authed, preLaunch = false }: { authed: bool
                         </DrawerContent>
                     </Drawer>
 
-                    <Link href="/" className="flex items-center gap-2.5">
-                        <span className="size-3 rounded-[5px] bg-brand" aria-hidden="true" />
-                        <span className="text-lg font-bold tracking-tight text-foreground">
+                    <Link href="/" className="flex shrink-0 items-center gap-2.5">
+                        <span className="size-3 shrink-0 rounded-[5px] bg-brand" aria-hidden="true" />
+                        <span className="whitespace-nowrap text-lg font-bold tracking-tight text-foreground max-[359px]:sr-only">
                             {home("brand")}
                         </span>
                     </Link>
                     <Link
                         href="/docs"
-                        className="rounded-full border border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                        className="hidden rounded-full border border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground min-[400px]:inline-flex"
                     >
                         {t("sectionLabel")}
                     </Link>
@@ -102,7 +102,7 @@ export default function DocsTopBar({ authed, preLaunch = false }: { authed: bool
                     )}
                     <Link
                         href={cta.href}
-                        className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97]"
+                        className="shrink-0 whitespace-nowrap rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.97]"
                     >
                         {cta.label}
                     </Link>

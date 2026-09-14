@@ -67,6 +67,7 @@
       "emailLabel": "メールアドレス",
       "emailPlaceholder": "メールアドレス",
       "submit": "公開通知を受け取る",
+      "navCta": "事前登録",
       "submitting": "登録中…",
       "privacy": "Connexの公開時にメールでお知らせします。<link>プライバシーポリシー</link>",
       "successTitle": "公開通知に登録しました。",
