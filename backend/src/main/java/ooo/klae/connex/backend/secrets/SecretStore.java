@@ -122,10 +122,7 @@ public class SecretStore {
         SecretReference parsed = SecretReference.parseOrNull(reference);
         if (parsed != null) {
             lockScopeParentsForShare(purpose.scopeType(), scopeId);
-            StoredSecret secret = secretValueMapper.findById(parsed.id());
-            if (secret != null && matches(secret, purpose, scopeId)) {
-                secretValueMapper.delete(secret.getId());
-            }
+            secretValueMapper.delete(parsed.id(), purpose.scopeType(), scopeId, purpose.value());
         }
     }
 

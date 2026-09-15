@@ -64,6 +64,8 @@ public class AuditService {
     private static final Set<String> SECRET_PURPOSES = Set.of(
             "workspace.smtp.password",
             "workspace.delivery.provider_credential",
+            "workspace.delivery.provider_credential.email",
+            "workspace.delivery.provider_credential.sms",
             "workspace.delivery.webhook_secret",
             "workspace.connector.credential",
             "org.sso.oidc_client_secret",

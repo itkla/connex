@@ -7,6 +7,11 @@ import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
  * A workspace's SMTP config as returned to the client. The password is never
  * included; {@code hasPassword} reports whether one is stored so the UI can show
  * a "configured" state and leave the field blank to keep it unchanged.
+ *
+ * <p>{@code defaultPort} is the instance's resolved SMTP port, which a stored {@code null} port
+ * inherits. The client must display and resubmit that value rather than a hardcoded literal: the
+ * endpoint-binding guard on save compares effective ports, so echoing 587 on an instance configured
+ * for another port would look like an endpoint change and reject an unrelated blank-password edit.
  */
 @Data
 public class MailConfigDto {
@@ -19,6 +24,7 @@ public class MailConfigDto {
     private boolean starttls;
     private boolean ssl;
     private boolean auth;
+    private int defaultPort;
     private boolean hasPassword;
     private boolean configured;
     private String updatedAt;
@@ -26,14 +32,16 @@ public class MailConfigDto {
     /**
      * Maps a stored config to its client view, omitting the encrypted password.
      * @param config the stored config, or null when none exists
+     * @param defaultPort the instance's resolved SMTP port, inherited by a stored null port
      * @return the DTO (an empty, disabled default when config is null)
      */
-    public static MailConfigDto from(WorkspaceMailConfig config) {
+    public static MailConfigDto from(WorkspaceMailConfig config, int defaultPort) {
         MailConfigDto dto = new MailConfigDto();
+        dto.setDefaultPort(defaultPort);
         if (config == null) {
             dto.setStarttls(true);
             dto.setAuth(true);
-            dto.setPort(587);
+            dto.setPort(defaultPort);
             return dto;
         }
         dto.setEnabled(config.isEnabled());

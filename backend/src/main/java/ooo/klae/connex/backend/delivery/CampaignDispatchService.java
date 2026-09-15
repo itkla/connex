@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.delivery;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -9,6 +10,8 @@ import java.util.function.LongSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 
@@ -17,6 +20,8 @@ import ooo.klae.connex.backend.beans.CampaignDeliveryEvent;
 import ooo.klae.connex.backend.beans.CampaignMessageRevision;
 import ooo.klae.connex.backend.beans.CampaignSend;
 import ooo.klae.connex.backend.capability.Capability;
+import ooo.klae.connex.backend.delivery.provider.esp.HttpEspDeliveryProvider;
+import ooo.klae.connex.backend.delivery.provider.sms.SmsHttpDeliveryProvider;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.mappers.CampaignMessageMapper;
@@ -53,6 +58,7 @@ public class CampaignDispatchService {
             "AMBIGUOUS: Worker claim expired after the delivery target changed";
     private static final String RECOVERED_CHANGED_TARGET_CLAIM =
             "AMBIGUOUS: Delivery target changed before a recovered attempt could resume";
+    private static final String NOT_DISPATCHABLE_SKIP_REASON = "not_dispatchable";
 
     private final CampaignSendMapper campaignSendMapper;
     private final CampaignDeliveryMapper campaignDeliveryMapper;
@@ -65,9 +71,11 @@ public class CampaignDispatchService {
     private final WorkflowTriggeredSendGate triggeredSendGate;
     private final WorkflowRunMapper workflowRunMapper;
     private final CampaignDispatchClaimBoundary claimBoundary;
+    private final CampaignFrequencyAdmissionService frequencyAdmissionService;
     private LongSupplier nanoTimeSource = System::nanoTime;
 
     /** Processes every queued send in the workspace. Never throws. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public int processWorkspace(int workspaceId) {
         if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
             return 0;
@@ -100,6 +108,7 @@ public class CampaignDispatchService {
      *         diagnostics derive their run status from this, so a silently undeliverable send is
      *         never reported as a healthy sweep.
      */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public boolean processSend(int workspaceId, int sendId) {
         if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
             return true;
@@ -218,12 +227,13 @@ public class CampaignDispatchService {
     private void dispatchClaimed(int workspaceId, CampaignSend send, DeliveryChannel channel,
             ResolvedDeliveryProvider target, MessageDispatcher dispatcher,
             CampaignMessageRevision revision, int deliveryId, String leaseOwner) {
-        if (leaseOwner != null && !triggeredSendGate.enabled()) {
-            campaignDeliveryMapper.releaseTriggeredClaim(workspaceId, deliveryId, leaseOwner);
-            return;
-        }
         CampaignDelivery identity = campaignDeliveryMapper.getDeliveryIdentity(workspaceId, deliveryId);
         if (identity == null) {
+            return;
+        }
+        if (leaseOwner != null && !triggeredSendGate.enabled()) {
+            campaignDeliveryMapper.releaseTriggeredClaim(
+                    workspaceId, deliveryId, leaseOwner, identity.getFrequencyReservedAt());
             return;
         }
         Integer personId = identity.getPersonId();
@@ -254,7 +264,8 @@ public class CampaignDispatchService {
                 return;
             }
             if (!triggeredSendGate.enabled()) {
-                campaignDeliveryMapper.releaseTriggeredClaim(workspaceId, deliveryId, leaseOwner);
+                campaignDeliveryMapper.releaseTriggeredClaim(
+                        workspaceId, deliveryId, leaseOwner, identity.getFrequencyReservedAt());
                 return;
             }
         }
@@ -262,6 +273,44 @@ public class CampaignDispatchService {
             markFailed(workspaceId, deliveryId, leaseOwner,
                     "Provider deadline expired before egress",
                     CampaignDeliveryFailureReason.PROVIDER_TIMEOUT.token());
+            return;
+        }
+        if (personId != null && FREQUENCY_WINDOW_HOURS > 0) {
+            CampaignFrequencyAdmissionService.Admission admission = frequencyAdmissionService.reserve(
+                    workspaceId, deliveryId, personId, channel.token(), leaseOwner, FREQUENCY_WINDOW_HOURS);
+            if (admission == CampaignFrequencyAdmissionService.Admission.CLAIM_LOST) {
+                return;
+            }
+            if (admission == CampaignFrequencyAdmissionService.Admission.REFUSED) {
+                markSkipped(workspaceId, deliveryId, leaseOwner, NOT_DISPATCHABLE_SKIP_REASON);
+                return;
+            }
+            if (admission == CampaignFrequencyAdmissionService.Admission.CAPPED) {
+                if (markSkipped(workspaceId, deliveryId, leaseOwner, "frequency_capped") == 1) {
+                    workflowRunMapper.markActionDeliveryCapped(workspaceId, deliveryId);
+                }
+                return;
+            }
+        }
+        if (leaseOwner != null && !triggeredSendGate.enabled()) {
+            campaignDeliveryMapper.releaseTriggeredClaim(
+                    workspaceId, deliveryId, leaseOwner, identity.getFrequencyReservedAt());
+            return;
+        }
+        if (providerDeadlineNanos - nanoTimeSource.getAsLong() <= 0) {
+            releaseFrequencyWindowBeforeEgress(workspaceId, deliveryId, leaseOwner);
+            markFailed(workspaceId, deliveryId, leaseOwner,
+                    "Provider deadline expired before egress",
+                    CampaignDeliveryFailureReason.PROVIDER_TIMEOUT.token());
+            return;
+        }
+        if ((HttpEspDeliveryProvider.PROVIDER_ID.equals(target.providerId())
+                || SmsHttpDeliveryProvider.PROVIDER_ID.equals(target.providerId()))
+                && !deliveryProviderConfigService.isCurrentClaimTarget(target, deliveryId, leaseOwner)) {
+            releaseFrequencyWindowBeforeEgress(workspaceId, deliveryId, leaseOwner);
+            markFailed(workspaceId, deliveryId, leaseOwner,
+                    "Delivery target changed before egress",
+                    CampaignDeliveryFailureReason.DELIVERY_TARGET_CHANGED.token());
             return;
         }
         DeliveryRequest request = new DeliveryRequest(
@@ -295,6 +344,9 @@ public class CampaignDispatchService {
                     : receipt.detail();
             String failureCode = CampaignDeliveryFailureReason.classify(
                     failure, receipt.status() == DispatchStatus.AMBIGUOUS).token();
+            if (receipt.provenBeforeEgress()) {
+                releaseFrequencyWindowBeforeEgress(workspaceId, deliveryId, leaseOwner);
+            }
             int updated = receipt.status() == DispatchStatus.AMBIGUOUS
                     ? markAmbiguousOrThrow(
                             workspaceId, deliveryId, leaseOwner, bounded(failure), failureCode)
@@ -306,8 +358,24 @@ public class CampaignDispatchService {
         }
     }
 
+    private void releaseFrequencyWindowBeforeEgress(int workspaceId, int deliveryId, String leaseOwner) {
+        CampaignDelivery history = campaignDeliveryMapper.getDeliveryIdentity(workspaceId, deliveryId);
+        if (history != null && !hasEarlierSubmissionUncertainty(history)) {
+            campaignDeliveryMapper.releaseFrequencyWindowBeforeEgress(workspaceId, deliveryId, leaseOwner);
+        }
+    }
+
+    /** Returns one only for a persisted skip; earlier uncertainty remains an ambiguous failure. */
     private int markSkipped(
             int workspaceId, int deliveryId, String leaseOwner, String skipReason) {
+        CampaignDelivery history = campaignDeliveryMapper.getDeliveryIdentity(workspaceId, deliveryId);
+        if (history == null) {
+            return 0;
+        }
+        if (hasEarlierSubmissionUncertainty(history)) {
+            markEarlierAttemptAmbiguous(workspaceId, deliveryId, leaseOwner, history);
+            return 0;
+        }
         return leaseOwner == null
                 ? campaignDeliveryMapper.markSkipped(workspaceId, deliveryId, skipReason)
                 : campaignDeliveryMapper.markTriggeredSkipped(
@@ -320,11 +388,39 @@ public class CampaignDispatchService {
             String leaseOwner,
             String lastError,
             String lastErrorCode) {
+        CampaignDelivery history = campaignDeliveryMapper.getDeliveryIdentity(workspaceId, deliveryId);
+        if (history == null) {
+            return 0;
+        }
+        if (hasEarlierSubmissionUncertainty(history)) {
+            return markEarlierAttemptAmbiguous(workspaceId, deliveryId, leaseOwner, history);
+        }
         return leaseOwner == null
             ? campaignDeliveryMapper.markFailed(
                     workspaceId, deliveryId, lastError, lastErrorCode)
             : campaignDeliveryMapper.markTriggeredFailed(
                     workspaceId, deliveryId, leaseOwner, lastError, lastErrorCode);
+    }
+
+    private boolean hasEarlierSubmissionUncertainty(CampaignDelivery history) {
+        return history.getReconciliationRequiredAt() != null
+                || CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token().equals(history.getLastErrorCode())
+                || (history.getLastError() != null && history.getLastError().startsWith("AMBIGUOUS:"))
+                || (history.getAttemptCount() > 1
+                    && !(history.getLastErrorCode() == null
+                        && "Claim released before provider egress".equals(history.getLastError())));
+    }
+
+    private int markEarlierAttemptAmbiguous(
+            int workspaceId, int deliveryId, String leaseOwner, CampaignDelivery history) {
+        String lastError = history.getLastError();
+        if (lastError == null || !lastError.startsWith("AMBIGUOUS:")) {
+            lastError = "AMBIGUOUS: An earlier provider attempt requires reconciliation";
+        }
+        String lastErrorCode = history.getLastErrorCode() == null
+                ? CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()
+                : history.getLastErrorCode();
+        return markAmbiguousOrThrow(workspaceId, deliveryId, leaseOwner, lastError, lastErrorCode);
     }
 
     private int markAmbiguous(
@@ -458,7 +554,7 @@ public class CampaignDispatchService {
             return AudienceEligibilityService.CONSENT_POLICY.exclusionReason();
         }
         if (personId != null && FREQUENCY_WINDOW_HOURS > 0) {
-            LocalDateTime since = LocalDateTime.now().minusHours(FREQUENCY_WINDOW_HOURS);
+            LocalDateTime since = LocalDateTime.now(ZoneOffset.UTC).minusHours(FREQUENCY_WINDOW_HOURS);
             if (campaignDeliveryMapper.recentDispatchCount(
                     workspaceId, personId, channelToken, send.getId(), since) > 0) {
                 return "frequency_capped";

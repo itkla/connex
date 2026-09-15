@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityRegistry;
 import ooo.klae.connex.backend.delivery.CampaignDispatchClaimBoundary;
 import ooo.klae.connex.backend.delivery.CampaignDispatchService;
+import ooo.klae.connex.backend.delivery.CampaignFrequencyAdmissionService;
 import ooo.klae.connex.backend.delivery.CampaignSendWorker;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryCredentials;
@@ -78,6 +79,7 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
     @Autowired private RuleActionExecutor ruleActionExecutor;
     @Autowired private CampaignTriggeredSendService triggeredSendService;
     @Autowired private CampaignDispatchService campaignDispatchService;
+    @Autowired private CampaignFrequencyAdmissionService frequencyAdmissionService;
     @Autowired private CampaignSendWorker campaignSendWorker;
     @Autowired private SuppressionService suppressionService;
     @Autowired private CampaignDeliveryMapper campaignDeliveryMapper;
@@ -442,7 +444,7 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
     }
 
     @Test
-    void webhookRotationPreservesRecoveryIdentityWhileEgressChangesDoNot() {
+    void everyConfigurationMutationAdvancesGenerationAndStopsExpiredClaimReplay() {
         String prefix = "webhook-generation-" + unique();
         Person person = person(prefix, prefix + "@example.com");
         CampaignMessageDto message = message(prefix);
@@ -471,16 +473,12 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
         DeliveryProviderConfig rotated = deliveryProviderConfigMapper.findByWorkspaceChannel(
                 workspace.getId(), DeliveryChannel.EMAIL.token());
 
-        assertEquals(original.getConfigGeneration(), rotated.getConfigGeneration());
-        assertEquals(originalFingerprint, deliveryTargetFingerprint(rotated));
+        assertEquals(original.getConfigGeneration() + 1, rotated.getConfigGeneration());
+        assertFalse(originalFingerprint.equals(deliveryTargetFingerprint(rotated)));
         assertTrue(dispatchService(false).processSend(workspace.getId(), result.sendId()));
-        assertEquals("pending", campaignDeliveryMapper.getDelivery(
+        assertEquals("failed", campaignDeliveryMapper.getDelivery(
                 workspace.getId(), result.deliveryId()).getStatus());
 
-        assertEquals(1, campaignDeliveryMapper.claimTriggered(
-                workspace.getId(), result.deliveryId(), "changed-target-worker", 1_000_000L,
-                rotated.getProvider(), deliveryTargetFingerprint(rotated)));
-        expireClaim(result.deliveryId());
         String rotatedFingerprint = deliveryTargetFingerprint(rotated);
         rotated.setEndpoint("https://account-b.example.test/send");
         deliveryProviderConfigMapper.upsert(rotated, false);
@@ -872,7 +870,8 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
                 capabilityRegistry,
                 new WorkflowTriggeredSendGate(enabled, 200, 200),
                 workflowRunMapper,
-                new CampaignDispatchClaimBoundary());
+                new CampaignDispatchClaimBoundary(),
+                frequencyAdmissionService);
     }
 
     private DeliveryProviderConfig deliveryConfig(String endpoint, String credentialRef) {

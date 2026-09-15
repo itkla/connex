@@ -19,5 +19,7 @@ public interface SecretValueMapper {
     int updateRewrapped(@Param("secret") StoredSecret secret, @Param("previousKeyId") String previousKeyId,
             @Param("previousEncryptedDataKey") String previousEncryptedDataKey,
             @Param("previousCiphertext") String previousCiphertext);
-    int delete(long id);
+    /** Deletes only the current row matching the complete secret identity, without a snapshot read. */
+    int delete(@Param("id") long id, @Param("scopeType") String scopeType,
+            @Param("scopeId") int scopeId, @Param("purpose") String purpose);
 }

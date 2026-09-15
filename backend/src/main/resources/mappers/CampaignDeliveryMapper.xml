@@ -7,7 +7,7 @@
     id, workspace_id, send_id, person_id, address, status, skip_reason, provider_message_id,
     provider_id, attempt_target_fingerprint, attempt_count, last_error, last_error_code,
     reconciliation_required_at, reconciliation_outcome, unsubscribe_token, unsubscribe_token_hash,
-    created_at, updated_at
+    created_at, submitted_at, frequency_reserved_at, updated_at
   </sql>
 
   <insert id="insertDeliveries">
@@ -93,7 +93,9 @@
   </select>
 
   <select id="getDeliveryIdentity" resultType="CampaignDelivery">
-    SELECT id, workspace_id, send_id, person_id FROM campaign_delivery
+    SELECT id, workspace_id, send_id, person_id, frequency_reserved_at,
+           attempt_count, last_error, last_error_code, reconciliation_required_at
+    FROM campaign_delivery
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </select>
 
@@ -174,10 +176,21 @@
       AND dispatch_lease_until >= UTC_TIMESTAMP(6)
   </update>
 
+  <sql id="cleanAttemptHistory">
+    (attempt_count = 1 OR (last_error_code IS NULL
+      AND last_error = 'Claim released before provider egress'))
+  </sql>
+
   <update id="releaseTriggeredClaim">
     UPDATE campaign_delivery
     SET status = 'pending', provider_id = NULL,
-        attempt_target_fingerprint = NULL,
+        attempt_target_fingerprint = CASE WHEN <include refid="cleanAttemptHistory"/>
+          THEN NULL ELSE attempt_target_fingerprint END,
+        last_error_code = CASE WHEN <include refid="cleanAttemptHistory"/>
+          THEN NULL ELSE 'deadline_ambiguous' END,
+        last_error = CASE WHEN <include refid="cleanAttemptHistory"/>
+          THEN 'Claim released before provider egress' ELSE last_error END,
+        frequency_reserved_at = #{priorFrequencyReservedAt},
         dispatch_lease_owner = NULL, dispatch_lease_until = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
       AND dispatch_lease_owner = #{leaseOwner}
@@ -197,7 +210,7 @@
   <update id="recoverExpiredTriggeredClaim">
     UPDATE campaign_delivery d
     JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
-    SET d.status = 'pending',
+    SET d.status = 'pending', d.last_error_code = 'deadline_ambiguous',
         d.dispatch_lease_owner = NULL, d.dispatch_lease_until = NULL
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'dispatching'
       AND d.dispatch_lease_until &lt; UTC_TIMESTAMP(6)
@@ -222,7 +235,8 @@
     UPDATE campaign_delivery
     SET status = 'dispatched', skip_reason = NULL, provider_id = #{providerId},
         provider_message_id = #{providerMessageId}, last_error = NULL, last_error_code = NULL,
-        reconciliation_required_at = NULL
+        reconciliation_required_at = NULL,
+        submitted_at = COALESCE(submitted_at, UTC_TIMESTAMP(6))
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
   </update>
 
@@ -231,6 +245,7 @@
     SET status = 'dispatched', skip_reason = NULL, provider_id = #{providerId},
         provider_message_id = #{providerMessageId}, last_error = NULL, last_error_code = NULL,
         reconciliation_required_at = NULL,
+        submitted_at = COALESCE(submitted_at, UTC_TIMESTAMP(6)),
         dispatch_lease_owner = NULL, dispatch_lease_until = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
       AND dispatch_lease_owner = #{leaseOwner}
@@ -239,7 +254,8 @@
   <update id="applyProviderStatus">
     UPDATE campaign_delivery
     SET status = #{toStatus}, last_error = NULL, last_error_code = NULL,
-        reconciliation_required_at = NULL
+        reconciliation_required_at = NULL,
+        submitted_at = COALESCE(submitted_at, LEAST(frequency_reserved_at, UTC_TIMESTAMP(6)), created_at)
     WHERE workspace_id = #{workspaceId} AND id = #{id}
       AND status IN
       <foreach item="from" collection="fromStatuses" open="(" separator="," close=")">
@@ -286,7 +302,8 @@
     UPDATE campaign_delivery
     SET status = 'failed', skip_reason = NULL, last_error = #{lastError},
         last_error_code = #{lastErrorCode},
-        reconciliation_required_at = UTC_TIMESTAMP(6), reconciliation_outcome = NULL
+        reconciliation_required_at = COALESCE(reconciliation_required_at, UTC_TIMESTAMP(6)),
+        reconciliation_outcome = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
   </update>
 
@@ -294,7 +311,7 @@
     UPDATE campaign_delivery
     SET status = 'failed', skip_reason = NULL, last_error = #{lastError},
         last_error_code = #{lastErrorCode},
-        reconciliation_required_at = UTC_TIMESTAMP(6),
+        reconciliation_required_at = COALESCE(reconciliation_required_at, UTC_TIMESTAMP(6)),
         reconciliation_outcome = NULL,
         dispatch_lease_owner = NULL, dispatch_lease_until = NULL
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'dispatching'
@@ -308,6 +325,11 @@
         d.last_error = #{lastError}, d.last_error_code = NULL,
         d.reconciliation_required_at = NULL,
         d.reconciliation_outcome = #{outcome},
+        d.submitted_at = CASE WHEN #{outcome} = 'operator_delivered'
+          THEN COALESCE(d.submitted_at, LEAST(d.frequency_reserved_at, UTC_TIMESTAMP(6)), d.created_at)
+          ELSE d.submitted_at END,
+        d.frequency_reserved_at = CASE WHEN #{outcome} = 'operator_not_delivered'
+          THEN NULL ELSE d.frequency_reserved_at END,
         d.dispatch_lease_owner = NULL, d.dispatch_lease_until = NULL
     WHERE d.workspace_id = #{workspaceId} AND d.id = #{id}
       AND s.campaign_id = #{campaignId}
@@ -322,9 +344,65 @@
       AND d.person_id = #{personId}
       AND s.channel = #{channel}
       AND d.send_id != #{sendId}
-      AND d.status = 'dispatched'
-      AND d.updated_at >= #{since}
+      AND d.submitted_at >= #{since}
   </select>
+
+  <select id="frequencyConflictCount" resultType="int">
+    SELECT COUNT(*) FROM campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    WHERE d.workspace_id = #{workspaceId} AND d.person_id = #{personId}
+      AND s.channel = #{channel} AND d.id != #{deliveryId}
+      AND (d.submitted_at >= #{since}
+        OR (d.submitted_at IS NULL AND d.frequency_reserved_at >= #{since}))
+  </select>
+
+  <update id="reserveFrequencyWindow">
+    UPDATE campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    SET d.frequency_reserved_at = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL #{reservationMicros} MICROSECOND)
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{deliveryId}
+      AND d.person_id = #{personId} AND s.channel = #{channel}
+      AND d.status = 'dispatching' AND d.submitted_at IS NULL
+      AND s.status IN ('queued', 'running', 'triggered')
+      <choose>
+        <when test="leaseOwner != null">
+          AND s.origin = 'triggered' AND s.status = 'triggered'
+          AND d.dispatch_lease_owner = #{leaseOwner}
+          AND d.dispatch_lease_until >= UTC_TIMESTAMP(6)
+        </when>
+        <otherwise>
+          AND s.origin = 'audience' AND d.dispatch_lease_owner IS NULL
+        </otherwise>
+      </choose>
+  </update>
+
+  <select id="claimStillOwned" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1 FROM campaign_delivery
+      WHERE workspace_id = #{workspaceId} AND id = #{deliveryId}
+        AND status = 'dispatching' AND submitted_at IS NULL
+        <choose>
+          <when test="leaseOwner != null">
+            AND dispatch_lease_owner = #{leaseOwner}
+            AND dispatch_lease_until >= UTC_TIMESTAMP(6)
+          </when>
+          <otherwise>AND dispatch_lease_owner IS NULL</otherwise>
+        </choose>
+    )
+  </select>
+
+  <update id="releaseFrequencyWindowBeforeEgress">
+    UPDATE campaign_delivery
+    SET frequency_reserved_at = NULL
+    WHERE workspace_id = #{workspaceId} AND id = #{deliveryId}
+      AND status = 'dispatching' AND submitted_at IS NULL
+      AND <include refid="cleanAttemptHistory"/>
+      AND reconciliation_required_at IS NULL
+      <choose>
+        <when test="leaseOwner != null">AND dispatch_lease_owner = #{leaseOwner}</when>
+        <otherwise>AND dispatch_lease_owner IS NULL</otherwise>
+      </choose>
+  </update>
 
   <insert id="insertEvent" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO campaign_delivery_event

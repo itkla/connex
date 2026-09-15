@@ -85,7 +85,7 @@ public interface CampaignDeliveryMapper {
 
     CampaignDelivery getDeliveryForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
-    /** Returns only identifiers so restriction can be checked before the address column is read. */
+    /** Returns identity and attempt evidence so restriction and uncertainty checks precede address reads. */
     CampaignDelivery getDeliveryIdentity(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     CampaignDelivery getBySendAndPerson(
@@ -139,18 +139,30 @@ public interface CampaignDeliveryMapper {
             @Param("leaseOwner") String leaseOwner,
             @Param("leaseMicros") long leaseMicros);
 
-    /** Releases an owned triggered-delivery claim before provider egress. */
+    /**
+     * Releases an owned triggered claim before this attempt's egress, restoring its prior reservation.
+     * A null prior reservation clears a clean attempt; a recovered attempt retains older uncertainty.
+     * @param workspaceId the owning workspace
+     * @param id the delivery
+     * @param leaseOwner the still-owning worker
+     * @param priorFrequencyReservedAt the reservation read on the claim before this attempt reserved
+     * @return one if the owned claim was released
+     */
     int releaseTriggeredClaim(
             @Param("workspaceId") int workspaceId,
             @Param("id") int id,
-            @Param("leaseOwner") String leaseOwner);
+            @Param("leaseOwner") String leaseOwner,
+            @Param("priorFrequencyReservedAt") LocalDateTime priorFrequencyReservedAt);
 
     /** Returns one bounded page of expired triggered claims and their exact attempted transports. */
     List<CampaignDelivery> expiredTriggeredClaimsPage(
             @Param("workspaceId") int workspaceId,
             @Param("limit") int limit);
 
-    /** Restores one expired claim only when its transport makes stable-key replay safe. */
+    /**
+     * Restores a replay-safe expired claim and persists the deadline-ambiguous marker so later
+     * clean retries cannot release evidence of its possible unrecorded submission.
+     */
     int recoverExpiredTriggeredClaim(
             @Param("workspaceId") int workspaceId,
             @Param("id") int id,
@@ -230,12 +242,48 @@ public interface CampaignDeliveryMapper {
             @Param("outcome") String outcome,
             @Param("lastError") String lastError);
 
+    /** Counts submissions by their immutable timestamp, independently of events and receipt status. */
     int recentDispatchCount(
             @Param("workspaceId") int workspaceId,
             @Param("personId") int personId,
             @Param("channel") String channel,
             @Param("sendId") int sendId,
             @Param("since") LocalDateTime since);
+
+    /** Counts other deliveries' submissions and unresolved reservations under the workspace mutex. */
+    int frequencyConflictCount(
+            @Param("workspaceId") int workspaceId,
+            @Param("personId") int personId,
+            @Param("channel") String channel,
+            @Param("deliveryId") int deliveryId,
+            @Param("since") LocalDateTime since);
+
+    /** Reserves the frequency window only while this worker still owns a dispatchable claim. */
+    int reserveFrequencyWindow(
+            @Param("workspaceId") int workspaceId,
+            @Param("deliveryId") int deliveryId,
+            @Param("personId") int personId,
+            @Param("channel") String channel,
+            @Param("leaseOwner") String leaseOwner,
+            @Param("reservationMicros") long reservationMicros);
+
+    /** Reports whether this worker still holds an unsubmitted dispatchable claim on the delivery. */
+    boolean claimStillOwned(
+            @Param("workspaceId") int workspaceId,
+            @Param("deliveryId") int deliveryId,
+            @Param("leaseOwner") String leaseOwner);
+
+    /**
+     * Releases a proven pre-egress attempt only when no earlier recovered attempt may have sent.
+     * Expired-lease recovery persists {@code deadline_ambiguous} in {@code last_error_code}; clean
+     * gate releases persist an explicit pre-egress reason in {@code last_error} with no error code.
+     * Retries require that positive clean history, so older unmarked recovered rows remain uncertain.
+     * Claims and gate releases retain uncertainty and cannot erase possible submission evidence.
+     */
+    int releaseFrequencyWindowBeforeEgress(
+            @Param("workspaceId") int workspaceId,
+            @Param("deliveryId") int deliveryId,
+            @Param("leaseOwner") String leaseOwner);
 
     void insertEvent(CampaignDeliveryEvent event);
 

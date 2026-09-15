@@ -20,6 +20,14 @@ public interface DeliveryProviderConfigMapper {
     DeliveryProviderConfig findByWorkspaceChannel(
             @Param("workspaceId") int workspaceId, @Param("channel") String channel);
 
+    /** Reads a current endpoint/credential generation while holding the workspace resolution root. */
+    DeliveryProviderConfig findByWorkspaceChannelForShare(
+            @Param("workspaceId") int workspaceId, @Param("channel") String channel);
+
+    /** Reads the current configuration after the workspace mutation and permission roots are held. */
+    DeliveryProviderConfig findByWorkspaceChannelForUpdate(
+            @Param("workspaceId") int workspaceId, @Param("channel") String channel);
+
     DeliveryProviderConfig findByWebhookTokenHash(@Param("webhookTokenHash") String webhookTokenHash);
 
     int upsert(

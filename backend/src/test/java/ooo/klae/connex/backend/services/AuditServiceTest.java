@@ -25,6 +25,8 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -330,6 +332,26 @@ class AuditServiceTest {
         assertFalse(result.getChanges().contains("leakKinds"));
         assertFalse(result.getChanges().contains("leakCount"));
         assertFalse(result.getChanges().contains("raw-secret-token"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"workspace.delivery.provider_credential.email", "workspace.delivery.provider_credential.sms"})
+    void recentPreservesChannelSpecificDeliveryPurposesWithoutCredentials(String purpose) {
+        AuditLog entry = new AuditLog();
+        entry.setAction("secret_store.secret.use");
+        entry.setEntityType("workspace");
+        entry.setTargetLabel(purpose);
+        entry.setOutcome("success");
+        entry.setChanges(objectMapper.writeValueAsString(Map.of(
+                "purpose", purpose, "secretId", 17, "credential", "private-provider-key")));
+        when(auditLogMapper.findRecent(7, 25, 0)).thenReturn(List.of(entry));
+
+        AuditLog result = service.recent(25, 0).getFirst();
+
+        assertEquals(purpose, result.getTargetLabel());
+        assertTrue(result.getChanges().contains(purpose));
+        assertFalse(result.getChanges().contains("private-provider-key"));
+        assertFalse(result.getChanges().contains("\"credential\""));
     }
 
     @Test

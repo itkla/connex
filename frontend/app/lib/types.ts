@@ -5230,6 +5230,7 @@ export type MailConfig = {
     starttls: boolean;
     ssl: boolean;
     auth: boolean;
+    defaultPort: number;
     hasPassword: boolean;
     configured: boolean;
     updatedAt: string | null;
