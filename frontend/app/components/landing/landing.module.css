@@ -3,12 +3,23 @@
     overflow-wrap: anywhere;
 }
 
-.landing header { container-type: inline-size; }
-.landing :is(header, footer) button { min-width: 2.75rem; min-height: 2.75rem; }
-.landing :is(header nav, footer > div) { padding-inline: 1.25rem; }
+.landing footer button { min-width: 2.75rem; min-height: 2.75rem; }
+
+/* LandingNav's own mobile guarantees — the legal pages and the 404 render the same header without
+   the landing page's `.landing` class, and the container query is what decides its mobile cluster. */
+.nav {
+    overflow-wrap: anywhere;
+    container-type: inline-size;
+}
+
+.nav button { min-width: 2.75rem; min-height: 2.75rem; }
+
+.nav nav,
+.landing footer > div { padding-inline: 1.25rem; }
 
 @media (min-width: 40rem) {
-    .landing :is(header nav, footer > div) { padding-inline: 2rem; }
+    .nav nav,
+    .landing footer > div { padding-inline: 2rem; }
 }
 
 .landing h1,
@@ -419,7 +430,7 @@
 }
 
 @container (max-width: 63.999rem) {
-    .landing [data-landing-desktop] { display: none; }
-    .landing [data-landing-mobile] { display: flex; }
-    .landing [data-landing-menu] { display: block; }
+    .nav [data-landing-desktop] { display: none; }
+    .nav [data-landing-mobile] { display: flex; }
+    .nav [data-landing-menu] { display: block; }
 }

@@ -55,6 +55,7 @@ import ooo.klae.connex.backend.dto.CampaignAudienceExportReconciliationRequest;
 import ooo.klae.connex.backend.dto.CampaignAudienceExportRequest;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CampaignAudienceExportMapper;
 import ooo.klae.connex.backend.mappers.CampaignMapper;
@@ -114,6 +115,7 @@ public class AudienceExportService {
     private static final String RESOLVER_SATURATION_METRIC =
             "connex.delivery.audience_export.resolver_saturated";
 
+    private final SessionSecurityService sessionSecurityService;
     private final CampaignMapper campaignMapper;
     private final CampaignAudienceExportMapper campaignAudienceExportMapper;
     private final PersonMapper personMapper;
@@ -133,6 +135,7 @@ public class AudienceExportService {
 
     /**
      * Builds the production audience-export choke point.
+     * @param sessionSecurityService recent passkey assertion enforcement
      * @param campaignMapper campaign persistence
      * @param campaignAudienceExportMapper export persistence
      * @param personMapper person persistence
@@ -151,6 +154,7 @@ public class AudienceExportService {
      */
     @Autowired
     public AudienceExportService(
+            SessionSecurityService sessionSecurityService,
             CampaignMapper campaignMapper,
             CampaignAudienceExportMapper campaignAudienceExportMapper,
             PersonMapper personMapper,
@@ -166,13 +170,14 @@ public class AudienceExportService {
             ObjectMapper objectMapper,
             SmartValidator validator,
             MeterRegistry meterRegistry) {
-        this(campaignMapper, campaignAudienceExportMapper, personMapper, audienceEligibilityService,
+        this(sessionSecurityService, campaignMapper, campaignAudienceExportMapper, personMapper, audienceEligibilityService,
                 connectorConfigService, deliveryProviderRouter, deliveryProperties, capabilityRegistry,
                 workspaceService, tenantContext, auditService, transactionManager, objectMapper, validator,
                 meterRegistry, System::nanoTime);
     }
 
     AudienceExportService(
+            SessionSecurityService sessionSecurityService,
             CampaignMapper campaignMapper,
             CampaignAudienceExportMapper campaignAudienceExportMapper,
             PersonMapper personMapper,
@@ -189,6 +194,7 @@ public class AudienceExportService {
             SmartValidator validator,
             MeterRegistry meterRegistry,
             LongSupplier nanoTimeSource) {
+        this.sessionSecurityService = Objects.requireNonNull(sessionSecurityService, "sessionSecurityService");
         this.campaignMapper = Objects.requireNonNull(campaignMapper, "campaignMapper");
         this.campaignAudienceExportMapper = Objects.requireNonNull(
                 campaignAudienceExportMapper, "campaignAudienceExportMapper");
@@ -218,6 +224,7 @@ public class AudienceExportService {
      */
     @RequirePermission(Permission.CAMPAIGN_MANAGE)
     public CampaignAudienceExportDto createExport(int campaignId, CampaignAudienceExportRequest request) {
+        requireExportStepUp();
         if (request == null) {
             throw new BadRequestException("Campaign audience export is required");
         }
@@ -331,6 +338,15 @@ public class AudienceExportService {
         int actorId = workspaceService.getCurrentUserId();
         return inNewTransaction(() -> reconcileExport(
                 workspaceId, actorId, campaignId, exportId, request.resolution()));
+    }
+
+    private void requireExportStepUp() {
+        try {
+            sessionSecurityService.requireExportStepUp();
+        } catch (RecentAuthenticationRequiredException exception) {
+            auditService.recordExportStepUpRefused();
+            throw exception;
+        }
     }
 
     private Optional<PreparedExport> prepareExport(

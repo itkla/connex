@@ -104,7 +104,10 @@ class SsoConnectionLockOrderTest {
 
         assertDoesNotThrow(() -> ssoConnectionService.save(5, 9, request));
 
-        InOrder order = inOrder(ssoDomainMapper);
+        InOrder order = inOrder(organizationMapper, orgMemberService, ssoConnectionMapper, ssoDomainMapper);
+        order.verify(organizationMapper).lockById(7);
+        order.verify(orgMemberService).requireOrgAdminForUpdate(7, 9);
+        order.verify(ssoConnectionMapper).findByOrgForUpdate(7);
         order.verify(ssoDomainMapper).lockMutationRoot();
         order.verify(ssoDomainMapper).listByOrg(7);
         order.verify(ssoDomainMapper).findOrgByDomain("a.example");
