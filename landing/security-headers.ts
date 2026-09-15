@@ -35,6 +35,8 @@ export type ContentSecurityPolicyOptions = {
   configuredWebSocketUrl?: string;
   configuredImageOrigins?: string;
   reportingEndpointUrl?: string | null;
+  /** Relative `report-uri` target; `null` omits the directive for deployments without a collector. */
+  reportPath?: string | null;
 };
 
 function isSafeContentSecurityPolicySource(value: string): boolean {
@@ -130,7 +132,7 @@ export function createFrontendContentSecurityPolicy(options: ContentSecurityPoli
     FRAME_ANCESTORS_DIRECTIVE,
     "frame-src 'none'",
     "worker-src 'none'",
-    `report-uri ${CSP_REPORT_PATH}`,
+    ...(options.reportPath === null ? [] : [`report-uri ${options.reportPath ?? CSP_REPORT_PATH}`]),
     ...(options.reportingEndpointUrl ? [`report-to ${CSP_REPORTING_ENDPOINT_NAME}`] : []),
   ].join("; ");
 }

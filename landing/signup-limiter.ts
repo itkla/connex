@@ -75,12 +75,16 @@ export class SignupLimiter extends DurableObject {
      * callers, so reading the next slot after sleeping would let two callers wake into the same one.
      * The schedule is held in memory: it only matters while calls are in flight, and an evicted
      * object has had none recently.
-     * @returns `false` without waiting when the queue is longer than a signup's provider deadline
+     * A slot is claimed only when the caller can still use it: the wait is bounded by the caller's
+     * remaining deadline as well as the overall cap, so a request never occupies a slot it would be
+     * aborted before reaching.
+     * @param remainingMs time left before the caller's provider deadline
+     * @returns `false` without waiting or claiming when no slot fits that deadline
      */
-    async pace(): Promise<boolean> {
+    async pace(remainingMs: number): Promise<boolean> {
         const now = Date.now();
         const slot = Math.max(now, this.nextProviderAt);
-        if (slot - now > MAX_PROVIDER_WAIT_MS) return false;
+        if (slot - now > Math.min(remainingMs, MAX_PROVIDER_WAIT_MS)) return false;
         this.nextProviderAt = slot + PROVIDER_INTERVAL_MS;
         if (slot > now) await sleep(slot - now);
         return true;

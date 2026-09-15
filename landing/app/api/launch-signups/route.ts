@@ -127,7 +127,7 @@ async function boundedJson(body: Request | Response, maxBytes: number, signal: A
     }
 }
 
-/** Claims the deployment-wide slot for one provider call; `false` means the queue is full. */
+/** Claims the deployment-wide slot for one provider call; `false` means no slot fits the deadline. */
 type ProviderGate = () => Promise<boolean>;
 
 /** Raised when every provider slot within a signup's deadline is already taken. */
@@ -177,7 +177,9 @@ function includesLaunchSegment(segments: unknown, segment: string): boolean {
 
 /**
  * Records a signup in the launch segment. The contact is looked up before anything is written,
- * because creating an existing address has no documented merge contract. A returned contact ID alone
+ * because creating an existing address has no documented merge contract. A concurrent signup for the
+ * same address can create the contact between that lookup and this request's create; when the create
+ * is refused, the contact is looked up again rather than the signup failing. A returned contact ID alone
  * does not establish segment membership for a repeat signup, so membership is read back and added
  * only when missing.
  * @param email validated address
@@ -190,15 +192,21 @@ function includesLaunchSegment(segments: unknown, segment: string): boolean {
 async function persistSignup(email: string, segment: string, key: string, signal: AbortSignal, gate: ProviderGate): Promise<boolean> {
     let contact = await resend(`/contacts/${encodeURIComponent(email)}`, key, signal, gate, { allowNotFound: true });
     if (contact === CONTACT_NOT_FOUND) {
-        const created = await resend("/contacts", key, signal, gate, {
-            method: "POST",
-            body: { email, segments: [{ id: segment }] },
-        });
-        if (!isRecord(created) || created.object !== "contact" || typeof created.id !== "string" || !UUID.test(created.id)) {
-            return false;
+        let created: unknown = null;
+        try {
+            created = await resend("/contacts", key, signal, gate, {
+                method: "POST",
+                body: { email, segments: [{ id: segment }] },
+            });
+        } catch (error) {
+            if (error instanceof ProviderBusyError || signal.aborted) throw error;
         }
-        contact = await resend(`/contacts/${created.id}`, key, signal, gate);
-        if (!isRecord(contact) || contact.id !== created.id) return false;
+        if (isRecord(created) && created.object === "contact" && typeof created.id === "string" && UUID.test(created.id)) {
+            contact = await resend(`/contacts/${created.id}`, key, signal, gate);
+            if (!isRecord(contact) || contact.id !== created.id) return false;
+        } else {
+            contact = await resend(`/contacts/${encodeURIComponent(email)}`, key, signal, gate);
+        }
     }
     if (!isRecord(contact) || typeof contact.id !== "string" || !UUID.test(contact.id) || contact.unsubscribed !== false
         || typeof contact.email !== "string" || contact.email.toLowerCase() !== email.toLowerCase()) {
@@ -256,7 +264,8 @@ export async function POST(request: Request): Promise<Response> {
     const reservation = await limiterInstance.reserve(client);
     if (!reservation.allowed) return json({ error: "rate_limited" }, 429, reservation.retryAfter);
 
-    const gate: ProviderGate = () => limiterInstance.pace();
+    const providerDeadline = Date.now() + PROVIDER_TIMEOUT_MS;
+    const gate: ProviderGate = () => limiterInstance.pace(providerDeadline - Date.now());
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
     try {

@@ -73,6 +73,7 @@ export function proxy(request: NextRequest) {
         isDevelopment: process.env.NODE_ENV === 'development',
         configuredImageOrigins: process.env.CONNEX_CSP_IMAGE_ORIGINS,
         reportingEndpointUrl,
+        reportPath: null,
     });
 
     const requestHeaders = new Headers(request.headers);

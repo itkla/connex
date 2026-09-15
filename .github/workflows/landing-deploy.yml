@@ -24,8 +24,9 @@ permissions:
   contents: read
 
 concurrency:
-  # Deploys queue rather than cancel, so a later merge never aborts an in-flight publish.
-  group: landing-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'main' }}
+  # Deploys queue rather than cancel, so a later merge never aborts an in-flight publish. Only runs on
+  # main share the deploy queue; pull requests and manual runs on other branches never deploy.
+  group: landing-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
