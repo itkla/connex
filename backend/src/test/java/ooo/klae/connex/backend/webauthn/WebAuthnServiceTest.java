@@ -159,7 +159,8 @@ class WebAuthnServiceTest {
 
         service.finishRegistration(7, 3, true, options, credential, "Work key");
 
-        verify(credentials).save(record);
+        verify(relyingParty).registerCredential(any());
+        verify(credentials, never()).save(any());
         verify(userMapper).clearEpochRestampGrant(7);
         verify(auditService).recordStrict(
                 org.mockito.ArgumentMatchers.eq("auth.passkey.register"),
