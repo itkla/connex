@@ -55,7 +55,6 @@
     animation-duration: calc(var(--motion-expressive) * 47);
     animation-delay: calc(var(--motion-expressive) * 16);
 }
-.hazeTone { stop-color: var(--background); }
 .cloudDrift {
     animation: cloudPassing var(--fuji-drift-far) linear infinite;
     animation-play-state: paused;

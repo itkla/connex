@@ -3,11 +3,11 @@ import styles from "./fuji.module.css";
 
 type Puff = readonly [cx: number, r: number];
 
-const LONG_CLOUD: readonly Puff[] = [[70, 42], [160, 64], [255, 46]];
-const SHORT_CLOUD: readonly Puff[] = [[55, 30], [120, 46], [185, 32]];
+type CloudPlacement = { puffs: readonly Puff[]; x: number; y: number; scale: number };
+
 const CLOUD_SHADE_BAND = 9;
 
-/** Returns a deterministic pseudo-random sequence so the star field renders identically everywhere. */
+/** Returns a deterministic pseudo-random sequence so the sky renders identically everywhere. */
 function seededRandom(seed: number) {
     let state = seed;
     return () => {
@@ -25,6 +25,40 @@ function twinklePhase(value: number) {
     if (value < 0.75) return styles.twinkleLate;
     return styles.twinkleLast;
 }
+
+/** Picks a value in `[min, max)` from a seeded sequence. */
+function between(random: () => number, min: number, max: number) {
+    return min + random() * (max - min);
+}
+
+/** Shapes a cloud with two or three overlapping bumps of varied size and spacing. */
+function cloudPuffs(random: () => number): Puff[] {
+    const peak = between(random, 48, 70);
+    const count = random() < 0.3 ? 2 : 3;
+    const peakIndex = Math.floor(random() * count);
+    const radii = Array.from({ length: count }, (_, index) => index === peakIndex ? peak : peak * between(random, 0.45, 0.82));
+    const puffs: Puff[] = [];
+    radii.forEach((r) => {
+        const previous = puffs.at(-1);
+        const cx = previous ? previous[0] + (previous[1] + r) * between(random, 0.6, 0.78) : r;
+        puffs.push([Math.round(cx), Math.round(r)]);
+    });
+    return puffs;
+}
+
+/** Scatters a band of distinct clouds across one 1600-unit drift loop. */
+function cloudBand(seed: number, count: number, band: { top: number; bottom: number; minScale: number; maxScale: number }): CloudPlacement[] {
+    const random = seededRandom(seed);
+    return Array.from({ length: count }, (_, index) => ({
+        puffs: cloudPuffs(random),
+        x: Math.round((index * 1600) / count + between(random, 0, 1600 / count - 320)),
+        y: Math.round(between(random, band.top, band.bottom)),
+        scale: between(random, band.minScale, band.maxScale),
+    }));
+}
+
+const BACK_CLOUDS = cloudBand(31, 4, { top: 540, bottom: 590, minScale: 0.7, maxScale: 0.95 });
+const FRONT_CLOUDS = cloudBand(83, 3, { top: 660, bottom: 770, minScale: 0.9, maxScale: 1.2 });
 
 const starRandom = seededRandom(1707);
 const STARS = Array.from({ length: 96 }, () => ({ x: Math.round(starRandom() * 1600), y: Math.round(24 + starRandom() * 520), r: 0.7 + starRandom() * 1.3, phase: twinklePhase(starRandom()) }))
@@ -51,6 +85,17 @@ function BubblyCloud({ puffs, x, y, scale }: { puffs: readonly Puff[]; x: number
     );
 }
 
+/** Repeats a cloud band at each loop offset so the drift wraps seamlessly. */
+function CloudLoop({ clouds, className }: { clouds: readonly CloudPlacement[]; className: string }) {
+    return (
+        <g className={`${styles.cloudDrift} ${className}`}>
+            {[-1600, 0, 1600].map((offset) => <g key={offset} transform={`translate(${offset} 0)`}>
+                {clouds.map((cloud) => <BubblyCloud key={`${cloud.x}-${cloud.y}`} {...cloud} />)}
+            </g>)}
+        </g>
+    );
+}
+
 /** A streak that crosses the night sky once per cycle, then waits out of sight. */
 function ShootingStar({ x, y, className }: { x: number; y: number; className: string }) {
     return (
@@ -63,7 +108,7 @@ function ShootingStar({ x, y, className }: { x: number; y: number; className: st
     );
 }
 
-/** A fine Fuji skyline with a daytime sun or a starry night sky, and drifting bubbly clouds. */
+/** A fine Fuji skyline before a daytime sun or a starry night sky, with bubbly clouds drifting behind and in front of it. */
 export function FujiBackdrop({ pauseLabel, resumeLabel }: { pauseLabel: string; resumeLabel: string }) {
     const skyline = "M160 846 C342 816 481 767 613 700 C762 625 891 518 1039 393 L1094 352 L1107 350 L1112 346 L1121 348 L1134 344 L1149 347 L1161 345 L1173 348 L1184 342 L1194 344 L1202 350 C1289 418 1368 485 1462 547 C1607 643 1747 718 1940 777";
     const silhouette = `${skyline} L1940 930 H160 Z`;
@@ -96,57 +141,50 @@ export function FujiBackdrop({ pauseLabel, resumeLabel }: { pauseLabel: string; 
                         <filter id="fuji-sun-bloom" x="-50%" y="-50%" width="200%" height="200%">
                             <feGaussianBlur stdDeviation="14" />
                         </filter>
-                        <filter id="fuji-ridge-feather" x="-5%" y="-5%" width="110%" height="110%">
-                            <feGaussianBlur stdDeviation="2" />
-                        </filter>
-                        <mask id="fuji-behind-ridge" maskUnits="userSpaceOnUse" x="0" y="0" width="1600" height="900">
-                            <rect width="1600" height="900" fill="white" />
-                            <path d={silhouette} fill="black" filter="url(#fuji-ridge-feather)" />
+                        <mask id="fuji-behind-ridge" maskUnits="userSpaceOnUse" x="-1600" y="-400" width="4800" height="1800">
+                            <rect x="-1600" y="-400" width="4800" height="1800" fill="white" />
+                            <g data-fuji-depth="0.16"><path d={silhouette} fill="black" /></g>
                         </mask>
                         <linearGradient id="fuji-meteor-tail" x1="0" y1="0" x2="150" y2="-75" gradientUnits="userSpaceOnUse">
                             <stop className={styles.starStop} />
                             <stop offset="1" className={styles.starStop} stopOpacity="0" />
                         </linearGradient>
                         <linearGradient id="fuji-haze" x1="0" y1="0" x2="0" y2="1">
-                            <stop className={styles.hazeTone} stopOpacity="0" />
-                            <stop offset="1" className={styles.hazeTone} />
+                            <stop stopColor="black" stopOpacity="0" />
+                            <stop offset="1" stopColor="black" />
                         </linearGradient>
+                        <mask id="fuji-haze-fade" maskUnits="userSpaceOnUse" x="-1600" y="-400" width="4800" height="1800">
+                            <rect x="-1600" y="-400" width="4800" height="1800" fill="white" />
+                                </mask>
                     </defs>
-                    <g data-fuji-depth="0.08">
-                        <g className={styles.sun}>
-                            <circle cx="1150" cy="340" r="560" fill="url(#fuji-sun-halo)" />
-                            <g mask="url(#fuji-behind-ridge)">
-                                <circle className={styles.sunBloom} cx="1150" cy="340" r="132" filter="url(#fuji-sun-bloom)" />
-                                <circle cx="1150" cy="340" r="115" fill="url(#fuji-sun-disc)" />
+                    <g mask="url(#fuji-haze-fade)">
+                        <g data-fuji-depth="0.32">
+                            <circle className={styles.sun} cx="1150" cy="340" r="560" fill="url(#fuji-sun-halo)" />
+                        </g>
+                        <g mask="url(#fuji-behind-ridge)">
+                            <g data-fuji-depth="0.32">
+                                <g className={styles.sun}>
+                                    <circle className={styles.sunBloom} cx="1150" cy="340" r="132" filter="url(#fuji-sun-bloom)" />
+                                    <circle cx="1150" cy="340" r="115" fill="url(#fuji-sun-disc)" />
+                                </g>
+                                <g className={styles.stars}>
+                                    <g>{STARS.map(({ x, y, r, phase }) => <circle key={`${x}-${y}`} className={`${styles.star} ${phase} ${styles.starTone}`} cx={x} cy={y} r={r} />)}</g>
+                                    <ShootingStar x={1500} y={80} className={styles.shootingStar} />
+                                    <ShootingStar x={1040} y={60} className={`${styles.shootingStar} ${styles.shootingStarLate}`} />
+                                </g>
+                            </g>
+                            <g data-fuji-depth="0.24">
+                                <CloudLoop clouds={BACK_CLOUDS} className={styles.farClouds} />
                             </g>
                         </g>
-                        <g className={styles.stars}>
-                            <g>{STARS.map(({ x, y, r, phase }) => <circle key={`${x}-${y}`} className={`${styles.star} ${phase} ${styles.starTone}`} cx={x} cy={y} r={r} />)}</g>
-                            <ShootingStar x={1500} y={80} className={styles.shootingStar} />
-                            <ShootingStar x={1040} y={60} className={`${styles.shootingStar} ${styles.shootingStarLate}`} />
+                        <g data-fuji-depth="0.16">
+                            <path d={silhouette} fill="url(#fuji-wash)" />
+                            <path className={styles.outline} d={skyline} stroke="url(#fuji-ink)" vectorEffect="non-scaling-stroke" />
+                        </g>
+                        <g data-fuji-depth="0.06">
+                            <CloudLoop clouds={FRONT_CLOUDS} className={styles.nearClouds} />
                         </g>
                     </g>
-                    <g data-fuji-depth="0.16">
-                        <g className={`${styles.cloudDrift} ${styles.farClouds}`}>
-                            {[-1600, 0, 1600].map((offset) => <g key={offset} transform={`translate(${offset} 0)`}>
-                                <BubblyCloud puffs={SHORT_CLOUD} x={200} y={490} scale={1.1} />
-                                <BubblyCloud puffs={LONG_CLOUD} x={820} y={500} scale={0.9} />
-                            </g>)}
-                        </g>
-                    </g>
-                    <g data-fuji-depth="0.08">
-                        <path d={silhouette} fill="url(#fuji-wash)" />
-                        <path className={styles.outline} d={skyline} stroke="url(#fuji-ink)" vectorEffect="non-scaling-stroke" />
-                    </g>
-                    <g data-fuji-depth="0.28">
-                        <g className={`${styles.cloudDrift} ${styles.nearClouds}`}>
-                            {[-1600, 0, 1600].map((offset) => <g key={offset} transform={`translate(${offset} 0)`}>
-                                <BubblyCloud puffs={LONG_CLOUD} x={260} y={720} scale={1.3} />
-                                <BubblyCloud puffs={SHORT_CLOUD} x={1060} y={610} scale={1.2} />
-                            </g>)}
-                        </g>
-                    </g>
-                    <path d="M0 716 C335 688 562 770 846 738 C1143 708 1358 753 1600 722 V900 H0 Z" fill="url(#fuji-haze)" />
                 </svg>
             </div>
         </FujiMotion>
