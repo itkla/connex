@@ -1,3 +1,5 @@
+import { hostMatchesPatterns } from "@/app/lib/requestHost";
+
 /**
  * Which landing page a request should receive.
  *
@@ -23,19 +25,7 @@ export function resolvePreLaunch({
     mode?: string;
     preLaunchHosts?: string;
 }): boolean {
-    const normalised = (host ?? "").trim().toLowerCase().replace(/:\d+$/, "");
-
-    if (normalised && preLaunchHosts) {
-        for (const raw of preLaunchHosts.split(",")) {
-            const pattern = raw.trim().toLowerCase().replace(/:\d+$/, "");
-            if (!pattern) continue;
-            if (pattern.startsWith(".")) {
-                if (normalised === pattern.slice(1) || normalised.endsWith(pattern)) return true;
-                continue;
-            }
-            if (normalised === pattern) return true;
-        }
-    }
+    if (hostMatchesPatterns(host, preLaunchHosts)) return true;
 
     return (mode ?? "prelaunch") === "prelaunch";
 }

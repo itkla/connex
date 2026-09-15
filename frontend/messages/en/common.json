@@ -1,4 +1,8 @@
 {
+  "AppMetadata": {
+    "title": "Connex",
+    "description": "Connex keeps companies, contacts, deals, and follow-ups in one workspace your whole team can work from."
+  },
   "Filters": {
     "searchAria": "Search",
     "clearSearchAria": "Clear search",
@@ -63,14 +67,17 @@
     "heroCtaPrimary": "Start for free",
     "prelaunch": {
       "closingHeading": "Your next chapter starts here.",
+      "metaTitle": "Connex — coming soon",
+      "metaDescription": "Connex brings companies, contacts, deals, and follow-ups into one CRM. Leave your email address and we\u2019ll write to you the day it opens.",
       "formLabel": "Get notified when Connex launches",
       "emailLabel": "Email address",
       "emailPlaceholder": "Your email address",
       "submit": "Notify me",
+      "navCta": "Notify me",
       "submitting": "Joining…",
       "privacy": "We’ll email you when Connex launches. <link>Privacy policy</link>",
-      "successTitle": "You’re on the list.",
-      "successBody": "We’ll email you when Connex is ready.",
+      "successTitle": "Thanks for your interest.",
+      "successBody": "Your request has been received. Launch emails follow your existing email preferences.",
       "invalid": "Enter a valid email address and try again.",
       "error": "We couldn’t confirm your signup. Your email is still here. Please try again shortly.",
       "rateLimited": "Please wait a few minutes, then try signing up again.",

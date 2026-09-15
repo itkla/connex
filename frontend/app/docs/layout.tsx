@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { getPublicPageUserFromCookie } from "@/app/lib/api";
+import { resolvePreLaunch } from "@/app/lib/landingMode";
 import DocsTopBar from "@/app/components/docs/DocsTopBar";
 import DocsNav from "@/app/components/docs/DocsNav";
 import LandingFooter from "@/app/components/landing/LandingFooter";
@@ -10,14 +11,17 @@ import LandingFooter from "@/app/components/landing/LandingFooter";
  * session is detected server-side only to adapt the header's call to action.
  * Because that is the session's only role here, an unreachable backend falls
  * back to the signed-out call to action rather than failing the documentation.
+ * A prelaunch host has no product to sign in to, so the session is not read at
+ * all there and the header offers the launch signup instead.
  */
 export default async function DocsLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-    const cookie = (await headers()).get("cookie");
-    const user = await getPublicPageUserFromCookie(cookie);
+    const requestHeaders = await headers();
+    const preLaunch = resolvePreLaunch({ host: requestHeaders.get("host") });
+    const user = preLaunch ? null : await getPublicPageUserFromCookie(requestHeaders.get("cookie"));
 
     return (
         <div className="font-body flex min-h-screen flex-col bg-background text-foreground">
-            <DocsTopBar authed={Boolean(user)} />
+            <DocsTopBar authed={Boolean(user)} preLaunch={preLaunch} />
 
             <div className="mx-auto flex w-full max-w-7xl flex-1 gap-8 px-6 lg:px-8">
                 <aside className="hidden w-60 shrink-0 lg:block">
@@ -29,7 +33,7 @@ export default async function DocsLayout({ children }: Readonly<{ children: Reac
                 <main className="min-w-0 flex-1 py-10">{children}</main>
             </div>
 
-            <LandingFooter />
+            <LandingFooter showLogin={!preLaunch} />
         </div>
     );
 }
