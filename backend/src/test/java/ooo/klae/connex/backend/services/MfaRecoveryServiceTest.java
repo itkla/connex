@@ -47,7 +47,8 @@ class MfaRecoveryServiceTest {
     private final AuditService auditService = mock(AuditService.class);
     private final SessionRegistry sessionRegistry = mock(SessionRegistry.class);
     private final AccountSessionRevocationService accountSessionRevocationService =
-            new AccountSessionRevocationService(sessionRegistry, springSessionMapper);
+            new AccountSessionRevocationService(sessionRegistry, springSessionMapper,
+                    mock(ooo.klae.connex.backend.notifications.WebSocketSessionRegistry.class));
     private final PrivilegedMfaProperties properties = properties();
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final MfaRecoveryService service = new MfaRecoveryService(
