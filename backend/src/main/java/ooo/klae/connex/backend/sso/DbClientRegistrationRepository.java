@@ -1,8 +1,15 @@
 package ooo.klae.connex.backend.sso;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.URI;
+import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
@@ -13,6 +20,9 @@ import org.springframework.security.oauth2.client.registration.ClientRegistratio
 import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.ClientAuthenticationMethod;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.SsoConnection;
@@ -27,6 +37,10 @@ import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
  * so the OAuth2 machinery treats the id as unknown. Issuer metadata is cached only
  * as a secret-free template; every returned registration receives a fresh decrypted
  * client secret.
+ *
+ * <p>Every resolution re-validates the issuer and all discovered destinations against the
+ * outbound address policy, in a single bounded transport task, so a warm cache hit costs one
+ * unit of transport capacity rather than one per endpoint.
  */
 @Component
 @RequiredArgsConstructor
@@ -38,12 +52,17 @@ public class DbClientRegistrationRepository implements ClientRegistrationReposit
     private static final String[] DEFAULT_SCOPES = { "openid", "email", "profile" };
     private static final Duration DISCOVERY_CACHE_TTL = Duration.ofMinutes(10);
     private static final String TEMPLATE_SECRET = "<redacted>";
+    private static final int FIRST_RFC8414_PATH_INDEX = 1;
+    private static final int MAX_CAUSE_DEPTH = 8;
+    private static final int RESOLUTIONS_PER_REGISTRATION = 2;
 
     private final SsoConnectionMapper ssoConnectionMapper;
     private final SsoSecretCipher ssoSecretCipher;
     private final SsoProperties ssoProperties;
+    private final SsoHttpClient ssoHttpClient;
 
     private final ConcurrentHashMap<String, CachedTemplate> cache = new ConcurrentHashMap<>();
+    private final SsoTransportSlots registrationSlots = new SsoTransportSlots(RESOLUTIONS_PER_REGISTRATION);
 
     @Override
     public ClientRegistration findByRegistrationId(String registrationId) {
@@ -51,28 +70,86 @@ public class DbClientRegistrationRepository implements ClientRegistrationReposit
         if (orgId == null) {
             return null;
         }
-        SsoConnection connection = ssoConnectionMapper.findByOrg(orgId);
-        if (connection == null || !connection.isEnabled() || !"oidc".equals(connection.getProtocol())) {
+        if (!ssoProperties.isEnabled()) {
+            log.debug("Enterprise OIDC resolution refused for org {}: the instance SSO kill switch is off", orgId);
             return null;
         }
-        if (!SsoUrlSafety.isFetchableHttpUrl(connection.getOidcIssuer(), ssoProperties.isAllowPrivateIssuerHosts())) {
-            log.warn("OIDC issuer for org {} is not a permitted public URL; skipping", orgId);
+        SsoConnection connection = ssoConnectionMapper.findByOrg(orgId);
+        if (!admitted(connection)) {
+            log.debug("Enterprise OIDC resolution refused for org {}: no enabled OIDC connection", orgId);
+            return null;
+        }
+        ConnectionIdentity identity = ConnectionIdentity.of(connection);
+        if (identity.issuer() == null || identity.clientId() == null) {
+            log.warn("Enterprise OIDC resolution refused for org {}: the stored connection is incomplete", orgId);
             return null;
         }
         Instant now = Instant.now();
-        CachedTemplate cached = cache.get(registrationId);
-        if (cached != null && !cached.expired(now)) {
-            return cached.template() == null ? null : withSecret(cached.template(), connection);
-        }
-        try {
-            ClientRegistration template = buildTemplate(registrationId, connection);
-            cache.put(registrationId, CachedTemplate.success(template, now));
-            return withSecret(template, connection);
-        } catch (RuntimeException e) {
-            log.warn("Failed to build OIDC client registration for org {}: {}", orgId, e.getMessage());
-            cache.put(registrationId, CachedTemplate.failure(now));
+        try (var lease = registrationSlots.acquire(Integer.toString(orgId), 0)) {
+            CachedTemplate cached = cache.get(registrationId);
+            ClientRegistration template;
+            if (cached != null && cached.identity().equals(identity) && !cached.expired(now)) {
+                template = cached.template();
+                ssoHttpClient.requireSafeEnterpriseDestinations(orgId, destinations(identity.issuer(), template));
+            } else {
+                ssoHttpClient.requireSafeEnterpriseDestinations(orgId, List.of(identity.issuer()));
+                template = buildTemplate(orgId, registrationId, identity, connection);
+                ssoHttpClient.requireSafeEnterpriseDestinations(orgId, destinations(identity.issuer(), template));
+                cache.put(registrationId, new CachedTemplate(identity, template, now));
+            }
+            SsoConnection current = ssoConnectionMapper.findByOrg(orgId);
+            if (!admitted(current) || !identity.equals(ConnectionIdentity.of(current))) {
+                log.warn("Enterprise OIDC resolution refused for org {}: connection identity changed", orgId);
+                return null;
+            }
+            ClientRegistration registration = withSecret(template, current);
+            SsoConnection afterDecryption = ssoConnectionMapper.findByOrg(orgId);
+            if (!admitted(afterDecryption) || !identity.equals(ConnectionIdentity.of(afterDecryption))) {
+                log.warn("Enterprise OIDC resolution refused for org {}: connection identity changed", orgId);
+                return null;
+            }
+            return registration;
+        } catch (IOException | RuntimeException e) {
+            log.warn("Enterprise OIDC resolution refused for org {}: {} [{}]",
+                    orgId, refusalReason(e), e.getClass().getName());
+            log.debug("Enterprise OIDC resolution failure for org {}", orgId, e);
             return null;
         }
+    }
+
+    private static String refusalReason(Exception failure) {
+        Throwable cause = failure;
+        for (int depth = 0; cause != null && depth < MAX_CAUSE_DEPTH; depth++) {
+            if (cause instanceof SsoTransportSaturatedException) {
+                return "OIDC transport saturated";
+            }
+            if (cause instanceof SsoTransportException transport) {
+                return transport.reason() == SsoTransportException.Reason.TIMEOUT
+                        ? "transport_timeout" : "transport_interrupted";
+            }
+            if (cause instanceof SocketTimeoutException) {
+                return "transport_timeout";
+            }
+            cause = cause.getCause();
+        }
+        if (failure instanceof IllegalArgumentException) {
+            return "destination or metadata refused by policy";
+        }
+        if (failure instanceof IOException || failure instanceof UncheckedIOException) {
+            return "transport_failure";
+        }
+        if (failure instanceof IllegalStateException) {
+            return "client secret unavailable";
+        }
+        if (failure instanceof RestClientException) {
+            return "discovery response unusable";
+        }
+        return "unexpected resolution failure";
+    }
+
+    private boolean admitted(SsoConnection connection) {
+        return ssoProperties.isEnabled() && connection != null && connection.isEnabled()
+                && "oidc".equals(connection.getProtocol());
     }
 
     /**
@@ -83,10 +160,11 @@ public class DbClientRegistrationRepository implements ClientRegistrationReposit
         cache.remove(REGISTRATION_PREFIX + orgId);
     }
 
-    private ClientRegistration buildTemplate(String registrationId, SsoConnection connection) {
-        return ClientRegistrations.fromIssuerLocation(connection.getOidcIssuer())
+    private ClientRegistration buildTemplate(int orgId, String registrationId, ConnectionIdentity identity,
+            SsoConnection connection) {
+        return discover(orgId, identity.issuer())
                 .registrationId(registrationId)
-                .clientId(connection.getOidcClientId())
+                .clientId(identity.clientId())
                 .clientSecret(TEMPLATE_SECRET)
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
@@ -95,11 +173,97 @@ public class DbClientRegistrationRepository implements ClientRegistrationReposit
                 .build();
     }
 
+    private ClientRegistration.Builder discover(int orgId, String issuer) {
+        URI uri = URI.create(issuer);
+        String path = uri.getRawPath();
+        List<String> paths = List.of(path + "/.well-known/openid-configuration",
+                "/.well-known/openid-configuration" + path,
+                "/.well-known/oauth-authorization-server" + path);
+        for (int index = 0; index < paths.size(); index++) {
+            String discoveryPath = paths.get(index);
+            URI discoveryUri = UriComponentsBuilder.fromUri(uri).replacePath(discoveryPath).build(true).toUri();
+            Map<String, Object> metadata;
+            try {
+                metadata = ssoHttpClient.metadata(orgId, discoveryUri);
+            } catch (HttpClientErrorException e) {
+                continue;
+            }
+            if (metadata == null || !issuer.equals(metadata.get("issuer"))) {
+                throw new IllegalArgumentException("OIDC discovery issuer mismatch");
+            }
+            return index >= FIRST_RFC8414_PATH_INDEX
+                    ? fromServerMetadata(metadata, issuer) : ClientRegistrations.fromOidcConfiguration(metadata);
+        }
+        throw new IllegalArgumentException("OIDC discovery unavailable");
+    }
+
+    /**
+     * Builds a registration from RFC 8414 metadata, which the OIDC-only parser rejects because it
+     * carries no {@code subject_types_supported} or {@code id_token_signing_alg_values_supported}.
+     * Both fallback paths use this reader, matching Spring Security's issuer discovery ordering;
+     * only the initial issuer-relative OIDC discovery path uses the strict OIDC reader.
+     */
+    private ClientRegistration.Builder fromServerMetadata(Map<String, Object> metadata, String issuer) {
+        String authorizationUri = requiredText(metadata, "authorization_endpoint");
+        String tokenUri = requiredText(metadata, "token_endpoint");
+        String jwkSetUri = requiredText(metadata, "jwks_uri");
+        String userInfoUri = optionalText(metadata, "userinfo_endpoint");
+        return ClientRegistration.withRegistrationId(URI.create(issuer).getHost())
+                .issuerUri(issuer).clientName(issuer).userNameAttributeName("sub")
+                .authorizationUri(authorizationUri).tokenUri(tokenUri)
+                .jwkSetUri(jwkSetUri).userInfoUri(userInfoUri)
+                .providerConfigurationMetadata(metadata);
+    }
+
+    private static String requiredText(Map<String, Object> metadata, String key) {
+        String value = optionalText(metadata, key);
+        if (value == null) {
+            throw new IllegalArgumentException("OIDC metadata is incomplete");
+        }
+        return value;
+    }
+
+    private static String optionalText(Map<String, Object> metadata, String key) {
+        Object value = metadata.get(key);
+        if (value == null) {
+            return null;
+        }
+        if (!(value instanceof String text) || text.isBlank()) {
+            throw new IllegalArgumentException("OIDC metadata is incomplete");
+        }
+        return text;
+    }
+
+    private static List<String> destinations(String issuer, ClientRegistration template) {
+        ClientRegistration.ProviderDetails provider = template.getProviderDetails();
+        List<String> urls = new ArrayList<>();
+        urls.add(issuer);
+        urls.add(requiredEndpoint(provider.getAuthorizationUri()));
+        urls.add(requiredEndpoint(provider.getTokenUri()));
+        urls.add(requiredEndpoint(provider.getJwkSetUri()));
+        String userInfoUri = provider.getUserInfoEndpoint().getUri();
+        if (userInfoUri != null && !userInfoUri.isBlank()) {
+            urls.add(userInfoUri);
+        }
+        return List.copyOf(urls);
+    }
+
+    private static String requiredEndpoint(String uri) {
+        if (uri == null || uri.isBlank()) {
+            throw new IllegalArgumentException("OIDC metadata is incomplete");
+        }
+        return uri;
+    }
+
     private ClientRegistration withSecret(ClientRegistration template, SsoConnection connection) {
+        String secret = ssoSecretCipher.decryptOidcClientSecret(connection.getOrgId(),
+                connection.getOidcClientSecretEnc());
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException("OIDC client secret is unavailable");
+        }
         return ClientRegistration.withClientRegistration(template)
                 .clientId(connection.getOidcClientId())
-                .clientSecret(ssoSecretCipher.decryptOidcClientSecret(connection.getOrgId(),
-                        connection.getOidcClientSecretEnc()))
+                .clientSecret(secret)
                 .scope(scopes(connection.getOidcScopes()))
                 .build();
     }
@@ -115,7 +279,8 @@ public class DbClientRegistrationRepository implements ClientRegistrationReposit
         return parsed.length == 0 ? DEFAULT_SCOPES.clone() : parsed;
     }
 
-    private static Integer parseOrgId(String registrationId) {
+    /** Shares organization parsing between registration lookup and callback transport admission. */
+    static Integer parseOrgId(String registrationId) {
         if (registrationId == null || !registrationId.startsWith(REGISTRATION_PREFIX)) {
             return null;
         }
@@ -126,15 +291,18 @@ public class DbClientRegistrationRepository implements ClientRegistrationReposit
         }
     }
 
-    private record CachedTemplate(ClientRegistration template, Instant cachedAt) {
-        static CachedTemplate success(ClientRegistration template, Instant cachedAt) {
-            return new CachedTemplate(template, cachedAt);
+    private record ConnectionIdentity(String issuer, String clientId, String secretReference, String scopes) {
+        static ConnectionIdentity of(SsoConnection connection) {
+            return new ConnectionIdentity(trimmed(connection.getOidcIssuer()), connection.getOidcClientId(),
+                    connection.getOidcClientSecretEnc(), connection.getOidcScopes());
         }
 
-        static CachedTemplate failure(Instant cachedAt) {
-            return new CachedTemplate(null, cachedAt);
+        private static String trimmed(String value) {
+            return value == null ? null : value.trim();
         }
+    }
 
+    private record CachedTemplate(ConnectionIdentity identity, ClientRegistration template, Instant cachedAt) {
         boolean expired(Instant now) {
             return cachedAt.plus(DISCOVERY_CACHE_TTL).isBefore(now);
         }
