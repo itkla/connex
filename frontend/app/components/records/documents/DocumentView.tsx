@@ -262,9 +262,9 @@ function renderNode(node: DocumentBodyNode, lineItemsTable: ReactNode): ReactNod
             return <Tag className={cls} style={alignStyle(node)}>{renderInline(node.content)}</Tag>;
         }
         case 'bulletList':
-            return <ul className="my-2.5 list-disc space-y-1 pl-5">{(node.content ?? []).filter((li) => li.type === 'listItem').map((li, i) => <li key={i}>{renderListItem(li, lineItemsTable)}</li>)}</ul>;
+            return <ul className="my-2.5 list-disc space-y-1 pl-5">{renderListItems(node, lineItemsTable)}</ul>;
         case 'orderedList':
-            return <ol className="my-2.5 list-decimal space-y-1 pl-5">{(node.content ?? []).filter((li) => li.type === 'listItem').map((li, i) => <li key={i}>{renderListItem(li, lineItemsTable)}</li>)}</ol>;
+            return <ol className="my-2.5 list-decimal space-y-1 pl-5">{renderListItems(node, lineItemsTable)}</ol>;
         case 'blockquote':
             return <blockquote className="my-3 border-l-2 border-border pl-4 text-muted-foreground">{(node.content ?? []).map((child, i) => <Fragment key={i}>{renderNode(child, lineItemsTable)}</Fragment>)}</blockquote>;
         case 'codeBlock':
@@ -276,6 +276,20 @@ function renderNode(node: DocumentBodyNode, lineItemsTable: ReactNode): ReactNod
         default:
             return null;
     }
+}
+
+/**
+ * Renders only the list-item children of a list node in a single pass; frozen document nodes carry
+ * no identifiers, so the position within the immutable snapshot is the stable key.
+ */
+function renderListItems(node: DocumentBodyNode, lineItemsTable: ReactNode): ReactNode[] {
+    const items: ReactNode[] = [];
+    for (const [index, child] of (node.content ?? []).entries()) {
+        if (child.type === 'listItem') {
+            items.push(<li key={index}>{renderListItem(child, lineItemsTable)}</li>);
+        }
+    }
+    return items;
 }
 
 function renderListItem(item: DocumentBodyNode, lineItemsTable: ReactNode): ReactNode {
