@@ -2,6 +2,8 @@ import { isIP } from "node:net";
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
+import type { SignupLimiter } from "@/signup-limiter";
+
 export const runtime = "nodejs";
 
 type SignupError = "invalid_email" | "invalid_request" | "rate_limited" | "unavailable";
@@ -76,9 +78,44 @@ function clientKey(request: Request): string | null {
         if (!version) return null;
         if (version !== 6) return forwarded;
         const address = `http://[${forwarded}]`;
-        return URL.canParse(address) ? new URL(address).hostname : null;
+        return URL.canParse(address) ? ipv6NetworkKey(new URL(address).hostname) : null;
     }
     return process.env.NODE_ENV === "production" ? null : "direct-development";
+}
+
+/**
+ * Reduces an IPv6 address to its /64 network, the smallest block a single subscriber routinely
+ * holds, so rotating addresses inside one network cannot multiply the per-client allowance. An
+ * IPv4-mapped address carries no such network, so it keys on the IPv4 address it wraps and shares
+ * that address's allowance instead of collapsing every mapped client into a single bucket.
+ * @param hostname the parsed IPv6 hostname, with or without brackets
+ * @returns the normalised client key, or null when the address is not eight groups
+ */
+function ipv6NetworkKey(hostname: string): string | null {
+    const address = hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+    const [head, tail] = address.split("::");
+    const leading = head === "" ? [] : head.split(":");
+    const trailing = tail === undefined || tail === "" ? [] : tail.split(":");
+    const omitted = 8 - leading.length - trailing.length;
+    if (tail === undefined ? leading.length !== 8 : omitted < 1) return null;
+    const groups = tail === undefined
+        ? leading
+        : [...leading, ...Array<string>(omitted).fill("0"), ...trailing];
+    return mappedIpv4Address(groups) ?? groups.slice(0, 4).map((group) => group.padStart(4, "0")).join(":");
+}
+
+/**
+ * Recovers the IPv4 address an IPv4-mapped IPv6 address carries, in the dotted form a plain IPv4
+ * client is keyed by, so one client cannot hold two allowances by changing representation.
+ * @param groups the eight expanded hexadecimal groups of the address
+ * @returns the dotted-quad address, or null when the address is not IPv4-mapped
+ */
+function mappedIpv4Address(groups: readonly string[]): string | null {
+    const values = groups.map((group) => (/^[\da-f]{1,4}$/i.test(group) ? Number.parseInt(group, 16) : -1));
+    if (values.slice(0, 5).some((value) => value !== 0) || values[5] !== 0xffff) return null;
+    const [high, low] = [values[6], values[7]];
+    if (high < 0 || low < 0) return null;
+    return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
 }
 
 function validEmail(value: unknown): value is string {
@@ -221,13 +258,15 @@ async function persistSignup(email: string, segment: string, key: string, signal
 }
 
 /**
- * Accepts anonymous launch signups only after Resend confirms the contact and launch membership.
+ * Acknowledges valid, admitted submissions before any preference-dependent work, matching the product
+ * application's endpoint: the response is the same whether the address is new, already listed, or
+ * opted out, and it is sent before Resend is contacted, so neither its body nor its timing discloses
+ * a preference. Persistence continues in `waitUntil` and is best effort.
  *
- * The rate-limit reservation is claimed after validation, so malformed requests never reach the
- * limiter. Every Resend call then waits for a deployment-wide slot from the same object; a full queue
- * is reported as a rate limit.
+ * Admission is decided once, after validation, by `SignupLimiter.reserve`, so malformed requests never
+ * reach the limiter and a refused submission spends no allowance.
  * @param request the signup submission
- * @returns the signup outcome
+ * @returns the acknowledgment, or a validation, rate-limit, or configuration error
  */
 export async function POST(request: Request): Promise<Response> {
     if (request.method !== "POST") return invalidRequest(405);
@@ -259,23 +298,40 @@ export async function POST(request: Request): Promise<Response> {
     const email = typeof body.email === "string" ? body.email.trim() : body.email;
     if (!validEmail(email)) return json({ error: "invalid_email" }, 400);
 
-    const limiter = getCloudflareContext().env.SIGNUP_LIMITER;
-    const limiterInstance = limiter.get(limiter.idFromName("launch"));
-    const reservation = await limiterInstance.reserve(client);
+    const { env, ctx } = getCloudflareContext();
+    const limiter = env.SIGNUP_LIMITER.get(env.SIGNUP_LIMITER.idFromName("launch"));
+    const reservation = await limiter.reserve(client);
     if (!reservation.allowed) return json({ error: "rate_limited" }, 429, reservation.retryAfter);
 
-    const providerDeadline = Date.now() + PROVIDER_TIMEOUT_MS;
-    const gate: ProviderGate = () => limiterInstance.pace(providerDeadline - Date.now());
+    ctx.waitUntil(persistInBackground(email, segment, key, limiter, Date.now() + PROVIDER_TIMEOUT_MS));
+    return json({ status: "subscribed" }, 200);
+}
+
+/**
+ * Runs an admitted signup's provider work after the acknowledgment has been sent. Every outcome,
+ * including provider failure, timeout, a full provider queue, and an opted-out contact, ends silently:
+ * surfacing any of them would re-open the preference oracle the acknowledgment closes.
+ * @param email validated address
+ * @param segment launch segment ID
+ * @param key Resend API key
+ * @param limiter the deployment-wide limiter that spaces provider calls
+ * @param deadline epoch milliseconds after which no provider work may start
+ */
+async function persistInBackground(
+    email: string,
+    segment: string,
+    key: string,
+    limiter: DurableObjectStub<SignupLimiter>,
+    deadline: number,
+): Promise<void> {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), remaining);
     try {
-        const saved = await persistSignup(email, segment, key, AbortSignal.any([request.signal, controller.signal]), gate);
-        return saved ? json({ status: "subscribed" }, 200) : unavailable();
-    } catch (error) {
-        if (error instanceof ProviderBusyError) {
-            return json({ error: "rate_limited" }, 429, Math.ceil(PROVIDER_TIMEOUT_MS / 1000));
-        }
-        return unavailable();
+        await persistSignup(email, segment, key, controller.signal, () => limiter.pace(deadline - Date.now()));
+    } catch {
+        return;
     } finally {
         clearTimeout(timer);
     }

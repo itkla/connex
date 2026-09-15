@@ -3,10 +3,13 @@ import { DurableObject } from "cloudflare:workers";
 const CLIENT_WINDOW_MS = 15 * 60 * 1000;
 const CLIENT_REQUESTS = 5;
 const GLOBAL_WINDOW_MS = 60 * 1000;
-const GLOBAL_SIGNUPS = 30;
 const PROVIDER_INTERVAL_MS = 550;
+const MAX_PROVIDER_CALLS_PER_SIGNUP = 6;
+const ADMISSION_INTERVAL_MS = MAX_PROVIDER_CALLS_PER_SIGNUP * PROVIDER_INTERVAL_MS;
+const GLOBAL_SIGNUPS = Math.floor(GLOBAL_WINDOW_MS / ADMISSION_INTERVAL_MS);
 const MAX_PROVIDER_WAIT_MS = 8000;
 const GLOBAL_KEY = "global";
+const ADMISSION_KEY = "admissionAvailableAt";
 const CLIENT_PREFIX = "client:";
 
 type Window = { count: number; expiresAt: number };
@@ -33,12 +36,24 @@ export class SignupLimiter extends DurableObject {
     private nextProviderAt = 0;
 
     /**
-     * Claims one signup attempt for a client.
-     * @param client the caller's address
-     * @returns whether the attempt may proceed, and when to retry if not
+     * Admits one signup, applying the product application's bounds in a single atomic decision.
+     *
+     * Admission is spaced by a fixed {@link ADMISSION_INTERVAL_MS} (the maximum six provider calls of
+     * one signup at {@link PROVIDER_INTERVAL_MS} each), and the minute cap is derived from it. The
+     * interval never depends on how long provider work takes, so repeated submissions cannot probe
+     * preference-dependent completion times. The shared interval and minute cap are checked before
+     * the caller's own window, and nothing is counted unless every check passes, so a submission
+     * refused because of another visitor never spends the caller's allowance.
+     * @param client the caller's normalised address
+     * @returns whether the signup is admitted, and when to retry if not
      */
     async reserve(client: string): Promise<Reservation> {
         const now = Date.now();
+
+        const admissionAvailableAt = (await this.ctx.storage.get<number>(ADMISSION_KEY)) ?? 0;
+        if (admissionAvailableAt > now) {
+            return { allowed: false, retryAfter: retryAfter(admissionAvailableAt, now) };
+        }
 
         const storedGlobal = await this.ctx.storage.get<Window>(GLOBAL_KEY);
         const globalWindow = !storedGlobal || storedGlobal.expiresAt <= now
@@ -59,7 +74,11 @@ export class SignupLimiter extends DurableObject {
 
         globalWindow.count += 1;
         clientWindow.count += 1;
-        await this.ctx.storage.put({ [GLOBAL_KEY]: globalWindow, [clientKey]: clientWindow });
+        await this.ctx.storage.put({
+            [GLOBAL_KEY]: globalWindow,
+            [clientKey]: clientWindow,
+            [ADMISSION_KEY]: now + ADMISSION_INTERVAL_MS,
+        });
 
         if ((await this.ctx.storage.getAlarm()) === null) {
             await this.ctx.storage.setAlarm(clientWindow.expiresAt);

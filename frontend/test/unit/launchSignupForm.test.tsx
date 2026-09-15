@@ -80,11 +80,14 @@ describe.each(["en", "ja"] as const)("launch signup in %s", (locale) => {
 });
 
 it.each([
+    [200, { status: "subscribed" }, "success"],
+    [200, { status: "accepted" }, "success"],
     [200, { error: "unavailable" }, "error"],
     [503, { status: "subscribed" }, "error"],
+    [503, { status: "accepted" }, "error"],
     [200, {}, "error"],
     [429, { error: "rate_limited" }, "rateLimited"],
-] as const)("requires confirmed provider acceptance for HTTP %s", async (status, body, expected) => {
+] as const)("requires a public acknowledgment for HTTP %s", async (status, body, expected) => {
     fetchMock.mockResolvedValueOnce(Response.json(body, { status }));
     expect(await subscribeToLaunch("visitor@example.com")).toBe(expected);
 });

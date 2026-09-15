@@ -20,7 +20,7 @@ export async function subscribeToLaunch(email: string, website = ""): Promise<La
     if (response.status === 429) return "rateLimited";
     const body: unknown = await response.json();
     if (typeof body !== "object" || body === null) return "error";
-    if (response.ok && "status" in body && body.status === "subscribed") return "success";
+    if (response.ok && "status" in body && (body.status === "subscribed" || body.status === "accepted")) return "success";
     if ("error" in body && body.error === "invalid_email") return "invalid";
     return "error";
 }
