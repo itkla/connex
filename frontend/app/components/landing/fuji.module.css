@@ -9,8 +9,8 @@
     inset: 0;
     overflow: hidden;
     pointer-events: none;
-    --fuji-drift-far: calc(var(--motion-expressive) * 300);
-    --fuji-drift-near: calc(var(--motion-expressive) * 200);
+    --fuji-drift-far: calc(var(--motion-ambient-cloud) * 1.6);
+    --fuji-drift-near: calc(var(--motion-ambient-cloud) * 1.08);
 }
 .landscape {
     position: absolute;
@@ -36,24 +36,24 @@
 .starTone { fill: color-mix(in oklab, var(--foreground) 90%, var(--background)); }
 .starStop { stop-color: color-mix(in oklab, var(--foreground) 90%, var(--background)); }
 .star {
-    animation: starTwinkle calc(var(--motion-expressive) * 9) ease-in-out infinite;
+    animation: starTwinkle var(--motion-ambient-twinkle) ease-in-out infinite;
     animation-play-state: paused;
 }
-.star:nth-child(3n + 1) { animation-duration: calc(var(--motion-expressive) * 13); }
+.star:nth-child(3n + 1) { animation-duration: calc(var(--motion-ambient-twinkle) * 1.45); }
 .twinkleEarly { animation-delay: 0s; }
-.twinkleMid { animation-delay: calc(var(--motion-expressive) * -4); }
-.twinkleLate { animation-delay: calc(var(--motion-expressive) * -8); }
-.twinkleLast { animation-delay: calc(var(--motion-expressive) * -11); }
-.star:nth-child(7n) { animation-duration: calc(var(--motion-expressive) * 6); }
+.twinkleMid { animation-delay: calc(var(--motion-ambient-twinkle) * -0.45); }
+.twinkleLate { animation-delay: calc(var(--motion-ambient-twinkle) * -0.9); }
+.twinkleLast { animation-delay: calc(var(--motion-ambient-twinkle) * -1.25); }
+.star:nth-child(7n) { animation-duration: calc(var(--motion-ambient-twinkle) * 0.68); }
 .shootingStar {
     opacity: 0;
-    animation: shootingStar calc(var(--motion-expressive) * 29) var(--ease-out) infinite;
+    animation: shootingStar var(--motion-ambient-meteor) var(--ease-out) infinite;
     animation-play-state: paused;
 }
-.backdrop:not([data-fuji-motion="running"]) .shootingStar { display: none; }
+.backdrop:not([data-fuji-motion="running"]) .shootingStar { visibility: hidden; }
 .shootingStarLate {
-    animation-duration: calc(var(--motion-expressive) * 47);
-    animation-delay: calc(var(--motion-expressive) * 16);
+    animation-duration: calc(var(--motion-ambient-meteor) * 1.62);
+    animation-delay: calc(var(--motion-ambient-meteor) * 0.55);
 }
 .cloudDrift {
     animation: cloudPassing var(--fuji-drift-far) linear infinite;
@@ -102,6 +102,9 @@
 }
 :global(.dark) .sun { display: none; }
 :global(.dark) .stars { display: inline; }
+@media (min-aspect-ratio: 2 / 1) {
+    .landscape { inset: auto 0 0 auto; width: auto; height: 100%; aspect-ratio: 16 / 9; }
+}
 @media (max-width: 63.999rem) {
     .landscape { inset: auto -12% 0 auto; width: 140%; height: 85%; }
     .scenery { mask-image: linear-gradient(180deg, transparent, rgb(0 0 0 / 0.12) 30%, rgb(0 0 0 / 0.55) 60%, black); }
