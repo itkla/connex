@@ -1,20 +1,31 @@
 import type { Metadata } from "next";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 
 import { LandingPage } from "@/app/components/landing/LandingPage";
+import { openGraphLocales } from "@/app/lib/siteMetadata";
+import { resolveLocale } from "@/i18n/config";
 
+/**
+ * Prelaunch landing metadata, matching what the product application states on a prelaunch host.
+ * @returns the landing page's title, description, and social card
+ */
 export async function generateMetadata(): Promise<Metadata> {
-    const t = await getTranslations("CommonHome");
+    const [locale, t] = await Promise.all([getLocale(), getTranslations("CommonHome")]);
+    const metaTitle = t("prelaunch.metaTitle");
+    const metaDescription = t("prelaunch.metaDescription");
+
     return {
-        title: t("metaTitle"),
-        description: t("metaDescription"),
+        title: { absolute: metaTitle },
+        description: metaDescription,
         alternates: { canonical: "/" },
         openGraph: {
-            title: t("metaTitle"),
-            description: t("metaDescription"),
             type: "website",
+            siteName: t("brand"),
+            url: "/",
+            title: metaTitle,
+            description: metaDescription,
+            ...openGraphLocales(resolveLocale(locale)),
         },
-        twitter: { card: "summary_large_image", title: t("metaTitle"), description: t("metaDescription") },
     };
 }
 

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { DropdownMenu } from "radix-ui";
 import { CheckIcon, ChevronDownIcon, GlobeAltIcon } from "@heroicons/react/16/solid";
-import { setLocaleCookie } from "@/app/lib/locale";
+import { setLocaleCookie } from "@/app/lib/utils";
 import type { Locale } from "@/i18n/config";
 
 const LANGUAGES = [

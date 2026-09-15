@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { getTranslations } from "next-intl/server";
+import { resolvePreLaunch } from "@/app/lib/landingMode";
 import LandingNav from "@/app/components/landing/LandingNav";
 import LandingFooter from "@/app/components/landing/LandingFooter";
 import LegalDisclosureList, { type LegalDisclosureRow } from "@/app/components/legal/LegalDisclosureList";
@@ -24,10 +26,11 @@ const UPDATED = "2026-07-01";
 
 export async function generateMetadata(): Promise<Metadata> {
     const t = await getTranslations("Legal");
-    return { title: `${t("tokushoho.title")} — ${t("brand")}` };
+    return { title: t("tokushoho.title"), description: t("tokushoho.metaDescription") };
 }
 
 export default async function TokushohoPage() {
+    const preLaunch = resolvePreLaunch({ host: (await headers()).get("host") });
     const t = await getTranslations("Legal");
     const nav = await getTranslations("CommonHome");
 
@@ -39,7 +42,7 @@ export default async function TokushohoPage() {
 
     return (
         <div className="font-body min-h-screen bg-background text-foreground">
-            <LandingNav ctaHref="/" ctaLabel={nav("ctaGetStarted")} preLaunch />
+            <LandingNav ctaHref="/auth/register" ctaLabel={nav("ctaGetStarted")} preLaunch={preLaunch} />
             <main>
                 <LegalDisclosureList
                     title={t("tokushoho.title")}
@@ -49,7 +52,7 @@ export default async function TokushohoPage() {
                     rows={rows}
                 />
             </main>
-            <LandingFooter showLogin={false} showDocs={false} />
+            <LandingFooter showLogin={!preLaunch} showDocs={!preLaunch} />
         </div>
     );
 }

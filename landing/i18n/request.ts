@@ -6,10 +6,10 @@ import { LOCALE_COOKIE, resolveLocale, type Locale } from "./config";
 export { defaultLocale, locales, LOCALE_COOKIE, type Locale } from "./config";
 
 /**
- * The prelaunch deployment serves the landing body and the legal pages only, so it loads the two
- * namespaces those need rather than the full product set.
+ * The prelaunch deployment serves the landing body, the legal pages, and the not-found page, so it
+ * loads the namespaces those need rather than the full product set.
  */
-const namespaces = ["common", "legal"] as const;
+const namespaces = ["common", "legal", "errors"] as const;
 
 async function loadNamespace(locale: Locale, namespace: string): Promise<Record<string, unknown>> {
     const fragment = (await import(`../messages/${locale}/${namespace}.json`)).default;

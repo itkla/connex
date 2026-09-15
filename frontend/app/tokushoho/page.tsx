@@ -52,7 +52,7 @@ export default async function TokushohoPage() {
                     rows={rows}
                 />
             </main>
-            <LandingFooter showLogin={!preLaunch} />
+            <LandingFooter showLogin={!preLaunch} showDocs={!preLaunch} />
         </div>
     );
 }

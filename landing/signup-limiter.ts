@@ -33,6 +33,10 @@ export class SignupLimiter extends DurableObject {
     /**
      * Claims one signup attempt for a client.
      * @param client the caller's address
+     *
+     * A granted attempt also waits out the provider spacing interval before returning. The instance
+     * is single-threaded, so concurrent signups queue behind that wait rather than reaching Resend
+     * together.
      * @returns whether the attempt may proceed, and when to retry if not
      */
     async reserve(client: string): Promise<Reservation> {
@@ -59,8 +63,6 @@ export class SignupLimiter extends DurableObject {
         clientWindow.count += 1;
         await this.ctx.storage.put({ [GLOBAL_KEY]: globalWindow, [clientKey]: clientWindow });
 
-        // Holding the object here is what spaces provider traffic: the instance is single-threaded,
-        // so concurrent signups queue behind this wait rather than reaching Resend together.
         const nextAt = (await this.ctx.storage.get<number>(PROVIDER_KEY)) ?? 0;
         const delay = nextAt - Date.now();
         if (delay > 0) await sleep(delay);

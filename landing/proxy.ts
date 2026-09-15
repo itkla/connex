@@ -10,9 +10,12 @@ import {
     resolveContentSecurityPolicyMode,
 } from './security-headers';
 
+/**
+ * Creates a per-request CSP nonce. Uses `btoa` rather than `Buffer` so it does not depend on a Node
+ * built-in; the UUID is ASCII, so the value matches the product application's byte for byte.
+ * @returns a base64 nonce
+ */
 function createNonce(): string {
-    // `btoa` rather than `Buffer`, so this does not depend on a Node built-in. The UUID is ASCII,
-    // so the emitted value matches the product application's byte for byte.
     return btoa(crypto.randomUUID());
 }
 
@@ -40,6 +43,12 @@ function browserFacingRequestOrigin(request: NextRequest): string {
  *
  * The prelaunch deployment has no sessions and no protected routes, so this carries the header work
  * only; route protection stays in the product application.
+ *
+ * Only the CSP and reporting headers are set here. The standard security headers come from
+ * `next.config.ts` and `public/_headers`; setting them here too appends a second copy of each, and a
+ * repeated `X-Frame-Options` is not a value browsers are obliged to honour.
+ * @param request the incoming request
+ * @returns the pass-through response carrying the policy
  */
 export function proxy(request: NextRequest) {
     const { pathname, search } = request.nextUrl;
@@ -60,9 +69,6 @@ export function proxy(request: NextRequest) {
     requestHeaders.set('x-nonce', nonce);
     requestHeaders.set('Content-Security-Policy', policy);
 
-    // The standard security headers come from `next.config.ts`, which also covers static assets.
-    // Setting them here as well appends a second copy of each, and a repeated `X-Frame-Options` is
-    // not a value browsers are obliged to honour.
     const response = NextResponse.next({ request: { headers: requestHeaders } });
     applyFrontendContentSecurityPolicy(
         response.headers,

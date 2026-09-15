@@ -64,9 +64,13 @@ function sameOrigin(request: Request): boolean {
     }
 }
 
+/**
+ * Identifies the caller for rate limiting from `CF-Connecting-IP`, which Cloudflare sets on every
+ * inbound request and a client cannot forge. Generic forwarded headers are not client identity.
+ * @param request the incoming request
+ * @returns the caller's normalised address, or null when it cannot be established
+ */
 function clientKey(request: Request): string | null {
-    // Cloudflare sets this on every inbound request and a client cannot forge it; generic forwarded
-    // headers are not client identity.
     const forwarded = request.headers.get("cf-connecting-ip");
     if (forwarded) {
         const version = isIP(forwarded);
@@ -188,8 +192,19 @@ function includesLaunchSegment(segments: unknown, segment: string): boolean {
     return isSegmentList(segments) && segments.data.some((entry) => isRecord(entry) && entry.id === segment);
 }
 
+/**
+ * Records a signup in the launch segment. The contact is looked up before anything is written,
+ * because creating an existing address has no documented merge contract. A returned contact ID alone
+ * does not establish segment membership for a repeat signup, so membership is read back and added
+ * only when missing.
+ * @param email validated address
+ * @param segment launch segment ID
+ * @param key Resend API key
+ * @param signal aborts the provider calls
+ * @param pacer spacing state for this request's provider calls
+ * @returns whether the contact is confirmed subscribed and in the segment
+ */
 async function persistSignup(email: string, segment: string, key: string, signal: AbortSignal, pacer: Pacer): Promise<boolean> {
-    // Resolve preferences before writing; creating an existing email has no documented merge contract.
     let contact = await resend(`/contacts/${encodeURIComponent(email)}`, key, signal, pacer, { allowNotFound: true });
     if (contact === CONTACT_NOT_FOUND) {
         const created = await resend("/contacts", key, signal, pacer, {
@@ -206,7 +221,6 @@ async function persistSignup(email: string, segment: string, key: string, signal
         || typeof contact.email !== "string" || contact.email.toLowerCase() !== email.toLowerCase()) {
         return false;
     }
-    // A returned contact ID alone does not establish launch-segment membership for a repeat signup.
     const segments = await resend(`/contacts/${contact.id}/segments`, key, signal, pacer);
     if (!isSegmentList(segments)) return false;
     if (includesLaunchSegment(segments, segment)) return true;
@@ -215,7 +229,14 @@ async function persistSignup(email: string, segment: string, key: string, signal
     return includesLaunchSegment(await resend(`/contacts/${contact.id}/segments`, key, signal, pacer), segment);
 }
 
-/** Accepts anonymous launch signups only after Resend confirms the contact and launch membership. */
+/**
+ * Accepts anonymous launch signups only after Resend confirms the contact and launch membership.
+ *
+ * The rate-limit reservation is claimed after validation. The limiter holds each caller for the
+ * provider spacing interval, so admitting unvalidated requests would let malformed traffic occupy it.
+ * @param request the signup submission
+ * @returns the signup outcome
+ */
 export async function POST(request: Request): Promise<Response> {
     if (request.method !== "POST") return invalidRequest(405);
     if (!sameOrigin(request)) return invalidRequest(403);
@@ -246,9 +267,6 @@ export async function POST(request: Request): Promise<Response> {
     const email = typeof body.email === "string" ? body.email.trim() : body.email;
     if (!validEmail(email)) return json({ error: "invalid_email" }, 400);
 
-    // Claimed after validation rather than before it, as the product application does. The object
-    // holds each caller for the provider spacing interval, so admitting unvalidated requests would
-    // let malformed traffic occupy it; rejecting them first keeps that queue for real signups.
     const limiter = getCloudflareContext().env.SIGNUP_LIMITER;
     const reservation = await limiter.get(limiter.idFromName("launch")).reserve(client);
     if (!reservation.allowed) return json({ error: "rate_limited" }, 429, reservation.retryAfter);

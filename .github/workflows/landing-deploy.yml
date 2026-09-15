@@ -1,0 +1,113 @@
+name: Landing
+
+# Builds the prelaunch landing Worker (landing/) and publishes it to connexcrm.jp.
+# - Pull requests: confirm landing/ still matches the files it vendors from frontend/, and when
+#   landing/ itself changed, typecheck and build it.
+# - Pushes to main that touch landing/: build and deploy with wrangler. Worker secrets
+#   (RESEND_API_KEY, RESEND_LAUNCH_SEGMENT_ID) live on the Worker and survive deploys.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'landing/**'
+      - '.github/workflows/landing-deploy.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'landing/**'
+      - 'frontend/**'
+      - '.github/workflows/landing-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Deploys queue rather than cancel, so a later merge never aborts an in-flight publish.
+  group: landing-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  sync:
+    name: Landing — vendored copy in sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      landing: ${{ steps.changes.outputs.landing }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - name: Check landing/ against frontend/
+        run: landing/scripts/sync-from-frontend.sh --check
+      - name: Did landing/ change?
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # Manual runs and first pushes have no usable base; build in that case rather than skip.
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || [ -z "$BASE_SHA" ] \
+            || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "landing=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! changed=$(git diff --name-only "$BASE_SHA"...HEAD -- landing .github/workflows/landing-deploy.yml); then
+            echo "git diff against $BASE_SHA failed; building rather than silently skipping."
+            echo "landing=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$changed" ]; then echo "landing=true" >> "$GITHUB_OUTPUT"; else echo "landing=false" >> "$GITHUB_OUTPUT"; fi
+
+  build:
+    name: Landing — build and deploy
+    needs: sync
+    if: needs.sync.outputs.landing == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          package_json_file: landing/package.json
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: landing/pnpm-lock.yaml
+      - name: Install
+        working-directory: landing
+        # Build scripts stay enabled: workerd and esbuild ship native binaries through them, and
+        # landing/pnpm-workspace.yaml limits which packages may run one.
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        working-directory: landing
+        run: node_modules/.bin/tsc --noEmit
+      - name: Build Worker
+        working-directory: landing
+        run: node_modules/.bin/opennextjs-cloudflare build
+      - name: Deploy
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        working-directory: landing
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node_modules/.bin/wrangler deploy
+      - name: Smoke test connexcrm.jp
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          # The edge can serve the previous version for a few seconds after a deploy.
+          for attempt in $(seq 1 12); do
+            home=$(curl -s -o /dev/null -w '%{http_code}' -m 15 https://connexcrm.jp/ || true)
+            app=$(curl -s -o /dev/null -w '%{http_code}' -m 15 https://connexcrm.jp/dashboard || true)
+            if [ "$home" = "200" ] && [ "$app" = "404" ]; then
+              echo "connexcrm.jp serves the landing Worker (/ -> 200, /dashboard -> 404)."
+              exit 0
+            fi
+            echo "attempt $attempt: / -> $home, /dashboard -> $app"
+            sleep 5
+          done
+          echo "connexcrm.jp did not serve the expected responses after deploy." >&2
+          exit 1
