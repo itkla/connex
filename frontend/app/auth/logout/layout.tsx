@@ -3,7 +3,7 @@ import { getTranslations } from "next-intl/server";
 
 export async function generateMetadata(): Promise<Metadata> {
     const t = await getTranslations("AuthLogout");
-    return { title: t("signingOut"), robots: { index: false, follow: false } };
+    return { title: t("title"), robots: { index: false, follow: false } };
 }
 
 export default function LogoutLayout({

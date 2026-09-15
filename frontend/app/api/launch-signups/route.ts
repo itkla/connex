@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { after } from "next/server";
 
 import { resolvePreLaunch } from "@/app/lib/landingMode";
 
@@ -13,6 +14,7 @@ const RESPONSE_BYTES = 65536;
 const BODY_TIMEOUT_MS = 3000;
 const PROVIDER_TIMEOUT_MS = 8000;
 const PROVIDER_INTERVAL_MS = 550;
+const ADMISSION_INTERVAL_MS = 1000;
 const CLIENT_WINDOW_MS = 15 * 60 * 1000;
 const CLIENT_REQUESTS = 5;
 const MAX_CLIENTS = 2048;
@@ -22,7 +24,7 @@ const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const CONTACT_NOT_FOUND = Symbol("contact-not-found");
 const clients = new Map<string, ClientWindow>();
 let globalWindow: ClientWindow = { count: 0, expiresAt: 0 };
-let providerBusy = false;
+let providerAvailableAt = 0;
 let nextProviderRequestAt = 0;
 
 function json(body: SignupResponse, status: number, retryAfter?: number): Response {
@@ -82,9 +84,44 @@ function clientKey(request: Request): string | null {
         if (!version) return null;
         if (version !== 6) return forwarded;
         const address = `http://[${forwarded}]`;
-        return URL.canParse(address) ? new URL(address).hostname : null;
+        return URL.canParse(address) ? ipv6NetworkKey(new URL(address).hostname) : null;
     }
     return process.env.NODE_ENV === "production" ? null : "direct-development";
+}
+
+/**
+ * Reduces an IPv6 address to its /64 network, the smallest block a single subscriber routinely
+ * holds, so rotating addresses inside one network cannot multiply the per-client allowance. An
+ * IPv4-mapped address carries no such network, so it keys on the IPv4 address it wraps and shares
+ * that address's allowance instead of collapsing every mapped client into a single bucket.
+ * @param hostname the parsed IPv6 hostname, with or without brackets
+ * @returns the normalised client key, or null when the address is not eight groups
+ */
+function ipv6NetworkKey(hostname: string): string | null {
+    const address = hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+    const [head, tail] = address.split("::");
+    const leading = head === "" ? [] : head.split(":");
+    const trailing = tail === undefined || tail === "" ? [] : tail.split(":");
+    const omitted = 8 - leading.length - trailing.length;
+    if (tail === undefined ? leading.length !== 8 : omitted < 1) return null;
+    const groups = tail === undefined
+        ? leading
+        : [...leading, ...Array<string>(omitted).fill("0"), ...trailing];
+    return mappedIpv4Address(groups) ?? groups.slice(0, 4).map((group) => group.padStart(4, "0")).join(":");
+}
+
+/**
+ * Recovers the IPv4 address an IPv4-mapped IPv6 address carries, in the dotted form a plain IPv4
+ * client is keyed by, so one client cannot hold two allowances by changing representation.
+ * @param groups the eight expanded hexadecimal groups of the address
+ * @returns the dotted-quad address, or null when the address is not IPv4-mapped
+ */
+function mappedIpv4Address(groups: readonly string[]): string | null {
+    const values = groups.map((group) => (/^[\da-f]{1,4}$/i.test(group) ? Number.parseInt(group, 16) : -1));
+    if (values.slice(0, 5).some((value) => value !== 0) || values[5] !== 0xffff) return null;
+    const [high, low] = [values[6], values[7]];
+    if (high < 0 || low < 0) return null;
+    return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
 }
 
 function takeClientAttempt(key: string, now: number): number | null {
@@ -102,6 +139,17 @@ function takeClientAttempt(key: string, now: number): number | null {
     if (window.count >= CLIENT_REQUESTS) return Math.max(1, Math.ceil((window.expiresAt - now) / 1000));
     window.count += 1;
     return null;
+}
+
+/**
+ * Returns an attempt a visitor spent on a submission the shared admission reservation went on to
+ * refuse, so a concurrent visitor's submission never costs them part of their own allowance.
+ * @param key the client bucket the attempt was taken from
+ * @param now the current epoch milliseconds
+ */
+function refundClientAttempt(key: string, now: number): void {
+    const window = clients.get(key);
+    if (window !== undefined && window.expiresAt > now && window.count > 0) window.count -= 1;
 }
 
 function validEmail(value: unknown): value is string {
@@ -150,8 +198,16 @@ async function boundedJson(body: Request | Response, maxBytes: number, signal: A
     }
 }
 
+/**
+ * Holds provider calls to one per pacing interval across every overlapping background operation.
+ * The slot is claimed synchronously before the wait, so two operations entering the wait together
+ * cannot compute the same slot and fire as a burst the provider would reject.
+ * @param signal aborts the wait when the operation's deadline passes
+ */
 async function waitForProvider(signal: AbortSignal): Promise<void> {
-    const delay = nextProviderRequestAt - Date.now();
+    const slot = Math.max(Date.now(), nextProviderRequestAt);
+    nextProviderRequestAt = slot + PROVIDER_INTERVAL_MS;
+    const delay = slot - Date.now();
     if (delay > 0) {
         await new Promise<void>((resolve, reject) => {
             const onAbort = () => {
@@ -167,7 +223,6 @@ async function waitForProvider(signal: AbortSignal): Promise<void> {
         });
     }
     signal.throwIfAborted();
-    nextProviderRequestAt = Date.now() + PROVIDER_INTERVAL_MS;
 }
 
 async function resend(
@@ -237,7 +292,13 @@ async function persistSignup(email: string, segment: string, key: string, signal
     return includesLaunchSegment(await resend(`/contacts/${contact.id}/segments`, key, signal), segment);
 }
 
-/** Accepts anonymous launch signups only after Resend confirms the contact and launch membership. */
+/**
+ * Acknowledges valid submissions before preference-dependent work; opt-outs remain unchanged.
+ * Admission is spaced by a constant interval that never depends on how long provider work takes, so
+ * follow-up requests cannot probe completion times. The shared interval is checked before a
+ * visitor's own attempt is counted, and an attempt taken by a submission the interval then refuses
+ * is returned, so another visitor's submission never spends their quota.
+ */
 export async function POST(request: Request): Promise<Response> {
     if (request.method !== "POST") return invalidRequest(405);
     if (!sameOrigin(request)) return invalidRequest(403);
@@ -258,7 +319,11 @@ export async function POST(request: Request): Promise<Response> {
         || !key || /\s/.test(key) || !segment || !UUID.test(segment)) return unavailable();
     const client = clientKey(request);
     if (!client) return unavailable();
-    const limitedFor = takeClientAttempt(client, Date.now());
+    const arrival = Date.now();
+    if (providerAvailableAt > arrival) {
+        return json({ error: "rate_limited" }, 429, Math.ceil((providerAvailableAt - arrival) / 1000));
+    }
+    const limitedFor = takeClientAttempt(client, arrival);
     if (limitedFor !== null) return json({ error: "rate_limited" }, 429, limitedFor);
 
     const bodyController = new AbortController();
@@ -280,21 +345,28 @@ export async function POST(request: Request): Promise<Response> {
 
     const now = Date.now();
     if (globalWindow.expiresAt <= now) globalWindow = { count: 0, expiresAt: now + GLOBAL_WINDOW_MS };
-    if (providerBusy) return json({ error: "rate_limited" }, 429, Math.ceil(PROVIDER_TIMEOUT_MS / 1000));
+    if (providerAvailableAt > now) {
+        refundClientAttempt(client, now);
+        return json({ error: "rate_limited" }, 429, Math.ceil((providerAvailableAt - now) / 1000));
+    }
     if (globalWindow.count >= GLOBAL_SIGNUPS) {
         return json({ error: "rate_limited" }, 429, Math.max(1, Math.ceil((globalWindow.expiresAt - now) / 1000)));
     }
     globalWindow.count += 1;
-    providerBusy = true;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
-    try {
-        const saved = await persistSignup(email, segment, key, AbortSignal.any([request.signal, controller.signal]));
-        return saved ? json({ status: "subscribed" }, 200) : unavailable();
-    } catch {
-        return unavailable();
-    } finally {
-        clearTimeout(timer);
-        providerBusy = false;
-    }
+    providerAvailableAt = now + ADMISSION_INTERVAL_MS;
+    const deadline = now + PROVIDER_TIMEOUT_MS;
+    after(async () => {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) return;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), remaining);
+        try {
+            await persistSignup(email, segment, key, controller.signal);
+        } catch {
+            return;
+        } finally {
+            clearTimeout(timer);
+        }
+    });
+    return json({ status: "subscribed" }, 200);
 }

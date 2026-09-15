@@ -1,5 +1,6 @@
 'use client';
 
+import { useAccountStorageGeneration } from '@/app/hooks/useAccountStorageGeneration';
 import {
     createContext,
     useCallback,
@@ -321,7 +322,8 @@ function toolCardFailure(error: unknown, action: AskConnexToolAction): AskConnex
     return 'actionFailed';
 }
 
-function safeStorageSet(key: string, value: string): void {
+function safeStorageSet(canPersist: () => boolean, key: string, value: string): void {
+    if (!canPersist()) return;
     try {
         window.localStorage.setItem(key, value);
     } catch {}
@@ -1016,10 +1018,22 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         }
     }, [hydrateStream, invalidateStream]);
 
+    const canPersist = useAccountStorageGeneration(() => {
+        identityControllerRef.current?.abort();
+        clearActiveSession();
+        setPinnedContext([]);
+        setPinnedIdentity(null);
+        setSessions([]);
+        setInvitations([]);
+        setMembers([]);
+        setWorkspaceSourceContext(null);
+        setWidth(ASK_CONNEX_DEFAULT_WIDTH);
+    });
+
     useEffect(() => {
-        if (userId === null || activeWorkspaceId === null) return;
+        if (!canPersist() || userId === null || activeWorkspaceId === null) return;
         setWidth(parseStoredAskConnexWidth(safeStorageGet(widthKey)) ?? ASK_CONNEX_DEFAULT_WIDTH);
-    }, [activeWorkspaceId, userId, widthKey]);
+    }, [canPersist, activeWorkspaceId, userId, widthKey]);
 
     /**
      * Applies a chosen panel width, and marks the change as one the shell must adopt without
@@ -1030,10 +1044,14 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
      * the panel in and out of the page.
      */
     const changeWidth = useCallback((next: AskConnexWidth) => {
+        if (!canPersist()) {
+            setWidth(ASK_CONNEX_DEFAULT_WIDTH);
+            return;
+        }
         setInstantWidth(true);
         setWidth(next);
-        safeStorageSet(widthKey, next);
-    }, [widthKey]);
+        safeStorageSet(canPersist, widthKey, next);
+    }, [canPersist, widthKey]);
 
     const openDrawer = useCallback((source: OpenSource = 'standard') => {
         if (open) return;
@@ -1434,6 +1452,10 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const controller = new AbortController();
         identityControllerRef.current?.abort();
         identityControllerRef.current = controller;
+        if (!canPersist()) {
+            controller.abort();
+            return;
+        }
         sessionControllerRef.current?.abort();
         sessionControllerRef.current = null;
         const storedSessionId = parseStoredAskConnexSession(safeStorageGet(sessionKey));
@@ -1529,7 +1551,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
 
         void initialize();
         return () => controller.abort();
-    }, [activeWorkspaceId, clearActiveSession, deferApiError, followDurableTurn, followTurn, identity, refreshSessions, refreshTranscript, reloadVersion, resetStream, sessionKey, sharePermission, switching, t, turnKey, userId]);
+    }, [canPersist, activeWorkspaceId, clearActiveSession, deferApiError, followDurableTurn, followTurn, identity, refreshSessions, refreshTranscript, reloadVersion, resetStream, sessionKey, sharePermission, switching, t, turnKey, userId]);
 
     const selectSession = useCallback(async (session: AiChatSession) => {
         if (working) return;
@@ -1539,7 +1561,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         sessionControllerRef.current = controller;
         const identitySignal = identityControllerRef.current?.signal;
         const signal = identitySignal ? AbortSignal.any([controller.signal, identitySignal]) : controller.signal;
-        safeStorageSet(sessionKey, String(session.id));
+        safeStorageSet(canPersist, sessionKey, String(session.id));
         safeStorageRemove(turnKey);
         setActiveSession(session);
         activeSessionRef.current = session;
@@ -1571,7 +1593,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 deferApiError(error, 'toast.requestFailed');
             }
         }
-    }, [clearActiveSession, deferApiError, followDurableTurn, refreshTranscript, resetStream, router, sessionKey, t, turnKey, working, workspaceMode]);
+    }, [canPersist, clearActiveSession, deferApiError, followDurableTurn, refreshTranscript, resetStream, router, sessionKey, t, turnKey, working, workspaceMode]);
 
     const newChat = useCallback(() => {
         if (working) return;
@@ -1598,7 +1620,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         const signal = identitySignal
             ? AbortSignal.any([controller.signal, identitySignal])
             : controller.signal;
-        safeStorageSet(sessionKey, String(workspaceSessionId));
+        safeStorageSet(canPersist, sessionKey, String(workspaceSessionId));
         safeStorageRemove(turnKey);
         messagesRef.current = [];
         setMessages([]);
@@ -1626,7 +1648,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         };
         void load();
         return () => controller.abort();
-    }, [activeTurn, clearActiveSession, deferApiError, followDurableTurn, identity, refreshTranscript, resetStream, router, sessionKey, stateIdentity, switching, t, turnKey, workspaceMode, workspaceSessionId]);
+    }, [canPersist, activeTurn, clearActiveSession, deferApiError, followDurableTurn, identity, refreshTranscript, resetStream, router, sessionKey, stateIdentity, switching, t, turnKey, workspaceMode, workspaceSessionId]);
 
     const enqueueRealtimeRefresh = useCallback((sessionId: number, signal: AbortSignal) => {
         realtimeRefreshQueueRef.current = realtimeRefreshQueueRef.current.then(async () => {
@@ -1862,7 +1884,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 createdSession,
                 ...current.filter((item) => item.id !== createdSession.id),
             ]);
-            safeStorageSet(sessionKey, String(createdSession.id));
+            safeStorageSet(canPersist, sessionKey, String(createdSession.id));
             if (workspaceMode) router.replace(`/ask-connex/${createdSession.id}`);
             setLoadState('ready');
             return createdSession;
@@ -1871,7 +1893,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         });
         sessionCreationRef.current = creation;
         return creation;
-    }, [activeSession, router, sessionKey, t, workspaceMode]);
+    }, [canPersist, activeSession, router, sessionKey, t, workspaceMode]);
 
     const uploadErrorMessage = useCallback((error: unknown): string => {
         if (!(error instanceof ApiError)) return t('upload.failed');
@@ -2166,7 +2188,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                         createdSession,
                         ...current.filter((item) => item.id !== createdSession.id),
                     ]);
-                    safeStorageSet(sessionKey, String(createdSession.id));
+                    safeStorageSet(canPersist, sessionKey, String(createdSession.id));
                     if (workspaceMode) router.replace(`/ask-connex/${createdSession.id}`);
                     setLoadState('ready');
                 } catch (error) {
@@ -2194,7 +2216,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
                 turnId: accepted.turnId,
                 generationHandle: accepted.generationHandle,
             };
-            safeStorageSet(turnKey, serializeStoredAskConnexTurn(stored));
+            safeStorageSet(canPersist, turnKey, serializeStoredAskConnexTurn(stored));
             dispatchTurn({
                 type: 'accepted',
                 sessionId: accepted.sessionId,
@@ -2252,7 +2274,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
             submittingRef.current = false;
             setSubmitting(false);
         }
-    }, [activeSession, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, scopeBlocked, scopePreviewKey, scopeRequest, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
+    }, [canPersist, activeSession, composer, corrections, featureUnavailable, fileContextCount, fileOperationPending, followTurn, permission, refreshTranscript, resetStream, router, scopeBlocked, scopePreviewKey, scopeRequest, sessionKey, showApiError, sourceRecord, sourceSelection, submissionBlocked, t, turn.phase, turnKey, userDisplayName, userId, workspaceMode]);
 
     const retryPrompt = useMemo(() => askConnexRetryPrompt(messages), [messages]);
     const retryTurn = useCallback(() => {
@@ -2285,15 +2307,20 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
     }, []);
 
     useEffect(() => {
-        if (userId === null || activeWorkspaceId === null) return;
+        if (!canPersist() || userId === null || activeWorkspaceId === null) return;
         setPinnedContext(parseStoredAskConnexPins(safeStorageGet(pinnedKey)));
         setPinnedIdentity(identity);
-    }, [activeWorkspaceId, identity, pinnedKey, userId]);
+    }, [canPersist, activeWorkspaceId, identity, pinnedKey, userId]);
 
     const commitPins = useCallback((next: AskConnexAttachment[]) => {
+        if (!canPersist()) {
+            setPinnedContext([]);
+            setPinnedIdentity(null);
+            return;
+        }
         setPinnedContext(next);
-        safeStorageSet(pinnedKey, serializeAskConnexPins(next));
-    }, [pinnedKey]);
+        safeStorageSet(canPersist, pinnedKey, serializeAskConnexPins(next));
+    }, [canPersist, pinnedKey]);
 
     const togglePagePin = useCallback(() => {
         if (inferredPageContext === null || pinnedIdentity !== identity) return;
