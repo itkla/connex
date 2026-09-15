@@ -12,7 +12,10 @@
   // esbuild keepNames wraps functions in __name(); next-themes serialises its theme script with
   // Function.toString(), so the helper call would ship into an inline <script> that has no __name.
   "keep_names": false,
-  "workers_dev": true,
+  // Only the custom domains serve this Worker. A workers.dev or preview URL would sit outside the
+  // connexcrm.jp zone's WAF and bot controls while reaching the same signup endpoint.
+  "workers_dev": false,
+  "preview_urls": false,
   "routes": [
     { "pattern": "connexcrm.jp", "custom_domain": true },
     { "pattern": "www.connexcrm.jp", "custom_domain": true }

@@ -11,7 +11,6 @@ const REQUEST_BYTES = 4096;
 const RESPONSE_BYTES = 65536;
 const BODY_TIMEOUT_MS = 3000;
 const PROVIDER_TIMEOUT_MS = 8000;
-const PROVIDER_INTERVAL_MS = 550;
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const CONTACT_NOT_FOUND = Symbol("contact-not-found");
 
@@ -128,37 +127,21 @@ async function boundedJson(body: Request | Response, maxBytes: number, signal: A
     }
 }
 
-/** Spacing state for one request's sequence of provider calls. */
-type Pacer = { nextAt: number };
+/** Claims the deployment-wide slot for one provider call; `false` means the queue is full. */
+type ProviderGate = () => Promise<boolean>;
 
-async function waitForProvider(pacer: Pacer, signal: AbortSignal): Promise<void> {
-    const delay = pacer.nextAt - Date.now();
-    if (delay > 0) {
-        await new Promise<void>((resolve, reject) => {
-            const onAbort = () => {
-                clearTimeout(timer);
-                reject(new Error("Signup interrupted"));
-            };
-            const timer = setTimeout(() => {
-                signal.removeEventListener("abort", onAbort);
-                resolve();
-            }, delay);
-            signal.addEventListener("abort", onAbort, { once: true });
-            if (signal.aborted) onAbort();
-        });
-    }
-    signal.throwIfAborted();
-    pacer.nextAt = Date.now() + PROVIDER_INTERVAL_MS;
-}
+/** Raised when every provider slot within a signup's deadline is already taken. */
+class ProviderBusyError extends Error {}
 
 async function resend(
     path: string,
     key: string,
     signal: AbortSignal,
-    pacer: Pacer,
+    gate: ProviderGate,
     init?: { method?: "POST"; body?: object; allowNotFound?: boolean },
 ): Promise<unknown> {
-    await waitForProvider(pacer, signal);
+    if (!(await gate())) throw new ProviderBusyError();
+    signal.throwIfAborted();
     const response = await fetch(`https://api.resend.com${path}`, {
         method: init?.method ?? "GET",
         headers: {
@@ -201,39 +184,40 @@ function includesLaunchSegment(segments: unknown, segment: string): boolean {
  * @param segment launch segment ID
  * @param key Resend API key
  * @param signal aborts the provider calls
- * @param pacer spacing state for this request's provider calls
+ * @param gate claims the deployment-wide slot for each provider call
  * @returns whether the contact is confirmed subscribed and in the segment
  */
-async function persistSignup(email: string, segment: string, key: string, signal: AbortSignal, pacer: Pacer): Promise<boolean> {
-    let contact = await resend(`/contacts/${encodeURIComponent(email)}`, key, signal, pacer, { allowNotFound: true });
+async function persistSignup(email: string, segment: string, key: string, signal: AbortSignal, gate: ProviderGate): Promise<boolean> {
+    let contact = await resend(`/contacts/${encodeURIComponent(email)}`, key, signal, gate, { allowNotFound: true });
     if (contact === CONTACT_NOT_FOUND) {
-        const created = await resend("/contacts", key, signal, pacer, {
+        const created = await resend("/contacts", key, signal, gate, {
             method: "POST",
             body: { email, segments: [{ id: segment }] },
         });
         if (!isRecord(created) || created.object !== "contact" || typeof created.id !== "string" || !UUID.test(created.id)) {
             return false;
         }
-        contact = await resend(`/contacts/${created.id}`, key, signal, pacer);
+        contact = await resend(`/contacts/${created.id}`, key, signal, gate);
         if (!isRecord(contact) || contact.id !== created.id) return false;
     }
     if (!isRecord(contact) || typeof contact.id !== "string" || !UUID.test(contact.id) || contact.unsubscribed !== false
         || typeof contact.email !== "string" || contact.email.toLowerCase() !== email.toLowerCase()) {
         return false;
     }
-    const segments = await resend(`/contacts/${contact.id}/segments`, key, signal, pacer);
+    const segments = await resend(`/contacts/${contact.id}/segments`, key, signal, gate);
     if (!isSegmentList(segments)) return false;
     if (includesLaunchSegment(segments, segment)) return true;
-    const added = await resend(`/contacts/${contact.id}/segments/${segment}`, key, signal, pacer, { method: "POST" });
+    const added = await resend(`/contacts/${contact.id}/segments/${segment}`, key, signal, gate, { method: "POST" });
     if (!isRecord(added) || added.id !== segment) return false;
-    return includesLaunchSegment(await resend(`/contacts/${contact.id}/segments`, key, signal, pacer), segment);
+    return includesLaunchSegment(await resend(`/contacts/${contact.id}/segments`, key, signal, gate), segment);
 }
 
 /**
  * Accepts anonymous launch signups only after Resend confirms the contact and launch membership.
  *
- * The rate-limit reservation is claimed after validation. The limiter holds each caller for the
- * provider spacing interval, so admitting unvalidated requests would let malformed traffic occupy it.
+ * The rate-limit reservation is claimed after validation, so malformed requests never reach the
+ * limiter. Every Resend call then waits for a deployment-wide slot from the same object; a full queue
+ * is reported as a rate limit.
  * @param request the signup submission
  * @returns the signup outcome
  */
@@ -268,16 +252,20 @@ export async function POST(request: Request): Promise<Response> {
     if (!validEmail(email)) return json({ error: "invalid_email" }, 400);
 
     const limiter = getCloudflareContext().env.SIGNUP_LIMITER;
-    const reservation = await limiter.get(limiter.idFromName("launch")).reserve(client);
+    const limiterInstance = limiter.get(limiter.idFromName("launch"));
+    const reservation = await limiterInstance.reserve(client);
     if (!reservation.allowed) return json({ error: "rate_limited" }, 429, reservation.retryAfter);
 
-    const pacer: Pacer = { nextAt: 0 };
+    const gate: ProviderGate = () => limiterInstance.pace();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
     try {
-        const saved = await persistSignup(email, segment, key, AbortSignal.any([request.signal, controller.signal]), pacer);
+        const saved = await persistSignup(email, segment, key, AbortSignal.any([request.signal, controller.signal]), gate);
         return saved ? json({ status: "subscribed" }, 200) : unavailable();
-    } catch {
+    } catch (error) {
+        if (error instanceof ProviderBusyError) {
+            return json({ error: "rate_limited" }, 429, Math.ceil(PROVIDER_TIMEOUT_MS / 1000));
+        }
         return unavailable();
     } finally {
         clearTimeout(timer);

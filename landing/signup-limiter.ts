@@ -5,8 +5,8 @@ const CLIENT_REQUESTS = 5;
 const GLOBAL_WINDOW_MS = 60 * 1000;
 const GLOBAL_SIGNUPS = 30;
 const PROVIDER_INTERVAL_MS = 550;
+const MAX_PROVIDER_WAIT_MS = 8000;
 const GLOBAL_KEY = "global";
-const PROVIDER_KEY = "providerNextAt";
 const CLIENT_PREFIX = "client:";
 
 type Window = { count: number; expiresAt: number };
@@ -30,13 +30,11 @@ function retryAfter(expiresAt: number, now: number): number {
  * A single Durable Object instance is the coordination point that restores the original semantics.
  */
 export class SignupLimiter extends DurableObject {
+    private nextProviderAt = 0;
+
     /**
      * Claims one signup attempt for a client.
      * @param client the caller's address
-     *
-     * A granted attempt also waits out the provider spacing interval before returning. The instance
-     * is single-threaded, so concurrent signups queue behind that wait rather than reaching Resend
-     * together.
      * @returns whether the attempt may proceed, and when to retry if not
      */
     async reserve(client: string): Promise<Reservation> {
@@ -63,15 +61,29 @@ export class SignupLimiter extends DurableObject {
         clientWindow.count += 1;
         await this.ctx.storage.put({ [GLOBAL_KEY]: globalWindow, [clientKey]: clientWindow });
 
-        const nextAt = (await this.ctx.storage.get<number>(PROVIDER_KEY)) ?? 0;
-        const delay = nextAt - Date.now();
-        if (delay > 0) await sleep(delay);
-        await this.ctx.storage.put(PROVIDER_KEY, Date.now() + PROVIDER_INTERVAL_MS);
-
         if ((await this.ctx.storage.getAlarm()) === null) {
             await this.ctx.storage.setAlarm(clientWindow.expiresAt);
         }
         return { allowed: true };
+    }
+
+    /**
+     * Waits for this deployment's next Resend slot, spacing every provider call at least
+     * {@link PROVIDER_INTERVAL_MS} apart across all concurrent signups.
+     *
+     * The slot is claimed synchronously before the wait. The wait yields the object to other
+     * callers, so reading the next slot after sleeping would let two callers wake into the same one.
+     * The schedule is held in memory: it only matters while calls are in flight, and an evicted
+     * object has had none recently.
+     * @returns `false` without waiting when the queue is longer than a signup's provider deadline
+     */
+    async pace(): Promise<boolean> {
+        const now = Date.now();
+        const slot = Math.max(now, this.nextProviderAt);
+        if (slot - now > MAX_PROVIDER_WAIT_MS) return false;
+        this.nextProviderAt = slot + PROVIDER_INTERVAL_MS;
+        if (slot > now) await sleep(slot - now);
+        return true;
     }
 
     /** Drops expired client windows so storage tracks live callers rather than every visitor. */

@@ -192,6 +192,59 @@ deployment must also apply its shared edge rate controls. Only fixed `https://ap
 are contacted, with redirects disabled and no application credentials forwarded. No browser CSP
 allowlist expansion is needed for these server-side requests.
 
+### The public prelaunch site (`connexcrm.jp` on Cloudflare Workers)
+
+The section above describes the product frontend's own prelaunch mode. The public site at
+`connexcrm.jp` and `www.connexcrm.jp` is a separate deployment: the `connex-landing` Cloudflare Worker
+built from [`landing/`](../landing/AGENTS.md) with `@opennextjs/cloudflare`. It needs no backend and does
+not run on the staging host; `preview.connexcrm.jp` keeps serving the product application.
+
+**What it serves.** `/`, `/privacy`, `/legal`, `/disclosure`, `/tokushoho`, `robots.txt`, `sitemap.xml`,
+the web manifest, and `POST /api/launch-signups`. Every other path is a 404, so the authenticated
+application is not reachable on the public domain. `www.` hosts redirect to the apex with 308. The
+Worker has no `workers.dev` or preview URL: those would sit outside the `connexcrm.jp` zone's WAF and
+bot controls.
+
+**Secrets.** Set on the Worker, never in the repository, and preserved by deploys:
+
+```bash
+cd landing
+wrangler secret put RESEND_API_KEY            # Contacts access; see the key requirements above
+wrangler secret put RESEND_LAUNCH_SEGMENT_ID  # UUID of the dedicated launch segment
+```
+
+**Signup bounds.** The endpoint keeps the validation, same-origin checks, deadlines, and Resend contract
+described above, with two Workers-specific differences:
+
+- Limits are enforced by the `SignupLimiter` Durable Object (SQLite, included on Workers Free): 5 attempts
+  per client per 15 minutes and 30 signups per minute overall, shared across all Cloudflare locations.
+  Module-level counters would reset per isolate, and the Workers Rate Limiting binding supports only
+  10- and 60-second windows per location.
+- The client is identified by `CF-Connecting-IP` rather than `X-Connex-Client-IP`. Every Resend call waits
+  for a deployment-wide slot at least 550 ms after the previous one; when the queue exceeds the 8-second
+  provider deadline the endpoint returns 429.
+
+**Deployment.** `.github/workflows/landing-deploy.yml` (`Landing`):
+
+- Pull requests touching `frontend/` or `landing/` run `landing/scripts/sync-from-frontend.sh --check`,
+  which fails when the vendored landing, legal, or not-found files differ from `frontend/`.
+- Pull requests that change `landing/` also typecheck and build the Worker.
+- Pushes to `main` that change `landing/` build, run `wrangler deploy`, and smoke-test `connexcrm.jp`
+  (`/` must return 200 and `/dashboard` 404). The red-main alert watches this workflow.
+- CI authenticates with the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets. The
+  token is limited to Workers Scripts (edit) and Account Settings (read) on the account, and Workers
+  Routes (edit) and Zone (read) on `connexcrm.jp`; it cannot read or edit DNS records.
+
+**Rollback.** `wrangler rollback` restores the previous Worker version. To return the domain to the
+staging host instead, remove the two custom domains from the Worker, recreate proxied CNAMEs for
+`connexcrm.jp` and `www.connexcrm.jp` pointing at the staging tunnel, add both hostnames to that tunnel's
+ingress, and restart `cloudflared`. Do not send `cloudflared` a SIGHUP to reload: it exits.
+
+**Verification.** HTTP status checks are not sufficient. Two defects on this deployment were visible only in
+a browser: Workers rejects `fetch` with `redirect: "error"`, which failed every Resend call, and esbuild's
+`keep_names` injected an undefined `__name()` into an inline script. After a change to the runtime or the
+signup path, load the site in a browser, confirm there are no console errors, and submit the form.
+
 ## Prerequisites
 
 - Docker Engine 28 or newer with Docker Compose 2.33.1 or newer. The bundle pins the frontend and
