@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { Bars3Icon, XMarkIcon, SunIcon, MoonIcon } from "@heroicons/react/24/outline";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
+import { DOCS_AVAILABLE } from "@/app/lib/deploymentSurface";
 import LanguageSwitcher from "./LanguageSwitcher";
 import styles from "./landing.module.css";
 
@@ -49,7 +50,7 @@ export default function LandingNav({ ctaHref, ctaLabel, preLaunch = false }: { c
         { href: "/#features", label: t("navFeatures"), route: false },
         { href: "/#pricing", label: t("navPricing"), route: false },
         { href: "/#faq", label: t("navFaq"), route: false },
-        ...(preLaunch ? [] : [{ href: "/docs", label: t("navDocs"), route: true }]),
+        ...(DOCS_AVAILABLE ? [{ href: "/docs", label: t("navDocs"), route: true }] : []),
     ];
 
     return (

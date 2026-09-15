@@ -49,21 +49,12 @@ function browserFacingRequestOrigin(request: NextRequest): string {
  *
  * No CSP reporting endpoint is advertised: the product application's collector is a backend route,
  * and this deployment has no backend to receive the reports.
- *
- * `www.` hosts redirect permanently to the apex, so each page has exactly one canonical address and
- * the per-request `metadataBase`, sitemap, and Open Graph URLs never name the `www` duplicate.
  * @param request the incoming request
- * @returns a redirect to the apex, or the pass-through response carrying the policy
+ * @returns the pass-through response carrying the policy
  */
 export function proxy(request: NextRequest) {
     const { pathname, search } = request.nextUrl;
     const requestOrigin = browserFacingRequestOrigin(request);
-    const origin = new URL(requestOrigin);
-    if (origin.hostname.startsWith('www.')) {
-        origin.hostname = origin.hostname.slice('www.'.length);
-        return NextResponse.redirect(new URL(pathname + search, origin), 308);
-    }
-
     const nonce = createNonce();
     const reportingEndpointUrl = null;
     const reportingEndpointsHeader = createReportingEndpointsHeader(reportingEndpointUrl);

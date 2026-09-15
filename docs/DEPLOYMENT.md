@@ -201,9 +201,10 @@ not run on the staging host; `preview.connexcrm.jp` keeps serving the product ap
 
 **What it serves.** `/`, `/privacy`, `/legal`, `/disclosure`, `/tokushoho`, `robots.txt`, `sitemap.xml`,
 the web manifest, and `POST /api/launch-signups`. Every other path is a 404, so the authenticated
-application is not reachable on the public domain. `www.` hosts redirect to the apex with 308. The
-Worker has no `workers.dev` or preview URL: those would sit outside the `connexcrm.jp` zone's WAF and
-bot controls.
+application is not reachable on the public domain. `www.connexcrm.jp` is a redirect-only alias: the
+Worker entrypoint answers every request to it, `/api/*` included, with a 308 to the apex before any
+application code runs, so it never reaches the signup limiter or Resend. The Worker has no
+`workers.dev` or preview URL: those would sit outside the `connexcrm.jp` zone's WAF and bot controls.
 
 **Secrets.** Set on the Worker, never in the repository, and preserved by deploys:
 
@@ -230,7 +231,9 @@ described above, with two Workers-specific differences:
   which fails when the vendored landing, legal, or not-found files differ from `frontend/`.
 - Pull requests that change `landing/` also typecheck and build the Worker.
 - Pushes to `main` that change `landing/` build, run `wrangler deploy`, and smoke-test `connexcrm.jp`
-  (`/` must return 200 and `/dashboard` 404). The red-main alert watches this workflow.
+  (`/` must return 200 and `/dashboard` 404). The red-main alert watches this workflow. A re-run of an
+  older `main` run skips the deploy: GitHub re-runs keep the original commit, and publishing it after
+  `main` has moved on would roll production back.
 - CI authenticates with the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets. The
   token is limited to Workers Scripts (edit) and Account Settings (read) on the account, and Workers
   Routes (edit) and Zone (read) on `connexcrm.jp`; it cannot read or edit DNS records.

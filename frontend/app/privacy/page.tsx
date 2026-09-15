@@ -55,7 +55,7 @@ export default async function PrivacyPage() {
                     sections={sections}
                 />
             </main>
-            <LandingFooter showLogin={!preLaunch} showDocs={!preLaunch} />
+            <LandingFooter showLogin={!preLaunch} />
         </div>
     );
 }

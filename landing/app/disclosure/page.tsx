@@ -48,7 +48,7 @@ export default async function DisclosurePage() {
                     sections={sections}
                 />
             </main>
-            <LandingFooter showLogin={!preLaunch} showDocs={!preLaunch} />
+            <LandingFooter showLogin={!preLaunch} />
         </div>
     );
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ChevronDownIcon } from "@heroicons/react/20/solid";
+import { DOCS_AVAILABLE } from "@/app/lib/deploymentSurface";
 import type { LandingTranslation } from "./sampleWorkspace";
 
 const QUESTIONS = [
@@ -10,7 +11,7 @@ const QUESTIONS = [
 ] as const;
 
 /** Native disclosures keep practical answers and their documentation reachable without JS. */
-export default function LandingFaq({ t, preLaunch = false }: { t: LandingTranslation; preLaunch?: boolean }) {
+export default function LandingFaq({ t }: { t: LandingTranslation }) {
     return (
         <div className="border-t border-border">
             {QUESTIONS.map(({ key, href }) => (
@@ -20,7 +21,7 @@ export default function LandingFaq({ t, preLaunch = false }: { t: LandingTransla
                     </summary>
                     <div className="max-w-[68ch] pb-6 text-base leading-relaxed text-muted-foreground">
                         <p>{t(`faq${key}A`)}</p>
-                        {!(preLaunch && href.startsWith("/docs")) && <Link href={href} className="mt-3 inline-block min-h-11 py-2 text-foreground underline underline-offset-4">{t("faqReadMore")}</Link>}
+                        {(DOCS_AVAILABLE || !href.startsWith("/docs")) && <Link href={href} className="mt-3 inline-block min-h-11 py-2 text-foreground underline underline-offset-4">{t("faqReadMore")}</Link>}
                     </div>
                 </details>
             ))}

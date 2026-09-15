@@ -6,7 +6,7 @@
 # rendered by this app are invisible to it. The shared files are therefore vendored byte-for-byte.
 # Landing-owned files (layout, page, robots, sitemap, the static opengraph-image.png rendered once from
 # frontend/app/opengraph-image.tsx because next/og would push the Worker past the free size limit, the signup route and its limiter, proxy,
-# i18n request config, and the app/lib/{landingMode,utils}.ts stand-ins) are not listed and are never
+# i18n request config, and the app/lib/{landingMode,utils,deploymentSurface}.ts stand-ins) are not listed and are never
 # overwritten.
 set -euo pipefail
 

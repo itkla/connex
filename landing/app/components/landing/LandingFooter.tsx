@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import LanguageSwitcher from "./LanguageSwitcher";
+import { DOCS_AVAILABLE } from "@/app/lib/deploymentSurface";
 
 /**
  * Shared marketing footer used by the landing page and the public legal pages.
  * Holds the brand mark, primary navigation, legal links, and the language
  * switcher.
  */
-export default async function LandingFooter({ withDividers = true, showLogin = true, showDocs = true }: { withDividers?: boolean; showLogin?: boolean; showDocs?: boolean }) {
+export default async function LandingFooter({ withDividers = true, showLogin = true }: { withDividers?: boolean; showLogin?: boolean }) {
     const t = await getTranslations("CommonHome");
 
     return (
@@ -30,7 +31,7 @@ export default async function LandingFooter({ withDividers = true, showLogin = t
                             <Link href="/#workflow" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navWorkflow")}
                             </Link>
-                            {showDocs && <Link href="/docs" className="text-muted-foreground transition-colors hover:text-foreground">
+                            {DOCS_AVAILABLE && <Link href="/docs" className="text-muted-foreground transition-colors hover:text-foreground">
                                 {t("navDocs")}
                             </Link>}
                             {showLogin && <Link href="/auth/login" className="text-muted-foreground transition-colors hover:text-foreground">

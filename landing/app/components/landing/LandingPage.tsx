@@ -15,6 +15,7 @@ import fujiStyles from "@/app/components/landing/fuji.module.css";
 import { FujiBackdrop } from "@/app/components/landing/FujiBackdrop";
 import { LaunchSignupForm } from "@/app/components/landing/LaunchSignupForm";
 import type { LandingTranslation } from "@/app/components/landing/sampleWorkspace";
+import { DOCS_AVAILABLE } from "@/app/lib/deploymentSurface";
 
 const display = Schibsted_Grotesk({ variable: "--font-landing-display", subsets: ["latin"], display: "swap" });
 const body = Source_Sans_3({ variable: "--font-landing-body", subsets: ["latin"], display: "swap" });
@@ -84,7 +85,7 @@ export function LandingPage({ t, preLaunch, ctaHref, ctaLabel }: LandingPageProp
                             <p className={featureHeading}>{t("warmth.heading")}</p>
                             <p className={description}>{t("warmth.body")}</p>
                             <p className="mt-5 text-base leading-relaxed text-muted-foreground">{t("warmth.evidence")}</p>
-                            {!preLaunch && <Link href="/docs/relationship-intelligence/warmth" className="mt-5 inline-flex min-h-11 items-center gap-2 text-base font-medium underline underline-offset-4">{t("warmth.docs")}<ArrowRightIcon aria-hidden="true" className="size-4 shrink-0" /></Link>}
+                            {DOCS_AVAILABLE && <Link href="/docs/relationship-intelligence/warmth" className="mt-5 inline-flex min-h-11 items-center gap-2 text-base font-medium underline underline-offset-4">{t("warmth.docs")}<ArrowRightIcon aria-hidden="true" className="size-4 shrink-0" /></Link>}
                         </div>
                         <WarmthPreview t={t} />
                     </div>
@@ -119,14 +120,14 @@ export function LandingPage({ t, preLaunch, ctaHref, ctaLabel }: LandingPageProp
 
                 <section id="faq" className={`${container} ${chapter} grid gap-8 scroll-mt-20 lg:grid-cols-[0.7fr_1.3fr] lg:gap-16`} aria-labelledby="faq-title">
                     <h2 id="faq-title" className={styles.heading}>{t("faqHeading")}</h2>
-                    <LandingFaq t={t} preLaunch={preLaunch} />
+                    <LandingFaq t={t} />
                 </section>
 
                 <section className="bg-brand/10" aria-labelledby="closing-title">
                     <div className={`${container} ${chapter}`}><h2 id="closing-title" className={`${styles.heading} max-w-3xl`}>{t(preLaunch ? "prelaunch.closingHeading" : "ctaHeading")}</h2><div className="mt-7">{preLaunch ? <LaunchSignupForm id="launch-signup-closing" /> : <Button asChild variant="brand" size="page" className="min-h-11 h-auto whitespace-normal px-6 py-3 text-base"><Link href={ctaHref}>{ctaLabel}<ArrowRightIcon aria-hidden="true" className="size-4" /></Link></Button>}</div></div>
                 </section>
             </main>
-            <LandingFooter withDividers={false} showLogin={!preLaunch} showDocs={!preLaunch} />
+            <LandingFooter withDividers={false} showLogin={!preLaunch} />
         </div>
     );
 }

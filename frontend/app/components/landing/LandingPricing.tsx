@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRightIcon, CheckIcon, MinusIcon, UserIcon, CloudIcon, BuildingOffice2Icon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
 import type { LandingTranslation } from "./sampleWorkspace";
+import { DOCS_AVAILABLE } from "@/app/lib/deploymentSurface";
 
 const OPTIONS = [
     { key: "free", Icon: UserIcon, highlights: ["seats", "workspaces", "records", "ask"] },
@@ -100,7 +101,7 @@ export default function LandingPricing({ t, ctaHref, ctaLabel, preLaunch = false
                         </tbody>
                     ))}
                 </table>
-                <p id="pricing-ai-note" className="mt-5 max-w-[75ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.aiNote")}{!preLaunch && <> <Link href="/docs/relationship-intelligence/ai-insights" className="text-foreground underline underline-offset-4">{t("pricing.aiDocs")}</Link></>}</p>
+                <p id="pricing-ai-note" className="mt-5 max-w-[75ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.aiNote")}{DOCS_AVAILABLE && <> <Link href="/docs/relationship-intelligence/ai-insights" className="text-foreground underline underline-offset-4">{t("pricing.aiDocs")}</Link></>}</p>
                 <p className="mt-3 max-w-[75ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.usageNote")}</p>
                 <p id="pricing-service-note" className="mt-3 max-w-[75ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.serviceNote")}</p>
             </div>

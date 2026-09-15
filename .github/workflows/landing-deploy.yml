@@ -89,15 +89,32 @@ jobs:
       - name: Build Worker
         working-directory: landing
         run: node_modules/.bin/opennextjs-cloudflare build
-      - name: Deploy
+      - name: Confirm this commit is still the head of main
+        id: current
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          # A re-run keeps the original run's GITHUB_SHA. Publishing it after main has moved on would
+          # silently roll production back, so only the current head of main may deploy.
+          head=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ -z "$head" ]; then
+            echo "Could not resolve refs/heads/main; refusing to deploy." >&2
+            exit 1
+          fi
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "::notice::Skipping deploy: $GITHUB_SHA is no longer the head of main ($head)."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Deploy
+        if: steps.current.outputs.deploy == 'true'
         working-directory: landing
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: node_modules/.bin/wrangler deploy
       - name: Smoke test connexcrm.jp
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: steps.current.outputs.deploy == 'true'
         run: |
           # The edge can serve the previous version for a few seconds after a deploy.
           for attempt in $(seq 1 12); do

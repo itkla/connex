@@ -28,7 +28,7 @@ export default async function RootNotFound() {
                     actions={[{ href: '/', label: t('site.home') }]}
                 />
             </main>
-            <LandingFooter showLogin={!preLaunch} showDocs={!preLaunch} />
+            <LandingFooter showLogin={!preLaunch} />
         </div>
     );
 }
