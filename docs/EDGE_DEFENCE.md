@@ -193,10 +193,11 @@ owner must reproduce in the dashboard for both SaaS hosts and export for review 
 - Select Business or a contract with equivalent features; confirm all five rate rules are available
   before DNS cutover. Set the zone maximum upload size to at least 100 MB so the 64 MiB import
   contract survives. Do not create an unproxied upload hostname.
-- `www.connexcrm.jp` is bound to the prelaunch landing Worker, which answers every request to it with a
-  `308` to `https://connexcrm.jp` before any application code runs (see
-  [DEPLOYMENT.md](DEPLOYMENT.md#the-public-prelaunch-site-connexcrmjp-on-cloudflare-workers)). It serves
-  no content or API, so the host sets below intentionally omit it. If the alias ever serves anything
+- `www.connexcrm.jp` is bound to the prelaunch landing Worker, which answers every page and API request to it
+  with a `308` to `https://connexcrm.jp` before any application code runs; only the same public,
+  immutable build assets the apex serves are returned directly (see
+  [DEPLOYMENT.md](DEPLOYMENT.md#the-public-prelaunch-site-connexcrmjp-on-cloudflare-workers)). It renders no
+  page and serves no API, so the host sets below intentionally omit it. If the alias ever serves anything
   other than that redirect, add it to every host set and to the evidence tooling before traffic.
 - Proxy `connexcrm.jp` and `preview.connexcrm.jp`; use Full (strict) TLS. Enable WebSockets. Do not
   enable HSTS yet: first validate Cloudflare-to-origin certificate authentication and every

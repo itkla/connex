@@ -89,23 +89,30 @@ jobs:
       - name: Build Worker
         working-directory: landing
         run: node_modules/.bin/opennextjs-cloudflare build
-      - name: Confirm this commit is still the head of main
+      - name: Confirm main still carries this landing tree
         id: current
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
-          # A re-run keeps the original run's GITHUB_SHA. Publishing it after main has moved on would
-          # silently roll production back, so only the current head of main may deploy.
-          head=$(git ls-remote origin refs/heads/main | cut -f1)
-          if [ -z "$head" ]; then
-            echo "Could not resolve refs/heads/main; refusing to deploy." >&2
+          # A re-run keeps the original run's GITHUB_SHA, so publishing it after a newer landing change
+          # would roll production back. Comparing only landing/ rather than the whole commit keeps an
+          # unrelated main commit, which the paths filter never re-deploys for, from suppressing this one.
+          if ! git fetch --no-tags --depth=1 origin refs/heads/main; then
+            echo "Could not fetch refs/heads/main; refusing to deploy." >&2
             exit 1
           fi
-          if [ "$head" != "$GITHUB_SHA" ]; then
-            echo "::notice::Skipping deploy: $GITHUB_SHA is no longer the head of main ($head)."
-            echo "deploy=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "deploy=true" >> "$GITHUB_OUTPUT"
-          fi
+          status=0
+          git diff --quiet "$GITHUB_SHA" FETCH_HEAD -- landing || status=$?
+          case "$status" in
+            0) echo "deploy=true" >> "$GITHUB_OUTPUT" ;;
+            1)
+              echo "::notice::Skipping deploy: main has a newer landing/ tree than $GITHUB_SHA; its own run deploys it."
+              echo "deploy=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Could not compare landing/ with main (git diff exited $status); refusing to guess." >&2
+              exit 1
+              ;;
+          esac
       - name: Deploy
         if: steps.current.outputs.deploy == 'true'
         working-directory: landing

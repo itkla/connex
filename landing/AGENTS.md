@@ -5,7 +5,7 @@ Prelaunch site for `connexcrm.jp`, served by the `connex-landing` Cloudflare Wor
 ## Structure
 
 - **Vendored from `frontend/`:** the paths listed in `scripts/sync-from-frontend.sh`. Never edit them here; change `frontend/`, then run `scripts/sync-from-frontend.sh`. They cannot be imported across packages: components resolved from `frontend/` load `frontend/node_modules`, so React and `next-intl` contexts split and providers vanish.
-- `www.` hosts are redirect-only, handled in `custom-worker.ts` before the Next.js handler; keep it that way or the alias escapes the hostname-scoped edge rules in `docs/EDGE_DEFENCE.md`.
+- `www.` hosts are redirect-only for every page and API path, handled in `custom-worker.ts` before the Next.js handler (static build assets are served by the assets binding first); keep it that way or the alias escapes the hostname-scoped edge rules in `docs/EDGE_DEFENCE.md`.
 - **Landing-owned:** `app/layout.tsx`, `app/page.tsx`, `app/robots.ts`, `app/sitemap.ts`, `app/opengraph-image.png`, `app/api/launch-signups/route.ts`, `signup-limiter.ts`, `custom-worker.ts`, `proxy.ts`, `i18n/request.ts`, `next.config.ts`, `wrangler.jsonc`, `public/_headers`, and the `app/lib/landingMode.ts` / `app/lib/utils.ts` / `app/lib/deploymentSurface.ts` stand-ins that let vendored files compile unchanged.
 - `app/opengraph-image.png` is rendered once from `frontend/app/opengraph-image.tsx`; `next/og` would push the Worker past the free plan's 3 MiB limit.
 

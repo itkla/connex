@@ -8,9 +8,11 @@ export { SignupLimiter } from "./signup-limiter";
  * OpenNext's generated worker exports only a fetch handler, and a Durable Object class has to be
  * exported from the same script as the binding that names it, so this wraps the generated handler.
  *
- * `www.` hosts are a redirect-only alias. Every request to one is answered with a 308 to the apex
- * before any application code runs, including `/api/*`, so the alias never reaches the signup
- * limiter or Resend and needs no hostname-scoped edge rules of its own.
+ * `www.` hosts are a redirect-only alias. Every request that reaches the Worker on one, which is every
+ * page and every `/api/*` call, is answered with a 308 to the apex before any application code runs,
+ * so the alias never renders a page or reaches the signup limiter or Resend. Build output that matches
+ * the assets binding is served before the Worker runs; those are the same public, immutable files the
+ * apex serves, and routing every asset through the Worker would spend an invocation per file.
  */
 export default {
     async fetch(request, env, ctx) {

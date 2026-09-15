@@ -216,8 +216,10 @@ not run on the staging host; `preview.connexcrm.jp` keeps serving the product ap
 **What it serves.** `/`, `/privacy`, `/legal`, `/disclosure`, `/tokushoho`, `robots.txt`, `sitemap.xml`,
 the web manifest, and `POST /api/launch-signups`. Every other path is a 404, so the authenticated
 application is not reachable on the public domain. `www.connexcrm.jp` is a redirect-only alias: the
-Worker entrypoint answers every request to it, `/api/*` included, with a 308 to the apex before any
-application code runs, so it never reaches the signup limiter or Resend. The Worker has no
+Worker entrypoint answers every page and `/api/*` request to it with a 308 to the apex before any
+application code runs, so it never renders a page or reaches the signup limiter or Resend. Static build
+assets are served by the assets binding before the Worker runs, on both hostnames; they are the same
+public, immutable files. The Worker has no
 `workers.dev` or preview URL: those would sit outside the `connexcrm.jp` zone's WAF and bot controls.
 
 **Secrets.** Set on the Worker, never in the repository, and preserved by deploys:
@@ -250,9 +252,10 @@ timing discloses a preference. Workers-specific differences:
   which fails when the vendored landing, legal, or not-found files differ from `frontend/`.
 - Pull requests that change `landing/` also typecheck and build the Worker.
 - Pushes to `main` that change `landing/` build, run `wrangler deploy`, and smoke-test `connexcrm.jp`
-  (`/` must return 200 and `/dashboard` 404). The red-main alert watches this workflow. A re-run of an
-  older `main` run skips the deploy: GitHub re-runs keep the original commit, and publishing it after
-  `main` has moved on would roll production back.
+  (`/` must return 200 and `/dashboard` 404). The red-main alert watches this workflow. Before publishing, the job
+  deploys only if `main` still carries the same `landing/` tree: a re-run keeps its original commit, and
+  publishing it after a newer landing change would roll production back. Unrelated `main` commits do not
+  block a deploy.
 - CI authenticates with the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets. The
   token is limited to Workers Scripts (edit) and Account Settings (read) on the account, and Workers
   Routes (edit) and Zone (read) on `connexcrm.jp`; it cannot read or edit DNS records.
