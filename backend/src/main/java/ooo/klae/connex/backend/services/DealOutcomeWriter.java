@@ -85,6 +85,23 @@ public class DealOutcomeWriter {
     }
 
     /**
+     * Persists only the outcome and stage fields of a locked deal, then settles realized value.
+     * Routes that change an outcome without editing the deal's details use this instead of the
+     * broad update, so a stale bean cannot restore a currency or any other field the caller never
+     * intended to write. Line totals in a foreign currency are refused before the row is touched.
+     * @param workspaceId tenant scope
+     * @param deal the locked deal to write, carrying its stored realized value
+     * @param previousOutcome the won flag before this transition
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void writeOutcome(int workspaceId, Deal deal, Boolean previousOutcome) {
+        dealValueService.requireConsistentLineCurrency(workspaceId, deal);
+        applyCloseState(deal, stageOutcome(workspaceId, deal.getStageId()));
+        dealMapper.updateOutcome(deal);
+        dealValueService.reconcileRealizedValue(workspaceId, deal, previousOutcome, null);
+    }
+
+    /**
      * Applies the outcome a new deal is created with and inserts it.
      * @param deal the deal to insert
      * @param requestedActualValue a submitted realized value, or null when the route carries none

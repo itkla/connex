@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,8 +30,8 @@ import ooo.klae.connex.backend.mappers.UserMapper;
  *       {@link SsoLoginResult.LinkRequired} so ownership is proven first;</li>
  *   <li>an existing <em>passwordless</em> account (another provider, or an SSO-/JIT-provisioned
  *       account) is refused rather than silently merged by email — there is no ownership proof;</li>
- *   <li>only a brand-new email is provisioned as a fresh passwordless personal account (the caller
- *       then routes it through onboarding);</li>
+ *   <li>only a brand-new email with open instance signup is provisioned as a fresh passwordless
+ *       personal account (the caller then routes it through onboarding);</li>
  *   <li>an account whose organization enforces SSO is refused — it must use that org's IdP.</li>
  * </ol>
  */
@@ -44,6 +45,9 @@ public class SocialLoginService {
     private final SsoConnectionService ssoConnectionService;
     private final AuditService auditService;
 
+    @Value("${connex.signup.mode:open}")
+    private String signupMode;
+
     /**
      * Resolves an authenticated social identity to a Connex login outcome.
      * @param provider the social provider ({@code google} or {@code microsoft})
@@ -53,7 +57,8 @@ public class SocialLoginService {
      * @param emailVerified whether the provider asserts the email is verified
      * @param displayName the provider-asserted display name, used when provisioning
      * @return a login outcome, or a link-required outcome when the email collides with a password account
-     * @throws ForbiddenException when the email is unverified or the account is SSO-enforced
+     * @throws ForbiddenException when the email is unverified, the account is SSO-enforced,
+     *         or a new account is requested while self-service registration is disabled
      */
     @Transactional
     public SsoLoginResult resolve(String provider, String issuer, String subject, String email,
@@ -78,6 +83,10 @@ public class SocialLoginService {
             }
             throw new ForbiddenException(
                     "An account already exists for this email. Sign in with the method you first used.");
+        }
+
+        if (signupMode == null || !"open".equalsIgnoreCase(signupMode.trim())) {
+            throw new ForbiddenException("Self-service registration is disabled on this instance");
         }
 
         User user = ssoUserProvisioner.provision(email, displayName, true);

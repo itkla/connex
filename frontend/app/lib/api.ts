@@ -4,6 +4,12 @@ const API_BASE =
         : "";
 
 import { clearAllDrafts } from "@/app/lib/formDrafts";
+import {
+    adoptBrowserAccount,
+    invalidateAccountStorage,
+    reconcileBrowserAccount,
+    resetBrowserAccount,
+} from "@/app/lib/browserAccountStorage";
 import { resolveAiGeneration } from '@/app/lib/aiGeneration';
 import { isProtectedPath } from "@/app/lib/protectedRoutes";
 import { isProtectedMediaPath } from "@/app/lib/protectedMedia";
@@ -35,7 +41,7 @@ export async function subscribeToLaunch(email: string, website = ""): Promise<La
     if (response.status === 429) return "rateLimited";
     const body: unknown = await response.json();
     if (typeof body !== "object" || body === null) return "error";
-    if (response.ok && "status" in body && body.status === "subscribed") return "success";
+    if (response.ok && "status" in body && (body.status === "subscribed" || body.status === "accepted")) return "success";
     if ("error" in body && body.error === "invalid_email") return "invalid";
     return "error";
 }
@@ -109,20 +115,23 @@ const clientRequestIdentityInvalidationListeners = new Set<() => void>();
 
 if (typeof window !== "undefined") {
     window.addEventListener("storage", (event) => {
-        if (event.key === CLIENT_IDENTITY_EVENT_KEY) {
-            invalidateClientRequestIdentity();
-            if (event.newValue?.startsWith("logout:")) {
-                clearAllDrafts();
-                window.location.reload();
-            } else if (event.newValue?.startsWith("workspace:")) {
-                if (isProtectedPath(window.location.pathname)) {
-                    window.location.replace("/dashboard");
-                } else {
-                    window.location.reload();
-                }
-            } else if (event.newValue?.startsWith("refresh:")) {
+        if (event.key !== CLIENT_IDENTITY_EVENT_KEY) return;
+        const action = event.newValue?.split(":")[0];
+        if (action === "logout") resetBrowserAccount();
+        else if (action === "account") invalidateAccountStorage();
+        else if (action === "refresh") reconcileBrowserAccount();
+        invalidateClientRequestIdentity();
+        if (action === "logout") {
+            clearAllDrafts();
+            window.location.reload();
+        } else if (action === "workspace") {
+            if (isProtectedPath(window.location.pathname)) {
+                window.location.replace("/dashboard");
+            } else {
                 window.location.reload();
             }
+        } else if (action === "refresh") {
+            window.location.reload();
         }
     });
 }
@@ -222,7 +231,7 @@ export function fetchProtectedMediaResponse(
     });
 }
 
-type ClientIdentityTransition = "invalidate" | "refresh" | "logout" | "workspace";
+type ClientIdentityTransition = "invalidate" | "account" | "refresh" | "logout" | "workspace";
 
 function broadcastClientRequestIdentityTransition(action: ClientIdentityTransition) {
     if (typeof window === "undefined") return;
@@ -237,8 +246,22 @@ function broadcastClientRequestIdentityTransition(action: ClientIdentityTransiti
 }
 
 function signalClientRequestIdentityTransition(action: ClientIdentityTransition) {
+    if (action === "account") invalidateAccountStorage();
+    if (action === "logout") resetBrowserAccount();
     invalidateClientRequestIdentity();
     broadcastClientRequestIdentityTransition(action);
+}
+
+/**
+ * Synchronizes storage after server-rendered authentication. Only a different account discards the
+ * previous account's browser data; re-authenticating the same user keeps that user's own data.
+ * @param userId the account the server authenticated for this document
+ */
+export function synchronizeBrowserAccount(userId: number): void {
+    if (adoptBrowserAccount(userId) !== "replaced") return;
+    clearAllDrafts();
+    invalidateClientRequestIdentity();
+    broadcastClientRequestIdentityTransition("refresh");
 }
 
 async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIdentity | null> {
@@ -1739,6 +1762,7 @@ export async function getPublicPageUserFromCookie(cookie: string | null): Promis
 }
 
 export function logout() {
+    signalClientRequestIdentityTransition("account");
     clearAllDrafts();
     return withClientRequestIdentityReset(() => postJson<void>("/api/auth/logout"), "logout");
 }
