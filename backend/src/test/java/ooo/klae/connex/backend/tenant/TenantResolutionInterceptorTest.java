@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -22,6 +23,8 @@ import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -30,6 +33,7 @@ import org.springframework.web.servlet.AsyncHandlerInterceptor;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.publicapi.ApiCredentialAuthenticationFilter;
 import ooo.klae.connex.backend.publicapi.ApiCredentialAuthenticationFilter.TenantBinding;
@@ -216,8 +220,15 @@ class TenantResolutionInterceptorTest {
         assertFalse(liveContext.isResolved());
     }
 
-    @Test
-    void revokedMembershipFallsBackToNextWorkspaceAndHealsTheCookie() {
+    @ParameterizedTest
+    @CsvSource({
+        "GET, /api/workspaces",
+        "GET, /api/auth/me",
+        "GET, /api/notes/page",
+        "HEAD, /api/notes/page",
+        "OPTIONS, /api/notes"
+    })
+    void revokedMembershipFallsBackToNextWorkspaceAndHealsTheCookie(String method, String path) {
         when(requestResolver.resolve(any(), eq(7))).thenReturn(11);
         when(requestResolver.isStaleWorkspacePin(any(), eq(11))).thenReturn(true);
         when(workspaceService.getRole(11, 7)).thenReturn(null);
@@ -226,7 +237,7 @@ class TenantResolutionInterceptorTest {
         when(workspaceService.getOrgId(19)).thenReturn(3);
         when(catalogResolver.resolveCatalog(3)).thenReturn(null);
 
-        assertTrue(preHandle(liveInterceptor, "GET", "/api/workspaces"));
+        assertTrue(preHandle(liveInterceptor, method, path));
 
         assertTrue(liveContext.isResolved());
         assertEquals(19, liveContext.getWorkspaceId());
@@ -234,6 +245,34 @@ class TenantResolutionInterceptorTest {
         verify(workspaceService).rememberActive(7, 19);
         verify(workspaceCookie).set(response, 19);
         verify(workspaceCookie, never()).clear(response);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+        "POST, /api/notes",
+        "PUT, /api/notes/1",
+        "PATCH, /api/notes/1",
+        "DELETE, /api/notes/1",
+        "POST, /api/workspaces",
+        "POST, /api/auth/me",
+        "TRACE, /api/notes",
+        "CUSTOM, /api/notes"
+    })
+    void revokedMembershipRejectsUnsafeMethodsWithoutRecoveringTheSelection(String method, String path) {
+        liveContext.set(19, 3, 7, "member", null);
+        when(requestResolver.resolve(any(), eq(7))).thenReturn(11);
+        when(requestResolver.isStaleWorkspacePin(any(), eq(11))).thenReturn(true);
+        when(workspaceService.getRole(11, 7)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(7)).thenReturn(19);
+
+        ForbiddenException exception = assertThrows(ForbiddenException.class,
+            () -> preHandle(liveInterceptor, method, path));
+
+        assertEquals("Not a member of workspace 11", exception.getMessage());
+        assertFalse(liveContext.isResolved());
+        verify(workspaceService, never()).defaultWorkspaceIdFor(anyInt());
+        verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
+        verifyNoInteractions(workspaceCookie, catalogResolver);
     }
 
     @Test

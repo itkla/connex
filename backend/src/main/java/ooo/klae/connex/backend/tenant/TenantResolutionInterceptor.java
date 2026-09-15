@@ -39,9 +39,12 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * selection mechanisms.
  *
  * <p>A stale matching cookie/header pair — or a cookie-only pin — that fails
- * membership after the caller was removed from that workspace falls back to
+ * membership after the caller was removed from that workspace falls back on
+ * {@code GET}, {@code HEAD}, and {@code OPTIONS} requests to
  * {@link WorkspaceService#defaultWorkspaceIdFor(int)} and rewrites or clears the
  * workspace cookie so the next request stops targeting the revoked id (#1108).
+ * Other methods return 403 before changing the selection, so a pending mutation
+ * cannot be redirected into another workspace (#1649).
  * An explicit foreign {@code X-Workspace-Id} (header without that cookie, or
  * disagreeing with it) still returns 403 when the caller is not a member.
  * Only a membership the caller still holds is ever installed in {@link TenantContext}.
@@ -75,6 +78,7 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
         "/api/orgs/\\d+/workspaces/\\d+");
     private static final Pattern ORGANIZATION_LIFECYCLE_PATH = Pattern.compile(
         "/api/orgs/\\d+");
+    private static final Set<String> WORKSPACE_RECOVERY_METHODS = Set.of("GET", "HEAD", "OPTIONS");
     private static final Set<String> JOURNAL_METHODS = Set.of(
         "DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT");
     private static final Logger log = LoggerFactory.getLogger(TenantResolutionInterceptor.class);
@@ -113,7 +117,8 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
 
         String role = workspaceService.getRole(candidate, user.getId());
         if (role == null) {
-            if (!workspaceRequestResolver.isStaleWorkspacePin(request, candidate)) {
+            if (!WORKSPACE_RECOVERY_METHODS.contains(request.getMethod())
+                    || !workspaceRequestResolver.isStaleWorkspacePin(request, candidate)) {
                 throw new ForbiddenException("Not a member of workspace " + candidate);
             }
             Integer fallback = workspaceService.defaultWorkspaceIdFor(user.getId());
