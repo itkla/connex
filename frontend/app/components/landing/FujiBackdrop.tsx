@@ -18,8 +18,16 @@ function seededRandom(seed: number) {
     };
 }
 
+/** Spreads twinkles across four offsets so neighbouring stars never pulse in unison. */
+function twinklePhase(value: number) {
+    if (value < 0.25) return styles.twinkleEarly;
+    if (value < 0.5) return styles.twinkleMid;
+    if (value < 0.75) return styles.twinkleLate;
+    return styles.twinkleLast;
+}
+
 const starRandom = seededRandom(1707);
-const STARS = Array.from({ length: 96 }, () => ({ x: Math.round(starRandom() * 1600), y: Math.round(24 + starRandom() * 520), r: 0.7 + starRandom() * 1.3 }))
+const STARS = Array.from({ length: 96 }, () => ({ x: Math.round(starRandom() * 1600), y: Math.round(24 + starRandom() * 520), r: 0.7 + starRandom() * 1.3, phase: twinklePhase(starRandom()) }))
     .filter(({ x, y }) => y < 300 + Math.abs(x - 1150) * 0.7);
 
 /** A stylized cumulus of stacked puffs on a flat base, with a shaded underside band. */
@@ -112,7 +120,7 @@ export function FujiBackdrop({ pauseLabel, resumeLabel }: { pauseLabel: string; 
                         </g>
                     </g>
                     <g className={styles.stars}>
-                        <g>{STARS.map(({ x, y, r }) => <circle key={`${x}-${y}`} className={`${styles.star} ${styles.starTone}`} cx={x} cy={y} r={r} />)}</g>
+                        <g>{STARS.map(({ x, y, r, phase }) => <circle key={`${x}-${y}`} className={`${styles.star} ${phase} ${styles.starTone}`} cx={x} cy={y} r={r} />)}</g>
                         <ShootingStar x={1500} y={80} className={styles.shootingStar} />
                         <ShootingStar x={1040} y={60} className={`${styles.shootingStar} ${styles.shootingStarLate}`} />
                     </g>

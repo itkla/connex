@@ -22,8 +22,12 @@
 .outline { stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
 .inkTone { stop-color: var(--color-brand-dark); }
 .mountainTint { stop-color: var(--color-brand-dark); }
-.cloudBody { fill: color-mix(in oklab, var(--foreground) 3%, var(--background)); }
-.cloudShade { fill: color-mix(in oklab, var(--foreground) 13%, var(--background)); }
+.cloudDrift {
+    --fuji-cloud-body: color-mix(in oklab, var(--foreground) 3%, var(--background));
+    --fuji-cloud-shade: color-mix(in oklab, var(--foreground) 13%, var(--background));
+}
+.cloudBody { fill: var(--fuji-cloud-body); }
+.cloudShade { fill: var(--fuji-cloud-shade); }
 .sunGlow { stop-color: var(--chart-3); }
 .sunCore { stop-color: color-mix(in oklab, var(--chart-3) 22%, var(--background)); }
 .sunEdge { stop-color: color-mix(in oklab, var(--chart-3) 55%, var(--background)); }
@@ -36,14 +40,17 @@
     animation-play-state: paused;
 }
 .star:nth-child(3n + 1) { animation-duration: calc(var(--motion-expressive) * 13); }
-.star:nth-child(4n + 2) { animation-delay: calc(var(--motion-expressive) * -5); }
-.star:nth-child(5n + 3) { animation-delay: calc(var(--motion-expressive) * -11); }
+.twinkleEarly { animation-delay: 0s; }
+.twinkleMid { animation-delay: calc(var(--motion-expressive) * -4); }
+.twinkleLate { animation-delay: calc(var(--motion-expressive) * -8); }
+.twinkleLast { animation-delay: calc(var(--motion-expressive) * -11); }
 .star:nth-child(7n) { animation-duration: calc(var(--motion-expressive) * 6); }
 .shootingStar {
     opacity: 0;
     animation: shootingStar calc(var(--motion-expressive) * 29) var(--ease-out) infinite;
     animation-play-state: paused;
 }
+.backdrop:not([data-fuji-motion="running"]) .shootingStar { display: none; }
 .shootingStarLate {
     animation-duration: calc(var(--motion-expressive) * 47);
     animation-delay: calc(var(--motion-expressive) * 16);
@@ -53,8 +60,11 @@
     animation: cloudPassing var(--fuji-drift-far) linear infinite;
     animation-play-state: paused;
 }
-.farClouds { opacity: 0.65; }
-.nearClouds { opacity: 0.9; animation-duration: var(--fuji-drift-near); }
+.farClouds {
+    --fuji-cloud-body: color-mix(in oklab, var(--foreground) 2%, var(--background));
+    --fuji-cloud-shade: color-mix(in oklab, var(--foreground) 8%, var(--background));
+}
+.nearClouds { animation-duration: var(--fuji-drift-near); }
 .backdrop[data-fuji-motion="running"] :is(.cloudDrift, .star, .shootingStar) { animation-play-state: running; }
 .copyVeil {
     position: absolute;
@@ -83,8 +93,14 @@
     6%, 100% { opacity: 0; transform: translate3d(-340px, 170px, 0); }
 }
 :global(.dark) .inkTone { stop-color: var(--color-brand); }
-:global(.dark) .cloudBody { fill: color-mix(in oklab, var(--foreground) 20%, var(--background)); }
-:global(.dark) .cloudShade { fill: color-mix(in oklab, var(--foreground) 11%, var(--background)); }
+:global(.dark) .cloudDrift {
+    --fuji-cloud-body: color-mix(in oklab, var(--foreground) 20%, var(--background));
+    --fuji-cloud-shade: color-mix(in oklab, var(--foreground) 11%, var(--background));
+}
+:global(.dark) .farClouds {
+    --fuji-cloud-body: color-mix(in oklab, var(--foreground) 14%, var(--background));
+    --fuji-cloud-shade: color-mix(in oklab, var(--foreground) 8%, var(--background));
+}
 :global(.dark) .sun { display: none; }
 :global(.dark) .stars { display: inline; }
 @media (max-width: 63.999rem) {
