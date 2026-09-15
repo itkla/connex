@@ -178,7 +178,7 @@ export default function DocumentView({ content, type, title, status, version, ge
             {content.body
                 ? <div className="document-prose max-w-none text-sm leading-relaxed text-foreground">
                     <BodyNodes nodes={content.body.content ?? []} lineItemsTable={lineItemsTable} />
-                    {lineItemsTable && !bodyHasLineItems(content.body) && (
+                    {lineItemsTable && !hasRenderableLineItems(content.body.content ?? []) && (
                         <div className="my-6">{lineItemsTable}</div>
                     )}
                   </div>
@@ -211,9 +211,21 @@ export default function DocumentView({ content, type, title, status, version, ge
     );
 }
 
-function bodyHasLineItems(node: DocumentBodyNode): boolean {
-    if (node.type === 'lineItems') return true;
-    return (node.content ?? []).some(bodyHasLineItems);
+function hasRenderableLineItems(nodes: DocumentBodyNode[]): boolean {
+    return nodes.some((node) => {
+        switch (node.type) {
+            case 'lineItems':
+                return true;
+            case 'blockquote':
+                return hasRenderableLineItems(node.content ?? []);
+            case 'bulletList':
+            case 'orderedList':
+                return (node.content ?? []).some((item) =>
+                    item.type === 'listItem' && hasRenderableLineItems(item.content ?? []));
+            default:
+                return false;
+        }
+    });
 }
 
 function BodyNodes({ nodes, lineItemsTable }: { nodes: DocumentBodyNode[]; lineItemsTable: ReactNode }) {
@@ -250,9 +262,9 @@ function renderNode(node: DocumentBodyNode, lineItemsTable: ReactNode): ReactNod
             return <Tag className={cls} style={alignStyle(node)}>{renderInline(node.content)}</Tag>;
         }
         case 'bulletList':
-            return <ul className="my-2.5 list-disc space-y-1 pl-5">{(node.content ?? []).map((li, i) => <li key={i}>{renderListItem(li, lineItemsTable)}</li>)}</ul>;
+            return <ul className="my-2.5 list-disc space-y-1 pl-5">{(node.content ?? []).filter((li) => li.type === 'listItem').map((li, i) => <li key={i}>{renderListItem(li, lineItemsTable)}</li>)}</ul>;
         case 'orderedList':
-            return <ol className="my-2.5 list-decimal space-y-1 pl-5">{(node.content ?? []).map((li, i) => <li key={i}>{renderListItem(li, lineItemsTable)}</li>)}</ol>;
+            return <ol className="my-2.5 list-decimal space-y-1 pl-5">{(node.content ?? []).filter((li) => li.type === 'listItem').map((li, i) => <li key={i}>{renderListItem(li, lineItemsTable)}</li>)}</ol>;
         case 'blockquote':
             return <blockquote className="my-3 border-l-2 border-border pl-4 text-muted-foreground">{(node.content ?? []).map((child, i) => <Fragment key={i}>{renderNode(child, lineItemsTable)}</Fragment>)}</blockquote>;
         case 'codeBlock':
