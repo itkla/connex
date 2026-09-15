@@ -385,6 +385,8 @@
         "oneTimeTotal": "一括",
         "recurringTotal": "継続",
         "grandTotal": "合計",
+        "totalsUnavailable": "明細の通貨を修正している間は、合計を表示できません。",
+        "currencyMismatch": "この明細の通貨は{lineCurrency}、商談の通貨は{dealCurrency}です。金額を確認してから{dealCurrency}で明細を編集するか、明細を削除してください。通貨換算は行われません。",
         "saveFailed": "明細を保存できませんでした"
     },
     "DealsDocuments": {
