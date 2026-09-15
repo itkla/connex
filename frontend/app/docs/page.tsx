@@ -7,7 +7,7 @@ import DocBlocks from "@/app/components/docs/DocBlocks";
 
 export async function generateMetadata(): Promise<Metadata> {
     const t = await getTranslations("DocsMeta");
-    return { title: t("metaTitle"), description: t("metaDescription") };
+    return { title: { absolute: t("metaTitle") }, description: t("metaDescription") };
 }
 
 export default async function DocsHomePage() {

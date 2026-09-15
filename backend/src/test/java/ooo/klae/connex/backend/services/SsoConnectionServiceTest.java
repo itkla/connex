@@ -7,21 +7,46 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mockStatic;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest;
+import org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient;
+import org.springframework.security.oauth2.client.registration.ClientRegistration;
+import org.springframework.security.oauth2.client.registration.ClientRegistrations;
+import org.springframework.security.oauth2.core.AuthorizationGrantType;
+import org.springframework.security.oauth2.core.OAuth2AuthorizationException;
+import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationExchange;
+import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
+import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationResponse;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClient;
 
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.SsoConnection;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.SsoConnectionDto;
 import ooo.klae.connex.backend.dto.SsoConnectionRequest;
 import ooo.klae.connex.backend.dto.SsoDiscoveryDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.SecretValueMapper;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.secrets.SecretPurpose;
@@ -29,6 +54,8 @@ import ooo.klae.connex.backend.secrets.SecretReference;
 import ooo.klae.connex.backend.secrets.SecretStore;
 import ooo.klae.connex.backend.secrets.StoredSecret;
 import ooo.klae.connex.backend.sso.SsoSecretCipher;
+import ooo.klae.connex.backend.sso.DbClientRegistrationRepository;
+import ooo.klae.connex.backend.sso.SsoUrlSafety;
 
 /**
  * Verifies SSO connection management: org-admin save/read round-trip, that the
@@ -47,10 +74,23 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
     @Autowired private SsoSecretCipher ssoSecretCipher;
     @Autowired private SecretStore secretStore;
     @Autowired private OrgMemberMapper orgMemberMapper;
+    @Autowired private OrganizationMapper organizationMapper;
+    @Autowired private DbClientRegistrationRepository clientRegistrationRepository;
 
     @BeforeEach
     void enrollActingUserAsOrgOwner() {
+        Organization organization = new Organization();
+        organization.setName("SSO connection test");
+        organization.setSlug("sso-connection-" + UUID.randomUUID());
+        organizationMapper.insert(organization);
+        workspace = new Workspace();
+        workspace.setOrgId(organization.getId());
+        workspace.setName("SSO connection test");
+        workspace.setSlug(organization.getSlug());
+        workspaceMapper.insert(workspace);
+        workspaceMapper.addMember(workspace.getId(), currentUser.getId(), "member");
         orgMemberMapper.addMember(workspaceMapper.getOrgId(workspace.getId()), currentUser.getId(), "owner");
+        authenticateAs(currentUser, workspace.getId());
     }
 
     private SsoConnectionRequest oidcRequest() {
@@ -105,13 +145,118 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
 
         SsoConnectionRequest update = oidcRequest();
         update.setOidcClientSecret(null);
-        update.setOidcClientId("client-xyz");
+        update.setOidcScopes("openid,email,profile");
         SsoConnectionDto saved = ssoConnectionService.save(workspace.getId(), currentUser.getId(), update);
 
         assertTrue(saved.isHasClientSecret());
-        assertEquals("client-xyz", saved.getOidcClientId());
+        assertEquals("client-abc", saved.getOidcClientId());
+        assertEquals("openid,email,profile", saved.getOidcScopes());
         assertEquals(firstEnc, ssoConnectionMapper.findByOrg(orgId).getOidcClientSecretEnc(),
                 "a blank secret must keep the previously stored ciphertext");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"issuer,true", "issuer,false", "client,true", "client,false"})
+    void save_changedCredentialIdentityRequiresFreshSecret(String changedField, boolean enabled) {
+        ssoConnectionService.save(workspace.getId(), currentUser.getId(), oidcRequest());
+        int orgId = workspace.getOrgId();
+        SsoConnection before = ssoConnectionMapper.findByOrg(orgId);
+        SsoConnectionRequest update = oidcRequest();
+        update.setEnabled(enabled);
+        update.setOidcClientSecret("  ");
+        if ("issuer".equals(changedField)) {
+            update.setOidcIssuer("https://replacement.example.test");
+        } else {
+            update.setOidcClientId("replacement-client");
+        }
+
+        assertThrows(BadRequestException.class,
+                () -> ssoConnectionService.save(workspace.getId(), currentUser.getId(), update));
+
+        assertEquals(before, ssoConnectionMapper.findByOrg(orgId));
+        assertEquals(PLAINTEXT_SECRET,
+                ssoSecretCipher.decryptOidcClientSecret(orgId, before.getOidcClientSecretEnc()));
+    }
+
+    @Test
+    void save_issuerTransitionNeverSendsPreviousSecret() {
+        ssoConnectionService.save(workspace.getId(), currentUser.getId(), oidcRequest());
+        int orgId = workspace.getOrgId();
+        String oldReference = ssoConnectionMapper.findByOrg(orgId).getOidcClientSecretEnc();
+        String replacementIssuer = "https://replacement.example.test";
+        String replacementSecret = "replacement-client-secret";
+        try (var safety = mockStatic(SsoUrlSafety.class);
+                var discovery = mockStatic(ClientRegistrations.class)) {
+            discovery.when(() -> ClientRegistrations.fromIssuerLocation("https://idp.example.com"))
+                    .thenReturn(discoveredRegistration("https://idp.example.com"));
+            discovery.when(() -> ClientRegistrations.fromIssuerLocation(replacementIssuer))
+                    .thenReturn(discoveredRegistration(replacementIssuer));
+            assertNotNull(clientRegistrationRepository.findByRegistrationId("org-" + orgId));
+
+            SsoConnectionRequest update = oidcRequest();
+            update.setOidcIssuer(replacementIssuer);
+            update.setOidcClientSecret("");
+            assertThrows(BadRequestException.class,
+                    () -> ssoConnectionService.save(workspace.getId(), currentUser.getId(), update));
+            assertEquals("https://idp.example.com", ssoConnectionMapper.findByOrg(orgId).getOidcIssuer());
+
+            update.setOidcClientSecret(replacementSecret);
+            ssoConnectionService.save(workspace.getId(), currentUser.getId(), update);
+            update.setOidcClientSecret(null);
+            ssoConnectionService.save(workspace.getId(), currentUser.getId(), update);
+            ClientRegistration registration = clientRegistrationRepository.findByRegistrationId("org-" + orgId);
+            assertNotNull(registration);
+            assertEquals(replacementSecret, registration.getClientSecret());
+            assertNotEquals(oldReference, ssoConnectionMapper.findByOrg(orgId).getOidcClientSecretEnc());
+            assertFalse(secretStore.exists(SecretPurpose.ORG_SSO_OIDC_CLIENT_SECRET, orgId, oldReference));
+            assertThrows(ResourceNotFoundException.class,
+                    () -> ssoSecretCipher.decryptOidcClientSecret(orgId, oldReference));
+
+            RestClient.Builder builder = RestClient.builder();
+            MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+            server.expect(requestTo(replacementIssuer + "/token"))
+                    .andExpect(header(HttpHeaders.AUTHORIZATION, "Basic " + HttpHeaders.encodeBasicAuth(
+                            "client-abc", replacementSecret, StandardCharsets.UTF_8)))
+                    .andRespond(withStatus(HttpStatus.BAD_REQUEST));
+            RestClientAuthorizationCodeTokenResponseClient client = new RestClientAuthorizationCodeTokenResponseClient();
+            client.setRestClient(builder.build());
+            OAuth2AuthorizationRequest authorization = OAuth2AuthorizationRequest.authorizationCode()
+                    .authorizationUri(replacementIssuer + "/authorize").clientId("client-abc")
+                    .redirectUri("https://app.example.test/callback").state("state").build();
+            OAuth2AuthorizationResponse response = OAuth2AuthorizationResponse.success("code")
+                    .redirectUri("https://app.example.test/callback").state("state").build();
+            OAuth2AuthorizationCodeGrantRequest grant = new OAuth2AuthorizationCodeGrantRequest(
+                    registration, new OAuth2AuthorizationExchange(authorization, response));
+
+            assertThrows(OAuth2AuthorizationException.class, () -> client.getTokenResponse(grant));
+            server.verify();
+        }
+    }
+
+    @Test
+    void save_clientIdTransitionInvalidatesPreviousSecretReference() {
+        ssoConnectionService.save(workspace.getId(), currentUser.getId(), oidcRequest());
+        int orgId = workspace.getOrgId();
+        SsoConnection previous = ssoConnectionMapper.findByOrg(orgId);
+        SsoConnectionRequest update = oidcRequest();
+        update.setOidcClientId("replacement-client");
+        update.setOidcClientSecret("replacement-client-secret");
+
+        ssoConnectionService.save(workspace.getId(), currentUser.getId(), update);
+
+        SsoConnection current = ssoConnectionMapper.findByOrg(orgId);
+        assertNotEquals(previous.getOidcClientSecretEnc(), current.getOidcClientSecretEnc());
+        assertEquals("replacement-client-secret",
+                ssoSecretCipher.decryptOidcClientSecret(orgId, current.getOidcClientSecretEnc()));
+        assertThrows(ResourceNotFoundException.class,
+                () -> ssoSecretCipher.decryptOidcClientSecret(orgId, previous.getOidcClientSecretEnc()));
+    }
+
+    private static ClientRegistration.Builder discoveredRegistration(String issuer) {
+        return ClientRegistration.withRegistrationId("discovery")
+                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
+                .issuerUri(issuer).authorizationUri(issuer + "/authorize")
+                .tokenUri(issuer + "/token").jwkSetUri(issuer + "/jwks");
     }
 
     @Test

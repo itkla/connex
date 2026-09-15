@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useAccountStorageGeneration } from "@/app/hooks/useAccountStorageGeneration";
 
 import { useActions } from '@/app/hooks/useActions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
@@ -29,7 +30,10 @@ export function useRecordDensity(): { density: RowDensity; setDensity: (next: Ro
     const key = densityStorageKey(context.user?.id ?? null, activeWorkspaceId);
     const [density, setDensityState] = useState<RowDensity>('comfortable');
 
+    const canPersist = useAccountStorageGeneration(() => setDensityState('comfortable'));
+
     useEffect(() => {
+        if (!canPersist()) return;
         let stored: string | null = null;
         try {
             stored = window.localStorage.getItem(key);
@@ -39,16 +43,20 @@ export function useRecordDensity(): { density: RowDensity; setDensity: (next: Ro
         const next: RowDensity = isDensity(stored) ? stored : 'comfortable';
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setDensityState((prev) => (prev === next ? prev : next));
-    }, [key]);
+    }, [canPersist, key]);
 
     const setDensity = useCallback(
         (next: RowDensity) => {
+            if (!canPersist()) {
+                setDensityState('comfortable');
+                return;
+            }
             setDensityState(next);
             try {
                 window.localStorage.setItem(key, next);
             } catch {}
         },
-        [key],
+        [canPersist, key],
     );
 
     return { density, setDensity };
