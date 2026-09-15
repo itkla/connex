@@ -1,0 +1,88 @@
+{
+  "ApiErrors": {
+    "title": "Couldn't complete that",
+    "generic": "Something went wrong. Nothing was lost — try again.",
+    "invalid": "Some of what you entered can't be accepted. Check the details and try again.",
+    "forbidden": "You don't have permission to do that here. Ask a workspace admin.",
+    "notFound": "That record is no longer available.",
+    "conflict": "Someone else changed this just now. Reload and try again.",
+    "tooManyRequests": "That's a lot of requests at once. Wait a moment and try again.",
+    "offline": "We couldn't reach Connex. Check your connection and try again.",
+    "serverError": "Something went wrong on our side. Nothing was lost — try again in a moment.",
+    "sessionExpired": "You've been signed out. Sign in again to continue.",
+    "identityCollisionReportTimeout": "That report is taking longer than expected. Try again in a moment.",
+    "sharePrivacyHold": "This contact asked not to be shared outside this workspace, so new shares are blocked.",
+    "reference": "Reference: {id}"
+  },
+  "ErrorState": {
+    "title": "Something went wrong",
+    "body": "We couldn't load this page. The issue is usually temporary.",
+    "retry": "Try again",
+    "retrying": "Retrying",
+    "back": "Go back",
+    "reference": "Reference: {digest}"
+  },
+  "NotFound": {
+    "title": "We couldn't find that",
+    "body": "This page doesn't exist, or it was moved or deleted.",
+    "home": "Go to dashboard",
+    "site": {
+      "body": "This page doesn't exist. Check the address, or head back to the start.",
+      "home": "Back to home"
+    },
+    "records": {
+      "body": "This record doesn't exist, or it was deleted. It may also belong to a different workspace.",
+      "contacts": "All contacts",
+      "companies": "All companies",
+      "deals": "All deals"
+    },
+    "activity": {
+      "body": "This item doesn't exist, or it was deleted. It may also belong to a different workspace.",
+      "tasks": "All tasks",
+      "notes": "All notes",
+      "activities": "All activities"
+    },
+    "library": {
+      "body": "This document or file doesn't exist, or it was deleted.",
+      "documents": "All documents",
+      "files": "All files"
+    },
+    "reports": {
+      "body": "This report doesn't exist, or it was deleted.",
+      "all": "All reports"
+    }
+  },
+  "AccessDenied": {
+    "title": "You don't have access",
+    "body": "You may be in the wrong workspace, or your role doesn't include permission to view this. Try switching workspace, signing in again, or asking a workspace admin.",
+    "home": "Go to dashboard",
+    "signIn": "Sign in again"
+  },
+  "PermissionsUnavailable": {
+    "title": "We couldn't confirm your permissions",
+    "body": "This page stays hidden until we can check what you're allowed to see. The issue is usually temporary — try again in a moment.",
+    "sectionBody": "This section stays hidden until we can check what you're allowed to see. The issue is usually temporary.",
+    "home": "Go to dashboard",
+    "retry": "Try again",
+    "retrying": "Retrying"
+  },
+  "WorkspaceUnavailable": {
+    "title": "We couldn't check your workspaces",
+    "body": "Your workspace access couldn't be confirmed. The issue is usually temporary — try again in a moment.",
+    "retry": "Try again",
+    "retrying": "Retrying",
+    "signOut": "Sign out"
+  },
+  "CapabilityUnavailable": {
+    "title": "We couldn't check feature availability",
+    "body": "Feature availability couldn't be confirmed. The issue is usually temporary — try again in a moment.",
+    "retry": "Try again",
+    "retrying": "Retrying"
+  },
+  "SectionUnavailable": {
+    "title": "Couldn't load this",
+    "body": "This section couldn't be loaded. Try again in a moment.",
+    "retry": "Try again",
+    "retrying": "Retrying"
+  }
+}

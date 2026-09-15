@@ -10,6 +10,9 @@ FRONTEND_CODEQL_CONFIG = Path(__file__).parents[1] / "codeql" / "frontend.yml"
 CODEQL_REVISION = "ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd"
 BACKEND_CODEQL_CONFIG_INPUT = "./.github/codeql/backend.yml"
 FRONTEND_CODEQL_CONFIG_INPUT = "./.github/codeql/frontend.yml"
+# The javascript-typescript analysis also covers the prelaunch Worker in landing/, a separate package
+# written in the same language. Every other surface analyses exactly its own tree.
+CODEQL_ANALYSED_PATHS = {"frontend": ["frontend", "landing"]}
 
 
 class SecurityWorkflowTest(unittest.TestCase):
@@ -66,7 +69,7 @@ class SecurityWorkflowTest(unittest.TestCase):
             with self.subTest(surface=surface):
                 self.assertEqual([], config["query-filters"])
                 self.assertNotIn("paths-ignore", config)
-                self.assertEqual([surface], config["paths"])
+                self.assertEqual(CODEQL_ANALYSED_PATHS.get(surface, [surface]), config["paths"])
 
     def test_backend_codeql_uses_manual_java_26_build(self) -> None:
         """The backend analysis is scoped by its config file's `paths`, never by `source-root`.
