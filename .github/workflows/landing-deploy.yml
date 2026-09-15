@@ -40,7 +40,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Check landing/ against frontend/
-        run: landing/scripts/sync-from-frontend.sh --check
+        run: bash landing/scripts/sync-from-frontend.sh --check
       - name: Did landing/ change?
         id: changes
         env:
