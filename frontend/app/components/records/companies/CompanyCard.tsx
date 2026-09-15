@@ -216,7 +216,7 @@ function AvatarSection({
                         <Tooltip key={p.id}>
                             <TooltipTrigger asChild>
                                 <Avatar key={p.id} className="border-card w-10 h-10 cursor-pointer hover:scale-110 transition-all duration-300 bg-card" onClick={() => handleClick(p.id)}>
-                                    <AvatarImage src={p[imageKey]} className="w-10 h-10" />
+                                    <AvatarImage src={p[imageKey]} alt={p[fallbackKey] ?? '?'} className="w-10 h-10" />
                                     <AvatarFallback className="w-10 h-10">{fallback}</AvatarFallback>
                                 </Avatar>
                             </TooltipTrigger>

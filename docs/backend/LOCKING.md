@@ -544,18 +544,22 @@ For interactive person/company/deal mutation, sharing, imports, OCR, and identit
 2. Lock actor user when present.
 3. Lock every active workspace root required by the mutation in ascending id.
 4. Lock required active memberships.
-5. Lock the active organization shared.
-6. Lock the organization duplicate-decision mutex exclusively.
-7. For a CSV import that uses an auto-create custom-field mapping, lock the affected
+5. For person updates (including processing-restriction changes) and person/company sharing,
+   lock the actor's custom `workspace_role` root and permission rows when applicable. Validate
+   `PERSON_UPDATE` for person updates or `SHARE_MANAGE` for share grants and revocations from
+   the locked authority before proceeding.
+6. Lock the active organization shared.
+7. Lock the organization duplicate-decision mutex exclusively.
+8. For a CSV import that uses an auto-create custom-field mapping, lock the affected
    record-creation template set before writable record targets. Lock and revalidate
    `CUSTOM_FIELD_MANAGE` first when the definition is absent. This set row is a schema
    synchronization root, not dependency creation. After the set lock is held, recompute the
    set of absent definition keys and fail closed with a review conflict if it differs in
    either direction from the pre-lock reading, so a definition created or removed concurrently
    under `READ_COMMITTED` cannot be silently adopted or created twice.
-8. Lock writable record targets ascending by record id.
-9. Lock canonical identity groups in deterministic kind/value order.
-10. Requery/revalidate current identities while locks are held.
+9. Lock writable record targets ascending by record id.
+10. Lock canonical identity groups in deterministic kind/value order.
+11. Requery/revalidate current identities while locks are held.
 
 Duplicate-review dismissal and reopen are terminal decision writes within this hierarchy. They lock
 and revalidate both the actor's `REPORT_READ` gate and type-specific update permission before entering

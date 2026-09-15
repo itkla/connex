@@ -1,4 +1,8 @@
 {
+  "AppMetadata": {
+    "title": "Connex",
+    "description": "Connexは、会社、連絡先、案件、フォローアップをひとつのワークスペースにまとめ、チーム全員が同じ情報をもとに仕事を進められるようにします。"
+  },
   "Filters": {
     "searchAria": "検索",
     "clearSearchAria": "検索をクリア",
@@ -63,14 +67,17 @@
     "heroCtaPrimary": "無料ではじめる",
     "prelaunch": {
       "closingHeading": "Connexで、新しい一歩を。",
+      "metaTitle": "Connex — まもなく公開",
+      "metaDescription": "Connexは、会社、連絡先、案件、フォローアップをひとつのCRMにまとめます。メールアドレスをご登録いただくと、公開した日にお知らせします。",
       "formLabel": "Connexの公開通知を受け取る",
       "emailLabel": "メールアドレス",
       "emailPlaceholder": "メールアドレス",
       "submit": "公開通知を受け取る",
+      "navCta": "公開通知",
       "submitting": "登録中…",
       "privacy": "Connexの公開時にメールでお知らせします。<link>プライバシーポリシー</link>",
-      "successTitle": "公開通知に登録しました。",
-      "successBody": "Connexの準備ができたら、メールでお知らせします。",
+      "successTitle": "ご関心をお寄せいただき、ありがとうございます。",
+      "successBody": "リクエストを受け付けました。公開のお知らせは、現在のメール配信設定に従ってお届けします。",
       "invalid": "正しいメールアドレスを入力して、もう一度お試しください。",
       "error": "登録を確認できませんでした。メールアドレスは入力欄に残っています。少し待って、もう一度お試しください。",
       "rateLimited": "数分待ってから、もう一度登録をお試しください。",

@@ -22,7 +22,7 @@ public class AbsoluteSessionTimeoutFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !apiPath(request).startsWith("/api/");
+        return !RequestPathNormalizer.apiPath(request).startsWith("/api/");
     }
 
     @Override
@@ -39,14 +39,5 @@ public class AbsoluteSessionTimeoutFilter extends OncePerRequestFilter {
             sessionSecurityService.ensureAuthenticatedSessionStarted(session);
         }
         chain.doFilter(request, response);
-    }
-
-    private static String apiPath(HttpServletRequest request) {
-        String uri = request.getRequestURI();
-        String contextPath = request.getContextPath();
-        if (contextPath != null && !contextPath.isBlank() && uri.startsWith(contextPath)) {
-            return uri.substring(contextPath.length());
-        }
-        return uri;
     }
 }

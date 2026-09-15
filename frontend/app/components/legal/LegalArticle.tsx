@@ -19,7 +19,8 @@ export type LegalArticleProps = {
     title: string;
     updated: string;
     lede: string;
-    notice: string;
+    /** Draft banner; omit it once the document is signed off and has legal effect. */
+    notice?: string;
     tocLabel: string;
     sections: LegalSection[];
 };

@@ -17,6 +17,9 @@ public interface SsoConnectionMapper {
 
     SsoConnection findByOrg(int orgId);
 
+    /** Reads the current connection after the caller has locked its organization and authorization roots. */
+    SsoConnection findByOrgForUpdate(int orgId);
+
     SsoConnection findById(int id);
 
     List<SsoConnection> listLegacySecretConnections();

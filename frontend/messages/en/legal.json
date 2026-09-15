@@ -7,6 +7,7 @@
     "privacy": {
       "title": "Privacy Policy",
       "lede": "This Privacy Policy explains how Connex handles personal information in connection with the Connex service. It reflects our obligations under Japan's Act on the Protection of Personal Information (APPI).",
+      "metaDescription": "How Connex collects, uses, shares, and protects personal information, and the choices you have under Japan’s APPI.",
       "sec": {
         "operator": {
           "h": "Who we are",
@@ -73,6 +74,7 @@
     "disclosure": {
       "title": "Disclosure Regarding Retained Personal Data",
       "lede": "This page sets out the matters concerning retained personal data that Connex makes publicly available under Article 32 of Japan's Act on the Protection of Personal Information (APPI). It complements our Privacy Policy.",
+      "metaDescription": "The matters Connex publishes about retained personal data under Article 32 of Japan’s APPI, and how to make a request.",
       "sec": {
         "operator": {
           "h": "1. Business operator and representative",
@@ -111,6 +113,7 @@
     "terms": {
       "title": "Terms of Service",
       "lede": "These Terms of Service govern your access to and use of the Connex service. Please read them carefully — by using the Service you agree to them.",
+      "metaDescription": "The terms that govern your access to and use of Connex, covering customer data, fees, liability, and how the agreement ends.",
       "sec": {
         "acceptance": {
           "h": "1. Agreement to these terms",
@@ -177,6 +180,7 @@
     "tokushoho": {
       "title": "Notation Based on the Act on Specified Commercial Transactions",
       "lede": "This notation is provided under the Act on Specified Commercial Transactions (特定商取引法) in connection with the sale of the Connex service.",
+      "metaDescription": "The notation Connex provides under Japan’s Act on Specified Commercial Transactions for the sale of the Connex service.",
       "row": {
         "seller": {
           "t": "Business operator",

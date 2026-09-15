@@ -512,6 +512,7 @@ export default function NewCompanyDialog({
                             <input
                                 id="company-logo"
                                 type="file"
+                                aria-label={t('logoAria')}
                                 accept={MANAGED_IMAGE_ACCEPT}
                                 disabled={formPending || logoSelectionPending || isSuccess}
                                 onChange={handleLogoChange}
@@ -956,6 +957,7 @@ export function NewCompanyForm({
                         <input
                             id="company-logo"
                             type="file"
+                            aria-label={t('logoAria')}
                             accept={MANAGED_IMAGE_ACCEPT}
                             disabled={formPending || logoSelectionPending || isSuccess}
                             onChange={handleLogoChange}
