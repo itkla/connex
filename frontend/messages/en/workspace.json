@@ -969,7 +969,7 @@
         "oidcIssuerHint": "The IdP's OpenID discovery URL. Connex reads its endpoints automatically.",
         "oidcClientId": "Client ID",
         "oidcClientSecret": "Client secret",
-        "oidcClientSecretHint": "Stored encrypted and never shown again. Leave blank to keep the current secret.",
+        "oidcClientSecretHint": "Stored encrypted and never shown again. Leave blank to keep the current secret only while the issuer URL and client ID stay the same; changing either requires entering a new secret.",
         "secretConfigured": "•••••••• configured",
         "oidcScopes": "Scopes",
         "samlEntityId": "IdP entity ID",
