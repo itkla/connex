@@ -3,8 +3,8 @@ import styles from "./fuji.module.css";
 
 type Puff = readonly [cx: number, r: number];
 
-const LONG_CLOUD: readonly Puff[] = [[60, 30], [120, 46], [200, 62], [290, 50], [370, 70], [460, 52], [530, 40], [585, 28]];
-const SHORT_CLOUD: readonly Puff[] = [[50, 28], [105, 44], [180, 58], [255, 46], [320, 52], [385, 34], [420, 22]];
+const LONG_CLOUD: readonly Puff[] = [[70, 42], [160, 64], [255, 46]];
+const SHORT_CLOUD: readonly Puff[] = [[55, 30], [120, 46], [185, 32]];
 const CLOUD_SHADE_BAND = 9;
 
 /** Returns a deterministic pseudo-random sequence so the star field renders identically everywhere. */
@@ -129,8 +129,8 @@ export function FujiBackdrop({ pauseLabel, resumeLabel }: { pauseLabel: string; 
                     <g data-fuji-depth="0.16">
                         <g className={`${styles.cloudDrift} ${styles.farClouds}`}>
                             {[-1600, 0, 1600].map((offset) => <g key={offset} transform={`translate(${offset} 0)`}>
-                                <BubblyCloud puffs={SHORT_CLOUD} x={200} y={452} scale={0.75} />
-                                <BubblyCloud puffs={LONG_CLOUD} x={780} y={286} scale={0.8} />
+                                <BubblyCloud puffs={SHORT_CLOUD} x={200} y={490} scale={1.1} />
+                                <BubblyCloud puffs={LONG_CLOUD} x={820} y={500} scale={0.9} />
                             </g>)}
                         </g>
                     </g>
@@ -141,8 +141,8 @@ export function FujiBackdrop({ pauseLabel, resumeLabel }: { pauseLabel: string; 
                     <g data-fuji-depth="0.28">
                         <g className={`${styles.cloudDrift} ${styles.nearClouds}`}>
                             {[-1600, 0, 1600].map((offset) => <g key={offset} transform={`translate(${offset} 0)`}>
-                                <BubblyCloud puffs={LONG_CLOUD} x={290} y={704} scale={1.1} />
-                                <BubblyCloud puffs={SHORT_CLOUD} x={1040} y={590} scale={1} />
+                                <BubblyCloud puffs={LONG_CLOUD} x={260} y={720} scale={1.3} />
+                                <BubblyCloud puffs={SHORT_CLOUD} x={1060} y={610} scale={1.2} />
                             </g>)}
                         </g>
                     </g>
