@@ -327,6 +327,12 @@ public class SecurityConfig {
             .logout(logout -> logout
                 .logoutUrl("/api/auth/logout")
                 .addLogoutHandler(logoutAuditHandler)
+                .addLogoutHandler((request, response, authentication) -> {
+                    var session = request.getSession(false);
+                    if (session != null) {
+                        webSocketSessions.closeByHttpSession(session.getId());
+                    }
+                })
                 .invalidateHttpSession(true)
                 .clearAuthentication(true)
                 .deleteCookies("JSESSIONID")

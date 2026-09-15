@@ -1,5 +1,6 @@
 {
     "ContactsPage": {
+        "unknownUser": "Unknown",
         "marketingOptedOut": "Opted out",
         "marketingDoNotContact": "Do not contact",
         "allContacts": "All Contacts",
@@ -310,7 +311,8 @@
         "create": "Create",
         "createFromCard": "Create from card",
         "attachCard": "Attach card",
-        "cardAiExtractedFields": "AI-filled from the card, please verify: {fields}"
+        "cardAiExtractedFields": "AI-filled from the card, please verify: {fields}",
+        "profilePhotoAria": "Choose a profile photo"
     },
     "ContactsTagEditor": {
         "removeAria": "Remove {name}",

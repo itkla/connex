@@ -174,6 +174,26 @@ describe("frontend security headers", () => {
         expect(policy).not.toContain("*");
     });
 
+    it("omits both report targets for a deployment without a collector", () => {
+        const withCollector = createFrontendContentSecurityPolicy({
+            nonce: "collector-nonce",
+            requestUrl: "https://connex.example.com/",
+            isDevelopment: false,
+        });
+        const withoutCollector = createFrontendContentSecurityPolicy({
+            nonce: "collector-nonce",
+            requestUrl: "https://connexcrm.jp/",
+            isDevelopment: false,
+            reportingEndpointUrl: null,
+            reportPath: null,
+        });
+
+        expect(withCollector).toContain("report-uri /api/csp-reports");
+        expect(withoutCollector).not.toContain("report-uri");
+        expect(withoutCollector).not.toContain("report-to");
+        expect(withoutCollector).toContain("script-src 'self' 'nonce-collector-nonce' 'strict-dynamic'");
+    });
+
     it("allows development eval and only exact WebSocket origins", () => {
         const policy = createFrontendContentSecurityPolicy({
             nonce: "development-nonce",

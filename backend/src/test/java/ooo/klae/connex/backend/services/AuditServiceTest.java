@@ -11,15 +11,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
 
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.MDC;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,7 +41,9 @@ import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.beans.AuditLog;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.AuditIntegrityProperties;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.CorrelationIds;
@@ -44,6 +52,7 @@ import ooo.klae.connex.backend.util.ClientIpResolver;
 
 @ExtendWith(MockitoExtension.class)
 class AuditServiceTest {
+    private final SessionSecurityService sessionSecurityService = mock(SessionSecurityService.class);
     @Mock private AuditLogMapper auditLogMapper;
     @Mock private AuditIntegrityService auditIntegrityService;
     @Mock private TenantContext tenantContext;
@@ -59,6 +68,7 @@ class AuditServiceTest {
         properties.setHmacSecret("test-correlation-hmac-secret-change-me");
         correlationPseudonymizer = new ClientAssertedCorrelationPseudonymizer(properties);
         service = new AuditService(
+            sessionSecurityService,
             auditLogMapper,
             auditIntegrityService,
             objectMapper,
@@ -67,6 +77,53 @@ class AuditServiceTest {
             correlationPseudonymizer);
         lenient().when(tenantContext.getWorkspaceId()).thenReturn(7);
         lenient().when(tenantContext.getOrgId()).thenReturn(8);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"workspace", "entity", "organization"})
+    void auditExportsRequireStepUpBeforeReadingEvents(String surface) {
+        doThrow(new RecentAuthenticationRequiredException())
+                .when(sessionSecurityService).requireExportStepUp();
+        assertThrows(RecentAuthenticationRequiredException.class, () -> {
+            switch (surface) {
+                case "workspace" -> service.exportRecent(10, 0);
+                case "entity" -> service.exportForEntity("person", 1, 10, 0);
+                case "organization" -> service.exportRecentForOrg(8, 10, 0);
+                default -> throw new IllegalArgumentException(surface);
+            }
+        });
+        verifyNoInteractions(auditLogMapper);
+    }
+
+    @Test
+    void refusedAuditExportRecordsTheServiceBoundaryStepUpSignal() {
+        doThrow(new RecentAuthenticationRequiredException())
+                .when(sessionSecurityService).requireExportStepUp();
+
+        User actor = new User();
+        actor.setId(41);
+        actor.setDisplayName("Export Actor");
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(actor, null, actor.getAuthorities()));
+        try {
+            assertThrows(RecentAuthenticationRequiredException.class, () -> service.exportRecent(10, 0));
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+
+        ArgumentCaptor<AuditLog> captor = ArgumentCaptor.forClass(AuditLog.class);
+        verify(auditIntegrityService).appendIndependent(captor.capture());
+        AuditLog entry = captor.getValue();
+        assertEquals(AuditService.EXPORT_STEP_UP_ACTION, entry.getAction());
+        assertEquals("failure", entry.getOutcome());
+        assertEquals(AuditService.EXPORT_STEP_UP_SUMMARY, entry.getSummary());
+        assertEquals(41, entry.getEntityId());
+        assertEquals("Export Actor", entry.getTargetLabel());
+        assertNull(entry.getWorkspaceId());
+        assertNull(entry.getOrgId());
+        assertEquals(AuditService.EXPORT_STEP_UP_SERVICE_BOUNDARY_REASON,
+                objectMapper.readTree(entry.getContext()).get("error").stringValue());
+        verifyNoInteractions(auditLogMapper);
     }
 
     @Test

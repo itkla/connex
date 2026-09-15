@@ -117,12 +117,13 @@ public class SecretStore {
         return secret != null && matches(secret, purpose, scopeId);
     }
 
+    /** Deletes the current scoped reference without consulting a potentially older transaction snapshot. */
     @Transactional
     public void delete(SecretPurpose purpose, int scopeId, String reference) {
         SecretReference parsed = SecretReference.parseOrNull(reference);
         if (parsed != null) {
             lockScopeParentsForShare(purpose.scopeType(), scopeId);
-            secretValueMapper.delete(parsed.id(), purpose.scopeType(), scopeId, purpose.value());
+            secretValueMapper.deleteScoped(parsed.id(), purpose.scopeType(), scopeId, purpose.value());
         }
     }
 
