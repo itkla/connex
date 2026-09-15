@@ -3,15 +3,16 @@ name: Landing
 # Builds the prelaunch landing Worker (landing/) and publishes it to connexcrm.jp.
 # - Pull requests: confirm landing/ still matches the files it vendors from frontend/, and when
 #   landing/ itself changed, typecheck and build it.
-# - Pushes to main that touch landing/: build and deploy with wrangler. Worker secrets
-#   (RESEND_API_KEY, RESEND_LAUNCH_SEGMENT_ID) live on the Worker and survive deploys.
+# - Every push to main: publish when the Worker is not already serving main's landing/ tree. Running on
+#   every push rather than path-filtering keeps a failed publish from being stranded: the next main
+#   push retries it, and a repeated failure lands on the current tip, where the red-main alert reports
+#   it. Each deploy records its landing/ tree hash as the Worker version message, which is how the
+#   next run knows what is live. Worker secrets (RESEND_API_KEY, RESEND_LAUNCH_SEGMENT_ID) live on
+#   the Worker and survive deploys.
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'landing/**'
-      - '.github/workflows/landing-deploy.yml'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
@@ -47,8 +48,9 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          # Manual runs and first pushes have no usable base; build in that case rather than skip.
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || [ -z "$BASE_SHA" ] \
+          # Pushes and manual runs always reach the build job, which decides from what is live whether
+          # to publish. Pull requests without a usable base build rather than skip.
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ] || [ -z "$BASE_SHA" ] \
             || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
             echo "landing=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -68,34 +70,18 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
-        with:
-          package_json_file: landing/package.json
-      - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: '22'
-          cache: pnpm
-          cache-dependency-path: landing/pnpm-lock.yaml
-      - name: Install
-        working-directory: landing
-        # Build scripts stay enabled: workerd and esbuild ship native binaries through them, and
-        # landing/pnpm-workspace.yaml limits which packages may run one.
-        run: pnpm install --frozen-lockfile
-      - name: Typecheck
-        working-directory: landing
-        run: node_modules/.bin/tsc --noEmit
-      - name: Build Worker
-        working-directory: landing
-        run: node_modules/.bin/opennextjs-cloudflare build
-      - name: Confirm main still carries this landing tree
-        id: current
+      - name: Decide whether to publish
+        id: plan
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          # A re-run keeps the original run's GITHUB_SHA, so publishing it after a newer landing change
-          # would roll production back. Comparing only landing/ rather than the whole commit keeps an
-          # unrelated main commit, which the paths filter never re-deploys for, from suppressing this one.
+          tree=$(git rev-parse HEAD:landing)
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+
+          # A re-run keeps its original GITHUB_SHA; publishing it after a newer landing change would roll
+          # production back. Only landing/ is compared, so unrelated main commits never block a publish.
           if ! git fetch --no-tags --depth=1 origin refs/heads/main; then
             echo "Could not fetch refs/heads/main; refusing to deploy." >&2
             exit 1
@@ -103,25 +89,70 @@ jobs:
           status=0
           git diff --quiet "$GITHUB_SHA" FETCH_HEAD -- landing || status=$?
           case "$status" in
-            0) echo "deploy=true" >> "$GITHUB_OUTPUT" ;;
+            0) ;;
             1)
-              echo "::notice::Skipping deploy: main has a newer landing/ tree than $GITHUB_SHA; its own run deploys it."
+              echo "::notice::Skipping deploy: main has a newer landing/ tree than $GITHUB_SHA; its own run publishes it."
               echo "deploy=false" >> "$GITHUB_OUTPUT"
+              exit 0
               ;;
             *)
               echo "Could not compare landing/ with main (git diff exited $status); refusing to guess." >&2
               exit 1
               ;;
           esac
+
+          # What is live: the version message of the Worker's active deployment. Any API failure stops the
+          # job rather than guessing, and a version without a message (for example one created by a
+          # secret change) is simply republished.
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/connex-landing"
+          version=$(curl -fsS -m 30 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/deployments" \
+            | python3 -c 'import json, sys; d = json.load(sys.stdin)["result"]["deployments"]; print(max(d[0]["versions"], key=lambda v: v["percentage"])["version_id"] if d else "")')
+          live=""
+          if [ -n "$version" ]; then
+            live=$(curl -fsS -m 30 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/versions/$version" \
+              | python3 -c 'import json, sys; print(json.load(sys.stdin)["result"].get("annotations", {}).get("workers/message", ""))')
+          fi
+          if [ "$live" = "landing-tree:$tree" ]; then
+            echo "::notice::connexcrm.jp already serves landing/ tree $tree; nothing to publish."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Set up pnpm
+        if: github.event_name == 'pull_request' || steps.plan.outputs.deploy == 'true'
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          package_json_file: landing/package.json
+      - name: Set up Node
+        if: github.event_name == 'pull_request' || steps.plan.outputs.deploy == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: landing/pnpm-lock.yaml
+      - name: Install
+        if: github.event_name == 'pull_request' || steps.plan.outputs.deploy == 'true'
+        working-directory: landing
+        # Build scripts stay enabled: workerd and esbuild ship native binaries through them, and
+        # landing/pnpm-workspace.yaml limits which packages may run one.
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        if: github.event_name == 'pull_request' || steps.plan.outputs.deploy == 'true'
+        working-directory: landing
+        run: node_modules/.bin/tsc --noEmit
+      - name: Build Worker
+        if: github.event_name == 'pull_request' || steps.plan.outputs.deploy == 'true'
+        working-directory: landing
+        run: node_modules/.bin/opennextjs-cloudflare build
       - name: Deploy
-        if: steps.current.outputs.deploy == 'true'
+        if: steps.plan.outputs.deploy == 'true'
         working-directory: landing
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: node_modules/.bin/wrangler deploy
+        run: node_modules/.bin/wrangler deploy --message "landing-tree:${{ steps.plan.outputs.tree }}"
       - name: Smoke test connexcrm.jp
-        if: steps.current.outputs.deploy == 'true'
+        if: steps.plan.outputs.deploy == 'true'
         run: |
           # The edge can serve the previous version for a few seconds after a deploy.
           for attempt in $(seq 1 12); do

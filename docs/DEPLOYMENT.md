@@ -251,11 +251,12 @@ timing discloses a preference. Workers-specific differences:
 - Pull requests touching `frontend/` or `landing/` run `landing/scripts/sync-from-frontend.sh --check`,
   which fails when the vendored landing, legal, or not-found files differ from `frontend/`.
 - Pull requests that change `landing/` also typecheck and build the Worker.
-- Pushes to `main` that change `landing/` build, run `wrangler deploy`, and smoke-test `connexcrm.jp`
-  (`/` must return 200 and `/dashboard` 404). The red-main alert watches this workflow. Before publishing, the job
-  deploys only if `main` still carries the same `landing/` tree: a re-run keeps its original commit, and
-  publishing it after a newer landing change would roll production back. Unrelated `main` commits do not
-  block a deploy.
+- Every push to `main` checks whether the Worker already serves `main`'s `landing/` tree and publishes
+  if not: it builds, runs `wrangler deploy --message "landing-tree:<tree hash>"`, and smoke-tests
+  `connexcrm.jp` (`/` must return 200 and `/dashboard` 404). The version message is how the next run
+  knows what is live. Running on every push, not only on `landing/` changes, means a failed publish is
+  retried by the next `main` push, and a repeated failure lands on the current tip, where the red-main
+  alert reports it. A re-run of an older commit never publishes over a newer `landing/` tree.
 - CI authenticates with the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets. The
   token is limited to Workers Scripts (edit) and Account Settings (read) on the account, and Workers
   Routes (edit) and Zone (read) on `connexcrm.jp`; it cannot read or edit DNS records.
