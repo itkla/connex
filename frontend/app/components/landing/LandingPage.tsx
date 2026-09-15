@@ -81,7 +81,7 @@ export async function LandingPage({ preLaunch, ctaHref, ctaLabel }: LandingPageP
                             <p className={featureHeading}>{t("warmth.heading")}</p>
                             <p className={description}>{t("warmth.body")}</p>
                             <p className="mt-5 text-base leading-relaxed text-muted-foreground">{t("warmth.evidence")}</p>
-                            <Link href="/docs/relationship-intelligence/warmth" className="mt-5 inline-flex min-h-11 items-center gap-2 text-base font-medium underline underline-offset-4">{t("warmth.docs")}<ArrowRightIcon aria-hidden="true" className="size-4 shrink-0" /></Link>
+                            {!preLaunch && <Link href="/docs/relationship-intelligence/warmth" className="mt-5 inline-flex min-h-11 items-center gap-2 text-base font-medium underline underline-offset-4">{t("warmth.docs")}<ArrowRightIcon aria-hidden="true" className="size-4 shrink-0" /></Link>}
                         </div>
                         <WarmthPreview t={t} />
                     </div>
@@ -116,7 +116,7 @@ export async function LandingPage({ preLaunch, ctaHref, ctaLabel }: LandingPageP
 
                 <section id="faq" className={`${container} ${chapter} grid gap-8 scroll-mt-20 lg:grid-cols-[0.7fr_1.3fr] lg:gap-16`} aria-labelledby="faq-title">
                     <h2 id="faq-title" className={styles.heading}>{t("faqHeading")}</h2>
-                    <LandingFaq t={t} />
+                    <LandingFaq t={t} preLaunch={preLaunch} />
                 </section>
 
                 <section className="bg-brand/10" aria-labelledby="closing-title">

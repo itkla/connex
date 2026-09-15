@@ -9,6 +9,9 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  // esbuild keepNames wraps functions in __name(); next-themes serialises its theme script with
+  // Function.toString(), so the helper call would ship into an inline <script> that has no __name.
+  "keep_names": false,
   "workers_dev": true,
   "routes": [
     { "pattern": "connexcrm.jp", "custom_domain": true },
