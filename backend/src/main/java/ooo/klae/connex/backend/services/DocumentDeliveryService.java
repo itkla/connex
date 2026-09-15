@@ -22,6 +22,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
+import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.DealDocument;
 import ooo.klae.connex.backend.beans.DocumentApproval;
@@ -61,6 +62,7 @@ import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
+import ooo.klae.connex.backend.util.DocumentBodySchema;
 
 /** Authenticated document-delivery lifecycle for immutable commercial-document versions. */
 @Service
@@ -82,6 +84,7 @@ public class DocumentDeliveryService {
     private final DocumentSignatureEmailService emailService;
     private final ManagedObjectService managedObjectService;
     private final AuditService auditService;
+    private final ObjectMapper objectMapper;
 
     /** Sends one final immutable document version to one through twenty external recipients. */
     @Transactional
@@ -565,6 +568,7 @@ public class DocumentDeliveryService {
             if (!"final".equals(document.getStatus())) {
                 throw new BadRequestException("Only final documents can be sent");
             }
+            DocumentBodySchema.validateFrozenContent(document.getContent(), objectMapper);
             requireCertifiableApproval(workspaceId, documentId);
         } catch (RuntimeException refusal) {
             deliveryMapper.cancelUncompletedRequest(workspaceId, requestId);
