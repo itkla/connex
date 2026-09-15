@@ -164,11 +164,14 @@ or the frontend service environment for deployment (the Compose bundle forwards 
 
 Resend uses [global Contacts and Segments](https://resend.com/docs/dashboard/segments/migrating-from-audiences-to-segments).
 The endpoint looks up the contact before writing and creates one only after an explicit not-found
-response. It verifies identity, opt-in state, and launch-segment membership before returning success.
-It can add an existing opted-in contact to the launch segment.
+response. Every valid submission admitted by the rate limits receives the same public acknowledgment,
+`200 {"status":"subscribed"}`, before background provider work begins. This legacy wire value acknowledges
+receipt, not subscription success. Background work verifies identity, opt-in state, and launch-segment
+membership; it can add an existing opted-in contact to the launch segment.
 It does not change global unsubscribe preferences, infer success from an error message, create a CRM
-account, or send an email. Missing configuration, provider failure, or an unverified result returns an
-unavailable response, preserving the visitor's input for retry. Keep Resend API keys and submitted emails
+account, or send an email. Missing configuration returns an unavailable response. Provider failures,
+timeouts, opt-outs, and unverified results never change the acknowledgment or disclose preferences.
+Background persistence is best effort, with no durable retry queue or delivery guarantee. Keep Resend API keys and submitted emails
 out of logs, including the provider's email lookup URL. Use this segment only for the requested launch
 notification; send that announcement through Resend when the release is ready, then remove the dedicated segment and delete launch-only contacts
 once the notification is complete. Preserve contacts used for separately consented purposes.
@@ -182,11 +185,22 @@ The browser submits same-origin JSON with `credentials: omit`; the endpoint vali
 metadata, email shape, content type, body length, and the empty honeypot before provider work.
 
 Bounds are process-local: 5 attempts per client per 15 minutes, at most 2,048 client buckets with LRU
-admission, 30 signup attempts per minute globally, and one active provider operation without a queue.
-Provider calls are paced at least 550 ms apart. Request bodies have a 3-second deadline; the complete
+admission (IPv6 clients share one bucket per /64 network, and an IPv4-mapped IPv6 address keys on the
+IPv4 address it carries), an 18-signup global minute cap, and a fixed
+3.3-second admission reservation per accepted signup. The reservation covers the maximum six
+provider calls per signup at 550 ms each: lookup, creation, contact verification, segment lookup,
+segment addition if needed, and membership verification. Its constant interval never tracks how
+long provider work takes, so follow-up requests cannot probe preference-dependent completion times.
+It limits admission to one signup per 3.3 seconds per process; the minute cap is derived by rounding
+down 60 seconds divided by that interval. The reservation is checked before a visitor's own attempt is
+counted, and an attempt taken by a submission a concurrent signup then wins the reservation from is
+returned, so another visitor's submission never consumes their 5-per-15-minute quota. Background
+operations can therefore overlap; each provider call claims its pacing slot before waiting, so calls
+remain at least 550 ms apart across all of them. Request bodies have a 3-second deadline; the complete
 provider operation has an 8-second deadline and each JSON response is capped at 64 KiB. Segment
 membership verification reads at most 100 entries and fails closed if membership cannot be verified.
-Rate limits return 429 with Retry-After; other provider/configuration failures return a generic 503.
+Rate limits return 429 with Retry-After; unavailable configuration returns a generic 503.
+Provider failures occur after the public acknowledgment and do not produce a public failure response.
 These counters reset on process restart and are not distributed across replicas. A public scaled
 deployment must also apply its shared edge rate controls. Only fixed `https://api.resend.com` endpoints
 are contacted, with redirects disabled and no application credentials forwarded. No browser CSP

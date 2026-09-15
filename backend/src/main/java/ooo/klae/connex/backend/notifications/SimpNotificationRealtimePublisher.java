@@ -10,10 +10,10 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 
 /**
  * In-process realtime publisher targeting the local STOMP simple broker.
- * Frames are addressed by principal name, and Spring's user-destination
- * resolution fans them out to every live session of that user on this
- * instance. Single-JVM by design; this is the bean a cross-instance
- * implementation replaces.
+ * Frames are addressed by the recipient's opaque routing token, which the handshake derives from
+ * the same immutable account id, and Spring's user-destination resolution fans them out to every
+ * live session of that account on this instance. Single-JVM by design; this is the bean a
+ * cross-instance implementation replaces.
  */
 @Component
 @ConditionalOnProperty(
@@ -28,13 +28,15 @@ public class SimpNotificationRealtimePublisher implements NotificationRealtimePu
 
     private final SimpMessagingTemplate messagingTemplate;
     private final UserMapper userMapper;
+    private final RealtimeRoutingIdentityResolver routingIdentities;
 
     @Override
     public void send(int recipientId, RealtimeNotificationPayload payload) {
         User recipient = userMapper.getUserById(recipientId);
-        if (recipient == null || recipient.getUsername() == null) {
+        if (recipient == null) {
             return;
         }
-        messagingTemplate.convertAndSendToUser(recipient.getUsername(), NOTIFICATIONS_QUEUE, payload);
+        messagingTemplate.convertAndSendToUser(
+                routingIdentities.destinationFor(recipient.getId()), NOTIFICATIONS_QUEUE, payload);
     }
 }
