@@ -186,11 +186,13 @@ metadata, email shape, content type, body length, and the empty honeypot before 
 
 Bounds are process-local: 5 attempts per client per 15 minutes, at most 2,048 client buckets with LRU
 admission (IPv6 clients share one bucket per /64 network, and an IPv4-mapped IPv6 address keys on the
-IPv4 address it carries), a 30-signup global minute cap, and a fixed
-one-second admission reservation per accepted signup, without a provider queue. The reservation is a
-constant interval that never tracks how long provider work takes, so follow-up requests cannot probe
-preference-dependent completion times. It limits admission to one signup per second per process, and
-the global cap holds a minute to 30. The reservation is checked before a visitor's own attempt is
+IPv4 address it carries), an 18-signup global minute cap, and a fixed
+3.3-second admission reservation per accepted signup. The reservation covers the maximum six
+provider calls per signup at 550 ms each: lookup, creation, contact verification, segment lookup,
+segment addition if needed, and membership verification. Its constant interval never tracks how
+long provider work takes, so follow-up requests cannot probe preference-dependent completion times.
+It limits admission to one signup per 3.3 seconds per process; the minute cap is derived by rounding
+down 60 seconds divided by that interval. The reservation is checked before a visitor's own attempt is
 counted, and an attempt taken by a submission a concurrent signup then wins the reservation from is
 returned, so another visitor's submission never consumes their 5-per-15-minute quota. Background
 operations can therefore overlap; each provider call claims its pacing slot before waiting, so calls

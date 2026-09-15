@@ -32,6 +32,7 @@ export default function LogoutPage() {
             router.refresh();
         } catch (error) {
             showApiError(error, "errorFallback");
+        } finally {
             pending.current = false;
             setSubmitting(false);
         }

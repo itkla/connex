@@ -72,6 +72,9 @@ describe.each(["en", "ja"] as const)("logout confirmation in %s", (locale) => {
         expect(fetcher.mock.calls.filter(([url, init]) => url === "/api/auth/logout" && init?.method === "POST")).toHaveLength(1);
         expect(window.sessionStorage.getItem(DRAFT_KEY)).toBeNull();
         expect(navigation.replace).toHaveBeenCalledWith("/");
+        expect(requiredElement("form", HTMLFormElement).getAttribute("aria-busy")).toBe("false");
+        expect(confirm.disabled).toBe(false);
+        expect(cancel.disabled).toBe(false);
     });
 
     it("allows cancellation without a logout request or draft loss", async () => {
@@ -101,7 +104,9 @@ describe.each(["en", "ja"] as const)("logout confirmation in %s", (locale) => {
         await act(async () => fail(new TypeError("Network unavailable")));
         expect(showApiError).toHaveBeenCalledOnce();
         expect(navigation.replace).not.toHaveBeenCalled();
+        expect(form.getAttribute("aria-busy")).toBe("false");
         expect(requiredElement('button[type="submit"]', HTMLButtonElement).disabled).toBe(false);
+        expect(requiredElement('button[type="button"]', HTMLButtonElement).disabled).toBe(false);
         fetcher.mockResolvedValue(new Response(null, { status: 204 }));
         await act(async () => form.requestSubmit());
         expect(fetcher.mock.calls.filter(([url]) => url === "/api/auth/logout")).toHaveLength(2);
