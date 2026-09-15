@@ -32,5 +32,5 @@ export async function generateMetadata(): Promise<Metadata> {
 /** This deployment exists to collect launch signups, so the body always renders prelaunch. */
 export default async function Home() {
     const t = await getTranslations("CommonHome");
-    return <LandingPage preLaunch ctaHref="/" ctaLabel={t("heroCtaPrimary")} />;
+    return LandingPage({ t, preLaunch: true, ctaHref: "/", ctaLabel: t("heroCtaPrimary") });
 }

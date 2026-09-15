@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { Schibsted_Grotesk, Source_Sans_3 } from "next/font/google";
-import { getTranslations } from "next-intl/server";
 import { ArrowRightIcon } from "@heroicons/react/24/outline";
 import { Button } from "@/components/ui/button";
 import LandingNav from "@/app/components/landing/LandingNav";
@@ -15,6 +14,7 @@ import styles from "@/app/components/landing/landing.module.css";
 import fujiStyles from "@/app/components/landing/fuji.module.css";
 import { FujiBackdrop } from "@/app/components/landing/FujiBackdrop";
 import { LaunchSignupForm } from "@/app/components/landing/LaunchSignupForm";
+import type { LandingTranslation } from "@/app/components/landing/sampleWorkspace";
 
 const display = Schibsted_Grotesk({ variable: "--font-landing-display", subsets: ["latin"], display: "swap" });
 const body = Source_Sans_3({ variable: "--font-landing-body", subsets: ["latin"], display: "swap" });
@@ -25,6 +25,7 @@ const featureHeading = "mt-4 text-3xl leading-tight tracking-tight sm:text-4xl";
 
 /** Props selecting which calls to action the shared landing body renders. */
 type LandingPageProps = {
+    t: LandingTranslation;
     preLaunch: boolean;
     ctaHref: string;
     ctaLabel: string;
@@ -32,11 +33,13 @@ type LandingPageProps = {
 
 /**
  * Renders the marketing landing body shared by the product site and the prelaunch deployment.
- * @param props the resolved mode and call-to-action wording
+ *
+ * Synchronous so a caller can return its tree directly: route tests inspect `await Home()` without
+ * rendering, and would not see through a nested async component.
+ * @param props the `CommonHome` translator, the resolved mode, and call-to-action wording
  * @returns the landing page markup
  */
-export async function LandingPage({ preLaunch, ctaHref, ctaLabel }: LandingPageProps) {
-    const t = await getTranslations("CommonHome");
+export function LandingPage({ t, preLaunch, ctaHref, ctaLabel }: LandingPageProps) {
     return (
         <div className={`${styles.landing} ${display.variable} ${body.variable} min-h-screen bg-background text-foreground`}>
             <a href="#main" className="sr-only rounded-full bg-brand px-4 py-2 text-sm font-semibold text-brand-foreground focus:not-sr-only focus:absolute focus:left-6 focus:top-4 focus:z-50">{t("skipToContent")}</a>

@@ -51,5 +51,5 @@ export default async function Home() {
     const ctaHref = user ? "/dashboard" : "/auth/register";
     const ctaLabel = user ? t("ctaDashboard") : t("heroCtaPrimary");
 
-    return <LandingPage preLaunch={preLaunch} ctaHref={ctaHref} ctaLabel={ctaLabel} />;
+    return LandingPage({ t, preLaunch, ctaHref, ctaLabel });
 }
