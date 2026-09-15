@@ -356,4 +356,80 @@
     ORDER BY ps.created_at DESC, ps.workspace_id
   </select>
 
+  <select id="findConsentState"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$ConsentStateDto">
+    SELECT c.id, c.workspace_id, c.person_id, c.channel, c.purpose, c.status, c.source,
+           c.evidence_ref, c.captured_at, c.updated_at
+    FROM person p
+    JOIN contact_channel_consent c
+      ON c.workspace_id = p.workspace_id AND c.person_id = p.id
+      AND c.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY c.channel, c.purpose, c.id
+  </select>
+
+  <select id="findConsentHistory"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$ConsentHistoryDto">
+    SELECT e.id, e.workspace_id, e.consent_id, e.person_id, e.channel, e.purpose,
+           e.status, e.source, e.evidence_ref, e.created_by_id, e.created_at
+    FROM person p
+    JOIN contact_channel_consent_event e
+      ON e.workspace_id = p.workspace_id AND e.person_id = p.id
+      AND e.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY e.created_at DESC, e.id DESC
+  </select>
+
+  <select id="findAudienceExportEvidence"
+          resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$AudienceExportEvidenceDto">
+    SELECT e.id, e.workspace_id, e.campaign_id, e.snapshot_id, s.channel, s.purpose,
+           e.connector, e.external_list_id,
+           m.status AS snapshot_member_status, m.exclusion_reason AS snapshot_exclusion_reason,
+           JSON_CONTAINS(e.frozen_member_ids_json, CAST(p.id AS JSON)) AS frozen_member,
+           JSON_CONTAINS(e.pushed_member_ids_json, CAST(p.id AS JSON)) AS staged_for_push,
+           CASE
+             WHEN e.pushed_member_ids_json IS NULL THEN 'unknown'
+             WHEN JSON_CONTAINS(e.pushed_member_ids_json, CAST(p.id AS JSON)) = 0 THEN 'not_staged'
+             WHEN e.late_outcome IS NOT NULL THEN 'unconfirmed'
+             WHEN e.status = 'completed'
+               AND e.outcome_classification IN ('confirmed_delivery', 'operator_delivered')
+               AND e.pushed_count = JSON_LENGTH(e.pushed_member_ids_json) THEN 'confirmed'
+             WHEN e.status = 'failed' AND e.pushed_count = 0
+               AND e.outcome_classification IN (
+                 'confirmed_no_delivery', 'definite_no_side_effect', 'operator_not_delivered'
+               ) THEN 'not_delivered'
+             ELSE 'unconfirmed'
+           END AS subject_provision_outcome,
+           e.status, e.attempt, e.total_members, e.pushed_count, e.failed_count,
+           e.outcome_classification, e.late_outcome, e.failure_reason,
+           CASE
+             WHEN e.reconciliation_required_at IS NOT NULL THEN e.reconciliation_required_at
+             WHEN e.status = 'running' AND e.lease_until &lt; UTC_TIMESTAMP(6) THEN e.lease_until
+             ELSE NULL
+           END AS reconciliation_required_at,
+           e.created_by_id, e.created_at, e.updated_at
+    FROM person p
+    JOIN campaign_audience_export e ON e.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    JOIN campaign_audience_snapshot s
+      ON s.workspace_id = e.workspace_id AND s.id = e.snapshot_id
+      AND s.campaign_id = e.campaign_id AND s.record_type = 'person'
+    LEFT JOIN campaign_audience_member m
+      ON m.workspace_id = e.workspace_id AND m.snapshot_id = e.snapshot_id
+      AND m.record_type = 'person' AND m.record_id = p.id
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+      AND (m.id IS NOT NULL
+        OR JSON_CONTAINS(e.frozen_member_ids_json, CAST(p.id AS JSON)) = 1
+        OR JSON_CONTAINS(e.pushed_member_ids_json, CAST(p.id AS JSON)) = 1)
+    ORDER BY e.created_at DESC, e.id DESC
+  </select>
+
 </mapper>

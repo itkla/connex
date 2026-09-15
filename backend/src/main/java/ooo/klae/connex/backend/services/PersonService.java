@@ -474,8 +474,9 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person update(int id, Person person) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        duplicateDecisionLockService.lockCurrentOrganization();
+        var locked = duplicateDecisionLockService.lockCurrentOrganization(Permission.PERSON_UPDATE);
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
+        locked.authority().revalidate();
         if (before == null || before.getArchivedAt() != null) {
             throw new ResourceNotFoundException("Contact not found");
         }
@@ -640,8 +641,10 @@ public class PersonService {
     @RequirePermission(Permission.PERSON_UPDATE)
     public Person updateProcessingRestrictions(int id, boolean suspended, boolean provisionCeased) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int orgId = duplicateDecisionLockService.lockCurrentOrganization();
+        var locked = duplicateDecisionLockService.lockCurrentOrganization(Permission.PERSON_UPDATE);
+        int orgId = locked.orgId();
         Person before = personMapper.getOwnedPersonByIdForUpdate(workspaceId, id);
+        locked.authority().revalidate();
         if (before == null) {
             throw new ResourceNotFoundException("Contact not found");
         }
