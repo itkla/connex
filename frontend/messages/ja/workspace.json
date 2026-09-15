@@ -33,6 +33,7 @@
         "joinInvalid": "有効な招待リンクではないようです。"
     },
     "InviteAccept": {
+        "metaTitle": "招待を承認",
         "heading": "{workspace} に参加",
         "roleLine": "{role} として招待されています。",
         "invitedBy": "{name} が招待",
@@ -49,6 +50,7 @@
         "roleMember": "メンバー"
     },
     "InviteLinkAccept": {
+        "metaTitle": "ワークスペースに参加",
         "heading": "{workspace} に参加",
         "roleLine": "{role} として参加します。",
         "accept": "ワークスペースに参加",

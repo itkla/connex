@@ -33,6 +33,7 @@
         "joinInvalid": "That doesn't look like a valid invite link."
     },
     "InviteAccept": {
+        "metaTitle": "Accept your invitation",
         "heading": "Join {workspace}",
         "roleLine": "You've been invited as {role}.",
         "invitedBy": "Invited by {name}",
@@ -49,6 +50,7 @@
         "roleMember": "a member"
     },
     "InviteLinkAccept": {
+        "metaTitle": "Join a workspace",
         "heading": "Join {workspace}",
         "roleLine": "You'll join as {role}.",
         "accept": "Join workspace",

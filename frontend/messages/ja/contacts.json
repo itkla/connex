@@ -1,5 +1,6 @@
 {
     "ContactsPage": {
+        "unknownUser": "不明",
         "marketingOptedOut": "配信停止（オプトアウト）",
         "marketingDoNotContact": "連絡不可",
         "allContacts": "連絡先一覧",
@@ -310,7 +311,8 @@
         "create": "作成",
         "createFromCard": "名刺から作成",
         "attachCard": "名刺を添付",
-        "cardAiExtractedFields": "カードからAIが入力しました。ご確認ください: {fields}"
+        "cardAiExtractedFields": "カードからAIが入力しました。ご確認ください: {fields}",
+        "profilePhotoAria": "プロフィール写真を選択"
     },
     "ContactsTagEditor": {
         "removeAria": "{name} を削除",
