@@ -12,8 +12,6 @@ import org.springframework.messaging.simp.SimpMessageType;
 import org.springframework.messaging.support.ExecutorChannelInterceptor;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
-import org.springframework.security.core.session.SessionInformation;
-import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
@@ -26,7 +24,6 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.SessionSecurityProperties;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.services.SessionSecurityService;
-import ooo.klae.connex.backend.session.AccountSessionIndex;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
@@ -34,12 +31,23 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * Reads the shared store without refreshing idle time, so receive-only sockets cannot receive after
  * logout, expiry or an epoch bump even when immediate revocation missed their session row.
  * Disconnect frames remain allowed after removal so the broker can release subscription state.
+ *
+ * <p>Heartbeats take a cheaper path. They are empty liveness frames that neither carry nor trigger
+ * application data, so they check the persisted session only: the single store read this class
+ * already performs answers logout, registry expiry, JDBC idle expiry, session deletion, a swapped
+ * backing account and absolute lifetime, and the account epoch lookup is skipped. The broker
+ * negotiates a ten-second heartbeat with every client, so keeping that second per-socket database
+ * read on the heartbeat timer would cost load proportional to the connected population while
+ * adding nothing a delivery does not already refuse. Frames that carry or trigger application
+ * data, including every outbound delivery, are still checked in full.
  */
 @Component
 @RequiredArgsConstructor
 public class WebSocketSessionExpiryInterceptor implements ExecutorChannelInterceptor {
 
-    private final SessionRegistry securitySessionRegistry;
+    static final String SPRING_SESSION_EXPIRED_ATTR =
+            "org.springframework.session.security.SpringSessionBackedSessionInformation.EXPIRED";
+
     private final WebSocketSessionRegistry webSocketSessionRegistry;
     private final ObjectProvider<SessionRepository<? extends Session>> sessionRepository;
     private final UserMapper userMapper;
@@ -67,12 +75,13 @@ public class WebSocketSessionExpiryInterceptor implements ExecutorChannelInterce
         if (socket == null) {
             return null;
         }
+        boolean carriesApplicationData = type != SimpMessageType.HEARTBEAT;
         Object httpSessionId = socket.getAttributes()
                 .get(HttpSessionHandshakeInterceptor.HTTP_SESSION_ID_ATTR_NAME);
         if (httpSessionId instanceof String id) {
             try {
                 if (socket.isOpen() && Boolean.TRUE.equals(
-                        tenantWorkScope.unrouted(() -> isValid(id, socket)))) {
+                        tenantWorkScope.unrouted(() -> isValid(id, socket, carriesApplicationData)))) {
                     return message;
                 }
             } catch (RuntimeException exception) {
@@ -86,27 +95,35 @@ public class WebSocketSessionExpiryInterceptor implements ExecutorChannelInterce
         return null;
     }
 
-    private boolean isValid(String httpSessionId, WebSocketSession socket) {
-        SessionInformation info = securitySessionRegistry.getSessionInformation(httpSessionId);
-        if (info == null || info.isExpired()) {
-            return false;
-        }
+    /**
+     * Reports whether the socket may still be used, reading the shared store without refreshing
+     * idle time.
+     *
+     * @param httpSessionId the backing HTTP session recorded at handshake
+     * @param socket the transport the frame belongs to
+     * @param checkAccountEpoch whether to also compare the session's stamped epoch against the
+     *     account's current one, which costs a second database read and is skipped for heartbeats
+     * @return whether the frame may proceed
+     */
+    private boolean isValid(String httpSessionId, WebSocketSession socket, boolean checkAccountEpoch) {
         SessionRepository<? extends Session> repository = sessionRepository.getIfAvailable();
         Session session = repository == null ? null : repository.findById(httpSessionId);
-        if (session == null || session.isExpired()
+        if (session == null || session.isExpired() || isRevoked(session)
                 || !(session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY)
                         instanceof SecurityContext context)
                 || !(context.getAuthentication() instanceof Authentication authentication)
                 || !authentication.isAuthenticated()
                 || !(authentication.getPrincipal() instanceof User user)
                 || !(socket.getPrincipal() instanceof Authentication socketAuthentication)
-                || !(socketAuthentication.getPrincipal() instanceof AccountSessionIndex account)
-                || account.userId() != user.getId()) {
+                || !(socketAuthentication.getPrincipal() instanceof RealtimeRoutingIdentity identity)
+                || identity.userId() != user.getId()) {
             return false;
         }
         Object epoch = session.getAttribute(SessionSecurityService.SESSION_EPOCH_ATTR);
-        if (!(epoch instanceof Integer stamped)
-                || !stamped.equals(userMapper.currentSessionEpoch(user.getId()))) {
+        if (!(epoch instanceof Integer stamped)) {
+            return false;
+        }
+        if (checkAccountEpoch && !stamped.equals(userMapper.currentSessionEpoch(user.getId()))) {
             return false;
         }
         Object authenticatedAt = session.getAttribute(SessionSecurityService.AUTHENTICATED_AT_ATTR);
@@ -119,5 +136,24 @@ public class WebSocketSessionExpiryInterceptor implements ExecutorChannelInterce
         long age = clock.millis() - timestamp;
         return age >= 0 && (timeout == null || timeout.isZero() || timeout.isNegative()
                 || age <= timeout.toMillis());
+    }
+
+    /**
+     * Reports the marker {@code SessionInformation.expireNow()} writes through
+     * {@code SpringSessionBackedSessionRegistry}, which is how
+     * {@code AccountSessionRevocationService} expires a session it has enumerated.
+     *
+     * <p>The registry answers the same question, but only by loading the row a second time — once
+     * more per delivered assistant delta. The marker is read off the row this validation has
+     * already loaded instead. Spring Session declares the key package-privately, so it is spelled
+     * out here and pinned behaviourally by
+     * {@code WebSocketSessionSecurityIntegrationTest#registryExpiryClosesAReceiveOnlySocketAtDelivery},
+     * which revokes through the real registry and asserts the next delivery is refused.
+     *
+     * @param session the persisted session backing the socket
+     * @return whether the session has been expired through the security session registry
+     */
+    private static boolean isRevoked(Session session) {
+        return Boolean.TRUE.equals(session.getAttribute(SPRING_SESSION_EXPIRED_ATTR));
     }
 }

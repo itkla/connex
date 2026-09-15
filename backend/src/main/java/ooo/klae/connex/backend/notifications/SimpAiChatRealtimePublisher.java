@@ -11,7 +11,6 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiChatRealtimeRecipientDto;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.mappers.UserMapper;
-import ooo.klae.connex.backend.session.AccountSessionIndex;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /** Local simple-broker publisher for explicitly authorized assistant user destinations. */
@@ -29,6 +28,7 @@ public class SimpAiChatRealtimePublisher implements AiChatRealtimePublisher {
     private final UserMapper userMapper;
     private final TenantWorkScope tenantWorkScope;
     private final AiChatRealtimeRecipientReader recipientReader;
+    private final RealtimeRoutingIdentityResolver routingIdentities;
 
     @Override
     public void sendUser(int userId, AiChatStepFrameDto frame) {
@@ -37,7 +37,7 @@ public class SimpAiChatRealtimePublisher implements AiChatRealtimePublisher {
             return;
         }
         messagingTemplate.convertAndSendToUser(
-                new AccountSessionIndex(recipient.getId()).getName(), AI_CHAT_QUEUE, frame);
+                routingIdentities.destinationFor(recipient.getId()), AI_CHAT_QUEUE, frame);
     }
 
     @Override
@@ -51,6 +51,6 @@ public class SimpAiChatRealtimePublisher implements AiChatRealtimePublisher {
         userMapper.getActiveAiChatRealtimeRecipientsByIds(workspaceId, recipientIds).stream()
                 .map(AiChatRealtimeRecipientDto::id)
                 .forEach(userId -> messagingTemplate.convertAndSendToUser(
-                        new AccountSessionIndex(userId).getName(), AI_CHAT_QUEUE, frame));
+                        routingIdentities.destinationFor(userId), AI_CHAT_QUEUE, frame));
     }
 }

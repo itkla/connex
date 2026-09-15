@@ -43,6 +43,8 @@ import org.springframework.messaging.simp.broker.SimpleBrokerMessageHandler;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.AbstractSubscribableChannel;
 import org.springframework.messaging.support.ExecutorChannelInterceptor;
+import org.springframework.security.core.session.SessionInformation;
+import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.session.FindByIndexNameSessionRepository;
 import org.springframework.session.Session;
@@ -86,6 +88,8 @@ class WebSocketSessionSecurityIntegrationTest {
     @Autowired private PasswordResetService passwordResetService;
     @Autowired private SimpNotificationRealtimePublisher notificationPublisher;
     @Autowired private SimpAiChatRealtimePublisher aiChatPublisher;
+    @Autowired private RealtimeRoutingIdentityResolver routingIdentities;
+    @Autowired private SessionRegistry securitySessionRegistry;
     @Autowired private FindByIndexNameSessionRepository<? extends Session> indexedSessions;
     @Autowired private SessionRepository<? extends Session> sessionRepository;
     @Autowired private SessionSecurityProperties sessionSecurityProperties;
@@ -116,13 +120,61 @@ class WebSocketSessionSecurityIntegrationTest {
         brokerChannel.removeInterceptor(subscriptions);
     }
 
+    /**
+     * Spring echoes the routing principal back to the browser in the {@code CONNECTED} frame's
+     * {@code user-name} header, so the header must carry the opaque token rather than the account.
+     */
     @Test
-    void handshakePrincipalUsesTheImmutableAccountId() throws Exception {
+    void theHandshakePrincipalIsAnOpaqueTokenThatDoesNotDiscloseTheAccount() throws Exception {
+        Browser browser = login(newAccount());
+        SocketClient socket = connect(browser);
+        int accountId = browser.account().user().getId();
+
+        String connected = socket.connected.get(TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+        assertTrue(connected.contains(
+            "user-name:" + routingIdentities.destinationFor(accountId) + "\n"));
+        assertFalse(connected.contains("uid:"));
+        assertFalse(connected.contains(browser.account().user().getUsername()));
+    }
+
+    /**
+     * The routing identity is derived from the authenticated handshake alone. A client-supplied
+     * identity header on {@code CONNECT} must neither become the principal nor subscribe the socket
+     * to another account's queues.
+     */
+    @Test
+    void aForgedConnectIdentityHeaderCannotChangeTheResolvedPrincipal() throws Exception {
+        Browser victim = login(newAccount());
+        String forged = routingIdentities.destinationFor(victim.account().user().getId());
+        Browser attacker = login(newAccount());
+        SocketClient socket = connect(attacker,
+            "user-name:" + forged + "\nlogin:" + victim.account().user().getUsername() + "\n");
+
+        String connected = socket.connected.get(TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+        assertTrue(connected.contains("user-name:"
+            + routingIdentities.destinationFor(attacker.account().user().getId()) + "\n"));
+        assertFalse(connected.contains(forged));
+
+        publish(victim.account(), "victim-private-frame", 7);
+        publish(attacker.account(), "attacker-own-frame", 8);
+
+        assertDelivery(socket, "attacker-own-frame", 8);
+        assertTrue(socket.messages.isEmpty(), "forged principal received another account's frames");
+    }
+
+    /**
+     * Pins the persisted expiry marker {@code SpringSessionBackedSessionInformation} writes, which
+     * delivery validation reads off the session row rather than loading it a second time.
+     */
+    @Test
+    void registryExpiryClosesAReceiveOnlySocketAtDelivery() throws Exception {
         Browser browser = login(newAccount());
         SocketClient socket = connect(browser);
 
-        assertTrue(socket.connected.get(TIMEOUT.toSeconds(), TimeUnit.SECONDS)
-            .contains("user-name:" + new AccountSessionIndex(browser.account().user().getId()).getName() + "\n"));
+        expireThroughRegistry(browser);
+        publish(browser.account(), "after-registry-expiry", 42);
+
+        assertClosedWithoutMessages(socket);
     }
 
     /** After-commit publishers can still carry the completed tenant transaction's thread state. */
@@ -130,7 +182,7 @@ class WebSocketSessionSecurityIntegrationTest {
     void tenantTransactionStateDoesNotLeakIntoOutboundSessionValidation() throws Exception {
         Browser browser = login(newAccount());
         SocketClient socket = connect(browser);
-        String recipient = new AccountSessionIndex(browser.account().user().getId()).getName();
+        String recipient = routingIdentities.destinationFor(browser.account().user().getId());
 
         tenantWorkScope.withCatalog("dedicated-fixture", () -> {
             TransactionSynchronizationManager.setActualTransactionActive(true);
@@ -295,6 +347,10 @@ class WebSocketSessionSecurityIntegrationTest {
     }
 
     private SocketClient connect(Browser browser) throws Exception {
+        return connect(browser, "");
+    }
+
+    private SocketClient connect(Browser browser, String extraConnectHeaders) throws Exception {
         SocketClient socket = new SocketClient();
         sockets.add(socket);
         socket.webSocket = browser.client().newWebSocketBuilder()
@@ -304,6 +360,7 @@ class WebSocketSessionSecurityIntegrationTest {
             .buildAsync(URI.create("ws://127.0.0.1:" + port + "/api/ws"), socket)
             .get(TIMEOUT.toSeconds(), TimeUnit.SECONDS);
         socket.send("CONNECT\naccept-version:1.2\nhost:localhost\nheart-beat:0,0\n"
+            + extraConnectHeaders
             + browser.csrf().headerName() + ":" + browser.csrf().token() + "\n\n\0");
         socket.connected.get(TIMEOUT.toSeconds(), TimeUnit.SECONDS);
         subscribe(socket, "notifications");
@@ -375,6 +432,14 @@ class WebSocketSessionSecurityIntegrationTest {
     private static void assertClosedWithoutMessages(SocketClient socket) throws Exception {
         assertEquals(1008, socket.closed.get(TIMEOUT.toSeconds(), TimeUnit.SECONDS));
         assertTrue(socket.messages.isEmpty(), "revoked socket received a server push");
+    }
+
+    private void expireThroughRegistry(Browser browser) {
+        List<SessionInformation> sessions = securitySessionRegistry.getAllSessions(
+            new AccountSessionIndex(browser.account().user().getId()), false);
+        assertEquals(1, sessions.size());
+        assertEquals(browser.sessionId(), sessions.getFirst().getSessionId());
+        sessions.getFirst().expireNow();
     }
 
     private static <S extends Session> void expireIdleSession(

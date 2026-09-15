@@ -25,6 +25,7 @@ import org.springframework.web.socket.handler.WebSocketHandlerDecorator;
 import org.springframework.web.socket.server.support.HttpSessionHandshakeInterceptor;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.notifications.RealtimeRoutingIdentityResolver;
 import ooo.klae.connex.backend.notifications.WebSocketConnectionLimiter;
 import ooo.klae.connex.backend.notifications.WebSocketSessionExpiryInterceptor;
 import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
@@ -38,6 +39,10 @@ import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
  * ({@code /user/queue/notifications}) and never send application messages.
  * The in-memory simple broker matches the single-JVM deployment; cross-instance
  * fan-out later replaces the realtime publisher seam, not this config.
+ *
+ * <p>{@link WebSocketAccountHandshakeHandler} binds each socket to its immutable account under an
+ * opaque destination token from {@link RealtimeRoutingIdentityResolver}, because the STOMP
+ * {@code CONNECTED} frame echoes the principal name back to the browser.
  *
  * <p>The handshake records the authenticating HTTP session id so
  * {@link WebSocketSessionRegistry} can force-close sockets when that session
@@ -71,11 +76,12 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     private final WebSocketSessionRegistry sessionRegistry;
     private final WebSocketSessionExpiryInterceptor sessionExpiryInterceptor;
     private final WebSocketConnectionLimiter connectionLimiter;
+    private final RealtimeRoutingIdentityResolver routingIdentities;
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/api/ws")
-                .setHandshakeHandler(new WebSocketAccountHandshakeHandler())
+                .setHandshakeHandler(new WebSocketAccountHandshakeHandler(routingIdentities))
                 .setAllowedOrigins(allowedOrigins)
                 .addInterceptors(
                         new HttpSessionHandshakeInterceptor(List.of()),

@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.Mockito.mock;
@@ -16,6 +17,8 @@ import org.springframework.web.socket.WebSocketHandler;
 import org.springframework.web.socket.server.HandshakeFailureException;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.notifications.RealtimeRoutingIdentity;
+import ooo.klae.connex.backend.notifications.RealtimeRoutingIdentityResolver;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.messaging.Message;
@@ -35,13 +38,38 @@ class WebSocketSecurityConfigTest {
         ServerHttpRequest request = mock(ServerHttpRequest.class);
         when(request.getPrincipal()).thenReturn(
                 UsernamePasswordAuthenticationToken.authenticated(account, null, List.of()));
+        RealtimeRoutingIdentityResolver identities = new RealtimeRoutingIdentityResolver();
 
-        var principal = new WebSocketAccountHandshakeHandler().determineUser(
+        var principal = new WebSocketAccountHandshakeHandler(identities).determineUser(
                 request, mock(WebSocketHandler.class), new HashMap<>());
         account.setUsername("renamed");
 
-        assertEquals("uid:17", principal.getName());
         assertTrue(principal instanceof Authentication authentication && authentication.isAuthenticated());
+        assertEquals(new RealtimeRoutingIdentity(17, identities.destinationFor(17)),
+                ((Authentication) principal).getPrincipal());
+        assertEquals(identities.destinationFor(17), principal.getName());
+    }
+
+    /**
+     * The destination name reaches the browser in the {@code CONNECTED} frame's {@code user-name}
+     * header, so it must not be the account id or anything derived from it without the key.
+     */
+    @Test
+    void handshakeRoutesByAnOpaqueNameThatDoesNotDiscloseTheAccountId() {
+        User account = new User();
+        account.setId(17);
+        account.setUsername("recycled");
+        ServerHttpRequest request = mock(ServerHttpRequest.class);
+        when(request.getPrincipal()).thenReturn(
+                UsernamePasswordAuthenticationToken.authenticated(account, null, List.of()));
+
+        var principal = new WebSocketAccountHandshakeHandler(new RealtimeRoutingIdentityResolver())
+                .determineUser(request, mock(WebSocketHandler.class), new HashMap<>());
+
+        assertNotEquals("uid:17", principal.getName());
+        assertNotEquals("17", principal.getName());
+        assertNotEquals("recycled", principal.getName());
+        assertNotEquals(new RealtimeRoutingIdentityResolver().destinationFor(17), principal.getName());
     }
 
     @Test
@@ -51,8 +79,8 @@ class WebSocketSecurityConfigTest {
                 UsernamePasswordAuthenticationToken.authenticated("subject", null, List.of()));
 
         assertThrows(HandshakeFailureException.class, () ->
-                new WebSocketAccountHandshakeHandler().determineUser(
-                        request, mock(WebSocketHandler.class), new HashMap<>()));
+                new WebSocketAccountHandshakeHandler(new RealtimeRoutingIdentityResolver())
+                        .determineUser(request, mock(WebSocketHandler.class), new HashMap<>()));
     }
 
     @Test

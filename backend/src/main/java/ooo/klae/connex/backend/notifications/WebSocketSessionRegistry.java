@@ -15,7 +15,6 @@ import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 
 import ooo.klae.connex.backend.beans.User;
-import ooo.klae.connex.backend.session.AccountSessionIndex;
 
 /**
  * Tracks local sockets by their backing HTTP session and transport id. Revocation and logout
@@ -85,8 +84,8 @@ public class WebSocketSessionRegistry {
     public void closeByUser(int userId) {
         for (WebSocketSession session : sessionsById.values()) {
             if (session.getPrincipal() instanceof Authentication authentication
-                    && ((authentication.getPrincipal() instanceof AccountSessionIndex account
-                            && account.userId() == userId)
+                    && ((authentication.getPrincipal() instanceof RealtimeRoutingIdentity identity
+                            && identity.userId() == userId)
                         || (authentication.getPrincipal() instanceof User user
                             && user.getId() == userId))) {
                 close(session);

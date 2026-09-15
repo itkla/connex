@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.notifications;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -16,7 +17,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,8 +33,6 @@ import org.springframework.messaging.simp.SimpMessageType;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextImpl;
-import org.springframework.security.core.session.SessionInformation;
-import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
@@ -47,7 +45,6 @@ import ooo.klae.connex.backend.config.SessionSecurityProperties;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.SessionSecurityService;
-import ooo.klae.connex.backend.session.AccountSessionIndex;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -60,7 +57,7 @@ class WebSocketSessionExpiryInterceptorTest {
     private static final int EPOCH = 3;
     private static final Instant NOW = Instant.parse("2026-09-13T12:00:00Z");
 
-    private final SessionRegistry securitySessions = mock(SessionRegistry.class);
+    private final RealtimeRoutingIdentityResolver routingIdentities = new RealtimeRoutingIdentityResolver();
     private final WebSocketSessionRegistry webSocketSessions = new WebSocketSessionRegistry();
     private final ObjectProvider<SessionRepository<? extends Session>> repositoryProvider = mock();
     private final SessionRepository<Session> repository = mock();
@@ -72,7 +69,6 @@ class WebSocketSessionExpiryInterceptorTest {
     private final Map<String, Object> socketAttributes = new HashMap<>();
     private final Map<String, Object> sessionAttributes = new HashMap<>();
 
-    private SessionInformation sessionInformation;
     private WebSocketSessionExpiryInterceptor interceptor;
 
     @BeforeEach
@@ -80,7 +76,6 @@ class WebSocketSessionExpiryInterceptorTest {
         User user = new User();
         user.setId(USER_ID);
         user.setUsername("realtime-account");
-        sessionInformation = new SessionInformation(user, HTTP_SESSION_ID, Date.from(NOW));
         sessionAttributes.put(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY,
                 new SecurityContextImpl(UsernamePasswordAuthenticationToken.authenticated(
                         user, null, List.of())));
@@ -92,8 +87,7 @@ class WebSocketSessionExpiryInterceptorTest {
         when(socket.getAttributes()).thenReturn(socketAttributes);
         when(socket.isOpen()).thenReturn(true);
         when(socket.getPrincipal()).thenReturn(UsernamePasswordAuthenticationToken.authenticated(
-                new AccountSessionIndex(USER_ID), null, List.of()));
-        when(securitySessions.getSessionInformation(HTTP_SESSION_ID)).thenReturn(sessionInformation);
+                routingIdentities.forAccount(USER_ID), null, List.of()));
         Mockito.<SessionRepository<? extends Session>>when(repositoryProvider.getIfAvailable())
                 .thenReturn(repository);
         when(repository.findById(HTTP_SESSION_ID)).thenReturn(backingSession);
@@ -104,7 +98,7 @@ class WebSocketSessionExpiryInterceptorTest {
         TenantWorkScope tenantWorkScope = new TenantWorkScope(
                 new TenantContext(), mock(TenantCatalogResolver.class), mock(WorkspaceMapper.class));
         interceptor = new WebSocketSessionExpiryInterceptor(
-                securitySessions, webSocketSessions, repositoryProvider, userMapper,
+                webSocketSessions, repositoryProvider, userMapper,
                 new SessionSecurityProperties(), Clock.fixed(NOW, ZoneOffset.UTC), tenantWorkScope);
     }
 
@@ -145,15 +139,9 @@ class WebSocketSessionExpiryInterceptorTest {
     }
 
     @Test
-    void missingSecuritySessionMarkerRejectsDelivery() throws IOException {
-        when(securitySessions.getSessionInformation(HTTP_SESSION_ID)).thenReturn(null);
-
-        assertOutboundRejected();
-    }
-
-    @Test
-    void expiredSecuritySessionMarkerRejectsDeliveryWithoutAnotherClientFrame() throws IOException {
-        sessionInformation.expireNow();
+    void registryExpiryMarkerRejectsDeliveryWithoutAnotherClientFrame() throws IOException {
+        sessionAttributes.put(
+                WebSocketSessionExpiryInterceptor.SPRING_SESSION_EXPIRED_ATTR, Boolean.TRUE);
 
         assertOutboundRejected();
     }
@@ -290,6 +278,53 @@ class WebSocketSessionExpiryInterceptorTest {
         verifyNoMoreInteractions(repository);
         verify(backingSession, never()).setLastAccessedTime(any());
         verify(socket, never()).close(any());
+    }
+
+    /**
+     * The broker negotiates a ten-second heartbeat with every client, so the cheap path must not
+     * add the account-epoch database read to that timer.
+     */
+    @Test
+    void heartbeatsAreCheckedAgainstTheSessionOnlyAndNeverLookUpTheAccountEpoch() throws IOException {
+        Message<byte[]> heartbeat = message(SimpMessageType.HEARTBEAT);
+
+        assertSame(heartbeat, interceptor.preSend(heartbeat, channel));
+        assertSame(heartbeat, interceptor.beforeHandle(heartbeat, channel, handler));
+
+        verify(repository, times(2)).findById(HTTP_SESSION_ID);
+        verifyNoMoreInteractions(repository);
+        verify(userMapper, never()).currentSessionEpoch(anyInt());
+        verify(backingSession, never()).setLastAccessedTime(any());
+        verify(socket, never()).close(any());
+    }
+
+    @Test
+    void heartbeatsOnARevokedSessionAreRefusedAndCloseTheSocket() throws IOException {
+        sessionAttributes.put(
+                WebSocketSessionExpiryInterceptor.SPRING_SESSION_EXPIRED_ATTR, Boolean.TRUE);
+
+        assertNull(interceptor.preSend(message(SimpMessageType.HEARTBEAT), channel));
+
+        verify(socket).close(CloseStatus.POLICY_VIOLATION);
+    }
+
+    @Test
+    void heartbeatsOnAnExpiredOrDeletedSessionAreRefusedAndCloseTheSocket() throws IOException {
+        when(repository.findById(HTTP_SESSION_ID)).thenReturn(null);
+
+        assertNull(interceptor.preSend(message(SimpMessageType.HEARTBEAT), channel));
+
+        verify(socket).close(CloseStatus.POLICY_VIOLATION);
+    }
+
+    @Test
+    void heartbeatsPastTheAbsoluteLifetimeAreRefusedAndCloseTheSocket() throws IOException {
+        sessionAttributes.put(SessionSecurityService.AUTHENTICATED_AT_ATTR,
+                NOW.minus(Duration.ofHours(12)).minusMillis(1).toEpochMilli());
+
+        assertNull(interceptor.preSend(message(SimpMessageType.HEARTBEAT), channel));
+
+        verify(socket).close(CloseStatus.POLICY_VIOLATION);
     }
 
     private void assertOutboundRejected() throws IOException {
