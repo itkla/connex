@@ -65,7 +65,7 @@ export default async function AppLayout({
         if (workspacesResult.unauthenticated) {
             redirect(signInPath);
         }
-        return <><BrowserAccountBridge userId={user.id} /><WorkspaceUnavailablePage /></>;
+        return <WorkspaceUnavailablePage />;
     }
     const { workspaces, activeWorkspaceId } = workspacesResult.data;
     if (workspaces.length === 0) {

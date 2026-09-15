@@ -42,7 +42,7 @@ export default function LogoutPage() {
             <div className="relative flex min-h-[100dvh] flex-col px-6 py-10 sm:px-10 lg:h-full lg:min-h-0 lg:overflow-y-auto lg:px-14 lg:py-12">
                 <Link
                     href="/"
-                    className="flex w-fit items-center gap-2.5 rounded-lg transition-opacity duration-150 ease-out hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand lg:hidden"
+                    className="flex w-fit items-center gap-2.5 rounded-lg transition-opacity duration-(--motion-micro) ease-out hover:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand lg:hidden"
                 >
                     <span className="size-3 rounded-[5px] bg-brand" aria-hidden="true" />
                     <span className="text-lg font-bold tracking-tight text-foreground">{tForm("brand")}</span>
