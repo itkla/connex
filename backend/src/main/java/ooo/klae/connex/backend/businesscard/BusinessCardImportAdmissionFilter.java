@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityEntitlement;
+import ooo.klae.connex.backend.config.RequestPathNormalizer;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
@@ -101,18 +102,9 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
         chain.doFilter(request, response);
     }
 
-    private static String apiPath(HttpServletRequest request) {
-        String uri = request.getRequestURI();
-        String contextPath = request.getContextPath();
-        if (contextPath != null && !contextPath.isBlank() && uri.startsWith(contextPath)) {
-            return uri.substring(contextPath.length());
-        }
-        return uri;
-    }
-
     private static Operation operation(HttpServletRequest request) {
         String method = request.getMethod();
-        String path = apiPath(request);
+        String path = RequestPathNormalizer.apiPath(request);
         if ("POST".equals(method) && SCAN_PATH.equals(path)) {
             return Operation.SCAN;
         }
