@@ -18,6 +18,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
@@ -96,9 +98,12 @@ class BusinessCardImportAdmissionFilterTest {
         assertFalse(request.bodyAccessed());
     }
 
-    @Test
-    void rejectsPrincipalThrottleBeforeMultipartOrChainAccess() throws Exception {
-        TrackingMultipartRequest request = request(IDEMPOTENCY_KEY);
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/business-cards/import", "/%61pi/business-cards/%69mport",
+            "//api/business-cards/import;x"})
+    void rejectsPrincipalThrottleBeforeMultipartOrChainAccess(String path) throws Exception {
+        TrackingMultipartRequest request = request("POST", "/connex" + path, IDEMPOTENCY_KEY);
+        request.setContextPath("/connex");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
         doThrow(new TooManyRequestsException("limited"))
@@ -149,10 +154,12 @@ class BusinessCardImportAdmissionFilterTest {
         verify(rateLimiter, never()).requireImportAdmissionAllowed(9);
     }
 
-    @Test
-    void scanThrottleRunsBeforeMultipartAccess() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/business-cards/scan", "/api/business-cards/%73can"})
+    void scanThrottleRunsBeforeMultipartAccess(String path) throws Exception {
         TrackingMultipartRequest request = request(
-            "POST", "/api/business-cards/scan", null);
+            "POST", "/connex" + path, null);
+        request.setContextPath("/connex");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
         doThrow(new TooManyRequestsException("limited"))
@@ -256,10 +263,12 @@ class BusinessCardImportAdmissionFilterTest {
         verify(rateLimiter, never()).requireScanAdmissionAllowed(9);
     }
 
-    @Test
-    void reservationThrottleRunsBeforeTheControllerAndDatabasePath() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/business-cards/import/reservation", "/api/business-cards/import/%72eservation"})
+    void reservationThrottleRunsBeforeTheControllerAndDatabasePath(String path) throws Exception {
         TrackingMultipartRequest request = request(
-            "POST", "/api/business-cards/import/reservation", IDEMPOTENCY_KEY);
+            "POST", "/connex" + path, IDEMPOTENCY_KEY);
+        request.setContextPath("/connex");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
         doThrow(new TooManyRequestsException("limited"))
@@ -276,10 +285,12 @@ class BusinessCardImportAdmissionFilterTest {
         assertFalse(request.bodyAccessed());
     }
 
-    @Test
-    void statusThrottleRunsBeforeTheControllerAndDatabasePath() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/business-cards/import", "/api/business-cards/%69mport"})
+    void statusThrottleRunsBeforeTheControllerAndDatabasePath(String path) throws Exception {
         TrackingMultipartRequest request = request(
-            "GET", "/api/business-cards/import", IDEMPOTENCY_KEY);
+            "GET", "/connex" + path, IDEMPOTENCY_KEY);
+        request.setContextPath("/connex");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
         doThrow(new TooManyRequestsException("limited"))

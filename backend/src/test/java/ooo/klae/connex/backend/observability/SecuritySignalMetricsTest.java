@@ -231,7 +231,9 @@ class SecuritySignalMetricsTest {
                     new SecuritySignalMetrics(failing, Clock.systemUTC()));
             var tenant = mock(ooo.klae.connex.backend.tenant.TenantContext.class);
             when(tenant.getWorkspaceId()).thenReturn(7);
-            var service = new ooo.klae.connex.backend.services.AuditService(mapper, integrity,
+            var service = new ooo.klae.connex.backend.services.AuditService(
+                    org.mockito.Mockito.mock(ooo.klae.connex.backend.services.SessionSecurityService.class),
+                    mapper, integrity,
                     new ObjectMapper(), tenant, new ooo.klae.connex.backend.util.ClientIpResolver(""),
                     new ClientAssertedCorrelationPseudonymizer(properties));
             AuditLog invalid = entry("workspace.role.create", "success", 7);

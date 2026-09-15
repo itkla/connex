@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAccountStorageGeneration } from "@/app/hooks/useAccountStorageGeneration";
 
 import { useActions } from '@/app/hooks/useActions';
 import { useWorkspace } from '@/app/hooks/useWorkspace';
@@ -73,7 +74,10 @@ export function useColumnVisibility<T>(
     const key = columnsStorageKey(entity, context.user?.id ?? null, activeWorkspaceId);
     const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
 
+    const canPersist = useAccountStorageGeneration(() => setHidden(new Set()));
+
     useEffect(() => {
+        if (!canPersist()) return;
         let stored: string | null = null;
         try {
             stored = window.localStorage.getItem(key);
@@ -83,18 +87,22 @@ export function useColumnVisibility<T>(
         const next = new Set(parseHidden(stored));
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setHidden((prev) => (sameSet(prev, next) ? prev : next));
-    }, [key]);
+    }, [canPersist, key]);
 
     const primaryKey = columns.length > 0 ? columns[0].key : null;
 
     const persist = useCallback(
         (next: ReadonlySet<string>) => {
+            if (!canPersist()) {
+                setHidden(new Set());
+                return;
+            }
             setHidden(next);
             try {
                 window.localStorage.setItem(key, JSON.stringify([...next]));
             } catch {}
         },
-        [key],
+        [canPersist, key],
     );
 
     const setColumnVisible = useCallback(

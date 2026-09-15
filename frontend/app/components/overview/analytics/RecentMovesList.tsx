@@ -32,7 +32,7 @@ export default function RecentMovesList({ moves }: { moves: JobMove[] }) {
                         className="group -mx-2 flex items-center gap-3 rounded-lg px-2 py-1.5 transition hover:bg-muted"
                     >
                         <Avatar className="size-8">
-                            <AvatarImage src={move.personImageUrl ?? undefined} />
+                            <AvatarImage src={move.personImageUrl ?? undefined} alt="" />
                             <AvatarFallback className="text-xs">{initials(move.personName)}</AvatarFallback>
                         </Avatar>
                         <div className="min-w-0 flex-1">

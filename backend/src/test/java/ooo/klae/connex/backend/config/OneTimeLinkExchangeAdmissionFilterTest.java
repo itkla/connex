@@ -94,6 +94,8 @@ class OneTimeLinkExchangeAdmissionFilterTest {
      */
     @ParameterizedTest
     @CsvSource({
+        "/%61pi/auth/reset-password/exchange, /api/auth/reset-password/exchange",
+        "/api/document-acceptance/%65xchange, /api/document-acceptance/exchange",
         "/api/delivery/unsubscribe/exchange;x=1, /api/delivery/unsubscribe/exchange",
         "//api/delivery/unsubscribe/exchange, /api/delivery/unsubscribe/exchange",
         "/api/document-acceptance/exchange;x=1, /api/document-acceptance/exchange",

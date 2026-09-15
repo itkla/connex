@@ -1,6 +1,7 @@
 import type { Viewport } from "next";
 import { Suspense } from "react";
 import Sidebar from "@/app/components/Sidebar";
+import BrowserAccountBridge from "@/app/components/BrowserAccountBridge";
 import SidebarFallback from "@/app/components/SidebarFallback";
 import ContentShell from "@/app/components/ContentShell";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
@@ -64,7 +65,7 @@ export default async function AppLayout({
         if (workspacesResult.unauthenticated) {
             redirect(signInPath);
         }
-        return <WorkspaceUnavailablePage />;
+        return <><BrowserAccountBridge userId={user.id} /><WorkspaceUnavailablePage /></>;
     }
     const { workspaces, activeWorkspaceId } = workspacesResult.data;
     if (workspaces.length === 0) {
@@ -84,6 +85,7 @@ export default async function AppLayout({
 
     return (
         <NowProvider value={requestNow()}>
+            <BrowserAccountBridge userId={user.id} />
             <PermissionsProvider permissions={effectivePermissions} status={permissionsStatus}>
                 <WorkspaceProvider initialWorkspaces={workspaces} initialActiveId={activeWorkspaceId}>
                     <ProtectedMediaProvider userId={user.id}>
