@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LaunchSignupForm } from "@/app/components/landing/LaunchSignupForm";
-import { subscribeToLaunch } from "@/app/lib/api";
+import { subscribeToLaunch } from "@/app/lib/launchSignup";
 import en from "@/messages/en/common.json";
 import ja from "@/messages/ja/common.json";
 
@@ -80,11 +80,14 @@ describe.each(["en", "ja"] as const)("launch signup in %s", (locale) => {
 });
 
 it.each([
+    [200, { status: "subscribed" }, "success"],
+    [200, { status: "accepted" }, "success"],
     [200, { error: "unavailable" }, "error"],
     [503, { status: "subscribed" }, "error"],
+    [503, { status: "accepted" }, "error"],
     [200, {}, "error"],
     [429, { error: "rate_limited" }, "rateLimited"],
-] as const)("requires confirmed provider acceptance for HTTP %s", async (status, body, expected) => {
+] as const)("requires a public acknowledgment for HTTP %s", async (status, body, expected) => {
     fetchMock.mockResolvedValueOnce(Response.json(body, { status }));
     expect(await subscribeToLaunch("visitor@example.com")).toBe(expected);
 });

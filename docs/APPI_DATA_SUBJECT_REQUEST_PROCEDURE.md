@@ -28,10 +28,65 @@ A data subject (or authorized representative) may request, regarding their **ret
 - Record the verification on the request (`identityVerifiedAt`) — the disclosure export refuses to assemble until it is recorded.
 
 ## 5. Fulfil the request
-- **Disclosure:** assemble everything held about the subject via the subject-scoped export (`GET /api/orgs/{orgId}/data-subject-requests/{id}/disclosure`) — person record plus tags, custom-field values with classification metadata, activities, notes, tasks, attachment metadata, employment history, relationship edges, deal associations, introductions, third-party-provision/share records, and the person-scoped audit trail (capped at 1,000 entries; the uncapped total is included so truncation is visible). The export is **operator-facing raw material**: it can contain third-party personal data and confidential business information, so apply the Art. 33(2) exceptions and redact before releasing anything to the subject. Flag `special_care` custom fields and suspected special-care free-text locations under [SPECIAL_CARE_DATA_POLICY.md](SPECIAL_CARE_DATA_POLICY.md). Attachment binaries are not embedded — retrieve flagged files through the normal attachment endpoints. Do **not** substitute the workspace-wide CSV export, which over-discloses.
+- **Disclosure:** assemble the retained subject evidence in the inventory below via the subject-scoped export (`GET /api/orgs/{orgId}/data-subject-requests/{id}/disclosure`), including current consent, consent history, and outbound audience-export evidence. The export is **operator-facing raw material**: it can contain third-party personal data and confidential business information, so apply the Art. 33(2) exceptions and redact before releasing anything to the subject. Flag `special_care` custom fields and suspected special-care free-text locations under [SPECIAL_CARE_DATA_POLICY.md](SPECIAL_CARE_DATA_POLICY.md). Attachment binaries are not embedded — retrieve flagged files through the normal attachment endpoints. Do **not** substitute the workspace-wide CSV export, which over-discloses.
 - **Correction:** update via the standard record edit; log the change (captured in `audit_log`).
 - **Cease of use:** set `suspended: true` via `PUT /api/persons/{id}/restrictions` — the contact stops being processed (warmth/decay scoring, automation rules, intro suggestions, network reports, AI features, notification nudges, CSV exports) while staying visible for management and disclosure. For **erasure**, note that deletion is hard-delete per record — confirm with the customer/operator before irreversible deletion.
 - **Cease third-party provision:** set `provisionCeased: true` on the same endpoint — every standing cross-workspace share is revoked immediately (audited with the revoked count), new shares are refused, and the contact is excluded from AI outbound. Record the instruction on the request.
+
+### Disclosure inventory
+
+The subject is identified by its owning workspace and person ID, within the request's organization.
+Sections include retained evidence even when processing or third-party provision has ceased.
+`DataSubjectDisclosureMapperXmlTest` pins the mapper statements and checks this section inventory
+against the response DTO; changes to disclosure sections must update both.
+
+| Response section | Retained evidence |
+|---|---|
+| `person` | Current person record and restrictions |
+| `identities` | Current and superseded identifiers with acquisition provenance |
+| `tags` | Subject tags |
+| `customFieldValues` | Values and field classification metadata |
+| `activities` | Subject activities |
+| `providerCaptureEvidence` | Matched provider interactions, subject participant and admission/exclusion evidence |
+| `notes` | Subject notes |
+| `recordCommentThreads` | Subject comment threads and retained comments |
+| `tasks` | Subject tasks |
+| `attachments` | Subject attachment metadata |
+| `employmentHistory` | Employment records |
+| `lifecycleHistory` | Lifecycle transitions and reasons |
+| `qualificationAnswers` | Qualification answers with the questions answered |
+| `lifecyclePasses` | Retained lifecycle passes and response timestamps |
+| `relationshipEdges` | Subject relationships |
+| `dealAssociations` | Linked deals and roles |
+| `introductions` | Subject introductions |
+| `thirdPartyProvisions` | Current standing workspace shares |
+| `consentState` | Current channel/purpose status, source, evidence reference and capture/update times |
+| `consentHistory` | Retained grant/revoke/unknown events, source, evidence reference, actor ID and event time |
+| `audienceExportEvidence` | Export destination (connector/list ID), snapshot membership, subject-only frozen/staged membership and export outcomes |
+| `auditTrail` | Person-scoped action/outcome audit metadata, capped at 1,000 entries; `auditTrailTotal` gives the uncapped total |
+
+Audience-export evidence includes exports by other workspaces in the request's organization that
+held a shared subject, even after the standing share is revoked. Audience-export member lists are
+projected to the subject's membership flags; other members' IDs
+are not included. `stagedForPush` records membership in the intended provider request, which is
+persisted before the call and does not itself prove provision. Export counts and
+`outcomeClassification` describe the whole batch. `subjectProvisionOutcome` is `confirmed` only
+when the provider or operator confirmed delivery of every staged member and no late conflicting
+outcome is recorded; partial, pending, ambiguous and conflicting outcomes are `unconfirmed`.
+A recorded definite failure for a staged subject is `not_delivered`; a subject absent from the
+staged request is `not_staged`. Legacy exports without retained member lists remain visible through
+their snapshot membership, with unknown frozen/staged flags omitted from JSON and an `unknown`
+subject outcome.
+The response retains failure, reconciliation and late-outcome evidence for operator review.
+The destination is the retained connector/list identifier; historical endpoint configuration is
+not stored on the export and cannot be reconstructed from its current connector configuration.
+
+| Declared exclusion | Handling / limitation |
+|---|---|
+| `ai_output_cache` | Persisted AI outputs remain excluded; tracked in #579 and subject to the restriction purge described below. |
+| `audit_log.changes` | Change payloads are excluded; the person-scoped audit trail includes actions/outcomes only. Consent/export evidence comes directly from its retained tables. |
+| `attachment_binaries` | Retrieve files separately through authorized attachment endpoints and review before release. |
+| `unlinked_free_text` | Text in other records that merely names the subject has no reliable subject link; operator review is required. |
 
 ## 6. Respond
 - Respond in the manner prescribed by the APPI (the subject may specify electromagnetic-record format for disclosure).

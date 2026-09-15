@@ -1,0 +1,8 @@
+allowBuilds:
+  '@parcel/watcher': true
+  '@swc/core': true
+  esbuild: true
+  workerd: true
+overrides:
+  # shadcn > cosmiconfig pulls js-yaml 4.3.1 (GHSA-2883-xcg3-v3hh, high).
+  js-yaml: '>=4.3.2'

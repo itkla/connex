@@ -19,6 +19,7 @@ Next.js 16 App Router/RSC · React 19 · strict TypeScript · Tailwind v4 · sha
 - Shared API client: `app/lib/api.ts`; shared DTO types: `app/lib/types.ts`.
 - Server Components by default. Add `"use client"` only for client behavior.
 - Keep presentational components free of data fetching and business logic.
+- `landing/` vendors the landing, legal, and not-found surface byte-for-byte. After changing those files or `messages/*/{common,legal,errors}.json`, run `landing/scripts/sync-from-frontend.sh` and commit the result; the `Landing` workflow fails on drift.
 
 ## Task routing
 

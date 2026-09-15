@@ -12,6 +12,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -39,6 +41,34 @@ class ApiRequestBodySizeFilterTest {
         properties.setClientErrorsMaxBodyBytes(10);
         properties.setCspReportsMaxBodyBytes(9);
         filter = new ApiRequestBodySizeFilter(properties);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/api/v1%2Fme", "/api/v1/%zz", "/api/v1%zz/me", "/api/v1%252Fme",
+            "/api/%2565xports/persons", "/api/exports/../persons", "/api/exports%5cpersons"})
+    void ambiguousPathsAreRejectedBeforeAnyBodyOrHandlerProcessing(String path) throws Exception {
+        MockHttpServletRequest request = jsonRequest("GET", path, "{}");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        filter.doFilter(request, response, chain);
+        assertEquals(400, response.getStatus());
+        assertNull(chain.getRequest());
+        if (PublicApiPaths.isPublicRequest(request)) {
+            JsonNode body = new ObjectMapper().readTree(response.getContentAsByteArray());
+            assertEquals("invalid_request", body.path("error").path("code").stringValue());
+            assertEquals("no-store", response.getHeader("Cache-Control"));
+        }
+    }
+
+    @Test
+    void encodedRouteUsesItsSpecificBodyLimit() throws Exception {
+        MockHttpServletRequest request = jsonRequest("POST", "/%61pi/auth/%77ebauthn/authenticate", "12345");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        filter.doFilter(request, response, chain);
+        assertEquals(413, response.getStatus());
+        assertNull(chain.getRequest());
     }
 
     @Test
@@ -69,11 +99,11 @@ class ApiRequestBodySizeFilterTest {
         JsonNode body = new ObjectMapper().readTree(response.getContentAsByteArray());
         assertEquals(413, response.getStatus());
         assertEquals("application/json", response.getContentType());
-        assertEquals("request_too_large", body.path("error").path("code").textValue());
+        assertEquals("request_too_large", body.path("error").path("code").stringValue());
         assertEquals(
             "Request body exceeds the allowed size",
-            body.path("error").path("message").textValue());
-        assertTrue(body.path("error").path("request_id").isTextual());
+            body.path("error").path("message").stringValue());
+        assertTrue(body.path("error").path("request_id").isString());
         assertNull(chain.getRequest());
     }
 
@@ -81,8 +111,7 @@ class ApiRequestBodySizeFilterTest {
     void malformedPublicNamespaceShapesUseTheOversizeEnvelope() throws Exception {
         for (String path : List.of(
                 "/api/v1;blocked/me",
-                "/api/v1%2Fme",
-                "/api/v1/%zz")) {
+                "/api/v1/me")) {
             MockHttpServletRequest request = jsonRequest("POST", path, "123456789");
             request.setSecure(true);
             MockHttpServletResponse response = new MockHttpServletResponse();
@@ -93,7 +122,7 @@ class ApiRequestBodySizeFilterTest {
             JsonNode body = new ObjectMapper().readTree(response.getContentAsByteArray());
             assertTrue(PublicApiPaths.isPublicRequest(request), path);
             assertEquals(413, response.getStatus(), path);
-            assertEquals("request_too_large", body.path("error").path("code").textValue(), path);
+            assertEquals("request_too_large", body.path("error").path("code").stringValue(), path);
             assertEquals(SecurityResponseHeaders.CONTENT_SECURITY_POLICY,
                 response.getHeader("Content-Security-Policy"), path);
             assertEquals("no-store", response.getHeader("Cache-Control"), path);
@@ -110,8 +139,6 @@ class ApiRequestBodySizeFilterTest {
         for (String path : List.of(
                 "/api/v1%30/me",
                 "/api/v1%78/me",
-                "/api/v1%zz/me",
-                "/api/v1%252Fme",
                 "/api/v1x/me",
                 "/api/v10/me")) {
             MockHttpServletRequest request = jsonRequest("POST", path, "123456789");
@@ -515,7 +542,7 @@ class ApiRequestBodySizeFilterTest {
     }
 
     @Test
-    void appliesLimitWhenSecurityRequestUsesServletPath() throws Exception {
+    void rejectsMissingRequestUriEvenWhenServletPathIsPresent() throws Exception {
         MockHttpServletRequest request = jsonRequest("POST", "", "123456789");
         request.setServletPath("/api/auth/login");
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -523,7 +550,7 @@ class ApiRequestBodySizeFilterTest {
 
         filter.doFilter(request, response, chain);
 
-        assertEquals(413, response.getStatus());
+        assertEquals(400, response.getStatus());
         assertNull(chain.getRequest());
     }
 

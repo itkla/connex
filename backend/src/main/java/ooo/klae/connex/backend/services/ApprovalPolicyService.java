@@ -371,6 +371,9 @@ public class ApprovalPolicyService {
      * Effective discount over the frozen line items: {@code (list - discounted) / list * 100}
      * where list is the undiscounted {@code unitPrice * quantity} sum and discounted is the
      * pre-tax subtotal sum. Returns {@code null} when the snapshot has no priced lines.
+     * Approval governs the effective monetary reduction after each subtotal is rounded to scale 2,
+     * not the configured discount percentage. A 20% discount on 0.01 × 1 rounds to subtotal 0.01
+     * and therefore has 0% effective discount; it does not meet a positive discount threshold.
      */
     private BigDecimal discountPercent(DocumentContent content) {
         if (content == null || content.lineItems() == null || content.lineItems().isEmpty()) {

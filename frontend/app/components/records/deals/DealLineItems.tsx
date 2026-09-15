@@ -32,10 +32,6 @@ type Props = {
     initial: DealLineItemsResponse;
 };
 
-const EMPTY_TOTALS = (currency: string): DealLineItemTotals => ({
-    currency, subtotal: 0, tax: 0, oneTimeTotal: 0, recurringTotal: 0, grandTotal: 0,
-});
-
 /**
  * Editable line-items table for a deal. All monetary values are server-computed: every add / edit /
  * remove posts to the server and replaces local state with the returned items + totals. The client
@@ -47,7 +43,7 @@ export default function DealLineItems({ dealId, dealCurrency, initial }: Props) 
     const showApiError = useApiErrorToast('DealsLineItems');
     const locale = useLocale();
     const [items, setItems] = useState<DealLineItem[]>(initial.items);
-    const [totals, setTotals] = useState<DealLineItemTotals>(initial.totals ?? EMPTY_TOTALS(dealCurrency));
+    const [totals, setTotals] = useState<DealLineItemTotals | null>(initial.totals);
     const [products, setProducts] = useState<Product[]>([]);
     const [busy, setBusy] = useState(false);
 
@@ -55,12 +51,12 @@ export default function DealLineItems({ dealId, dealCurrency, initial }: Props) 
         getProducts().then((all) => setProducts(all.filter((p) => p.active))).catch(() => setProducts([]));
     }, []);
 
-    const currency = totals.currency ?? dealCurrency;
-    const money = (value: number) => formatCurrency(value, currency, locale);
+    const currency = totals?.currency ?? dealCurrency;
+    const money = (value: number, lineCurrency = currency) => formatCurrency(value, lineCurrency, locale);
 
     const apply = (res: DealLineItemsResponse) => {
         setItems(res.items);
-        setTotals(res.totals ?? EMPTY_TOTALS(dealCurrency));
+        setTotals(res.totals);
     };
 
     const run = async (op: () => Promise<DealLineItemsResponse>) => {
@@ -101,7 +97,7 @@ export default function DealLineItems({ dealId, dealCurrency, initial }: Props) 
                         items={productItems}
                         itemToStringLabel={(p: Product) => p.name}
                         value={null}
-                        onValueChange={(p) => { if (p) addFromProduct(p as Product); }}
+                        onValueChange={(p) => { if (p) addFromProduct(p); }}
                     >
                         <ComboboxInput placeholder={t('addFromCatalog')} className="w-56" disabled={busy} />
                         <ComboboxContent>
@@ -126,6 +122,12 @@ export default function DealLineItems({ dealId, dealCurrency, initial }: Props) 
                     </Button>
                 </div>
             </div>
+
+            {totals === null && (
+                <p role="status" className="mb-3 text-sm text-muted-foreground">
+                    {t('totalsUnavailable')}
+                </p>
+            )}
 
             {items.length === 0 ? (
                 <div className="rounded-2xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
@@ -158,6 +160,11 @@ export default function DealLineItems({ dealId, dealCurrency, initial }: Props) 
                                         <div className="mt-0.5 text-xs text-muted-foreground">
                                             {item.billingFrequency === 'recurring' ? t('recurring') : t('oneTime')}
                                         </div>
+                                        {item.currency.toUpperCase() !== dealCurrency.toUpperCase() && (
+                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                {t('currencyMismatch', { lineCurrency: item.currency, dealCurrency })}
+                                            </p>
+                                        )}
                                     </td>
                                     <td className="px-4 py-3 text-right">
                                         <Input type="number" min="0" step="0.001" inputMode="decimal"
@@ -174,15 +181,16 @@ export default function DealLineItems({ dealId, dealCurrency, initial }: Props) 
                                             className="h-8 w-28 text-right tabular-nums"
                                             onBlur={(e) => { const v = Number(e.target.value); if (v !== item.unitPrice) patchLine(item, linePayload(item, { unitPrice: v })); }}
                                             disabled={busy} />
+                                        <span className="text-xs text-muted-foreground">{item.currency}</span>
                                     </td>
                                     <td className="px-4 py-3 text-right text-muted-foreground tabular-nums">
                                         {item.discountValue
                                             ? item.discountType === 'percent'
                                                 ? `${item.discountValue}%`
-                                                : money(item.discountValue)
+                                                : money(item.discountValue, item.currency)
                                             : '—'}
                                     </td>
-                                    <td className="px-4 py-3 text-right font-medium tabular-nums">{money(item.lineTotal)}</td>
+                                    <td className="px-4 py-3 text-right font-medium tabular-nums">{money(item.lineTotal, item.currency)}</td>
                                     <td className="px-2 py-3 text-right">
                                         <Button variant="ghost" size="icon-xs" aria-label={t('remove')}
                                             onClick={() => removeLine(item)} disabled={busy}>
@@ -192,7 +200,7 @@ export default function DealLineItems({ dealId, dealCurrency, initial }: Props) 
                                 </tr>
                             ))}
                         </tbody>
-                        <tfoot className="border-t border-border bg-muted/40">
+                        {totals !== null && <tfoot className="border-t border-border bg-muted/40">
                             <TotalRow label={t('subtotal')} value={money(totals.subtotal)} />
                             <TotalRow label={t('tax')} value={money(totals.tax)} />
                             {totals.recurringTotal > 0 && (
@@ -202,7 +210,7 @@ export default function DealLineItems({ dealId, dealCurrency, initial }: Props) 
                                 </>
                             )}
                             <TotalRow label={t('grandTotal')} value={money(totals.grandTotal)} emphasis />
-                        </tfoot>
+                        </tfoot>}
                     </table>
                 </div>
             )}
