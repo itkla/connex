@@ -36,6 +36,10 @@ public interface WorkspaceMapper {
     WorkspaceMember lockAuthorizationMembership(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
+    /** Retains exact membership authority without excluding other authorized readers. */
+    WorkspaceMember lockAuthorizationMembershipForShare(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
     WorkspaceMember getAuthorizationMembership(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
@@ -71,6 +75,7 @@ public interface WorkspaceMapper {
     int removeMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getLastActiveWorkspaceId(int userId);
     int setLastActiveWorkspaceId(@Param("userId") int userId, @Param("workspaceId") int workspaceId);
+    int clearLastActiveWorkspaceId(int userId);
     int insert(Workspace workspace);
     int updateIdentity(
         @Param("workspaceId") int workspaceId,
