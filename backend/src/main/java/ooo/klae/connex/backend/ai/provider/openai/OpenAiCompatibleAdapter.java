@@ -156,7 +156,8 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                     String responseBody = request.providerAttemptExecutor().execute(() ->
                             openAiCompatibleClient.complete(
                                     endpoint, target.allowInternalEndpoint(),
-                                    request.credentials(), requestBody, deadline));
+                                    request.credentials(), requestBody, deadline,
+                                    request.providerAttemptExecutor()::beforeSend));
                     return parseResponse(responseBody, enforcement, request.reasoningMode());
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
@@ -204,7 +205,8 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                                             objectMapper,
                                             observer,
                                             appliedEnforcement,
-                                            request.reasoningMode())));
+                                            request.reasoningMode()),
+                                    request.providerAttemptExecutor()::beforeSend));
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
                             || !exception.permitsStructuredOutputFallback()) {

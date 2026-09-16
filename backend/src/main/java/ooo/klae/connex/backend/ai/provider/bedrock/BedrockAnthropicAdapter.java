@@ -94,7 +94,8 @@ public class BedrockAnthropicAdapter implements AiProvider {
             String requestBody = buildRequestBody(request, enforcement);
             String responseBody = request.providerAttemptExecutor().execute(() ->
                     bedrockClient.invokeModel(
-                            region, target.modelId(), request.credentials(), requestBody, deadline));
+                            region, target.modelId(), request.credentials(), requestBody, deadline,
+                                    request.providerAttemptExecutor()::beforeSend));
             return parseResponse(responseBody, enforcement, request.reasoningMode());
         } catch (AiProviderException exception) {
             throw exception;

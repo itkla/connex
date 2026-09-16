@@ -128,6 +128,16 @@ public class OpenAiCompatibleClient {
             AiCredentials credentials,
             String requestBodyJson,
             AiRequestDeadline deadline) {
+        return complete(endpoint, allowInternalEndpoint, credentials, requestBodyJson, deadline, () -> {});
+    }
+
+    String complete(
+            URI endpoint,
+            boolean allowInternalEndpoint,
+            AiCredentials credentials,
+            String requestBodyJson,
+            AiRequestDeadline deadline,
+            Runnable beforeSend) {
         String host = requireEndpoint(endpoint, allowInternalEndpoint);
         if (credentials == null) {
             throw new AiProviderException("OpenAI-compatible credentials are required");
@@ -142,12 +152,12 @@ public class OpenAiCompatibleClient {
         try {
             InetAddress pinnedAddress = resolveFetchable(host, allowInternalEndpoint, deadline);
             if (restClient != null) {
-                response = sendOnce(restClient, endpoint, apiKey, body);
+                response = sendOnce(restClient, endpoint, apiKey, body, beforeSend);
             } else {
                 Objects.requireNonNull(deadline, "deadline");
                 try (PinnedRestClient pinned = pinnedRestClient(
                         host, pinnedAddress, remainingDuration(deadline), requestTimeout)) {
-                    response = sendOnce(pinned, endpoint, apiKey, body, deadline);
+                    response = sendOnce(pinned, endpoint, apiKey, body, deadline, beforeSend);
                 }
             }
         } catch (AiProviderException exception) {
@@ -173,6 +183,18 @@ public class OpenAiCompatibleClient {
             String requestBodyJson,
             AiRequestDeadline deadline,
             OpenAiSseAccumulator accumulator) {
+        return stream(endpoint, allowInternalEndpoint, credentials, requestBodyJson, deadline, accumulator, () -> {});
+    }
+
+    /** Streams a model response after the durable pre-send callback succeeds. */
+    public AiCompletionResult stream(
+            URI endpoint,
+            boolean allowInternalEndpoint,
+            AiCredentials credentials,
+            String requestBodyJson,
+            AiRequestDeadline deadline,
+            OpenAiSseAccumulator accumulator,
+            Runnable beforeSend) {
         String host = requireEndpoint(endpoint, allowInternalEndpoint);
         if (credentials == null) {
             throw new AiProviderException("OpenAI-compatible credentials are required");
@@ -194,6 +216,7 @@ public class OpenAiCompatibleClient {
             if (apiKey != null && !apiKey.isBlank()) {
                 spec = spec.header(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey);
             }
+            beforeSend.run();
             return spec.body(body).exchange((request, response) -> {
                 if (response.getStatusCode().isError()) {
                     byte[] rejection = readBounded(response.getBody());
@@ -210,7 +233,7 @@ public class OpenAiCompatibleClient {
         }
         try (PinnedRestClient pinned = pinnedRestClient(
                 host, pinnedAddress, remainingDuration(deadline), streamIdleTimeout)) {
-            return sendStream(pinned, endpoint, apiKey, body, deadline, accumulator);
+            return sendStream(pinned, endpoint, apiKey, body, deadline, accumulator, beforeSend);
         }
     }
 
@@ -250,7 +273,7 @@ public class OpenAiCompatibleClient {
     }
 
     private OpenAiCompatibleResponse sendOnce(
-            RestClient client, URI endpoint, String apiKey, byte[] body) {
+            RestClient client, URI endpoint, String apiKey, byte[] body, Runnable beforeSend) {
         RestClient.RequestBodySpec spec = client.post()
                 .uri(endpoint)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -258,6 +281,7 @@ public class OpenAiCompatibleClient {
         if (apiKey != null && !apiKey.isBlank()) {
             spec = spec.header("Authorization", "Bearer " + apiKey);
         }
+        beforeSend.run();
         return spec.body(body)
                 .exchange((request, response) -> new OpenAiCompatibleResponse(
                         response.getStatusCode().value(), readBounded(response.getBody())));
@@ -269,7 +293,8 @@ public class OpenAiCompatibleClient {
             String apiKey,
             byte[] body,
             AiRequestDeadline deadline,
-            OpenAiSseAccumulator accumulator) {
+            OpenAiSseAccumulator accumulator,
+            Runnable beforeSend) {
         Duration remaining = remainingDuration(deadline);
         HttpPost request = new HttpPost(endpoint);
         request.setHeader(HttpHeaders.CONTENT_TYPE, ContentType.APPLICATION_JSON.getMimeType());
@@ -294,6 +319,10 @@ public class OpenAiCompatibleClient {
                 request.cancel();
                 pinned.httpClient().close(CloseMode.IMMEDIATE);
             });
+            if (request.isCancelled() || deadline.isExpired() || Thread.currentThread().isInterrupted()) {
+                throw deadlineExceeded();
+            }
+            beforeSend.run();
             AiCompletionResult result = pinned.httpClient().execute(request, response -> {
                 HttpEntity entity = response.getEntity();
                 if (response.getCode() < 200 || response.getCode() > 299) {
@@ -342,7 +371,8 @@ public class OpenAiCompatibleClient {
             URI endpoint,
             String apiKey,
             byte[] body,
-            AiRequestDeadline deadline) {
+            AiRequestDeadline deadline,
+            Runnable beforeSend) {
         Duration remaining = remainingDuration(deadline);
         HttpPost request = new HttpPost(endpoint);
         request.setHeader(HttpHeaders.CONTENT_TYPE, ContentType.APPLICATION_JSON.getMimeType());
@@ -363,6 +393,10 @@ public class OpenAiCompatibleClient {
             pinned.httpClient().close(CloseMode.IMMEDIATE);
         }, remainingNanos(deadline), TimeUnit.NANOSECONDS);
         try {
+            if (request.isCancelled() || deadline.isExpired() || Thread.currentThread().isInterrupted()) {
+                throw deadlineExceeded();
+            }
+            beforeSend.run();
             OpenAiCompatibleResponse response = pinned.httpClient().execute(request, providerResponse -> {
                 HttpEntity entity = providerResponse.getEntity();
                 byte[] responseBody = entity == null

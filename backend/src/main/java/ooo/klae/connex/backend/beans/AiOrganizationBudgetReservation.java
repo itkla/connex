@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.beans;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import lombok.Data;
 
@@ -11,4 +12,7 @@ public class AiOrganizationBudgetReservation {
     private int orgId;
     private LocalDate usageDay;
     private long reservedTokens;
+    private LocalDateTime expiresAt;
+    private String state;
+    private Long consumedTokens;
 }

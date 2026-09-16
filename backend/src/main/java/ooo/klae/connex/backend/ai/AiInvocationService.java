@@ -1395,6 +1395,12 @@ public class AiInvocationService {
         }
 
         @Override
+        public synchronized void beforeSend() {
+            checkpoint();
+            Objects.requireNonNull(budgetLease, "budgetLease").markDispatched();
+        }
+
+        @Override
         public void checkpoint() {
             aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
                 requireCurrentProviderSnapshot();
@@ -1435,18 +1441,18 @@ public class AiInvocationService {
 
         private synchronized void settleBudget(int inputTokens, int outputTokens) {
             AiOrganizationBudgetCoordinator.Lease activeLease = budgetLease;
-            budgetLease = null;
             if (activeLease == null) {
                 throw new IllegalStateException("Provider attempt completed without a budget reservation");
             }
             activeLease.settle(inputTokens, outputTokens);
+            budgetLease = null;
         }
 
         private synchronized void closeBudget() {
             AiOrganizationBudgetCoordinator.Lease activeLease = budgetLease;
-            budgetLease = null;
             if (activeLease != null) {
                 activeLease.close();
+                budgetLease = null;
             }
         }
 

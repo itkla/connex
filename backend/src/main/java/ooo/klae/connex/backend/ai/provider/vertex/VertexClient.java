@@ -76,6 +76,15 @@ public class VertexClient {
             String accessToken,
             String requestBodyJson,
             AiRequestDeadline deadline) {
+        return complete(endpoint, accessToken, requestBodyJson, deadline, () -> {});
+    }
+
+    String complete(
+            URI endpoint,
+            String accessToken,
+            String requestBodyJson,
+            AiRequestDeadline deadline,
+            Runnable beforeSend) {
         String host = requireVertexEndpoint(endpoint);
         requireHeaderValue(accessToken);
         requireText(requestBodyJson, "request body");
@@ -83,7 +92,7 @@ public class VertexClient {
         byte[] body = requestBodyJson.getBytes(StandardCharsets.UTF_8);
         VertexResponse response;
         try {
-            response = sendOnce(endpoint, host, accessToken, body, deadline);
+            response = sendOnce(endpoint, host, accessToken, body, deadline, beforeSend);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (RestClientException exception) {
@@ -105,6 +114,18 @@ public class VertexClient {
             AiRequestDeadline deadline,
             VertexSseAccumulator accumulator,
             AiProviderStreamObserver observer) {
+        return stream(endpoint, accessToken, requestBodyJson, deadline, accumulator, observer, () -> {});
+    }
+
+    /** Streams a model response after the durable pre-send callback succeeds. */
+    public AiCompletionResult stream(
+            URI endpoint,
+            String accessToken,
+            String requestBodyJson,
+            AiRequestDeadline deadline,
+            VertexSseAccumulator accumulator,
+            AiProviderStreamObserver observer,
+            Runnable beforeSend) {
         String host = requireVertexEndpoint(endpoint);
         requireHeaderValue(accessToken);
         requireText(requestBodyJson, "request body");
@@ -130,7 +151,8 @@ public class VertexClient {
                                         input, accumulator::accept,
                                         accumulator::onTransportActivity);
                                 return accumulator.finish();
-                            });
+                            },
+                            beforeSend);
             if (response.statusCode() < 200 || response.statusCode() > 299) {
                 throw new AiProviderException(
                         "Vertex invocation failed with status " + response.statusCode());
@@ -143,6 +165,7 @@ public class VertexClient {
                 .accept(MediaType.TEXT_EVENT_STREAM)
                 .header("Authorization", "Bearer " + accessToken);
         AiEgressGuard.requireFetchableHost(host, false);
+        beforeSend.run();
         return spec.body(body).exchange((request, response) -> {
             if (response.getStatusCode().isError()) {
                 throw new AiProviderException(
@@ -161,7 +184,8 @@ public class VertexClient {
             String host,
             String accessToken,
             byte[] body,
-            AiRequestDeadline deadline) {
+            AiRequestDeadline deadline,
+            Runnable beforeSend) {
         if (providerClient != null) {
             FixedAiProviderClient.Response response = providerClient.post(
                     endpoint,
@@ -173,7 +197,8 @@ public class VertexClient {
                     ContentType.APPLICATION_JSON,
                     body,
                     deadline,
-                    "Vertex invocation");
+                    "Vertex invocation",
+                    beforeSend);
             return new VertexResponse(response.statusCode(), response.body());
         }
         RestClient.RequestBodySpec spec = restClient.post()
@@ -182,6 +207,7 @@ public class VertexClient {
                 .accept(MediaType.APPLICATION_JSON)
                 .header("Authorization", "Bearer " + accessToken);
         AiEgressGuard.requireFetchableHost(host, false);
+        beforeSend.run();
         return spec.body(body)
                 .exchange((request, response) -> new VertexResponse(response.getStatusCode().value(),
                         readBounded(response.getBody())));

@@ -292,7 +292,7 @@ class OpenAiCompatibleAdapterTest {
     void onlyANativeReasoningRequestAsksForThoughts() throws Exception {
         when(openAiCompatibleClient.complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
-                any(AiRequestDeadline.class)))
+                any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn(validResponse());
         adapter.complete(withReasoningMode(schemaRequest(), AiReasoningMode.NATIVE));
         adapter.complete(withReasoningMode(schemaRequest(), AiReasoningMode.NONE));
@@ -300,7 +300,7 @@ class OpenAiCompatibleAdapterTest {
         ArgumentCaptor<String> bodies = ArgumentCaptor.forClass(String.class);
         verify(openAiCompatibleClient, org.mockito.Mockito.times(2)).complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), bodies.capture(),
-                any(AiRequestDeadline.class));
+                any(AiRequestDeadline.class), any(Runnable.class));
         assertTrue(objectMapper.readTree(bodies.getAllValues().get(0))
                 .path("extra_body").path("google").path("thinking_config")
                 .path("include_thoughts").asBoolean(false));
@@ -315,7 +315,7 @@ class OpenAiCompatibleAdapterTest {
     void aThoughtSummaryLeavesTheAnswerBeforeAnyChannelReadsIt() throws Exception {
         when(openAiCompatibleClient.complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
-                any(AiRequestDeadline.class)))
+                any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn("""
                         {
                           "choices": [{
@@ -343,7 +343,7 @@ class OpenAiCompatibleAdapterTest {
     void aToolCallTurnWhoseContentIsOnlyThoughtLeavesNarrationEmpty() throws Exception {
         when(openAiCompatibleClient.complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
-                any(AiRequestDeadline.class)))
+                any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn("""
                         {
                           "choices": [{
@@ -376,7 +376,7 @@ class OpenAiCompatibleAdapterTest {
     void anUnclosedThoughtYieldsNoAnswerRatherThanLeakingIt() throws Exception {
         when(openAiCompatibleClient.complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
-                any(AiRequestDeadline.class)))
+                any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn("""
                         {
                           "choices": [{
@@ -407,7 +407,7 @@ class OpenAiCompatibleAdapterTest {
     void aFlaggedMessageWithoutTagsIsStillKeptOutOfTheAnswer() throws Exception {
         when(openAiCompatibleClient.complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
-                any(AiRequestDeadline.class)))
+                any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn("""
                         {
                           "choices": [{
@@ -448,7 +448,7 @@ class OpenAiCompatibleAdapterTest {
     void aStreamedNativeReasoningRequestAlsoAsksForThoughts() throws Exception {
         when(openAiCompatibleClient.stream(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
-                any(AiRequestDeadline.class), any(OpenAiSseAccumulator.class)))
+                any(AiRequestDeadline.class), any(OpenAiSseAccumulator.class), any(Runnable.class)))
                 .thenReturn(new AiCompletionResult("Done", 4, 1, "stop"));
 
         adapter.completeStreaming(
@@ -457,7 +457,7 @@ class OpenAiCompatibleAdapterTest {
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
         verify(openAiCompatibleClient).stream(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), body.capture(),
-                any(AiRequestDeadline.class), any(OpenAiSseAccumulator.class));
+                any(AiRequestDeadline.class), any(OpenAiSseAccumulator.class), any(Runnable.class));
         assertTrue(objectMapper.readTree(body.getValue())
                 .path("extra_body").path("google").path("thinking_config")
                 .path("include_thoughts").asBoolean(false));
@@ -499,7 +499,7 @@ class OpenAiCompatibleAdapterTest {
             throws Exception {
         when(openAiCompatibleClient.complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
-                any(AiRequestDeadline.class)))
+                any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn(validResponse());
         AiProviderTarget llama = target(
                 "https://api.example.test/v1", false, "llama3.3:70b");
@@ -515,7 +515,7 @@ class OpenAiCompatibleAdapterTest {
 
     @Test
     void complete_joinsBasePathsAndPreservesExplicitPort() {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn(validResponse());
 
         for (String base : List.of(
@@ -528,7 +528,7 @@ class OpenAiCompatibleAdapterTest {
 
         ArgumentCaptor<URI> endpoints = ArgumentCaptor.forClass(URI.class);
         verify(openAiCompatibleClient, times(4)).complete(
-                endpoints.capture(), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class));
+                endpoints.capture(), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class), any(Runnable.class));
         assertEquals(List.of(
                 URI.create("https://api.example.test/v1/chat/completions"),
                 URI.create("https://api.example.test/v1/chat/completions"),
@@ -539,7 +539,7 @@ class OpenAiCompatibleAdapterTest {
 
     @Test
     void complete_buildsChatCompletionBodyAndParsesResponse() throws Exception {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn("""
                         {
                           "choices": [{
@@ -555,7 +555,7 @@ class OpenAiCompatibleAdapterTest {
 
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(openAiCompatibleClient).complete(any(URI.class), anyBoolean(),
-                any(AiCredentials.class), bodyCaptor.capture(), any(AiRequestDeadline.class));
+                any(AiCredentials.class), bodyCaptor.capture(), any(AiRequestDeadline.class), any(Runnable.class));
         assertEquals(
                 "{\"model\":\"llama3.3:70b\",\"messages\":["
                         + "{\"role\":\"system\",\"content\":\"Use short answers\"},"
@@ -589,7 +589,7 @@ class OpenAiCompatibleAdapterTest {
     void completeStreamingAddsSseFlagsToExistingStructuredRequest() throws Exception {
         when(openAiCompatibleClient.stream(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
-                any(AiRequestDeadline.class), any(OpenAiSseAccumulator.class)))
+                any(AiRequestDeadline.class), any(OpenAiSseAccumulator.class), any(Runnable.class)))
                 .thenReturn(new AiCompletionResult("Done", 4, 1, "stop"));
 
         AiCompletionResult result = adapter.completeStreaming(schemaRequest(), text -> {});
@@ -598,7 +598,7 @@ class OpenAiCompatibleAdapterTest {
         verify(openAiCompatibleClient).stream(
                 eq(URI.create("https://api.example.test/v1/chat/completions")), eq(false),
                 eq(credentials()), bodyCaptor.capture(), any(AiRequestDeadline.class),
-                any(OpenAiSseAccumulator.class));
+                any(OpenAiSseAccumulator.class), any(Runnable.class));
         JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
         assertTrue(body.path("stream").asBoolean());
         assertTrue(body.path("stream_options").path("include_usage").asBoolean());
@@ -613,7 +613,7 @@ class OpenAiCompatibleAdapterTest {
         String thirdSignature = "response token two \u65e5\u672c\u8a9e";
         when(openAiCompatibleClient.complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
-                any(AiRequestDeadline.class)))
+                any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn("""
                         {
                           "choices": [{
@@ -694,7 +694,7 @@ class OpenAiCompatibleAdapterTest {
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(openAiCompatibleClient).complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), bodyCaptor.capture(),
-                any(AiRequestDeadline.class));
+                any(AiRequestDeadline.class), any(Runnable.class));
         JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
         JsonNode tool = body.path("tools").path(0).path("function");
         assertEquals("get_record", tool.path("name").asString());
@@ -736,7 +736,7 @@ class OpenAiCompatibleAdapterTest {
      */
     @Test
     void complete_finalOnlyNativeRequestSendsToolChoiceNone() throws Exception {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn("""
                         {
                           "choices": [{
@@ -776,7 +776,7 @@ class OpenAiCompatibleAdapterTest {
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(openAiCompatibleClient).complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), bodyCaptor.capture(),
-                any(AiRequestDeadline.class));
+                any(AiRequestDeadline.class), any(Runnable.class));
         JsonNode body = objectMapper.readTree(bodyCaptor.getValue());
         assertEquals("none", body.path("tool_choice").asString());
         assertEquals("get_record",
@@ -787,7 +787,7 @@ class OpenAiCompatibleAdapterTest {
     void complete_leavesAbsentThoughtSignatureNull() throws Exception {
         when(openAiCompatibleClient.complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
-                any(AiRequestDeadline.class)))
+                any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn("""
                         {
                           "choices": [{
@@ -815,7 +815,7 @@ class OpenAiCompatibleAdapterTest {
     @Test
     void complete_sendsStrictJsonSchemaAndDegradesOnARejectedCapability() throws Exception {
         when(openAiCompatibleClient.complete(
-                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
+                any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenThrow(new AiProviderRequestRejectedException("OpenAI-compatible", 400))
                 .thenThrow(new AiProviderRequestRejectedException("OpenAI-compatible", 422))
                 .thenReturn(validResponse());
@@ -825,7 +825,7 @@ class OpenAiCompatibleAdapterTest {
         ArgumentCaptor<String> bodies = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<AiRequestDeadline> deadlines = ArgumentCaptor.forClass(AiRequestDeadline.class);
         verify(openAiCompatibleClient, times(3)).complete(
-                any(URI.class), anyBoolean(), any(AiCredentials.class), bodies.capture(), deadlines.capture());
+                any(URI.class), anyBoolean(), any(AiCredentials.class), bodies.capture(), deadlines.capture(), any(Runnable.class));
         JsonNode schemaBody = objectMapper.readTree(bodies.getAllValues().get(0));
         assertEquals("json_schema", schemaBody.path("response_format").path("type").asString());
         assertEquals("assistant_step",
@@ -848,7 +848,7 @@ class OpenAiCompatibleAdapterTest {
     void complete_nativeStructuredFallbackKeepsToolsAndOneDeadline() throws Exception {
         when(openAiCompatibleClient.complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
-                any(AiRequestDeadline.class)))
+                any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenThrow(new AiProviderRequestRejectedException("OpenAI-compatible", 400))
                 .thenReturn(validResponse());
         AiCompletionRequest base = schemaRequest();
@@ -882,7 +882,7 @@ class OpenAiCompatibleAdapterTest {
                 ArgumentCaptor.forClass(AiRequestDeadline.class);
         verify(openAiCompatibleClient, times(2)).complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), bodies.capture(),
-                deadlines.capture());
+                deadlines.capture(), any(Runnable.class));
         JsonNode strict = objectMapper.readTree(bodies.getAllValues().getFirst());
         JsonNode fallback = objectMapper.readTree(bodies.getAllValues().getLast());
         assertEquals("json_schema", strict.path("response_format").path("type").asString());
@@ -899,7 +899,7 @@ class OpenAiCompatibleAdapterTest {
     void complete_taggedReasoningHonestlyUsesPromptOnlyStructuredEnforcement() throws Exception {
         when(openAiCompatibleClient.complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(),
-                any(AiRequestDeadline.class)))
+                any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn(validResponse());
         AiCompletionRequest base = schemaRequest();
         AiCompletionRequest request = new AiCompletionRequest(
@@ -920,7 +920,7 @@ class OpenAiCompatibleAdapterTest {
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
         verify(openAiCompatibleClient).complete(
                 any(URI.class), anyBoolean(), any(AiCredentials.class), body.capture(),
-                any(AiRequestDeadline.class));
+                any(AiRequestDeadline.class), any(Runnable.class));
         assertFalse(objectMapper.readTree(body.getValue()).has("response_format"));
         assertEquals(AiStructuredOutputEnforcement.PROMPT_ONLY,
                 result.structuredOutputEnforcement());
@@ -973,7 +973,7 @@ class OpenAiCompatibleAdapterTest {
 
     @Test
     void completeEmbedsImageBytesInTheFirstUserTurn() throws Exception {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn(validResponse());
         AiCompletionRequest request = new AiCompletionRequest(
                 target("https://api.example.test/v1", false, "openai/gpt-5.2"),
@@ -989,7 +989,7 @@ class OpenAiCompatibleAdapterTest {
 
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(openAiCompatibleClient).complete(any(URI.class), anyBoolean(),
-                any(AiCredentials.class), bodyCaptor.capture(), any(AiRequestDeadline.class));
+                any(AiCredentials.class), bodyCaptor.capture(), any(AiRequestDeadline.class), any(Runnable.class));
         JsonNode content = objectMapper.readTree(bodyCaptor.getValue())
                 .path("messages").path(1).path("content");
         assertEquals("text", content.path(0).path("type").asString());
@@ -1006,7 +1006,7 @@ class OpenAiCompatibleAdapterTest {
 
     @Test
     void complete_missingUsageReturnsZeroTokenCounts() {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn("""
                         {
                           "choices": [{
@@ -1032,13 +1032,13 @@ class OpenAiCompatibleAdapterTest {
         assertThrows(AiProviderException.class, () -> adapter.complete(denied));
         verifyNoInteractions(openAiCompatibleClient);
 
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn(validResponse());
         adapter.complete(request("http://localhost:11434/v1", true, null, emptyCredentials()));
 
         verify(openAiCompatibleClient).complete(
                 eq(URI.create("http://localhost:11434/v1/chat/completions")), eq(true),
-                eq(emptyCredentials()), anyString(), any(AiRequestDeadline.class));
+                eq(emptyCredentials()), anyString(), any(AiRequestDeadline.class), any(Runnable.class));
     }
 
     @Test
@@ -1063,7 +1063,7 @@ class OpenAiCompatibleAdapterTest {
                 "{\"choices\":[{\"message\":{\"content\":3},\"finish_reason\":\"stop\"}]}",
                 "{\"choices\":[{\"message\":{\"content\":\"SENSITIVE_RESPONSE_BODY\"}}]}")) {
             when(openAiCompatibleClient.complete(
-                    any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
+                    any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class), any(Runnable.class)))
                     .thenReturn(responseBody);
 
             AiProviderException exception = assertThrows(AiProviderException.class,
@@ -1078,7 +1078,7 @@ class OpenAiCompatibleAdapterTest {
 
     @Test
     void complete_arbitraryFinishReasonIsNormalizedToOther() {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn("{\"choices\":[{\"message\":{\"content\":\"Local result\"},"
                         + "\"finish_reason\":\"sk-live-leaked-credential\"}],"
                         + "\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}");
@@ -1092,7 +1092,7 @@ class OpenAiCompatibleAdapterTest {
 
     @Test
     void complete_partialOrNegativeUsageDefaultsTokensToZero() {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn("{\"choices\":[{\"message\":{\"content\":\"Local result\"},"
                         + "\"finish_reason\":\"stop\"}],\"usage\":{\"total_tokens\":9,\"prompt_tokens\":-1}}");
 
@@ -1106,7 +1106,7 @@ class OpenAiCompatibleAdapterTest {
 
     @Test
     void complete_neverExposesApiKeyPromptOrResponseInExceptionsOrToString() {
-        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class)))
+        when(openAiCompatibleClient.complete(any(URI.class), anyBoolean(), any(AiCredentials.class), anyString(), any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenThrow(new IllegalStateException(API_KEY + PROMPT + "SENSITIVE_RESPONSE_BODY"));
         AiCompletionRequest request = new AiCompletionRequest(
                 target("https://api.example.test/v1", false),

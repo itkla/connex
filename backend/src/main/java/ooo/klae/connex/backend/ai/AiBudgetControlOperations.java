@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -35,7 +36,7 @@ public class AiBudgetControlOperations {
     private final AuditService auditService;
 
     /** Reserves a conservative provider-call token ceiling or returns an unmetered marker. */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Reservation reserve(
             int orgId,
             LocalDate usageDay,
@@ -47,7 +48,6 @@ public class AiBudgetControlOperations {
         if (budget == null || budget.getDailyTokenLimit() == 0) {
             return Reservation.unmetered(orgId, usageDay);
         }
-        budgetMapper.deleteExpiredReservations(now);
         budgetMapper.ensureUsage(orgId, usageDay);
         AiOrganizationBudgetUsage usage = budgetMapper.getUsageForUpdate(orgId, usageDay);
         if (usage == null) {
@@ -69,32 +69,99 @@ public class AiBudgetControlOperations {
         return new Reservation(reservationId, orgId, usageDay, requestedTokens, true);
     }
 
-    /** Consumes actual provider tokens and removes the matching reservation exactly once. */
-    @Transactional
-    public void settle(String reservationId, long consumedTokens) {
-        AiOrganizationBudgetReservation reservation =
-                budgetMapper.getReservationForUpdate(reservationId);
-        if (reservation == null) {
+    /** Commits dispatch before model egress, refusing expired or already settled leases. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markDispatched(String reservationId, LocalDateTime now) {
+        AiOrganizationBudgetReservation reservation = lockReservation(reservationId);
+        if (reservation == null || "settled".equals(reservation.getState())
+                || !reservation.getExpiresAt().isAfter(now)) {
+            throw new IllegalStateException("Provider dispatch requires a live budget reservation");
+        }
+        if ("dispatched".equals(reservation.getState())) {
             return;
         }
-        budgetMapper.ensureUsage(reservation.getOrgId(), reservation.getUsageDay());
+        if (!"reserved".equals(reservation.getState())
+                || budgetMapper.markReservationDispatched(reservationId) != 1) {
+            throw new IllegalStateException("Organization AI budget dispatch was not recorded");
+        }
+    }
+
+    /** Atomically consumes provider tokens and retains an exactly-once settlement record. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void settle(String reservationId, long consumedTokens) {
+        if (consumedTokens < 0) {
+            throw new IllegalArgumentException("Organization AI usage must not be negative");
+        }
+        AiOrganizationBudgetReservation reservation = lockReservation(reservationId);
+        if (reservation == null || "settled".equals(reservation.getState())) {
+            return;
+        }
+        consume(reservation, consumedTokens);
+    }
+
+    /** Releases only durably pre-dispatch work, including after an ambiguous dispatch commit. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void release(String reservationId) {
+        AiOrganizationBudgetReservation reservation = lockReservation(reservationId);
+        if (reservation == null || "settled".equals(reservation.getState())) {
+            return;
+        }
+        releaseOrConsume(reservation);
+    }
+
+    /** Discovers a bounded expiry batch without taking cross-organization range locks. */
+    @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+    public List<String> expiredReservationIds(LocalDateTime now) {
+        return budgetMapper.listExpiredReservationIds(now);
+    }
+
+    /** Rechecks one expired lease under budget, usage, then reservation locks. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void expireReservation(String reservationId, LocalDateTime now) {
+        AiOrganizationBudgetReservation reservation = lockReservation(reservationId);
+        if (reservation == null || "settled".equals(reservation.getState())
+                || reservation.getExpiresAt().isAfter(now)) {
+            return;
+        }
+        releaseOrConsume(reservation);
+    }
+
+    private AiOrganizationBudgetReservation lockReservation(String reservationId) {
+        AiOrganizationBudgetReservation discovered = budgetMapper.getReservation(reservationId);
+        if (discovered == null) {
+            return null;
+        }
+        if (budgetMapper.getForUpdate(discovered.getOrgId()) == null) {
+            throw new IllegalStateException("Organization AI budget row is unavailable");
+        }
+        budgetMapper.ensureUsage(discovered.getOrgId(), discovered.getUsageDay());
+        if (budgetMapper.getUsageForUpdate(discovered.getOrgId(), discovered.getUsageDay()) == null) {
+            throw new IllegalStateException("Organization AI budget usage row is unavailable");
+        }
+        return budgetMapper.getReservationForUpdate(reservationId);
+    }
+
+    private void releaseOrConsume(AiOrganizationBudgetReservation reservation) {
+        if ("reserved".equals(reservation.getState())) {
+            budgetMapper.deleteReservation(reservation.getReservationId());
+        } else {
+            consume(reservation, reservation.getReservedTokens());
+        }
+    }
+
+    private void consume(AiOrganizationBudgetReservation reservation, long consumedTokens) {
         if (consumedTokens > 0 && budgetMapper.addConsumedTokens(
                 reservation.getOrgId(), reservation.getUsageDay(), consumedTokens) != 1) {
             throw new IllegalStateException("Organization AI budget usage was not updated");
         }
-        budgetMapper.deleteReservation(reservationId);
-    }
-
-    /** Releases a provider-call reservation that never produced billable token counts. */
-    @Transactional
-    public void release(String reservationId) {
-        budgetMapper.deleteReservation(reservationId);
+        if (budgetMapper.markReservationSettled(reservation.getReservationId(), consumedTokens) != 1) {
+            throw new IllegalStateException("Organization AI budget settlement was not recorded");
+        }
     }
 
     /** Returns the current limit, ledger state, and audit-derived daily usage. */
     @Transactional
     public Snapshot snapshot(int orgId, LocalDate usageDay, LocalDateTime now) {
-        budgetMapper.deleteExpiredReservations(now);
         AiOrganizationBudget budget = budgetMapper.get(orgId);
         long limit = budget == null ? 0 : budget.getDailyTokenLimit();
         long consumed = budgetMapper.getConsumedTokens(orgId, usageDay);

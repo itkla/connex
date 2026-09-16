@@ -97,6 +97,19 @@ public class FixedAiProviderClient {
             byte[] body,
             AiRequestDeadline deadline,
             String operation) {
+        return post(endpoint, allowedHosts, headers, contentType, body, deadline, operation, () -> {});
+    }
+
+    /** Sends only after destination validation and durable pre-send accounting succeed. */
+    public Response post(
+            URI endpoint,
+            Set<String> allowedHosts,
+            Map<String, String> headers,
+            ContentType contentType,
+            byte[] body,
+            AiRequestDeadline deadline,
+            String operation,
+            Runnable beforeSend) {
         String host = requireEndpoint(endpoint, allowedHosts, operation);
         Objects.requireNonNull(headers, "headers");
         Objects.requireNonNull(contentType, "contentType");
@@ -106,7 +119,7 @@ public class FixedAiProviderClient {
         InetAddress address = resolve(host, deadline, operation);
         try (PinnedClient pinned = pinnedClient(
                 host, address, remainingDuration(deadline, operation), requestTimeout)) {
-            return send(pinned, endpoint, headers, contentType, body, deadline, operation);
+            return send(pinned, endpoint, headers, contentType, body, deadline, operation, beforeSend);
         }
     }
 
@@ -121,6 +134,22 @@ public class FixedAiProviderClient {
             String operation,
             AiProviderStreamObserver streamObserver,
             StreamBodyReader<T> bodyReader) {
+        return postStream(endpoint, allowedHosts, headers, contentType, body, deadline,
+                operation, streamObserver, bodyReader, () -> {});
+    }
+
+    /** Streams only after destination validation and durable pre-send accounting succeed. */
+    public <T> StreamResponse<T> postStream(
+            URI endpoint,
+            Set<String> allowedHosts,
+            Map<String, String> headers,
+            ContentType contentType,
+            byte[] body,
+            AiRequestDeadline deadline,
+            String operation,
+            AiProviderStreamObserver streamObserver,
+            StreamBodyReader<T> bodyReader,
+            Runnable beforeSend) {
         String host = requireEndpoint(endpoint, allowedHosts, operation);
         Objects.requireNonNull(headers, "headers");
         Objects.requireNonNull(contentType, "contentType");
@@ -134,7 +163,7 @@ public class FixedAiProviderClient {
                 host, address, remainingDuration(deadline, operation), streamIdleTimeout)) {
             return sendStream(
                     pinned, endpoint, headers, contentType, body, deadline, operation,
-                    streamObserver, bodyReader);
+                    streamObserver, bodyReader, beforeSend);
         }
     }
 
@@ -151,7 +180,8 @@ public class FixedAiProviderClient {
             ContentType contentType,
             byte[] body,
             AiRequestDeadline deadline,
-            String operation) {
+            String operation,
+            Runnable beforeSend) {
         HttpPost request = new HttpPost(endpoint);
         headers.forEach(request::setHeader);
         request.setEntity(new ByteArrayEntity(body, contentType));
@@ -168,6 +198,10 @@ public class FixedAiProviderClient {
             pinned.httpClient().close(CloseMode.IMMEDIATE);
         }, remainingNanos(deadline, operation), TimeUnit.NANOSECONDS);
         try {
+            if (request.isCancelled() || deadline.isExpired() || Thread.currentThread().isInterrupted()) {
+                throw deadlineExceeded(operation);
+            }
+            beforeSend.run();
             Response response = pinned.httpClient().execute(request, providerResponse -> {
                 HttpEntity entity = providerResponse.getEntity();
                 byte[] responseBody = entity == null
@@ -205,7 +239,8 @@ public class FixedAiProviderClient {
             AiRequestDeadline deadline,
             String operation,
             AiProviderStreamObserver streamObserver,
-            StreamBodyReader<T> bodyReader) {
+            StreamBodyReader<T> bodyReader,
+            Runnable beforeSend) {
         HttpPost request = new HttpPost(endpoint);
         headers.forEach(request::setHeader);
         request.setEntity(new ByteArrayEntity(body, contentType));
@@ -226,6 +261,10 @@ public class FixedAiProviderClient {
                 request.cancel();
                 pinned.httpClient().close(CloseMode.IMMEDIATE);
             });
+            if (request.isCancelled() || deadline.isExpired() || Thread.currentThread().isInterrupted()) {
+                throw deadlineExceeded(operation);
+            }
+            beforeSend.run();
             StreamResponse<T> response = pinned.httpClient().execute(request, providerResponse -> {
                 HttpEntity entity = providerResponse.getEntity();
                 int status = providerResponse.getCode();
