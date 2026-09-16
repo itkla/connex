@@ -64,6 +64,7 @@ import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProperties;
+import ooo.klae.connex.backend.connectedaccounts.ConnectedCaptureProperties;
 import ooo.klae.connex.backend.connectedaccounts.ProviderConnectionService;
 import ooo.klae.connex.backend.connectedaccounts.ProviderTokenClient;
 import ooo.klae.connex.backend.connectedaccounts.ProviderTokenResponse;
@@ -83,6 +84,7 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
 
     @Autowired ProviderConnectionService connectionService;
     @Autowired ConnectedAccountProperties properties;
+    @Autowired ConnectedCaptureProperties captureProperties;
     @Autowired UserProviderSecretCipher secretCipher;
     @Autowired ProviderConnectionMapper providerConnectionMapper;
     @Autowired OrganizationMapper organizationMapper;
@@ -100,6 +102,7 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
     private Organization organization;
     private String sessionId;
     private MockMvc mockMvc;
+    private int originalSchedulerBatchSize;
 
     @Override
     @BeforeEach
@@ -162,6 +165,22 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
         if (organization != null) {
             jdbcTemplate.update("DELETE FROM organization WHERE id = ?", organization.getId());
         }
+    }
+
+    /**
+     * Sweeps every workspace in one purge page. The reset advances one bounded page per call and
+     * leaves the rest to the retry scheduler, so a default-sized page would strand the tombstone
+     * whenever other suites have left more workspaces than that page holds in the shared schema.
+     */
+    @BeforeEach
+    void sweepEveryWorkspaceInOnePurgePage() {
+        originalSchedulerBatchSize = captureProperties.getSchedulerBatchSize();
+        captureProperties.setSchedulerBatchSize(Integer.MAX_VALUE);
+    }
+
+    @AfterEach
+    void restoreSchedulerBatchSize() {
+        captureProperties.setSchedulerBatchSize(originalSchedulerBatchSize);
     }
 
     private static String fakeIdToken(String email, String accountId) {

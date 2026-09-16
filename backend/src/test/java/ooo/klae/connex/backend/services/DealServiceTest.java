@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -1368,6 +1369,47 @@ class DealServiceTest extends AbstractServiceTest {
         assertEquals(open.getId(), reopenChanges.path("stageId").path("new").asInt());
         assertTrue(reopenChanges.has("won"));
         assertTrue(reopenChanges.path("won").path("old").asBoolean());
+    }
+
+    @Test
+    void reopen_cannotRestoreACurrencyFromAStaleSnapshot() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, open, newCompany());
+        dealService.close(deal.getId(), Boolean.FALSE, null, null);
+        Deal stale = dealMapper.getDealById(workspace.getId(), deal.getId());
+        jdbcTemplate.update(
+            "UPDATE deal SET currency = 'USD' WHERE workspace_id = ? AND id = ?",
+            workspace.getId(), deal.getId());
+        doReturn(stale).when(dealMapperSpy).getDealById(workspace.getId(), deal.getId());
+        clearInvocations(dealMapperSpy);
+
+        dealService.reopen(deal.getId());
+
+        verify(dealMapperSpy, never()).update(any());
+        assertEquals("USD", jdbcTemplate.queryForObject(
+            "SELECT currency FROM deal WHERE workspace_id = ? AND id = ?",
+            String.class, workspace.getId(), deal.getId()));
+    }
+
+    @Test
+    void reopen_refusesLineTotalsDenominatedInAnotherCurrency() {
+        Pipeline pipeline = newPipeline();
+        Stage open = newStage(pipeline, 0);
+        Deal deal = newDeal(pipeline, open, newCompany());
+        DealLineItemRequest line = new DealLineItemRequest();
+        line.setName("Service " + unique());
+        line.setUnitPrice(new BigDecimal("100000.00"));
+        line.setQuantity(BigDecimal.ONE);
+        dealLineItemService.create(deal.getId(), line);
+        dealService.close(deal.getId(), Boolean.FALSE, null, null);
+        jdbcTemplate.update(
+            "UPDATE deal_line_item SET currency = 'USD' WHERE workspace_id = ? AND deal_id = ?",
+            workspace.getId(), deal.getId());
+
+        assertThrows(ConflictException.class, () -> dealService.reopen(deal.getId()));
+        assertEquals(Boolean.FALSE,
+            dealMapper.getDealById(workspace.getId(), deal.getId()).getWon());
     }
 
     @Test

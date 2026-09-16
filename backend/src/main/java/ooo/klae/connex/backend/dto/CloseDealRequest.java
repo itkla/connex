@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.dto;
 
 import java.math.BigDecimal;
 
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Size;
@@ -25,5 +26,6 @@ public class CloseDealRequest {
 
     @DecimalMin("0.00")
     @Digits(integer = 13, fraction = 2)
+    @DecimalMax("9999999999999.99")
     private BigDecimal actualValue;
 }
