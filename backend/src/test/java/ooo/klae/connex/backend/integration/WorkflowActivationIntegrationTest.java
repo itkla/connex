@@ -579,6 +579,84 @@ class WorkflowActivationIntegrationTest {
             workspace.getId(), "person", "person.owner_changed", 3).size());
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void legacyRuleUpdateSkipsAdmissionWhenDisablingAndWaitsWhenEnabling(boolean enabled)
+            throws Exception {
+        String body = ruleBody(!enabled, "person.owner_changed", "notify");
+        int ruleId = createRule(author, body);
+        int workflowId = workflowMapper.getByLegacyRuleId(workspace.getId(), ruleId).getId();
+        createRule(manager, ruleBody(true, "person.owner_changed", "notify"));
+        int activationRule = createRule(manager, ruleBody(false, "person.owner_changed", "notify"));
+        int activationWorkflow = workflowMapper.getByLegacyRuleId(
+            workspace.getId(), activationRule).getId();
+        String updateBody = body.replace("\"enabled\":" + !enabled, "\"enabled\":" + enabled);
+        CountDownLatch activationHoldsMutex = new CountDownLatch(1);
+        CountDownLatch releaseActivation = new CountDownLatch(1);
+        CountDownLatch legacyRequestsMutex = new CountDownLatch(1);
+        CountDownLatch legacyHoldsMutex = new CountDownLatch(1);
+        CountDownLatch legacyCompleted = new CountDownLatch(1);
+        WorkflowMapper realWorkflowMapper = sqlSessionTemplate.getMapper(WorkflowMapper.class);
+        doAnswer(invocation -> {
+            String current = contender.get();
+            if ("legacy".equals(current)) {
+                legacyRequestsMutex.countDown();
+            }
+            realWorkflowMapper.acquireTriggerAdmissionMutex(invocation.getArgument(0));
+            if ("activation".equals(current)) {
+                activationHoldsMutex.countDown();
+                await(releaseActivation);
+            } else if ("legacy".equals(current)) {
+                legacyHoldsMutex.countDown();
+            }
+            return null;
+        }).when(workflowMapper).acquireTriggerAdmissionMutex(workspace.getId());
+
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var activation = executor.submit(() -> enableAs("activation", manager, activationWorkflow));
+            assertTrue(activationHoldsMutex.await(30, TimeUnit.SECONDS),
+                "Activation must hold the real admission upsert before the legacy update starts");
+            var update = executor.submit(() -> {
+                contender.set("legacy");
+                try {
+                    return perform(author, put("/api/rules/{id}", ruleId).content(updateBody))
+                        .andReturn().getResponse().getStatus();
+                } finally {
+                    legacyCompleted.countDown();
+                    contender.remove();
+                    RequestContextHolder.resetRequestAttributes();
+                }
+            });
+            if (enabled) {
+                assertTrue(legacyRequestsMutex.await(30, TimeUnit.SECONDS),
+                    "Legacy enable must request admission before checking capacity");
+                assertFalse(legacyHoldsMutex.await(5, TimeUnit.SECONDS),
+                    "Legacy enable must wait for the activation's admission transaction to commit");
+            } else {
+                assertTrue(legacyCompleted.await(10, TimeUnit.SECONDS),
+                    "Legacy disable must commit while the unrelated activation still holds admission");
+                assertEquals(200, update.get(30, TimeUnit.SECONDS));
+                assertEquals(1, legacyRequestsMutex.getCount(),
+                    "Legacy disable must not request the admission mutex");
+                assertFalse(ruleMapper.getById(workspace.getId(), ruleId).isEnabled());
+                assertFalse(workflowMapper.getById(workspace.getId(), workflowId).isEnabled());
+            }
+            releaseActivation.countDown();
+            assertEquals(200, activation.get(30, TimeUnit.SECONDS));
+            assertEquals(enabled ? 409 : 200, update.get(30, TimeUnit.SECONDS));
+        } finally {
+            releaseActivation.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS));
+        }
+        assertFalse(ruleMapper.getById(workspace.getId(), ruleId).isEnabled());
+        assertFalse(workflowMapper.getById(workspace.getId(), workflowId).isEnabled());
+        assertTrue(workflowMapper.getById(workspace.getId(), activationWorkflow).isEnabled());
+        assertEquals(2, outboxMapper.findEntityTargets(
+            workspace.getId(), "person", "person.owner_changed", 3).size());
+    }
+
     /**
      * Parks installation after its first real role lock. With admission already held, enable must
      * wait at the upsert; otherwise it must hold admission and request the shared role before
