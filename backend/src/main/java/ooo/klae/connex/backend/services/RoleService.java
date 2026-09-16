@@ -48,8 +48,8 @@ public class RoleService {
         workspaceService.requirePermission(workspaceId, actorId, Permission.ROLE_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
         List<String> valid = validatePermissions(permissions);
-        workspaceService.lockRoleMutationAuthorization(
-            workspaceId, actorId, null, toEnumSet(valid));
+        workspaceService.lockRoleCreationAuthorization(
+            workspaceId, actorId, toEnumSet(valid));
         WorkspaceRole role = new WorkspaceRole();
         role.setWorkspaceId(workspaceId);
         role.setName(name.trim());

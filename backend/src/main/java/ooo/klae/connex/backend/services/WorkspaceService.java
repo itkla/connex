@@ -1329,10 +1329,21 @@ public class WorkspaceService {
         }
     }
 
+    /** Locks current role-management authority and the grant ceiling for an unassigned new role. */
+    void lockRoleCreationAuthorization(
+            int workspaceId,
+            int actorId,
+            Set<Permission> requestedPermissions) {
+        LockedRoleMutation locks = lockRoleMutation(
+            workspaceId, actorId, null, Permission.ROLE_MANAGE, null, null);
+        requireGrantable(locks.actorPermissions(), requestedPermissions);
+    }
+
+    /** Locks an existing role and enforces owner authority, retained recovery, and the grant ceiling. */
     void lockRoleMutationAuthorization(
             int workspaceId,
             int actorId,
-            Integer roleId,
+            int roleId,
             Set<Permission> requestedPermissions) {
         LockedRoleMutation locks = lockRoleMutation(
             workspaceId,
@@ -1341,12 +1352,10 @@ public class WorkspaceService {
             Permission.ROLE_MANAGE,
             roleId,
             "Role not found");
-        if (roleId != null) {
-            requireRoleOwnerAuthority(locks);
-            requireRetainedRecovery(
-                locks.ownerRecovery(),
-                locks.ownerRecovery().withRolePermissions(roleId, requestedPermissions));
-        }
+        requireRoleOwnerAuthority(locks);
+        requireRetainedRecovery(
+            locks.ownerRecovery(),
+            locks.ownerRecovery().withRolePermissions(roleId, requestedPermissions));
         requireGrantable(locks.actorPermissions(), requestedPermissions);
     }
 
