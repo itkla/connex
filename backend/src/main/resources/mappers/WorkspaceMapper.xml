@@ -117,6 +117,13 @@
     FOR UPDATE
   </select>
 
+  <select id="lockAuthorizationMembershipForShare" resultType="WorkspaceMember">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+    FOR SHARE
+  </select>
+
   <select id="getAuthorizationMembership" resultType="WorkspaceMember">
     SELECT wm.workspace_id, wm.user_id, wm.role, wm.role_id, wm.status, wm.created_at
     FROM workspace_member wm
