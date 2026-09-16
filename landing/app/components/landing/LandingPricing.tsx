@@ -74,7 +74,7 @@ export default function LandingPricing({ t, ctaHref, ctaLabel, preLaunch = false
                     </article>
                 ))}
             </div>
-            <p className="mt-8 max-w-[85ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.allFeatures")}</p>
+            <p className="mt-8 max-w-[75ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.allFeatures")}</p>
             <table className="mt-6 w-full table-fixed border-collapse text-sm">
                 <caption className="sr-only">{t("pricing.compare")}</caption>
                 <colgroup><col className="w-1/3 lg:w-1/4" /><col /><col /><col /></colgroup>
@@ -96,7 +96,7 @@ export default function LandingPricing({ t, ctaHref, ctaLabel, preLaunch = false
                     </tbody>
                 ))}
             </table>
-            <div id="pricing-notes" className="mt-8 max-w-[85ch] space-y-3 text-sm leading-relaxed text-muted-foreground">
+            <div id="pricing-notes" className="mt-8 max-w-[75ch] space-y-3 text-sm leading-relaxed text-muted-foreground">
                 <p>{t("pricing.poolingNote")}</p>
                 <p>{t("pricing.subscriptionNote")}</p>
                 <p>{t("pricing.aiNote")}{DOCS_AVAILABLE && <> <Link href="/docs/relationship-intelligence/ai-insights" className="text-foreground underline underline-offset-4">{t("pricing.aiDocs")}</Link></>}</p>
