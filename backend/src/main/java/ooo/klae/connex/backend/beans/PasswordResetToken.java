@@ -6,12 +6,15 @@ import lombok.NoArgsConstructor;
 /**
  * A single-use password reset token. Only the SHA-256 hash of the raw token is
  * persisted; the raw token is delivered to the user by email and is never stored.
+ * The credential generation is the owner's session epoch at issuance; a missing
+ * or changed generation makes the token unusable.
  */
 @Data
 @NoArgsConstructor
 public class PasswordResetToken {
     private int id;
     private int userId;
+    private Integer credentialGeneration;
     private String tokenHash;
     private String expiresAt;
     private String consumedAt;

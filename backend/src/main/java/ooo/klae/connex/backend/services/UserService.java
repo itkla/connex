@@ -13,10 +13,12 @@ import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.util.NotePageCursor;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.dto.UserReferenceDto;
+import ooo.klae.connex.backend.dto.NoteActivityDayDto;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
@@ -24,6 +26,8 @@ import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.connectedaccounts.ProviderAccountOffboardingService;
 
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -133,6 +137,8 @@ public class UserService implements UserDetailsService {
      * intentionally immutable here: because email is a trust anchor (email-bound
      * invites rely on it), it can only change through the verified, ownership-proving
      * flow in {@code EmailChangeService}, so any email in the request body is ignored.
+     * A fresh profile-only bean and credential-free update statement also prevent a stale
+     * profile read from overwriting a concurrently confirmed mailbox or password.
      *
      * @param id the user being updated (must be the caller)
      * @param user the submitted profile fields
@@ -142,15 +148,16 @@ public class UserService implements UserDetailsService {
     public User update(int id, User user) {
         workspaceService.requireSelf(id);
         User before = getUserById(id);
-        user.setId(id);
+        User profile = new User();
+        profile.setId(id);
+        profile.setUsername(user.getUsername());
+        profile.setDisplayName(user.getDisplayName());
         if (user.getTimezone() == null || user.getTimezone().isBlank()) {
-            user.setTimezone(before.getTimezone());
+            profile.setTimezone(before.getTimezone());
         } else {
-            user.setTimezone(TimezoneSupport.validateIana(user.getTimezone(), null));
+            profile.setTimezone(TimezoneSupport.validateIana(user.getTimezone(), null));
         }
-        user.setLocale(before.getLocale());
-        user.setProfilePictureUrl(before.getProfilePictureUrl());
-        userMapper.update(user);
+        userMapper.update(profile);
         User after = userMapper.getUserById(id);
         if (after == null) {
             throw new ResourceNotFoundException("User not found with id: " + id);
@@ -294,9 +301,35 @@ public class UserService implements UserDetailsService {
      * @return
      */
     public List<Note> getNotesByUserId(int userId) {
+        return getNotesByUserId(userId, 25, 0);
+    }
+
+    /** Returns a bounded page of visible authored notes with redacted previews. */
+    public List<Note> getNotesByUserId(int userId, int limit, int offset) {
+        return getNotesByUserId(userId, limit, offset, null);
+    }
+
+    public List<Note> getNotesByUserId(int userId, int limit, int offset, NotePageCursor before) {
         getUserById(userId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByAuthorId(workspaceId, userId, workspaceService.getCurrentUserId()));
+        return referenceService.hydrateNotePreviews(workspaceId, noteMapper.getVisibleNotesByAuthorId(
+            workspaceId, userId, workspaceService.getCurrentUserId(), limit, before == null ? offset : 0, before));
+    }
+
+    /** Counts all authored notes visible to the current workspace member. */
+    public long countNotesByUserId(int userId) {
+        getUserById(userId);
+        return noteMapper.countVisibleNotesByAuthorId(workspaceService.getCurrentWorkspaceId(),
+            userId, workspaceService.getCurrentUserId());
+    }
+
+    /** Aggregates every visible authored note into at most 84 UTC calendar-day counts. */
+    public List<NoteActivityDayDto> getNoteActivityByUserId(int userId) {
+        getUserById(userId);
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        return noteMapper.getVisibleNoteActivityByAuthorId(workspaceService.getCurrentWorkspaceId(),
+            userId, workspaceService.getCurrentUserId(), today.minusDays(83).atStartOfDay(),
+            today.plusDays(1).atStartOfDay());
     }
 
     public User updateCurrentProfilePicture(int userId, UploadSource source) {

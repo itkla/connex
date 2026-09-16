@@ -608,9 +608,9 @@ class IdentityInvitationTrustIntegrationTest {
             return realTokenMapper.insert(
                 invocation.getArgument(0, Integer.class), invocation.getArgument(1, String.class),
                 invocation.getArgument(2, String.class), invocation.getArgument(3, String.class),
-                invocation.getArgument(4, Integer.class));
+                invocation.getArgument(4, Integer.class), invocation.getArgument(5, Integer.class));
         }).when(emailChangeTokenMapper).insert(
-            eq(account.user().getId()), eq(replacementAddress), anyString(), anyString(), anyInt());
+            eq(account.user().getId()), eq(replacementAddress), anyString(), anyString(), anyInt(), anyInt());
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {

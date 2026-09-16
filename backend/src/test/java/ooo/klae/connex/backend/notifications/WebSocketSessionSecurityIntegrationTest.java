@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 
 import java.net.CookieManager;
 import java.net.CookiePolicy;
@@ -30,6 +32,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -49,9 +52,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.session.FindByIndexNameSessionRepository;
 import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import ooo.klae.connex.backend.beans.Organization;
+import ooo.klae.connex.backend.beans.PasswordResetToken;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.config.SessionSecurityProperties;
@@ -63,6 +68,7 @@ import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.PasswordResetEmailService;
 import ooo.klae.connex.backend.services.PasswordResetService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.session.AccountSessionIndex;
@@ -86,6 +92,7 @@ class WebSocketSessionSecurityIntegrationTest {
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private PasswordResetTokenMapper passwordResetTokenMapper;
     @Autowired private PasswordResetService passwordResetService;
+    @MockitoBean private PasswordResetEmailService passwordResetEmailService;
     @Autowired private SimpNotificationRealtimePublisher notificationPublisher;
     @Autowired private SimpAiChatRealtimePublisher aiChatPublisher;
     @Autowired private RealtimeRoutingIdentityResolver routingIdentities;
@@ -224,9 +231,16 @@ class WebSocketSessionSecurityIntegrationTest {
     void passwordResetClosesAReceiveOnlySocketBeforeFurtherDelivery() throws Exception {
         Browser browser = login(newAccount());
         SocketClient socket = connect(browser);
-        String rawToken = OneTimeTokenDigest.generate();
-        passwordResetTokenMapper.insert(browser.account().user().getId(),
-            OneTimeTokenDigest.sha256(rawToken), "198.51.100.61", 30);
+        passwordResetService.requestReset(browser.account().user().getEmail(), "198.51.100.61");
+        ArgumentCaptor<String> tokenCapture = ArgumentCaptor.forClass(String.class);
+        verify(passwordResetEmailService).sendResetEmail(any(User.class), tokenCapture.capture());
+        String rawToken = tokenCapture.getValue();
+        PasswordResetToken token = passwordResetTokenMapper.findRedeemableByHash(
+            OneTimeTokenDigest.sha256(rawToken));
+        assertNotNull(token);
+        assertEquals(browser.account().user().getId(), token.getUserId());
+        assertNotNull(token.getCredentialGeneration());
+        assertEquals(userMapper.currentSessionEpoch(token.getUserId()), token.getCredentialGeneration());
 
         passwordResetService.resetPassword(rawToken, "WebSocket-Replacement-Pw2!");
         publish(browser.account(), "after-password-reset", 42);

@@ -1265,6 +1265,8 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
             default -> List.of();
         };
         List<EffectSnapshot.NoteEffect> noteEffects = notes.stream()
+            .map(note -> java.util.Objects.requireNonNull(
+                noteMapper.getNoteById(workspace.getId(), note.getId())))
             .map(note -> new EffectSnapshot.NoteEffect(
                 note.getContent(),
                 normalizedPersonId(note.getPerson(), subject),

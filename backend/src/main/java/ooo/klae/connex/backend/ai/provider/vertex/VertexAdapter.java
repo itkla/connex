@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.AiProviderGateExceptions;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
@@ -132,7 +133,8 @@ public class VertexAdapter implements AiProvider {
                 String accessToken = googleAccessTokenClient.accessToken(
                         request.credentials(), deadline);
                 request.providerAttemptExecutor().checkpoint();
-                return vertexClient.complete(endpoint, accessToken, requestBody, deadline);
+                return vertexClient.complete(endpoint, accessToken, requestBody, deadline,
+                        request.providerAttemptExecutor()::beforeSend);
             });
             return switch (family) {
                 case GEMINI -> parseGeminiResponse(
@@ -143,6 +145,7 @@ public class VertexAdapter implements AiProvider {
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
+            AiProviderGateExceptions.rethrowIfGate(exception);
             throw new AiProviderException("Vertex adapter failed");
         }
     }
@@ -185,11 +188,13 @@ public class VertexAdapter implements AiProvider {
                         deadline,
                         new VertexSseAccumulator(
                                 objectMapper, observer, enforcement, request.reasoningMode()),
-                        observer);
+                        observer,
+                        request.providerAttemptExecutor()::beforeSend);
             });
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
+            AiProviderGateExceptions.rethrowIfGate(exception);
             throw new AiProviderException("Vertex adapter failed");
         }
     }

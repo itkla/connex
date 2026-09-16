@@ -8,8 +8,11 @@ import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Notification;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.ActivityVolumeBucketDto;
 import ooo.klae.connex.backend.dto.CountDto;
@@ -53,6 +56,8 @@ import lombok.RequiredArgsConstructor;
 public class ActivityService {
     private final ActivityMapper activityMapper;
     private final DealMapper dealMapper;
+    private final PersonMapper personMapper;
+    private final ShareMapper shareMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
@@ -193,7 +198,7 @@ public class ActivityService {
     /**
      * Creates a new activity in the active workspace.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.ACTIVITY_CREATE)
     public Activity create(Activity activity) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -203,6 +208,8 @@ public class ActivityService {
             activity.setCreatedBy(actor);
             activity.setType(normalizeType(activity.getType()));
             activity.setTimestamp(resolveTimestamp(activity.getTimestamp(), null));
+            requireLinkedRecordsVisible(workspaceId, activity, true);
+            workspaceService.requirePermission(Permission.ACTIVITY_CREATE);
             activityMapper.insert(activity);
             auditService.record("activity.create", "activity", activity.getId(), activity.getSubject(),
                     "Created activity " + activity.getSubject(),
@@ -224,7 +231,7 @@ public class ActivityService {
     /**
      * Updates a workspace-scoped activity.
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.ACTIVITY_UPDATE)
     public Activity update(int id, Activity activity) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -241,6 +248,8 @@ public class ActivityService {
         activity.setCreatedBy(before.getCreatedBy());
         activity.setType(normalizeType(activity.getType()));
         activity.setTimestamp(resolveTimestamp(activity.getTimestamp(), before.getTimestamp()));
+        requireLinkedRecordsVisible(workspaceId, activity, false);
+        workspaceService.requirePermission(Permission.ACTIVITY_UPDATE);
         activityMapper.update(activity);
         auditService.record("activity.update", "activity", id, activity.getSubject(),
             "Updated activity " + activity.getSubject(),
@@ -289,6 +298,23 @@ public class ActivityService {
         auditService.record("activity.delete", "activity", id, before.getSubject(),
             "Deleted activity " + before.getSubject(),
             auditService.diff(before, null, AUDIT_FIELDS));
+    }
+
+    /** Retains the person and its exact visibility grant until the surrounding write commits. */
+    private void requireLinkedRecordsVisible(int workspaceId, Activity activity, boolean recordsFirstResponse) {
+        if (activity.getPerson() != null) {
+            Person person = recordsFirstResponse
+                ? personMapper.getVisiblePersonByIdForUpdate(workspaceId, activity.getPerson().getId())
+                : personMapper.getVisiblePersonByIdForShare(workspaceId, activity.getPerson().getId());
+            if (person == null || (person.getWorkspaceId() != workspaceId
+                    && shareMapper.lockPersonShareForWorkspace(person.getId(), workspaceId) == null)) {
+                throw new ResourceNotFoundException("Contact not found");
+            }
+        }
+        if (activity.getDeal() != null
+                && !dealMapper.exists(workspaceId, activity.getDeal().getId())) {
+            throw new ResourceNotFoundException("Deal not found");
+        }
     }
 
     private Activity hydrate(int workspaceId, Activity activity) {

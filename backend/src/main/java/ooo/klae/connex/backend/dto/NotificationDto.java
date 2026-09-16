@@ -68,7 +68,8 @@ public class NotificationDto {
         dto.setActorLabel(notification.getActorLabel());
         dto.setSourceType(notification.getSourceType());
         dto.setSourceId(notification.getSourceId());
-        dto.setSourceLabel(notification.getType() != null && notification.getType().endsWith(MENTION_SUFFIX)
+        dto.setSourceLabel(notification.getType() != null
+                && (notification.getType().endsWith(MENTION_SUFFIX) || "comment.reply".equals(notification.getType()))
             ? null
             : notification.getSourceLabel());
         dto.setContextType(notification.getContextType());

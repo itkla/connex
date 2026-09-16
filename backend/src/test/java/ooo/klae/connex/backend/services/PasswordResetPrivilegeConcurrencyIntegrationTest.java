@@ -96,7 +96,8 @@ class PasswordResetPrivilegeConcurrencyIntegrationTest {
         roleMapper.insertRole(role);
         roleMapper.insertPermissions(workspace.getId(), role.getId(), List.of("REPORT_READ"));
         workspaceMapper.setMemberCustomRole(workspace.getId(), user.getId(), role.getId());
-        passwordResetTokenMapper.insert(user.getId(), TOKEN_HASH, "127.0.0.1", 30);
+        passwordResetTokenMapper.insert(user.getId(), TOKEN_HASH, "127.0.0.1", 30,
+                userMapper.currentSessionEpoch(user.getId()));
         assertEquals(1, passwordResetTokenMapper.claimExchange(TOKEN_HASH, EXCHANGE_OWNER));
         when(breachedPasswordLookup.isBreached(anyString())).thenThrow(
                 new BreachedPasswordSourceUnavailableException(

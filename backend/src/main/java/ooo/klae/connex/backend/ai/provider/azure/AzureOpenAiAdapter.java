@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.AiProviderGateExceptions;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
@@ -112,7 +113,8 @@ public class AzureOpenAiAdapter implements AiProvider {
                     String requestBody = buildRequestBody(request, enforcement);
                     String responseBody = request.providerAttemptExecutor().execute(() ->
                             azureOpenAiClient.complete(
-                                    endpoint, request.credentials(), requestBody, deadline));
+                                    endpoint, request.credentials(), requestBody, deadline,
+                                    request.providerAttemptExecutor()::beforeSend));
                     return parseResponse(responseBody, enforcement, request.reasoningMode());
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
@@ -125,6 +127,7 @@ public class AzureOpenAiAdapter implements AiProvider {
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
+            AiProviderGateExceptions.rethrowIfGate(exception);
             throw new AiProviderException("Azure OpenAI adapter failed");
         }
     }
@@ -160,7 +163,8 @@ public class AzureOpenAiAdapter implements AiProvider {
                                             observer,
                                             appliedEnforcement,
                                             request.reasoningMode()),
-                                    observer));
+                                    observer,
+                                    request.providerAttemptExecutor()::beforeSend));
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
                             || !exception.permitsStructuredOutputFallback()) {
@@ -172,6 +176,7 @@ public class AzureOpenAiAdapter implements AiProvider {
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
+            AiProviderGateExceptions.rethrowIfGate(exception);
             throw new AiProviderException("Azure OpenAI adapter failed");
         }
     }
