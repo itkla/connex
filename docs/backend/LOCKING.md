@@ -20,12 +20,47 @@ Workflow lifecycle writes and permanent account offboarding share a hierarchy:
 1. Discover identity-bound keys without locks.
 2. Lock referenced `app_user` roots in ascending user id.
 3. Lock candidate workspace roots in ascending workspace id (`FOR SHARE` or the existing stronger owner lock as required).
+3b. Automation authoring that admits trigger capacity only: acquire the workspace's
+   `workflow_trigger_admission` row with the single `WorkflowMapper.acquireTriggerAdmissionMutex`
+   upsert. That `INSERT ... ON DUPLICATE KEY UPDATE` *is* the acquisition: it creates the row on
+   first use, and when it hits the existing primary key InnoDB takes an exclusive lock on the
+   duplicate row and holds it to commit, so a concurrent author blocks on that statement. No
+   trailing `SELECT ... FOR UPDATE` follows it — naming one would document a statement that never
+   contends. This is the mutex for aggregate trigger-capacity admission; nothing outside
+   `WorkflowPrincipalLockService` may take it, and the remediation paths (disable, pause, archive,
+   restore), standalone draft authoring, legacy delete, and runtime-owner cutover/rollback pass
+   `admitTriggerCapacity = false` so they neither wait on it nor write to it.
+   Any transaction that will publish must take this mutex in its first principal-lock pass,
+   before membership or role locks, and hold it through publication. Recipe installation therefore
+   passes `true` during draft creation; its later publication reacquires the already-held mutex.
 4. Lock required `workspace_member` rows in ascending user id.
 5. Lock the actor's custom `workspace_role` root and exact permission row when current authorization depends on it.
 6. Lock exact workflow → workflow-version → rule point keys in that order.
 7. Revalidate locked state before writes.
 
 Version/rule key discovery is non-locking and Java-sorted before individual exact `getByIdForUpdate` calls. Final workflow authorization uses the locked membership's current role/role id, not an earlier `WorkspaceService` snapshot.
+
+The workspace root at step 3 stays `FOR SHARE` for workflow lifecycle writes, and taking it
+exclusively there is a defect. Every audited transaction in the workspace takes that same row
+`FOR SHARE` at its end (`AuditIntegrityService.lockForeignKeyParents`), and membership-first record
+mutations — person owner change, deal, company, task, saved views, AI chat turn persistence — lock
+the `workspace_member` row before reaching the root in that trailing audit. An exclusive root at
+step 3 would therefore both barrier every audited write in the tenant for the duration of an
+authoring transaction and close a deadlock cycle against those mutations (issue #1582's inversion
+class). Mutual exclusion for the trigger-capacity count comes from step 3b instead, which is scoped
+to the counter it protects because no other path locks that row.
+
+The activation entry points that perform trigger-capacity admission — `WorkflowService.publish`,
+`enable`, and `resume`, `RuleService.create` and `update`, and `WorkflowRecipeService.install` —
+declare `Isolation.READ_COMMITTED`. Without it the recount after waiting on the step-3b mutex would
+be served from the transaction's pre-lock snapshot and both contenders would be admitted. `install`
+carries the isolation because it wraps `publish` inside its own transaction, so the inner method's
+annotation never applies. `RbacEnforcementArchTest` pins all six.
+
+`LegacyWorkflowBackfillTransaction` is exempt from both step 3b and trigger-capacity admission: it
+runs at startup under the exclusive workspace root (`:62`) and only mirrors pre-existing legacy
+`enabled` state onto its canonical pair (`:321`), so it creates no new fan-out; a workspace already
+over the limit stays bounded by the retained intake backstop.
 
 Account offboarding takes the union of owner/workflow workspace roots in one ascending pass before membership rows, then disables affected paired/unpaired rules before principal redaction.
 

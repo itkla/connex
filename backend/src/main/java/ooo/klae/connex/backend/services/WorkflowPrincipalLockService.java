@@ -17,10 +17,25 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 
-/** Acquires and validates the shared principal and authorization locks for workflow mutations. */
+/**
+ * Acquires and validates the shared principal and authorization locks for workflow mutations.
+ *
+ * <p>The workspace root is taken {@code FOR SHARE} so audited CRM writes, which take the same row
+ * shared at commit time, are never blocked by automation authoring. Mutual exclusion for the
+ * aggregate trigger-capacity count comes instead from the per-workspace
+ * {@code workflow_trigger_admission} row, which only these authoring paths touch. The single
+ * {@code WorkflowMapper.acquireTriggerAdmissionMutex} upsert both creates that row on first use and
+ * acquires it exclusively, at the documented step-3b position of {@code docs/backend/LOCKING.md} —
+ * after the {@code app_user} roots and the workspace root, before any {@code workspace_member} row.
+ *
+ * <p>Only the callers that admit trigger capacity request the mutex. Remediation and non-capacity
+ * paths — disable, pause, archive, restore, draft authoring, legacy delete, and runtime-owner
+ * cutover — pass {@code false} so they neither wait on nor write to the admission row.
+ */
 @Service
 @RequiredArgsConstructor
 public class WorkflowPrincipalLockService {
@@ -28,27 +43,41 @@ public class WorkflowPrincipalLockService {
     private final UserMapper userMapper;
     private final WorkspaceMapper workspaceMapper;
     private final RoleMapper roleMapper;
+    private final WorkflowMapper workflowMapper;
 
-    /** Locks principals and current authorization for a user-mode lifecycle mutation. */
+    /**
+     * Locks principals and current authorization for a user-mode lifecycle mutation.
+     *
+     * @param admitTriggerCapacity whether this mutation admits aggregate trigger capacity and
+     *     therefore needs the per-workspace admission mutex
+     */
     public LockedPrincipals lockUserMutation(
             int workspaceId,
             int actorId,
             Collection<Integer> discoveredPrincipalIds,
-            Collection<Integer> requiredActivePrincipalIds) {
+            Collection<Integer> requiredActivePrincipalIds,
+            boolean admitTriggerCapacity) {
         LockedAuthorization authorization = lockSharedRoots(
-            workspaceId, actorId, discoveredPrincipalIds, requiredActivePrincipalIds);
+            workspaceId, actorId, discoveredPrincipalIds, requiredActivePrincipalIds,
+            admitTriggerCapacity);
         Set<Permission> actorPermissions = lockCurrentPermissions(
             workspaceId, authorization.actorMembership());
         return authorization.principals().withActorPermissions(actorPermissions);
     }
 
-    /** Locks principals and requires a current built-in administrator for a system-mode mutation. */
+    /**
+     * Locks principals and requires a current built-in administrator for a system-mode mutation.
+     *
+     * @param admitTriggerCapacity whether this mutation admits aggregate trigger capacity and
+     *     therefore needs the per-workspace admission mutex
+     */
     public LockedPrincipals lockSystemMutation(
             int workspaceId,
             int actorId,
-            Collection<Integer> discoveredPrincipalIds) {
+            Collection<Integer> discoveredPrincipalIds,
+            boolean admitTriggerCapacity) {
         LockedAuthorization authorization = lockSharedRoots(
-            workspaceId, actorId, discoveredPrincipalIds, Set.of());
+            workspaceId, actorId, discoveredPrincipalIds, Set.of(), admitTriggerCapacity);
         WorkspaceMember actor = authorization.actorMembership();
         if (actor.getRoleId() != null
                 || !("admin".equals(actor.getRole()) || "owner".equals(actor.getRole()))) {
@@ -61,7 +90,8 @@ public class WorkflowPrincipalLockService {
             int workspaceId,
             int actorId,
             Collection<Integer> discoveredPrincipalIds,
-            Collection<Integer> requiredActivePrincipalIds) {
+            Collection<Integer> requiredActivePrincipalIds,
+            boolean admitTriggerCapacity) {
         TreeSet<Integer> requestedIds = sortedIds(discoveredPrincipalIds);
         requestedIds.add(actorId);
         TreeSet<Integer> activeIds = sortedIds(requiredActivePrincipalIds);
@@ -79,6 +109,9 @@ public class WorkflowPrincipalLockService {
         }
         if (workspaceMapper.lockWorkspaceForShare(workspaceId) == null) {
             throw new ResourceNotFoundException("Workspace not found: " + workspaceId);
+        }
+        if (admitTriggerCapacity) {
+            workflowMapper.acquireTriggerAdmissionMutex(workspaceId);
         }
 
         WorkspaceMember actorMembership = null;

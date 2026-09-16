@@ -158,4 +158,6 @@ public interface WorkflowMapper {
         @Param("id") int id,
         @Param("activeVersionId") Long activeVersionId,
         @Param("updatedById") Integer updatedById);
+
+    void acquireTriggerAdmissionMutex(@Param("workspaceId") int workspaceId);
 }

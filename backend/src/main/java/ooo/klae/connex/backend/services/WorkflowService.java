@@ -13,6 +13,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -67,6 +68,7 @@ public class WorkflowService {
     private final RuleDefinitionCodec definitionCodec;
     private final WorkflowVersionProjection versionProjection;
     private final WorkflowRuntimeProperties runtimeProperties;
+    private final WorkflowTriggerAdmissionService triggerAdmissionService;
 
     /** Lists workflows in the active workspace using the existing deterministic mapper order. */
     @Transactional(readOnly = true)
@@ -90,19 +92,20 @@ public class WorkflowService {
     @RequirePermission(Permission.RULE_MANAGE)
     public WorkflowDto create(WorkflowCreateRequest request) {
         return createWithPrincipal(
-            request, workspaceService.getCurrentUserId(), "legacy");
+            request, workspaceService.getCurrentUserId(), false);
     }
 
+    /** Takes admission before principal locks because recipe installation publishes in this transaction. */
     WorkflowDto createForRecipe(
             WorkflowCreateRequest request,
             int runAsUserId) {
-        return createWithPrincipal(request, runAsUserId, "canonical");
+        return createWithPrincipal(request, runAsUserId, true);
     }
 
     private WorkflowDto createWithPrincipal(
             WorkflowCreateRequest request,
             int runAsUserId,
-            String runtimeOwner) {
+            boolean admitTriggerCapacity) {
         if (request == null) {
             throw new BadRequestException("Workflow request is required");
         }
@@ -120,7 +123,8 @@ public class WorkflowService {
             actorId,
             draft.executionMode(),
             new TreeSet<>(List.of(actorId, runAsUserId)),
-            "user".equals(draft.executionMode()) ? Set.of(runAsUserId) : Set.of());
+            "user".equals(draft.executionMode()) ? Set.of(runAsUserId) : Set.of(),
+            admitTriggerCapacity);
         Set<Permission> requiredPermissions = workflowDefinitionValidator.validateDraftActionsForMutation(
             draft.recordType(),
             draft.executionMode(),
@@ -133,7 +137,7 @@ public class WorkflowService {
         workflow.setName(draft.name());
         workflow.setDescription(draft.description());
         workflow.setEnabled(false);
-        workflow.setRuntimeOwner(runtimeOwner);
+        workflow.setRuntimeOwner("legacy");
         workflow.setArchivedAt(null);
         workflow.setDraftRevision(0);
         workflow.setDraftRecordType(draft.recordType());
@@ -191,7 +195,8 @@ public class WorkflowService {
             principalIds,
             "user".equals(draft.executionMode())
                 ? Set.of(discoveredRunAsUserId)
-                : Set.of());
+                : Set.of(),
+            false);
         Set<Permission> requiredPermissions = workflowDefinitionValidator.validateDraftActionsForMutation(
             draft.recordType(),
             draft.executionMode(),
@@ -296,9 +301,21 @@ public class WorkflowService {
     }
 
     /** Publishes a revision-preconditioned immutable version under the workflow's runtime owner. */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.RULE_MANAGE)
     public WorkflowDto publish(int id, WorkflowPublishRequest request) {
+        return publish(id, request, false);
+    }
+
+    /** Promotes a recipe draft only with its first version, within the installation transaction. */
+    WorkflowDto publishForRecipe(int id, WorkflowPublishRequest request) {
+        return publish(id, request, true);
+    }
+
+    private WorkflowDto publish(
+            int id,
+            WorkflowPublishRequest request,
+            boolean canonicalFirstPublication) {
         if (request == null || request.getExpectedRevision() == null) {
             throw new BadRequestException("Expected revision is required");
         }
@@ -317,7 +334,8 @@ public class WorkflowService {
             actorId,
             discoveredExecutionMode,
             discovery.principalIds(),
-            requiredActiveIds);
+            requiredActiveIds,
+            true);
         if ("system".equals(discoveredExecutionMode)) {
             principals.requireExisting(
                 discovered.getCreatedById(),
@@ -344,7 +362,11 @@ public class WorkflowService {
             draft.recordType(),
             draft.executionMode(),
             definition);
-        boolean canonicalPublication = canonicalPublicationOwner(workflow);
+        if (canonicalFirstPublication
+                && (workflow.getActiveVersionId() != null || workflow.getLegacyRuleId() != null)) {
+            throw inconsistentWorkflow();
+        }
+        boolean canonicalPublication = canonicalPublicationOwner(workflow) || canonicalFirstPublication;
         Rule projection = canonicalPublication
             ? versionProjection.project(workflow, draft, compiled)
             : project(workflow, draft);
@@ -366,6 +388,11 @@ public class WorkflowService {
                     workflow, lockedVersions.active(), linkedRule, principalMatchPolicy);
         if (current != null && materiallyEquivalent(current.version(), projection, draft)) {
             return toDto(workflow, draft);
+        }
+        if (workflow.isEnabled() && workflow.getIntakePausedAt() == null) {
+            triggerAdmissionService.requireCapacity(
+                workspaceId, id, projection.getRecordType(),
+                definitionCodec.parse(projection.getTriggerConfig(), RuleTrigger.class));
         }
 
         int versionNumber = nextVersionNumber(current, lockedVersions.latest());
@@ -442,7 +469,7 @@ public class WorkflowService {
     }
 
     /** Enables a published workflow and its linked rule atomically. */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.RULE_MANAGE)
     public WorkflowDto enable(int id) {
         return setEnabled(id, true);
@@ -477,7 +504,7 @@ public class WorkflowService {
     }
 
     /** Resumes durable intake claims without changing the workflow runtime generation. */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.RULE_MANAGE)
     public WorkflowDto resume(int id) {
         return setIntakePaused(id, false);
@@ -511,9 +538,9 @@ public class WorkflowService {
         }
         LockedPrincipals principals = enabled && "system".equals(executionMode)
             ? principalLockService.lockSystemMutation(
-                workspaceId, actorId, discovery.principalIds())
+                workspaceId, actorId, discovery.principalIds(), true)
             : principalLockService.lockUserMutation(
-                workspaceId, actorId, discovery.principalIds(), requiredActiveIds);
+                workspaceId, actorId, discovery.principalIds(), requiredActiveIds, enabled);
         if (enabled && "system".equals(executionMode)) {
             principals.requireExisting(
                 discovery.workflow().getCreatedById(),
@@ -552,6 +579,12 @@ public class WorkflowService {
             ? requireCanonicalPublishedState(workflow, versions.active(), linkedRule)
             : requirePublishedState(
                 workflow, versions.active(), linkedRule, principalMatchPolicy);
+        if (enabled) {
+            requireActivationPermissions(state.version(), principals);
+            if (!workflow.isEnabled() && workflow.getIntakePausedAt() == null) {
+                requireTriggerCapacity(workflow, state.version());
+            }
+        }
         if (workflow.isEnabled() == enabled) {
             return toDto(workflow);
         }
@@ -580,13 +613,53 @@ public class WorkflowService {
         int actorId = workspaceService.getCurrentUserId();
         MutationDiscovery discovery = discoverMutation(workspaceId, id, false);
         requireMutable(discovery.workflow());
-        LockedPrincipals principals = principalLockService.lockUserMutation(
-            workspaceId, actorId, discovery.principalIds(), Set.of());
+        WorkflowVersion discoveredActive = discovery.activeVersion();
+        boolean activating = !paused
+            && discoveredActive != null
+            && discovery.workflow().isEnabled();
+        String executionMode = discoveredActive == null
+            ? discovery.workflow().getDraftExecutionMode()
+            : discoveredActive.getExecutionMode();
+        TreeSet<Integer> requiredActiveIds = new TreeSet<>();
+        if (activating && "user".equals(executionMode)) {
+            addRequiredPrincipal(requiredActiveIds, discoveredActive.getRunAsUserId());
+        }
+        LockedPrincipals principals = activating && "system".equals(executionMode)
+            ? principalLockService.lockSystemMutation(
+                workspaceId, actorId, discovery.principalIds(), true)
+            : principalLockService.lockUserMutation(
+                workspaceId, actorId, discovery.principalIds(), requiredActiveIds, activating);
+        if (activating && "system".equals(executionMode)) {
+            principals.requireExisting(
+                discoveredActive.getCreatedById(), "System workflow creator account no longer exists");
+        }
         Workflow workflow = requireWorkflowForUpdate(workspaceId, id);
         requireMutable(workflow);
         requireStableAuthorizationDiscovery(discovery.workflow(), workflow);
         principals.requireCurrentReferences(workflowPrincipalIds(workflow));
         boolean currentlyPaused = workflow.getIntakePausedAt() != null;
+        if (!paused
+                && !activating
+                && workflow.isEnabled()
+                && workflow.getActiveVersionId() != null) {
+            throw new ConflictException("Workflow state changed during authorization");
+        }
+        if (activating && workflow.isEnabled()) {
+            PrincipalMatchPolicy principalMatchPolicy = "user".equals(executionMode)
+                ? PrincipalMatchPolicy.REDACTED_CREATOR
+                : PrincipalMatchPolicy.STRICT;
+            LockedVersionState versions = lockDiscoveredVersions(workflow, discovery, principals);
+            Rule linkedRule = lockDiscoveredRule(
+                workflow, discovery, principals, principalMatchPolicy != PrincipalMatchPolicy.STRICT);
+            PublishedState state = "canonical".equals(workflow.getRuntimeOwner())
+                ? requireCanonicalPublishedState(workflow, versions.active(), linkedRule)
+                : requirePublishedState(
+                    workflow, versions.active(), linkedRule, principalMatchPolicy);
+            requireActivationPermissions(state.version(), principals);
+            if (currentlyPaused) {
+                requireTriggerCapacity(workflow, state.version());
+            }
+        }
         if (currentlyPaused != paused
                 && workflowMapper.updateIntakePause(
                     workspaceId, id, paused, actorId) != 1) {
@@ -604,12 +677,24 @@ public class WorkflowService {
         return toDto(requireWorkflow(workspaceId, id));
     }
 
+    private void requireActivationPermissions(WorkflowVersion version, LockedPrincipals principals) {
+        principals.requirePermissions(workflowDefinitionValidator.validateForMutation(
+            version.getRecordType(), version.getExecutionMode(),
+            canonicalizer.parseDefinition(version.getDefinitionJson())));
+    }
+
+    private void requireTriggerCapacity(Workflow workflow, WorkflowVersion version) {
+        triggerAdmissionService.requireCapacity(
+            workflow.getWorkspaceId(), workflow.getId(), version.getRecordType(),
+            definitionCodec.parse(version.getTriggerConfig(), RuleTrigger.class));
+    }
+
     private WorkflowDto setArchived(int id, boolean archived) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
         MutationDiscovery discovery = discoverMutation(workspaceId, id, false);
         LockedPrincipals principals = principalLockService.lockUserMutation(
-            workspaceId, actorId, discovery.principalIds(), Set.of());
+            workspaceId, actorId, discovery.principalIds(), Set.of(), false);
         Workflow workflow = requireWorkflowForUpdate(workspaceId, id);
         requireStableAuthorizationDiscovery(discovery.workflow(), workflow);
         principals.requireDiscoveredReferences(workflowPrincipalIds(workflow));
@@ -829,15 +914,17 @@ public class WorkflowService {
             int actorId,
             String executionMode,
             Collection<Integer> principalIds,
-            Collection<Integer> requiredActiveIds) {
+            Collection<Integer> requiredActiveIds,
+            boolean admitTriggerCapacity) {
         if ("system".equals(executionMode)) {
-            return principalLockService.lockSystemMutation(workspaceId, actorId, principalIds);
+            return principalLockService.lockSystemMutation(
+                workspaceId, actorId, principalIds, admitTriggerCapacity);
         }
         if (!"user".equals(executionMode)) {
             throw inconsistentWorkflow();
         }
         return principalLockService.lockUserMutation(
-            workspaceId, actorId, principalIds, requiredActiveIds);
+            workspaceId, actorId, principalIds, requiredActiveIds, admitTriggerCapacity);
     }
 
     private int nextVersionNumber(PublishedState current, WorkflowVersion latest) {

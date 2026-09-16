@@ -235,6 +235,7 @@ public final class TablePlaneRegistry {
         "workflow_runtime_workspace",
         "workflow_step_attempt",
         "workflow_step_run",
+        "workflow_trigger_admission",
         "workflow_trigger_outbox",
         "workflow_version",
         "disqualification_reason",

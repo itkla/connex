@@ -183,7 +183,7 @@ class WorkflowTriggerExactlyOnceIntegrationTest extends AbstractServiceTest {
             }
             return invocation.callRealMethod();
         }).when(principalLockService).lockUserMutation(
-            eq(workspace.getId()), eq(currentUser.getId()), any(), any());
+            eq(workspace.getId()), eq(currentUser.getId()), any(), any(), eq(false));
 
         assertThrows(
             ConflictException.class,

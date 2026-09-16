@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -20,6 +21,7 @@ import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -29,6 +31,7 @@ class WorkflowPrincipalLockServiceTest {
     @Mock private UserMapper userMapper;
     @Mock private WorkspaceMapper workspaceMapper;
     @Mock private RoleMapper roleMapper;
+    @Mock private WorkflowMapper workflowMapper;
 
     @Test
     void userMutationLocksSortedRootsMembershipsAndCurrentCustomPermission() {
@@ -45,13 +48,14 @@ class WorkflowPrincipalLockServiceTest {
         when(roleMapper.lockPermissions(5, 11))
             .thenReturn(List.of(Permission.RULE_MANAGE.name(), Permission.TASK_CREATE.name()));
 
-        service.lockUserMutation(5, 7, List.of(9, 3), Set.of(3));
+        service.lockUserMutation(5, 7, List.of(9, 3), Set.of(3), true);
 
-        InOrder order = inOrder(userMapper, workspaceMapper, roleMapper);
+        InOrder order = inOrder(userMapper, workspaceMapper, workflowMapper, roleMapper);
         order.verify(userMapper).lockById(3);
         order.verify(userMapper).lockById(7);
         order.verify(userMapper).lockById(9);
         order.verify(workspaceMapper).lockWorkspaceForShare(5);
+        order.verify(workflowMapper).acquireTriggerAdmissionMutex(5);
         order.verify(workspaceMapper).lockAuthorizationMembership(5, 3);
         order.verify(workspaceMapper).lockAuthorizationMembership(5, 7);
         order.verify(roleMapper).lockRole(5, 11);
@@ -66,7 +70,7 @@ class WorkflowPrincipalLockServiceTest {
         when(workspaceMapper.lockAuthorizationMembership(5, 7))
             .thenReturn(membership(5, 7, "admin", null, "active"));
 
-        service.lockSystemMutation(5, 7, Set.of(7));
+        service.lockSystemMutation(5, 7, Set.of(7), true);
 
         verifyNoInteractions(roleMapper);
     }
@@ -81,7 +85,7 @@ class WorkflowPrincipalLockServiceTest {
 
         assertThrows(
             ForbiddenException.class,
-            () -> service.lockSystemMutation(5, 7, Set.of(7)));
+            () -> service.lockSystemMutation(5, 7, Set.of(7), true));
 
         verifyNoInteractions(roleMapper);
     }
@@ -98,7 +102,7 @@ class WorkflowPrincipalLockServiceTest {
 
         assertThrows(
             ForbiddenException.class,
-            () -> service.lockUserMutation(5, 7, Set.of(7), Set.of()));
+            () -> service.lockUserMutation(5, 7, Set.of(7), Set.of(), true));
 
         verify(roleMapper).lockRole(5, 11);
         verify(roleMapper).lockPermissions(5, 11);
@@ -115,7 +119,7 @@ class WorkflowPrincipalLockServiceTest {
         when(roleMapper.lockPermissions(5, 11)).thenReturn(List.of(Permission.RULE_MANAGE.name()));
 
         WorkflowPrincipalLockService.LockedPrincipals principals =
-            service.lockUserMutation(5, 7, Set.of(7), Set.of());
+            service.lockUserMutation(5, 7, Set.of(7), Set.of(), true);
 
         assertThrows(
             ForbiddenException.class,
@@ -132,13 +136,46 @@ class WorkflowPrincipalLockServiceTest {
 
         assertThrows(
             ForbiddenException.class,
-            () -> service.lockUserMutation(5, 7, Set.of(7), Set.of()));
+            () -> service.lockUserMutation(5, 7, Set.of(7), Set.of(), true));
 
         verify(roleMapper, never()).lockRole(5, 11);
     }
 
+    @Test
+    void capacityAdmittingAuthoringTakesTheMutexUpsertUnderASharedWorkspaceRoot() {
+        WorkflowPrincipalLockService service = service();
+        when(userMapper.lockById(7)).thenReturn(7);
+        when(workspaceMapper.lockWorkspaceForShare(5)).thenReturn(5);
+        when(workspaceMapper.lockAuthorizationMembership(5, 7))
+            .thenReturn(membership(5, 7, "admin", null, "active"));
+
+        service.lockUserMutation(5, 7, Set.of(7), Set.of(), true);
+
+        verify(workspaceMapper, never()).lockWorkspace(5);
+        InOrder order = inOrder(workspaceMapper, workflowMapper);
+        order.verify(workspaceMapper).lockWorkspaceForShare(5);
+        order.verify(workflowMapper).acquireTriggerAdmissionMutex(5);
+        order.verify(workspaceMapper).lockAuthorizationMembership(5, 7);
+    }
+
+    @Test
+    void remediationMutationsNeverTouchTheAdmissionMutex() {
+        WorkflowPrincipalLockService service = service();
+        when(userMapper.lockById(7)).thenReturn(7);
+        when(workspaceMapper.lockWorkspaceForShare(5)).thenReturn(5);
+        when(workspaceMapper.lockAuthorizationMembership(5, 7))
+            .thenReturn(membership(5, 7, "admin", null, "active"));
+
+        service.lockUserMutation(5, 7, Set.of(7), Set.of(), false);
+        service.lockSystemMutation(5, 7, Set.of(7), false);
+
+        verifyNoInteractions(workflowMapper);
+        verify(workspaceMapper, times(2)).lockWorkspaceForShare(5);
+    }
+
     private WorkflowPrincipalLockService service() {
-        return new WorkflowPrincipalLockService(userMapper, workspaceMapper, roleMapper);
+        return new WorkflowPrincipalLockService(
+            userMapper, workspaceMapper, roleMapper, workflowMapper);
     }
 
     private static WorkspaceMember membership(
