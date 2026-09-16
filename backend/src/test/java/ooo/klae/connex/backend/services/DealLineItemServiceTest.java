@@ -50,6 +50,17 @@ class DealLineItemServiceTest extends AbstractServiceTest {
         return r;
     }
 
+    private DealLineItemRequest adHoc(String unitPrice, String quantity) {
+        DealLineItemRequest r = new DealLineItemRequest();
+        r.setName("Service " + unique());
+        r.setUnitPrice(new BigDecimal(unitPrice));
+        r.setQuantity(new BigDecimal(quantity));
+        r.setDiscountType("percent");
+        r.setDiscountValue(new BigDecimal("20"));
+        r.setTaxRate(BigDecimal.ZERO);
+        return r;
+    }
+
     private static void eq(String expected, BigDecimal actual) {
         assertEquals(0, new BigDecimal(expected).compareTo(actual),
             () -> "expected " + expected + " but was " + actual);
@@ -244,6 +255,52 @@ class DealLineItemServiceTest extends AbstractServiceTest {
         Deal edited = dealService.updateValue(deal.getId(), new BigDecimal("225.00"));
         eq("225.00", edited.getValue());
         assertEquals("manual", edited.getValueSource());
+    }
+
+    @Test
+    void persistedOperandsReproduceTheStoredSubtotal() {
+        Deal deal = jpyDeal();
+        DealLineItemRequest request = adHoc("1.00", "1000");
+
+        DealLineItemDto created = lineItemService.create(deal.getId(), request).items().get(0);
+        eq("800.00", created.getLineSubtotal());
+        eq("1.00", created.getUnitPrice());
+
+        DealLineItemRequest echo = new DealLineItemRequest();
+        echo.setUnitPrice(created.getUnitPrice());
+        echo.setQuantity(created.getQuantity());
+        echo.setDiscountType(created.getDiscountType());
+        echo.setDiscountValue(created.getDiscountValue());
+        echo.setTaxRate(created.getTaxRate());
+        DealLineItemDto replayed =
+            lineItemService.update(deal.getId(), created.getId(), echo).items().get(0);
+
+        eq("800.00", replayed.getLineSubtotal());
+        assertEquals(0, created.getLineTotal().compareTo(replayed.getLineTotal()));
+    }
+
+    @Test
+    void rejectsAUnitPriceThePriceColumnCannotHold() {
+        Deal deal = jpyDeal();
+
+        assertThrows(BadRequestException.class,
+            () -> lineItemService.create(deal.getId(), adHoc("1.004", "1000")));
+    }
+
+    @Test
+    void rejectsAQuantityThePersistedScaleCannotHold() {
+        Deal deal = jpyDeal();
+
+        assertThrows(BadRequestException.class,
+            () -> lineItemService.create(deal.getId(), adHoc("1.00", "1.0001")));
+    }
+
+    @Test
+    void rejectsAnUnboundedDecimalExponentBeforeCalculating() {
+        Deal deal = jpyDeal();
+
+        assertThrows(BadRequestException.class,
+            () -> lineItemService.create(deal.getId(), adHoc("1E100000000", "1")));
     }
 
     @Test

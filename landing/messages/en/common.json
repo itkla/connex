@@ -1,0 +1,1300 @@
+{
+  "AppMetadata": {
+    "title": "Connex",
+    "description": "Connex keeps companies, contacts, deals, and follow-ups in one workspace your whole team can work from."
+  },
+  "Filters": {
+    "searchAria": "Search",
+    "clearSearchAria": "Clear search",
+    "clear": "Clear",
+    "clearAll": "Clear all",
+    "removeFilter": "Remove {label} filter",
+    "chipSearch": "Search: {query}",
+    "noMatchesTitle": "No matches",
+    "noMatchesBody": "Try adjusting your search or filters.",
+    "assignee": "Assignee",
+    "creator": "Creator",
+    "contact": "Contact",
+    "deal": "Deal",
+    "company": "Company",
+    "filterSort": "Filter & sort",
+    "filterSortAria": "Filter and sort records",
+    "filterSortDescription": "Choose how the list is ordered and which records it shows.",
+    "sortBy": "Sort",
+    "sortAscending": "Ascending",
+    "sortDescending": "Descending",
+    "done": "Done",
+    "filter": "Filters",
+    "filterAria": "Filter tasks",
+    "filterDescription": "Choose which tasks the list shows."
+  },
+  "MemberScope": {
+    "label": "Owner",
+    "ariaLabel": "Filter by owner",
+    "me": "Me",
+    "unassigned": "Unassigned",
+    "clear": "Clear"
+  },
+  "CommonHome": {
+    "brand": "CONNEX",
+    "navFeatures": "Features",
+    "navWorkflow": "Getting started",
+    "navPricing": "Pricing",
+    "navFaq": "FAQ",
+    "navDocs": "Docs",
+    "navLogin": "Log in",
+    "navMenu": "Menu",
+    "navPrivacy": "Privacy",
+    "navDisclosure": "Data disclosure",
+    "navTerms": "Terms of Service",
+    "navTokushoho": "Commercial transactions",
+    "ctaDashboard": "Go to dashboard",
+    "ctaGetStarted": "Get started",
+    "languageLabel": "Language",
+    "languageEnglish": "English",
+    "languageJapanese": "日本語",
+    "heroHeadlineLead": "Know your customers.",
+    "heroHeadlineRest": "Know your next move.",
+    "footerTagline": "The CRM for teams who close by staying close.",
+    "footerRights": "© 2026 Connex. All rights reserved.",
+    "toggleLightDarkMode": "Toggle light/dark mode",
+    "faqAiQ": "Does the AI change our records?",
+    "faqImportQ": "Can we bring our existing data?",
+    "faqImportA": "Import companies and contacts from CSV, or scan business cards. Interaction history comes across as its own step, once the people it belongs to exist.",
+    "skipToContent": "Skip to content",
+    "footerNavProduct": "Product",
+    "footerNavLegal": "Legal",
+    "heroCtaPrimary": "Start for free",
+    "prelaunch": {
+      "closingHeading": "Your next chapter starts here.",
+      "metaTitle": "Connex — coming soon",
+      "metaDescription": "Connex brings companies, contacts, deals, and follow-ups into one CRM. Leave your email address and we\u2019ll write to you the day it opens.",
+      "formLabel": "Get notified when Connex launches",
+      "emailLabel": "Email address",
+      "emailPlaceholder": "Your email address",
+      "submit": "Notify me",
+      "navCta": "Notify me",
+      "submitting": "Joining…",
+      "privacy": "We’ll email you when Connex launches. <link>Privacy policy</link>",
+      "successTitle": "Thanks for your interest.",
+      "successBody": "Your request has been received. Launch emails follow your existing email preferences.",
+      "invalid": "Enter a valid email address and try again.",
+      "error": "We couldn’t confirm your signup. Your email is still here. Please try again shortly.",
+      "rateLimited": "Please wait a few minutes, then try signing up again.",
+      "noJavaScript": "Enable JavaScript to sign up for the launch notification."
+    },
+    "navProduct": "Product",
+    "heroSubtext": "Connex brings contacts, deals, conversations, and follow-ups into one CRM your whole team can work from.",
+    "heroSecondaryCta": "Explore the features",
+    "ctaHeading": "Bring your customer work together.",
+    "contextHeading": "Customer information, connected.",
+    "contextBody": "Companies and contacts connect to deals, activities, notes, and tasks, so your team can follow the work and its history.",
+    "connectedRecords": {
+      "choose": "Explore customer records",
+      "company": {
+        "label": "Companies",
+        "heading": "The context behind every customer.",
+        "body": "Bring a company’s contacts, deals, and related history together. Keep profile details and ownership in one place so your team can pick up with context."
+      },
+      "contacts": {
+        "label": "Contacts",
+        "heading": "Know the people behind the company.",
+        "body": "Keep contact details, company connections, and recorded conversations together. See who your team knows and what you last discussed."
+      },
+      "deals": {
+        "label": "Deals",
+        "heading": "Move each deal forward.",
+        "body": "Track value, stage, and expected close date alongside the company and people involved. Keep related activities and next steps close to the deal."
+      },
+      "activities": {
+        "label": "Activities",
+        "heading": "Keep the conversation in context.",
+        "body": "Record calls, emails, and meetings with their date and details. Link each activity to a contact or deal so the history is easy to follow."
+      },
+      "notes": {
+        "label": "Notes",
+        "heading": "Save the details you’ll need again.",
+        "body": "Keep useful context beside a contact or deal, from meeting preparation to customer requirements. Choose private notes or share them with your workspace."
+      },
+      "tasks": {
+        "label": "Tasks",
+        "heading": "Give the next step a place.",
+        "body": "Assign a follow-up, set a due date, and track it through to completion. Link tasks to a contact or deal so the next step stays with the work."
+      }
+    },
+    "featuresHeading": "Work with the bigger picture.",
+    "warmth": {
+      "name": "Warmth",
+      "heading": "Read the relationship behind the record.",
+      "body": "See how active each customer relationship is, with warmth based on the timing, frequency, and type of recorded interactions.",
+      "evidence": "Open the activities, shared notes, and linked tasks behind each contact or company’s reading.",
+      "docs": "How warmth works",
+      "visualLabel": "How recorded interactions contribute to warmth",
+      "inputs": {
+        "recency": "How recently",
+        "frequency": "How often",
+        "kind": "What kind of interaction"
+      },
+      "scale": "Four warmth bands",
+      "bands": {
+        "cold": "Cold",
+        "cool": "Cool",
+        "warm": "Warm",
+        "hot": "Hot"
+      },
+      "noHistory": "Relationships without recorded history show “No history.”"
+    },
+    "askName": "Ask Connex",
+    "askHeading": "An agentic assistant that moves work forward.",
+    "askBody": "Find customer records, work through a deal, and create tasks, notes, or activities through conversation. Review proposed changes to deal stages and record owners before applying them.",
+    "askAvailability": "AI availability depends on your workspace configuration and your organization’s AI provider. Answers can be incomplete; review the sources.",
+    "askResponseTitle": "Follow-up task created",
+    "askPrompt": "Check this renewal and create a follow-up task.",
+    "askYou": "You",
+    "askExample": "Example conversation",
+    "askThinking": "Reviewing recorded activities…",
+    "askReplay": "Replay conversation",
+    "askSkip": "Show full answer",
+    "askFinding": "The renewal is waiting on revised pricing.",
+    "askNextBody": "I created a task to send the revised quote and agree on a new decision date.",
+    "askSources": "2 source activities",
+    "mapName": "Map",
+    "mapHeading": "See how your team’s relationships connect.",
+    "mapBody": "Explore connections between your team, companies, and contacts. Search for a person or company and follow their recorded relationship history.",
+    "mapMember": "Members",
+    "heroPauseScenery": "Pause scenery",
+    "heroResumeScenery": "Resume scenery",
+    "mapWorkspace": "Your workspace",
+    "mapCompanies": "Client companies",
+    "workflowName": "Workflows",
+    "workflowHeading": "Keep repeatable work moving.",
+    "workflowBody": "Choose a trigger, set conditions, and connect actions. Review a recipe with your team before enabling it.",
+    "workflowRecipe": "Workflow example: route a won deal",
+    "workflow_trigger_title": "Deal won",
+    "workflow_task_title": "Create handoff task",
+    "workflow_activity_title": "Log activity",
+    "workflowReview": "Recipes start turned off. Review who the workflow runs as and what it changes before enabling it. Creating a handoff task does not complete the handoff.",
+    "attentionHeading": "Connex knows <em>who</em> to surface.",
+    "attentionBody": "Radar surfaces cooling relationships and deal risk. Introductions reveals connections worth exploring, with recorded evidence behind each suggestion.",
+    "attentionChoose": "Choose a sample priority",
+    "attention_next": "Next step",
+    "attention_cooling_tab": "Cooling",
+    "attention_risk_tab": "Deal risk",
+    "attention_introduction_tab": "Introduction",
+    "attention_cooling_label": "Radar · cooling relationship",
+    "attention_cooling_who": "Mari Okada · Kitagawa Industrial",
+    "attention_cooling_why": "Five weeks without a recorded interaction since the August 7 review. The renewal conversation needs a follow-up.",
+    "attention_cooling_next": "Send the revised quote.",
+    "attention_cooling_limit": "An unrecorded conversation cannot update the reading. Check with the owner before following up.",
+    "attention_risk_label": "Radar · deal risk",
+    "attention_risk_who": "Kitagawa Industrial · annual renewal",
+    "attention_risk_why": "The August 30 close date is 12 days overdue. The ¥8,400,000 renewal is still in Negotiating.",
+    "attention_risk_next": "Agree on a new close date.",
+    "attention_risk_limit": "An overdue date is a reason to review the deal, not proof that it will be lost.",
+    "attention_introduction_label": "Introductions · intro path",
+    "attention_introduction_who": "Rina Hoshino · through Aya Morita",
+    "attention_introduction_why": "Aya’s August 21 call records a working relationship with Rina in Finance. Misaki can ask Aya about an introduction.",
+    "attention_introduction_next": "Ask your teammate about an introduction.",
+    "attention_introduction_limit": "A recorded connection supports a possible route. It does not guarantee an introduction or imply consent.",
+    "attentionEvidence": "View example evidence",
+    "sampleCaption": "Fictional workspace · September 11, 2026",
+    "recordContacts": "Contacts",
+    "recordDeal": "Deal",
+    "recordActivity": "Activity",
+    "recordTask": "Next task",
+    "recordCompany": "Company",
+    "source_review_title": "Quarterly review · Mari & Misaki",
+    "source_review_date": "August 7, 2026",
+    "source_review_body": "Misaki recorded a meeting with Mari about the annual renewal. Mari requested a revised quote before continuing the discussion. No later interaction with Mari is recorded as of September 11.",
+    "source_pricing_title": "Pricing request · email from Mari",
+    "source_pricing_date": "August 5, 2026",
+    "source_pricing_body": "Email logged by Misaki: Mari asked for separate prices for the two service options so Procurement could compare them.",
+    "source_introduction_title": "Finance planning call · Rina & Aya",
+    "source_introduction_date": "August 21, 2026",
+    "source_introduction_body": "Aya logged a call with Rina about next quarter’s planning at Kitagawa Industrial. This records their working relationship; the call does not record a conversation with Mari or an agreement to an introduction.",
+    "source_close_title": "Annual renewal · expected close date",
+    "source_close_date": "August 30, 2026 · expected close",
+    "source_close_body": "The renewal is worth ¥8,400,000 and remains in Negotiating. Its expected close was August 30. At the September 11 snapshot, that date is 12 days overdue.",
+    "teamHeading": "Keep the work and its history together.",
+    "teamBody": "From the first deal to the next handover, keep each step connected to the customer.",
+    "teamStory": {
+      "scroll": "Scroll to follow the work",
+      "deals": {
+        "heading": "Move the deal forward.",
+        "body": "Track each deal through your pipeline, with its owner, value, and next steps close at hand."
+      },
+      "quotes": {
+        "heading": "Turn the deal into a quote.",
+        "body": "Generate a quote from deal information. Review the document and apply your team’s approval controls before finalizing it."
+      },
+      "progress": {
+        "heading": "See how the work is progressing.",
+        "body": "Review trends in Analytics and bring findings together in Reports to share with your team."
+      },
+      "handover": {
+        "heading": "Pass on the work, with its context.",
+        "body": "Change the record owner while keeping recorded activity and ownership history together, so the next person can pick up with context."
+      },
+      "visual": {
+        "new": "New",
+        "proposal": "Proposal",
+        "won": "Won",
+        "review": "Approval review",
+        "analytics": "Analytics",
+        "reports": "Reports",
+        "owner": "Record owner changes",
+        "customerRecord": "Customer record",
+        "ownership": "Ownership history",
+        "caption": "Product illustration"
+      }
+    },
+    "pricing": {
+      "heading": "Pricing",
+      "body": "All CRM features included. Choose the capacity and service your team needs.",
+      "compare": "Compare the plans.",
+      "allFeatures": "Every plan includes the complete CRM, including Ask Connex, Workflows, relationship intelligence, quotes, and reporting. Capacity, company-managed SSO, and service levels differ.",
+      "feature": "Feature",
+      "included": "Included",
+      "notIncluded": "Not included",
+      "aiNote": "Ask Connex requires AI configuration and the appropriate permissions. Free has a small monthly allowance; Pro has a larger organization-wide pool that grows with paid seats, with administrator-approved top-ups. Enterprise uses a contracted allowance or customer-funded AI, depending on deployment.",
+      "aiDocs": "How AI works",
+      "groups": {
+        "capacity": "Capacity",
+        "features": "CRM features",
+        "services": "Identity and support",
+        "hosting": "Deployment"
+      },
+      "features": {
+        "seats": "Included full-member seats",
+        "extraSeats": "Additional full-member seats",
+        "records": "Contacts and companies",
+        "extraRecords": "Additional record capacity",
+        "workspaces": "Workspaces",
+        "ask": "Ask Connex allowance",
+        "crm": "Companies, contacts, deals & activities",
+        "relationships": "Radar, Map & Introductions",
+        "workflows": "Workflows",
+        "insights": "Quotes, Analytics & Reports",
+        "roles": "Workspace roles & permissions",
+        "sso": "Company-managed SSO",
+        "support": "Support",
+        "saas": "Shared cloud",
+        "silo": "Dedicated Silo environment",
+        "onPrem": "On-premises deployment"
+      },
+      "free": {
+        "name": "Free",
+        "body": "For getting your customer work organized.",
+        "includes": "Included in Free",
+        "highlights": {
+          "seats": "1 full-member seat",
+          "workspaces": "1 workspace",
+          "records": "250 contacts and companies combined",
+          "ask": "Small monthly Ask Connex allowance"
+        }
+      },
+      "pro": {
+        "name": "Pro",
+        "body": "For teams building their customer relationships.",
+        "hosting": "SaaS, hosted by Connex.",
+        "includes": "More room for your team",
+        "highlights": {
+          "seats": "2 full-member seats included",
+          "workspaces": "Up to 5 workspaces",
+          "records": "10,000 contacts and companies combined",
+          "expansion": "Add seats and record capacity",
+          "ask": "AI pool grows with paid seats",
+          "clientWorkspaces": "Join client workspaces"
+        }
+      },
+      "enterprise": {
+        "name": "Enterprise",
+        "cta": "Contact us",
+        "body": "For organizations with specific identity, hosting, and support needs.",
+        "includes": "Tailored to your contract",
+        "highlights": {
+          "sso": "Company-managed SSO",
+          "hosting": "Shared cloud, Silo or on-premises options",
+          "capacity": "Contracted seats, records & AI allowance",
+          "support": "Contracted support and deployment services"
+        }
+      },
+      "values": {
+        "one": "1",
+        "two": "2",
+        "five": "Up to 5",
+        "recordsFree": "250",
+        "recordsPro": "10,000",
+        "smallMonthly": "Small monthly",
+        "sharedPool": "Shared pool",
+        "custom": "By contract",
+        "upgrade": "Upgrade to Pro",
+        "perSeat": "Fixed per-seat",
+        "addOn": "Add-on",
+        "selfService": "Self-service",
+        "productSupport": "Product support",
+        "quoted": "Quoted option"
+      },
+      "combinedTotal": "Combined total",
+      "poolingNote": "Your Pro subscription belongs to your organization. Its seats, combined record allowance, and AI pool are shared across your organization’s own workspaces. Each full member counts once, even across multiple workspaces.",
+      "subscriptionNote": "Pro includes two full-member seats, with a fixed charge per additional seat. Expand record capacity while staying on Pro.",
+      "usageNote": "Storage, automation/API throughput, sending, and AI consumption have separate usage allowances, even though the same CRM tools are available on every plan.",
+      "serviceNote": "Pro support covers product setup and troubleshooting. Enterprise software, deployment arrangements, support scope, and operator responsibilities are specified in the contract; Silo and on-premises options are quoted separately."
+    },
+    "teamHandover": "Shared history",
+    "startHeading": "Start with the customers you know.",
+    "stepCaptureTitle": "Import companies and contacts",
+    "stepCaptureBody": "Bring in a CSV or add your first records. You can import interaction history once the related contacts exist.",
+    "stepUnderstandTitle": "Organize customer work",
+    "stepUnderstandBody": "Connect deals, notes, and tasks to customers. Give each next step a clear owner.",
+    "stepActTitle": "Build useful history together",
+    "stepActBody": "Record conversations and progress as you work. Give the next person the context to continue.",
+    "startNote": "Everyday CRM work is useful from the start. Richer relationship evidence builds as your team records interactions; Connex can only read what has been recorded.",
+    "faqHeading": "Practical questions",
+    "faqReadMore": "Read more",
+    "faqJaQ": "Can our team use Japanese and English?",
+    "faqJaA": "Yes. Japanese and English are supported throughout the interface. Each member can choose their language.",
+    "faqAiA": "AI availability depends on workspace configuration. Proposed changes to existing records wait for you to apply them. While answering, Connex may immediately add an activity, task, note, or tag; it announces these additions and they are reversible. Check the answer and its sources before relying on it.",
+    "faqDataQ": "How do we control access and data?",
+    "faqDataA": "Workspace roles control access, with audit history and tools for retention and data requests. Connex supports cloud and self-hosted deployments. The details of data handling and privacy commitments are in the privacy policy; we do not claim a privacy-law certification.",
+    "metaTitle": "Connex — customer work, connected",
+    "metaDescription": "Bring contacts, deals, conversations, and follow-ups into one CRM. Explore Ask Connex, Map, Workflows, and relationship intelligence for your team.",
+    "recordNote": "Notes",
+    "recordTasks": "Tasks",
+    "mapContact": "Contacts",
+    "mapVisualLabel": "Your workspace sits at the center, connected to its members. Each member connects to a client company, which connects to its contacts. Two branches illustrate the hierarchy.",
+    "workflowReviewLabel": "Review before enabling",
+    "attention_cooling_visual": "Last recorded contact: 5 weeks ago",
+    "attention_risk_visual": "12 days overdue",
+    "attention_introduction_visual": "A recorded connection",
+    "teamDeals": "Deals",
+    "teamQuotes": "Quotes",
+    "teamProgress": "Analytics & reports",
+    "workflow_condition_title": "High value?",
+    "workflow_yes": "Yes",
+    "workflow_no": "No",
+    "workflowDiagramLabel": "After a deal is won, check its value. High-value deals create a handoff task; other deals log an activity. The highlighted path shows the Yes branch."
+  },
+  "CommonSidebar": {
+    "ariaPrimarySidebar": "Primary sidebar",
+    "brand": "CONNEX",
+    "sectionPinnedViews": "Pinned views",
+    "pinnedViewsUnavailable": "Pinned views couldn't be loaded.",
+    "retryPinnedViews": "Retry",
+    "sectionRecent": "Recent",
+    "sectionIntelligence": "Intelligence",
+    "sectionRecords": "Records",
+    "sectionActivity": "Activity",
+    "sectionInsights": "Insights",
+    "sectionMarketing": "Marketing",
+    "sectionLibrary": "Library",
+    "sectionWorkspace": "Workspace",
+    "navDashboard": "Dashboard",
+    "navRadar": "Radar",
+    "navCalendar": "Calendar",
+    "navMap": "Map",
+    "navIntroductions": "Introductions",
+    "navAnalytics": "Analytics",
+    "navReports": "Reports",
+    "navGoals": "Goals",
+    "navCompanies": "Companies",
+    "navContacts": "Contacts",
+    "navDeals": "Deals",
+    "navPipelines": "Pipelines",
+    "navCampaigns": "Campaigns",
+    "navActivities": "Activities",
+    "navTasks": "Tasks",
+    "navNotes": "Notes",
+    "navTags": "Tags",
+    "navFiles": "Files",
+    "navWorkflows": "Workflows",
+    "navCaptureReviews": "Capture reviews",
+    "navAuditLog": "Audit log",
+    "navDocs": "Documentation",
+    "myWork": "My Work",
+    "accountSettings": "Account settings",
+    "logOut": "Log out",
+    "theme": "Theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "System",
+    "language": "Language",
+    "languageEnglish": "English",
+    "languageJapanese": "Japanese",
+    "languageSaveFailed": "Couldn't update your language. Please try again.",
+    "profilePictureAlt": "{name}'s profile picture",
+    "navProducts": "Products",
+    "navDocuments": "Documents",
+    "navNotifications": "Notifications",
+    "navApprovalPolicies": "Approval policies",
+    "navSearch": "Search"
+  },
+  "CommonContentShell": {
+    "hideSidebar": "Hide sidebar",
+    "showSidebar": "Show sidebar",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar"
+  },
+  "MobileNav": {
+    "barLabel": "Primary",
+    "more": "More",
+    "search": "Search",
+    "tasksBadge": "{count} tasks need attention"
+  },
+  "ConfirmDiscard": {
+    "title": "Discard unsaved changes?",
+    "description": "You have unsaved changes. If you leave now, they'll be lost.",
+    "discard": "Discard changes",
+    "keepEditing": "Keep editing"
+  },
+  "DraftResume": {
+    "activityMessage": "You have an unfinished activity — resume it?",
+    "activityMessageNamed": "Unfinished activity: “{label}” — resume it?",
+    "dealMessage": "You have an unfinished deal — resume it?",
+    "dealMessageNamed": "Unfinished deal: “{label}” — resume it?",
+    "noteMessageNamed": "Unfinished note: “{label}” — resume it?",
+    "taskMessageNamed": "Unfinished task: “{label}” — resume it?",
+    "resumeActivity": "Resume activity",
+    "discardActivity": "Discard activity",
+    "resumeDeal": "Resume deal",
+    "discardDeal": "Discard deal",
+    "resumeNote": "Resume note",
+    "discardNote": "Discard note",
+    "resumeTask": "Resume task",
+    "discardTask": "Discard task",
+    "resume": "Resume",
+    "discard": "Discard"
+  },
+  "RecordDensity": {
+    "ariaLabel": "Row density",
+    "comfortable": "Comfortable rows",
+    "compact": "Compact rows"
+  },
+  "RecordColumns": {
+    "ariaLabel": "Choose columns",
+    "label": "Columns",
+    "title": "Show columns",
+    "reset": "Reset columns",
+    "sorted": "sorted"
+  },
+  "DuplicateWarning": {
+    "heading": "Possible duplicates",
+    "description": "Review these exact matches before creating a new record.",
+    "checking": "Checking for duplicates...",
+    "failed": "Duplicate check failed. Try again before creating this record.",
+    "retry": "Retry",
+    "more": "+{count} more",
+    "truncated": "More visible matches were omitted. Refine the details before continuing.",
+    "shared": "Shared · review only",
+    "acknowledge": "I reviewed these matches and still want to create a new record.",
+    "cardResolution": "Choose how to save this business card",
+    "useExisting": "Use existing contact",
+    "useExistingDescription": "Attach this card to the matched contact without replacing their details.",
+    "createSeparate": "Create separate contact",
+    "createSeparateDescription": "Keep this scan as a new contact after reviewing the exact match.",
+    "strength": {
+      "STRONG": "Exact identity",
+      "WEAK": "Exact name"
+    },
+    "evidence": {
+      "EMAIL": "Same email",
+      "PHONE": "Same phone",
+      "DOMAIN": "Same domain",
+      "EXTERNAL_ID": "Same external ID",
+      "NAME": "Same normalized name",
+      "DEAL_KEY": "Same deal name and company"
+    }
+  },
+  "CommonSearchBar": {
+    "placeholder": "Search for anything",
+    "searching": "Searching...",
+    "noResults": "No results for “{query}”",
+    "searchFailed": "We couldn't run that search. Try again.",
+    "resultsHeading": "Results for “{query}”",
+    "groupCompanies": "Companies",
+    "groupPeople": "Contacts",
+    "groupDeals": "Deals",
+    "groupPipelines": "Pipelines",
+    "groupTags": "Tags",
+    "groupActivities": "Activities",
+    "groupNotes": "Notes",
+    "groupTasks": "Tasks",
+    "groupUsers": "Users",
+    "groupAttachments": "Files",
+    "groupProducts": "Products",
+    "groupCampaigns": "Campaigns",
+    "groupReports": "Reports",
+    "groupDocuments": "Documents",
+    "groupDocumentTemplates": "Document templates",
+    "groupWorkflows": "Workflows"
+  },
+  "CommonProfileCard": {
+    "defaultName": "Profile Name",
+    "defaultDescription": "Profile description goes here",
+    "companyName": "Voice Co. Ltd.",
+    "yourConnections": "Your Connections",
+    "sampleName": "Tahm Kench",
+    "sampleCompany": "LOL Inc.",
+    "sampleRole": "CTO"
+  },
+  "Temperature": {
+    "hot": "Hot",
+    "warm": "Warm",
+    "cool": "Cool",
+    "cold": "Cold",
+    "noHistory": "No history",
+    "noHistoryTooltip": "Not enough interaction history to score this relationship yet.",
+    "tooltip": "{score}% warm · last touch {lastTouch}",
+    "goesCold": "goes cold {when}"
+  },
+  "CommonBreadcrumb": {
+    "ariaLabel": "Breadcrumb",
+    "showHidden": "Show hidden breadcrumb links",
+    "workspace": "Workspace",
+    "settings": "Settings",
+    "organization": "Organization",
+    "dashboard": "Dashboard",
+    "radar": "Radar",
+    "calendar": "Calendar",
+    "map": "Map",
+    "introductions": "Introductions",
+    "analytics": "Analytics",
+    "reports": "Reports",
+    "goals": "Goals",
+    "companies": "Companies",
+    "contacts": "Contacts",
+    "deals": "Deals",
+    "pipelines": "Pipelines",
+    "products": "Products",
+    "approvalPolicies": "Approval policies",
+    "campaigns": "Campaigns",
+    "activities": "Activities",
+    "tasks": "Tasks",
+    "notes": "Notes",
+    "documents": "Documents",
+    "tags": "Tags",
+    "files": "Files",
+    "notifications": "Notifications",
+    "search": "Search",
+    "myWork": "My Work",
+    "users": "Users",
+    "workflows": "Workflows",
+    "auditLog": "Audit log",
+    "peopleAccess": "People & access",
+    "crmConfiguration": "CRM configuration",
+    "communications": "Communications",
+    "auditDiagnostics": "Audit & diagnostics",
+    "identityAdministrators": "Identity & administrators",
+    "aiDataGovernance": "AI & data governance",
+    "members": "Members",
+    "roles": "Roles",
+    "customFields": "Custom fields",
+    "qualification": "Qualification",
+    "email": "Email",
+    "delivery": "Delivery",
+    "diagnostics": "Diagnostics",
+    "captureReviews": "Capture reviews",
+    "allowedDomains": "Allowed domains",
+    "singleSignOn": "Single sign-on",
+    "aiProvider": "AI provider",
+    "dataRequests": "Data requests",
+    "newReport": "New report",
+    "edit": "Edit",
+    "snapshot": "Snapshot",
+    "operations": "Operations",
+    "run": "Run",
+    "recipes": "Recipes"
+  },
+  "AskConnex": {
+    "title": "Ask Connex",
+    "assistantAuthor": "Ask Connex",
+    "mobileLabel": "Ask",
+    "newChatTitle": "New conversation",
+    "archive": "Archive",
+    "addContext": "Add context",
+    "addRecordContext": "Add record context",
+    "attachFile": "Attach file",
+    "close": "Close Ask Connex",
+    "closeWorkspace": "Back to the previous page",
+    "openWorkspace": "Open full view",
+    "openWorkspaceAction": "Open the Ask Connex workspace",
+    "width": "Panel width",
+    "widthCompact": "Compact",
+    "widthComfortable": "Comfortable",
+    "visibilityPrivate": "Private",
+    "visibilityShared": "Shared",
+    "stateRunning": "Working",
+    "stateAwaitingApproval": "Waiting for you",
+    "stateFailed": "Didn't finish",
+    "contextSummary": "{count, plural, one {# in context} other {# in context}}",
+    "participantCount": "{count, plural, one {# person} other {# people}}",
+    "sessionActivity": "Last active {time}",
+    "sessionRail": "Chats",
+    "sessionGroups": {
+      "invitations": "Invitations",
+      "last24h": "Last 24 hours",
+      "last7d": "Last 7 days",
+      "earlier": "Earlier"
+    },
+    "continueFromPartial": "Continue from here",
+    "continuePrompt": "Continue the answer to: {question}",
+    "narrowScope": "Narrow what it covers",
+    "stepCapExceeded": "This question covered more records than the assistant can review in one pass. Narrow the records or the date range, then ask again.",
+    "composerAria": "Message Ask Connex",
+    "composerHint": "Enter to send. Shift+Enter for a new line.",
+    "composerPlaceholder": "Ask about this record or your workspace…",
+    "context": "Context",
+    "contextPage": "Page",
+    "contextPinned": "Kept",
+    "contextSelected": "{count} selected {type}",
+    "contextMentioned": "Mentioned",
+    "contextFile": "File",
+    "contextUnavailable": "Unavailable",
+    "contextUnsupported": "{type} context is visible here but is not sent to Ask Connex yet.",
+    "contextScopeUnsupported": "This all-matching scope remains visible but is not sent until Ask Connex can preserve its exact filter or saved view.",
+    "contextLimit": "You can include up to 10 records and files. Remove one before sending.",
+    "contextNone": "No record context",
+    "contextReset": "Put back what I removed",
+    "pinContext": "Keep {label} here while I move around",
+    "unpinContext": "Stop keeping {label} here",
+    "scopeTitle": "What this will cover",
+    "scopeSummary": "I'll read {scope} before answering. Take anything out above to narrow it.",
+    "scopeRecordCounts": {
+      "person": "{count, plural, one {# contact} other {# contacts}}",
+      "company": "{count, plural, one {# company} other {# companies}}",
+      "deal": "{count, plural, one {# deal} other {# deals}}"
+    },
+    "scopeFiles": "{count, plural, one {# file} other {# files}}",
+    "scopeConfirm": "Ask with this context",
+    "scopeEdit": "Change the context",
+    "emptyTitle": "What can I help with?",
+    "emptyBody": "Ask about this record or your workspace.",
+    "formerMember": "Former member",
+    "contentWithheld": "This answer is hidden because one or more source records are no longer available for AI use.",
+    "historySummarized": "Earlier messages were summarized",
+    "invitation": "Invitation",
+    "invitations": "Invitations",
+    "invite": "Invite",
+    "inviteMember": "Workspace member",
+    "invitePending": "Invitation pending",
+    "join": "Join",
+    "leave": "Leave shared chat",
+    "manageSharing": "Manage sharing",
+    "memberAuthor": "Member {id}",
+    "jumpToLatest": "Jump to latest",
+    "loadError": "This conversation could not be loaded.",
+    "messages": "Conversation messages",
+    "newChat": "New chat",
+    "noRecentSessions": "No recent chats",
+    "noMatchingSessions": "No chats match this search",
+    "moreOptions": "Chat options",
+    "participants": "People with access",
+    "presence": "Here now",
+    "recentSessions": "Recent chats",
+    "searchSessions": "Search chats",
+    "removeContext": "Remove {label} from context",
+    "removeFile": "Remove {label}",
+    "removeParticipant": "Remove {name} from this chat",
+    "rename": "Rename",
+    "renameCancel": "Cancel",
+    "renameDescription": "Choose a short name that will make this conversation easy to find.",
+    "renameLabel": "Conversation name",
+    "renameSave": "Save",
+    "renameSaving": "Saving…",
+    "renameTitle": "Rename chat",
+    "retry": "Try again",
+    "send": "Send message",
+    "shareCancel": "Close",
+    "shareConfirm": "Share session",
+    "shareDescription": "Sharing exposes the full transcript, which may contain data the invitee cannot otherwise access. Citations they cannot access are hidden, but the answer text is shared as written.",
+    "shared": "Joined",
+    "shareTitle": "Share this chat",
+    "suggestedFollowUps": "Suggested follow-ups",
+    "tooLong": "Messages can contain up to 16,000 characters.",
+    "typing": "{names} typing",
+    "unshare": "Make private",
+    "stop": "Stop generating",
+    "stopping": "Stopping…",
+    "turnAccepted": "Request accepted",
+    "turnWorking": "Thinking…",
+    "thinkingToggle": "Show thinking",
+    "thinkingToggleHide": "Hide thinking",
+    "narrationTrail": "Work in progress",
+    "todoPlan": "Plan",
+    "todoStatus": {
+      "pending": "To do",
+      "active": "In progress",
+      "done": "Done"
+    },
+    "turnStreaming": "Writing…",
+    "turnResolved": "Answer ready",
+    "turnCancelled": "Response stopped",
+    "turnFailed": "The assistant couldn't finish this answer.",
+    "turnProviderUnavailable": "The AI provider didn't answer this request. Nothing about the question caused it — ask again.",
+    "turnInternalError": "Something went wrong on our side while writing this answer. Ask again, and tell an administrator if it keeps happening.",
+    "turnUnreadableAnswer": "The answer came back in a shape Connex couldn't read, so none of it was kept. Ask again, or reword the question.",
+    "turnStalled": "The assistant kept re-reading the same records without getting any further. Ask again, or reword the question.",
+    "turnRanOutOfTime": "This answer ran out of time before it finished. Ask again — or ask for a smaller slice if it keeps happening.",
+    "turnImageUnsupported": "This assistant model can’t read images. Remove the image from the context above, or choose an image-capable model.",
+    "budgetExhausted": "Your organization's daily AI limit has been reached. Ask the same question again later.",
+    "capacityExhausted": "There is no AI capacity left for this request right now. Ask the same question again later.",
+    "toolResultBudgetExhausted": "This answer needed more relationship data than it could hold at once. Try a narrower set of records or a shorter date range.",
+    "skillBudgetExceeded": "This answer found what it needed but ran out of room to write it up. Ask it again, or ask a more specific question.",
+    "toolOutsideSkillAuthority": "Ask Connex couldn't complete this request.",
+    "workspaceDisabled": "Ask Connex is disabled for this workspace. A workspace administrator can enable it again.",
+    "contextWindowTooSmall": "The AI model this organization uses can't take in enough at once for Ask Connex to work well. An organization administrator can switch to a more capable model.",
+    "accessRevoked": "Your access to something this answer was reading changed while it was being written, so the answer was stopped and not kept.",
+    "restrictionsChanged": "What this workspace allows AI to read changed while this answer was being written, so the answer was stopped and not kept.",
+    "partialAnswer": "Unfinished answer — this is as far as the assistant got before it stopped.",
+    "entryPoint": {
+      "workspace": "Ask Connex about this workspace",
+      "record": "Ask Connex about {label}",
+      "selection": "Ask Connex about {count} selected {type}",
+      "recordMenu": {
+        "person": "Ask about this contact",
+        "company": "Ask about this company",
+        "deal": "Ask about this deal"
+      }
+    },
+    "recordTypes": {
+      "person": "contacts",
+      "company": "companies",
+      "deal": "deals",
+      "task": "tasks",
+      "activity": "activities",
+      "note": "notes"
+    },
+    "toolCards": {
+      "outcome": "Outcome",
+      "recordLink": "Open {target}",
+      "restrictedTarget": "a record you can't open",
+      "states": {
+        "pending": "Needs approval",
+        "pendingDetail": "Nothing has happened yet. Review the exact action before approving.",
+        "executed": "Completed",
+        "executedDetail": "This action has already been completed.",
+        "rejected": "Rejected",
+        "rejectedDetail": "This proposal was rejected. No change was made.",
+        "undone": "Undone",
+        "undoneDetail": "The assistant-created record was removed.",
+        "failed": "Failed",
+        "failedDetail": "This action did not complete.",
+        "expired": "Undo expired",
+        "expiredDetail": "This action completed, but its undo window is closed."
+      },
+      "change": {
+        "proposedChange": "Proposed change",
+        "before": "Now",
+        "after": "After",
+        "notSet": "Not set",
+        "fieldOwner": "Owner",
+        "fieldStage": "Stage",
+        "currentUnresolvedOwner": "Someone no longer in this workspace",
+        "currentUnresolvedStage": "A stage that no longer exists",
+        "proposedUnresolved": "No longer exists",
+        "stateUnchanged": "This is already the current value, so applying it would change nothing.",
+        "stateRecordChanged": "This record moved on after the assistant proposed this, so the change can't be applied as reviewed. Ask for it again to work from where the record is now.",
+        "statePermissionLost": "You no longer have permission to make this change. Ask a workspace admin.",
+        "stateUnresolved": "The proposed value no longer exists in this workspace, so this change can't be made."
+      },
+      "actions": {
+        "undo": "Undo",
+        "undoAria": "Undo the assistant action for {target}",
+        "undoing": "Undoing…",
+        "apply": "Apply",
+        "applyAria": "Apply the proposed change to {target}",
+        "applying": "Applying…",
+        "discard": "Discard",
+        "discardAria": "Discard the proposed change to {target}",
+        "discarding": "Discarding…",
+        "editOnRecord": "Change it on the record",
+        "editOnRecordAria": "Open {target} to make this change there"
+      },
+      "failures": {
+        "proposalChanged": "The target changed after this proposal was shown. Reject it and ask for a new proposal.",
+        "proposalPermissionLost": "You no longer have permission to approve this proposal.",
+        "proposalUnavailable": "This proposal is no longer available. Its permissions or target may have changed.",
+        "undoConflict": "This record changed after the assistant created it, so it can’t be undone safely.",
+        "actionFailed": "This action did not complete. Try again."
+      },
+      "summaries": {
+        "createActivity": "Create an activity",
+        "createTask": "Create a task",
+        "createNote": "Create a note",
+        "addTag": "Add an existing tag",
+        "changeDealStage": "Change the deal stage",
+        "changeDealStageTo": "Change deal stage to: {value}",
+        "assignOwner": "Assign an owner",
+        "assignOwnerTo": "Assign owner: {value}",
+        "removeOwner": "Remove the current owner",
+        "runWriteTool": "Run a write action",
+        "requestRejected": "Request rejected",
+        "requestFailed": "Request failed",
+        "createdRecordRemoved": "Created record removed",
+        "activityCreated": "Activity created",
+        "taskCreated": "Task created",
+        "noteCreated": "Note created",
+        "tagAdded": "Tag added",
+        "tagAlreadyPresent": "Tag was already present",
+        "dealStageChanged": "Deal stage changed",
+        "ownerRemoved": "Owner removed",
+        "ownerAssigned": "Owner assigned",
+        "requestCompleted": "Request completed"
+      },
+      "outcomeFields": {
+        "type": "Type",
+        "subject": "Subject",
+        "start": "Starts",
+        "description": "Task",
+        "dueDate": "Due",
+        "title": "Title",
+        "visibility": "Visibility",
+        "tag": "Tag",
+        "stage": "Stage",
+        "owner": "Owner",
+        "other": "Detail"
+      },
+      "outcomeValues": {
+        "type": {
+          "call": "Call",
+          "email": "Email",
+          "meeting": "Meeting",
+          "note": "Note",
+          "other": "Other"
+        },
+        "visibility": {
+          "private": "Private",
+          "workspace": "Workspace"
+        }
+      },
+      "openCreated": {
+        "activity": "Open activity",
+        "task": "Open task",
+        "note": "Open note"
+      },
+      "openCreatedAria": {
+        "activity": "Open the activity this action created",
+        "task": "Open the task this action created",
+        "note": "Open the note this action created"
+      },
+      "undoWindow": "You can undo this until {deadline} — {remaining}."
+    },
+    "upload": {
+      "progress": "Uploading {progress}%",
+      "removing": "Removing…",
+      "failed": "Upload failed",
+      "tooLarge": "File is too large",
+      "unsupported": "File type isn’t supported",
+      "limit": "Context limit reached",
+      "removeFailed": "Couldn't remove the file"
+    },
+    "unavailable": {
+      "permissionTitle": "Ask Connex isn’t available to your role",
+      "permissionBody": "Your workspace role does not include permission to use AI features.",
+      "lookupTitle": "Permission status unavailable",
+      "lookupBody": "Connex could not confirm whether your role can use the assistant. Try again after permissions reload.",
+      "featureTitle": "Ask Connex is unavailable",
+      "featureBody": "The assistant can't be used in this workspace right now. Ask a workspace admin if you need access.",
+      "uncertainTitle": "We're not sure this answer went through",
+      "uncertainBody": "Connex didn't get a clear response back, so sending again is blocked to avoid a duplicate. Start a new chat or refresh this one."
+    },
+    "toast": {
+      "archived": "Chat archived",
+      "renamed": "Chat renamed",
+      "shared": "Chat is ready to share",
+      "private": "Chat made private",
+      "invited": "Invitation sent",
+      "joined": "Joined shared chat",
+      "left": "Left shared chat",
+      "participantRemoved": "Participant removed",
+      "requestFailed": "Ask Connex request failed",
+      "turnFailed": "Ask Connex couldn't finish that answer",
+      "turnTimedOut": "Ask Connex timed out",
+      "cancelFailed": "The response could not be stopped",
+      "toolActionRefreshFailed": "The action completed, but its latest status could not be loaded"
+    },
+    "citations": "Sources",
+    "citationKindPerson": "Contact",
+    "citationKindCompany": "Company",
+    "citationKindDeal": "Deal",
+    "citationFreshness": "{label} — as of {time}",
+    "citationFreshnessUnknown": "{label} — freshness unknown",
+    "suggestions": "Things I can do here",
+    "dismissSuggestions": "Hide these suggestions",
+    "jobs": {
+      "relationshipBrief": {
+        "label": "Brief me on this relationship",
+        "prompt": "Brief me on this relationship."
+      },
+      "companyBrief": {
+        "label": "Brief me on this company",
+        "prompt": "Brief me on this company."
+      },
+      "relationshipCooling": {
+        "label": "Why is this relationship cooling?",
+        "prompt": "Why is this relationship cooling?"
+      },
+      "companyCooling": {
+        "label": "Which relationships here are cooling?",
+        "prompt": "Which relationships at this company are cooling, and why?"
+      },
+      "dealRisk": {
+        "label": "Explain this deal's risks",
+        "prompt": "Explain what puts this deal at risk."
+      },
+      "contactActivity": {
+        "label": "Summarize recent activity",
+        "prompt": "Summarize the recent activity with this contact."
+      },
+      "companyActivity": {
+        "label": "Summarize recent activity",
+        "prompt": "Summarize the recent activity at this company."
+      },
+      "dealActivity": {
+        "label": "Summarize activity on this deal",
+        "prompt": "Summarize the recent activity on this deal."
+      },
+      "companyPipeline": {
+        "label": "Which deals need attention?",
+        "prompt": "Which deals at this company need attention, and what is each one waiting on?"
+      },
+      "dealPipeline": {
+        "label": "What is this deal waiting on?",
+        "prompt": "What is this deal waiting on, and how does it compare with the rest of the pipeline?"
+      },
+      "relationshipChanges": {
+        "label": "What changed recently?",
+        "prompt": "What changed here recently?"
+      },
+      "dealChanges": {
+        "label": "What changed since the stage moved?",
+        "prompt": "What changed on this deal since it moved stage?"
+      },
+      "introPath": {
+        "label": "Find an intro path",
+        "prompt": "Who could introduce me here, and what is that route based on?"
+      },
+      "meetingPreparation": {
+        "label": "Prepare me for the next meeting",
+        "prompt": "Prepare me for the next meeting here."
+      },
+      "meetingFollowUp": {
+        "label": "Pull out decisions and commitments",
+        "prompt": "Pull out the decisions, commitments, and owners from the recent meetings here."
+      },
+      "followUpDraft": {
+        "label": "Draft a follow-up",
+        "prompt": "Draft a follow-up message I can edit before sending."
+      },
+      "stakeholderGaps": {
+        "label": "Who is missing?",
+        "prompt": "Which roles or people are we missing a relationship with here?"
+      },
+      "companyReview": {
+        "label": "Prepare a company review",
+        "prompt": "Prepare a review of this company."
+      },
+      "commitments": {
+        "label": "Find open commitments",
+        "prompt": "What has been promised here, by whom, and what is still open?"
+      },
+      "dataQuality": {
+        "label": "Check for missing details",
+        "prompt": "Which details here are missing or contradict each other?"
+      },
+      "workspaceWorkBrief": {
+        "label": "What should I do today?",
+        "prompt": "What should I focus on today?"
+      },
+      "workspacePipeline": {
+        "label": "Which deals need attention?",
+        "prompt": "Which deals need attention, and what is each one waiting on?"
+      },
+      "workspaceActivity": {
+        "label": "Summarize recent activity",
+        "prompt": "Summarize the recent activity in this workspace."
+      },
+      "workspaceReport": {
+        "label": "Build a report from a question",
+        "prompt": "Build a report answering a question about this workspace."
+      }
+    },
+    "scope": {
+      "title": "Filters",
+      "description": "Choose which records this question covers. Ask Connex reads only what you name here.",
+      "open": "Add filters",
+      "openSet": "Filters · {count}",
+      "clear": "Clear filters",
+      "done": "Done",
+      "period": {
+        "label": "Period",
+        "modeLabel": "How to state the period",
+        "any": "Any time",
+        "recent": "Recent",
+        "range": "Dates",
+        "days": "{count, plural, one {Last # day} other {Last # days}}",
+        "start": "From",
+        "end": "To"
+      },
+      "owners": {
+        "label": "Owner",
+        "modeLabel": "Whose records to cover",
+        "allTeam": "Everyone",
+        "me": "Me",
+        "members": "Chosen members",
+        "none": "No members to choose from here.",
+        "cap": "You can name up to {count} members. Clear one to choose another."
+      },
+      "warmth": {
+        "label": "Warmth"
+      },
+      "recordKinds": {
+        "label": "Record types",
+        "person": "Contacts",
+        "company": "Companies",
+        "deal": "Deals"
+      },
+      "dealStatuses": {
+        "label": "Deal status",
+        "open": "Open",
+        "won": "Won",
+        "lost": "Lost"
+      },
+      "stages": {
+        "label": "Stages",
+        "cap": "You can name up to {count} stages. Clear one to choose another."
+      },
+      "savedView": {
+        "label": "Saved view"
+      },
+      "chips": {
+        "period": "Period",
+        "owners": "Owner",
+        "ownersMe": "My records",
+        "warmth": "Warmth",
+        "recordKinds": "Record types",
+        "dealStatuses": "Deal status",
+        "stages": "Stages",
+        "savedView": "Saved view"
+      },
+      "problem": {
+        "periodOrder": "The first date has to come before the second one.",
+        "periodLength": "Choose a window of 1 to 365 days.",
+        "membersMissing": "Choose at least one member, or go back to everyone."
+      },
+      "options": {
+        "loading": "Loading the names this workspace offers…",
+        "failed": "Couldn't load members, stages, and saved views.",
+        "retry": "Try again"
+      },
+      "preview": {
+        "title": "What this covers",
+        "idle": "Choose a filter to see what it covers.",
+        "loading": "Checking what this covers…",
+        "matched": "{count, plural, one {# record matches} other {# records match}} these filters.",
+        "matchedUnknown": "These filters are ready to use.",
+        "matchedUnchecked": "How much these filters cover couldn't be checked. Send only if this is the breadth you meant.",
+        "truncated": "Ask Connex will read the first {count} of them.",
+        "capability": "It will use {name}.",
+        "throttled": "That was a lot of changes at once — the count will catch up in a moment.",
+        "unavailable": "Ask Connex isn't available in this workspace right now, so these filters can't be checked here.",
+        "failed": "Couldn't check what these filters cover. Try again in a moment."
+      },
+      "reasons": {
+        "unknown": "Ask Connex can't cover exactly this combination of filters. Change one of them and try again.",
+        "other": "One of the filters you set couldn't be applied to this question.",
+        "deal_status_unsupported_for_attention": "A deals review always looks at open deals, so the won and lost filters don't apply to it.",
+        "period_capped": "A period can reach back one year, so the earlier part of the one you chose is left out.",
+        "record_kind_ambiguous_for_cohort": "Say whether this covers contacts, companies, or deals — the question fits more than one.",
+        "record_kind_outside_declared_scope": "This question is about a record type your filters leave out. Add that type, or ask about one you kept.",
+        "saved_view_scope_changed": "That saved view changed while this was being prepared. Choose it again to use the current one.",
+        "saved_view_scope_unsupported": "Ask Connex can't reproduce that saved view exactly, so it won't pretend to. Use the filters here instead.",
+        "stage_scope_unsupported_for_cohort": "Stages and deal status only apply when deals are included. Add deals, or clear those two filters.",
+        "tool_cannot_honor_declared_scope": "Answering this would mean reading outside the filters you set, so it stopped instead. Widen them, or ask something narrower.",
+        "warmth_outside_declared_scope": "This question is about a warmth band your filters leave out. Add that band, or ask about one you kept.",
+        "warmth_unsupported_for_deals": "Warmth describes relationships with people and companies, so it doesn't narrow a set of deals."
+      }
+    },
+    "commandCenter": {
+      "briefsTitle": "Briefs",
+      "briefsBody": "A short summary of your commitments, meetings, cooling relationships, and deals needing attention, prepared on a schedule you set.",
+      "briefsUnavailable": "Briefs are not available in this workspace yet.",
+      "loadFailed": "Your briefs and watches couldn't be loaded just now.",
+      "loadRetry": "Try again",
+      "openLatestBrief": "Open the last one",
+      "dailyLabel": "Every day at",
+      "dailyHourLabel": "Daily brief hour",
+      "weeklyLabel": "Every week on",
+      "weeklyDayLabel": "Weekly review day",
+      "weeklyAt": "at",
+      "weeklyHourLabel": "Weekly review hour",
+      "hour": "{hour}:00",
+      "weekday": {
+        "1": "Monday",
+        "2": "Tuesday",
+        "3": "Wednesday",
+        "4": "Thursday",
+        "5": "Friday",
+        "6": "Saturday",
+        "7": "Sunday"
+      },
+      "scheduleZoneLabel": "Times are in",
+      "scheduleZoneEmpty": "No matching time zone",
+      "scheduleFailed": "Couldn't save the brief schedule",
+      "watchesTitle": "Watches",
+      "watchesEmpty": "You aren't watching anything yet. Open a contact, company, or deal and add a watch to be told when something specific changes.",
+      "watchesUnavailable": "Watches are switched off in this workspace.",
+      "watchesHint": "A watch tells you exactly what changed and which rule noticed it.",
+      "watchActions": "Watch actions",
+      "watchFailed": "Couldn't change the watch",
+      "watchesUsage": "Using {used} of {limit} watches.",
+      "cooldownEvery": "At most once every {days, plural, one {day} other {# days}}",
+      "expiresNever": "No end date",
+      "expiresOnDate": "Until {date}",
+      "pause": "Pause",
+      "resume": "Resume",
+      "delete": "Delete watch",
+      "deleteTitle": "Delete this watch?",
+      "deleteBody": "You'll stop being told when this condition is met. This can't be undone.",
+      "deleteBodyNamed": "You'll stop being told when: {trigger}. This can't be undone.",
+      "statusActive": "Active",
+      "statusPaused": "Paused",
+      "neverFired": "Not triggered yet",
+      "lastFired": "Last triggered {date}",
+      "subjectUnavailable": "This record is no longer available to you",
+      "band": {
+        "warm": "warm",
+        "cool": "cool",
+        "cold": "cold"
+      },
+      "level": {
+        "medium": "medium",
+        "high": "high"
+      },
+      "watchTrigger": {
+        "cooling": "Warmth reaches {band}",
+        "noInteraction": "No interaction for {days} days",
+        "commitmentOverdue": "A commitment on this record becomes overdue, whoever it's assigned to",
+        "dealRisk": "Deal risk reaches {level}",
+        "unknown": "This trigger can't be read in this version"
+      },
+      "watchTypeName": {
+        "relationship_cooling": "Warmth reaches a colder band",
+        "no_interaction": "No interaction for a while",
+        "commitment_overdue": "A commitment becomes overdue, whoever owns it",
+        "deal_risk_threshold": "Deal risk crosses a level"
+      },
+      "createMenuItem": "Watch this record",
+      "createTitle": "Add a watch",
+      "createDescription": "Be told when something specific changes about {record}.",
+      "createTypeLabel": "Tell me when",
+      "createBandLabel": "Warmth band",
+      "createDaysLabel": "Quiet for",
+      "createDaysOption": "{days} days",
+      "createLevelLabel": "Risk level",
+      "createPreviewLabel": "This watch will trigger when",
+      "createPreviewNote": "Connex checks this itself. You'll get one notification naming the rule and the evidence behind it. It can also notify you sooner than the interval above if the condition moves to a different state — warm to cold, for example.",
+      "createCancel": "Cancel",
+      "createApply": "Add watch"
+    },
+    "signals": {
+      "relationship_decay": {
+        "label": "Explain why this signal fired",
+        "prompt": "Radar says the relationship with {subject} is cooling. Explain why, from what has actually been logged."
+      },
+      "deal_risk": {
+        "label": "Explain why this signal fired",
+        "prompt": "Radar flagged {subject} as at risk. Explain why, from what has actually been logged."
+      },
+      "warm_path": {
+        "label": "Explain this intro path",
+        "prompt": "Radar found an intro path to {subject}. Explain who could introduce me and what that route is based on."
+      }
+    },
+    "proposalReview": {
+      "heading": "{count, plural, one {# change needs your review} other {# changes need your review}}",
+      "applicable": "{applicable} of {count} can be applied now.",
+      "selected": "{count, plural, =0 {Nothing selected} one {# change selected} other {# changes selected}}",
+      "applySelected": "{count, plural, one {Apply # change} other {Apply # changes}}",
+      "applying": "Applying…",
+      "include": "Include the change to {target}",
+      "openFullView": "Open review in full view",
+      "noneApplicable": "None of these can be applied right now. Open each one to see why.",
+      "applied": "{count, plural, one {# applied} other {# applied}}",
+      "discarded": "{count, plural, one {# discarded} other {# discarded}}",
+      "failed": "{count, plural, one {# could not be applied} other {# could not be applied}}"
+    }
+  },
+  "SearchLayout": {
+    "title": "Search",
+    "description": "Search across your workspace"
+  },
+  "askConnex": {
+    "skills": {
+      "relationshipCoolingExplanation": {
+        "name": "Cooling relationship",
+        "description": "Explains why one contact or company has gone quieter, from the logged activity and the warmth reading behind it."
+      },
+      "activityDigest": {
+        "name": "Activity digest",
+        "description": "Summarizes what has been logged across the records in view, over a period you choose."
+      },
+      "relationshipBrief": {
+        "name": "Relationship brief",
+        "description": "Pulls together what you already know about one contact or company before you speak to them."
+      },
+      "pipelineAttentionReview": {
+        "name": "Deals needing attention",
+        "description": "Reviews open deals against the Connex risk model and explains what each one is waiting on."
+      },
+      "relationshipChangeSummary": {
+        "name": "What changed",
+        "description": "Reports what moved on a record since you last looked at it."
+      },
+      "introductionPathExplanation": {
+        "name": "Intro path",
+        "description": "Explains who could introduce you, and what that route is based on."
+      },
+      "meetingPreparation": {
+        "name": "Meeting preparation",
+        "description": "Gathers the people, history, and open threads you need before a meeting."
+      },
+      "meetingFollowUpExtraction": {
+        "name": "Meeting follow-ups",
+        "description": "Pulls the decisions, commitments, and owners out of what a meeting produced."
+      },
+      "followUpDraft": {
+        "name": "Follow-up draft",
+        "description": "Drafts a follow-up message for you to edit before you send it."
+      },
+      "dealRiskReview": {
+        "name": "Deal risk review",
+        "description": "Explains what puts a deal at risk, from its own history and the Connex risk model."
+      },
+      "stakeholderGapAnalysis": {
+        "name": "Missing stakeholders",
+        "description": "Points out the roles and people a deal or company has no relationship with yet."
+      },
+      "companyReview": {
+        "name": "Company review",
+        "description": "Prepares a review of one company from its relationships, deals, and recent activity."
+      },
+      "dailyWorkBrief": {
+        "name": "Today's brief",
+        "description": "Summarizes the relationship work worth doing today."
+      },
+      "commitmentExtraction": {
+        "name": "Open commitments",
+        "description": "Finds what has been promised, by whom, and what is still outstanding."
+      },
+      "dataQualityReview": {
+        "name": "Data quality review",
+        "description": "Points out records whose details are missing or contradict each other."
+      },
+      "naturalLanguageReport": {
+        "name": "Report from a question",
+        "description": "Builds a report that answers a question about your workspace."
+      }
+    }
+  }
+}

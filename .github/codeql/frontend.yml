@@ -10,6 +10,9 @@
 # No query filters. See backend.yml and #1464 for why the list must stay empty: a query filter is
 # repository-wide and can never be narrowed to one finding; an accepted finding is a dismissal.
 
+# `landing/` is the prelaunch Cloudflare Worker: the same JavaScript/TypeScript language and a public
+# request handler, so it is analysed here rather than left outside every CodeQL category.
 paths:
   - frontend
+  - landing
 query-filters: []

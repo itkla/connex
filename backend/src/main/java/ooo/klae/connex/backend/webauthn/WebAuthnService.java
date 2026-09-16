@@ -135,7 +135,6 @@ public class WebAuthnService {
         }
         CredentialRecord record = rpOperations.registerCredential(
             new ImmutableRelyingPartyRegistrationRequest(options, new RelyingPartyPublicKey(credential, label)));
-        userCredentials.save(record);
         userMapper.clearEpochRestampGrant(expectedUserId);
         User user = userMapper.getUserById(expectedUserId);
         if (user == null) {

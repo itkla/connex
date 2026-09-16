@@ -38,6 +38,8 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class DataSubjectRequestServiceTest extends AbstractServiceTest {
@@ -50,6 +52,7 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
     @Autowired private DisqualificationReasonService reasonService;
     @Autowired private RoleService roleService;
     @Autowired private WorkspaceService workspaceService;
+    @Autowired private ObjectMapper objectMapper;
     private final List<Integer> createdUserIds = new ArrayList<>();
     private final List<Integer> createdOrganizationIds = new ArrayList<>();
     private final List<Integer> createdWorkspaceIds = new ArrayList<>();
@@ -58,6 +61,14 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
 
     @AfterEach
     void cleanUpCommittedFixtures() {
+        createdWorkspaceIds.forEach(id -> jdbcTemplate.update(
+            "DELETE FROM campaign_audience_export WHERE workspace_id = ?", id));
+        createdWorkspaceIds.forEach(id -> jdbcTemplate.update(
+            "DELETE FROM campaign_audience_member WHERE workspace_id = ?", id));
+        createdWorkspaceIds.forEach(id -> jdbcTemplate.update(
+            "DELETE FROM campaign_audience_snapshot WHERE workspace_id = ?", id));
+        createdWorkspaceIds.forEach(id -> jdbcTemplate.update(
+            "DELETE FROM campaign WHERE workspace_id = ?", id));
         createdPersonIds.forEach(id -> jdbcTemplate.update("DELETE FROM person WHERE id = ?", id));
         createdCompanyIds.forEach(id -> jdbcTemplate.update("DELETE FROM company WHERE id = ?", id));
         createdOrganizationIds.forEach(
@@ -323,6 +334,268 @@ class DataSubjectRequestServiceTest extends AbstractServiceTest {
             identities.getLast().getPurposeOfUseCode());
         assertNotNull(identities.getLast().getSupersededAt());
     }
+
+    @Test
+    void disclosureIncludesConsentStateAndHistoryOnlyForTheSubject() {
+        Organization org = orgOwnedByCurrentUser();
+        Workspace subjectWorkspace = newWorkspace(org.getId());
+        Person subject = newPerson(subjectWorkspace.getId());
+        Person otherSubject = newPerson(subjectWorkspace.getId());
+        Workspace foreignWorkspace = newWorkspace(orgOwnedByCurrentUser().getId());
+        Person foreignSubject = newPerson(foreignWorkspace.getId());
+        seedConsentHistory(subjectWorkspace, subject, "consent-evidence");
+        seedConsentHistory(subjectWorkspace, otherSubject, "other-subject");
+        seedConsentHistory(foreignWorkspace, foreignSubject, "other-org");
+        jdbcTemplate.update(
+            "UPDATE person SET suspended_at = CURRENT_TIMESTAMP, provision_ceased_at = CURRENT_TIMESTAMP "
+                + "WHERE workspace_id = ? AND id = ?", subjectWorkspace.getId(), subject.getId());
+
+        JsonNode disclosure = disclosureFor(org, subjectWorkspace, subject);
+        JsonNode state = disclosure.path("consentState");
+        JsonNode history = disclosure.path("consentHistory");
+
+        assertEquals(1, state.size());
+        assertEquals("revoked", state.get(0).path("status").asString());
+        assertEquals("consent-evidence-revoke", state.get(0).path("evidenceRef").asString());
+        assertEquals("email", state.get(0).path("channel").asString());
+        assertEquals("marketing", state.get(0).path("purpose").asString());
+        assertEquals("self_service", state.get(0).path("source").asString());
+        assertTrue(state.get(0).hasNonNull("capturedAt"));
+        assertEquals(2, history.size());
+        assertEquals("revoked", history.get(0).path("status").asString());
+        assertEquals("consent-evidence-revoke", history.get(0).path("evidenceRef").asString());
+        assertEquals("granted", history.get(1).path("status").asString());
+        assertEquals("consent-evidence-grant", history.get(1).path("evidenceRef").asString());
+        for (JsonNode event : history) {
+            assertEquals(subjectWorkspace.getId(), event.path("workspaceId").asInt());
+            assertEquals(subject.getId(), event.path("personId").asInt());
+            assertEquals(state.get(0).path("id").asInt(), event.path("consentId").asInt());
+            assertEquals(currentUser.getId(), event.path("createdById").asInt());
+            assertEquals("self_service", event.path("source").asString());
+            assertTrue(event.hasNonNull("createdAt"));
+        }
+    }
+
+    @Test
+    void disclosureIncludesSubjectExportMembershipAndConservativeOutcomes() {
+        Organization org = orgOwnedByCurrentUser();
+        Workspace subjectWorkspace = newWorkspace(org.getId());
+        Person subject = newPerson(subjectWorkspace.getId());
+        Person otherSubject = newPerson(subjectWorkspace.getId());
+        List<Integer> both = List.of(subject.getId(), otherSubject.getId());
+        List<Integer> otherOnly = List.of(otherSubject.getId());
+        AudienceFixture audience = seedAudience(subjectWorkspace.getId(), both);
+        List<ExportScenario> scenarios = List.of(
+            new ExportScenario("confirmed", "completed", "confirmed_delivery", null,
+                both, both, 2, 0, "confirmed"),
+            new ExportScenario("partial", "completed", "confirmed_delivery", null,
+                both, both, 1, 1, "unconfirmed"),
+            new ExportScenario("operator", "completed", "operator_delivered", null,
+                both, both, 2, 0, "confirmed"),
+            new ExportScenario("ambiguous", "running", "ambiguous", null,
+                both, both, 0, 0, "unconfirmed"),
+            new ExportScenario("staged", "running", null, null,
+                both, both, 0, 0, "unconfirmed"),
+            new ExportScenario("failed", "failed", "definite_no_side_effect", null,
+                both, both, 0, 2, "not_delivered"),
+            new ExportScenario("none-delivered", "failed", "confirmed_no_delivery", null,
+                both, both, 0, 2, "not_delivered"),
+            new ExportScenario("operator-not-delivered", "failed", "operator_not_delivered", null,
+                both, both, 0, 2, "not_delivered"),
+            new ExportScenario("late-conflict", "completed", "operator_delivered", "confirmed_no_delivery",
+                both, both, 2, 0, "unconfirmed"),
+            new ExportScenario("legacy", "completed", null, null,
+                null, null, 2, 0, "unknown"),
+            new ExportScenario("legacy-unknown-counts", "completed", "operator_delivered", null,
+                null, null, null, null, "unknown"),
+            new ExportScenario("excluded-before-push", "completed", "confirmed_delivery", null,
+                both, otherOnly, 1, 1, "not_staged"),
+            new ExportScenario("snapshot-only", "failed", "no_eligible_members", null,
+                List.of(), List.of(), 0, 0, "not_staged"));
+        scenarios.forEach(scenario -> seedAudienceExport(audience, scenario));
+        AudienceFixture otherAudience = seedAudience(subjectWorkspace.getId(), otherOnly);
+        seedAudienceExport(otherAudience, new ExportScenario("other-subject", "completed",
+            "confirmed_delivery", null, otherOnly, otherOnly, 1, 0, "confirmed"));
+        Workspace foreignWorkspace = newWorkspace(orgOwnedByCurrentUser().getId());
+        AudienceFixture foreignAudience = seedAudience(foreignWorkspace.getId(), both);
+        seedAudienceExport(foreignAudience, new ExportScenario("other-org", "completed",
+            "confirmed_delivery", null, both, both, 2, 0, "confirmed"));
+
+        JsonNode exports = disclosureFor(org, subjectWorkspace, subject).path("audienceExportEvidence");
+
+        assertEquals(scenarios.size(), exports.size());
+        for (int index = 0; index < scenarios.size(); index++) {
+            ExportScenario expected = scenarios.get(scenarios.size() - index - 1);
+            JsonNode evidence = exports.get(index);
+            assertEquals(expected.destination(), evidence.path("externalListId").asString());
+            assertEquals("http_list", evidence.path("connector").asString());
+            assertEquals(audience.campaignId(), evidence.path("campaignId").asInt());
+            assertEquals(audience.snapshotId(), evidence.path("snapshotId").asInt());
+            assertEquals(subjectWorkspace.getId(), evidence.path("workspaceId").asInt());
+            assertEquals("email", evidence.path("channel").asString());
+            assertEquals("marketing", evidence.path("purpose").asString());
+            assertEquals("included", evidence.path("snapshotMemberStatus").asString());
+            assertEquals(expected.subjectOutcome(), evidence.path("subjectProvisionOutcome").asString());
+            assertEquals(expected.status(), evidence.path("status").asString());
+            assertJsonField(evidence, "outcomeClassification", expected.classification());
+            assertJsonField(evidence, "lateOutcome", expected.lateOutcome());
+            assertJsonField(evidence, "pushedCount", expected.pushedCount());
+            assertJsonField(evidence, "failedCount", expected.failedCount());
+            assertJsonField(evidence, "frozenMember", expected.frozen() == null
+                ? null : expected.frozen().contains(subject.getId()));
+            assertJsonField(evidence, "stagedForPush", expected.staged() == null
+                ? null : expected.staged().contains(subject.getId()));
+            assertEquals(currentUser.getId(), evidence.path("createdById").asInt());
+            assertEquals(1, evidence.path("attempt").asInt());
+            if ("running".equals(expected.status())) {
+                assertTrue(evidence.hasNonNull("reconciliationRequiredAt"));
+            }
+            assertFalse(evidence.has("frozenMemberIdsJson"));
+            assertFalse(evidence.has("pushedMemberIdsJson"));
+        }
+    }
+
+    @Test
+    void disclosureFindsExportMemberEvidenceWithoutDisclosingUnrelatedSnapshotRecords() {
+        Organization org = orgOwnedByCurrentUser();
+        Workspace subjectWorkspace = newWorkspace(org.getId());
+        Person subject = newPerson(subjectWorkspace.getId());
+        Person otherSubject = newPerson(subjectWorkspace.getId());
+        AudienceFixture audience = seedAudience(subjectWorkspace.getId(), List.of(otherSubject.getId()));
+        List<Integer> subjectOnly = List.of(subject.getId());
+        seedAudienceExport(audience, new ExportScenario("retained-request", "completed",
+            "confirmed_delivery", null, null, subjectOnly, 1, 0, "confirmed"));
+        seedAudienceExport(audience, new ExportScenario("retained-frozen", "failed",
+            "no_eligible_members", null, subjectOnly, List.of(), 0, 1, "not_staged"));
+        AudienceFixture unrelated = seedAudience(subjectWorkspace.getId(), subjectOnly);
+        jdbcTemplate.update("UPDATE campaign_audience_snapshot SET record_type = 'company' WHERE id = ?",
+            unrelated.snapshotId());
+        jdbcTemplate.update("UPDATE campaign_audience_member SET record_type = 'company' WHERE snapshot_id = ?",
+            unrelated.snapshotId());
+        seedAudienceExport(unrelated, new ExportScenario("unrelated-company", "completed",
+            null, null, null, null, 1, 0, "unknown"));
+
+        JsonNode exports = disclosureFor(org, subjectWorkspace, subject).path("audienceExportEvidence");
+
+        assertEquals(2, exports.size());
+        assertEquals("retained-frozen", exports.get(0).path("externalListId").asString());
+        assertEquals("not_staged", exports.get(0).path("subjectProvisionOutcome").asString());
+        assertTrue(exports.get(0).path("frozenMember").asBoolean());
+        assertFalse(exports.get(0).path("stagedForPush").asBoolean());
+        assertEquals("retained-request", exports.get(1).path("externalListId").asString());
+        assertEquals("confirmed", exports.get(1).path("subjectProvisionOutcome").asString());
+        assertFalse(exports.get(1).has("frozenMember"));
+        assertTrue(exports.get(1).path("stagedForPush").asBoolean());
+        for (JsonNode evidence : exports) {
+            assertFalse(evidence.has("snapshotMemberStatus"));
+        }
+    }
+
+    @Test
+    void disclosureIncludesExportEvidenceAfterAnOrganizationWorkspaceShareIsRevoked() {
+        Organization org = orgOwnedByCurrentUser();
+        Workspace subjectWorkspace = newWorkspace(org.getId());
+        Person subject = newPerson(subjectWorkspace.getId());
+        Workspace exportWorkspace = newWorkspace(org.getId());
+        jdbcTemplate.update(
+            "INSERT INTO person_share (person_id, workspace_id, granted_by) VALUES (?, ?, ?)",
+            subject.getId(), exportWorkspace.getId(), currentUser.getId());
+        List<Integer> subjectOnly = List.of(subject.getId());
+        AudienceFixture audience = seedAudience(exportWorkspace.getId(), subjectOnly);
+        seedAudienceExport(audience, new ExportScenario("shared-subject-list", "completed",
+            "confirmed_delivery", null, subjectOnly, subjectOnly, 1, 0, "confirmed"));
+        jdbcTemplate.update("DELETE FROM person_share WHERE person_id = ? AND workspace_id = ?",
+            subject.getId(), exportWorkspace.getId());
+
+        JsonNode disclosure = disclosureFor(org, subjectWorkspace, subject);
+        JsonNode exports = disclosure.path("audienceExportEvidence");
+
+        assertEquals(0, disclosure.path("thirdPartyProvisions").size());
+        assertEquals(1, exports.size());
+        assertEquals(exportWorkspace.getId(), exports.get(0).path("workspaceId").asInt());
+        assertEquals("shared-subject-list", exports.get(0).path("externalListId").asString());
+        assertEquals("confirmed", exports.get(0).path("subjectProvisionOutcome").asString());
+        assertTrue(exports.get(0).path("stagedForPush").asBoolean());
+    }
+
+    private void assertJsonField(JsonNode evidence, String field, Object expected) {
+        assertEquals(expected == null ? null : objectMapper.valueToTree(expected), evidence.get(field), field);
+    }
+
+    private JsonNode disclosureFor(Organization org, Workspace subjectWorkspace, Person subject) {
+        DataSubjectRequestDto request = dataSubjectRequestService.create(
+            org.getId(), currentUser.getId(), linkedRequest(subjectWorkspace.getId(), subject.getId()));
+        return objectMapper.valueToTree(dataSubjectRequestService.disclosure(
+            org.getId(), request.getId(), currentUser.getId()));
+    }
+
+    private void seedConsentHistory(Workspace subjectWorkspace, Person subject, String evidencePrefix) {
+        jdbcTemplate.update("""
+            INSERT INTO contact_channel_consent
+              (workspace_id, person_id, channel, purpose, status, source, evidence_ref, captured_at)
+            VALUES (?, ?, 'email', 'marketing', 'revoked', 'self_service', ?, '2026-01-03 00:00:00')
+            """, subjectWorkspace.getId(), subject.getId(), evidencePrefix + "-revoke");
+        for (String status : List.of("granted", "revoked")) {
+            jdbcTemplate.update("""
+                INSERT INTO contact_channel_consent_event
+                  (workspace_id, consent_id, person_id, channel, purpose, status, source,
+                   evidence_ref, created_by_id, created_at)
+                SELECT workspace_id, id, person_id, channel, purpose, ?, source, ?, ?, ?
+                FROM contact_channel_consent WHERE workspace_id = ? AND person_id = ?
+                """, status, evidencePrefix + ("granted".equals(status) ? "-grant" : "-revoke"),
+                currentUser.getId(), "granted".equals(status) ? "2026-01-02 00:00:00" : "2026-01-03 00:00:00",
+                subjectWorkspace.getId(), subject.getId());
+        }
+    }
+
+    private AudienceFixture seedAudience(int workspaceId, List<Integer> personIds) {
+        String campaignName = "Disclosure campaign " + unique();
+        jdbcTemplate.update("INSERT INTO campaign (workspace_id, name, type) VALUES (?, ?, 'email')",
+            workspaceId, campaignName);
+        Integer campaignId = jdbcTemplate.queryForObject(
+            "SELECT id FROM campaign WHERE workspace_id = ? AND name = ?", Integer.class,
+            workspaceId, campaignName);
+        assertNotNull(campaignId);
+        jdbcTemplate.update("""
+            INSERT INTO campaign_audience_snapshot
+              (workspace_id, campaign_id, version, record_type, definition_json, estimated_included,
+               excluded_total, excluded_consent, excluded_suppressed, excluded_restricted)
+            VALUES (?, ?, 1, 'person', '{}', ?, 0, 0, 0, 0)
+            """, workspaceId, campaignId, personIds.size());
+        Integer snapshotId = jdbcTemplate.queryForObject(
+            "SELECT id FROM campaign_audience_snapshot WHERE workspace_id = ? AND campaign_id = ?",
+            Integer.class, workspaceId, campaignId);
+        assertNotNull(snapshotId);
+        personIds.forEach(personId -> jdbcTemplate.update("""
+            INSERT INTO campaign_audience_member (workspace_id, snapshot_id, record_type, record_id, status)
+            VALUES (?, ?, 'person', ?, 'included')
+            """, workspaceId, snapshotId, personId));
+        return new AudienceFixture(workspaceId, campaignId, snapshotId, personIds.size());
+    }
+
+    private void seedAudienceExport(AudienceFixture audience, ExportScenario scenario) {
+        jdbcTemplate.update("""
+            INSERT INTO campaign_audience_export
+              (workspace_id, campaign_id, snapshot_id, connector, external_list_id,
+               frozen_member_ids_json, pushed_member_ids_json, status, total_members,
+               pushed_count, failed_count, outcome_classification, late_outcome,
+               reconciliation_required_at, lease_until, created_by_id)
+            VALUES (?, ?, ?, 'http_list', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, audience.workspaceId(), audience.campaignId(), audience.snapshotId(), scenario.destination(),
+            scenario.frozen() == null ? null : objectMapper.writeValueAsString(scenario.frozen()),
+            scenario.staged() == null ? null : objectMapper.writeValueAsString(scenario.staged()),
+            scenario.status(), scenario.frozen() == null ? audience.members() : scenario.frozen().size(),
+            scenario.pushedCount(), scenario.failedCount(), scenario.classification(), scenario.lateOutcome(),
+            "ambiguous".equals(scenario.classification()) ? "2026-01-03 00:00:00" : null,
+            "staged".equals(scenario.destination()) ? "2026-01-03 00:00:00" : null,
+            currentUser.getId());
+    }
+
+    private record AudienceFixture(int workspaceId, int campaignId, int snapshotId, int members) {}
+
+    private record ExportScenario(String destination, String status, String classification, String lateOutcome,
+            List<Integer> frozen, List<Integer> staged, Integer pushedCount, Integer failedCount,
+            String subjectOutcome) {}
 
     @Test
     void disclosureIncludesConfiguredAndLocalizedDisqualificationLabels() {
