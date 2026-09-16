@@ -237,9 +237,7 @@
     <set>
       username = #{username},
       display_name = #{displayName},
-      email = #{email},
       timezone = COALESCE(#{timezone}, timezone),
-      <if test="passwordHash != null">password_hash = #{passwordHash},</if>
     </set>
     WHERE id = #{id}
   </update>

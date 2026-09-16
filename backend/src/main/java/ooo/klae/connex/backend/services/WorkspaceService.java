@@ -70,6 +70,7 @@ public class WorkspaceService {
     private final AuditService auditService;
     private final SystemActor systemActor;
     private final SessionSecurityService sessionSecurityService;
+    private final RegistrationVerificationService registrationVerificationService;
 
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int WORKSPACE_NAME_MAX = 128;
@@ -182,12 +183,25 @@ public class WorkspaceService {
         return TimezoneSupport.validateIana(workspace.getTimezone(), actorTimezone);
     }
 
+    /** Returns the raw last-active workspace id, or null, without validating membership or selecting a fallback. */
+    public Integer rememberedWorkspaceIdFor(int userId) {
+        return workspaceMapper.getLastActiveWorkspaceId(userId);
+    }
+
     /** The workspace to activate when none is supplied: remembered last-active, else first membership, else null. */
     public Integer defaultWorkspaceIdFor(int userId) {
         Integer last = workspaceMapper.getLastActiveWorkspaceId(userId);
         if (last != null && workspaceMapper.isMember(last, userId)) {
             return last;
         }
+        return firstMembershipWorkspaceIdFor(userId);
+    }
+
+    /**
+     * The caller's lowest-id active membership, or null when none remains. Lets a caller that has
+     * already read the remembered selection finish resolution without re-reading it.
+     */
+    public Integer firstMembershipWorkspaceIdFor(int userId) {
         List<Workspace> workspaces = workspaceMapper.getWorkspacesForUser(userId);
         return workspaces.isEmpty() ? null : workspaces.getFirst().getId();
     }
@@ -288,6 +302,19 @@ public class WorkspaceService {
 
     public void rememberActive(int userId, int workspaceId) {
         workspaceMapper.setLastActiveWorkspaceId(userId, workspaceId);
+    }
+
+    /**
+     * Drops a remembered selection that has been proven dead, so the caller resolves no workspace
+     * at all rather than a workspace they were removed from. Without this the remembered id
+     * survives revocation forever and every later pinless request re-derives the revoked
+     * workspace, which would lock a member out of the very endpoints that let them join or create
+     * a workspace again (#1649).
+     *
+     * @param userId the member whose remembered selection is no longer resolvable
+     */
+    public void forgetActive(int userId) {
+        workspaceMapper.clearLastActiveWorkspaceId(userId);
     }
 
     public boolean isSelfServiceCreationAllowed() {
@@ -447,6 +474,14 @@ public class WorkspaceService {
             lockAndRequirePermissions(workspaceId, requiredByUser, false), requiredByUser);
     }
 
+    /** Returns authority retained by shared membership locks through the surrounding transaction. */
+    public LockedPermissionSnapshot lockAndRequirePermissionsSnapshotForShare(
+            int workspaceId,
+            Map<Integer, Set<Permission>> requiredByUser) {
+        return new LockedPermissionSnapshot(
+            lockAndRequirePermissions(workspaceId, requiredByUser, false, true), requiredByUser);
+    }
+
     /**
      * Locks the workspace exclusively while revalidating current membership and permissions.
      *
@@ -466,6 +501,14 @@ public class WorkspaceService {
             int workspaceId,
             Map<Integer, Set<Permission>> requiredByUser,
             boolean exclusiveWorkspace) {
+        return lockAndRequirePermissions(workspaceId, requiredByUser, exclusiveWorkspace, false);
+    }
+
+    private Map<Integer, Set<Permission>> lockAndRequirePermissions(
+            int workspaceId,
+            Map<Integer, Set<Permission>> requiredByUser,
+            boolean exclusiveWorkspace,
+            boolean sharedMemberships) {
         Objects.requireNonNull(requiredByUser, "requiredByUser");
         TreeSet<Integer> userIds = new TreeSet<>(requiredByUser.keySet());
         if (userIds.isEmpty()) {
@@ -489,8 +532,9 @@ public class WorkspaceService {
         Map<Integer, WorkspaceMember> memberships = new LinkedHashMap<>();
         TreeSet<Integer> roleIds = new TreeSet<>();
         for (int userId : userIds) {
-            WorkspaceMember membership = workspaceMapper.lockAuthorizationMembership(
-                    workspaceId, userId);
+            WorkspaceMember membership = sharedMemberships
+                ? workspaceMapper.lockAuthorizationMembershipForShare(workspaceId, userId)
+                : workspaceMapper.lockAuthorizationMembership(workspaceId, userId);
             if (!isExactMembership(membership, workspaceId, userId)
                     || !"active".equals(membership.getStatus())) {
                 throw authorizationRequired(userId, requiredByUser.get(userId));
@@ -1521,9 +1565,12 @@ public class WorkspaceService {
     }
 
     /**
-     * The user accepts a pending invitation, becoming an active member. The organization's
-     * email-domain ceiling (#316) is re-applied at activation, so a pending row that predates a
-     * later-tightened org policy cannot slip an out-of-policy member into the workspace.
+     * The user accepts a pending invitation, becoming an active member. When the instance runs
+     * registration verification, the account must have proven mailbox ownership first, so a
+     * preregistered address the inviter meant for someone else cannot be activated by whoever
+     * typed it. The organization's email-domain ceiling (#316) is re-applied at activation from the
+     * locked account row, so a pending row that predates a later-tightened org policy — or a since
+     * changed address — cannot slip an out-of-policy member into the workspace.
      */
     @Transactional
     public WorkspaceMembershipDto approveMembership(int workspaceId, int userId) {
@@ -1544,7 +1591,14 @@ public class WorkspaceService {
         if (pending == null) {
             throw pendingMembershipNotFound();
         }
-        if (!orgAllowedDomainService.isJoinAllowed(workspace.getOrgId(), pending.getEmail())) {
+        User user = userMapper.getUserByIdForShare(userId);
+        if (user == null) {
+            throw pendingMembershipNotFound();
+        }
+        if (registrationVerificationService.requiresMailboxProof(user)) {
+            throw new ForbiddenException("Verify your email address before joining this workspace");
+        }
+        if (!orgAllowedDomainService.isJoinAllowed(workspace.getOrgId(), user.getEmail())) {
             throw new ForbiddenException("This organization only allows members from approved email domains");
         }
         if (workspaceMapper.activateMember(workspaceId, userId) == 0) {
@@ -1638,6 +1692,8 @@ public class WorkspaceService {
                 Integer nextWorkspaceId = defaultWorkspaceIdFor(userId);
                 if (nextWorkspaceId != null) {
                     rememberActive(userId, nextWorkspaceId);
+                } else {
+                    forgetActive(userId);
                 }
                 return Optional.ofNullable(nextWorkspaceId);
             }).orElse(null);

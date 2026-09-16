@@ -11,7 +11,9 @@ import ooo.klae.connex.backend.publicapi.ApiCredentialPrincipal;
 import ooo.klae.connex.backend.publicapi.PublicApiPaths;
 
 /**
- * Resolves the requested workspace candidate from the header, cookie, or remembered membership.
+ * Resolves the requested workspace candidate from the header, cookie, or raw remembered
+ * workspace id. With no remembered selection, uses the caller's first active membership.
+ * Membership validation and method-specific stale-selection recovery belong to the interceptor.
  */
 @Component
 @RequiredArgsConstructor
@@ -29,7 +31,10 @@ public class WorkspaceRequestResolver {
         if (fromCookie != null) {
             return fromCookie;
         }
-        return workspaceService.defaultWorkspaceIdFor(userId);
+        Integer remembered = workspaceService.rememberedWorkspaceIdFor(userId);
+        return remembered != null
+            ? remembered
+            : workspaceService.firstMembershipWorkspaceIdFor(userId);
     }
 
     /**
@@ -53,20 +58,24 @@ public class WorkspaceRequestResolver {
     }
 
     /**
-     * Whether a failed membership on {@code candidate} is the stale browser/SSR pin
-     * that should heal to the caller's next workspace (#1108), rather than an explicit
-     * foreign {@code X-Workspace-Id} that must stay 403.
+     * Whether a failed membership on a {@code candidate} returned by {@link #resolve}
+     * is a stale selection eligible for recovery on safe methods (#1108, #1649).
      *
      * <p>The SPA mirrors {@code connex_workspace} into the header, so a matching stale
-     * pair (or cookie-only SSR) is the revocation case. A header that is absent from
-     * the cookie, or that disagrees with it, is treated as an intentional pin.
+     * pair (or cookie-only SSR) is the revocation case. Without a header or cookie,
+     * the remembered candidate is an implicit selection eligible for the same recovery.
+     * A header that is absent from the cookie, or that disagrees with it, is treated
+     * as an intentional pin and must stay 403.
      */
     public boolean isStaleWorkspacePin(HttpServletRequest request, int candidate) {
         Integer fromCookie = cookieId(request);
-        if (fromCookie == null || fromCookie != candidate) {
+        Integer fromHeader = parseId(request.getHeader(HEADER));
+        if (fromCookie == null) {
+            return fromHeader == null;
+        }
+        if (fromCookie != candidate) {
             return false;
         }
-        Integer fromHeader = parseId(request.getHeader(HEADER));
         return fromHeader == null || fromHeader.equals(fromCookie);
     }
 

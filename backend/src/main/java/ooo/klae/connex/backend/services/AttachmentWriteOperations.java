@@ -1,15 +1,21 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Attachment;
+import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
@@ -17,9 +23,13 @@ import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.ShareMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.WorkspaceService.LockedPermissionSnapshot;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ScannedUpload;
+import ooo.klae.connex.backend.tenant.Permission;
 
 /** Isolates attachment persistence in a proxied tenant transaction before normal label hydration. */
 @Component
@@ -36,6 +46,9 @@ public class AttachmentWriteOperations {
     private final NoteMapper noteMapper;
     private final AuditService auditService;
     private final ManagedObjectService managedObjectService;
+    private final WorkspaceService workspaceService;
+    private final WorkspaceMapper workspaceMapper;
+    private final ShareMapper shareMapper;
 
     /** Persists an externally stored attachment after tenant target validation. */
     @Transactional
@@ -55,7 +68,7 @@ public class AttachmentWriteOperations {
     @Transactional
     public Attachment upload(
             int workspaceId, String entityType, int entityId, ScannedUpload scanned, User uploader) {
-        requireTenantTarget(workspaceId, entityType, entityId);
+        requireUploadTarget(workspaceId, entityType, entityId);
         return storeAndPersist(
             workspaceId, entityType, entityId, scanned, uploader);
     }
@@ -64,7 +77,7 @@ public class AttachmentWriteOperations {
     @Transactional
     public Attachment uploadInlineImage(
             int workspaceId, String entityType, int entityId, ScannedUpload scanned, User uploader) {
-        requireTenantTarget(workspaceId, entityType, entityId);
+        requireUploadTarget(workspaceId, entityType, entityId);
         return storeAndPersist(
             workspaceId, entityType, entityId, scanned, uploader);
     }
@@ -87,7 +100,15 @@ public class AttachmentWriteOperations {
             int entityId,
             ScannedUpload scanned,
             User uploader) {
-        StoredBinary stored = managedObjectService.storeInspectedAttachment(workspaceId, scanned);
+        int userId = workspaceService.getCurrentUserId();
+        Map<Integer, Set<Permission>> required = "user".equals(entityType) && entityId != userId
+            ? Map.of(userId, Set.of(Permission.ATTACHMENT_CREATE), entityId, Set.of())
+            : Map.of(userId, Set.of(Permission.ATTACHMENT_CREATE));
+        AtomicReference<LockedPermissionSnapshot> authority = new AtomicReference<>();
+        StoredBinary stored = managedObjectService.storeInspectedAttachment(workspaceId, scanned,
+            () -> authority.set(workspaceService.lockAndRequirePermissionsSnapshotForShare(workspaceId, required)));
+        requireLockedTarget(workspaceId, entityType, entityId, userId);
+        Objects.requireNonNull(authority.get(), "Upload authority was not locked").revalidate();
         return persistStored(workspaceId, entityType, entityId, uploader, stored, scanned);
     }
 
@@ -120,8 +141,14 @@ public class AttachmentWriteOperations {
     private Attachment persist(int workspaceId, Attachment attachment, boolean managed) {
         attachment.setWorkspaceId(workspaceId);
         validateUrl(attachment.getUrl());
-        if (managed && attachmentMapper.countUrl(workspaceId, attachment.getUrl()) > 0) {
-            throw new BadRequestException("That managed attachment reference is already in use");
+        attachment.setUrl(ManagedObjectService.canonicalAttachmentUrl(attachment.getUrl()));
+        if (ManagedObjectService.hasManagedAttachmentPrefix(attachment.getUrl())) {
+            if (attachmentMapper.countUrl(workspaceId, attachment.getUrl()) > 0) {
+                throw new ConflictException("That managed attachment reference is already in use");
+            }
+            if (!managed) {
+                throw new BadRequestException("Managed attachment references cannot be submitted directly");
+            }
         }
         if (!managed && attachmentMapper.countUrlInOtherWorkspaces(workspaceId, attachment.getUrl()) > 0) {
             throw new BadRequestException("That attachment url is already in use");
@@ -151,6 +178,47 @@ public class AttachmentWriteOperations {
                 || !Objects.equals(created.getUrl(), expected.getUrl())
                 || !Objects.equals(createdUploaderId, expectedUploaderId)) {
             throw new IllegalStateException("Created attachment could not be reloaded safely");
+        }
+    }
+
+    private void requireUploadTarget(int workspaceId, String entityType, int entityId) {
+        int userId = workspaceService.getCurrentUserId();
+        workspaceService.requirePermission(workspaceId, userId, Permission.ATTACHMENT_CREATE);
+        boolean visible = switch (entityType) {
+            case "note" -> noteMapper.getVisibleNoteById(workspaceId, entityId, userId) != null;
+            case "user" -> workspaceMapper.isMember(workspaceId, entityId);
+            default -> true;
+        };
+        if (!visible) {
+            throw new ResourceNotFoundException("Attachment target was not found");
+        }
+        requireTenantTarget(workspaceId, entityType, entityId);
+    }
+
+    /**
+     * Retains current record visibility and any sharing grant through metadata commit.
+     * User targets are retained by the ordered user and membership locks acquired at write admission.
+     * A refusal rolls back quota and tombstone cancellation, leaving unpublished bytes queued for cleanup.
+     */
+    private void requireLockedTarget(int workspaceId, String entityType, int entityId, int userId) {
+        boolean visible = switch (entityType) {
+            case "company" -> {
+                Company company = companyMapper.getVisibleCompanyByIdForUpdate(workspaceId, entityId);
+                yield company != null && (company.getWorkspaceId() == workspaceId
+                    || Objects.equals(shareMapper.lockCompanyShareForWorkspace(entityId, workspaceId), entityId));
+            }
+            case "person" -> {
+                Person person = personMapper.getVisiblePersonByIdForUpdate(workspaceId, entityId);
+                yield person != null && (person.getWorkspaceId() == workspaceId
+                    || Objects.equals(shareMapper.lockPersonShareForWorkspace(entityId, workspaceId), entityId));
+            }
+            case "deal" -> dealMapper.getDealByIdForUpdate(workspaceId, entityId) != null;
+            case "note" -> noteMapper.getVisibleNoteByIdForUpdate(workspaceId, entityId, userId) != null;
+            case "user" -> true;
+            default -> throw new BadRequestException("Unsupported attachment entity type");
+        };
+        if (!visible) {
+            throw new ForbiddenException("Attachment target is no longer visible");
         }
     }
 

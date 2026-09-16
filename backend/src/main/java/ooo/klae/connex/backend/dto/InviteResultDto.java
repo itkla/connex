@@ -6,9 +6,10 @@ import lombok.NoArgsConstructor;
 
 /**
  * The outcome of inviting someone to a workspace by email. Exactly one field is
- * populated: {@code invite} for an emailed token invite (the address has no
- * Connex account yet), or {@code member} when the address belongs to an existing
- * Connex user, who is added as a pending member and notified in-app instead.
+ * populated: {@code invite} for an emailed token invite (the address has no Connex account, or
+ * has one that still owes email verification while the instance runs it), or {@code member} when
+ * the address belongs to an existing account whose mailbox ownership is settled, which is added as
+ * a pending member and notified in-app instead.
  */
 @Data
 @NoArgsConstructor

@@ -1858,10 +1858,10 @@ export function validateEmailChangeToken(init: RequestInit = {}) {
 
 /**
  * Applies a pending email change behind a valid confirmation token.
- * @returns A promise resolving to the confirmation message
+ * @returns The confirmation message and pending workspace invitations revoked by the change
  */
 export function confirmEmailChange() {
-    return postJson<Types.AuthResponse>("/api/auth/email-change/confirm", {});
+    return postJson<Types.EmailChangeConfirmation>("/api/auth/email-change/confirm", {});
 }
 
 export function getPasskeys(init: RequestInit = {}) {

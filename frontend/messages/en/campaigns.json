@@ -287,7 +287,8 @@
             "frequency_capped": "Frequency capped",
             "quiet_hours": "Quiet hours",
             "no_address": "No address",
-            "consent_missing": "No opt-in recorded"
+            "consent_missing": "No opt-in recorded",
+            "not_dispatchable": "Send no longer active"
         },
         "sendsTitle": "By send",
         "sendLabel": "Send #{id}"

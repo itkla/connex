@@ -10,14 +10,22 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.SsoConnection;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceMailConfig;
 import ooo.klae.connex.backend.mail.SecretCipher;
 import ooo.klae.connex.backend.mappers.MailConfigMapper;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.sso.SsoSecretCipher;
 
 /**
@@ -42,6 +50,9 @@ public class LegacySecretRewrapRunner implements ApplicationRunner {
     private final SsoConnectionMapper ssoConnectionMapper;
     private final SecretCipher secretCipher;
     private final SsoSecretCipher ssoSecretCipher;
+    private final UserMapper userMapper;
+    private final WorkspaceMapper workspaceMapper;
+    private final PlatformTransactionManager transactionManager;
 
     @Override
     @Transactional
@@ -61,20 +72,42 @@ public class LegacySecretRewrapRunner implements ApplicationRunner {
         }
         int count = 0;
         for (WorkspaceMailConfig config : configs) {
-            if (!config.isEnabled() || !config.isAuth()) {
-                mailConfigMapper.updatePasswordReference(config.getWorkspaceId(), null);
-                continue;
+            TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+            transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            if (Boolean.TRUE.equals(transaction.execute(status -> rewrapWorkspaceMailSecret(config.getWorkspaceId())))) {
+                count++;
             }
-            if (!secretCipher.hasLegacyKey()) {
-                throw new IllegalStateException(
-                        "CONNEX_MAIL_SECRET_KEY is required until existing workspace SMTP secrets are rewrapped");
-            }
-            String plaintext = secretCipher.decryptForWorkspace(config.getWorkspaceId(), config.getPasswordEnc());
-            String reference = secretCipher.encryptForWorkspace(config.getWorkspaceId(), plaintext);
-            mailConfigMapper.updatePasswordReference(config.getWorkspaceId(), reference);
-            count++;
         }
         return count;
+    }
+
+    /** Each workspace commits independently so no SMTP child lock precedes another workspace root. */
+    private boolean rewrapWorkspaceMailSecret(int workspaceId) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.isAuthenticated()
+                && authentication.getPrincipal() instanceof User user
+                && userMapper.lockByIdForShare(user.getId()) == null) {
+            return false;
+        }
+        if (workspaceMapper.lockWorkspace(workspaceId) == null) {
+            return false;
+        }
+        WorkspaceMailConfig config = mailConfigMapper.findByWorkspaceForUpdate(workspaceId);
+        if (config == null || !isLegacySecret(config.getPasswordEnc())) {
+            return false;
+        }
+        if (!config.isEnabled() || !config.isAuth()) {
+            mailConfigMapper.updatePasswordReference(workspaceId, null);
+            return false;
+        }
+        if (!secretCipher.hasLegacyKey()) {
+            throw new IllegalStateException(
+                    "CONNEX_MAIL_SECRET_KEY is required until existing workspace SMTP secrets are rewrapped");
+        }
+        String plaintext = secretCipher.decryptForWorkspace(workspaceId, config.getPasswordEnc());
+        String reference = secretCipher.encryptForWorkspace(workspaceId, plaintext);
+        mailConfigMapper.updatePasswordReference(workspaceId, reference);
+        return true;
     }
 
     private SsoRewrapCounts rewrapSsoSecrets() {
