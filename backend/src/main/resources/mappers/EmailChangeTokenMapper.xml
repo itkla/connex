@@ -4,23 +4,29 @@
 <mapper namespace="ooo.klae.connex.backend.mappers.EmailChangeTokenMapper">
 
   <insert id="insert">
-    INSERT INTO email_change_token (user_id, new_email, token_hash, expires_at, requested_ip)
+    INSERT INTO email_change_token (user_id, new_email, token_hash, expires_at, requested_ip, credential_generation)
     VALUES (#{userId}, #{newEmail}, #{tokenHash},
-            DATE_ADD(UTC_TIMESTAMP(), INTERVAL #{expiryMinutes} MINUTE), #{requestedIp})
+            DATE_ADD(UTC_TIMESTAMP(), INTERVAL #{expiryMinutes} MINUTE), #{requestedIp}, #{credentialGeneration})
   </insert>
 
   <select id="existsRedeemableByHash" resultType="boolean">
     SELECT EXISTS(
       SELECT 1 FROM email_change_token
       WHERE token_hash = #{tokenHash} AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+        AND credential_generation = (SELECT session_epoch FROM app_user WHERE id = email_change_token.user_id)
     )
   </select>
 
-  <select id="findRedeemableByHash" resultType="EmailChangeToken">
-    SELECT id, user_id, new_email, token_hash, expires_at, exchanged_at, consumed_at, requested_ip, created_at
+  <select id="findByHash" resultType="EmailChangeToken">
+    SELECT id, user_id, credential_generation, new_email, token_hash, expires_at, consumed_at, requested_ip, created_at
     FROM email_change_token
     WHERE token_hash = #{tokenHash}
-      AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+  </select>
+
+  <select id="findRedeemableByHash" resultType="EmailChangeToken">
+    SELECT id, user_id, credential_generation, new_email, token_hash, expires_at, exchanged_at, consumed_at, requested_ip, created_at
+    FROM email_change_token
+    WHERE token_hash = #{tokenHash} AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
   </select>
 
   <update id="claimExchange">
@@ -32,12 +38,13 @@
       AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
   </update>
 
-  <select id="isExchangeOwnedBy" resultType="boolean">
-    SELECT EXISTS(
-      SELECT 1 FROM email_change_token
-      WHERE token_hash = #{tokenHash} AND exchange_owner_hash = #{exchangeOwnerHash}
-        AND exchanged_at IS NOT NULL AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
-    )
+  <!-- FOR SHARE: a same-owner exchange retry must observe an invalidation that committed while
+       it waited on the account lock, which the transaction's REPEATABLE READ snapshot cannot. -->
+  <select id="lockExchangeOwnedBy" resultType="java.lang.Integer">
+    SELECT id FROM email_change_token
+    WHERE token_hash = #{tokenHash} AND exchange_owner_hash = #{exchangeOwnerHash}
+      AND exchanged_at IS NOT NULL AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+    FOR SHARE
   </select>
 
   <select id="existsExchangedRedeemableByHash" resultType="boolean">
@@ -45,11 +52,12 @@
       SELECT 1 FROM email_change_token
       WHERE token_hash = #{tokenHash} AND exchanged_at IS NOT NULL
         AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+        AND credential_generation = (SELECT session_epoch FROM app_user WHERE id = email_change_token.user_id)
     )
   </select>
 
   <select id="findExchangedRedeemableByHash" resultType="EmailChangeToken">
-    SELECT id, user_id, new_email, token_hash, expires_at, exchanged_at, consumed_at, requested_ip, created_at
+    SELECT id, user_id, credential_generation, new_email, token_hash, expires_at, exchanged_at, consumed_at, requested_ip, created_at
     FROM email_change_token
     WHERE token_hash = #{tokenHash} AND exchanged_at IS NOT NULL
       AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()

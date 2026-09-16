@@ -681,6 +681,45 @@ Detailed storage behavior lives in `docs/backend/OBJECT_STORAGE.md`. Lock-order 
 - Cleanup/retry workers lock/revalidate exact queue/tombstone identities before provider I/O.
 - Preserve deletion-queue → quota → audit ordering, including business-card binary storage before company/person/audit writes.
 
+## Account recovery and emailed credential tokens
+
+Password reset and verified email change are one hierarchy, not two: a reset exists to evict the
+holder of the old password and an email change moves the recovery mailbox, so each must evict the
+other family's outstanding tokens. The class order is:
+
+0. `one_time_link_flow` — the browser grant held by `OneTimeLinkFlowService.consume` (or
+   `consumePasswordReset`) across the confirm/reset operation.
+1. `app_user` — the account root, exclusive (`FOR UPDATE`) for every credential write and every
+   token claim; shared (`FOR SHARE`) for reset issuance, which only re-reads the mailbox.
+2. `password_reset_token` / `email_change_token` — the two emailed token families.
+3. The audit integrity head and its foreign-key parents.
+
+Source-token exchange and browser-grant issue run in separate transactions.
+
+Both token families are locked under the same exclusive account root, so their relative order inside
+one transaction is unconstrained; do not rely on that, and never acquire either one before the
+account root.
+
+- `PasswordResetService.requestReset` takes `app_user FOR SHARE` and re-reads the mailbox under that
+  lock before issuing, so a verified email change committing concurrently cannot leave the link
+  addressed to the mailbox it just moved away from.
+- Both public exchange endpoints (`PasswordResetService.exchangeToken`,
+  `EmailChangeService.exchangeToken`) resolve the token's owner without a lock, then take
+  `app_user FOR UPDATE` before claiming. A same-owner retry re-reads the claimed token `FOR SHARE`,
+  because its `REPEATABLE READ` snapshot predates the invalidation it waited behind.
+- `PasswordResetService.resetPasswordByHash` and `EmailChangeService.confirmChangeByHash` hold the
+  exclusive account root across the credential write and both `invalidateForUser` calls.
+- `EmailChangeService.requestChange` proves the current password through the shared throttled
+  confirmation, then re-reads the account under the exclusive root and refuses when the password
+  hash or `session_epoch` moved since the proof.
+
+The audit head sits below `app_user` in this order, and an independent audit append re-acquires the
+actor's `app_user` row shared. `AuthService.requireCurrentPassword` therefore writes no audit of its
+own: `MfaRecoveryService.recover` calls it while holding that row exclusively, so an append there
+would wait on the caller's own lock until the InnoDB timeout, lose the event, and pin a second
+pooled connection. Callers that are not already holding the account root —
+`EmailChangeService.requestChange` — record the confirmation outcome themselves, before acquiring it.
+
 ## Connected-provider credentials
 
 Provider credential transitions lock the owning `app_user` shared before the exact
