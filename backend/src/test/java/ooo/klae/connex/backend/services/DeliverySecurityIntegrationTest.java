@@ -863,6 +863,10 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         assertEquals(CampaignFrequencyAdmissionService.Admission.RESERVED, frequencyAdmissionService.reserve(
                 workspace.getId(), firstId, person.getId(), "email", owner, 24));
         if (recovered) {
+            assertEquals(1, jdbcTemplate.update("UPDATE campaign_delivery"
+                            + " SET frequency_reserved_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 HOUR)"
+                            + " WHERE workspace_id = ? AND id = ?", workspace.getId(), firstId));
+            sqlSession.clearCache();
             expireDispatchLease(firstId);
             assertEquals(1, deliveryMapper.recoverExpiredTriggeredClaim(
                     workspace.getId(), firstId, target.attemptTargetFingerprint()));
@@ -905,7 +909,7 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         CampaignDelivery failed = deliveryMapper.getDelivery(workspace.getId(), firstId);
         assertEquals(2, failed.getAttemptCount());
         assertEquals("failed", failed.getStatus());
-        assertEquals(recovered, failed.getFrequencyReservedAt() != null);
+        assertEquals(pending.getFrequencyReservedAt(), failed.getFrequencyReservedAt());
         assertEquals(recovered, failed.getReconciliationRequiredAt() != null);
         if (recovered) {
             assertEquals("deadline_ambiguous", failed.getLastErrorCode());
@@ -920,6 +924,112 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         assertEquals(recovered ? "skipped" : "dispatched",
                 deliveryMapper.getDelivery(workspace.getId(), secondId).getStatus());
         assertEquals(recovered ? 0 : 1, submissions.size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void targetValidationFailureRestoresTheReservationBeforeRecordingFailure(boolean recovered) {
+        Person person = recipient();
+        DeliveryProviderConfigRequest provider = providerRequest(DeliveryChannel.EMAIL, "key-a");
+        provider.setIdempotentSubmission(true);
+        configService.save(provider);
+        ResolvedDeliveryProvider target = configService.resolveForWorkspace(workspace.getId(), DeliveryChannel.EMAIL);
+        CampaignSendDto first = readySend(person, DeliveryChannel.EMAIL);
+        int firstId = pendingDelivery(first);
+        asTriggeredSend(first);
+        if (recovered) {
+            String owner = UUID.randomUUID().toString();
+            assertEquals(1, deliveryMapper.claimTriggered(workspace.getId(), firstId, owner,
+                    DISPATCH_LEASE_MICROS, target.providerId(), target.attemptTargetFingerprint()));
+            assertEquals(CampaignFrequencyAdmissionService.Admission.RESERVED, frequencyAdmissionService.reserve(
+                    workspace.getId(), firstId, person.getId(), "email", owner, 24));
+            assertEquals(1, jdbcTemplate.update("UPDATE campaign_delivery"
+                            + " SET frequency_reserved_at = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 2 HOUR)"
+                            + " WHERE workspace_id = ? AND id = ?", workspace.getId(), firstId));
+            expireDispatchLease(firstId);
+            assertEquals(1, deliveryMapper.recoverExpiredTriggeredClaim(
+                    workspace.getId(), firstId, target.attemptTargetFingerprint()));
+        }
+        LocalDateTime priorReservation = deliveryMapper.getDelivery(workspace.getId(), firstId).getFrequencyReservedAt();
+        AtomicBoolean failTargetCheck = new AtomicBoolean();
+        DeliveryProviderConfigMapper realConfigMapper = sqlSession.getMapper(DeliveryProviderConfigMapper.class);
+        doAnswer(invocation -> {
+            if (failTargetCheck.getAndSet(false)) {
+                throw new IllegalStateException("Configuration read failed");
+            }
+            return realConfigMapper.findByWorkspaceChannelForShare(invocation.getArgument(0), invocation.getArgument(1));
+        }).when(configMapper).findByWorkspaceChannelForShare(workspace.getId(), "email");
+        CampaignDeliveryMapper realDeliveryMapper = sqlSession.getMapper(CampaignDeliveryMapper.class);
+        doAnswer(invocation -> {
+            int updated = realDeliveryMapper.reserveFrequencyWindow(
+                    invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2),
+                    invocation.getArgument(3), invocation.getArgument(4), invocation.getArgument(5));
+            assertEquals(1, updated);
+            failTargetCheck.set(true);
+            return updated;
+        }).when(deliveryMapper).reserveFrequencyWindow(
+                eq(workspace.getId()), eq(firstId), eq(person.getId()), eq("email"), anyString(), anyLong());
+        when(triggeredSendGate.enabled()).thenReturn(true);
+
+        assertTrue(dispatchService.processSend(workspace.getId(), first.id()));
+
+        CampaignDelivery failed = deliveryMapper.getDelivery(workspace.getId(), firstId);
+        assertFalse(failTargetCheck.get());
+        assertEquals(recovered ? 2 : 1, failed.getAttemptCount());
+        assertEquals("failed", failed.getStatus());
+        assertEquals(priorReservation, failed.getFrequencyReservedAt());
+        assertEquals(recovered, failed.getReconciliationRequiredAt() != null);
+        assertEquals(recovered ? "deadline_ambiguous" : "relay_error", failed.getLastErrorCode());
+        assertNull(failed.getSubmittedAt());
+        assertEquals(0, submissions.size());
+        CampaignSendDto second = readySend(person, DeliveryChannel.EMAIL);
+        int secondId = pendingDelivery(second);
+        dispatch(second);
+        assertEquals(recovered ? "skipped" : "dispatched",
+                deliveryMapper.getDelivery(workspace.getId(), secondId).getStatus());
+        assertEquals(recovered ? 0 : 1, submissions.size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void nonOutboundUpdatesPreserveResolvedAndRecoverableTargets(boolean webhookOnly) {
+        DeliveryChannel channel = DeliveryChannel.EMAIL;
+        Person person = recipient();
+        DeliveryProviderConfigRequest provider = providerRequest(channel, key(channel));
+        provider.setIdempotentSubmission(true);
+        configService.save(provider);
+        ResolvedDeliveryProvider target = configService.resolveForWorkspace(workspace.getId(), channel);
+        CampaignSendDto send = readySend(person, channel);
+        int deliveryId = pendingDelivery(send);
+        asTriggeredSend(send);
+        String owner = UUID.randomUUID().toString();
+        assertEquals(1, deliveryMapper.claimTriggered(workspace.getId(), deliveryId, owner,
+                DISPATCH_LEASE_MICROS, target.providerId(), target.attemptTargetFingerprint()));
+
+        if (webhookOnly) {
+            configService.issueWebhookToken(channel.token());
+            DeliveryProviderConfig firstWebhook = storedConfig(channel);
+            configService.issueWebhookToken(channel.token());
+            assertNotEquals(firstWebhook.getWebhookTokenHash(), storedConfig(channel).getWebhookTokenHash());
+        } else {
+            provider.setApiKey(null);
+            configService.save(provider);
+        }
+        assertEquals(target.configGeneration(), storedConfig(channel).getConfigGeneration());
+        assertEquals(target.attemptTargetFingerprint(),
+                configService.resolveForWorkspace(workspace.getId(), channel).attemptTargetFingerprint());
+        assertTrue(configService.isCurrentClaimTarget(target, deliveryId, owner));
+        expireDispatchLease(deliveryId);
+        when(triggeredSendGate.enabled()).thenReturn(false);
+        assertTrue(dispatchService.processSend(workspace.getId(), send.id()));
+        assertEquals("pending", deliveryMapper.getDelivery(workspace.getId(), deliveryId).getStatus());
+        when(triggeredSendGate.enabled()).thenReturn(true);
+        assertTrue(dispatchService.processSend(workspace.getId(), send.id()));
+        CampaignDelivery dispatched = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals("dispatched", dispatched.getStatus());
+        assertEquals(2, dispatched.getAttemptCount());
+        assertNull(dispatched.getReconciliationRequiredAt());
+        assertEquals(1, submissions.size());
     }
 
     @Test

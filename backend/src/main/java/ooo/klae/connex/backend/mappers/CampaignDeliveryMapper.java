@@ -285,6 +285,13 @@ public interface CampaignDeliveryMapper {
             @Param("deliveryId") int deliveryId,
             @Param("leaseOwner") String leaseOwner);
 
+    /** Restores a still-owned retry's non-null prior reservation after proven absence of new egress. */
+    int restoreFrequencyWindowBeforeEgress(
+            @Param("workspaceId") int workspaceId,
+            @Param("deliveryId") int deliveryId,
+            @Param("leaseOwner") String leaseOwner,
+            @Param("priorFrequencyReservedAt") LocalDateTime priorFrequencyReservedAt);
+
     void insertEvent(CampaignDeliveryEvent event);
 
     boolean hasEvent(

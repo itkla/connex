@@ -404,6 +404,18 @@
       </choose>
   </update>
 
+  <update id="restoreFrequencyWindowBeforeEgress">
+    UPDATE campaign_delivery
+    SET frequency_reserved_at = #{priorFrequencyReservedAt}
+    WHERE workspace_id = #{workspaceId} AND id = #{deliveryId}
+      AND status = 'dispatching' AND submitted_at IS NULL
+      AND #{priorFrequencyReservedAt} IS NOT NULL
+      <choose>
+        <when test="leaseOwner != null">AND dispatch_lease_owner = #{leaseOwner}</when>
+        <otherwise>AND dispatch_lease_owner IS NULL</otherwise>
+      </choose>
+  </update>
+
   <insert id="insertEvent" useGeneratedKeys="true" keyProperty="id">
     INSERT INTO campaign_delivery_event
       (workspace_id, delivery_id, event_type, detail, provider_id, provider_event_id)

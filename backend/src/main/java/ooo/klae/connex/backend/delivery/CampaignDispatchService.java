@@ -298,16 +298,27 @@ public class CampaignDispatchService {
             return;
         }
         if (providerDeadlineNanos - nanoTimeSource.getAsLong() <= 0) {
-            releaseFrequencyWindowBeforeEgress(workspaceId, deliveryId, leaseOwner);
+            releaseFrequencyWindowBeforeEgress(
+                    workspaceId, deliveryId, leaseOwner, identity.getFrequencyReservedAt());
             markFailed(workspaceId, deliveryId, leaseOwner,
                     "Provider deadline expired before egress",
                     CampaignDeliveryFailureReason.PROVIDER_TIMEOUT.token());
             return;
         }
-        if ((HttpEspDeliveryProvider.PROVIDER_ID.equals(target.providerId())
-                || SmsHttpDeliveryProvider.PROVIDER_ID.equals(target.providerId()))
-                && !deliveryProviderConfigService.isCurrentClaimTarget(target, deliveryId, leaseOwner)) {
-            releaseFrequencyWindowBeforeEgress(workspaceId, deliveryId, leaseOwner);
+        boolean currentTarget = true;
+        try {
+            if (HttpEspDeliveryProvider.PROVIDER_ID.equals(target.providerId())
+                    || SmsHttpDeliveryProvider.PROVIDER_ID.equals(target.providerId())) {
+                currentTarget = deliveryProviderConfigService.isCurrentClaimTarget(target, deliveryId, leaseOwner);
+            }
+        } catch (RuntimeException exception) {
+            releaseFrequencyWindowBeforeEgress(
+                    workspaceId, deliveryId, leaseOwner, identity.getFrequencyReservedAt());
+            throw exception;
+        }
+        if (!currentTarget) {
+            releaseFrequencyWindowBeforeEgress(
+                    workspaceId, deliveryId, leaseOwner, identity.getFrequencyReservedAt());
             markFailed(workspaceId, deliveryId, leaseOwner,
                     "Delivery target changed before egress",
                     CampaignDeliveryFailureReason.DELIVERY_TARGET_CHANGED.token());
@@ -345,7 +356,8 @@ public class CampaignDispatchService {
             String failureCode = CampaignDeliveryFailureReason.classify(
                     failure, receipt.status() == DispatchStatus.AMBIGUOUS).token();
             if (receipt.provenBeforeEgress()) {
-                releaseFrequencyWindowBeforeEgress(workspaceId, deliveryId, leaseOwner);
+                releaseFrequencyWindowBeforeEgress(
+                        workspaceId, deliveryId, leaseOwner, identity.getFrequencyReservedAt());
             }
             int updated = receipt.status() == DispatchStatus.AMBIGUOUS
                     ? markAmbiguousOrThrow(
@@ -358,10 +370,17 @@ public class CampaignDispatchService {
         }
     }
 
-    private void releaseFrequencyWindowBeforeEgress(int workspaceId, int deliveryId, String leaseOwner) {
+    private void releaseFrequencyWindowBeforeEgress(
+            int workspaceId, int deliveryId, String leaseOwner, LocalDateTime priorFrequencyReservedAt) {
         CampaignDelivery history = campaignDeliveryMapper.getDeliveryIdentity(workspaceId, deliveryId);
-        if (history != null && !hasEarlierSubmissionUncertainty(history)) {
+        if (history == null) {
+            return;
+        }
+        if (!hasEarlierSubmissionUncertainty(history)) {
             campaignDeliveryMapper.releaseFrequencyWindowBeforeEgress(workspaceId, deliveryId, leaseOwner);
+        } else if (priorFrequencyReservedAt != null) {
+            campaignDeliveryMapper.restoreFrequencyWindowBeforeEgress(
+                    workspaceId, deliveryId, leaseOwner, priorFrequencyReservedAt);
         }
     }
 

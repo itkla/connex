@@ -74,7 +74,15 @@
        #{config.webhookSecretRef},
        #{config.enabled}, #{config.idempotentSubmission}, #{config.createdById})
     ON DUPLICATE KEY UPDATE
-      config_generation = config_generation + 1,
+      config_generation = config_generation + CASE WHEN #{credentialRotated}
+        OR NOT (CAST(provider AS BINARY) &lt;=> CAST(VALUES(provider) AS BINARY))
+        OR NOT (CAST(endpoint AS BINARY) &lt;=> CAST(VALUES(endpoint) AS BINARY))
+        OR NOT (CAST(from_address AS BINARY) &lt;=> CAST(VALUES(from_address) AS BINARY))
+        OR NOT (CAST(from_name AS BINARY) &lt;=> CAST(VALUES(from_name) AS BINARY))
+        OR NOT (CAST(credential_ref AS BINARY) &lt;=> CAST(VALUES(credential_ref) AS BINARY))
+        OR NOT (enabled &lt;=> VALUES(enabled))
+        OR NOT (idempotent_submission &lt;=> VALUES(idempotent_submission))
+        THEN 1 ELSE 0 END,
       provider = VALUES(provider),
       endpoint = VALUES(endpoint),
       from_address = VALUES(from_address),

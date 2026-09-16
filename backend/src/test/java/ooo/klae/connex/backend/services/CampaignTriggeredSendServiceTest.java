@@ -444,7 +444,7 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
     }
 
     @Test
-    void everyConfigurationMutationAdvancesGenerationAndStopsExpiredClaimReplay() {
+    void onlyOutboundConfigurationChangesAdvanceGenerationAndStopExpiredClaimReplay() {
         String prefix = "webhook-generation-" + unique();
         Person person = person(prefix, prefix + "@example.com");
         CampaignMessageDto message = message(prefix);
@@ -473,14 +473,17 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
         DeliveryProviderConfig rotated = deliveryProviderConfigMapper.findByWorkspaceChannel(
                 workspace.getId(), DeliveryChannel.EMAIL.token());
 
-        assertEquals(original.getConfigGeneration() + 1, rotated.getConfigGeneration());
-        assertFalse(originalFingerprint.equals(deliveryTargetFingerprint(rotated)));
+        assertEquals(original.getConfigGeneration(), rotated.getConfigGeneration());
+        assertEquals(originalFingerprint, deliveryTargetFingerprint(rotated));
+        deliveryProviderConfigMapper.upsert(rotated, false);
+        assertEquals(rotated.getConfigGeneration(), deliveryProviderConfigMapper.findByWorkspaceChannel(
+                workspace.getId(), DeliveryChannel.EMAIL.token()).getConfigGeneration());
         assertTrue(dispatchService(false).processSend(workspace.getId(), result.sendId()));
-        assertEquals("failed", campaignDeliveryMapper.getDelivery(
+        assertEquals("pending", campaignDeliveryMapper.getDelivery(
                 workspace.getId(), result.deliveryId()).getStatus());
 
         String rotatedFingerprint = deliveryTargetFingerprint(rotated);
-        rotated.setEndpoint("https://account-b.example.test/send");
+        rotated.setEndpoint("https://account-a.example.test/Send");
         deliveryProviderConfigMapper.upsert(rotated, false);
         DeliveryProviderConfig endpointChanged = deliveryProviderConfigMapper.findByWorkspaceChannel(
                 workspace.getId(), DeliveryChannel.EMAIL.token());
@@ -495,7 +498,7 @@ class CampaignTriggeredSendServiceTest extends CampaignRealDbTestSupport {
 
         assertEquals(endpointChanged.getConfigGeneration() + 1, credentialChanged.getConfigGeneration());
         assertFalse(endpointFingerprint.equals(deliveryTargetFingerprint(credentialChanged)));
-        assertTrue(dispatchService(false).processSend(workspace.getId(), result.sendId()));
+        assertTrue(dispatchService(true).processSend(workspace.getId(), result.sendId()));
         CampaignDelivery delivery = campaignDeliveryMapper.getDelivery(
                 workspace.getId(), result.deliveryId());
         assertEquals("failed", delivery.getStatus());
