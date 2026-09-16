@@ -206,6 +206,71 @@ deployment must also apply its shared edge rate controls. Only fixed `https://ap
 are contacted, with redirects disabled and no application credentials forwarded. No browser CSP
 allowlist expansion is needed for these server-side requests.
 
+### The public prelaunch site (`connexcrm.jp` on Cloudflare Workers)
+
+The section above describes the product frontend's own prelaunch mode. The public site at
+`connexcrm.jp` and `www.connexcrm.jp` is a separate deployment: the `connex-landing` Cloudflare Worker
+built from [`landing/`](../landing/AGENTS.md) with `@opennextjs/cloudflare`. It needs no backend and does
+not run on the staging host; `preview.connexcrm.jp` keeps serving the product application.
+
+**What it serves.** `/`, `/privacy`, `/legal`, `/disclosure`, `/tokushoho`, `robots.txt`, `sitemap.xml`,
+the web manifest, and `POST /api/launch-signups`. Every other path is a 404, so the authenticated
+application is not reachable on the public domain. `www.connexcrm.jp` is a redirect-only alias: the
+Worker entrypoint answers every page and `/api/*` request to it with a 308 to the apex before any
+application code runs, so it never renders a page or reaches the signup limiter or Resend. Static build
+assets are served by the assets binding before the Worker runs, on both hostnames; they are the same
+public, immutable files. The Worker has no
+`workers.dev` or preview URL: those would sit outside the `connexcrm.jp` zone's WAF and bot controls.
+
+**Secrets.** Set on the Worker, never in the repository, and preserved by deploys:
+
+```bash
+cd landing
+wrangler secret put RESEND_API_KEY            # Contacts access; see the key requirements above
+wrangler secret put RESEND_LAUNCH_SEGMENT_ID  # UUID of the dedicated launch segment
+```
+
+**Signup bounds.** The endpoint keeps the acknowledgment, validation, same-origin checks, deadlines, and
+Resend contract described above: every valid, admitted submission receives `200 {"status":"subscribed"}`
+before any Resend call, and provider work continues in `ctx.waitUntil`, so neither the response nor its
+timing discloses a preference. Workers-specific differences:
+
+- Admission is decided by the `SignupLimiter` Durable Object (SQLite, included on Workers Free) in one
+  atomic step after validation: one admitted signup per 3.3 seconds across the deployment, an
+  18-signup minute cap derived from that interval, and 5 attempts per client per 15 minutes. The shared
+  checks run first and nothing is counted unless every check passes, so a submission refused because
+  of another visitor spends no allowance. Module-level counters would reset per isolate, and the
+  Workers Rate Limiting binding supports only 10- and 60-second windows per location.
+- The client is identified by `CF-Connecting-IP` rather than `X-Connex-Client-IP`, with the same IPv6
+  /64 and IPv4-mapped normalisation. Every Resend call waits for a deployment-wide slot at least 550 ms
+  after the previous one, claimed only if it fits the signup's remaining 8-second deadline; work that
+  cannot fit ends silently, like any other background failure.
+
+**Deployment.** `.github/workflows/landing-deploy.yml` (`Landing`):
+
+- Pull requests touching `frontend/` or `landing/` run `landing/scripts/sync-from-frontend.sh --check`,
+  which fails when the vendored landing, legal, or not-found files differ from `frontend/`.
+- Pull requests that change `landing/` also typecheck and build the Worker.
+- Every push to `main` checks whether the Worker already serves `main`'s `landing/` tree and publishes
+  if not: it builds, runs `wrangler deploy --message "landing-tree:<tree hash>"`, and smoke-tests
+  `connexcrm.jp` (`/` must return 200 and `/dashboard` 404). The version message is how the next run
+  knows what is live. Running on every push, not only on `landing/` changes, means a failed publish is
+  retried by the next `main` push, and a repeated failure lands on the current tip, where the red-main
+  alert reports it. A re-run of an older commit never publishes over a newer `landing/` tree.
+- CI authenticates with the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets. The
+  token is limited to Workers Scripts (edit) and Account Settings (read) on the account, and Workers
+  Routes (edit) and Zone (read) on `connexcrm.jp`; it cannot read or edit DNS records.
+
+**Rollback.** `wrangler rollback` restores the previous Worker version. To return the domain to the
+staging host instead, remove the two custom domains from the Worker, recreate proxied CNAMEs for
+`connexcrm.jp` and `www.connexcrm.jp` pointing at the staging tunnel, add both hostnames to that tunnel's
+ingress, and restart `cloudflared`. Do not send `cloudflared` a SIGHUP to reload: it exits.
+
+**Verification.** HTTP status checks are not sufficient. Two defects on this deployment were visible only in
+a browser: Workers rejects `fetch` with `redirect: "error"`, which failed every Resend call, and esbuild's
+`keep_names` injected an undefined `__name()` into an inline script. After a change to the runtime or the
+signup path, load the site in a browser, confirm there are no console errors, and submit the form.
+
 ## Prerequisites
 
 - Docker Engine 28 or newer with Docker Compose 2.33.1 or newer. The bundle pins the frontend and

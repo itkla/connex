@@ -1,0 +1,11 @@
+# Static assets are served straight from the assets binding, so they never pass through the Worker
+# and never see the headers next.config.ts sets. These restate them for that path.
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+
+# Build output is content-hashed, so it can be cached indefinitely. Without this the assets binding
+# serves `max-age=0, must-revalidate` and every asset is revalidated on every page load.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
