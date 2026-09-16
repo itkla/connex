@@ -30,6 +30,7 @@ import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiMediaAdmissionService;
 import ooo.klae.connex.backend.ai.AiOrganizationBudgetCoordinator;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolTurn;
@@ -246,8 +247,11 @@ class AiAssistantPromptInjectionGoldenTest {
         when(featureGate.isAiUsable(AiFeature.ASSISTANT_CHAT)).thenReturn(true);
         when(providerConfigService.resolveForOrg(9, 11)).thenReturn(resolved);
         var budgetCoordinator = mock(AiOrganizationBudgetCoordinator.class);
+        var budgetLease = mock(AiOrganizationBudgetCoordinator.Lease.class);
+        when(budgetLease.deadline()).thenReturn(
+                AiRequestDeadline.afterMillis(60_000));
         when(budgetCoordinator.reserve(eq(9), any(AiInvocation.class), anyString()))
-                .thenReturn(mock(AiOrganizationBudgetCoordinator.Lease.class));
+                .thenReturn(budgetLease);
         var invocationService = new AiInvocationService(
                 featureGate,
                 mock(AiInvocationAdmissionService.class),

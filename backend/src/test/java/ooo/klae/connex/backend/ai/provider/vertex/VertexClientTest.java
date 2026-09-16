@@ -51,7 +51,7 @@ class VertexClientTest {
         FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
         when(providerClient.post(
                 any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
-                any(AiRequestDeadline.class), any()))
+                any(AiRequestDeadline.class), any(), any(Runnable.class)))
                 .thenReturn(new FixedAiProviderClient.Response(
                         200, "{\"candidates\":[]}".getBytes(StandardCharsets.UTF_8)));
         VertexClient client = new VertexClient(properties, providerClient);
@@ -66,7 +66,7 @@ class VertexClientTest {
                 eq(ContentType.APPLICATION_JSON),
                 aryEq(REQUEST_BODY.getBytes(StandardCharsets.UTF_8)),
                 any(AiRequestDeadline.class),
-                eq("Vertex invocation"));
+                eq("Vertex invocation"), any(Runnable.class));
     }
 
     @Test

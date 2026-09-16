@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,6 +15,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -23,13 +25,17 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import com.sun.net.httpserver.HttpServer;
 import org.apache.hc.core5.http.ContentType;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException;
 import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
@@ -37,6 +43,64 @@ import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 class FixedAiProviderClientTest {
     private static final String HOST = "fixed-provider.example.test";
     private static final byte[] REQUEST_BODY = "{}".getBytes(StandardCharsets.UTF_8);
+
+    @Test
+    void bufferedAndStreamingPreSendFailuresPropagateUnchangedWithoutTransport() throws Exception {
+        AtomicInteger requests = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/complete", exchange -> {
+            requests.incrementAndGet();
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+        FixedAiProviderClient client = new FixedAiProviderClient(
+                properties(5_000, 1024), host -> InetAddress.getLoopbackAddress());
+        AtomicInteger closed = new AtomicInteger();
+        AiProviderStreamObserver observer = new AiProviderStreamObserver() {
+            @Override
+            public void onContentDelta(String text) {
+                throw new AssertionError("Refused transport emitted content");
+            }
+
+            @Override
+            public void onTransportClosed() {
+                closed.incrementAndGet();
+            }
+        };
+        try {
+            URI endpoint = URI.create("http://" + HOST + ":" + server.getAddress().getPort() + "/complete");
+            for (RuntimeException refusal : List.of(
+                    new ForbiddenException("Permission revoked"),
+                    restrictionEpochRefusal())) {
+                Runnable beforeSend = () -> { throw refusal; };
+                assertSame(refusal, assertThrows(RuntimeException.class, () -> client.post(
+                        endpoint, Set.of(HOST), Map.of(), ContentType.APPLICATION_JSON,
+                        REQUEST_BODY, AiRequestDeadline.afterMillis(5_000), "Gate test", beforeSend)));
+                assertSame(refusal, assertThrows(RuntimeException.class, () -> client.postStream(
+                        endpoint, Set.of(HOST), Map.of(), ContentType.APPLICATION_JSON,
+                        REQUEST_BODY, AiRequestDeadline.afterMillis(5_000), "Gate test",
+                        observer, input -> input.readAllBytes(), beforeSend)));
+            }
+            assertEquals(0, requests.get());
+            assertEquals(2, closed.get());
+        } finally {
+            client.shutdown();
+            server.stop(0);
+        }
+    }
+
+    private RuntimeException restrictionEpochRefusal() {
+        AiRestrictionEpoch epoch = new AiRestrictionEpoch();
+        long expected = epoch.current(7);
+        epoch.bump(7);
+        Supplier<Boolean> provider = () -> Boolean.TRUE;
+        Runnable checkpoint = () -> ReflectionTestUtils.invokeMethod(epoch, "invokeAtEgress", 7, provider);
+        RuntimeException refusal = assertThrows(RuntimeException.class,
+                () -> ReflectionTestUtils.invokeMethod(epoch, "runWithExpectedEgressEpoch", 7, expected, checkpoint));
+        assertEquals("EgressRejectedException", refusal.getClass().getSimpleName());
+        return refusal;
+    }
 
     @Test
     void springSelectsTheProductionConstructor() {

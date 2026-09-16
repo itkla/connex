@@ -18,6 +18,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.AiProviderGateExceptions;
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.egress.FixedAiProviderClient;
@@ -77,6 +78,15 @@ public class AzureOpenAiClient {
             AiCredentials credentials,
             String requestBodyJson,
             AiRequestDeadline deadline) {
+        return complete(endpoint, credentials, requestBodyJson, deadline, () -> {});
+    }
+
+    String complete(
+            URI endpoint,
+            AiCredentials credentials,
+            String requestBodyJson,
+            AiRequestDeadline deadline,
+            Runnable beforeSend) {
         String host = requireAzureEndpoint(endpoint);
         if (credentials == null) {
             throw new AiProviderException("Azure OpenAI credentials are required");
@@ -87,12 +97,13 @@ public class AzureOpenAiClient {
         byte[] body = requestBodyJson.getBytes(StandardCharsets.UTF_8);
         AzureOpenAiResponse response;
         try {
-            response = sendOnce(endpoint, host, apiKey, body, deadline);
+            response = sendOnce(endpoint, host, apiKey, body, deadline, beforeSend);
         } catch (AiProviderException exception) {
             throw exception;
         } catch (RestClientException exception) {
             throw new AiProviderException("Azure OpenAI invocation failed during transport");
         } catch (RuntimeException exception) {
+            AiProviderGateExceptions.rethrowIfGate(exception);
             throw new AiProviderException("Azure OpenAI invocation failed during transport");
         }
         if (response.statusCode() < 200 || response.statusCode() > 299) {
@@ -109,6 +120,18 @@ public class AzureOpenAiClient {
             AiRequestDeadline deadline,
             OpenAiSseAccumulator accumulator,
             AiProviderStreamObserver observer) {
+        return stream(endpoint, credentials, requestBodyJson, deadline, accumulator, observer, () -> {});
+    }
+
+    /** Streams a model response after the durable pre-send callback succeeds. */
+    public AiCompletionResult stream(
+            URI endpoint,
+            AiCredentials credentials,
+            String requestBodyJson,
+            AiRequestDeadline deadline,
+            OpenAiSseAccumulator accumulator,
+            AiProviderStreamObserver observer,
+            Runnable beforeSend) {
         String host = requireAzureEndpoint(endpoint);
         if (credentials == null) {
             throw new AiProviderException("Azure OpenAI credentials are required");
@@ -137,7 +160,8 @@ public class AzureOpenAiClient {
                                         input, accumulator::accept,
                                         accumulator::onTransportActivity);
                                 return accumulator.finish();
-                            });
+                            },
+                            beforeSend);
             if (response.statusCode() < 200 || response.statusCode() > 299) {
                 throw new AiProviderRequestRejectedException(
                         "Azure OpenAI", response.statusCode());
@@ -151,6 +175,7 @@ public class AzureOpenAiClient {
                 .accept(MediaType.TEXT_EVENT_STREAM)
                 .header("api-key", apiKey);
         AiEgressGuard.requireFetchableHost(host, false);
+        beforeSend.run();
         AiCompletionResult result = spec.body(body).exchange((request, response) -> {
             if (response.getStatusCode().isError()) {
                 throw new AiProviderRequestRejectedException(
@@ -170,7 +195,8 @@ public class AzureOpenAiClient {
             String host,
             String apiKey,
             byte[] body,
-            AiRequestDeadline deadline) {
+            AiRequestDeadline deadline,
+            Runnable beforeSend) {
         if (providerClient != null) {
             FixedAiProviderClient.Response response = providerClient.post(
                     endpoint,
@@ -182,7 +208,8 @@ public class AzureOpenAiClient {
                     ContentType.APPLICATION_JSON,
                     body,
                     deadline,
-                    "Azure OpenAI invocation");
+                    "Azure OpenAI invocation",
+                    beforeSend);
             return new AzureOpenAiResponse(response.statusCode(), response.body());
         }
         requireRemainingDeadline(deadline);
@@ -192,6 +219,7 @@ public class AzureOpenAiClient {
                 .accept(MediaType.APPLICATION_JSON)
                 .header("api-key", apiKey);
         AiEgressGuard.requireFetchableHost(host, false);
+        beforeSend.run();
         AzureOpenAiResponse response = spec.body(body)
                 .exchange((request, providerResponse) -> new AzureOpenAiResponse(
                         providerResponse.getStatusCode().value(),
