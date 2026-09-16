@@ -59,6 +59,64 @@ install_configuration() {
     install_resolve_lock_directory
 }
 
+install_defaults_have_ca() {
+    awk '
+        function trim(value) {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+            return value
+        }
+        {
+            line = trim($0)
+            if (line ~ /^\[/) {
+                client = (line ~ /^\[client\]([[:space:]]*[#;].*)?$/)
+                next
+            }
+            if (!client || line !~ /^ssl[-_](ca|capath)[[:space:]]*=/) next
+            key = line
+            sub(/[[:space:]]*=.*/, "", key)
+            gsub(/_/, "-", key)
+            value = substr(line, index(line, "=") + 1)
+            sub(/[[:space:]]+#.*/, "", value)
+            value = trim(value)
+            if (value ~ /^".*"$/ || value ~ /^\047.*\047$/) value = substr(value, 2, length(value) - 2)
+            if (key == "ssl-ca") ca = (value ~ /^\/[^[:space:]]/)
+            if (key == "ssl-capath") capath = (value ~ /^\/[^[:space:]]/)
+        }
+        END { exit !(ca || capath) }
+    ' "$1"
+}
+
+install_tls_migration_message() {
+    local profile="$1" defaults_file="$2"
+    printf 'Backup TLS configuration required for the %s profile before enabling timers.\n' "$profile" >&2
+    printf 'Configure a trusted absolute ssl-ca or ssl-capath in [client] of %s (mode 0600), with a server certificate matching the configured host.\n' "$defaults_file" >&2
+    printf 'Only for localhost, 127.0.0.1 or ::1, explicitly set CONNEX_BACKUP_%s_ALLOW_LOOPBACK_PLAINTEXT=true in %s; remote hosts require this setting to be false and CA-backed TLS.\n' "${profile^^}" "$CONNEX_BACKUP_ENV_FILE" >&2
+    printf 'CA paths must exist inside the DB container for exec mode or be mounted read-only for run mode. Correct this profile and rerun install.sh.\n' >&2
+}
+
+install_validate_upgrade_configuration() {
+    local profile host port user defaults_file ssl_mode
+    local image="$CONNEX_BACKUP_DOCKER_BINLOG_IMAGE"
+    if [ -n "$image" ] && [[ ! "$image" =~ ^[a-zA-Z0-9][a-zA-Z0-9./:_-]*@sha256:[a-f0-9]{64}$ ]]; then
+        printf 'Backup PITR image migration required before enabling timers: replace CONNEX_BACKUP_DOCKER_BINLOG_IMAGE in %s with an independently approved immutable digest.\n' "$CONNEX_BACKUP_ENV_FILE" >&2
+        printf 'Use the format documented in docs/BACKUP_RESTORE.md: CONNEX_BACKUP_DOCKER_BINLOG_IMAGE=percona/percona-server@sha256:<64 lowercase hex digits>.\n' >&2
+        printf 'Substitute the release-owner-approved digest, stage that image, then rerun install.sh. Mutable tags such as percona/percona-server:8.4 remain refused at runtime.\n' >&2
+        return "$EXIT_CONFIG"
+    fi
+    for profile in source verify restore; do
+        IFS=$'\t' read -r host port user defaults_file < <(backup_profile_values "$profile")
+        if ! backup_validate_defaults_file "${profile}_defaults_file" "$defaults_file" >&2 ||
+            ! ssl_mode="$(backup_tls_mode "$profile" "$host")"; then
+            install_tls_migration_message "$profile" "$defaults_file"
+            return "$EXIT_CONFIG"
+        fi
+        if [ "$ssl_mode" != DISABLED ] && ! install_defaults_have_ca "$defaults_file"; then
+            install_tls_migration_message "$profile" "$defaults_file"
+            return "$EXIT_CONFIG"
+        fi
+    done
+}
+
 # A lock directory under the volatile /run must be declared as a systemd
 # RuntimeDirectory: ProtectSystem=strict resolves ReadWritePaths before
 # ExecStart, so a path that does not survive reboot fails namespace setup
@@ -179,12 +237,13 @@ install_enable_timers() {
 main() {
     install_require_root
     install_configuration
+    install_validate_upgrade_configuration
     install_programs
     install_units
     install_render_dropins
     install_runtime_directories
     install_enable_timers
-    printf 'Connex backup tooling installed. Configure %s and its mode-0600 MySQL defaults files, then rerun this installer.\n' "$CONFIG_ROOT/backup.env"
+    printf 'Connex backup tooling installed using %s. Verify a full backup, binlog archive, and PITR drill.\n' "$CONFIG_ROOT/backup.env"
 }
 
 main "$@"

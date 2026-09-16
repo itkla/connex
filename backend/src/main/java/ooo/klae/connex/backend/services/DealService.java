@@ -1267,7 +1267,7 @@ public class DealService {
      * @param actualValue optional realized value to record
      * @return the closed deal
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal close(int id, Boolean won, String reason, BigDecimal actualValue) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -1290,12 +1290,16 @@ public class DealService {
      * @param id
      * @return
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public Deal reopen(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal before = dealMapper.getDealById(workspaceId, id);
-        if (before == null) throw new ResourceNotFoundException("Deal not found");
+        int actorId = workspaceService.getCurrentUserId();
+        WorkspaceService.LockedPermissionSnapshot permissions =
+            workspaceService.lockAndRequirePermissionsSnapshot(
+                workspaceId, Map.of(actorId, Set.of(Permission.DEAL_UPDATE)));
+        Deal before = requireDealForUpdate(workspaceId, id);
+        permissions.revalidate();
         Boolean previousOutcome = before.getWon();
         Deal deal = mutableCopy(before);
         boolean wasClosed = previousOutcome != null;
@@ -1313,7 +1317,7 @@ public class DealService {
             deal.setStageId(normalStage);
             deal.setPosition(dealMapper.nextDealPosition(workspaceId, normalStage));
         }
-        dealOutcomeWriter.write(workspaceId, deal, previousOutcome, null);
+        dealOutcomeWriter.writeOutcome(workspaceId, deal, previousOutcome);
         if (wasClosed && deal.getStageId() != null) {
             dealStageHistoryService.recordTransition(
                 workspaceId, id, deal.getStageId(), previousOutcome, deal.getWon());

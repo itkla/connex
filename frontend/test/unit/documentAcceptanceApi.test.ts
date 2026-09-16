@@ -65,6 +65,43 @@ afterEach(() => {
 });
 
 describe("document acceptance public response boundary", () => {
+    it.each(["paragraph", "heading", "codeBlock", "text", "horizontalRule", "unknown", "bulletList"])(
+        "refuses a preview with lineItems inside %s before acceptance controls are available",
+        async (type) => {
+            const response = validPreview();
+            response.content.body = {
+                type: "doc",
+                content: [{ type, content: [{ type: "lineItems" }] }],
+            };
+            stubPublicResponse(response);
+
+            await expect(getDocumentAcceptancePreview()).rejects.toMatchObject({
+                status: 502,
+                code: "INVALID_PUBLIC_RESPONSE",
+            });
+        },
+    );
+
+    it("accepts lineItems at supported block positions", async () => {
+        const response = validPreview();
+        response.content.body = {
+            type: "doc",
+            content: [{
+                type: "blockquote",
+                content: [{
+                    type: "bulletList",
+                    content: [{
+                        type: "listItem",
+                        content: [{ type: "paragraph" }, { type: "lineItems" }],
+                    }],
+                }],
+            }],
+        };
+        stubPublicResponse(response);
+
+        await expect(getDocumentAcceptancePreview()).resolves.toEqual(response);
+    });
+
     it("rejects a successful preview with a malformed shape as unavailable", async () => {
         stubJsonResponses(JSON.stringify({ actionable: "yes" }));
 

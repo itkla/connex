@@ -67,6 +67,7 @@ import ooo.klae.connex.backend.dto.ReportWidgetConfig;
 import ooo.klae.connex.backend.dto.ReportWidgetDataDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.GoalMapper;
@@ -183,6 +184,7 @@ public class ReportService {
             "forecasting", "quota-attainment", "activity-team", "network-warm-intros", "employment-moves",
             "commercial-documents", "lead-lifecycle");
 
+    private final SessionSecurityService sessionSecurityService;
     private final ReportMapper reportMapper;
     private final ScheduleMapper scheduleMapper;
     private final GoalMapper goalMapper;
@@ -761,13 +763,24 @@ public class ReportService {
     /** Exports a live report appendix as RFC-4180 CSV. */
     @RequirePermission(Permission.REPORT_READ)
     public String exportCsv(int id, ReportGenerateRequest request) {
+        requireExportStepUp();
         return appendixCsv(generateInternal(id, request, NarrativeMode.NONE));
     }
 
     /** Exports a frozen report appendix as RFC-4180 CSV. */
     @RequirePermission(Permission.REPORT_READ)
     public String exportSnapshotCsv(int reportId, int snapshotId) {
+        requireExportStepUp();
         return appendixCsv(getSnapshot(reportId, snapshotId).computedResult());
+    }
+
+    private void requireExportStepUp() {
+        try {
+            sessionSecurityService.requireExportStepUp();
+        } catch (RecentAuthenticationRequiredException exception) {
+            auditService.recordExportStepUpRefused();
+            throw exception;
+        }
     }
 
     private ReportDocumentDto generateInternal(int id, ReportGenerateRequest request, NarrativeMode mode) {

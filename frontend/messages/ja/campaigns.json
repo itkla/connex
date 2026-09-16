@@ -287,7 +287,8 @@
             "frequency_capped": "頻度制限",
             "quiet_hours": "サイレント時間帯",
             "no_address": "アドレスなし",
-            "consent_missing": "オプトイン未取得"
+            "consent_missing": "オプトイン未取得",
+            "not_dispatchable": "配信が停止されました"
         },
         "sendsTitle": "配信別",
         "sendLabel": "配信 #{id}"
