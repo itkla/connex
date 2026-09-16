@@ -101,6 +101,31 @@ class RbacTest extends AbstractServiceTest {
     }
 
     @Test
+    void customOverlayRemovesAdministratorAndOwnerExceptions() {
+        tenantContext.clear();
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace("Effective Admin WS", currentUser.getId());
+        authenticateAs(currentUser, ws.getId());
+        User member = newUser();
+        User admin = newUser();
+        workspaceMapper.addMember(ws.getId(), member.getId(), "member");
+        workspaceMapper.addMember(ws.getId(), admin.getId(), "admin");
+        WorkspaceRole role = roleService.createRole(ws.getId(), currentUser.getId(), "Report deleter",
+            List.of(Permission.REPORT_DELETE.name()));
+        for (User user : List.of(member, admin)) {
+            workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), user.getId(), role.getId());
+            assertThrows(ForbiddenException.class,
+                () -> workspaceService.requireRole(ws.getId(), user.getId(), WorkspaceService.Role.ADMIN));
+        }
+        WorkspaceRole ownerRole = roleService.createRole(ws.getId(), currentUser.getId(), "Recovery owner",
+            List.of(Permission.MEMBER_MANAGE.name(), Permission.ROLE_MANAGE.name()));
+        User recoveryOwner = newUser();
+        workspaceMapper.addMember(ws.getId(), recoveryOwner.getId(), "owner");
+        workspaceService.assignCustomRole(ws.getId(), currentUser.getId(), currentUser.getId(), ownerRole.getId());
+        assertThrows(ForbiddenException.class,
+            () -> workspaceService.requireRole(ws.getId(), currentUser.getId(), WorkspaceService.Role.OWNER));
+    }
+
+    @Test
     void aiSessionAdminIsGrantableToACustomRole() {
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
             "Assistant Oversight WS", currentUser.getId());
@@ -289,8 +314,10 @@ class RbacTest extends AbstractServiceTest {
 
     @Test
     void customOwnerOverlayKeepsRawOwnerVisibleAndProtected() {
+        tenantContext.clear();
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
             "Custom Owner Guard WS", currentUser.getId());
+        authenticateAs(currentUser, ws.getId());
         User delegate = newUser();
         workspaceMapper.addMember(ws.getId(), delegate.getId(), "member");
         WorkspaceRole memberManager = roleService.createRole(
@@ -301,6 +328,8 @@ class RbacTest extends AbstractServiceTest {
         WorkspaceRole ownerOverlay = roleService.createRole(
             ws.getId(), currentUser.getId(), "Owner Overlay",
             List.of(Permission.PERSON_CREATE.name()));
+        User recoveryOwner = newUser();
+        workspaceMapper.addMember(ws.getId(), recoveryOwner.getId(), "owner");
         workspaceService.assignCustomRole(
             ws.getId(), currentUser.getId(), currentUser.getId(), ownerOverlay.getId());
 
