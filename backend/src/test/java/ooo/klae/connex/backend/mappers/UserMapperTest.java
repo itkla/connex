@@ -130,7 +130,7 @@ class UserMapperTest extends AbstractMapperTest {
      * Persists editable profile fields without replacing the stored email or password.
      */
     @Test
-    void update_persistsNewValues() {
+    void update_persistsProfileWithoutChangingEmail() {
         User user = newUser();
         String originalEmail = user.getEmail();
         String originalPasswordHash = user.getPasswordHash();

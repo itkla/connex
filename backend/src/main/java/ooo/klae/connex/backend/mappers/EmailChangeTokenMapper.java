@@ -20,6 +20,7 @@ public interface EmailChangeTokenMapper {
     /** Reads a token's persisted lifecycle state, including consumed or expired tokens. */
     EmailChangeToken findByHash(String tokenHash);
 
+    /** Returns the redeemable token without locks so callers can acquire its account root first. */
     EmailChangeToken findRedeemableByHash(String tokenHash);
 
     int claimExchange(@Param("tokenHash") String tokenHash,

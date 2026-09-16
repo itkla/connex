@@ -52,6 +52,7 @@ public class AuthService {
     private final LoginRateLimiter loginRateLimiter;
     private final ClientIpResolver clientIpResolver;
     private final RegistrationVerificationService registrationVerificationService;
+    private final AccountCreationRateLimiter accountCreationRateLimiter;
     private final SsoConnectionService ssoConnectionService;
     private final SessionSecurityService sessionSecurityService;
     private final OneTimeLinkFlowService oneTimeLinkFlowService;
@@ -84,15 +85,31 @@ public class AuthService {
     }
 
     /**
-     * Registers a new user with the provided registration data.
+     * Registers an account created by a workspace member manager under the instance's email
+     * verification policy. Workspace authority cannot assert global mailbox ownership: while
+     * verification is enabled the account starts unverified and is emailed a link to the address
+     * the creator supplied, so only that mailbox's holder can complete it.
+     *
+     * <p>That link is operator-paid outbound mail to a creator-chosen address, so it is bounded per
+     * creating actor by {@link AccountCreationRateLimiter}, and the creating request's IP is
+     * recorded on the issued token. The creating actor is already attributed on the
+     * {@code auth.register} audit entry through the authenticated principal.
      * @param request the registration details
-     * @param emailVerified whether the account starts email-verified — true for trusted callers
-     *     (admin create), false for self-serve accounts that must prove control of their address
+     * @param requestIp the creating client IP, recorded on the verification token for abuse audit
      * @return the created user
      */
     @Transactional
-    public User register(RegisterDto request, boolean emailVerified) {
-        return register(request, emailVerified, PasswordScreeningFlow.ADMIN_ACCOUNT_CREATION);
+    public User register(RegisterDto request, String requestIp) {
+        boolean verificationEnabled = registrationVerificationService.isEnabled();
+        if (verificationEnabled && !accountCreationRateLimiter.tryAcquire(getCurrentUser().getId())) {
+            throw new TooManyRequestsException(
+                "Too many accounts created recently. Please try again later.");
+        }
+        User user = register(request, !verificationEnabled, PasswordScreeningFlow.ADMIN_ACCOUNT_CREATION);
+        if (verificationEnabled) {
+            registrationVerificationService.issue(user, requestIp);
+        }
+        return user;
     }
 
     private User register(RegisterDto request, boolean emailVerified, PasswordScreeningFlow flow) {
