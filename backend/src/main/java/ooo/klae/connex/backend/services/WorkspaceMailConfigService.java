@@ -2,6 +2,8 @@ package ooo.klae.connex.backend.services;
 
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,7 +33,8 @@ import ooo.klae.connex.backend.tenant.Permission;
 /**
  * Owner/admin management of a workspace's own SMTP transport ({@code WORKSPACE_SETTINGS}).
  * The SMTP password is encrypted at rest and never returned; a blank password on
- * save keeps the stored one. Provides a synchronous "send test email" so an admin
+ * save keeps the stored one only when its connection settings are unchanged. Provides a synchronous
+ * "send test email" so an admin
  * can verify the transport before relying on it. Mutating operations are unavailable
  * when instance-managed mail is enabled.
  */
@@ -63,12 +66,13 @@ public class WorkspaceMailConfigService {
      */
     public MailConfigDto getConfig(int workspaceId, int actorId) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
-        return MailConfigDto.from(mailConfigMapper.findByWorkspace(workspaceId));
+        return MailConfigDto.from(mailConfigMapper.findByWorkspace(workspaceId), mailProperties.getPort());
     }
 
     /**
      * Creates or updates the workspace's SMTP config. Requires host and from-address
-     * when enabled; encrypts a supplied password and preserves the stored one when blank.
+     * when enabled; encrypts a supplied password and preserves the stored one when blank only if
+     * the host, port, username, and transport security are unchanged.
      * @param workspaceId the workspace
      * @param actorId the requesting user
      * @param request the submitted config
@@ -90,7 +94,9 @@ public class WorkspaceMailConfigService {
             smtpDestinationGuard.requirePublicDestination(request.getHost(), request.getPort());
         }
 
-        WorkspaceMailConfig existing = mailConfigMapper.findByWorkspace(workspaceId);
+        workspaceService.lockAndRequirePermissionsWithWorkspaceMutex(
+                workspaceId, Map.of(actorId, Set.of(Permission.WORKSPACE_SETTINGS)));
+        WorkspaceMailConfig existing = mailConfigMapper.findByWorkspaceForUpdate(workspaceId);
 
         WorkspaceMailConfig config = new WorkspaceMailConfig();
         config.setWorkspaceId(workspaceId);
@@ -110,6 +116,9 @@ public class WorkspaceMailConfigService {
         } else if (!isBlank(request.getPassword())) {
             config.setPasswordEnc(secretCipher.encryptForWorkspace(workspaceId, request.getPassword()));
         } else if (existing != null) {
+            if (!isBlank(existing.getPasswordEnc()) && credentialBindingChanged(existing, config)) {
+                throw new BadRequestException("Re-enter the credential to change the endpoint");
+            }
             config.setPasswordEnc(existing.getPasswordEnc());
         }
 
@@ -119,7 +128,7 @@ public class WorkspaceMailConfigService {
         }
         auditService.record("workspace.mail_config.save", "workspace", workspaceId, config.getHost(),
                 "Updated workspace email settings", null);
-        return MailConfigDto.from(mailConfigMapper.findByWorkspace(workspaceId));
+        return MailConfigDto.from(mailConfigMapper.findByWorkspace(workspaceId), mailProperties.getPort());
     }
 
     /**
@@ -132,7 +141,9 @@ public class WorkspaceMailConfigService {
         requireWorkspaceOverridesAllowed();
         workspaceService.requirePermission(workspaceId, actorId, Permission.WORKSPACE_SETTINGS);
         sessionSecurityService.requireRecentAuthentication(actorId);
-        WorkspaceMailConfig existing = mailConfigMapper.findByWorkspace(workspaceId);
+        workspaceService.lockAndRequirePermissionsWithWorkspaceMutex(
+                workspaceId, Map.of(actorId, Set.of(Permission.WORKSPACE_SETTINGS)));
+        WorkspaceMailConfig existing = mailConfigMapper.findByWorkspaceForUpdate(workspaceId);
         mailConfigMapper.delete(workspaceId);
         if (existing != null) {
             secretCipher.deleteReferenceForWorkspace(workspaceId, existing.getPasswordEnc());
@@ -177,6 +188,19 @@ public class WorkspaceMailConfigService {
                     workspaceId, e.getClass().getName());
             return MailTestResult.failure("Could not send the test email. Check the host, port, and credentials.");
         }
+    }
+
+    private boolean credentialBindingChanged(WorkspaceMailConfig existing, WorkspaceMailConfig replacement) {
+        return !Objects.equals(trimToNull(existing.getHost()), trimToNull(replacement.getHost()))
+                || effectivePort(existing) != effectivePort(replacement)
+                || !Objects.equals(trimToNull(existing.getUsername()), trimToNull(replacement.getUsername()))
+                || existing.isStarttls() != replacement.isStarttls()
+                || existing.isSsl() != replacement.isSsl()
+                || existing.isAuth() != replacement.isAuth();
+    }
+
+    private int effectivePort(WorkspaceMailConfig config) {
+        return config.getPort() == null ? mailProperties.getPort() : config.getPort();
     }
 
     private static boolean isBlank(String value) {
