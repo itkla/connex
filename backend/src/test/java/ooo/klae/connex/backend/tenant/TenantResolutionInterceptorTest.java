@@ -25,6 +25,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -223,7 +224,6 @@ class TenantResolutionInterceptorTest {
     @ParameterizedTest
     @CsvSource({
         "GET, /api/workspaces",
-        "GET, /api/auth/me",
         "GET, /api/notes/page",
         "HEAD, /api/notes/page",
         "OPTIONS, /api/notes"
@@ -253,8 +253,7 @@ class TenantResolutionInterceptorTest {
         "PUT, /api/notes/1",
         "PATCH, /api/notes/1",
         "DELETE, /api/notes/1",
-        "POST, /api/workspaces",
-        "POST, /api/auth/me",
+        "POST, /api/workspaces/11/members",
         "TRACE, /api/notes",
         "CUSTOM, /api/notes"
     })
@@ -270,6 +269,89 @@ class TenantResolutionInterceptorTest {
 
         assertEquals("Not a member of workspace 11", exception.getMessage());
         assertFalse(liveContext.isResolved());
+        verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
+        verify(workspaceService, never()).forgetActive(anyInt());
+        verify(workspaceService, never()).getRole(19, 7);
+        verifyNoInteractions(workspaceCookie, catalogResolver);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"POST", "PUT", "PATCH", "DELETE"})
+    void pinlessUnsafeMethodsRejectRevokedRememberedWorkspaceWithoutRecovery(String method) {
+        liveContext.set(19, 3, 7, "member", null);
+        when(workspaceService.rememberedWorkspaceIdFor(7)).thenReturn(11);
+        when(workspaceService.getRole(11, 7)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(7)).thenReturn(19);
+        when(workspaceService.getRole(19, 7)).thenReturn("member");
+        MockHttpServletRequest request = new MockHttpServletRequest(method, "/api/notes");
+
+        ForbiddenException exception = assertThrows(ForbiddenException.class,
+            () -> interceptorWithRealResolver().preHandle(request, response, handler));
+
+        assertEquals("Not a member of workspace 11", exception.getMessage());
+        assertFalse(liveContext.isResolved());
+        verify(workspaceService).getRole(11, 7);
+        verify(workspaceService, never()).getRole(19, 7);
+        verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
+        verify(workspaceService, never()).forgetActive(anyInt());
+        verifyNoInteractions(workspaceCookie, catalogResolver);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"GET", "HEAD", "OPTIONS"})
+    void pinlessSafeMethodsRecoverRevokedRememberedWorkspace(String method) {
+        when(workspaceService.rememberedWorkspaceIdFor(7)).thenReturn(11);
+        when(workspaceService.getRole(11, 7)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(7)).thenReturn(19);
+        when(workspaceService.getRole(19, 7)).thenReturn("member");
+        when(workspaceService.getOrgId(19)).thenReturn(3);
+        MockHttpServletRequest request = new MockHttpServletRequest(method, "/api/workspaces");
+
+        assertTrue(interceptorWithRealResolver().preHandle(request, response, handler));
+
+        assertTrue(liveContext.isResolved());
+        assertEquals(19, liveContext.getWorkspaceId());
+        assertEquals(3, liveContext.getOrgId());
+        assertEquals("member", liveContext.getRole());
+        verify(workspaceService).getRole(11, 7);
+        verify(workspaceService).rememberActive(7, 19);
+        verify(workspaceCookie).set(response, 19);
+        verify(workspaceCookie, never()).clear(response);
+    }
+
+    @Test
+    void pinlessWriteWithoutRememberedWorkspaceStillUsesDefaultMembership() {
+        when(workspaceService.rememberedWorkspaceIdFor(7)).thenReturn(null);
+        when(workspaceService.firstMembershipWorkspaceIdFor(7)).thenReturn(19);
+        when(workspaceService.getRole(19, 7)).thenReturn("member");
+        when(workspaceService.getOrgId(19)).thenReturn(3);
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/notes");
+
+        assertTrue(interceptorWithRealResolver().preHandle(request, response, handler));
+
+        assertTrue(liveContext.isResolved());
+        assertEquals(19, liveContext.getWorkspaceId());
+        verify(workspaceService).rememberedWorkspaceIdFor(7);
+        verify(workspaceService).firstMembershipWorkspaceIdFor(7);
+        verify(workspaceService, never()).defaultWorkspaceIdFor(anyInt());
+        verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
+        verifyNoInteractions(workspaceCookie);
+    }
+
+    @Test
+    void headerOnlyRevokedWorkspaceRemainsAnIntentionalPinOnGet() {
+        when(workspaceService.rememberedWorkspaceIdFor(7)).thenReturn(11);
+        when(workspaceService.getRole(11, 7)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(7)).thenReturn(19);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/workspaces");
+        request.addHeader("X-Workspace-Id", "11");
+
+        ForbiddenException exception = assertThrows(ForbiddenException.class,
+            () -> interceptorWithRealResolver().preHandle(request, response, handler));
+
+        assertEquals("Not a member of workspace 11", exception.getMessage());
+        assertFalse(liveContext.isResolved());
+        verify(workspaceService, never()).rememberedWorkspaceIdFor(anyInt());
         verify(workspaceService, never()).defaultWorkspaceIdFor(anyInt());
         verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
         verifyNoInteractions(workspaceCookie, catalogResolver);
@@ -287,7 +369,99 @@ class TenantResolutionInterceptorTest {
         assertFalse(liveContext.isResolved());
         verify(workspaceCookie).clear(response);
         verify(workspaceCookie, never()).set(any(), anyInt());
+        verify(workspaceService).forgetActive(7);
         verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
+    }
+
+    /**
+     * A member removed from their only workspace must not be locked out: nothing can redirect a
+     * write when no membership remains, so every method falls through unresolved and the dead
+     * remembered selection is forgotten, leaving workspace creation and invite acceptance usable.
+     */
+    @ParameterizedTest
+    @CsvSource({
+        "POST, /api/workspaces",
+        "POST, /api/invites/accept",
+        "POST, /api/notes",
+        "DELETE, /api/notes/1",
+        "GET, /api/notes/page"
+    })
+    void losingTheLastMembershipFallsThroughUnresolvedAndForgetsTheSelection(
+            String method, String path) {
+        liveContext.set(11, 3, 7, "member", null);
+        when(workspaceService.rememberedWorkspaceIdFor(7)).thenReturn(11);
+        when(workspaceService.getRole(11, 7)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(7)).thenReturn(null);
+        MockHttpServletRequest request = new MockHttpServletRequest(method, path);
+
+        assertTrue(interceptorWithRealResolver().preHandle(request, response, handler));
+
+        assertFalse(liveContext.isResolved());
+        verify(workspaceService).forgetActive(7);
+        verify(workspaceCookie).clear(response);
+        verify(workspaceCookie, never()).set(any(), anyInt());
+        verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
+        verifyNoInteractions(catalogResolver);
+    }
+
+    /**
+     * Selection and link-bootstrap routes authorize their own targets, so the stale selection
+     * must not refuse them; they run unresolved instead.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "/api/workspaces",
+        "/api/workspaces/11/switch",
+        "/api/workspaces/11/accept",
+        "/api/workspaces/11/decline",
+        "/api/workspaces/11/leave",
+        "/api/invites/exchange",
+        "/api/invites/accept",
+        "/api/invite-links/exchange",
+        "/api/invite-links/accept",
+        "/api/delivery/unsubscribe/exchange",
+        "/api/document-acceptance/exchange"
+    })
+    void selectionRoutesAreNotRefusedByTheStaleSelectionTheyReplace(String path) {
+        liveContext.set(11, 3, 7, "member", null);
+        when(requestResolver.resolve(any(), eq(7))).thenReturn(11);
+        when(workspaceService.getRole(11, 7)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(7)).thenReturn(19);
+
+        assertTrue(preHandle(liveInterceptor, "POST", path));
+
+        assertFalse(liveContext.isResolved());
+        verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
+        verify(workspaceService, never()).forgetActive(anyInt());
+        verify(workspaceService, never()).getRole(19, 7);
+        verifyNoInteractions(workspaceCookie, catalogResolver);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "/api/workspaces/11",
+        "/api/workspaces/11/members",
+        "/api/workspaces/11/invites",
+        "/api/workspaces/11/switch/extra",
+        "/api/invites/exchange/extra",
+        "/api/invite-links/exchange/extra",
+        "/api/delivery/unsubscribe/exchange/extra",
+        "/api/document-acceptance/exchange/extra"
+    })
+    void postsOutsideTheSelectionAllowlistStayRefusedOnAStaleSelection(String path) {
+        liveContext.set(11, 3, 7, "member", null);
+        when(requestResolver.resolve(any(), eq(7))).thenReturn(11);
+        when(requestResolver.isStaleWorkspacePin(any(), eq(11))).thenReturn(true);
+        when(workspaceService.getRole(11, 7)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(7)).thenReturn(19);
+
+        ForbiddenException exception = assertThrows(ForbiddenException.class,
+            () -> preHandle(liveInterceptor, "POST", path));
+
+        assertEquals("Not a member of workspace 11", exception.getMessage());
+        assertFalse(liveContext.isResolved());
+        verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
+        verifyNoInteractions(workspaceCookie, catalogResolver);
     }
 
     @Test
@@ -324,6 +498,16 @@ class TenantResolutionInterceptorTest {
         assertEquals(19, liveContext.getWorkspaceId());
         verify(workspaceService, never()).getOrgId(99);
         verify(workspaceCookie).set(response, 19);
+    }
+
+    private TenantResolutionInterceptor interceptorWithRealResolver() {
+        return new TenantResolutionInterceptor(
+            workspaceService,
+            liveContext,
+            catalogResolver,
+            new WorkspaceRequestResolver(workspaceService),
+            workspaceCookie,
+            correlationPseudonymizer);
     }
 
     private void stubResolutionFor(int userId, int workspaceId) {
