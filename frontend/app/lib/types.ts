@@ -871,6 +871,18 @@ export type EmailChangePayload = {
     currentPassword: string;
 };
 
+/** A pending workspace invitation revoked when the account's email address changed. */
+export type RevokedInvitation = {
+    workspaceId: number;
+    orgId: number | null;
+    workspaceName: string;
+};
+
+/** Email-change confirmation and the pending invitations that need to be sent again. */
+export type EmailChangeConfirmation = AuthResponse & {
+    revokedInvitations: RevokedInvitation[];
+};
+
 export type ResetTokenValidation = {
     valid: boolean;
 };

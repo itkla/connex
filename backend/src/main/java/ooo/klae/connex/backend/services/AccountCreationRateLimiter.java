@@ -49,8 +49,7 @@ public class AccountCreationRateLimiter {
             if (existing == null || nowMillis - existing.start >= windowMillis) {
                 return new Window(nowMillis, 1);
             }
-            existing.count++;
-            return existing;
+            return new Window(existing.start, existing.count + 1);
         });
         return window.count <= maxPerWindow;
     }
@@ -72,13 +71,6 @@ public class AccountCreationRateLimiter {
         return windows.size();
     }
 
-    private static final class Window {
-        private final long start;
-        private int count;
-
-        private Window(long start, int count) {
-            this.start = start;
-            this.count = count;
-        }
-    }
+    /** Immutable count captured at one request's atomic update, unaffected by later attempts. */
+    private record Window(long start, int count) {}
 }
