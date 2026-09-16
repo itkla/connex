@@ -47,7 +47,7 @@ class BedrockAnthropicAdapterImageTest {
     void completeEmbedsBase64ImageBlockBeforeUserText() throws Exception {
         when(bedrockClient.invokeModel(
                 any(BedrockRegion.class), any(), any(AiCredentials.class), any(),
-                any(AiRequestDeadline.class)))
+                any(AiRequestDeadline.class), any(Runnable.class)))
                 .thenReturn("""
                         {"content":[{"type":"text","text":"{}"}],
                          "usage":{"input_tokens":1,"output_tokens":1},"stop_reason":"end_turn"}
@@ -58,7 +58,7 @@ class BedrockAnthropicAdapterImageTest {
         ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(bedrockClient).invokeModel(
                 eq(BedrockRegion.US_EAST_1), eq(MODEL_ID), any(AiCredentials.class),
-                bodyCaptor.capture(), any(AiRequestDeadline.class));
+                bodyCaptor.capture(), any(AiRequestDeadline.class), any(Runnable.class));
         JsonNode content = objectMapper.readTree(bodyCaptor.getValue())
                 .path("messages").path(0).path("content");
         assertEquals("image", content.path(0).path("type").asString());

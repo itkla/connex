@@ -25,7 +25,7 @@ import ooo.klae.connex.backend.config.AuditLogV126MigrationCallback;
 
 class AiBudgetReservationV212MigrationIntegrationTest {
     private static final String SCRATCH_CATALOG =
-            "connex_ai_budget_v207_it_" + UUID.randomUUID().toString().replace("-", "");
+            "connex_ai_budget_v212_it_" + UUID.randomUUID().toString().replace("-", "");
     private static String bootstrapUrl;
     private static String scratchUrl;
     private static String username;
@@ -67,24 +67,24 @@ class AiBudgetReservationV212MigrationIntegrationTest {
     }
 
     @Test
-    void v207BackfillsLegacyReservationsAndConstrainsLifecycle() throws SQLException {
+    void v212BackfillsLegacyReservationsAndConstrainsLifecycle() throws SQLException {
         try (Connection connection = connection(); Statement statement = connection.createStatement()) {
             statement.executeUpdate("""
                     INSERT INTO organization (id, name, slug)
-                    VALUES (65207, 'Budget migration fixture', 'budget-migration-v207')
+                    VALUES (65212, 'Budget migration fixture', 'budget-migration-v212')
                     """);
             statement.executeUpdate("""
                     INSERT INTO organization_ai_budget_reservation
                         (reservation_id, org_id, usage_day, reserved_tokens, expires_at)
                     VALUES
-                        ('legacy-expired', 65207, '2026-09-15', 60, '2026-09-14 00:00:00'),
-                        ('legacy-live', 65207, '2026-09-15', 40, '2099-09-15 00:00:00')
+                        ('legacy-expired', 65212, '2026-09-15', 60, '2026-09-14 00:00:00'),
+                        ('legacy-live', 65212, '2026-09-15', 40, '2099-09-15 00:00:00')
                     """);
         }
 
-        Flyway flyway = migrateTo("207");
+        Flyway flyway = migrateTo("212");
 
-        assertEquals(MigrationVersion.fromVersion("207"), flyway.info().current().getVersion());
+        assertEquals(MigrationVersion.fromVersion("212"), flyway.info().current().getVersion());
         try (Connection connection = connection(); Statement statement = connection.createStatement()) {
             try (ResultSet rows = statement.executeQuery("""
                     SELECT reservation_id, state, consumed_tokens, reserved_tokens
@@ -105,7 +105,7 @@ class AiBudgetReservationV212MigrationIntegrationTest {
             statement.executeUpdate("""
                     INSERT INTO organization_ai_budget_reservation
                         (reservation_id, org_id, usage_day, reserved_tokens, expires_at)
-                    VALUES ('legacy-writer', 65207, '2026-09-15', 20, '2099-09-15 00:00:00')
+                    VALUES ('legacy-writer', 65212, '2026-09-15', 20, '2099-09-15 00:00:00')
                     """);
             try (ResultSet rows = statement.executeQuery("""
                     SELECT state, consumed_tokens FROM organization_ai_budget_reservation
@@ -130,7 +130,7 @@ class AiBudgetReservationV212MigrationIntegrationTest {
             statement.executeUpdate("""
                     INSERT INTO organization_ai_budget_reservation
                         (reservation_id, org_id, usage_day, reserved_tokens, expires_at, state)
-                    VALUES ('new-writer', 65207, '2026-09-15', 30, '2099-09-15 00:00:00', 'reserved')
+                    VALUES ('new-writer', 65212, '2026-09-15', 30, '2099-09-15 00:00:00', 'reserved')
                     """);
             assertEquals(1, statement.executeUpdate("""
                     UPDATE organization_ai_budget_reservation SET state = 'dispatched'
