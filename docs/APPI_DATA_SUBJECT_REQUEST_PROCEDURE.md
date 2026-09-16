@@ -65,6 +65,15 @@ against the response DTO; changes to disclosure sections must update both.
 | `audienceExportEvidence` | Export destination (connector/list ID), snapshot membership, subject-only frozen/staged membership and export outcomes |
 | `auditTrail` | Person-scoped action/outcome audit metadata, capped at 1,000 entries; `auditTrailTotal` gives the uncapped total |
 
+The `notes` section is complete and is never filtered by note visibility class: private notes are
+disclosed to the handling operator as raw assembly material and must be reviewed for statutory
+redaction (Art. 33(2)) like every other section. It carries no row cap and holds the largest
+free-text material in the response. Note bodies are read in pages, but the assembled response is
+held in memory in full, so a subject with a very large note corpus produces a correspondingly large
+response and a matching peak heap on the serving instance. Run such an export off-peak and expect
+a slow response; there is no operator-facing continuation or page parameter, and the export is
+never silently truncated.
+
 Audience-export evidence includes exports by other workspaces in the request's organization that
 held a shared subject, even after the standing share is revoked. Audience-export member lists are
 projected to the subject's membership flags; other members' IDs

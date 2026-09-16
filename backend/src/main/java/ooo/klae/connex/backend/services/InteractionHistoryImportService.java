@@ -181,8 +181,6 @@ public class InteractionHistoryImportService {
         applyProvenance(kind, workspaceId, plan);
         duplicatePreflightService.completeImportCommit(
             session, decisionFingerprint(plan));
-        lockResolvedPeople(workspaceId, plan);
-
         List<PlanRow> creates = plan.stream()
             .filter(row -> READY.equals(row.status))
             .toList();
@@ -190,6 +188,7 @@ public class InteractionHistoryImportService {
         if (!creates.isEmpty() && kind == Kind.TASK) {
             lockTaskBoard(workspaceId);
         }
+        lockResolvedPeople(workspaceId, plan);
         Instant evaluationInstant = clock.instant();
         NotificationReconciliationService.HistoricalExpectationSnapshot before = null;
         if (!creates.isEmpty()) {
@@ -731,7 +730,7 @@ public class InteractionHistoryImportService {
         }
         for (int personId : ids) {
             Person person =
-                personMapper.getOwnedPersonByIdForUpdate(workspaceId, personId);
+                personMapper.getOwnedPersonByIdForShare(workspaceId, personId);
             if (!processable(person) || person.getArchivedAt() != null) {
                 throw new ConflictException(
                     "Participant decisions changed; preview the import again");

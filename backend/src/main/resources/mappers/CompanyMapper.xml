@@ -318,6 +318,54 @@
     ORDER BY c.id
   </select>
 
+  <select id="getRelationshipScoreAggregatesByIds"
+          resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
+    SELECT c.id,
+           COALESCE(SUM(touch.weight
+             * POW(#{model.decayBase}, -touch.age_days / #{model.halfLifeDays})), 0.0) AS raw_weight,
+           COALESCE(SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                             THEN touch.weight ELSE 0.0 END), 0.0)
+             AS recent_weight,
+           COALESCE(SUM(CASE WHEN touch.age_days &gt; #{model.recentWindowDays}
+                               AND touch.age_days &lt;= #{model.priorWindowDays}
+                             THEN touch.weight ELSE 0.0 END), 0.0) AS prior_weight,
+           DATE_FORMAT(MAX(touch.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
+           SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                    THEN 1 ELSE 0 END) AS recent_touch_count
+    FROM company c
+    LEFT JOIN (
+      SELECT attributed.company_id, attributed.touched_at, attributed.weight,
+             GREATEST(0.0,
+               TIMESTAMPDIFF(MICROSECOND, attributed.touched_at, #{reference})
+                 / #{model.microsecondsPerDay}) AS age_days
+      FROM (
+        SELECT source.source_type,
+               source.source_id,
+               source.company_id,
+               source.interaction_type,
+               source.touched_at,
+               source.weight
+        FROM (
+          <include refid="relationshipTouchSources"/>
+        ) source
+        WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
+        AND source.company_id IN
+        <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+        GROUP BY source.source_type,
+                 source.source_id,
+                 source.company_id,
+                 source.interaction_type,
+                 source.touched_at,
+                 source.weight
+      ) attributed
+    ) touch ON touch.company_id = c.id
+    WHERE <include refid="visible"/>
+      AND c.id IN
+      <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+    GROUP BY c.id
+    ORDER BY c.id
+  </select>
+
   <select id="getRelationshipEvidenceTotals" timeout="10"
           resultType="ooo.klae.connex.backend.dto.RelationshipEvidenceTotalsDto">
     SELECT COUNT(*) AS contributor_count,

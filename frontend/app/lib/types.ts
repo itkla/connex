@@ -7,6 +7,13 @@ export type Page<T> = {
     total: number;
 };
 
+/** Body-free authored-note count for one UTC calendar day. */
+export type NoteActivityDay = { date: string; count: number };
+
+/** The last update timestamp and id returned by a timeline note page. */
+export type NotePageCursor = { beforeAt: string; beforeId: number };
+export type NotePageParams = PageParams & Partial<NotePageCursor>;
+
 export type PageParams = {
     page?: number;
     size?: number;

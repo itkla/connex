@@ -23,10 +23,13 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
@@ -36,6 +39,8 @@ class TaskMutationInvariantTest {
 
     @Mock TaskMapper taskMapper;
     @Mock DealMapper dealMapper;
+    @Mock PersonMapper personMapper;
+    @Mock ShareMapper shareMapper;
     @Mock AuditService auditService;
     @Mock WorkspaceService workspaceService;
     @Mock AuthService authService;
@@ -66,6 +71,29 @@ class TaskMutationInvariantTest {
         order.verify(taskMapper).lockTaskBoard(workspaceId);
         order.verify(taskMapper).nextTaskPosition(workspaceId, "todo");
         order.verify(taskMapper).insert(task);
+    }
+
+    @Test
+    void createRefusesSharedPersonWhenLockedGrantHasDisappeared() {
+        int workspaceId = 17;
+        Task task = task(0, "Revoked link");
+        Person person = new Person();
+        person.setId(53);
+        person.setWorkspaceId(23);
+        task.setPerson(person);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(workspaceId);
+        when(personMapper.getVisiblePersonByIdForShare(workspaceId, person.getId())).thenReturn(person);
+        when(shareMapper.lockPersonShareForWorkspace(person.getId(), workspaceId)).thenReturn(null);
+
+        assertThrows(ResourceNotFoundException.class, () -> taskService.create(task));
+
+        InOrder order = inOrder(workspaceService, taskMapper, personMapper, shareMapper);
+        order.verify(workspaceService).lockAndRequireMember(workspaceId, 41);
+        order.verify(taskMapper).lockTaskBoard(workspaceId);
+        order.verify(personMapper).getVisiblePersonByIdForShare(workspaceId, person.getId());
+        order.verify(shareMapper).lockPersonShareForWorkspace(person.getId(), workspaceId);
+        verify(taskMapper, never()).insert(task);
+        verifyNoInteractions(referenceService, auditService, notificationChanges, ruleTriggers);
     }
 
     @Test

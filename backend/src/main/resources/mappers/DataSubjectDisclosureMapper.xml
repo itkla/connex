@@ -144,7 +144,19 @@
     ORDER BY interaction.occurred_at DESC, interaction.id DESC, participant.id
   </select>
 
-  <select id="findNotes"
+  <select id="findNoteIds" resultType="int">
+    SELECT n.id
+    FROM person p
+    JOIN note n ON n.person_id = p.id AND n.workspace_id IN
+      <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
+        #{candidateWorkspaceId}
+      </foreach>
+    <!-- A statutory disclosure must be complete: subject notes are never filtered by visibility class. -->
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
+    ORDER BY n.id
+  </select>
+
+  <select id="findNotePage" flushCache="true" useCache="false"
           resultType="ooo.klae.connex.backend.dto.DataSubjectDisclosureDto$NoteDto">
     SELECT n.id, n.workspace_id, n.content, n.title, n.author_id, n.person_id, n.deal_id,
            n.visibility, n.created_at, n.updated_at
@@ -153,8 +165,14 @@
       <foreach collection="workspaceIds" item="candidateWorkspaceId" open="(" separator="," close=")">
         #{candidateWorkspaceId}
       </foreach>
+    <!-- A statutory disclosure must be complete: subject notes are never filtered by visibility class. -->
     WHERE p.workspace_id = #{workspaceId} AND p.id = #{personId}
-    ORDER BY n.created_at DESC, n.id DESC
+      AND n.id IN
+      <foreach collection="noteIds" item="noteId" open="(" separator="," close=")">
+        #{noteId}
+      </foreach>
+    ORDER BY n.id
+    LIMIT 100
   </select>
 
   <select id="findRecordCommentThreads"

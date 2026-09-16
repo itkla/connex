@@ -8,6 +8,8 @@ import org.apache.ibatis.annotations.Param;
 import ooo.klae.connex.backend.beans.HistoryImportProvenance;
 import ooo.klae.connex.backend.beans.HistoryImportWrite;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.dto.NoteActivityDayDto;
+import ooo.klae.connex.backend.util.NotePageCursor;
 
 /**
  * Mapper interface for {@code Note} persistence.
@@ -16,6 +18,9 @@ import ooo.klae.connex.backend.beans.Note;
  */
 
 public interface NoteMapper {
+    /** Returns a bounded page of shared-note linkage/timestamps without text fields. */
+    List<Note> getWorkspaceNoteMetadataPage(@Param("workspaceId") int workspaceId,
+        @Param("afterId") int afterId, @Param("limit") int limit);
     List<Note> getAllNotes(int workspaceId);
     List<Note> getNotesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId);
     List<Note> getNotesByPersonIds(@Param("workspaceId") int workspaceId,
@@ -23,8 +28,6 @@ public interface NoteMapper {
     List<Note> getNotesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId);
     List<Note> getNotesByAuthorId(@Param("workspaceId") int workspaceId, @Param("authorId") int authorId);
     Note getNoteById(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<Note> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
-    List<Note> getVisibleNotes(@Param("workspaceId") int workspaceId, @Param("currentUserId") int currentUserId);
     List<Note> getVisibleNotesPage(
         @Param("workspaceId") int workspaceId,
         @Param("currentUserId") int currentUserId,
@@ -32,6 +35,15 @@ public interface NoteMapper {
         @Param("authorIds") List<Integer> authorIds,
         @Param("sort") String sort,
         @Param("dir") String dir,
+        @Param("limit") int limit,
+        @Param("offset") int offset
+    );
+    List<Note> getVisibleNotesFilteredPage(
+        @Param("workspaceId") int workspaceId,
+        @Param("currentUserId") int currentUserId,
+        @Param("personId") Integer personId,
+        @Param("dealId") Integer dealId,
+        @Param("authorId") Integer authorId,
         @Param("limit") int limit,
         @Param("offset") int offset
     );
@@ -54,9 +66,33 @@ public interface NoteMapper {
         @Param("query") String query,
         @Param("authorIds") List<Integer> authorIds
     );
-    List<Note> getVisibleNotesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId, @Param("currentUserId") int currentUserId);
-    List<Note> getVisibleNotesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId, @Param("currentUserId") int currentUserId);
-    List<Note> getVisibleNotesByAuthorId(@Param("workspaceId") int workspaceId, @Param("authorId") int authorId, @Param("currentUserId") int currentUserId);
+    default List<Note> getVisibleNotesByPersonId(int workspaceId, int personId,
+            int currentUserId, int limit, int offset) {
+        return getVisibleNotesByPersonId(workspaceId, personId, currentUserId, limit, offset, null);
+    }
+    List<Note> getVisibleNotesByPersonId(@Param("workspaceId") int workspaceId, @Param("personId") int personId,
+        @Param("currentUserId") int currentUserId, @Param("limit") int limit, @Param("offset") int offset,
+        @Param("before") NotePageCursor before);
+    default List<Note> getVisibleNotesByDealId(int workspaceId, int dealId,
+            int currentUserId, int limit, int offset) {
+        return getVisibleNotesByDealId(workspaceId, dealId, currentUserId, limit, offset, null);
+    }
+    List<Note> getVisibleNotesByDealId(@Param("workspaceId") int workspaceId, @Param("dealId") int dealId,
+        @Param("currentUserId") int currentUserId, @Param("limit") int limit, @Param("offset") int offset,
+        @Param("before") NotePageCursor before);
+    default List<Note> getVisibleNotesByAuthorId(int workspaceId, int authorId,
+            int currentUserId, int limit, int offset) {
+        return getVisibleNotesByAuthorId(workspaceId, authorId, currentUserId, limit, offset, null);
+    }
+    List<Note> getVisibleNotesByAuthorId(@Param("workspaceId") int workspaceId, @Param("authorId") int authorId,
+        @Param("currentUserId") int currentUserId, @Param("limit") int limit, @Param("offset") int offset,
+        @Param("before") NotePageCursor before);
+    long countVisibleNotesByAuthorId(@Param("workspaceId") int workspaceId, @Param("authorId") int authorId,
+        @Param("currentUserId") int currentUserId);
+    /** Counts all eligible creation timestamps without selecting note text. */
+    List<NoteActivityDayDto> getVisibleNoteActivityByAuthorId(@Param("workspaceId") int workspaceId,
+        @Param("authorId") int authorId, @Param("currentUserId") int currentUserId,
+        @Param("from") LocalDateTime from, @Param("until") LocalDateTime until);
     List<Note> getVisibleCompanyNotes(@Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId, @Param("currentUserId") int currentUserId,
             @Param("limit") int limit);
@@ -91,7 +127,9 @@ public interface NoteMapper {
         @Param("limit") int limit,
         @Param("offset") int offset
     );
-    List<Note> getNotesReferencing(@Param("workspaceId") int workspaceId, @Param("refType") String refType, @Param("refId") int refId, @Param("currentUserId") int currentUserId);
+    List<Note> getNotesReferencing(@Param("workspaceId") int workspaceId, @Param("refType") String refType,
+        @Param("refId") int refId, @Param("currentUserId") int currentUserId,
+        @Param("limit") int limit, @Param("offset") int offset);
     List<Integer> getVisibleNoteIdsIn(@Param("workspaceId") int workspaceId, @Param("ids") List<Integer> ids, @Param("currentUserId") int currentUserId);
     int insert(Note note);
     List<HistoryImportProvenance> findHistoryImports(

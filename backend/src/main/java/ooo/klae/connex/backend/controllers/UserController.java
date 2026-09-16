@@ -18,6 +18,8 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.NoteDto;
+import ooo.klae.connex.backend.dto.NoteActivityDayDto;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.UpdateLocaleDto;
@@ -32,6 +34,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.util.ClientIpResolver;
+import ooo.klae.connex.backend.util.NotePageCursor;
 import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.LinkedHashSet;
@@ -155,8 +158,34 @@ public class UserController {
      * @return
      */
     @GetMapping("/{id}/notes")
-    public List<NoteDto> getNotesForUser(@PathVariable int id) {
-        return userService.getNotesByUserId(id).stream().map(NoteDto::from).toList();
+    public List<NoteDto> getNotesForUser(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String beforeAt,
+            @RequestParam(required = false) Integer beforeId) {
+        NotePageCursor cursor = NotePageCursor.parse(beforeAt, beforeId);
+        PageBounds bounds = PageBounds.of(cursor == null ? page : 1, size);
+        return userService.getNotesByUserId(id, bounds.size(), bounds.offset(), cursor)
+            .stream().map(NoteDto::from).toList();
+    }
+
+    /** Returns visible authored-note counts for today and the preceding 83 UTC days. */
+    @GetMapping("/{id}/notes/pulse")
+    public List<NoteActivityDayDto> getNoteActivityForUser(@PathVariable int id) {
+        return userService.getNoteActivityByUserId(id);
+    }
+
+    /** Returns bounded authored-note previews and the complete visible total. */
+    @GetMapping("/{id}/notes/page")
+    public PageResponse<NoteDto> getNotesPageForUser(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "25") int size) {
+        PageBounds bounds = PageBounds.of(page, size);
+        List<NoteDto> items = userService.getNotesByUserId(id, bounds.size(), bounds.offset())
+            .stream().map(NoteDto::from).toList();
+        return new PageResponse<>(items, userService.countNotesByUserId(id));
     }
 
     /**
