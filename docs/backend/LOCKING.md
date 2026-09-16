@@ -348,6 +348,36 @@ catalog may be synthesized only while the workspace mutex is held. First-edit ma
 the same mutex, so it cannot commit between a lifecycle miss and the row-less check. Persist the code
 returned by the locked resolution, never a separately compared caller value.
 
+## SMTP configuration
+
+A workspace's own SMTP transport (`workspace_mail_config`) has two sides with deliberately different
+lock sets.
+
+Mutations — `WorkspaceMailConfigService.saveConfig` and `deleteConfig` — take the standard settings
+order and re-assert `WORKSPACE_SETTINGS` after locking:
+
+1. Lock the actor's `app_user` root and check its account-deletion reservation.
+2. Lock the active workspace root exclusively (the workspace mutation mutex).
+3. Lock and revalidate membership, custom role, and the required permission.
+4. Re-read the exact `workspace_mail_config` row `FOR UPDATE`; the pre-lock read is preliminary only.
+5. Write the config and its secret in that same transaction.
+
+The credential is bound to its destination: a blank submitted password may reuse the stored one only
+when host, effective port, username, and the STARTTLS/SSL/AUTH transport-security settings are all
+unchanged. Any other change requires re-entry, so a settings delegate cannot redirect a stored
+password to a new endpoint. Port comparison uses the resolved effective port, so a client that echoes
+the instance default for a stored `NULL` port is not treated as an endpoint change.
+
+Resolution — `MailConfigResolver.resolveForWorkspace` and `resolveWorkspaceOnly` — locks the
+authenticated actor's `app_user` root `FOR SHARE` when a `User` principal is present, then the workspace
+root `FOR SHARE`. It holds these roots across the configuration and secret reads so the endpoint and
+password come from one generation. `SecretStore.get` reacquires those same roots in that order;
+acquiring the actor root first avoids an inversion with a queued exclusive user lock. Background
+resolution without an actor takes only the workspace root. Callers already holding roots must follow
+the same actor-before-workspace order. Resolution performs no provider I/O; the SMTP connection is
+made after the resolving transaction. A missing actor row or workspace root resolves to `null` — "sending
+disabled" — so fire-and-forget senders keep their contract instead of seeing an exception escape.
+
 ## Campaign mutations
 
 Campaign update, live-audience replacement, snapshot creation, and send creation acquire current
@@ -586,18 +616,22 @@ For interactive person/company/deal mutation, sharing, imports, OCR, and identit
 2. Lock actor user when present.
 3. Lock every active workspace root required by the mutation in ascending id.
 4. Lock required active memberships.
-5. Lock the active organization shared.
-6. Lock the organization duplicate-decision mutex exclusively.
-7. For a CSV import that uses an auto-create custom-field mapping, lock the affected
+5. For person updates (including processing-restriction changes) and person/company sharing,
+   lock the actor's custom `workspace_role` root and permission rows when applicable. Validate
+   `PERSON_UPDATE` for person updates or `SHARE_MANAGE` for share grants and revocations from
+   the locked authority before proceeding.
+6. Lock the active organization shared.
+7. Lock the organization duplicate-decision mutex exclusively.
+8. For a CSV import that uses an auto-create custom-field mapping, lock the affected
    record-creation template set before writable record targets. Lock and revalidate
    `CUSTOM_FIELD_MANAGE` first when the definition is absent. This set row is a schema
    synchronization root, not dependency creation. After the set lock is held, recompute the
    set of absent definition keys and fail closed with a review conflict if it differs in
    either direction from the pre-lock reading, so a definition created or removed concurrently
    under `READ_COMMITTED` cannot be silently adopted or created twice.
-8. Lock writable record targets ascending by record id.
-9. Lock canonical identity groups in deterministic kind/value order.
-10. Requery/revalidate current identities while locks are held.
+9. Lock writable record targets ascending by record id.
+10. Lock canonical identity groups in deterministic kind/value order.
+11. Requery/revalidate current identities while locks are held.
 
 Duplicate-review dismissal and reopen are terminal decision writes within this hierarchy. They lock
 and revalidate both the actor's `REPORT_READ` gate and type-specific update permission before entering

@@ -6,6 +6,7 @@ import {
     useRef,
     useSyncExternalStore,
 } from 'react';
+import { useAccountStorageGeneration } from "@/app/hooks/useAccountStorageGeneration";
 
 import {
     resolveViewPreference,
@@ -37,7 +38,13 @@ export function useScopedViewPreference<T extends string>({
     const scopedStorageKey = viewPreferenceStorageKey(storageKey, userId, workspaceId);
     const volatileValue = useRef<{ key: string; value: T } | null>(null);
 
+    const canPersist = useAccountStorageGeneration(() => {
+        volatileValue.current = null;
+        window.dispatchEvent(new CustomEvent(VIEW_PREFERENCE_EVENT, { detail: scopedStorageKey }));
+    });
+
     const readValue = useCallback(() => {
+        if (!canPersist()) return fallback;
         const volatile = volatileValue.current?.key === scopedStorageKey
             ? volatileValue.current.value
             : null;
@@ -48,7 +55,7 @@ export function useScopedViewPreference<T extends string>({
         } catch {
             return resolveViewPreference(initialValue, null, fallback, isValue);
         }
-    }, [fallback, initialValue, isValue, scopedStorageKey]);
+    }, [canPersist, fallback, initialValue, isValue, scopedStorageKey]);
 
     const subscribe = useCallback((onStoreChange: () => void) => {
         const onStorage = (event: StorageEvent) => {
@@ -84,12 +91,16 @@ export function useScopedViewPreference<T extends string>({
     );
 
     const setValue = useCallback((next: T) => {
+        if (!canPersist()) {
+            volatileValue.current = null;
+            return;
+        }
         volatileValue.current = { key: scopedStorageKey, value: next };
         try {
             window.localStorage.setItem(scopedStorageKey, next);
         } catch {}
         window.dispatchEvent(new CustomEvent(VIEW_PREFERENCE_EVENT, { detail: scopedStorageKey }));
-    }, [scopedStorageKey]);
+    }, [canPersist, scopedStorageKey]);
 
     return [value, setValue];
 }

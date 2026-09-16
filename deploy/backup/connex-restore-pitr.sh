@@ -882,20 +882,24 @@ pitr_replay_target_notice() {
     fi
 }
 
-pitr_replay() {
-    if ! PITR_EXPECTED_EVENTS="$(pitr_count_source_events)"; then
-        backup_log error pitr_replay_failed reason source_event_count source_schema "$PITR_SOURCE_SCHEMA"
-        return "$EXIT_PITR"
-    fi
-    PITR_COUNT_FILE="$(mktemp "${TMPDIR:-/tmp}/connex-pitr-applied.XXXXXX")" || return "$EXIT_PITR"
-    if ! TZ=UTC "${MYSQLBINLOG_COMMAND[@]}" \
+pitr_decode_replay() {
+    backup_mysqlbinlog_local \
         --verify-binlog-checksum \
         --require-row-format \
         --start-position="$PITR_BINLOG_POSITION" \
         --stop-datetime="$PITR_TARGET_TIME" \
         "--rewrite-db=$PITR_SOURCE_SCHEMA->$PITR_TARGET_SCHEMA" \
         "--database=$PITR_TARGET_SCHEMA" \
-        "${PITR_BINLOG_FILES[@]}" |
+        "${PITR_BINLOG_FILES[@]}"
+}
+
+pitr_replay() {
+    if ! PITR_EXPECTED_EVENTS="$(pitr_count_source_events)"; then
+        backup_log error pitr_replay_failed reason source_event_count source_schema "$PITR_SOURCE_SCHEMA"
+        return "$EXIT_PITR"
+    fi
+    PITR_COUNT_FILE="$(mktemp "${TMPDIR:-/tmp}/connex-pitr-applied.XXXXXX")" || return "$EXIT_PITR"
+    if ! pitr_decode_replay |
         pitr_rewrite_qualified_schema "$PITR_COUNT_FILE" |
         { backup_session_preamble restore; cat; } |
         backup_mysql restore --binary-mode "$PITR_TARGET_SCHEMA"; then
@@ -918,7 +922,7 @@ pitr_replay() {
 }
 
 pitr_run() {
-    local start_file summary
+    local start_file summary exit_code=0
     pitr_parse_arguments "$@" || return $?
     backup_load_environment || return $?
     backup_validate_common || return $?
@@ -936,6 +940,11 @@ pitr_run() {
     pitr_validate_sequence "$start_file" || return $?
     pitr_verify_no_coverage_gap || return $?
     pitr_query_preflight || return $?
+    pitr_decode_replay > /dev/null || exit_code=$?
+    if [ "$exit_code" -ne 0 ]; then
+        backup_log error pitr_preflight_failed reason replay_decode
+        return "$exit_code"
+    fi
     BACKUP_PHASE=restoring_full
     pitr_replay_target_notice
     backup_configure_sidecar_binlog "$PITR_SOURCE_SCHEMA" "$PITR_TARGET_SCHEMA"

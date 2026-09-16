@@ -27,6 +27,7 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.config.SessionSecurityProperties;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
@@ -36,16 +37,19 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 class SessionSecurityServiceTest {
     private MutableClock clock;
     private SessionSecurityProperties properties;
+    private PrivilegedMfaProperties privilegedMfaProperties;
     private SessionSecurityService service;
 
     @BeforeEach
     void setUp() {
         clock = new MutableClock();
         properties = new SessionSecurityProperties();
+        privilegedMfaProperties = new PrivilegedMfaProperties();
         properties.setAbsoluteTimeout(Duration.ofHours(12));
         properties.setRecentAuthenticationWindow(Duration.ofMinutes(10));
         service = new SessionSecurityService(
                 properties,
+                privilegedMfaProperties,
                 clock,
                 mock(UserMapper.class),
                 mock(SpringSessionMapper.class));
@@ -55,6 +59,41 @@ class SessionSecurityServiceTest {
     void tearDown() {
         SecurityContextHolder.clearContext();
         RequestContextHolder.resetRequestAttributes();
+    }
+
+    @Test
+    void exportStepUpRequiresAnAuthenticatedCallerAndOwnFreshPasskeyStamp() {
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireExportStepUp());
+        User user = new User();
+        user.setId(7);
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities()));
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireExportStepUp());
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireExportStepUp());
+        service.markStepUp(request, 8);
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireExportStepUp());
+        service.markStepUp(request, 7);
+        assertDoesNotThrow(() -> service.requireExportStepUp());
+        request.getSession().setAttribute(SessionSecurityService.WEBAUTHN_STEP_UP_AT_ATTR,
+                clock.millis() - Duration.ofMinutes(11).toMillis());
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireExportStepUp());
+    }
+
+    @Test
+    void rolloutExceptionOnlyDisablesTheAddedExportPolicy() {
+        privilegedMfaProperties.setEnforced("false");
+        assertDoesNotThrow(() -> service.requireExportStepUp());
+        assertTrue(service.isExportStepUpSatisfied(null, null));
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireRecentAuthentication(7));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        assertDoesNotThrow(() -> service.requireExportStepUp());
+        assertThrows(RecentAuthenticationRequiredException.class, () -> service.requireRecentAuthentication(7));
+        service.markStepUp(request, 7);
+        assertDoesNotThrow(() -> service.requireRecentAuthentication(7));
     }
 
     @Test

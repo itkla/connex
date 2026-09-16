@@ -117,6 +117,10 @@ public class ImportService {
     private static final String DEFAULT_TAG_COLOR = "#CCCCCC";
     private static final String DEFAULT_CURRENCY = "USD";
     private static final int DEAL_VALUE_SCALE = 2;
+    private static final int MAX_VALUE_LENGTH = 128;
+    private static final int MAX_NUMERIC_DIGITS = 20;
+    private static final int DEAL_VALUE_INTEGER_DIGITS = 13;
+    private static final BigDecimal DEAL_VALUE_ROUNDING_LIMIT = new BigDecimal("9999999999999.995");
     private static final int CUSTOM_NUMBER_SCALE = 4;
     private static final String DEAL_VALUE_LINE_ITEM_CONFLICT =
         "Cannot import a deal value while line items exist; update or remove the line items first";
@@ -1574,14 +1578,38 @@ public class ImportService {
         return value.length() + ":" + value;
     }
 
+    /**
+     * Parses an imported deal value against the bounds of the {@code deal.value} column, mirroring
+     * the numeric guard {@code CustomFieldValueService} applies to custom fields. Every bound is
+     * asserted on the parsed representation — length, scale, and integer-digit count — before any
+     * rescaling, because {@code setScale} on an unbounded exponent such as {@code 1E100000000}
+     * materializes a hundred-million-digit unscaled integer. The integer-digit comparison widens to
+     * {@code long} so an extreme negative exponent cannot wrap it into a passing value. Preview and
+     * commit both parse here, so a row admitted by one is admitted by the other.
+     *
+     * @param raw the cell value, or null when the column is absent
+     * @return the value rounded to the persisted scale
+     * @throws BadRequestException when the value is unparseable or outside the column's range
+     */
     private static BigDecimal parseValue(String raw) {
         if (raw == null) return BigDecimal.ZERO.setScale(DEAL_VALUE_SCALE);
-        String cleaned = raw.replaceAll("[,\\s]", "");
-        try {
-            return new BigDecimal(cleaned).setScale(DEAL_VALUE_SCALE, RoundingMode.HALF_UP);
-        } catch (NumberFormatException e) {
-            return BigDecimal.ZERO.setScale(DEAL_VALUE_SCALE);
+        String cell = raw.length() > 40 ? raw.substring(0, 40) + "..." : raw;
+        if (raw.length() > MAX_VALUE_LENGTH) {
+            throw new BadRequestException("Deal value is out of range: " + cell);
         }
+        BigDecimal value;
+        try {
+            value = new BigDecimal(raw.replaceAll("[,\\s]", ""));
+        } catch (NumberFormatException exception) {
+            throw new BadRequestException("Invalid deal value: " + cell);
+        }
+        if (value.precision() > MAX_NUMERIC_DIGITS
+                || value.scale() > MAX_NUMERIC_DIGITS
+                || (long) value.precision() - value.scale() > DEAL_VALUE_INTEGER_DIGITS
+                || value.abs().compareTo(DEAL_VALUE_ROUNDING_LIMIT) >= 0) {
+            throw new BadRequestException("Deal value is out of range: " + cell);
+        }
+        return value.setScale(DEAL_VALUE_SCALE, RoundingMode.HALF_UP);
     }
 
     // ===================================================================================
@@ -1678,9 +1706,9 @@ public class ImportService {
         String value = row.std.get("value");
         if (value != null) {
             try {
-                new BigDecimal(value.replaceAll("[,\\s]", ""));
-            } catch (NumberFormatException e) {
-                fail(row, "Invalid value: " + value);
+                parseValue(value);
+            } catch (BadRequestException exception) {
+                fail(row, exception.getMessage());
             }
         }
     }

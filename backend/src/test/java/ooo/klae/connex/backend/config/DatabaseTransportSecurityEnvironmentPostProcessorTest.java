@@ -2,12 +2,44 @@ package ooo.klae.connex.backend.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.io.IOException;
+import java.util.concurrent.ConcurrentHashMap;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.boot.session.autoconfigure.SessionAutoConfiguration;
+import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
 import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.MediaType;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.mock.env.MockPropertySource;
+import org.springframework.session.MapSession;
+import org.springframework.session.MapSessionRepository;
+import org.springframework.session.web.http.CookieHttpSessionIdResolver;
+import org.springframework.session.web.http.CookieSerializer;
+import org.springframework.session.web.http.SessionRepositoryFilter;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.support.GenericWebApplicationContext;
+
+import ooo.klae.connex.backend.controllers.AuthController;
+import ooo.klae.connex.backend.dto.LoginDto;
+import ooo.klae.connex.backend.services.AuthService;
 
 class DatabaseTransportSecurityEnvironmentPostProcessorTest {
 
@@ -91,8 +123,8 @@ class DatabaseTransportSecurityEnvironmentPostProcessorTest {
             .withProperty("spring.datasource.password", "x");
 
         assertDoesNotThrow(() -> postProcessor.postProcessEnvironment(environment, null));
-        assertEquals("false", environment.getProperty("CONNEX_SESSION_COOKIE_SECURE"));
-        assertEquals("false", environment.getProperty("CONNEX_WORKSPACE_COOKIE_SECURE"));
+        assertEquals("true", environment.getProperty("CONNEX_SESSION_COOKIE_SECURE", "true"));
+        assertEquals("true", environment.getProperty("CONNEX_WORKSPACE_COOKIE_SECURE", "true"));
         assertEquals(
             "http://localhost:3001",
             environment.getProperty("CONNEX_CORS_ALLOWED_ORIGINS")
@@ -143,8 +175,8 @@ class DatabaseTransportSecurityEnvironmentPostProcessorTest {
             .withProperty("connex.webauthn.rp-id", "${CONNEX_WEBAUTHN_RP_ID:localhost}");
 
         assertDoesNotThrow(() -> postProcessor.postProcessEnvironment(environment, null));
-        assertEquals("false", environment.getProperty("server.servlet.session.cookie.secure"));
-        assertEquals("false", environment.getProperty("connex.workspace-cookie.secure"));
+        assertEquals("true", environment.getProperty("server.servlet.session.cookie.secure"));
+        assertEquals("true", environment.getProperty("connex.workspace-cookie.secure"));
         assertEquals("http://localhost:3001", environment.getProperty("connex.cors.allowed-origins"));
         assertEquals("http://localhost:3001", environment.getProperty("connex.webauthn.allowed-origins"));
         assertEquals("localhost", environment.getProperty("connex.webauthn.rp-id"));
@@ -506,6 +538,138 @@ class DatabaseTransportSecurityEnvironmentPostProcessorTest {
             .withProperty("spring.datasource.password", "x");
 
         assertDoesNotThrow(() -> postProcessor.postProcessEnvironment(environment, null));
+    }
+
+    /**
+     * Exercises executable-archive cookie wiring, where auto-configuration runs before a servlet context exists.
+     * A pre-bound mock servlet context selects Boot's external-WAR serializer, which reads container cookie
+     * settings instead of {@code server.servlet.session.cookie.*} from {@code application.yml}.
+     */
+    @Test
+    void stagingLoginEmitsSecureSessionCookieWithUnsetOverrides() throws IOException {
+        MockEnvironment environment = configuredStagingEnvironment();
+        postProcessor.postProcessEnvironment(environment, null);
+
+        assertEquals("true", environment.getProperty("server.servlet.session.cookie.secure"));
+        assertEquals("true", environment.getProperty("connex.workspace-cookie.secure"));
+
+        new WebApplicationContextRunner(GenericWebApplicationContext::new)
+            .withInitializer(context -> context.setEnvironment(environment))
+            .withConfiguration(AutoConfigurations.of(SessionAutoConfiguration.class))
+            .run(context -> {
+                AuthService authService = mock(AuthService.class);
+                doAnswer(invocation -> {
+                    HttpServletRequest request = invocation.getArgument(1, HttpServletRequest.class);
+                    request.getSession().setAttribute("authenticated", true);
+                    request.changeSessionId();
+                    return null;
+                }).when(authService).login(any(LoginDto.class), any(HttpServletRequest.class), any(HttpServletResponse.class));
+                AuthController controller = new AuthController(authService, mock(), mock(), mock(), mock(), mock());
+                CookieHttpSessionIdResolver resolver = new CookieHttpSessionIdResolver();
+                resolver.setCookieSerializer(context.getBean(CookieSerializer.class));
+                SessionRepositoryFilter<MapSession> sessions =
+                    new SessionRepositoryFilter<>(new MapSessionRepository(new ConcurrentHashMap<>()));
+                sessions.setHttpSessionIdResolver(resolver);
+
+                String cookie = MockMvcBuilders.standaloneSetup(controller).addFilters(sessions).build()
+                    .perform(post("/api/auth/login").secure(false)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"staging-user\",\"password\":\"synthetic-password\"}"))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getHeader("Set-Cookie");
+
+                assertNotNull(cookie, "no Set-Cookie header was written");
+                assertTrue(cookie.startsWith("JSESSIONID="), cookie);
+                assertTrue(cookie.contains("; Secure"), cookie);
+                verify(authService).login(any(LoginDto.class), any(HttpServletRequest.class), any(HttpServletResponse.class));
+            });
+    }
+
+    @Test
+    void localHttpCookieExceptionRequiresExplicitOptIn() throws IOException {
+        MockEnvironment environment = configuredStagingEnvironment()
+            .withProperty("CONNEX_LOCAL_HTTP_COOKIES_ENABLED", "true");
+
+        postProcessor.postProcessEnvironment(environment, null);
+
+        assertEquals("false", environment.getProperty("server.servlet.session.cookie.secure"));
+        assertEquals("false", environment.getProperty("connex.workspace-cookie.secure"));
+        assertEquals("http://localhost:3001", environment.getProperty("connex.cors.allowed-origins"));
+        assertEquals("localhost", environment.getProperty("connex.webauthn.rp-id"));
+    }
+
+    @Test
+    void refusesLocalHttpCookieOptInForPublicOrMalformedOrigins() throws IOException {
+        for (String property : new String[] {"CONNEX_CORS_ALLOWED_ORIGINS", "CONNEX_WEBAUTHN_ALLOWED_ORIGINS"}) {
+            for (String origin : new String[] {
+                "https://preview.connexcrm.jp", "http://preview.connexcrm.jp",
+                "http://localhost:3001,https://preview.connexcrm.jp", "http://localhost.evil.test",
+                "http://localhost@evil.test", "http://localhost:3001/redirect", "*", ""
+            }) {
+                MockEnvironment environment = configuredStagingEnvironment()
+                    .withProperty("CONNEX_LOCAL_HTTP_COOKIES_ENABLED", "true")
+                    .withProperty(property, origin);
+                assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null), origin);
+            }
+        }
+    }
+
+    @Test
+    void refusesLocalHttpCookieOptInForIndexedPublicWebAuthnOrigin() throws IOException {
+        MockEnvironment environment = configuredStagingEnvironment()
+            .withProperty("CONNEX_LOCAL_HTTP_COOKIES_ENABLED", "true")
+            .withProperty("connex.webauthn.allowed-origins[0]", "https://preview.connexcrm.jp");
+
+        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
+    }
+
+    @Test
+    void refusesLocalHttpCookieOptInWhenIndexedCorsOriginMasksPublicScalar() throws IOException {
+        MockEnvironment environment = configuredStagingEnvironment()
+            .withProperty("CONNEX_LOCAL_HTTP_COOKIES_ENABLED", "true")
+            .withProperty("CONNEX_CORS_ALLOWED_ORIGINS", "https://preview.connexcrm.jp")
+            .withProperty("connex.cors.allowed-origins[0]", "http://localhost:3001");
+
+        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
+    }
+
+    @Test
+    void refusesLegacyInsecureStagingOverridesWithoutLocalHttpOptIn() throws IOException {
+        for (String property : new String[] {
+            "CONNEX_SESSION_COOKIE_SECURE", "CONNEX_WORKSPACE_COOKIE_SECURE",
+            "server.servlet.session.cookie.secure", "connex.workspace-cookie.secure",
+            "server.servlet.session.cookie.Secure", "connex.workspaceCookie.secure"
+        }) {
+            for (String value : new String[] {"false", "", " "}) {
+                MockEnvironment environment = configuredStagingEnvironment().withProperty(property, value);
+                assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null), property);
+            }
+        }
+    }
+
+    @Test
+    void refusesLocalHttpCookieOptInOutsideSystemdStaging() throws IOException {
+        MockEnvironment environment = configuredStagingEnvironment()
+            .withProperty("user.dir", "/opt/connex/backend")
+            .withProperty("spring.datasource.url", "jdbc:mysql://db.example.test/connexdb?sslMode=VERIFY_IDENTITY")
+            .withProperty("CONNEX_LOCAL_HTTP_COOKIES_ENABLED", "true");
+
+        assertThrows(IllegalStateException.class, () -> postProcessor.postProcessEnvironment(environment, null));
+    }
+
+    private static MockEnvironment configuredStagingEnvironment() throws IOException {
+        MockEnvironment environment = localSystemdStagingEnvironment()
+            .withProperty("CONNEX_DEPLOYMENT_PROFILE", "silo")
+            .withProperty("spring.datasource.url", "jdbc:mysql://localhost:3306/connexdb?sslMode=DISABLED")
+            .withProperty("spring.datasource.username", "connex")
+            .withProperty("spring.datasource.password", "x");
+        environment.getPropertySources().addLast(new MockPropertySource(
+            StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME));
+        for (var propertySource : new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yml"))) {
+            environment.getPropertySources().addLast(propertySource);
+        }
+        ConfigurationPropertySources.attach(environment);
+        return environment;
     }
 
     private static MockEnvironment productionEnvironment() {

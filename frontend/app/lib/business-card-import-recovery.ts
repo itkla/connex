@@ -1,3 +1,4 @@
+import { currentAccountBinding, isCurrentBinding, type AccountBinding } from '@/app/lib/browserAccountStorage';
 import {
     ApiError,
     clientRecoveryContext,
@@ -172,7 +173,10 @@ function readEntry(scope: string, requestId: string): RecoveryEntry | null {
     }
 }
 
-function persistEntry(scope: string, entry: RecoveryEntry): void {
+function persistEntry(binding: AccountBinding, scope: string, entry: RecoveryEntry): void {
+    if (!isCurrentBinding(binding)) {
+        throw new ApiError('Business-card recovery context changed', 409, 'BUSINESS_CARD_CONTEXT_CHANGED');
+    }
     try {
         const key = entryKey(scope, entry.requestId);
         window.localStorage.setItem(key, JSON.stringify(entry));
@@ -278,11 +282,12 @@ export async function registerBusinessCardImportRecovery(
     context: BusinessCardRecoveryContext,
     signal?: AbortSignal,
 ): Promise<string> {
+    const binding = currentAccountBinding();
     const scope = (await recoveryContext(context, signal)).scope;
     return withRecoveryLock(scope, () => {
         const requestId = window.crypto.randomUUID();
         const createdAt = Date.now();
-        persistEntry(scope, {
+        persistEntry(binding, scope, {
             requestId,
             createdAt,
             expiresAt: createdAt + REGISTERED_TTL_MS,
@@ -301,6 +306,7 @@ export async function prepareBusinessCardImportRecovery(
     context: BusinessCardRecoveryContext,
     signal?: AbortSignal,
 ): Promise<number> {
+    const binding = currentAccountBinding();
     const scope = (await recoveryContext(context, signal)).scope;
     const entry = await withRecoveryLock(scope, () => {
         const stored = readEntry(scope, requestId);
@@ -312,7 +318,7 @@ export async function prepareBusinessCardImportRecovery(
             pendingAvatar,
             revision: 0,
         };
-        if (!stored) persistEntry(scope, current);
+        if (!stored) persistEntry(binding, scope, current);
         if (current.expiresAt <= Date.now()) {
             removeEntry(scope, requestId);
             throw new ApiError(
@@ -343,7 +349,7 @@ export async function prepareBusinessCardImportRecovery(
             );
         }
         const revision = current.revision + 1;
-        persistEntry(scope, {
+        persistEntry(binding, scope, {
             ...current,
             expiresAt,
             phase: 'submitted',
@@ -407,13 +413,14 @@ export async function markBusinessCardImportAvatarCompleted(
     context: BusinessCardRecoveryContext,
     signal?: AbortSignal,
 ): Promise<number | null> {
+    const binding = currentAccountBinding();
     const scope = (await recoveryContext(context, signal)).scope;
     return withRecoveryLock(scope, () => {
         const entry = readEntry(scope, requestId);
         if (!entry) return null;
         if (!entry.pendingAvatar) return entry.revision;
         const revision = entry.revision + 1;
-        persistEntry(scope, {
+        persistEntry(binding, scope, {
             ...entry,
             pendingAvatar: false,
             revision,
