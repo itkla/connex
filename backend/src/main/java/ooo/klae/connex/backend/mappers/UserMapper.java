@@ -45,6 +45,8 @@ public interface UserMapper {
     Integer lockByIdForShare(int id);
     List<Integer> lockAssignedCustomRoleIds(int id);
     boolean isAccountDeletionReserved(int id);
+    /** IDs with live deletion reservations; callers supply a nonempty candidate set. */
+    List<Integer> findAccountDeletionReservedIds(@Param("ids") List<Integer> ids);
     /** Returns current deletion-reservation state while retaining a shared user-row lock, or null if absent. */
     Boolean isAccountDeletionReservedForShare(int id);
     boolean isAccountDeletionReservationOwner(

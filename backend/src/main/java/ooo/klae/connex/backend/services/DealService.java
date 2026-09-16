@@ -1378,10 +1378,12 @@ public class DealService {
     @RequirePermission(Permission.DEAL_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministrator(
+            workspaceId, workspaceService.getCurrentUserId());
         duplicateDecisionLockService.lockCurrentOrganization();
         Deal before = requireDealForUpdate(workspaceId, id);
         if (dealDocumentMapper.countNonDraftByDeal(workspaceId, id) > 0) {
-            workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+            workspaceService.requireLockedBuiltInAdministrator(builtInAdministrator);
         }
         for (DocumentDeliveryArtifact artifact
                 : documentDeliveryMapper.getArtifactsByDeal(workspaceId, id)) {

@@ -195,22 +195,27 @@
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND status = 'active'
   </select>
 
-  <select id="hasMembersWithCustomRole" resultType="boolean">
-    SELECT EXISTS(
-      SELECT 1
-      FROM workspace_member
-      WHERE workspace_id = #{workspaceId} AND role_id = #{roleId}
-    )
-  </select>
-
   <update id="setMemberCustomRole">
     UPDATE workspace_member SET role_id = #{roleId}
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
   </update>
 
-  <select id="countOwners" resultType="int">
-    SELECT COUNT(*) FROM workspace_member
+  <!-- NOWAIT: the caller already holds the workspace root, while departure cleanup can hold a
+       membership row before requesting that root. Waiting here would close the cycle. -->
+  <select id="lockActiveOwnerMembers" resultType="WorkspaceMember">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member FORCE INDEX (idx_workspace_member_role_status)
     WHERE workspace_id = #{workspaceId} AND role = 'owner' AND status = 'active'
+    ORDER BY user_id
+    FOR UPDATE NOWAIT
+  </select>
+
+  <select id="lockRoleAssignees" resultType="WorkspaceMember">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member FORCE INDEX (fk_workspace_member_role)
+    WHERE role_id = #{roleId} AND workspace_id = #{workspaceId}
+    ORDER BY user_id
+    FOR UPDATE NOWAIT
   </select>
 
   <select id="workspaceIdsOwnedBy" resultType="int">
@@ -238,13 +243,6 @@
        workspace root and its organization while the workspace is tearing down. -->
   <select id="lockWorkspaceOrgIdForShare" resultType="java.lang.Integer">
     SELECT org_id FROM workspace WHERE id = #{workspaceId} FOR SHARE
-  </select>
-
-  <select id="lockOwnerIds" resultType="int">
-    SELECT user_id FROM workspace_member
-    WHERE workspace_id = #{workspaceId} AND role = 'owner' AND status = 'active'
-    ORDER BY user_id
-    FOR UPDATE
   </select>
 
   <delete id="removeMember">

@@ -277,9 +277,11 @@ public class DealDocumentService {
     @RequirePermission(Permission.DEAL_UPDATE)
     public void delete(int dealId, int documentId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministrator(
+            workspaceId, workspaceService.getCurrentUserId());
         Deal deal = lockDeal(workspaceId, dealId);
         DealDocument document = lockDocument(workspaceId, dealId, documentId);
-        deletionPolicy.requireDeletable(document.getCreatedBy());
+        deletionPolicy.requireDeletable(document.getCreatedBy(), builtInAdministrator);
         if (!"draft".equals(document.getStatus())) {
             throw new BadRequestException("Only draft documents can be deleted");
         }

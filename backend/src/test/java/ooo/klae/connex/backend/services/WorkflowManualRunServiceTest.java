@@ -22,6 +22,7 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -255,6 +256,27 @@ class WorkflowManualRunServiceTest {
         assertEquals(0, result.exactCount());
         verify(dealService).getMatchingDealIds(
             null, null, null, null, null, null, false, null, null, memberScope);
+    }
+
+    @Test
+    void preparedInvocationTimesItsWholeLifecycleWithOneClock() throws Exception {
+        stubSavedView("{\"filters\":{\"contact\":[\"13\"]}}");
+        when(dealService.getMatchingDealIds(
+            null, null, null, null, null, List.of(13), false, null, null, null))
+            .thenReturn(List.of());
+
+        service.prepare(
+            11,
+            new WorkflowManualPrepareRequest(
+                "saved_view", new WorkflowManualScope.SavedView(5)));
+
+        ArgumentCaptor<WorkflowInvocation> prepared =
+            ArgumentCaptor.forClass(WorkflowInvocation.class);
+        verify(operationsMapper).insertInvocation(prepared.capture());
+        assertNotNull(prepared.getValue().getCreatedAt());
+        assertEquals(
+            prepared.getValue().getCreatedAt().plusMinutes(15),
+            prepared.getValue().getExpiresAt());
     }
 
     @Test
