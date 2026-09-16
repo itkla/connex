@@ -448,6 +448,14 @@ public class WorkspaceService {
             lockAndRequirePermissions(workspaceId, requiredByUser, false), requiredByUser);
     }
 
+    /** Returns authority retained by shared membership locks through the surrounding transaction. */
+    public LockedPermissionSnapshot lockAndRequirePermissionsSnapshotForShare(
+            int workspaceId,
+            Map<Integer, Set<Permission>> requiredByUser) {
+        return new LockedPermissionSnapshot(
+            lockAndRequirePermissions(workspaceId, requiredByUser, false, true), requiredByUser);
+    }
+
     /**
      * Locks the workspace exclusively while revalidating current membership and permissions.
      *
@@ -467,6 +475,14 @@ public class WorkspaceService {
             int workspaceId,
             Map<Integer, Set<Permission>> requiredByUser,
             boolean exclusiveWorkspace) {
+        return lockAndRequirePermissions(workspaceId, requiredByUser, exclusiveWorkspace, false);
+    }
+
+    private Map<Integer, Set<Permission>> lockAndRequirePermissions(
+            int workspaceId,
+            Map<Integer, Set<Permission>> requiredByUser,
+            boolean exclusiveWorkspace,
+            boolean sharedMemberships) {
         Objects.requireNonNull(requiredByUser, "requiredByUser");
         TreeSet<Integer> userIds = new TreeSet<>(requiredByUser.keySet());
         if (userIds.isEmpty()) {
@@ -490,8 +506,9 @@ public class WorkspaceService {
         Map<Integer, WorkspaceMember> memberships = new LinkedHashMap<>();
         TreeSet<Integer> roleIds = new TreeSet<>();
         for (int userId : userIds) {
-            WorkspaceMember membership = workspaceMapper.lockAuthorizationMembership(
-                    workspaceId, userId);
+            WorkspaceMember membership = sharedMemberships
+                ? workspaceMapper.lockAuthorizationMembershipForShare(workspaceId, userId)
+                : workspaceMapper.lockAuthorizationMembership(workspaceId, userId);
             if (!isExactMembership(membership, workspaceId, userId)
                     || !"active".equals(membership.getStatus())) {
                 throw authorizationRequired(userId, requiredByUser.get(userId));

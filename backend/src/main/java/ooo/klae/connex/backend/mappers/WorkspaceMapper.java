@@ -37,6 +37,10 @@ public interface WorkspaceMapper {
     WorkspaceMember lockAuthorizationMembership(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
+    /** Retains exact membership authority without excluding other authorized readers. */
+    WorkspaceMember lockAuthorizationMembershipForShare(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
     WorkspaceMember getAuthorizationMembership(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);

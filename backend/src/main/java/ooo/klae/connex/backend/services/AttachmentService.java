@@ -38,7 +38,6 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class AttachmentService {
-    private static final String MANAGED_URL_PREFIX = "/api/attachments/content/";
     private static final String ASSISTANT_SESSION = "ai_chat_session";
 
     private final AttachmentMapper attachmentMapper;
@@ -228,9 +227,6 @@ public class AttachmentService {
     @RequirePermission(Permission.ATTACHMENT_CREATE)
     public Attachment create(Attachment attachment) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (attachment.getUrl() != null && attachment.getUrl().startsWith(MANAGED_URL_PREFIX)) {
-            throw new BadRequestException("Managed attachment references cannot be submitted directly");
-        }
         UserDisplayNameDto targetLabel = prepareTarget(workspaceId, attachment);
         Attachment created = attachmentWriteOperations.createExternal(workspaceId, attachment);
         return attachmentReadService.hydrateKnown(
@@ -246,7 +242,7 @@ public class AttachmentService {
     @RequirePermission(Permission.ATTACHMENT_CREATE)
     public Attachment createManaged(Attachment attachment) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (attachment.getUrl() == null || !attachment.getUrl().startsWith(MANAGED_URL_PREFIX)) {
+        if (!ManagedObjectService.hasManagedAttachmentPrefix(attachment.getUrl())) {
             throw new BadRequestException("Managed attachment reference is invalid");
         }
         UserDisplayNameDto targetLabel = prepareTarget(workspaceId, attachment);
