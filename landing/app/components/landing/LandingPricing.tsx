@@ -75,7 +75,7 @@ export default function LandingPricing({ t, ctaHref, ctaLabel, preLaunch = false
                 ))}
             </div>
             <p className="mt-8 max-w-[75ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.allFeatures")}</p>
-            <table className="mt-6 w-full table-fixed border-collapse text-sm">
+            <table aria-describedby="pricing-notes" className="mt-6 w-full table-fixed border-collapse text-sm">
                 <caption className="sr-only">{t("pricing.compare")}</caption>
                 <colgroup><col className="w-1/3 lg:w-1/4" /><col /><col /><col /></colgroup>
                 <thead>
