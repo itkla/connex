@@ -20,4 +20,8 @@ public interface SecretValueMapper {
             @Param("previousEncryptedDataKey") String previousEncryptedDataKey,
             @Param("previousCiphertext") String previousCiphertext);
     int delete(long id);
+
+    /** Deletes a current reference only when all ownership coordinates match. */
+    int deleteScoped(@Param("id") long id, @Param("scopeType") String scopeType,
+            @Param("scopeId") int scopeId, @Param("purpose") String purpose);
 }

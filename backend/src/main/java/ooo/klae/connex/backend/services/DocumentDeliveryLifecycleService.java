@@ -38,6 +38,7 @@ import ooo.klae.connex.backend.signature.InAppAcceptanceProvider;
 import ooo.klae.connex.backend.signature.ProviderSignedArtifact;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredArtifact;
+import ooo.klae.connex.backend.util.DocumentBodySchema;
 
 /** Applies terminal delivery transitions after callers acquire the documented aggregate locks. */
 @Service
@@ -83,6 +84,7 @@ public class DocumentDeliveryLifecycleService {
             Optional<ProviderSignedArtifact> providerArtifact) {
         Objects.requireNonNull(triggeringEventAt, "triggeringEventAt");
         Objects.requireNonNull(providerArtifact, "providerArtifact");
+        DocumentBodySchema.validateFrozenContent(document.getContent(), objectMapper);
         DocumentDeliveryArtifact signedArtifact = deliveryMapper.getArtifactByKind(
             workspaceId, delivery.getId(), "signed_document");
         if (providerArtifact.isPresent()) {

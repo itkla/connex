@@ -188,7 +188,7 @@ export default function TimelineRow({
     const chipLabel = t(CHIP_LABEL_KEY[entry.kind]);
     const commentAuthor = entry.kind === 'comment' ? entry.comment.author : null;
     const avatarUrl = commentAuthor?.profilePictureUrl ?? author?.profilePictureUrl;
-    const avatarName = commentAuthor?.displayName ?? author?.displayName ?? author?.username ?? '';
+    const avatarName = commentAuthor?.displayName || author?.displayName || author?.username || t('unknownAuthor');
 
     let title: React.ReactNode;
     let subtitle: React.ReactNode = null;
@@ -330,7 +330,7 @@ export default function TimelineRow({
             <Tooltip>
                 <TooltipTrigger asChild>
                     <Avatar size="default">
-                        <AvatarImage src={avatarUrl} />
+                        <AvatarImage src={avatarUrl} alt={avatarName} />
                         <AvatarFallback>
                             <UserIcon className="size-3 text-muted-foreground" />
                         </AvatarFallback>

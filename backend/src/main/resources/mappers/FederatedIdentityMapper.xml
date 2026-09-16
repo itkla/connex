@@ -18,7 +18,7 @@
 
   <select id="countByUserIdExcludingOrg" resultType="int">
     SELECT COUNT(*) FROM federated_identity
-    WHERE user_id = #{userId} AND org_id &lt;&gt; #{orgId}
+    WHERE user_id = #{userId} AND (org_id &lt;&gt; #{orgId} OR org_id IS NULL)
   </select>
 
   <insert id="insert" useGeneratedKeys="true" keyProperty="id">

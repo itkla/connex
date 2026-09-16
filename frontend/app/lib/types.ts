@@ -1705,7 +1705,8 @@ export type DealLineItemTotals = {
 
 export type DealLineItemsResponse = {
     items: DealLineItem[];
-    totals: DealLineItemTotals;
+    /** Unavailable until every remaining line uses the deal currency. */
+    totals: DealLineItemTotals | null;
 };
 
 export type DealLineItemPayload = {

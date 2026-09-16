@@ -13,8 +13,9 @@ import lombok.ToString;
 /**
  * Upsert of an organization's SSO connection. Structural constraints only; the
  * "required per protocol" and secret-encryption rules live in
- * {@code SsoConnectionService}. A null/blank {@code oidcClientSecret} leaves any
- * stored client secret unchanged; a blank string is never persisted as the secret.
+ * {@code SsoConnectionService}. A null/blank {@code oidcClientSecret} preserves the stored
+ * OIDC secret only when the issuer and client id are unchanged; a blank string is never
+ * persisted as the secret.
  */
 @Data
 @ToString(exclude = "oidcClientSecret")
