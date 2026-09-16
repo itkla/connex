@@ -53,8 +53,12 @@ class InviteServiceTest extends AbstractServiceTest {
 
     @Test
     void acceptInvite_revalidatesInvitersCurrentGrantAuthority() {
+        tenantContext.clear();
         WorkspaceMembershipDto ws = workspaceService.createWorkspace(
             "Stored Invite Grant WS", currentUser.getId());
+        authenticateAs(currentUser, ws.getId());
+        User recoveryOwner = newUser();
+        workspaceMapper.addMember(ws.getId(), recoveryOwner.getId(), "owner");
         String email = "stored-invite-" + unique() + "@example.com";
         InviteResultDto result = inviteService.createInvite(
             ws.getId(), currentUser, email, "member");
@@ -65,9 +69,11 @@ class InviteServiceTest extends AbstractServiceTest {
             ws.getId(), currentUser.getId(), currentUser.getId(), restricted.getId());
         User invitee = register(email);
 
-        assertThrows(
+        ForbiddenException failure = assertThrows(
             ForbiddenException.class,
             () -> inviteService.acceptInvite(result.getInvite().getToken(), invitee));
+        assertEquals("You cannot grant the COMPANY_CREATE permission because you do not hold it",
+            failure.getMessage());
         assertFalse(workspaceMapper.isMember(ws.getId(), invitee.getId()));
     }
 

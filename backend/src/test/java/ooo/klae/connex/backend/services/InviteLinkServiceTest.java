@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.InviteLinkDto;
+import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -97,21 +98,29 @@ class InviteLinkServiceTest extends AbstractServiceTest {
 
     @Test
     void redeemLink_revalidatesCreatorsCurrentGrantAuthority() {
+        tenantContext.clear();
+        WorkspaceMembershipDto ws = workspaceService.createWorkspace(
+            "Stored Link Grant WS", currentUser.getId());
+        authenticateAs(currentUser, ws.getId());
+        User recoveryOwner = newUser();
+        workspaceMapper.addMember(ws.getId(), recoveryOwner.getId(), "owner");
         InviteLinkDto link = inviteLinkService.createLink(
-            workspace.getId(), currentUser, "member", null, null);
+            ws.getId(), currentUser, "member", null, null);
         WorkspaceRole manager = roleService.createRole(
-            workspace.getId(),
+            ws.getId(),
             currentUser.getId(),
             "Restricted link creator",
             List.of(Permission.MEMBER_MANAGE.name()));
         workspaceService.assignCustomRole(
-            workspace.getId(), currentUser.getId(), currentUser.getId(), manager.getId());
+            ws.getId(), currentUser.getId(), currentUser.getId(), manager.getId());
         User user = outsider();
 
-        assertThrows(
+        ForbiddenException failure = assertThrows(
             ForbiddenException.class,
             () -> inviteLinkService.redeemLink(link.getToken(), user));
-        assertFalse(workspaceMapper.isMember(workspace.getId(), user.getId()));
+        assertEquals("You cannot grant the COMPANY_CREATE permission because you do not hold it",
+            failure.getMessage());
+        assertFalse(workspaceMapper.isMember(ws.getId(), user.getId()));
     }
 
     @Test
