@@ -933,6 +933,7 @@ case_binlog_shim_refuses_mutable_images_before_docker() {
     done
 }
 
+# shellcheck disable=SC2317
 case_binlog_shim_only_mounts_readonly_binlog_inputs() {
     write_recording_docker
     local input="$SANDBOX/binlog-inputs/mysql-bin.000001"
@@ -1049,18 +1050,21 @@ assert_pitr_shim_replays() {
 }
 
 case_pitr_shim_accepts_actual_replay_arguments() {
+    # shellcheck source=deploy/backup/connex-restore-pitr.sh
     source "$SANDBOX/pitr-lib.sh"
     assert_pitr_shim_replays src_1-db target_2-db
 }
 
 case_pitr_shim_accepts_dollar_in_source_schema() {
+    # shellcheck source=deploy/backup/connex-restore-pitr.sh
     source "$SANDBOX/pitr-lib.sh"
-    assert_pitr_shim_replays 'tenant$1' target_2-db
+    assert_pitr_shim_replays "tenant\$1" target_2-db
 }
 
 case_pitr_shim_accepts_dollar_in_target_schema() {
+    # shellcheck source=deploy/backup/connex-restore-pitr.sh
     source "$SANDBOX/pitr-lib.sh"
-    assert_pitr_shim_replays src_1-db 'target$name'
+    assert_pitr_shim_replays src_1-db "target\$name"
 }
 
 assert_pitr_shim_refused_before_restore() {
@@ -1077,6 +1081,7 @@ assert_pitr_shim_refused_before_restore() {
 }
 
 case_pitr_shim_refuses_foreign_option_before_restore() {
+    # shellcheck source=deploy/backup/connex-restore-pitr.sh
     source "$SANDBOX/pitr-lib.sh"
     initialize_pitr_shim_fixture
     local option
@@ -1087,11 +1092,12 @@ case_pitr_shim_refuses_foreign_option_before_restore() {
 }
 
 case_pitr_shim_refuses_malformed_rewrite_before_restore() {
+    # shellcheck source=deploy/backup/connex-restore-pitr.sh
     source "$SANDBOX/pitr-lib.sh"
     initialize_pitr_shim_fixture
     local rewrite
     for rewrite in 'src->' '->target' 'src=>target' 'src->target->other' 'src ->target' 'src->target;id' \
-        'src->$(id)' 'src->`id`' 'src->${name}' '$(id)->target' 'src;id->target' 'src->target|id' 'src->target&' 'src->target/name' \
+        "src->\$(id)" "src->\`id\`" "src->\${name}" "\$(id)->target" 'src;id->target' 'src->target|id' 'src->target&' 'src->target/name' \
         'src->target.name' 'src->target*' $'src->target\n' "src->$(printf 'a%.0s' {1..65})" \
         "$(printf 'a%.0s' {1..65})->target"; do
         PITR_TEST_REWRITE="$rewrite"
@@ -1149,6 +1155,7 @@ EOF
 }
 
 case_remote_tls_refuses_unverified_transfers() {
+    # shellcheck source=deploy/backup/connex-backup-lib.sh
     source "$SANDBOX/connex-backup-lib.sh"
     initialize_tls_fixture
     local fixture profile status command
@@ -1169,6 +1176,7 @@ case_remote_tls_refuses_unverified_transfers() {
 }
 
 case_remote_tls_enforces_identity_on_every_client() {
+    # shellcheck source=deploy/backup/connex-backup-lib.sh
     source "$SANDBOX/connex-backup-lib.sh"
     initialize_tls_fixture
     export TLS_FIXTURE=trusted
@@ -1185,6 +1193,7 @@ case_remote_tls_enforces_identity_on_every_client() {
 }
 
 case_tls_plaintext_exception_is_explicit_and_profile_scoped() {
+    # shellcheck source=deploy/backup/connex-backup-lib.sh
     source "$SANDBOX/connex-backup-lib.sh"
     initialize_tls_fixture
     export TLS_FIXTURE=plaintext
@@ -1213,6 +1222,7 @@ case_tls_plaintext_exception_is_explicit_and_profile_scoped() {
 }
 
 case_tls_option_terminator_refused_before_client() {
+    # shellcheck source=deploy/backup/connex-backup-lib.sh
     source "$SANDBOX/connex-backup-lib.sh"
     initialize_tls_fixture
     export TLS_FIXTURE=trusted
@@ -1226,6 +1236,7 @@ case_tls_option_terminator_refused_before_client() {
 }
 
 case_tls_plaintext_refuses_effective_endpoint_overrides() {
+    # shellcheck source=deploy/backup/connex-backup-lib.sh
     source "$SANDBOX/connex-backup-lib.sh"
     initialize_tls_fixture
     export TLS_FIXTURE=plaintext
