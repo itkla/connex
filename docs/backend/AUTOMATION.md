@@ -71,6 +71,13 @@ a workspace that is already over the limit. A *material* edit to an enabled work
 workspace is refused, because it republishes the trigger; pause or disable first, or reduce the
 fan-out.
 
+Two legacy-rule replacements are exempt because they can only release intake capacity: a request
+that sets `enabled` to `false`, and a replacement whose trigger events are a strict subset of the
+current rule's events on the same record type. `LegacyRuleWorkflowService.requiresTriggerAdmission`
+decides this from the requested transition, so those requests neither wait on the admission mutex nor
+recount fan-out; the aggregate lock still revalidates the discovered rule before either exemption is
+applied, so a concurrent edit cannot turn an exempt request into an unadmitted activation.
+
 The intake-side `trigger_fanout_limit` guard is retained as a backstop, so a workspace that is
 already over the limit — including one pushed over by lowering `max-trigger-fanout` — still aborts
 the triggering CRM write until an operator reduces the fan-out. Disable, pause, and archive skip

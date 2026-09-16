@@ -29,7 +29,10 @@ Workflow lifecycle writes and permanent account offboarding share a hierarchy:
    contends. This is the mutex for aggregate trigger-capacity admission; nothing outside
    `WorkflowPrincipalLockService` may take it, and the remediation paths (disable, pause, archive,
    restore), standalone draft authoring, legacy delete, and runtime-owner cutover/rollback pass
-   `admitTriggerCapacity = false` so they neither wait on it nor write to it.
+   `admitTriggerCapacity = false` so they neither wait on it nor write to it. Legacy-rule
+   replacements that disable the rule or strictly shrink its trigger events are exempt the same way
+   (`LegacyRuleWorkflowService.requiresTriggerAdmission`), and the aggregate lock revalidates the
+   discovered rule before the exemption is honoured.
    Any transaction that will publish must take this mutex in its first principal-lock pass,
    before membership or role locks, and hold it through publication. Recipe installation therefore
    passes `true` during draft creation; its later publication reacquires the already-held mutex.
