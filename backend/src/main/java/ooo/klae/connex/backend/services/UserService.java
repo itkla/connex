@@ -13,10 +13,12 @@ import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.util.NotePageCursor;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.dto.UserReferenceDto;
+import ooo.klae.connex.backend.dto.NoteActivityDayDto;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
 import ooo.klae.connex.backend.storage.ManagedObjectService.ManagedContent;
@@ -24,6 +26,8 @@ import ooo.klae.connex.backend.storage.UploadSource;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 import ooo.klae.connex.backend.connectedaccounts.ProviderAccountOffboardingService;
 
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -297,9 +301,35 @@ public class UserService implements UserDetailsService {
      * @return
      */
     public List<Note> getNotesByUserId(int userId) {
+        return getNotesByUserId(userId, 25, 0);
+    }
+
+    /** Returns a bounded page of visible authored notes with redacted previews. */
+    public List<Note> getNotesByUserId(int userId, int limit, int offset) {
+        return getNotesByUserId(userId, limit, offset, null);
+    }
+
+    public List<Note> getNotesByUserId(int userId, int limit, int offset, NotePageCursor before) {
         getUserById(userId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByAuthorId(workspaceId, userId, workspaceService.getCurrentUserId()));
+        return referenceService.hydrateNotePreviews(workspaceId, noteMapper.getVisibleNotesByAuthorId(
+            workspaceId, userId, workspaceService.getCurrentUserId(), limit, before == null ? offset : 0, before));
+    }
+
+    /** Counts all authored notes visible to the current workspace member. */
+    public long countNotesByUserId(int userId) {
+        getUserById(userId);
+        return noteMapper.countVisibleNotesByAuthorId(workspaceService.getCurrentWorkspaceId(),
+            userId, workspaceService.getCurrentUserId());
+    }
+
+    /** Aggregates every visible authored note into at most 84 UTC calendar-day counts. */
+    public List<NoteActivityDayDto> getNoteActivityByUserId(int userId) {
+        getUserById(userId);
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        return noteMapper.getVisibleNoteActivityByAuthorId(workspaceService.getCurrentWorkspaceId(),
+            userId, workspaceService.getCurrentUserId(), today.minusDays(83).atStartOfDay(),
+            today.plusDays(1).atStartOfDay());
     }
 
     public User updateCurrentProfilePicture(int userId, UploadSource source) {

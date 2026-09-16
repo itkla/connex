@@ -37,7 +37,7 @@ describe('record timeline deep-link fallback', () => {
     it.each([
         ['task', '/activity/tasks'],
         ['activity', '/activity/all'],
-        ['note', '/activity/notes'],
+        ['note', '/activity/notes?note=88'],
     ] as const)(
         'does not assert that an unknown %s is merely outside the rendered window',
         (kind, href) => {
@@ -49,6 +49,12 @@ describe('record timeline deep-link fallback', () => {
             });
         },
     );
+
+    it('preserves a notification note id that has not been fetched in the first 25 rows', () => {
+        const firstPage = { task: [], activity: [], note: Array.from({ length: 25 }, (_, index) => index + 1) };
+        expect(missingTimelineDeepLink(new URLSearchParams('note=26'), firstPage, firstPage)?.href)
+            .toBe('/activity/notes?note=26');
+    });
 
     it('ignores malformed identities instead of exposing them', () => {
         expect(missingTimelineDeepLink(new URLSearchParams('note=raw-id'), visible, known)).toBeNull();

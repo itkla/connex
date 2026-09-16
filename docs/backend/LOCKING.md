@@ -308,10 +308,21 @@ execution and prevents offboarding's user-before-workflow order from forming a c
 
 Task creation/full update lock the requested active membership first. Mutations that can change board positions run at `READ_COMMITTED` and acquire the exact tenant-plane `task_board_lock` workspace root through the atomic insert-or-update mapper statement.
 
-- Create: membership → board root → insert.
-- Full update: membership → board root → exact task rows.
+- Create: membership → board root → linked people → exact visibility grants → insert.
+- Full update: membership → board root → exact task rows → linked people → exact visibility grants.
 - Completion/deletion/movement: board root → exact task rows.
 - Due-date-only reschedule: exact task only; no board root.
+
+Task-history imports retain their authorization and duplicate-decision roots first, then acquire
+that same board root before locking resolved people in ascending id order. Assistant task creation
+also acquires the board before its processable-record target and restriction fence. These callers
+must never enter task creation while holding a person lock acquired before the board. Existing
+task rows precede people on updates; imports and creates insert new task rows after people while
+holding the board mutex. Person visibility/processing locks use `FOR SHARE` for task links,
+history imports, and activity updates, which do not mutate the person. The exact share grant is
+retained through commit and permissions are rechecked after contention. Activity creation keeps
+`FOR UPDATE` because recording the first-response timestamp can update the person; taking a
+shared lock first would permit a concurrent lock-upgrade cycle.
 
 After the board root is held, discover workspace task ids without locks, add the requested root, Java-sort the union, and lock exact `(workspace_id,id)` rows individually. Skip siblings that vanished before lock; fail closed if the requested root vanished. Derive ordering only from locked rows.
 

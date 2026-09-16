@@ -2298,8 +2298,12 @@ export function getUserActivities(id: number, init: RequestInit = {}) {
     return getJson<Types.Activity[]>(`/api/users/${id}/activities`, init);
 }
 
-export function getUserNotes(id: number, init: RequestInit = {}) {
-    return getJson<Types.Note[]>(`/api/users/${id}/notes`, init);
+export function getUserNotes(id: number, params: Types.NotePageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Note[]>(`/api/users/${id}/notes${buildQuery(params)}`, init);
+}
+
+export function getUserNotesPage(id: number, params: Types.PageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Page<Types.Note>>(`/api/users/${id}/notes/page${buildQuery(params)}`, init);
 }
 
 export function getUserTasksFromCookie(id: number, cookie: string | null) {
@@ -2310,8 +2314,18 @@ export function getUserActivitiesFromCookie(id: number, cookie: string | null) {
     return safeReadWithCookie<Types.Activity>((init) => getUserActivities(id, init), cookie);
 }
 
-export function getUserNotesFromCookie(id: number, cookie: string | null) {
-    return safeReadWithCookie<Types.Note>((init) => getUserNotes(id, init), cookie);
+export function getUserNotesFromCookie(id: number, cookie: string | null, params: Types.PageParams = {}) {
+    return safeReadWithCookie<Types.Note>((init) => getUserNotes(id, params, init), cookie);
+}
+
+/** Reads the complete visible 84-day note activity aggregate independently of timeline pages. */
+export function getUserNoteActivityResultFromCookie(id: number, cookie: string | null) {
+    return resultWithCookie<Types.NoteActivityDay[]>(
+        (init) => getJson<Types.NoteActivityDay[]>(`/api/users/${id}/notes/pulse`, init), cookie);
+}
+
+export function getUserNotesPageResultFromCookie(id: number, cookie: string | null) {
+    return resultWithCookie<Types.Page<Types.Note>>((init) => getUserNotesPage(id, {}, init), cookie);
 }
 
 /*
@@ -2459,9 +2473,11 @@ export function getNoteById(id: number, init: RequestInit = {}) {
     return getJson<Types.Note>(`/api/notes/${id}`, init);
 }
 
-export function getNotesReferencing(refType: string, refId: number, init: RequestInit = {}) {
+export function getNotesReferencing(
+    refType: string, refId: number, params: Types.PageParams = {}, init: RequestInit = {},
+) {
     return getJson<Types.Note[]>(
-        `/api/notes/referencing?refType=${encodeURIComponent(refType)}&refId=${refId}`,
+        `/api/notes/referencing?refType=${encodeURIComponent(refType)}&refId=${refId}&page=${params.page ?? 1}&size=${params.size ?? 25}`,
         init,
     );
 }
@@ -3958,8 +3974,12 @@ export function getActivitiesForDeal(id: number, init: RequestInit = {}) {
     return getJson<Types.Activity[]>(`/api/deals/${id}/activities`, init);
 }
 
-export function getNotesForDeal(id: number, init: RequestInit = {}) {
-    return getJson<Types.Note[]>(`/api/deals/${id}/notes`, init);
+export function getNotesForPerson(id: number, params: Types.NotePageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Note[]>(`/api/persons/${id}/notes${buildQuery({ page: 1, size: 25, ...params })}`, init);
+}
+
+export function getNotesForDeal(id: number, params: Types.NotePageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Note[]>(`/api/deals/${id}/notes${buildQuery({ page: 1, size: 25, ...params })}`, init);
 }
 
 export function getTasksForDeal(id: number, init: RequestInit = {}) {

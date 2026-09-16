@@ -239,6 +239,20 @@ public class ReferenceService {
         return notes;
     }
 
+    /** Hydrates a SQL-bounded note page and truncates content only after reader-specific redaction. */
+    public List<Note> hydrateNotePreviews(int workspaceId, List<Note> notes) {
+        List<Note> hydrated = hydrate(workspaceId, notes);
+        if (hydrated == null) {
+            return List.of();
+        }
+        for (Note note : hydrated) {
+            if (note.getContent() != null && note.getContent().length() > 500) {
+                note.setContent(note.getContent().substring(0, 500));
+            }
+        }
+        return hydrated;
+    }
+
     /**
      * Attaches each task's resolved references in a single batch query, so any
      * read path returns tasks the frontend can render as chips. Mutates the tasks

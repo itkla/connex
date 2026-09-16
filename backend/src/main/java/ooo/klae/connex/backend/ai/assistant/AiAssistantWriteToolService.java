@@ -577,6 +577,9 @@ public class AiAssistantWriteToolService {
     }
 
     private PreparedMutation lockMutationTarget(StoredWrite write) {
+        if ("create_task".equals(write.toolName())) {
+            taskService.lockBoardForCreation();
+        }
         if ("change_deal_stage".equals(write.toolName())) {
             Stage stage = resolveStage(write);
             DealService.LockedStageChange stageChange = dealService.lockStageChangeRowsForUpdate(
@@ -587,8 +590,9 @@ public class AiAssistantWriteToolService {
                     stageChange == null ? null : stageChange.targetUpdatedAt());
         }
         String updatedAt = switch (write.targetKind()) {
-            case "person" -> updatedAt(personService.lockProcessablePersonForUpdate(
-                    write.targetId()));
+            case "person" -> updatedAt("create_task".equals(write.toolName())
+                    ? personService.lockProcessablePersonForShare(write.targetId())
+                    : personService.lockProcessablePersonForUpdate(write.targetId()));
             case "company" -> updatedAt(companyService.lockOwnedCompanyForUpdate(
                     write.targetId()));
             case "deal" -> updatedAt(dealService.lockDealForUpdate(write.targetId()));

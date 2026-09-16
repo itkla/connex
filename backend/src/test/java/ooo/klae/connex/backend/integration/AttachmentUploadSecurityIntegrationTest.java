@@ -31,6 +31,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -334,16 +336,23 @@ class AttachmentUploadSecurityIntegrationTest {
         verify(storage, times(1)).put(anyString(), any(UploadSource.class), anyString(), any(byte[].class));
     }
 
+    /** Surfaces pre-scan refusals and worker failures before attempting the scanner-gated revocation. */
     @ParameterizedTest
     @CsvSource({"upload,membership", "upload-image,membership", "upload,permission", "upload-image,permission"})
     void revocationCommittedDuringScanDeniesBothUploadRoutes(String route, String revocation) throws Exception {
-        CountDownLatch scanning = new CountDownLatch(1);
+        CompletableFuture<Void> scanning = new CompletableFuture<>();
         CountDownLatch releaseScan = new CountDownLatch(1);
-        pauseScanner(scanning, releaseScan);
+        pauseScanner(() -> scanning.complete(null), releaseScan);
         try (var executor = Executors.newSingleThreadExecutor()) {
-            var result = executor.submit(() -> upload(route, "company", company.getId()));
+            var result = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return upload(route, "company", company.getId());
+                } catch (Exception exception) {
+                    throw new CompletionException(exception);
+                }
+            }, executor);
             try {
-                assertTrue(scanning.await(RACE_SECONDS, TimeUnit.SECONDS));
+                awaitScannerEntry(scanning, result);
                 new TransactionTemplate(transactionManager).executeWithoutResult(status -> revoke(revocation));
             } finally {
                 releaseScan.countDown();
@@ -351,6 +360,24 @@ class AttachmentUploadSecurityIntegrationTest {
             assertEquals(403, result.get(RACE_SECONDS, TimeUnit.SECONDS).getResponse().getStatus());
         }
         assertNoPersistence();
+    }
+
+    @Test
+    void scannerBarrierReportsPreScanRefusal() throws Exception {
+        MvcResult refused = mvc.perform(multipart("/api/attachments/upload")
+                .file(new MockMultipartFile("file", "image.png", "image/png",
+                    "not a PNG".getBytes(StandardCharsets.UTF_8)))
+                .param("entityType", "company").param("entityId", Integer.toString(company.getId()))
+                .session(session).with(csrf().asHeader()).header("X-Workspace-Id", workspace.getId()))
+            .andExpect(status().isUnsupportedMediaType()).andReturn();
+
+        AssertionError failure = assertThrows(AssertionError.class, () -> awaitScannerEntry(
+            new CompletableFuture<>(), CompletableFuture.completedFuture(refused)));
+
+        assertNotNull(failure.getMessage());
+        assertTrue(failure.getMessage().contains("status=415"));
+        verify(scanner, never()).scan(any(byte[].class));
+        verify(storage, never()).put(anyString(), any(UploadSource.class), anyString(), any(byte[].class));
     }
 
     @ParameterizedTest
@@ -362,7 +389,7 @@ class AttachmentUploadSecurityIntegrationTest {
         CountDownLatch revocationLocked = new CountDownLatch(1);
         CountDownLatch commitRevocation = new CountDownLatch(1);
         CountDownLatch uploadLockAttempted = new CountDownLatch(1);
-        pauseScanner(scanning, releaseScan);
+        pauseScanner(scanning::countDown, releaseScan);
         signalAuthorizationLock(revocation, uploadLockAttempted);
         try (var executor = Executors.newFixedThreadPool(2)) {
             var result = executor.submit(() -> upload(route, "company", company.getId()));
@@ -410,7 +437,7 @@ class AttachmentUploadSecurityIntegrationTest {
         }
         CountDownLatch scanning = new CountDownLatch(1);
         CountDownLatch releaseScan = new CountDownLatch(1);
-        pauseScanner(scanning, releaseScan);
+        pauseScanner(scanning::countDown, releaseScan);
         try (var executor = Executors.newSingleThreadExecutor()) {
             var result = executor.submit(() -> upload(route, type, targetId));
             try {
@@ -787,10 +814,19 @@ class AttachmentUploadSecurityIntegrationTest {
         }
     }
 
-    private void pauseScanner(CountDownLatch scanning, CountDownLatch release) {
+    private static void awaitScannerEntry(
+            CompletableFuture<Void> scanning, CompletableFuture<MvcResult> result) throws Exception {
+        CompletableFuture.anyOf(scanning, result).get(RACE_SECONDS, TimeUnit.SECONDS);
+        if (!scanning.isDone()) {
+            throw new AssertionError("Upload did not reach the scanner: "
+                + failureDetail(result.get(RACE_SECONDS, TimeUnit.SECONDS)));
+        }
+    }
+
+    private void pauseScanner(Runnable scanning, CountDownLatch release) {
         when(scanner.scan(any(byte[].class))).thenAnswer(invocation -> {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
-            scanning.countDown();
+            scanning.run();
             await(release);
             return cleanReport();
         });
