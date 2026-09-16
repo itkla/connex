@@ -110,13 +110,25 @@ function ShootingStar({ x, y, className }: { x: number; y: number; className: st
 
 /** A fine Fuji skyline before a daytime sun or a starry night sky, with bubbly clouds drifting behind and in front of it. */
 export function FujiBackdrop({ pauseLabel, resumeLabel }: { pauseLabel: string; resumeLabel: string }) {
-    const skyline = "M160 846 C342 816 481 767 613 700 C762 625 891 518 1039 393 L1094 352 L1107 350 L1112 346 L1121 348 L1134 344 L1149 347 L1161 345 L1173 348 L1184 342 L1194 344 L1202 350 C1289 418 1368 485 1462 547 C1607 643 1747 718 1940 777";
+    // Split the existing left ridge at its midpoint so the ascent follows the exact silhouette.
+    const ascentStart = { x: 826.375, y: 565.25 };
+    const ascentCurve = "C895.75 513.5 965 455.5 1039 393";
+    const leftSlope = `M160 846 C342 816 481 767 613 700 C687.5 662.5 757 617 ${ascentStart.x} ${ascentStart.y} ${ascentCurve}`;
+    const skyline = `${leftSlope} L1094 352 L1107 350 L1112 346 L1121 348 L1134 344 L1149 347 L1161 345 L1173 348 L1184 342 L1194 344 L1202 350 C1289 418 1368 485 1462 547 C1607 643 1747 718 1940 777`;
     const silhouette = `${skyline} L1940 930 H160 Z`;
     return (
         <FujiMotion pauseLabel={pauseLabel} resumeLabel={resumeLabel}>
             <div className={styles.scenery}>
                 <svg className={styles.landscape} viewBox="0 0 1600 900" fill="none" preserveAspectRatio="xMidYMax slice" aria-hidden="true" focusable="false">
                     <defs>
+                        <path data-fuji-ascent-route d={`M${ascentStart.x} ${ascentStart.y} ${ascentCurve}`} />
+                        <linearGradient id="fuji-ascent-fade">
+                            <stop stopColor="white" stopOpacity="0" />
+                            <stop offset="1" stopColor="white" />
+                        </linearGradient>
+                        <mask id="fuji-ascent-trail" maskUnits="userSpaceOnUse" x="0" y="0" width="1600" height="900">
+                            <rect data-fuji-ascent-fade x="-220" width="220" height="900" fill="url(#fuji-ascent-fade)" transform={`translate(${ascentStart.x} 0)`} />
+                        </mask>
                         <linearGradient id="fuji-ink" x1="1150" y1="342" x2="1150" y2="846" gradientUnits="userSpaceOnUse">
                             <stop className={styles.inkTone} stopOpacity="0.5" />
                             <stop offset="0.55" className={styles.inkTone} stopOpacity="0.2" />
@@ -180,6 +192,11 @@ export function FujiBackdrop({ pauseLabel, resumeLabel }: { pauseLabel: string; 
                         <g data-fuji-depth="0.16">
                             <path d={silhouette} fill="url(#fuji-wash)" />
                             <path className={styles.outline} d={skyline} stroke="url(#fuji-ink)" vectorEffect="non-scaling-stroke" />
+                            <path className={styles.ascentTrail} d={leftSlope} mask="url(#fuji-ascent-trail)" vectorEffect="non-scaling-stroke" />
+                            <g data-fuji-ascent-marker transform={`translate(${ascentStart.x} ${ascentStart.y})`}>
+                                <circle className={styles.ascentPulse} r="7" />
+                                <circle className={styles.ascentDot} r="3.75" />
+                            </g>
                         </g>
                         <g data-fuji-depth="0.06">
                             <CloudLoop clouds={FRONT_CLOUDS} className={styles.nearClouds} />

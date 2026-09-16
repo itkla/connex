@@ -23,7 +23,7 @@ function visibilitySnapshot() { return !document.hidden; }
 function serverMotionSnapshot() { return true; }
 function serverVisibilitySnapshot() { return false; }
 
-/** Keeps decorative clouds still until visible, with pause and reduced-motion controls. */
+/** Coordinates the scenery and ridge ascent with visibility, pause, and reduced-motion controls. */
 export function FujiMotion({ children, pauseLabel, resumeLabel }: { children: ReactNode; pauseLabel: string; resumeLabel: string }) {
     const scene = useRef<HTMLDivElement>(null);
     const reduceMotion = useSyncExternalStore(subscribeMotion, motionSnapshot, serverMotionSnapshot);
@@ -46,28 +46,43 @@ export function FujiMotion({ children, pauseLabel, resumeLabel }: { children: Re
         const section = element?.closest("section");
         if (!element || !section) return;
         const layers = element.querySelectorAll<SVGGElement>("g[data-fuji-depth]");
+        const route = element.querySelector<SVGPathElement>("[data-fuji-ascent-route]");
+        const marker = element.querySelector<SVGGElement>("[data-fuji-ascent-marker]");
+        const trail = element.querySelector<SVGRectElement>("[data-fuji-ascent-fade]");
         if (reduceMotion) {
             layers.forEach((layer) => layer.style.removeProperty("transform"));
+            marker?.style.removeProperty("transform");
+            trail?.style.removeProperty("transform");
             return;
         }
         if (!running) return;
 
+        const routeLength = route?.getTotalLength() ?? 0;
         let frame: number | undefined;
-        const updateParallax = () => {
+        const updateScenery = () => {
             frame = undefined;
-            const distance = Math.max(0, -section.getBoundingClientRect().top);
+            const bounds = section.getBoundingClientRect();
+            const distance = Math.max(0, -bounds.top);
+            const progress = Math.min(1, distance / Math.max(1, bounds.height * 0.3));
+            const point = route?.getPointAtLength(routeLength * progress);
+            if (point && marker && trail) {
+                marker.style.transform = `translate(${point.x}px, ${point.y}px)`;
+                trail.style.transform = `translateX(${point.x}px)`;
+            }
             layers.forEach((layer) => {
                 const depth = Number(layer.dataset.fujiDepth);
                 if (Number.isFinite(depth)) layer.style.transform = `translate3d(0, ${distance * depth}px, 0)`;
             });
         };
         const onScroll = () => {
-            if (frame === undefined) frame = window.requestAnimationFrame(updateParallax);
+            if (frame === undefined) frame = window.requestAnimationFrame(updateScenery);
         };
-        updateParallax();
+        updateScenery();
         window.addEventListener("scroll", onScroll, { passive: true });
+        window.addEventListener("resize", onScroll);
         return () => {
             window.removeEventListener("scroll", onScroll);
+            window.removeEventListener("resize", onScroll);
             if (frame !== undefined) window.cancelAnimationFrame(frame);
         };
     }, [reduceMotion, running]);
