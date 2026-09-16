@@ -31,11 +31,13 @@ import ooo.klae.connex.backend.services.UserService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.LinkedHashSet;
 import java.util.List;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
@@ -52,6 +54,7 @@ public class UserController {
     private final AuthService authService;
     private final WorkspaceService workspaceService;
     private final SessionSecurityService sessionSecurityService;
+    private final ClientIpResolver clientIpResolver;
 
     /**
      * GET endpoint to retrieve all users. This will return *all* users, not necessarily just the current user
@@ -94,15 +97,16 @@ public class UserController {
     }
 
     /**
-     * POST endpoint to create a new user.
-     * @param dto
-     * @return
+     * POST endpoint to create a new user under the instance's email-verification policy.
+     * @param dto the registration details
+     * @param httpRequest the creating request, whose client IP is recorded for abuse audit
+     * @return the created account
      */
     @PostMapping
-    public UserDto createUser(@Valid @RequestBody RegisterDto dto) {
+    public UserDto createUser(@Valid @RequestBody RegisterDto dto, HttpServletRequest httpRequest) {
         workspaceService.requirePermission(Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(authService.getCurrentUser().getId());
-        return UserDto.from(authService.register(dto, true));
+        return UserDto.from(authService.register(dto, clientIpResolver.resolve(httpRequest)));
     }
 
     /**

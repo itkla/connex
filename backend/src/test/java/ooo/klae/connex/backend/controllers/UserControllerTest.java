@@ -30,6 +30,7 @@ import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.services.UserService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.util.PageBounds;
 
 @ExtendWith(MockitoExtension.class)
@@ -38,6 +39,7 @@ class UserControllerTest {
     @Mock private AuthService authService;
     @Mock private WorkspaceService workspaceService;
     @Mock private SessionSecurityService sessionSecurityService;
+    @Mock private ClientIpResolver clientIpResolver;
     @Mock private ErrorReporter errorReporter;
 
     private MockMvc mockMvc;
@@ -45,7 +47,7 @@ class UserControllerTest {
     @BeforeEach
     void setUp() {
         UserController controller = new UserController(
-                userService, authService, workspaceService, sessionSecurityService);
+                userService, authService, workspaceService, sessionSecurityService, clientIpResolver);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler(errorReporter, new TenantContext()))
                 .build();
