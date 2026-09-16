@@ -31,6 +31,7 @@ import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.LegacyWorkflowGraphConverter.ConvertedWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
+import ooo.klae.connex.backend.services.WorkflowExecutionMode.AuthorizationContext;
 import ooo.klae.connex.backend.services.WorkflowPrincipalLockService.LockedPrincipals;
 import ooo.klae.connex.backend.tenant.Permission;
 
@@ -52,6 +53,7 @@ public class LegacyRuleWorkflowService {
     private final RuleDefinitionCodec definitionCodec;
     private final LegacyWorkflowGraphConverter graphConverter;
     private final WorkflowDraftCanonicalizer canonicalizer;
+    private final WorkflowTriggerAdmissionService triggerAdmissionService;
 
     Rule create(int workspaceId, int actorId, RuleRequest request) {
         Set<Permission> requiredPermissions = definitionValidator.validateForMutation(request);
@@ -61,7 +63,9 @@ public class LegacyRuleWorkflowService {
             actorId,
             executionMode,
             Set.of(actorId),
-            "user".equals(executionMode) ? Set.of(actorId) : Set.of());
+            "user".equals(executionMode) ? Set.of(actorId) : Set.of(),
+            actorId,
+            !Boolean.FALSE.equals(request.getEnabled()));
         principals.requirePermissions(requiredPermissions);
 
         Rule requested = requestedRule(
@@ -72,6 +76,11 @@ public class LegacyRuleWorkflowService {
             request);
         LegacySnapshot snapshot = snapshot(requested);
         Rule projection = snapshot.projection();
+        if (projection.isEnabled()) {
+            triggerAdmissionService.requireCapacity(
+                workspaceId, 0, projection.getRecordType(),
+                definitionCodec.parse(projection.getTriggerConfig(), RuleTrigger.class));
+        }
         ruleMapper.insert(projection);
         if (projection.getId() <= 0) {
             throw new IllegalStateException("Rule insert did not return an id");
@@ -108,17 +117,15 @@ public class LegacyRuleWorkflowService {
         Integer discoveredRunAs = requestedRunAs(discovery.activeVersion(), executionMode);
         TreeSet<Integer> principalIds = new TreeSet<>(discovery.principalIds());
         addPrincipal(principalIds, discoveredRunAs);
+        boolean admitTriggerCapacity = requiresTriggerAdmission(discovery.rule(), request);
         LockedPrincipals principals = lockRequestedMode(
             workspaceId,
             actorId,
             executionMode,
             principalIds,
-            "user".equals(executionMode) ? Set.of(discoveredRunAs) : Set.of());
-        if ("system".equals(executionMode)) {
-            principals.requireExisting(
-                discovery.rule().getCreatedById(),
-                "System rule creator account no longer exists");
-        }
+            "user".equals(executionMode) ? Set.of(discoveredRunAs) : Set.of(),
+            discovery.rule().getCreatedById(),
+            admitTriggerCapacity);
         principals.requirePermissions(requiredPermissions);
 
         boolean allowBrokenPrincipals = !discovery.workflow().isEnabled()
@@ -142,18 +149,61 @@ public class LegacyRuleWorkflowService {
 
         if (semanticallyEquivalent(currentProjection, replacement)) {
             if (aggregate.rule().isEnabled() != replacement.isEnabled()) {
+                requireTriggerCapacity(aggregate, replacement, admitTriggerCapacity);
                 updateEnabledOnly(aggregate, replacement.isEnabled(), actorId);
             }
             return requirePersistedRule(workspaceId, ruleId);
         }
+        requireTriggerCapacity(aggregate, replacement, admitTriggerCapacity);
         replacePublication(aggregate, replacement, snapshot.draft(), actorId);
         return requirePersistedRule(workspaceId, ruleId);
+    }
+
+    /**
+     * Disabled replacements and strict event-subset replacements only release intake capacity.
+     * The aggregate lock revalidates the discovered rule before either exemption can be used.
+     */
+    private boolean requiresTriggerAdmission(Rule current, RuleRequest request) {
+        if (Boolean.FALSE.equals(request.getEnabled())) {
+            return false;
+        }
+        if (!current.isEnabled()
+                || !Objects.equals(current.getRecordType(),
+                    definitionValidator.normalize(request.getRecordType()))
+                || !"entity_change".equals(current.getTriggerType())
+                || !"entity_change".equals(definitionValidator.normalize(request.getTrigger().getType()))) {
+            return true;
+        }
+        RuleTrigger currentTrigger = definitionCodec.parse(current.getTriggerConfig(), RuleTrigger.class);
+        if (currentTrigger == null || currentTrigger.getEvents() == null
+                || request.getTrigger().getEvents() == null
+                || currentTrigger.getEvents().stream().anyMatch(Objects::isNull)
+                || request.getTrigger().getEvents().stream().anyMatch(Objects::isNull)) {
+            return true;
+        }
+        Set<String> currentEvents = new TreeSet<>(currentTrigger.getEvents());
+        Set<String> requestedEvents = new TreeSet<>(request.getTrigger().getEvents());
+        return requestedEvents.size() >= currentEvents.size()
+            || !currentEvents.containsAll(requestedEvents);
+    }
+
+    private void requireTriggerCapacity(
+            LockedAggregate aggregate, Rule replacement, boolean admitTriggerCapacity) {
+        if (!admitTriggerCapacity || !replacement.isEnabled()
+                || aggregate.workflow().getIntakePausedAt() != null) {
+            return;
+        }
+        triggerAdmissionService.requireCapacity(
+            aggregate.workflow().getWorkspaceId(),
+            aggregate.workflow().getId(),
+            replacement.getRecordType(),
+            definitionCodec.parse(replacement.getTriggerConfig(), RuleTrigger.class));
     }
 
     Rule delete(int workspaceId, int actorId, int ruleId) {
         AggregateDiscovery discovery = discover(workspaceId, ruleId);
         LockedPrincipals principals = principalLockService.lockUserMutation(
-            workspaceId, actorId, discovery.principalIds(), Set.of());
+            workspaceId, actorId, discovery.principalIds(), Set.of(), false);
         LockedAggregate aggregate = lockAggregate(discovery, principals, true);
         requireLegacyOwner(aggregate.workflow());
         requireDeletablePair(aggregate);
@@ -177,16 +227,16 @@ public class LegacyRuleWorkflowService {
             int actorId,
             String executionMode,
             Collection<Integer> principalIds,
-            Collection<Integer> requiredActiveIds) {
-        if ("system".equals(executionMode)) {
-            return principalLockService.lockSystemMutation(
-                workspaceId, actorId, principalIds);
-        }
-        if (!"user".equals(executionMode)) {
-            throw new BadRequestException("Invalid execution mode: " + executionMode);
-        }
-        return principalLockService.lockUserMutation(
-            workspaceId, actorId, principalIds, requiredActiveIds);
+            Collection<Integer> requiredActiveIds,
+            Integer systemCreatorId,
+            boolean admitTriggerCapacity) {
+        WorkflowExecutionMode mode = WorkflowExecutionMode.parse(executionMode);
+        AuthorizationContext authorization = new AuthorizationContext(
+            actorId, List.copyOf(requiredActiveIds), Collections.singletonList(systemCreatorId));
+        LockedPrincipals principals = mode.lockPrincipals(
+            principalLockService, workspaceId, principalIds, authorization, admitTriggerCapacity);
+        mode.requireAuthorized(principals, authorization);
+        return principals;
     }
 
     private AggregateDiscovery discover(int workspaceId, int ruleId) {

@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 import ooo.klae.connex.backend.services.InteractionHistoryImportService;
 import ooo.klae.connex.backend.services.ProductImportService;
 import ooo.klae.connex.backend.services.RecordCreationTemplateService;
+import ooo.klae.connex.backend.services.RuleService;
 import ooo.klae.connex.backend.services.SequencePreviewService;
 import ooo.klae.connex.backend.services.SequenceService;
 import ooo.klae.connex.backend.services.SequenceVersionService;
@@ -290,6 +291,33 @@ class RbacEnforcementArchTest {
                     && transaction.isolation() == Isolation.READ_COMMITTED,
                 methodName + " must claim its proof and write inside READ_COMMITTED");
         }
+    }
+
+    @Test
+    void workflowActivationEntryPointsUseReadCommittedTransactions() throws Exception {
+        List<Method> entryPoints = List.of(
+            WorkflowService.class.getDeclaredMethod("publish",
+                int.class, ooo.klae.connex.backend.dto.WorkflowPublishRequest.class),
+            WorkflowService.class.getDeclaredMethod("enable", int.class),
+            WorkflowService.class.getDeclaredMethod("resume", int.class),
+            RuleService.class.getDeclaredMethod("create",
+                ooo.klae.connex.backend.dto.RuleRequest.class),
+            RuleService.class.getDeclaredMethod("update",
+                int.class, ooo.klae.connex.backend.dto.RuleRequest.class),
+            WorkflowRecipeService.class.getDeclaredMethod("install",
+                String.class, ooo.klae.connex.backend.dto.WorkflowRecipeInstallRequest.class));
+        List<String> violations = new ArrayList<>();
+        for (Method method : entryPoints) {
+            Transactional transaction = method.getAnnotation(Transactional.class);
+            if (transaction == null || transaction.isolation() != Isolation.READ_COMMITTED) {
+                violations.add(method.getDeclaringClass().getSimpleName() + "#" + method.getName());
+            }
+        }
+        assertTrue(violations.isEmpty(),
+            "Trigger-capacity admission counts enabled workflows after taking the admission mutex, "
+                + "so every activation entry point must run at READ_COMMITTED or serve the count "
+                + "from a pre-lock snapshot; install carries it because it wraps publish inside the "
+                + "same transaction: " + violations);
     }
 
     @Test

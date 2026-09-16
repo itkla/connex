@@ -270,6 +270,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("workflow_run", 196));
         raw.add(direct("workflow_trigger_outbox", 197));
         raw.add(direct("workflow_runtime_workspace", 198));
+        raw.add(direct("workflow_trigger_admission", 199));
         raw.add(direct("rule_execution", 200));
         raw.add(direct("job_run", 201));
         raw.add(direct("workflow_version", 210));

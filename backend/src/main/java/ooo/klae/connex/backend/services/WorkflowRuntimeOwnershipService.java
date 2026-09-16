@@ -66,7 +66,8 @@ public class WorkflowRuntimeOwnershipService {
         if (!"legacy".equals(workflow.getRuntimeOwner())) {
             throw new ConflictException("Workflow runtime owner is invalid");
         }
-        requireCompiled(ownership.version());
+        CanonicalDraft canonical = requireCompiled(ownership.version());
+        requireActivationPermissions(ownership, canonical);
         Rule rule = ownership.rule();
         if (rule == null) {
             throw new ConflictException("Legacy workflow projection is unavailable");
@@ -115,6 +116,7 @@ public class WorkflowRuntimeOwnershipService {
                 "Canonical workflow with run history cannot attach its first legacy projection");
         }
         CanonicalDraft canonical = requireCompiled(ownership.version());
+        requireActivationPermissions(ownership, canonical);
         Rule projection;
         try {
             projection = graphConverter.project(new ConvertedWorkflow(
@@ -225,7 +227,16 @@ public class WorkflowRuntimeOwnershipService {
         Rule rule = workflow.getLegacyRuleId() == null
             ? null : ruleMapper.getByIdForUpdate(workspaceId, workflow.getLegacyRuleId());
         principals.requireDiscoveredReferences(principalIds(workflow, version, rule));
-        return new LockedOwnership(workflow, version, rule);
+        return new LockedOwnership(workflow, version, rule, principals);
+    }
+
+    private void requireActivationPermissions(LockedOwnership ownership, CanonicalDraft canonical) {
+        if (ownership.workflow().isEnabled()) {
+            ownership.principals().requirePermissions(definitionValidator.validateForMutation(
+                ownership.version().getRecordType(),
+                ownership.version().getExecutionMode(),
+                canonicalizer.parseDefinition(canonical.definitionJson())));
+        }
     }
 
     private LockedPrincipals lockOwnershipPrincipals(
@@ -235,11 +246,11 @@ public class WorkflowRuntimeOwnershipService {
             Set<Integer> principalIds) {
         if ("system".equals(executionMode)) {
             return principalLockService.lockSystemMutation(
-                workspaceId, actorId, principalIds);
+                workspaceId, actorId, principalIds, false);
         }
         if ("user".equals(executionMode)) {
             return principalLockService.lockUserMutation(
-                workspaceId, actorId, principalIds, Set.of());
+                workspaceId, actorId, principalIds, Set.of(), false);
         }
         throw new ConflictException("Workflow active version has an invalid execution mode");
     }
@@ -301,6 +312,7 @@ public class WorkflowRuntimeOwnershipService {
     private record LockedOwnership(
         Workflow workflow,
         WorkflowVersion version,
-        Rule rule
+        Rule rule,
+        LockedPrincipals principals
     ) { }
 }

@@ -89,7 +89,8 @@ class WorkflowDraftMutationValidationTest {
             new LegacyWorkflowGraphConverter(definitionCodec),
             definitionCodec,
             new WorkflowVersionProjection(definitionCodec),
-            mock(WorkflowRuntimeProperties.class));
+            mock(WorkflowRuntimeProperties.class),
+            mock(WorkflowTriggerAdmissionService.class));
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         when(workspaceService.getCurrentUserId()).thenReturn(41);
     }
@@ -102,7 +103,7 @@ class WorkflowDraftMutationValidationTest {
     @Test
     void triggerToEndDraftCanBeCreatedAndSaved() throws Exception {
         Set<Permission> permissions = Set.of(Permission.RULE_MANAGE);
-        when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41)))
+        when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41), false))
             .thenReturn(principals(permissions));
         doAnswer(invocation -> {
             invocation.<Workflow>getArgument(0).setId(101);
@@ -124,7 +125,7 @@ class WorkflowDraftMutationValidationTest {
     void unauthorizedSendMessageDraftIsRefusedBeforeTheWorkflowLock() throws Exception {
         Workflow discovered = workflow(3, triggerEndDefinition());
         when(workflowMapper.getById(7, 101)).thenReturn(discovered);
-        when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41)))
+        when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41), false))
             .thenReturn(principals(Set.of(Permission.RULE_MANAGE)));
 
         assertThrows(
@@ -142,7 +143,7 @@ class WorkflowDraftMutationValidationTest {
         when(workflowMapper.getById(7, 101)).thenReturn(discovered, saved);
         when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(discovered);
         when(workflowMapper.updateDraft(any(Workflow.class), eq(3))).thenReturn(1);
-        when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41)))
+        when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41), false))
             .thenReturn(principals(Set.of(
                 Permission.RULE_MANAGE,
                 Permission.CAMPAIGN_MANAGE,

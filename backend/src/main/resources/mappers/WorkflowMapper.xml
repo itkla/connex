@@ -285,7 +285,7 @@
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
       AND archived_at IS NULL
-      AND runtime_owner = 'legacy'
+      AND runtime_owner IN ('legacy', 'canonical')
       AND draft_revision = #{expectedRevision}
       AND legacy_rule_id IS NULL
       AND active_version_id IS NULL
@@ -463,5 +463,19 @@
         updated_by_id = #{updatedById}
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
+
+  <!--
+    Automation authoring admission mutex (see docs/backend/LOCKING.md step 3b).
+    This single statement IS the lock acquisition: InnoDB takes an exclusive lock on the
+    duplicate row when the insert hits the primary key, and holds it until commit, so a
+    concurrent authoring transaction blocks here. It also creates the row on first use.
+    Do not add a separate SELECT ... FOR UPDATE afterwards: it would document the mutex at
+    the wrong statement and any latch keyed on it would never observe the real contention.
+  -->
+  <insert id="acquireTriggerAdmissionMutex">
+    INSERT INTO workflow_trigger_admission (workspace_id)
+    VALUES (#{workspaceId})
+    ON DUPLICATE KEY UPDATE workspace_id = workflow_trigger_admission.workspace_id
+  </insert>
 
 </mapper>

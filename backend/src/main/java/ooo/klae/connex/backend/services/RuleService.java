@@ -6,6 +6,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -91,7 +92,7 @@ public class RuleService {
         return new RulePreviewDto(ids.size(), segmentService.labels(recordType, sampleIds));
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.RULE_MANAGE)
     public RuleDto create(RuleRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -102,7 +103,7 @@ public class RuleService {
         return toDto(rule);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.RULE_MANAGE)
     public RuleDto update(int id, RuleRequest request) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();

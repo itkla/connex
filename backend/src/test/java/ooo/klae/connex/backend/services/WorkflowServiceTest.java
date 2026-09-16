@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -30,6 +31,10 @@ import java.util.TreeSet;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -80,6 +85,7 @@ class WorkflowServiceTest {
     @Mock private AuditService auditService;
     @Mock private WorkflowDefinitionValidator workflowDefinitionValidator;
     @Mock private WorkflowRuntimeProperties runtimeProperties;
+    @Mock private WorkflowTriggerAdmissionService triggerAdmissionService;
 
     private WorkflowDraftCanonicalizer canonicalizer;
     private LegacyWorkflowGraphConverter graphConverter;
@@ -102,7 +108,8 @@ class WorkflowServiceTest {
             graphConverter,
             definitionCodec,
             new WorkflowVersionProjection(definitionCodec),
-            runtimeProperties);
+            runtimeProperties,
+            triggerAdmissionService);
         lenient().when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
         lenient().when(workspaceService.getCurrentUserId()).thenReturn(41);
         lenient().when(workspaceService.getCurrentPermissions())
@@ -126,7 +133,7 @@ class WorkflowServiceTest {
 
         ArgumentCaptor<Workflow> workflow = ArgumentCaptor.forClass(Workflow.class);
         verify(workflowMapper).insert(workflow.capture());
-        verify(principalLockService).lockUserMutation(7, 41, Set.of(41), Set.of(41));
+        verify(principalLockService).lockUserMutation(7, 41, Set.of(41), Set.of(41), false);
         assertEquals(101, created.id());
         assertEquals(0, created.draftRevision());
         assertEquals(41, created.runAsUserId());
@@ -139,6 +146,29 @@ class WorkflowServiceTest {
         verify(auditService).record(
             eq("workflow.create"), eq("workflow"), eq(101), eq("Workflow 101"),
             eq("Workflow created"), eq(Map.of("draftRevision", 0, "executionMode", "user")));
+    }
+
+    @Test
+    void createForRecipeDefersCanonicalOwnershipUntilPublication() throws Exception {
+        stubUserMutation(Set.of(41, 55), Set.of(55));
+        doAnswer(invocation -> {
+            invocation.<Workflow>getArgument(0).setId(101);
+            return null;
+        }).when(workflowMapper).insert(any(Workflow.class));
+
+        WorkflowDto created = service.createForRecipe(createRequest("user"), 55);
+
+        ArgumentCaptor<Workflow> inserted = ArgumentCaptor.forClass(Workflow.class);
+        verify(workflowMapper).insert(inserted.capture());
+        verify(principalLockService).lockUserMutation(7, 41, Set.of(41, 55), Set.of(55), true);
+        assertEquals("legacy", inserted.getValue().getRuntimeOwner());
+        assertNull(inserted.getValue().getActiveVersionId());
+        assertNull(inserted.getValue().getLegacyRuleId());
+        assertFalse(inserted.getValue().isEnabled());
+        assertEquals(55, created.runAsUserId());
+        assertEquals("legacy", created.runtimeOwner());
+        assertNull(created.activeVersionId());
+        verifyNoInteractions(ruleMapper, workflowVersionMapper);
     }
 
     @Test
@@ -191,7 +221,7 @@ class WorkflowServiceTest {
     void userCreateFailsBeforeInsertionWhenTheCreatorMembershipIsNotActive() throws Exception {
         doThrow(new ForbiddenException("User is not an active workspace member"))
             .when(principalLockService)
-            .lockUserMutation(7, 41, Set.of(41), Set.of(41));
+            .lockUserMutation(7, 41, Set.of(41), Set.of(41), false);
 
         assertThrows(ForbiddenException.class, () -> service.create(createRequest("user")));
 
@@ -201,7 +231,7 @@ class WorkflowServiceTest {
 
     @Test
     void createRejectsActionPermissionsAgainstTheLockedAuthorizationSnapshot() throws Exception {
-        when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41)))
+        when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41), false))
             .thenReturn(new LockedPrincipals(
                 Set.of(41), Set.of(41), Set.of(Permission.RULE_MANAGE)));
         when(workflowDefinitionValidator.validateDraftActionsForMutation(any(), any(), any()))
@@ -215,6 +245,142 @@ class WorkflowServiceTest {
         verify(workflowMapper, never()).insert(any());
     }
 
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"unknown", "USERX"})
+    void unknownExecutionModeIsRejectedBeforeDraftParsing(String executionMode) throws Exception {
+        WorkflowCreateRequest request = createRequest(executionMode);
+        request.setDefinition(null);
+
+        BadRequestException failure = assertThrows(BadRequestException.class, () -> service.create(request));
+
+        assertEquals("Workflow execution mode must be user or system", failure.getMessage());
+        verifyNoInteractions(principalLockService, workflowMapper, workflowVersionMapper, ruleMapper,
+            workflowDefinitionValidator, auditService);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"unknown", "USERX"})
+    void unknownExecutionModeIsRejectedBeforeDraftDiscovery(String executionMode) throws Exception {
+        WorkflowDraftRequest request = draftRequest("Workflow", executionMode, 0);
+
+        BadRequestException failure = assertThrows(
+            BadRequestException.class, () -> service.saveDraft(101, request));
+
+        assertEquals("Workflow execution mode must be user or system", failure.getMessage());
+        verifyNoInteractions(principalLockService, workflowMapper, workflowVersionMapper, ruleMapper,
+            workflowDefinitionValidator, auditService);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"user,false", "user,true", "system,false", "system,true"})
+    void bothDraftModesRequireTheirLockedAuthorizationBeforeMutation(
+            String executionMode, boolean update) throws Exception {
+        if (update) {
+            when(workflowMapper.getById(7, 101))
+                .thenReturn(workflow("Workflow", "user", 0, 41, null, null, false));
+        }
+        LockedPrincipals locked = new LockedPrincipals(Set.of(41), Set.of(41), Set.of());
+        if ("user".equals(executionMode)) {
+            when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41), false))
+                .thenReturn(locked);
+        } else {
+            when(principalLockService.lockSystemMutation(7, 41, Set.of(41), false))
+                .thenReturn(locked);
+        }
+
+        ForbiddenException failure = assertThrows(ForbiddenException.class, () -> {
+            if (update) {
+                service.saveDraft(101, draftRequest("Workflow", executionMode, 0));
+            } else {
+                service.create(createRequest(executionMode));
+            }
+        });
+
+        assertEquals("Requires the RULE_MANAGE permission in this workspace", failure.getMessage());
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowMapper, never()).getByIdForUpdate(7, 101);
+        verifyNoInteractions(workflowVersionMapper, ruleMapper, workflowDefinitionValidator, auditService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"user", "system"})
+    void bothPublicationModesRequireTheirLockedAuthorizationBeforeMutation(String executionMode) {
+        when(workflowMapper.getById(7, 101))
+            .thenReturn(workflow("Workflow", executionMode, 0, 41, null, null, false));
+        LockedPrincipals locked = new LockedPrincipals(Set.of(41), Set.of(41), Set.of());
+        if ("user".equals(executionMode)) {
+            when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41), true))
+                .thenReturn(locked);
+        } else {
+            when(principalLockService.lockSystemMutation(7, 41, Set.of(41), true))
+                .thenReturn(locked);
+        }
+
+        ForbiddenException failure = assertThrows(
+            ForbiddenException.class, () -> service.publish(101, publishRequest(0)));
+
+        assertEquals("Requires the RULE_MANAGE permission in this workspace", failure.getMessage());
+        verify(workflowMapper, never()).getByIdForUpdate(7, 101);
+        verify(workflowVersionMapper, never()).insert(any());
+        verifyNoInteractions(ruleMapper, workflowDefinitionValidator, auditService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void systemDraftMutationsRequireLockedSystemAuthorization(boolean update) throws Exception {
+        if (update) {
+            when(workflowMapper.getById(7, 101))
+                .thenReturn(workflow("Workflow", "user", 0, 41, null, null, false));
+        }
+        doThrow(new ForbiddenException("Requires a built-in admin role in this workspace"))
+            .when(principalLockService).lockSystemMutation(7, 41, Set.of(41), false);
+
+        ForbiddenException failure = assertThrows(ForbiddenException.class, () -> {
+            if (update) {
+                service.saveDraft(101, draftRequest("Workflow", "SYSTEM", 0));
+            } else {
+                service.create(createRequest("SYSTEM"));
+            }
+        });
+
+        assertEquals("Requires a built-in admin role in this workspace", failure.getMessage());
+        verify(principalLockService).lockSystemMutation(7, 41, Set.of(41), false);
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowMapper, never()).getByIdForUpdate(7, 101);
+        verifyNoInteractions(workflowVersionMapper, ruleMapper, workflowDefinitionValidator, auditService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void systemDraftMutationsRequireLockedActorActionPermissions(boolean update) throws Exception {
+        if (update) {
+            when(workflowMapper.getById(7, 101))
+                .thenReturn(workflow("Workflow", "user", 0, 41, null, null, false));
+        }
+        when(principalLockService.lockSystemMutation(7, 41, Set.of(41), false))
+            .thenReturn(new LockedPrincipals(Set.of(41), Set.of(41), Set.of(Permission.RULE_MANAGE)));
+        when(workflowDefinitionValidator.validateDraftActionsForMutation(any(), eq("system"), any()))
+            .thenReturn(Set.of(Permission.TASK_CREATE));
+
+        ForbiddenException failure = assertThrows(ForbiddenException.class, () -> {
+            if (update) {
+                service.saveDraft(101, draftRequest("Workflow", "system", 0));
+            } else {
+                service.create(createRequest("system"));
+            }
+        });
+
+        assertEquals("Requires the TASK_CREATE permission in this workspace", failure.getMessage());
+        InOrder order = inOrder(principalLockService, workflowDefinitionValidator);
+        order.verify(principalLockService).lockSystemMutation(7, 41, Set.of(41), false);
+        order.verify(workflowDefinitionValidator).validateDraftActionsForMutation(any(), eq("system"), any());
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowMapper, never()).getByIdForUpdate(7, 101);
+        verifyNoInteractions(workflowVersionMapper, ruleMapper, auditService);
+    }
+
     @Test
     void systemAuthoringRequiresAdminAndNeverAcceptsRunAsInput() throws Exception {
         stubSystemMutation(Set.of(41));
@@ -225,9 +391,9 @@ class WorkflowServiceTest {
 
         var created = service.create(createRequest("system"));
 
-        verify(principalLockService).lockSystemMutation(7, 41, Set.of(41));
+        verify(principalLockService).lockSystemMutation(7, 41, Set.of(41), false);
         verify(principalLockService, never()).lockUserMutation(
-            any(Integer.class), any(Integer.class), any(), any());
+            any(Integer.class), any(Integer.class), any(), any(), anyBoolean());
         assertNull(created.runAsUserId());
     }
 
@@ -246,7 +412,7 @@ class WorkflowServiceTest {
         ArgumentCaptor<Workflow> replacement = ArgumentCaptor.forClass(Workflow.class);
         verify(workflowMapper).updateDraft(replacement.capture(), eq(3));
         verify(principalLockService).lockUserMutation(
-            7, 41, Set.of(41, 999), Set.of(999));
+            7, 41, Set.of(41, 999), Set.of(999), false);
         assertEquals(999, replacement.getValue().getDraftRunAsUserId());
         assertEquals(4, response.draftRevision());
         verify(auditService).record(
@@ -259,7 +425,7 @@ class WorkflowServiceTest {
         Workflow discovered = workflow("Workflow", "user", 3, 999, null, null, false);
         when(workflowMapper.getById(7, 101)).thenReturn(discovered);
         when(principalLockService.lockUserMutation(
-            7, 41, Set.of(41, 999), Set.of(999)))
+            7, 41, Set.of(41, 999), Set.of(999), false))
             .thenReturn(new LockedPrincipals(
                 Set.of(41, 999), Set.of(41, 999), Set.of(Permission.RULE_MANAGE)));
         when(workflowDefinitionValidator.validateDraftActionsForMutation(any(), any(), any()))
@@ -288,7 +454,7 @@ class WorkflowServiceTest {
         when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(locked);
         when(workflowMapper.updateDraft(any(Workflow.class), eq(3))).thenReturn(1);
         when(principalLockService.lockUserMutation(
-            7, 41, Set.of(41, 55), Set.of(55)))
+            7, 41, Set.of(41, 55), Set.of(55), false))
             .thenReturn(principals(Set.of(41, 55), Set.of(41, 55)))
             .thenThrow(new ConflictException(
                 "Workflow run-as user is not an active workspace member"));
@@ -299,7 +465,7 @@ class WorkflowServiceTest {
         verify(workflowMapper).updateDraft(replacement.capture(), eq(3));
         assertEquals(55, replacement.getValue().getDraftRunAsUserId());
         verify(principalLockService).lockUserMutation(
-            7, 41, Set.of(41, 55), Set.of(55));
+            7, 41, Set.of(41, 55), Set.of(55), false);
 
         Workflow second = workflow("Workflow", "system", 3, null, null, null, false);
         second.setId(102);
@@ -327,7 +493,7 @@ class WorkflowServiceTest {
         ArgumentCaptor<Workflow> replacement = ArgumentCaptor.forClass(Workflow.class);
         verify(workflowMapper).updateDraft(replacement.capture(), eq(3));
         assertNull(replacement.getValue().getDraftRunAsUserId());
-        verify(principalLockService).lockSystemMutation(7, 41, Set.of(41, 55));
+        verify(principalLockService).lockSystemMutation(7, 41, Set.of(41, 55), false);
     }
 
     @Test
@@ -480,7 +646,7 @@ class WorkflowServiceTest {
         InOrder authorization = inOrder(workflowMapper, principalLockService);
         authorization.verify(workflowMapper).getById(7, 101);
         authorization.verify(principalLockService).lockUserMutation(
-            7, 41, Set.of(41, 55), Set.of(55));
+            7, 41, Set.of(41, 55), Set.of(55), false);
         authorization.verify(workflowMapper).getByIdForUpdate(7, 101);
         verify(workflowMapper, never()).updateDraft(any(), any(Integer.class));
     }
@@ -508,7 +674,7 @@ class WorkflowServiceTest {
         locks.verify(workflowVersionMapper).getLatest(7, 101);
         locks.verify(ruleMapper).getById(7, 77);
         locks.verify(principalLockService).lockUserMutation(
-            7, 41, Set.of(41, 55), Set.of(55));
+            7, 41, Set.of(41, 55), Set.of(55), true);
         locks.verify(workflowMapper).getByIdForUpdate(7, 101);
         locks.verify(workflowVersionMapper).getByIdForUpdate(7, 101, 88L);
         locks.verify(workflowVersionMapper).getByIdForUpdate(7, 101, 99L);
@@ -555,15 +721,16 @@ class WorkflowServiceTest {
         writes.verify(ruleMapper).insert(any(Rule.class));
         writes.verify(workflowVersionMapper).insert(any(WorkflowVersion.class));
         writes.verify(workflowMapper).assignFirstPublication(7, 101, 77, 88L, 41, 0);
-        verify(principalLockService).lockUserMutation(7, 41, Set.of(41), Set.of(41));
+        verify(principalLockService).lockUserMutation(7, 41, Set.of(41), Set.of(41), true);
         verify(auditService).record(
             eq("workflow.publish"), eq("workflow"), eq(101), eq("Workflow 101"),
             eq("Workflow published"), eq(Map.of("versionNumber", 1)));
     }
 
-    @Test
-    void firstPublishUsesCanonicalOwnershipWithoutCreatingALegacyRuleWhenGateIsEnabled() {
-        when(runtimeProperties.enabled()).thenReturn(true);
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void firstPublishUsesCanonicalOwnershipForEnabledRuntimeOrRecipeInstallation(boolean recipe) {
+        when(runtimeProperties.enabled()).thenReturn(!recipe);
         Workflow workflow = workflow("Workflow", "user", 0, 41, null, null, false);
         when(workflowMapper.getById(7, 101)).thenReturn(workflow);
         when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(workflow);
@@ -591,14 +758,36 @@ class WorkflowServiceTest {
         when(workflowMapper.assignFirstCanonicalPublication(
             7, 101, 88L, 41, 0)).thenReturn(1);
 
-        WorkflowDto published = service.publish(101, publishRequest(0));
+        WorkflowDto published = recipe
+            ? service.publishForRecipe(101, publishRequest(0))
+            : service.publish(101, publishRequest(0));
 
         assertEquals("canonical", published.runtimeOwner());
         assertEquals(88L, published.activeVersionId());
+        assertFalse(published.enabled());
         verify(ruleMapper, never()).insert(any());
         verify(ruleMapper, never()).update(any());
-        verify(workflowMapper).assignFirstCanonicalPublication(
+        InOrder writes = inOrder(workflowVersionMapper, workflowMapper);
+        writes.verify(workflowVersionMapper).insert(any(WorkflowVersion.class));
+        writes.verify(workflowMapper).assignFirstCanonicalPublication(
             7, 101, 88L, 41, 0);
+    }
+
+    @Test
+    void recipePublicationRejectsAnAlreadyPublishedWorkflow() {
+        PublishedPair pair = publishedPair("Workflow", false, 4);
+        stubDiscoveredMutation(pair);
+        when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(pair.workflow());
+        stubUserMutation(Set.of(41), Set.of(41));
+
+        ConflictException failure = assertThrows(
+            ConflictException.class, () -> service.publishForRecipe(101, publishRequest(3)));
+
+        assertEquals("Workflow state is inconsistent", failure.getMessage());
+        verify(workflowVersionMapper, never()).insert(any());
+        verify(ruleMapper, never()).insert(any());
+        verify(ruleMapper, never()).update(any());
+        verifyNoInteractions(triggerAdmissionService, auditService);
     }
 
     @Test
@@ -607,7 +796,7 @@ class WorkflowServiceTest {
         when(workflowMapper.getById(7, 101)).thenReturn(workflow);
         when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(workflow);
         when(workflowVersionMapper.getLatest(7, 101)).thenReturn(null);
-        when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41)))
+        when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41), true))
             .thenReturn(new LockedPrincipals(
                 Set.of(41), Set.of(41), Set.of(Permission.RULE_MANAGE)));
         when(workflowDefinitionValidator.validateForMutation(
@@ -630,14 +819,14 @@ class WorkflowServiceTest {
         doThrow(new ConflictException(
             "Workflow run-as user is not an active workspace member"))
             .when(principalLockService)
-            .lockUserMutation(7, 41, Set.of(41, 999), Set.of(999));
+            .lockUserMutation(7, 41, Set.of(41, 999), Set.of(999), true);
 
         assertThrows(ConflictException.class, () -> service.publish(101, publishRequest(0)));
 
         verify(principalLockService).lockUserMutation(
-            7, 41, Set.of(41, 999), Set.of(999));
+            7, 41, Set.of(41, 999), Set.of(999), true);
         verify(principalLockService, never()).lockUserMutation(
-            7, 41, Set.of(41, 999), Set.of(41));
+            7, 41, Set.of(41, 999), Set.of(41), true);
         verify(workflowMapper, never()).getByIdForUpdate(7, 101);
         verifyNoInteractions(ruleMapper);
         verify(workflowVersionMapper, never()).insert(any());
@@ -662,11 +851,11 @@ class WorkflowServiceTest {
         when(workflowVersionMapper.getLatest(7, 101)).thenReturn(null);
         doThrow(new ForbiddenException("Requires admin role"))
             .when(principalLockService)
-            .lockSystemMutation(7, 41, Set.of(41));
+            .lockSystemMutation(7, 41, Set.of(41), true);
 
         assertThrows(ForbiddenException.class, () -> service.publish(101, publishRequest(0)));
 
-        verify(principalLockService).lockSystemMutation(7, 41, Set.of(41));
+        verify(principalLockService).lockSystemMutation(7, 41, Set.of(41), true);
         verify(workflowMapper, never()).getByIdForUpdate(7, 101);
         verifyNoInteractions(ruleMapper);
         verify(workflowVersionMapper, never()).insert(any());
@@ -778,7 +967,7 @@ class WorkflowServiceTest {
         workflow.setCreatedById(null);
         when(workflowMapper.getById(7, 101)).thenReturn(workflow);
         when(workflowVersionMapper.getLatest(7, 101)).thenReturn(null);
-        when(principalLockService.lockSystemMutation(7, 41, Set.of(41)))
+        when(principalLockService.lockSystemMutation(7, 41, Set.of(41), true))
             .thenReturn(principals(Set.of(41), Set.of(41)));
 
         assertThrows(
@@ -797,7 +986,7 @@ class WorkflowServiceTest {
         when(workflowMapper.getById(7, 101)).thenReturn(pair.workflow());
         when(workflowVersionMapper.getById(7, 101, 88L)).thenReturn(pair.version());
         when(ruleMapper.getById(7, 77)).thenReturn(pair.rule());
-        when(principalLockService.lockSystemMutation(7, 41, Set.of(41, 55)))
+        when(principalLockService.lockSystemMutation(7, 41, Set.of(41, 55), true))
             .thenReturn(principals(Set.of(41, 55), Set.of(41)));
 
         assertThrows(ConflictException.class, () -> service.enable(101));
@@ -807,7 +996,7 @@ class WorkflowServiceTest {
         order.verify(workflowMapper).getById(7, 101);
         order.verify(workflowVersionMapper).getById(7, 101, 88L);
         order.verify(ruleMapper).getById(7, 77);
-        order.verify(principalLockService).lockSystemMutation(7, 41, Set.of(41, 55));
+        order.verify(principalLockService).lockSystemMutation(7, 41, Set.of(41, 55), true);
         verify(workflowMapper, never()).getByIdForUpdate(7, 101);
     }
 
@@ -821,7 +1010,7 @@ class WorkflowServiceTest {
         pair.rule().setCreatedById(null);
         stubPublishedMutation(pair, pair.version(), true);
         when(principalLockService.lockUserMutation(
-                7, 41, Set.of(41, 55, 66, 67), Set.of(55)))
+                7, 41, Set.of(41, 55, 66, 67), Set.of(55), true))
             .thenReturn(principals(Set.of(41, 55, 66, 67), Set.of(41, 55)));
         doAnswer(invocation -> {
             invocation.<WorkflowVersion>getArgument(0).setId(99L);
@@ -855,7 +1044,7 @@ class WorkflowServiceTest {
         pair.rule().setCreatedById(null);
         stubPublishedMutation(pair, null, false);
         when(principalLockService.lockUserMutation(
-                7, 41, Set.of(41, 55, 66, 67), Set.of(55)))
+                7, 41, Set.of(41, 55, 66, 67), Set.of(55), true))
             .thenReturn(principals(Set.of(41, 55, 66, 67), Set.of(41, 55)));
         when(ruleMapper.updateEnabled(7, 77, true)).thenReturn(1);
         when(workflowMapper.updateLifecycle(7, 101, true, 41)).thenReturn(1);
@@ -908,14 +1097,14 @@ class WorkflowServiceTest {
         doThrow(new ConflictException(
             "Workflow run-as user is not an active workspace member"))
             .when(principalLockService)
-            .lockUserMutation(7, 41, Set.of(41, 999), Set.of(999));
+            .lockUserMutation(7, 41, Set.of(41, 999), Set.of(999), true);
 
         assertThrows(ConflictException.class, () -> service.enable(101));
 
         verify(principalLockService).lockUserMutation(
-            7, 41, Set.of(41, 999), Set.of(999));
+            7, 41, Set.of(41, 999), Set.of(999), true);
         verify(principalLockService, never()).lockUserMutation(
-            7, 41, Set.of(41, 999), Set.of(41));
+            7, 41, Set.of(41, 999), Set.of(41), true);
         verify(workflowMapper, never()).getByIdForUpdate(7, 101);
         verify(ruleMapper, never()).updateEnabled(7, 77, true);
         verify(workflowMapper, never()).updateLifecycle(7, 101, true, 41);
@@ -946,7 +1135,7 @@ class WorkflowServiceTest {
         var enabled = service.enable(101);
 
         verify(principalLockService).lockUserMutation(
-            7, 41, Set.of(41, 55), Set.of(55));
+            7, 41, Set.of(41, 55), Set.of(55), true);
         assertTrue(enabled.enabled());
         InOrder writes = inOrder(ruleMapper, workflowMapper);
         writes.verify(ruleMapper).updateEnabled(7, 77, true);
@@ -987,9 +1176,9 @@ class WorkflowServiceTest {
         assertFalse(disabled.enabled());
         assertFalse(unchanged.enabled());
         verify(principalLockService, times(2)).lockUserMutation(
-            7, 41, Set.of(41), Set.of());
+            7, 41, Set.of(41), Set.of(), false);
         verify(principalLockService, never()).lockSystemMutation(
-            any(Integer.class), any(Integer.class), any());
+            any(Integer.class), any(Integer.class), any(), anyBoolean());
         verify(ruleMapper, times(1)).updateEnabled(7, 77, false);
         verify(workflowMapper, times(1)).updateLifecycle(7, 101, false, 41);
         verify(auditService, times(1)).record(
@@ -1006,7 +1195,7 @@ class WorkflowServiceTest {
         when(ruleMapper.getById(7, 77)).thenReturn(systemDisabled.rule());
         doThrow(new ForbiddenException("Requires admin role"))
             .when(principalLockService)
-            .lockSystemMutation(7, 41, Set.of(41));
+            .lockSystemMutation(7, 41, Set.of(41), true);
 
         assertThrows(ForbiddenException.class, () -> service.enable(101));
         verify(ruleMapper, never()).updateEnabled(7, 77, true);
@@ -1024,8 +1213,8 @@ class WorkflowServiceTest {
         var disabled = service.disable(102);
 
         assertFalse(disabled.enabled());
-        verify(principalLockService).lockSystemMutation(7, 41, Set.of(41));
-        verify(principalLockService).lockUserMutation(7, 41, Set.of(41), Set.of());
+        verify(principalLockService).lockSystemMutation(7, 41, Set.of(41), true);
+        verify(principalLockService).lockUserMutation(7, 41, Set.of(41), Set.of(), false);
         verify(auditService).record(
             eq("workflow.disable"), eq("workflow"), eq(102), eq("Workflow 102"),
             eq("Workflow disabled"), any());
@@ -1042,7 +1231,7 @@ class WorkflowServiceTest {
         pair.rule().setCreatedById(null);
         pair.rule().setRunAsUserId(null);
         stubPublishedMutation(pair, null, false);
-        when(principalLockService.lockUserMutation(7, 41, Set.of(999), Set.of()))
+        when(principalLockService.lockUserMutation(7, 41, Set.of(999), Set.of(), false))
             .thenReturn(principals(Set.of(41, 999), Set.of(41)));
         when(ruleMapper.updateEnabled(7, 77, false)).thenReturn(1);
         when(workflowMapper.updateLifecycle(7, 101, false, 41)).thenReturn(1);
@@ -1134,32 +1323,256 @@ class WorkflowServiceTest {
         assertFalse(saveDraft.getAnnotation(Transactional.class).readOnly());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"legacy", "canonical"})
+    void enableRejectsActiveVersionActionsMissingFromLockedActorPermissions(String runtimeOwner) {
+        PublishedPair pair = publishedPair("Workflow", false, 4, "user", 55, 88L);
+        pair.workflow().setRuntimeOwner(runtimeOwner);
+        stubPublishedMutation(pair, null, false);
+        when(principalLockService.lockUserMutation(7, 41, Set.of(41, 55), Set.of(55), true))
+            .thenReturn(new LockedPrincipals(
+                Set.of(41, 55), Set.of(41, 55), Set.of(Permission.RULE_MANAGE)));
+        when(workflowDefinitionValidator.validateForMutation(
+                eq("deal"), eq("user"), any()))
+            .thenReturn(Set.of(Permission.NOTE_CREATE));
+
+        assertThrows(ForbiddenException.class, () -> service.enable(101));
+
+        assertFalse(pair.workflow().isEnabled());
+        assertFalse(pair.rule().isEnabled());
+        verify(ruleMapper, never()).updateEnabled(7, 77, true);
+        verify(workflowMapper, never()).updateLifecycle(7, 101, true, 41);
+        verifyNoInteractions(triggerAdmissionService, auditService);
+        InOrder order = inOrder(workflowVersionMapper, workflowDefinitionValidator);
+        order.verify(workflowVersionMapper).getByIdForUpdate(7, 101, 88L);
+        order.verify(workflowDefinitionValidator).validateForMutation(
+            "deal", "user", canonicalizer.parseDefinition(pair.version().getDefinitionJson()));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"legacy", "canonical"})
+    void resumeRejectsActiveVersionActionsMissingFromLockedActorPermissions(String runtimeOwner) {
+        PublishedPair pair = publishedPair("Workflow", true, 4, "user", 55, 88L);
+        pair.workflow().setRuntimeOwner(runtimeOwner);
+        pair.workflow().setIntakePausedAt(LocalDateTime.now());
+        pair.rule().setEnabled("legacy".equals(runtimeOwner));
+        stubPublishedMutation(pair, null, false);
+        when(principalLockService.lockUserMutation(7, 41, Set.of(41, 55), Set.of(55), true))
+            .thenReturn(new LockedPrincipals(
+                Set.of(41, 55), Set.of(41, 55), Set.of(Permission.RULE_MANAGE)));
+        when(workflowDefinitionValidator.validateForMutation(
+                eq("deal"), eq("user"), any()))
+            .thenReturn(Set.of(Permission.NOTE_CREATE));
+
+        assertThrows(ForbiddenException.class, () -> service.resume(101));
+
+        assertNotNull(pair.workflow().getIntakePausedAt());
+        verify(workflowMapper, never()).updateIntakePause(7, 101, false, 41);
+        verifyNoInteractions(triggerAdmissionService, auditService);
+    }
+
+    @Test
+    void enableRejectsExhaustedTriggerCapacityBeforeEitherLifecycleWrite() {
+        PublishedPair pair = publishedPair("Workflow", false, 4);
+        stubPublishedMutation(pair, null, false);
+        stubUserMutation(Set.of(41), Set.of(41));
+        doThrow(new ConflictException("Workflow trigger capacity is exhausted"))
+            .when(triggerAdmissionService).requireCapacity(eq(7), eq(101), eq("deal"), any());
+
+        assertThrows(ConflictException.class, () -> service.enable(101));
+
+        verify(ruleMapper, never()).updateEnabled(7, 77, true);
+        verify(workflowMapper, never()).updateLifecycle(7, 101, true, 41);
+    }
+
+    @Test
+    void resumeRejectsExhaustedTriggerCapacityBeforeClearingPause() {
+        PublishedPair pair = publishedPair("Workflow", true, 4);
+        pair.workflow().setIntakePausedAt(LocalDateTime.now());
+        stubPublishedMutation(pair, null, false);
+        stubUserMutation(Set.of(41), Set.of(41));
+        doThrow(new ConflictException("Workflow trigger capacity is exhausted"))
+            .when(triggerAdmissionService).requireCapacity(eq(7), eq(101), eq("deal"), any());
+
+        assertThrows(ConflictException.class, () -> service.resume(101));
+
+        verify(workflowMapper, never()).updateIntakePause(7, 101, false, 41);
+    }
+
+    @Test
+    void publishRejectsExhaustedTriggerCapacityBeforeReplacingActiveVersion() {
+        PublishedPair pair = publishedPair("Workflow", true, 4);
+        pair.workflow().setName("Draft rename");
+        stubPublishedMutation(pair, pair.version(), true);
+        stubUserMutation(Set.of(41), Set.of(41));
+        doThrow(new ConflictException("Workflow trigger capacity is exhausted"))
+            .when(triggerAdmissionService).requireCapacity(eq(7), eq(101), eq("deal"), any());
+
+        assertThrows(ConflictException.class, () -> service.publish(101, publishRequest(3)));
+
+        verify(workflowVersionMapper, never()).insert(any());
+        verify(ruleMapper, never()).update(any());
+    }
+
+    @Test
+    void materiallyEquivalentRepublishOfAnEnabledWorkflowNeverConsultsTriggerCapacity() {
+        PublishedPair pair = publishedPair("Workflow", true, 4);
+        stubPublishedMutation(pair, pair.version(), true);
+        stubUserMutation(Set.of(41), Set.of(41));
+
+        var unchanged = service.publish(101, publishRequest(3));
+
+        assertEquals(88L, unchanged.activeVersionId());
+        verifyNoInteractions(triggerAdmissionService);
+        verify(workflowVersionMapper, never()).insert(any());
+        verify(ruleMapper, never()).update(any());
+    }
+
+    @Test
+    void resumeFailsClosedWhenTheLockedRowIsEnabledAfterADisabledDiscovery() {
+        PublishedPair discovered = publishedPair("Workflow", false, 4);
+        discovered.workflow().setIntakePausedAt(LocalDateTime.now());
+        Workflow locked = publishedPair("Workflow", true, 4).workflow();
+        locked.setIntakePausedAt(LocalDateTime.now());
+        when(workflowMapper.getById(7, 101)).thenReturn(discovered.workflow());
+        when(workflowVersionMapper.getById(7, 101, 88L)).thenReturn(discovered.version());
+        when(ruleMapper.getById(7, 77)).thenReturn(discovered.rule());
+        when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(locked);
+        stubUserMutation(Set.of(41), Set.of());
+
+        assertThrows(ConflictException.class, () -> service.resume(101));
+
+        verify(workflowMapper, never()).updateIntakePause(7, 101, false, 41);
+        verifyNoInteractions(triggerAdmissionService, auditService);
+    }
+
+    @Test
+    void resumePreservesUserActivationAfterCreatorAndPublisherErasure() {
+        PublishedPair pair = publishedPair("Workflow", true, 4, "user", 55, 88L);
+        pair.workflow().setIntakePausedAt(LocalDateTime.now());
+        pair.workflow().setCreatedById(null);
+        pair.version().setCreatedById(66);
+        pair.version().setPublishedById(67);
+        pair.rule().setCreatedById(null);
+        stubPublishedMutation(pair, null, false);
+        when(principalLockService.lockUserMutation(
+                7, 41, Set.of(41, 55, 66, 67), Set.of(55), true))
+            .thenReturn(principals(Set.of(41, 55, 66, 67), Set.of(41, 55)));
+        when(workflowMapper.updateIntakePause(7, 101, false, 41)).thenReturn(1);
+
+        service.resume(101);
+
+        verify(workflowMapper).updateIntakePause(7, 101, false, 41);
+        verify(workflowDefinitionValidator).validateForMutation(
+            "deal", "user", canonicalizer.parseDefinition(pair.version().getDefinitionJson()));
+    }
+
+    @Test
+    void resumeOnADisabledWorkflowSkipsActivationChecksAndSystemAuthorization() {
+        PublishedPair pair = publishedPair("Workflow", false, 4, "system", null, 88L);
+        pair.workflow().setIntakePausedAt(LocalDateTime.now());
+        stubDiscoveredMutation(pair);
+        when(workflowMapper.getByIdForUpdate(7, 101)).thenReturn(pair.workflow());
+        stubUserMutation(Set.of(41), Set.of());
+        when(workflowMapper.updateIntakePause(7, 101, false, 41)).thenReturn(1);
+
+        service.resume(101);
+
+        verify(workflowMapper).updateIntakePause(7, 101, false, 41);
+        verify(principalLockService, never()).lockSystemMutation(
+            any(Integer.class), any(Integer.class), any(), anyBoolean());
+        verify(workflowDefinitionValidator, never()).validateForMutation(any(), any(), any());
+        verifyNoInteractions(triggerAdmissionService);
+    }
+
+    @Test
+    void enableOnAnAlreadyEnabledWorkflowDoesNotRecheckTriggerCapacity() {
+        PublishedPair pair = publishedPair("Workflow", true, 4);
+        stubPublishedMutation(pair, null, false);
+        stubUserMutation(Set.of(41), Set.of(41));
+
+        WorkflowDto unchanged = service.enable(101);
+
+        assertTrue(unchanged.enabled());
+        verifyNoInteractions(triggerAdmissionService, auditService);
+        verify(workflowMapper, never()).updateLifecycle(7, 101, true, 41);
+    }
+
+    @Test
+    void resumeOnAnAlreadyResumedWorkflowDoesNotRecheckTriggerCapacity() {
+        PublishedPair pair = publishedPair("Workflow", true, 4);
+        stubPublishedMutation(pair, null, false);
+        stubUserMutation(Set.of(41), Set.of(41));
+
+        service.resume(101);
+
+        verifyNoInteractions(triggerAdmissionService, auditService);
+        verify(workflowMapper, never()).updateIntakePause(7, 101, false, 41);
+    }
+
+    @Test
+    void resumeRejectsAnEnabledWorkflowWhoseRunAsMemberWentInactive() {
+        PublishedPair pair = publishedPair("Workflow", true, 4, "user", 55, 88L);
+        pair.workflow().setIntakePausedAt(LocalDateTime.now());
+        stubDiscoveredMutation(pair);
+        doThrow(new ConflictException("Workflow run-as user is not an active workspace member"))
+            .when(principalLockService).lockUserMutation(7, 41, Set.of(41, 55), Set.of(55), true);
+
+        assertThrows(ConflictException.class, () -> service.resume(101));
+
+        verify(workflowMapper, never()).updateIntakePause(7, 101, false, 41);
+        verifyNoInteractions(triggerAdmissionService, auditService);
+    }
+
+    @Test
+    void enableRejectsAnActiveVersionTheCurrentValidatorNoLongerCompiles() {
+        PublishedPair pair = publishedPair("Workflow", false, 4);
+        stubPublishedMutation(pair, null, false);
+        stubUserMutation(Set.of(41), Set.of(41));
+        when(workflowDefinitionValidator.validateForMutation(eq("deal"), eq("user"), any()))
+            .thenThrow(new WorkflowDefinitionValidationException(
+                "Workflow action is no longer supported",
+                new WorkflowDiagnosticDto(
+                    WorkflowDiagnosticCode.ACTION_CONFIG_REQUIRED, null, null, null, Map.of())));
+
+        assertThrows(WorkflowDefinitionValidationException.class, () -> service.enable(101));
+
+        verify(ruleMapper, never()).updateEnabled(7, 77, true);
+        verify(workflowMapper, never()).updateLifecycle(7, 101, true, 41);
+        verifyNoInteractions(triggerAdmissionService, auditService);
+    }
+
     private void stubUserMutation(
             Set<Integer> principalIds, Set<Integer> requiredActiveIds) {
         TreeSet<Integer> requestedIds = new TreeSet<>(principalIds);
         requestedIds.add(41);
         requestedIds.addAll(requiredActiveIds);
         when(principalLockService.lockUserMutation(
-            7, 41, principalIds, requiredActiveIds))
+            eq(7), eq(41), eq(principalIds), eq(requiredActiveIds), anyBoolean()))
             .thenReturn(principals(requestedIds, requestedIds));
     }
 
     private void stubSystemMutation(Set<Integer> principalIds) {
         TreeSet<Integer> requestedIds = new TreeSet<>(principalIds);
         requestedIds.add(41);
-        when(principalLockService.lockSystemMutation(7, 41, principalIds))
+        when(principalLockService.lockSystemMutation(
+            eq(7), eq(41), eq(principalIds), anyBoolean()))
             .thenReturn(principals(requestedIds, requestedIds));
+    }
+
+    private void stubDiscoveredMutation(PublishedPair pair) {
+        when(workflowMapper.getById(7, pair.workflow().getId())).thenReturn(pair.workflow());
+        when(workflowVersionMapper.getById(
+            7, pair.workflow().getId(), pair.version().getId())).thenReturn(pair.version());
+        when(ruleMapper.getById(7, pair.rule().getId())).thenReturn(pair.rule());
     }
 
     private void stubPublishedMutation(
             PublishedPair pair, WorkflowVersion latest, boolean publish) {
-        when(workflowMapper.getById(7, pair.workflow().getId())).thenReturn(pair.workflow());
+        stubDiscoveredMutation(pair);
         when(workflowMapper.getByIdForUpdate(7, pair.workflow().getId())).thenReturn(pair.workflow());
-        when(workflowVersionMapper.getById(
-            7, pair.workflow().getId(), pair.version().getId())).thenReturn(pair.version());
         when(workflowVersionMapper.getByIdForUpdate(
             7, pair.workflow().getId(), pair.version().getId())).thenReturn(pair.version());
-        when(ruleMapper.getById(7, pair.rule().getId())).thenReturn(pair.rule());
         when(ruleMapper.getByIdForUpdate(7, pair.rule().getId())).thenReturn(pair.rule());
         if (publish) {
             when(workflowVersionMapper.getLatest(7, pair.workflow().getId())).thenReturn(latest);

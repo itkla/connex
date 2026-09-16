@@ -51,6 +51,49 @@ A mutation publishes a validated trigger token from the same transaction after i
 - Add every canonical workflow record type to the record-availability guard/`SegmentMapper.entityIdInWorkspace`; unknown record types fail closed as unavailable.
 - Update the validated trigger vocabulary and tests in the same change.
 
+### Aggregate trigger capacity is admitted at authoring time
+
+`connex.workflows.runtime.max-trigger-fanout` bounds how many enabled workflows one trigger key may
+fan out to. That bound is admitted when a workspace member authors the activation — legacy rule
+create and update, publish while the workflow is enabled and intake is not paused, enable, and
+resume — not when the CRM write fires. `WorkflowTriggerAdmissionService` counts existing targets
+with intake's own selectors (per `entity_change` event and per `schedule` cadence, excluding the
+workflow being mutated) while the transaction holds the per-workspace
+`workflow_trigger_admission` mutex, so two concurrent activations cannot both pass the count. The
+entry points run at `READ_COMMITTED` so the recount after waiting on that mutex observes the
+winner's commit. A persisted trigger with no type, no events, or no cadence matches no intake
+selector and therefore consumes no capacity.
+
+The check guards state changes only. It runs after the equivalence short-circuits
+(`LegacyRuleWorkflowService.semanticallyEquivalent`, `WorkflowService.materiallyEquivalent`), so a
+no-op `PUT /api/rules/{id}` or republish that changes nothing the runtime observes still succeeds in
+a workspace that is already over the limit. A *material* edit to an enabled workflow in such a
+workspace is refused, because it republishes the trigger; pause or disable first, or reduce the
+fan-out.
+
+Two legacy-rule replacements are exempt because they can only release intake capacity: a request
+that sets `enabled` to `false`, and a replacement whose trigger events are a strict subset of the
+current rule's events on the same record type. `LegacyRuleWorkflowService.requiresTriggerAdmission`
+decides this from the requested transition, so those requests neither wait on the admission mutex nor
+recount fan-out; the aggregate lock still revalidates the discovered rule before either exemption is
+applied, so a concurrent edit cannot turn an exempt request into an unadmitted activation.
+
+The intake-side `trigger_fanout_limit` guard is retained as a backstop, so a workspace that is
+already over the limit — including one pushed over by lowering `max-trigger-fanout` — still aborts
+the triggering CRM write until an operator reduces the fan-out. Disable, pause, and archive skip
+the capacity check, so they remain available as the remediation path, and they do not take the
+admission mutex at all. The startup `LegacyWorkflowBackfillTransaction` is likewise exempt: it
+mirrors pre-existing legacy `enabled` state onto its canonical pair under the exclusive workspace
+root without the mutex or a capacity check, and creates no new fan-out of its own.
+
+Activation is fail-closed in two further ways that authors will observe. Resuming intake on an
+enabled user-mode workflow requires its stored run-as member to still be active, so a workflow whose
+run-as account was deactivated returns a conflict until the run-as member is restored or the
+workflow is disabled. Activation also re-derives the active version's required action permissions
+from its stored definition, so a persisted version that no longer compiles under the current
+validator cannot be enabled or resumed until it is republished. Pausing, disabling, and archiving
+stay available in both cases.
+
 ## Adding actions
 
 Add a new action to the closed validated vocabulary and `RuleActionExecutor`, delegating to the existing domain service rather than reproducing domain logic.
