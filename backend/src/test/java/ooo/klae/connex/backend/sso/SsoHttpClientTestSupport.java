@@ -14,6 +14,7 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -29,6 +30,21 @@ import org.apache.hc.core5.http.message.BasicClassicHttpResponse;
 /** Provides deterministic DNS fixtures without changing the production resolver contract. */
 public final class SsoHttpClientTestSupport {
     private SsoHttpClientTestSupport() {
+    }
+
+    /** Resolves only the fixture hosts to a public address and delegates their exchanges to a fake transport. */
+    public static SsoHttpClient stubbedClient(SsoProperties properties, List<String> hosts,
+            CloseableHttpClient client) throws UnknownHostException {
+        List<String> allowedHosts = List.copyOf(hosts);
+        InetAddress publicAddress = InetAddress.getByName("93.184.216.34");
+        SsoHttpClient http = spy(new SsoHttpClient(properties, host -> {
+            if (!allowedHosts.contains(host)) {
+                throw new UnknownHostException("Unexpected SSO fixture host");
+            }
+            return new InetAddress[] { publicAddress };
+        }, Duration.ofSeconds(10)));
+        doReturn(client).when(http).pinnedClient(anyString(), any(InetAddress[].class));
+        return http;
     }
 
     /** Creates a transport whose DNS can rebind a previously public destination to loopback. */

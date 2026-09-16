@@ -7,32 +7,47 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mockStatic;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
-import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
-import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.core5.http.ClassicHttpRequest;
+import org.apache.hc.core5.http.ContentType;
+import org.apache.hc.core5.http.Header;
+import org.apache.hc.core5.http.io.entity.StringEntity;
+import org.apache.hc.core5.http.message.BasicClassicHttpResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
+import org.springframework.http.converter.FormHttpMessageConverter;
 import org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest;
 import org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient;
+import org.springframework.security.oauth2.client.http.OAuth2ErrorResponseErrorHandler;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
-import org.springframework.security.oauth2.client.registration.ClientRegistrations;
-import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.security.oauth2.core.OAuth2AuthorizationException;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationExchange;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationResponse;
-import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.security.oauth2.core.http.converter.OAuth2AccessTokenResponseHttpMessageConverter;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.client.RestClient;
 
 import ooo.klae.connex.backend.beans.Organization;
@@ -53,9 +68,11 @@ import ooo.klae.connex.backend.secrets.SecretPurpose;
 import ooo.klae.connex.backend.secrets.SecretReference;
 import ooo.klae.connex.backend.secrets.SecretStore;
 import ooo.klae.connex.backend.secrets.StoredSecret;
-import ooo.klae.connex.backend.sso.SsoSecretCipher;
 import ooo.klae.connex.backend.sso.DbClientRegistrationRepository;
-import ooo.klae.connex.backend.sso.SsoUrlSafety;
+import ooo.klae.connex.backend.sso.SsoHttpClient;
+import ooo.klae.connex.backend.sso.SsoHttpClientTestSupport;
+import ooo.klae.connex.backend.sso.SsoProperties;
+import ooo.klae.connex.backend.sso.SsoSecretCipher;
 
 /**
  * Verifies SSO connection management: org-admin save/read round-trip, that the
@@ -64,6 +81,7 @@ import ooo.klae.connex.backend.sso.SsoUrlSafety;
  * is denied. SSO configuration is gated on org membership (#316), so the acting
  * user is enrolled as an org owner of the workspace's organization.
  */
+@Import(SsoConnectionServiceTest.SsoTransportTestConfiguration.class)
 class SsoConnectionServiceTest extends AbstractServiceTest {
 
     private static final String PLAINTEXT_SECRET = "super-secret-client-value";
@@ -76,6 +94,19 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
     @Autowired private OrgMemberMapper orgMemberMapper;
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private DbClientRegistrationRepository clientRegistrationRepository;
+    @Autowired private SsoHttpClient ssoHttpClient;
+    @MockitoBean private CloseableHttpClient oidcTransport;
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class SsoTransportTestConfiguration {
+        @Bean
+        @Primary
+        SsoHttpClient testSsoHttpClient(SsoProperties properties, CloseableHttpClient oidcTransport)
+                throws UnknownHostException {
+            return SsoHttpClientTestSupport.stubbedClient(properties,
+                    List.of("idp.example.com", "replacement.example.test"), oidcTransport);
+        }
+    }
 
     @BeforeEach
     void enrollActingUserAsOrgOwner() {
@@ -179,57 +210,92 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
     }
 
     @Test
-    void save_issuerTransitionNeverSendsPreviousSecret() {
+    void save_issuerTransitionNeverSendsPreviousSecret() throws Exception {
         ssoConnectionService.save(workspace.getId(), currentUser.getId(), oidcRequest());
         int orgId = workspace.getOrgId();
         String oldReference = ssoConnectionMapper.findByOrg(orgId).getOidcClientSecretEnc();
         String replacementIssuer = "https://replacement.example.test";
         String replacementSecret = "replacement-client-secret";
-        try (var safety = mockStatic(SsoUrlSafety.class);
-                var discovery = mockStatic(ClientRegistrations.class)) {
-            discovery.when(() -> ClientRegistrations.fromIssuerLocation("https://idp.example.com"))
-                    .thenReturn(discoveredRegistration("https://idp.example.com"));
-            discovery.when(() -> ClientRegistrations.fromIssuerLocation(replacementIssuer))
-                    .thenReturn(discoveredRegistration(replacementIssuer));
-            assertNotNull(clientRegistrationRepository.findByRegistrationId("org-" + orgId));
+        Map<String, String> documents = Map.of(
+                "https://idp.example.com/.well-known/openid-configuration", discoveryDocument("https://idp.example.com"),
+                replacementIssuer + "/.well-known/openid-configuration", discoveryDocument(replacementIssuer));
+        List<OutboundRequest> requests = new CopyOnWriteArrayList<>();
+        when(oidcTransport.executeOpen(any(), any(), any())).thenAnswer(invocation -> {
+            OutboundRequest request = captureRequest(invocation.getArgument(1, ClassicHttpRequest.class));
+            requests.add(request);
+            String document = documents.get(request.uri().toString());
+            if (request.method().equals("GET") && document != null) {
+                return jsonResponse(200, document);
+            }
+            if (request.method().equals("POST") && request.uri().equals(URI.create(replacementIssuer + "/token"))) {
+                return jsonResponse(400, "{\"error\":\"invalid_grant\"}");
+            }
+            throw new IOException("Unexpected SSO fixture request");
+        });
+        ClientRegistration previous = clientRegistrationRepository.findByRegistrationId("org-" + orgId);
+        assertNotNull(previous);
+        assertEquals("https://idp.example.com", previous.getProviderDetails().getIssuerUri());
+        assertEquals(PLAINTEXT_SECRET, previous.getClientSecret());
 
-            SsoConnectionRequest update = oidcRequest();
-            update.setOidcIssuer(replacementIssuer);
-            update.setOidcClientSecret("");
-            assertThrows(BadRequestException.class,
-                    () -> ssoConnectionService.save(workspace.getId(), currentUser.getId(), update));
-            assertEquals("https://idp.example.com", ssoConnectionMapper.findByOrg(orgId).getOidcIssuer());
+        SsoConnectionRequest update = oidcRequest();
+        update.setOidcIssuer(replacementIssuer);
+        update.setOidcClientSecret("");
+        assertThrows(BadRequestException.class,
+                () -> ssoConnectionService.save(workspace.getId(), currentUser.getId(), update));
+        assertEquals("https://idp.example.com", ssoConnectionMapper.findByOrg(orgId).getOidcIssuer());
+        assertEquals(oldReference, ssoConnectionMapper.findByOrg(orgId).getOidcClientSecretEnc());
+        assertEquals(1, requests.size(), "the rejected transition must not contact the replacement issuer");
 
-            update.setOidcClientSecret(replacementSecret);
-            ssoConnectionService.save(workspace.getId(), currentUser.getId(), update);
-            update.setOidcClientSecret(null);
-            ssoConnectionService.save(workspace.getId(), currentUser.getId(), update);
-            ClientRegistration registration = clientRegistrationRepository.findByRegistrationId("org-" + orgId);
-            assertNotNull(registration);
-            assertEquals(replacementSecret, registration.getClientSecret());
-            assertNotEquals(oldReference, ssoConnectionMapper.findByOrg(orgId).getOidcClientSecretEnc());
-            assertFalse(secretStore.exists(SecretPurpose.ORG_SSO_OIDC_CLIENT_SECRET, orgId, oldReference));
-            assertThrows(ResourceNotFoundException.class,
-                    () -> ssoSecretCipher.decryptOidcClientSecret(orgId, oldReference));
+        update.setOidcClientSecret(replacementSecret);
+        ssoConnectionService.save(workspace.getId(), currentUser.getId(), update);
+        update.setOidcClientSecret(null);
+        ssoConnectionService.save(workspace.getId(), currentUser.getId(), update);
+        ClientRegistration registration = clientRegistrationRepository.findByRegistrationId("org-" + orgId);
+        assertNotNull(registration);
+        assertEquals(replacementIssuer, registration.getProviderDetails().getIssuerUri());
+        assertEquals(replacementIssuer + "/token", registration.getProviderDetails().getTokenUri());
+        assertEquals(replacementSecret, registration.getClientSecret());
+        assertNotEquals(oldReference, ssoConnectionMapper.findByOrg(orgId).getOidcClientSecretEnc());
+        assertFalse(secretStore.exists(SecretPurpose.ORG_SSO_OIDC_CLIENT_SECRET, orgId, oldReference));
+        assertThrows(ResourceNotFoundException.class,
+                () -> ssoSecretCipher.decryptOidcClientSecret(orgId, oldReference));
 
-            RestClient.Builder builder = RestClient.builder();
-            MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-            server.expect(requestTo(replacementIssuer + "/token"))
-                    .andExpect(header(HttpHeaders.AUTHORIZATION, "Basic " + HttpHeaders.encodeBasicAuth(
-                            "client-abc", replacementSecret, StandardCharsets.UTF_8)))
-                    .andRespond(withStatus(HttpStatus.BAD_REQUEST));
-            RestClientAuthorizationCodeTokenResponseClient client = new RestClientAuthorizationCodeTokenResponseClient();
-            client.setRestClient(builder.build());
-            OAuth2AuthorizationRequest authorization = OAuth2AuthorizationRequest.authorizationCode()
-                    .authorizationUri(replacementIssuer + "/authorize").clientId("client-abc")
-                    .redirectUri("https://app.example.test/callback").state("state").build();
-            OAuth2AuthorizationResponse response = OAuth2AuthorizationResponse.success("code")
-                    .redirectUri("https://app.example.test/callback").state("state").build();
-            OAuth2AuthorizationCodeGrantRequest grant = new OAuth2AuthorizationCodeGrantRequest(
-                    registration, new OAuth2AuthorizationExchange(authorization, response));
+        RestClientAuthorizationCodeTokenResponseClient client = new RestClientAuthorizationCodeTokenResponseClient();
+        client.setRestClient(RestClient.builder()
+                .requestFactory(ssoHttpClient.forEnterpriseRegistration(registration.getRegistrationId()))
+                .configureMessageConverters(converters -> converters.addCustomConverter(
+                        new FormHttpMessageConverter()).addCustomConverter(
+                        new OAuth2AccessTokenResponseHttpMessageConverter()))
+                .defaultStatusHandler(new OAuth2ErrorResponseErrorHandler()).build());
+        OAuth2AuthorizationRequest authorization = OAuth2AuthorizationRequest.authorizationCode()
+                .authorizationUri(replacementIssuer + "/authorize").clientId("client-abc")
+                .redirectUri("https://app.example.test/callback").state("state").build();
+        OAuth2AuthorizationResponse response = OAuth2AuthorizationResponse.success("code")
+                .redirectUri("https://app.example.test/callback").state("state").build();
+        OAuth2AuthorizationCodeGrantRequest grant = new OAuth2AuthorizationCodeGrantRequest(
+                registration, new OAuth2AuthorizationExchange(authorization, response));
 
-            assertThrows(OAuth2AuthorizationException.class, () -> client.getTokenResponse(grant));
-            server.verify();
+        OAuth2AuthorizationException failure = assertThrows(OAuth2AuthorizationException.class,
+                () -> client.getTokenResponse(grant));
+        assertEquals("invalid_grant", failure.getError().getErrorCode());
+        assertEquals(List.of(
+                URI.create("https://idp.example.com/.well-known/openid-configuration"),
+                URI.create(replacementIssuer + "/.well-known/openid-configuration"),
+                URI.create(replacementIssuer + "/token")), requests.stream().map(OutboundRequest::uri).toList());
+        assertEquals(List.of("GET", "GET", "POST"), requests.stream().map(OutboundRequest::method).toList());
+        assertNull(requests.get(0).headers().getFirst(HttpHeaders.AUTHORIZATION));
+        assertNull(requests.get(1).headers().getFirst(HttpHeaders.AUTHORIZATION));
+        OutboundRequest tokenRequest = requests.getLast();
+        assertEquals("Basic " + HttpHeaders.encodeBasicAuth("client-abc", replacementSecret, StandardCharsets.UTF_8),
+                tokenRequest.headers().getFirst(HttpHeaders.AUTHORIZATION));
+        assertTrue(tokenRequest.body().contains("grant_type=authorization_code"));
+        assertTrue(tokenRequest.body().contains("code=code"));
+        String previousBasicCredentials = HttpHeaders.encodeBasicAuth("client-abc", PLAINTEXT_SECRET,
+                StandardCharsets.UTF_8);
+        for (OutboundRequest request : requests) {
+            String sent = request.uri() + request.headers().toString() + request.body();
+            assertFalse(sent.contains(PLAINTEXT_SECRET), "the transport must never receive the previous secret");
+            assertFalse(sent.contains(previousBasicCredentials), "the transport must never receive its Basic encoding");
         }
     }
 
@@ -252,11 +318,36 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
                 () -> ssoSecretCipher.decryptOidcClientSecret(orgId, previous.getOidcClientSecretEnc()));
     }
 
-    private static ClientRegistration.Builder discoveredRegistration(String issuer) {
-        return ClientRegistration.withRegistrationId("discovery")
-                .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-                .issuerUri(issuer).authorizationUri(issuer + "/authorize")
-                .tokenUri(issuer + "/token").jwkSetUri(issuer + "/jwks");
+    private static String discoveryDocument(String issuer) {
+        return """
+                {"issuer":"%1$s","authorization_endpoint":"%1$s/authorize",
+                 "token_endpoint":"%1$s/token","jwks_uri":"%1$s/jwks",
+                 "response_types_supported":["code"],"subject_types_supported":["public"],
+                 "id_token_signing_alg_values_supported":["RS256"]}
+                """.formatted(issuer);
+    }
+
+    private static BasicClassicHttpResponse jsonResponse(int status, String body) {
+        BasicClassicHttpResponse response = new BasicClassicHttpResponse(status);
+        response.setHeader(HttpHeaders.CONTENT_TYPE, "application/json");
+        response.setEntity(new StringEntity(body, ContentType.APPLICATION_JSON));
+        return response;
+    }
+
+    private static OutboundRequest captureRequest(ClassicHttpRequest request) throws IOException, URISyntaxException {
+        HttpHeaders headers = new HttpHeaders();
+        for (Header header : request.getHeaders()) {
+            headers.add(header.getName(), header.getValue());
+        }
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        if (request.getEntity() != null) {
+            request.getEntity().writeTo(body);
+        }
+        return new OutboundRequest(request.getUri(), request.getMethod(), HttpHeaders.readOnlyHttpHeaders(headers),
+                body.toString(StandardCharsets.UTF_8));
+    }
+
+    private record OutboundRequest(URI uri, String method, HttpHeaders headers, String body) {
     }
 
     @Test
