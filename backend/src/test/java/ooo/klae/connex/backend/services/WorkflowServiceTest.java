@@ -32,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
@@ -270,6 +271,60 @@ class WorkflowServiceTest {
         assertEquals("Workflow execution mode must be user or system", failure.getMessage());
         verifyNoInteractions(principalLockService, workflowMapper, workflowVersionMapper, ruleMapper,
             workflowDefinitionValidator, auditService);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"user,false", "user,true", "system,false", "system,true"})
+    void bothDraftModesRequireTheirLockedAuthorizationBeforeMutation(
+            String executionMode, boolean update) throws Exception {
+        if (update) {
+            when(workflowMapper.getById(7, 101))
+                .thenReturn(workflow("Workflow", "user", 0, 41, null, null, false));
+        }
+        LockedPrincipals locked = new LockedPrincipals(Set.of(41), Set.of(41), Set.of());
+        if ("user".equals(executionMode)) {
+            when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41), false))
+                .thenReturn(locked);
+        } else {
+            when(principalLockService.lockSystemMutation(7, 41, Set.of(41), false))
+                .thenReturn(locked);
+        }
+
+        ForbiddenException failure = assertThrows(ForbiddenException.class, () -> {
+            if (update) {
+                service.saveDraft(101, draftRequest("Workflow", executionMode, 0));
+            } else {
+                service.create(createRequest(executionMode));
+            }
+        });
+
+        assertEquals("Requires the RULE_MANAGE permission in this workspace", failure.getMessage());
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowMapper, never()).getByIdForUpdate(7, 101);
+        verifyNoInteractions(workflowVersionMapper, ruleMapper, workflowDefinitionValidator, auditService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"user", "system"})
+    void bothPublicationModesRequireTheirLockedAuthorizationBeforeMutation(String executionMode) {
+        when(workflowMapper.getById(7, 101))
+            .thenReturn(workflow("Workflow", executionMode, 0, 41, null, null, false));
+        LockedPrincipals locked = new LockedPrincipals(Set.of(41), Set.of(41), Set.of());
+        if ("user".equals(executionMode)) {
+            when(principalLockService.lockUserMutation(7, 41, Set.of(41), Set.of(41), true))
+                .thenReturn(locked);
+        } else {
+            when(principalLockService.lockSystemMutation(7, 41, Set.of(41), true))
+                .thenReturn(locked);
+        }
+
+        ForbiddenException failure = assertThrows(
+            ForbiddenException.class, () -> service.publish(101, publishRequest(0)));
+
+        assertEquals("Requires the RULE_MANAGE permission in this workspace", failure.getMessage());
+        verify(workflowMapper, never()).getByIdForUpdate(7, 101);
+        verify(workflowVersionMapper, never()).insert(any());
+        verifyNoInteractions(ruleMapper, workflowDefinitionValidator, auditService);
     }
 
     @ParameterizedTest
