@@ -131,7 +131,7 @@ export default function NewUserDialog() {
                 email: payload.email.trim(),
                 password: payload.password,
             });
-            toastSuccess(t("toastCreated"));
+            toastSuccess(t("toastCreated"), { description: t("toastCreatedVerification") });
             setIsCreating(false);
             setSucceeded(true);
             setTimeout(() => onOpenChange(false), 900);

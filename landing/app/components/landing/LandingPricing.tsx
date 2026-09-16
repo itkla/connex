@@ -39,7 +39,7 @@ const COMPARISON = [
 function FeatureStatus({ value, t }: { value: ComparisonValue; t: LandingTranslation }) {
     if (typeof value === "string") return t(`pricing.values.${value}`);
     const Icon = value ? CheckIcon : MinusIcon;
-    return <><Icon aria-hidden="true" className={`mx-auto size-5 ${value ? "text-brand-dark dark:text-brand" : "text-muted-foreground"}`} /><span className="sr-only">{t(value ? "pricing.included" : "pricing.notIncluded")}</span></>;
+    return <><Icon aria-hidden="true" className={`ml-auto size-5 ${value ? "text-brand-dark dark:text-brand" : "text-muted-foreground"}`} /><span className="sr-only">{t(value ? "pricing.included" : "pricing.notIncluded")}</span></>;
 }
 
 /** Shows plan comparisons without prices or plan selection at signup. */
@@ -75,27 +75,28 @@ export default function LandingPricing({ t, ctaHref, ctaLabel, preLaunch = false
                 ))}
             </div>
             <p className="mt-8 max-w-[75ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.allFeatures")}</p>
-            <table aria-describedby="pricing-notes" className="mt-6 w-full table-fixed border-collapse text-sm">
-                <caption className="sr-only">{t("pricing.compare")}</caption>
-                <colgroup><col className="w-1/3 lg:w-1/4" /><col /><col /><col /></colgroup>
-                <thead>
-                    <tr>
-                        <th scope="col" className="pb-4 pr-3 text-left font-medium">{t("pricing.feature")}</th>
-                        {OPTIONS.map(({ key }) => <th key={key} scope="col" className="px-1 pb-4 text-center text-xs font-semibold sm:text-sm">{t(`pricing.${key}.name`)}</th>)}
-                    </tr>
-                </thead>
+            <div role="group" aria-label={t("pricing.compare")} aria-describedby="pricing-notes" className="mt-10 space-y-10">
                 {COMPARISON.map(({ group, rows }) => (
-                    <tbody key={group}>
-                        <tr><th scope="rowgroup" colSpan={4} className="border-y border-border bg-muted/50 px-3 py-3 text-left font-semibold">{t(`pricing.groups.${group}`)}</th></tr>
-                        {rows.map(({ feature, values }) => (
-                            <tr key={feature} data-pricing-feature={feature} className="border-b border-border/60">
-                                <th scope="row" className="py-4 pr-3 text-left font-normal leading-relaxed text-muted-foreground">{t(`pricing.features.${feature}`)}{feature === "records" && <span className="mt-1 block text-xs">{t("pricing.combinedTotal")}</span>}</th>
-                                {OPTIONS.map(({ key }) => <td key={key} data-pricing-plan={key} className={`px-1 py-4 text-center text-xs font-medium leading-relaxed sm:text-sm ${key === "pro" ? "bg-brand/5" : ""}`}><FeatureStatus value={values[key]} t={t} /></td>)}
-                            </tr>
-                        ))}
-                    </tbody>
+                    <section key={group} aria-labelledby={`pricing-${group}-title`}>
+                        <h3 id={`pricing-${group}-title`} className="border-t border-border px-6 pb-4 pt-6 text-lg font-semibold sm:px-8">{t(`pricing.groups.${group}`)}</h3>
+                        <div className="flex flex-col gap-5 lg:grid lg:grid-cols-3 lg:gap-y-0">
+                            {OPTIONS.map(({ key }) => (
+                                <div key={key} data-pricing-plan={key} className={`min-w-0 border-x border-transparent px-6 sm:px-8 lg:grid lg:grid-rows-subgrid ${key === "pro" ? "bg-brand/5" : ""}`} style={{ gridRow: `span ${rows.length + 1}` }}>
+                                    <h4 id={`pricing-${group}-${key}-title`} className="py-4 text-sm font-semibold">{t(`pricing.${key}.name`)}</h4>
+                                    <dl aria-labelledby={`pricing-${group}-${key}-title`} className="lg:grid lg:grid-rows-subgrid" style={{ gridRow: `span ${rows.length}` }}>
+                                        {rows.map(({ feature, values }) => (
+                                            <div key={feature} data-pricing-feature={feature} className="flex items-start justify-between gap-4 border-t border-border/60 py-4 text-sm leading-relaxed">
+                                                <dt className="min-w-0 text-muted-foreground">{t(`pricing.features.${feature}`)}{feature === "records" && <span className="mt-1 block text-xs">{t("pricing.combinedTotal")}</span>}</dt>
+                                                <dd className="max-w-1/2 shrink-0 text-right font-medium"><FeatureStatus value={values[key]} t={t} /></dd>
+                                            </div>
+                                        ))}
+                                    </dl>
+                                </div>
+                            ))}
+                        </div>
+                    </section>
                 ))}
-            </table>
+            </div>
             <div id="pricing-notes" className="mt-8 max-w-[75ch] space-y-3 text-sm leading-relaxed text-muted-foreground">
                 <p>{t("pricing.poolingNote")}</p>
                 <p>{t("pricing.subscriptionNote")}</p>

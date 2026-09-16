@@ -122,6 +122,9 @@ inspectable history, with no invented customer score. Missing history stays dist
 The following Radar/Introductions chapter owns priorities, risk, and recommended next steps.
 
 Pricing appears immediately before practical questions, with Free, Pro, and Enterprise plans.
+Overview cards retain each plan's summary and key inclusions. Detailed comparisons follow outside
+the cards in three columns aligned with them, with shared headers for each feature group. On narrow
+screens, each group lists the plans vertically with explicit plan headings.
 The approved pricing draft includes all CRM features on every plan; company-managed SSO is reserved
 for Enterprise and does not restrict ordinary account sign-in. Free includes 1 full-member seat,
 1 workspace, and 250 contacts and companies combined. Pro is hosted SaaS with 2 included full-member

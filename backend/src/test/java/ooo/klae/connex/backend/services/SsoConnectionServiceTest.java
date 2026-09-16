@@ -17,6 +17,7 @@ import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -80,6 +81,8 @@ import ooo.klae.connex.backend.sso.SsoSecretCipher;
  * blank secret preserves the stored one, and that a user without org membership
  * is denied. SSO configuration is gated on org membership (#316), so the acting
  * user is enrolled as an org owner of the workspace's organization.
+ * Routing domains are unique per test because verified accounts outside the organization
+ * prevent claims on their domains.
  */
 @Import(SsoConnectionServiceTest.SsoTransportTestConfiguration.class)
 class SsoConnectionServiceTest extends AbstractServiceTest {
@@ -108,12 +111,15 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
         }
     }
 
+    private String routingDomain;
+
     @BeforeEach
     void enrollActingUserAsOrgOwner() {
         Organization organization = new Organization();
         organization.setName("SSO connection test");
         organization.setSlug("sso-connection-" + UUID.randomUUID());
         organizationMapper.insert(organization);
+        routingDomain = organization.getSlug() + ".example.test";
         workspace = new Workspace();
         workspace.setOrgId(organization.getId());
         workspace.setName("SSO connection test");
@@ -133,7 +139,7 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
         req.setOidcClientId("client-abc");
         req.setOidcClientSecret(PLAINTEXT_SECRET);
         req.setOidcScopes("openid,email");
-        req.setDomains(List.of("Example.com", "@corp.example.com"));
+        req.setDomains(List.of(routingDomain.toUpperCase(Locale.ROOT), "@corp." + routingDomain));
         return req;
     }
 
@@ -143,7 +149,7 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
 
         assertTrue(saved.isConfigured());
         assertTrue(saved.isHasClientSecret(), "the DTO must report a stored secret");
-        assertEquals(List.of("corp.example.com", "example.com"), saved.getDomains(),
+        assertEquals(List.of("corp." + routingDomain, routingDomain), saved.getDomains(),
                 "domains are normalized to lowercase, @ stripped, and sorted");
 
         SsoConnectionDto fetched = ssoConnectionService.getForWorkspace(workspace.getId(), currentUser.getId());
@@ -166,6 +172,27 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
                 "the wrapped data key must not embed the plaintext");
         assertEquals(PLAINTEXT_SECRET, ssoSecretCipher.decryptOidcClientSecret(orgId, stored.getOidcClientSecretEnc()),
                 "the stored blob must decrypt back to the original secret");
+    }
+
+    @Test
+    void save_isolatesRoutingDomainsFromUnrelatedVerifiedAccounts() {
+        String suffix = UUID.randomUUID().toString();
+        User unrelated = new User();
+        unrelated.setUsername("unrelated-" + suffix);
+        unrelated.setDisplayName("Unrelated verified account");
+        unrelated.setEmail(suffix + "@example.com");
+        unrelated.setEmailVerified(true);
+        unrelated.setTimezone("UTC");
+        userMapper.insert(unrelated);
+
+        SsoConnectionDto saved = ssoConnectionService.save(workspace.getId(), currentUser.getId(), oidcRequest());
+
+        assertEquals(List.of("corp." + routingDomain, routingDomain), saved.getDomains());
+
+        SsoConnectionRequest conflicting = oidcRequest();
+        conflicting.setDomains(List.of("example.com"));
+        assertThrows(BadRequestException.class,
+                () -> ssoConnectionService.save(workspace.getId(), currentUser.getId(), conflicting));
     }
 
     @Test
@@ -397,13 +424,13 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
         ssoConnectionService.save(workspace.getId(), currentUser.getId(), oidcRequest());
         int orgId = workspaceMapper.getOrgId(workspace.getId());
 
-        SsoDiscoveryDto routed = ssoConnectionService.discoverByEmail("alice@example.com");
+        SsoDiscoveryDto routed = ssoConnectionService.discoverByEmail("alice@" + routingDomain);
         assertTrue(routed.isAvailable());
         assertEquals("org-" + orgId, routed.getRegistrationId());
         assertEquals("oidc", routed.getProtocol());
         assertFalse(routed.isEnforced());
 
-        assertFalse(ssoConnectionService.discoverByEmail("bob@unmapped.example.org").isAvailable(),
+        assertFalse(ssoConnectionService.discoverByEmail("bob@unmapped." + routingDomain).isAvailable(),
                 "an unmapped domain is unavailable");
         assertFalse(ssoConnectionService.discoverByEmail(null).isAvailable());
         assertFalse(ssoConnectionService.discoverByEmail("no-at-sign").isAvailable());
@@ -415,7 +442,7 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
         disabled.setEnabled(false);
         ssoConnectionService.save(workspace.getId(), currentUser.getId(), disabled);
 
-        assertFalse(ssoConnectionService.discoverByEmail("alice@example.com").isAvailable(),
+        assertFalse(ssoConnectionService.discoverByEmail("alice@" + routingDomain).isAvailable(),
                 "a domain routed to a disabled connection must not be startable");
     }
 
