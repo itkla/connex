@@ -307,6 +307,16 @@ CONNEX_DEPLOYMENT_PROFILE=silo
 JAVA_TOOL_OPTIONS=-Djava.security.properties=/opt/connex-staging/backend/connex.java.security
 ```
 
+Session and workspace cookies default to `Secure`, including when systemd launches from
+`/opt/connex-staging/backend`. That directory still supplies the local CORS/WebAuthn origin
+`http://localhost:3001` and WebAuthn RP ID `localhost` when the environment does not override them;
+it does not opt out of secure cookies. A local HTTP-only staging session requires the explicit
+`CONNEX_LOCAL_HTTP_COOKIES_ENABLED=true` exception and exclusively loopback HTTP CORS and WebAuthn
+origins. Public origins are refused with that exception, and legacy cookie-Secure=false overrides
+without the exception fail startup. Leave the exception unset for `https://preview.connexcrm.jp`.
+The public edge is managed separately: confirm a positive `Strict-Transport-Security` max-age on
+the public HTTPS response during the independent edge retest; checkout settings do not prove live HSTS.
+
 The second setting is required because staging launches the backend JAR directly instead of using
 the published backend image. It loads the tracked one-second positive and zero-second negative JVM
 DNS TTLs used by hostname-based trusted proxies. After adding or changing it, run
