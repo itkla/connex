@@ -6,8 +6,11 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -41,6 +44,28 @@ public class AiOrganizationBudgetCoordinator {
     /** Reserves a conservative ceiling for callers without an enriched serialized envelope. */
     public Lease reserve(int orgId, AiInvocation invocation) {
         return reserve(orgId, invocation, invocation.prompt().getSystemPrompt());
+    }
+
+    /** Recovers expired reservations in separate transactions, charging dispatched work durably. */
+    @Scheduled(fixedDelay = 1, initialDelay = 1, timeUnit = TimeUnit.MINUTES)
+    public void sweepExpiredReservations() {
+        LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+        List<String> expiredIds = controlAccess.execute(() -> operations.expiredReservationIds(now));
+        for (String reservationId : expiredIds) {
+            controlAccess.execute(() -> {
+                operations.expireReservation(reservationId, now);
+                return null;
+            });
+        }
+    }
+
+    private void markDispatched(Reservation reservation) {
+        if (!reservation.metered()) return;
+        LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+        controlAccess.execute(() -> {
+            operations.markDispatched(reservation.id(), now);
+            return null;
+        });
     }
 
     private void settle(Reservation reservation, long consumedTokens) {
@@ -95,11 +120,23 @@ public class AiOrganizationBudgetCoordinator {
         private final AiOrganizationBudgetCoordinator coordinator;
         private final Reservation reservation;
         private Long settlementTokens;
+        private boolean dispatched;
         private boolean closed;
 
         private Lease(AiOrganizationBudgetCoordinator coordinator, Reservation reservation) {
             this.coordinator = coordinator;
             this.reservation = reservation;
+        }
+
+        /** Marks the final handoff to provider transport after pre-dispatch checks pass. */
+        public synchronized void markDispatched() {
+            if (closed) {
+                throw new IllegalStateException("Provider dispatch requires an active budget reservation");
+            }
+            if (!dispatched) {
+                coordinator.markDispatched(reservation);
+                dispatched = true;
+            }
         }
 
         /** Replaces the reservation with actual input and output token usage. */
@@ -114,10 +151,13 @@ public class AiOrganizationBudgetCoordinator {
             closed = true;
         }
 
-        /** Releases a reservation when no provider usage was returned. */
+        /** Charges interrupted dispatches conservatively; only pre-dispatch failures are released. */
         @Override
         public synchronized void close() {
             if (closed) return;
+            if (settlementTokens == null && dispatched) {
+                settlementTokens = reservation.reservedTokens();
+            }
             if (settlementTokens == null) {
                 coordinator.release(reservation);
             } else {

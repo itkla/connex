@@ -201,6 +201,7 @@ class AiInvocationServiceTest {
                 .thenAnswer(call -> {
                     AiCompletionRequest request = call.getArgument(0);
                     return request.providerAttemptExecutor().executeStream(() -> {
+                        request.providerAttemptExecutor().beforeSend();
                         providerTransport.run();
                         return new AiCompletionResult("{{P1}}", 12, 4, "end_turn");
                     });
@@ -254,6 +255,7 @@ class AiInvocationServiceTest {
                 .thenAnswer(call -> {
                     AiCompletionRequest request = call.getArgument(0);
                     return request.providerAttemptExecutor().executeStream(() -> {
+                        request.providerAttemptExecutor().beforeSend();
                         providerTransport.run();
                         return new AiCompletionResult("unused", 1, 1, "end_turn");
                     });
@@ -279,6 +281,7 @@ class AiInvocationServiceTest {
                     AiCompletionRequest request = call.getArgument(0);
                     return request.providerAttemptExecutor().executeStream(() -> {
                         request.providerAttemptExecutor().checkpoint();
+                        request.providerAttemptExecutor().beforeSend();
                         providerTransport.run();
                         return new AiCompletionResult("unused", 1, 1, "end_turn");
                     });
@@ -297,7 +300,7 @@ class AiInvocationServiceTest {
     void completeRejectsAProviderConfigurationChangedDuringTheRequest() {
         ResolvedAiProvider changed = unmaskedResolved();
         when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID))
-                .thenReturn(resolved, resolved, changed);
+                .thenReturn(resolved, resolved, resolved, changed);
         providerReturns(new AiCompletionResult("unused", 12, 4, "end_turn"));
 
         AiProviderException exception = assertThrows(
@@ -312,7 +315,7 @@ class AiInvocationServiceTest {
 
     @Test
     void completeRejectsPermissionLossDuringTheRequest() {
-        doNothing().doThrow(new ForbiddenException("AI access changed"))
+        doNothing().doNothing().doThrow(new ForbiddenException("AI access changed"))
                 .when(providerAttemptGuard).run();
         providerReturns(new AiCompletionResult(
                 "{\"rationale\":\"unused\",\"evidence\":[]}",
@@ -328,10 +331,39 @@ class AiInvocationServiceTest {
                         restrictionEpoch.current(WORKSPACE_ID),
                         providerAttemptGuard));
 
-        verify(providerAttemptGuard, times(2)).run();
-        verify(providerTransport).run();
-        verify(budgetLease).settle(12, 4);
+        InOrder order = inOrder(providerAttemptGuard, directAdmission, budgetLease, providerTransport);
+        order.verify(providerAttemptGuard).run();
+        order.verify(directAdmission).commitInvocation();
+        order.verify(providerAttemptGuard).run();
+        order.verify(budgetLease).markDispatched();
+        order.verify(providerTransport).run();
+        order.verify(budgetLease).settle(12, 4);
+        order.verify(providerAttemptGuard).run();
         verify(budgetLease, never()).close();
+    }
+
+    @Test
+    void completeRejectsPermissionLossBeforeTransportWithoutMarkingDispatch() {
+        doNothing().doThrow(new ForbiddenException("AI access changed"))
+                .when(providerAttemptGuard).run();
+        providerReturns(new AiCompletionResult("unused", 12, 4, "end_turn"));
+
+        assertThrows(
+                ForbiddenException.class,
+                () -> service.complete(
+                        invocation("Summarize relationship state"),
+                        directAdmission,
+                        restrictionEpoch.current(WORKSPACE_ID),
+                        providerAttemptGuard));
+
+        InOrder order = inOrder(providerAttemptGuard, directAdmission, budgetLease);
+        order.verify(providerAttemptGuard).run();
+        order.verify(directAdmission).commitInvocation();
+        order.verify(providerAttemptGuard).run();
+        order.verify(budgetLease).close();
+        verify(budgetLease, never()).markDispatched();
+        verify(providerTransport, never()).run();
+        verify(budgetLease, never()).settle(12, 4);
     }
 
     @Test
@@ -369,7 +401,7 @@ class AiInvocationServiceTest {
                         directAdmission,
                         providerAttemptGuard);
 
-        AiNativeToolCompletion.Tool<AiAssistantStep.FinalAnswer> tool =
+        AiNativeToolCompletion.Tool<?> tool =
                 assertInstanceOf(AiNativeToolCompletion.Tool.class, completion);
         assertEquals("Mina Patel", tool.arguments().path("query").asString());
         assertEquals("{{P1}}", new ObjectMapper().readTree(
@@ -1124,7 +1156,7 @@ class AiInvocationServiceTest {
 
         service.complete(invocation);
 
-        verify(aiFeatureGate, times(3)).requireAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION);
+        verify(aiFeatureGate, times(4)).requireAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION);
         ArgumentCaptor<AiCompletionRequest> requestCaptor = ArgumentCaptor.forClass(AiCompletionRequest.class);
         verify(aiProvider).complete(requestCaptor.capture());
         assertEquals(1, requestCaptor.getValue().images().size());
@@ -1562,6 +1594,7 @@ class AiInvocationServiceTest {
             AiCompletionRequest request = call.getArgument(0);
             try {
                 request.providerAttemptExecutor().execute(() -> {
+                    request.providerAttemptExecutor().beforeSend();
                     providerTransport.run();
                     throw new AiProviderRequestRejectedException("provider", 400);
                 });
@@ -1569,6 +1602,7 @@ class AiInvocationServiceTest {
                 assertEquals("provider invocation failed with status 400", exception.getMessage());
             }
             request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
                 return "fallback response";
             });
@@ -1588,9 +1622,11 @@ class AiInvocationServiceTest {
                 providerAttemptGuard, directAdmission, fallbackAdmission, providerTransport);
         order.verify(providerAttemptGuard).run();
         order.verify(directAdmission).commitInvocation();
+        order.verify(providerAttemptGuard).run();
         order.verify(providerTransport).run();
         order.verify(providerAttemptGuard).run();
         order.verify(fallbackAdmission).commitInvocation();
+        order.verify(providerAttemptGuard).run();
         order.verify(providerTransport).run();
     }
 
@@ -1666,6 +1702,34 @@ class AiInvocationServiceTest {
 
         assertEquals("AI provider configuration changed before egress", exception.getMessage());
         verify(providerTransport, never()).run();
+        verify(budgetLease, never()).markDispatched();
+        verify(budgetLease).close();
+    }
+
+    @Test
+    void dispatchIsMarkedBeforeProviderTransportAndRetainedOnAbort() {
+        providerThrows(new AiProviderException("cancelled"));
+
+        assertThrows(AiProviderException.class, () -> service.complete(invocation("Summarize")));
+
+        InOrder order = inOrder(budgetLease, providerTransport);
+        order.verify(budgetLease).markDispatched();
+        order.verify(providerTransport).run();
+        order.verify(budgetLease).close();
+    }
+
+    @Test
+    void failedUsageSettlementRetainsLeaseForCloseRetry() {
+        providerReturns(new AiCompletionResult("done", 12, 4, "end_turn"));
+        doThrow(new IllegalStateException("temporary database failure"))
+                .when(budgetLease).settle(12, 4);
+
+        assertThrows(IllegalStateException.class, () -> service.complete(invocation("Summarize")));
+
+        InOrder order = inOrder(budgetLease);
+        order.verify(budgetLease).markDispatched();
+        order.verify(budgetLease).settle(12, 4);
+        order.verify(budgetLease).close();
     }
 
     @Test
@@ -1676,6 +1740,7 @@ class AiInvocationServiceTest {
             AiCompletionRequest request = call.getArgument(0);
             try {
                 request.providerAttemptExecutor().execute(() -> {
+                    request.providerAttemptExecutor().beforeSend();
                     providerTransport.run();
                     throw new AiProviderRequestRejectedException("provider", 400);
                 });
@@ -1683,6 +1748,7 @@ class AiInvocationServiceTest {
                 assertEquals("provider invocation failed with status 400", exception.getMessage());
             }
             request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
                 return "fallback response";
             });
@@ -1701,6 +1767,8 @@ class AiInvocationServiceTest {
         verify(budgetCoordinator, times(2)).reserve(
                 eq(ORG_ID), same(invocation), anyString());
         verify(budgetLease).close();
+        verify(budgetLease).markDispatched();
+        verify(fallbackBudgetLease).markDispatched();
         verify(fallbackBudgetLease).settle(20, 8);
         verify(auditService, times(2)).recordStrictIndependentScoped(
                 eq("ai.llm.call"), eq("ai_call"), isNull(), eq(WORKSPACE_ID), eq(ORG_ID),
@@ -1719,6 +1787,7 @@ class AiInvocationServiceTest {
             AiCompletionRequest request = call.getArgument(0);
             try {
                 request.providerAttemptExecutor().execute(() -> {
+                    request.providerAttemptExecutor().beforeSend();
                     providerTransport.run();
                     throw new AiProviderRequestRejectedException("provider", 400);
                 });
@@ -1727,6 +1796,7 @@ class AiInvocationServiceTest {
             }
             restrictionEpoch.bump(WORKSPACE_ID);
             request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
                 return "forbidden fallback";
             });
@@ -1750,13 +1820,14 @@ class AiInvocationServiceTest {
     void featureGateIsRecheckedBeforeFallbackProviderEgress() {
         AiInvocation invocation = invocation("Summarize relationship state");
         ForbiddenException disabled = new ForbiddenException("AI features are not available");
-        doNothing().doNothing().doThrow(disabled)
+        doNothing().doNothing().doNothing().doThrow(disabled)
                 .when(aiFeatureGate).requireAiUsable(FEATURE);
         when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
             AiCompletionRequest request = call.getArgument(0);
             try {
                 request.providerAttemptExecutor().execute(() -> {
+                    request.providerAttemptExecutor().beforeSend();
                     providerTransport.run();
                     throw new AiProviderRequestRejectedException("provider", 400);
                 });
@@ -1764,6 +1835,7 @@ class AiInvocationServiceTest {
                 assertEquals("provider invocation failed with status 400", exception.getMessage());
             }
             request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
                 return "forbidden fallback";
             });
@@ -1796,6 +1868,7 @@ class AiInvocationServiceTest {
             AiCompletionRequest request = call.getArgument(0);
             try {
                 request.providerAttemptExecutor().execute(() -> {
+                    request.providerAttemptExecutor().beforeSend();
                     providerTransport.run();
                     throw new AiProviderRequestRejectedException("provider", 400);
                 });
@@ -1803,6 +1876,7 @@ class AiInvocationServiceTest {
                 assertEquals("provider invocation failed with status 400", exception.getMessage());
             }
             request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
                 return "fallback response";
             });
@@ -1838,6 +1912,7 @@ class AiInvocationServiceTest {
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(invocation -> {
             AiCompletionRequest request = invocation.getArgument(0);
             request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
                 return "provider response";
             });
@@ -1849,6 +1924,7 @@ class AiInvocationServiceTest {
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(invocation -> {
             AiCompletionRequest request = invocation.getArgument(0);
             request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
                 throw failure;
             });

@@ -112,7 +112,8 @@ public class AzureOpenAiAdapter implements AiProvider {
                     String requestBody = buildRequestBody(request, enforcement);
                     String responseBody = request.providerAttemptExecutor().execute(() ->
                             azureOpenAiClient.complete(
-                                    endpoint, request.credentials(), requestBody, deadline));
+                                    endpoint, request.credentials(), requestBody, deadline,
+                                    request.providerAttemptExecutor()::beforeSend));
                     return parseResponse(responseBody, enforcement, request.reasoningMode());
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
@@ -160,7 +161,8 @@ public class AzureOpenAiAdapter implements AiProvider {
                                             observer,
                                             appliedEnforcement,
                                             request.reasoningMode()),
-                                    observer));
+                                    observer,
+                                    request.providerAttemptExecutor()::beforeSend));
                 } catch (AiProviderRequestRejectedException exception) {
                     if (enforcement == AiStructuredOutputEnforcement.PROMPT_ONLY
                             || !exception.permitsStructuredOutputFallback()) {

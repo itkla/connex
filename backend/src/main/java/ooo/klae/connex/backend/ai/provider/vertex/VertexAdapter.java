@@ -132,7 +132,8 @@ public class VertexAdapter implements AiProvider {
                 String accessToken = googleAccessTokenClient.accessToken(
                         request.credentials(), deadline);
                 request.providerAttemptExecutor().checkpoint();
-                return vertexClient.complete(endpoint, accessToken, requestBody, deadline);
+                return vertexClient.complete(endpoint, accessToken, requestBody, deadline,
+                        request.providerAttemptExecutor()::beforeSend);
             });
             return switch (family) {
                 case GEMINI -> parseGeminiResponse(
@@ -185,7 +186,8 @@ public class VertexAdapter implements AiProvider {
                         deadline,
                         new VertexSseAccumulator(
                                 objectMapper, observer, enforcement, request.reasoningMode()),
-                        observer);
+                        observer,
+                        request.providerAttemptExecutor()::beforeSend);
             });
         } catch (AiProviderException exception) {
             throw exception;
