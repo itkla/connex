@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -11,6 +12,7 @@ import java.util.stream.Collectors;
 
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -28,6 +30,8 @@ import ooo.klae.connex.backend.beans.DocumentTemplate;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.DealDocumentDto;
+import ooo.klae.connex.backend.dto.DealLineItemDto;
+import ooo.klae.connex.backend.dto.DealLineItemTotalsDto;
 import ooo.klae.connex.backend.dto.DealLineItemsResponse;
 import ooo.klae.connex.backend.dto.DocumentApprovalDto;
 import ooo.klae.connex.backend.dto.DocumentContent;
@@ -35,6 +39,7 @@ import ooo.klae.connex.backend.dto.GeneratedDocumentSummaryDto;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -150,18 +155,36 @@ public class DealDocumentService {
         return enrich(workspaceId, requireDocument(workspaceId, dealId, documentId));
     }
 
-    /** Generates a new immutable document version on a deal from a template. */
+    /**
+     * Generates an immutable version from one parent-and-lines snapshot. After preliminary existence
+     * discovery, authorization roots precede the deal lock; only the locked parent supplies content.
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealDocumentDto generate(int dealId, int templateId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        Deal deal = requireDeal(workspaceId, dealId);
+        requireDeal(workspaceId, dealId);
+        int actorId = workspaceService.getCurrentUserId();
+        WorkspaceService.LockedPermissionSnapshot permissions =
+            workspaceService.lockAndRequirePermissionsSnapshot(
+                workspaceId, Map.of(actorId, Set.of(Permission.DEAL_UPDATE)));
+        Deal deal = lockDeal(workspaceId, dealId);
+        permissions.revalidate();
         DocumentTemplate template = templateService.require(workspaceId, templateId);
         String currency = deal.getCurrency() == null || deal.getCurrency().isBlank() ? "USD" : deal.getCurrency();
 
         Company company = deal.getCompanyId() == null ? null : companyMapper.getCompanyById(workspaceId, deal.getCompanyId());
         User owner = deal.getOwnerId() == null ? null : userMapper.getUserById(deal.getOwnerId());
         Workspace workspace = workspaceService.getCurrentWorkspace();
-        DealLineItemsResponse lines = lineItemService.getForDeal(dealId);
+        DealLineItemsResponse lines = lineItemService.snapshotForDocument(workspaceId, deal);
+        DealLineItemTotalsDto totals = lines.totals();
+        if (totals == null) {
+            throw new ConflictException("Cannot generate a document while line currencies disagree with the deal");
+        }
+        if (lines.items().isEmpty()) {
+            totals = new DealLineItemTotalsDto(deal.getCurrency(), totals.subtotal(), totals.tax(),
+                totals.oneTimeTotal(), totals.recurringTotal(), totals.grandTotal());
+        }
 
         Map<String, String> tokens = new HashMap<>();
         tokens.put("workspace.name", workspace == null ? "" : nz(workspace.getName()));
@@ -171,8 +194,8 @@ public class DealDocumentService {
         tokens.put("deal.currency", currency);
         tokens.put("owner.name", owner == null ? "" : nz(owner.getDisplayName()));
         tokens.put("date", LocalDateTime.now().toLocalDate().toString());
-        tokens.put("total", lines.totals() == null || lines.totals().grandTotal() == null
-            ? "" : currency + " " + lines.totals().grandTotal().toPlainString());
+        tokens.put("total", totals.grandTotal() == null
+            ? "" : currency + " " + totals.grandTotal().toPlainString());
 
         DocumentContent.Sections sections = new DocumentContent.Sections(
             resolve(template.getTitle(), tokens),
@@ -191,7 +214,7 @@ public class DealDocumentService {
             sections,
             resolveBody(template.getBody(), tokens),
             lines.items(),
-            lines.totals());
+            totals);
 
         DealDocument document = new DealDocument();
         document.setWorkspaceId(workspaceId);
@@ -217,6 +240,8 @@ public class DealDocumentService {
      * request), final|sent|signed → superseded. Finalizing a draft is refused while an active
      * approval policy matches; the approval flow is the only path to {@code final} for such
      * documents. Superseding a sent document voids its live delivery before the status changes.
+     * Both draft and approved finalization require frozen currencies to agree with the stored
+     * document currency, independently of later changes to the parent deal.
      */
     @RequirePermission(Permission.DEAL_UPDATE)
     public DealDocumentDto updateStatus(int dealId, int documentId, String status) {
@@ -246,6 +271,14 @@ public class DealDocumentService {
         }
         if (!isAllowedTransition(document.getStatus(), status)) {
             throw new BadRequestException("Cannot change document status from " + document.getStatus() + " to " + status);
+        }
+        if ("final".equals(status)) {
+            DocumentContent content = parseContent(document);
+            if (content == null || content.lineItems() == null) {
+                throw new ConflictException("Document line items are unavailable; generate a new document");
+            }
+            requireConsistentSnapshotCurrency(document, content);
+            lineItemService.requireConsistentLineArithmetic(content.lineItems());
         }
         if ("final".equals(status) && "draft".equals(document.getStatus())) {
             requireNoMatchingPolicy(policies, document);
@@ -296,6 +329,44 @@ public class DealDocumentService {
             case "final", "sent", "signed" -> to.equals("superseded");
             default -> false;
         };
+    }
+
+    private void requireConsistentSnapshotCurrency(DealDocument document, DocumentContent content) {
+        String currency = document.getCurrency();
+        if (currency == null || currency.isBlank()) {
+            throw new ConflictException("Document currency is unavailable; generate a new document");
+        }
+        requireMatchingSnapshotCurrency("Frozen deal", content.deal() == null ? null : content.deal().currency(),
+            currency);
+        for (DealLineItemDto line : content.lineItems()) {
+            if (line == null) {
+                throw new ConflictException("Document line item is unavailable; generate a new document");
+            }
+            requireMatchingSnapshotCurrency("Line item " + line.getId(), line.getCurrency(), currency);
+        }
+        if (!isHistoricalEmptySnapshot(content)) {
+            requireMatchingSnapshotCurrency("Document totals",
+                content.totals() == null ? null : content.totals().currency(), currency);
+        }
+    }
+
+    /** Historical empty snapshots omitted totals currency; only complete zero totals qualify. */
+    private boolean isHistoricalEmptySnapshot(DocumentContent content) {
+        DealLineItemTotalsDto totals = content.totals();
+        return content.lineItems().isEmpty() && totals != null && totals.currency() == null
+            && isZero(totals.subtotal()) && isZero(totals.tax()) && isZero(totals.oneTimeTotal())
+            && isZero(totals.recurringTotal()) && isZero(totals.grandTotal());
+    }
+
+    private boolean isZero(BigDecimal amount) {
+        return amount != null && amount.signum() == 0;
+    }
+
+    private void requireMatchingSnapshotCurrency(String source, String frozenCurrency, String documentCurrency) {
+        if (!documentCurrency.equalsIgnoreCase(frozenCurrency)) {
+            throw new ConflictException(source + " currency " + frozenCurrency
+                + " does not match document currency " + documentCurrency + "; generate a new document");
+        }
     }
 
     private void requireNoMatchingPolicy(List<ApprovalPolicy> policies, DealDocument document) {

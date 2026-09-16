@@ -31,6 +31,9 @@ public class DataSubjectDisclosureDto {
     private List<DealAssociationDto> dealAssociations;
     private List<IntroductionDto> introductions;
     private List<ThirdPartyProvisionDto> thirdPartyProvisions;
+    private List<ConsentStateDto> consentState;
+    private List<ConsentHistoryDto> consentHistory;
+    private List<AudienceExportEvidenceDto> audienceExportEvidence;
     private List<AuditEntryDto> auditTrail;
     private long auditTrailTotal;
 
@@ -331,6 +334,73 @@ public class DataSubjectDisclosureDto {
         private Integer grantedBy;
         private boolean canEdit;
         private LocalDateTime createdAt;
+    }
+
+    /** Current channel/purpose consent, including the retained acquisition evidence. */
+    @Data
+    public static class ConsentStateDto {
+        private int id;
+        private int workspaceId;
+        private int personId;
+        private String channel;
+        private String purpose;
+        private String status;
+        private String source;
+        private String evidenceRef;
+        private LocalDateTime capturedAt;
+        private LocalDateTime updatedAt;
+    }
+
+    /** Retained consent transitions, including superseded evidence and nullable actor attribution. */
+    @Data
+    public static class ConsentHistoryDto {
+        private int id;
+        private int workspaceId;
+        private int consentId;
+        private int personId;
+        private String channel;
+        private String purpose;
+        private String status;
+        private String source;
+        private String evidenceRef;
+        private Integer createdById;
+        private LocalDateTime createdAt;
+    }
+
+    /**
+     * Subject-only membership in a retained audience export. Frozen and staged membership are
+     * nullable for legacy records; staging records the intended request, not provider acceptance.
+     * Counts and outcome classification describe the entire export. The subject provision outcome
+     * is confirmed only for full staged-member delivery without a recorded late-outcome conflict;
+     * partial, ambiguous and conflicting results remain unconfirmed. Legacy membership is unknown.
+     */
+    @Data
+    public static class AudienceExportEvidenceDto {
+        private int id;
+        private int workspaceId;
+        private int campaignId;
+        private int snapshotId;
+        private String channel;
+        private String purpose;
+        private String connector;
+        private String externalListId;
+        private String snapshotMemberStatus;
+        private String snapshotExclusionReason;
+        private Boolean frozenMember;
+        private Boolean stagedForPush;
+        private String subjectProvisionOutcome;
+        private String status;
+        private int attempt;
+        private int totalMembers;
+        private Integer pushedCount;
+        private Integer failedCount;
+        private String outcomeClassification;
+        private String lateOutcome;
+        private String failureReason;
+        private LocalDateTime reconciliationRequiredAt;
+        private Integer createdById;
+        private LocalDateTime createdAt;
+        private LocalDateTime updatedAt;
     }
 
     @Data

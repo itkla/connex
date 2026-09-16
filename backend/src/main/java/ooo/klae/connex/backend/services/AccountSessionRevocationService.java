@@ -3,9 +3,12 @@ package ooo.klae.connex.backend.services;
 import org.springframework.security.core.session.SessionInformation;
 import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
+import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
 import ooo.klae.connex.backend.session.AccountSessionIndex;
 
 /**
@@ -35,6 +38,12 @@ import ooo.klae.connex.backend.session.AccountSessionIndex;
 public class AccountSessionRevocationService {
     private final SessionRegistry sessionRegistry;
     private final SpringSessionMapper springSessionMapper;
+    private final WebSocketSessionRegistry webSocketSessions;
+
+    /** Closes historical realtime identities only after the username change commits. */
+    public void closeWebSocketsAfterRename(int userId) {
+        closeAfterCommit(() -> webSocketSessions.closeByUser(userId));
+    }
 
     /**
      * Expires every session the account holds, forcing re-authentication everywhere.
@@ -67,6 +76,7 @@ public class AccountSessionRevocationService {
             String primaryId = springSessionMapper.primaryIdBySessionId(session.getSessionId());
             if (primaryId != null && !primaryId.equals(retainedSessionPrimaryId)) {
                 session.expireNow();
+                closeAfterCommit(() -> webSocketSessions.closeByHttpSession(session.getSessionId()));
             }
         }
     }
@@ -82,7 +92,23 @@ public class AccountSessionRevocationService {
                 : sessionRegistry.getAllSessions(new AccountSessionIndex(userId), false)) {
             if (!session.getSessionId().equals(retainedSessionId)) {
                 session.expireNow();
+                closeAfterCommit(() -> webSocketSessions.closeByHttpSession(session.getSessionId()));
             }
         }
     }
+
+    /** Defers transport I/O until the account mutation's database locks have been released. */
+    private void closeAfterCommit(Runnable close) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            close.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                close.run();
+            }
+        });
+    }
+
 }

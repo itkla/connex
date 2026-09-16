@@ -174,6 +174,12 @@ public class DataSubjectDisclosureReadTransaction {
             dataSubjectDisclosureMapper.findIntroductions(workspaceId, personId, workspaceIds));
         disclosure.setThirdPartyProvisions(
             dataSubjectDisclosureMapper.findProvisions(workspaceId, personId, workspaceIds));
+        disclosure.setConsentState(
+            dataSubjectDisclosureMapper.findConsentState(workspaceId, personId, workspaceIds));
+        disclosure.setConsentHistory(
+            dataSubjectDisclosureMapper.findConsentHistory(workspaceId, personId, workspaceIds));
+        disclosure.setAudienceExportEvidence(
+            dataSubjectDisclosureMapper.findAudienceExportEvidence(workspaceId, personId, workspaceIds));
         return disclosure;
     }
 

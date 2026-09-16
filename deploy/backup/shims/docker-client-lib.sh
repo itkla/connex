@@ -176,6 +176,55 @@ shim_run() {
     "${docker_command[@]}" "${docker_args[@]}" "$@"
 }
 
+shim_run_local_binlog() {
+    local image backup_root docker_value argument input
+    local rewrite_pattern='^[A-Za-z0-9_$-]{1,64}->[A-Za-z0-9_$-]{1,64}$'
+    local -a docker_command=()
+    local -a mounts=()
+    shim_load_environment
+    image="${CONNEX_BACKUP_DOCKER_BINLOG_IMAGE:-}"
+    if [[ ! "$image" =~ ^[a-zA-Z0-9][a-zA-Z0-9./:_-]*@sha256:[a-f0-9]{64}$ ]]; then
+        printf 'Connex mysqlbinlog image must be pinned as IMAGE@sha256:<64 lowercase hex digits>\n' >&2
+        return 64
+    fi
+    backup_root="$(realpath -m "${CONNEX_BACKUP_ROOT:-/var/backups/connex}")" || return 64
+    if ! shim_validate_path "$backup_root"; then
+        return 64
+    fi
+    for argument in "$@"; do
+        case "$argument" in
+            --version|--help|--verify-binlog-checksum|--require-row-format|--base64-output=*|--start-position=*|--stop-position=*|--start-datetime=*|--stop-datetime=*|--database=*|--verbose|-v|-vv|--hexdump)
+                ;;
+            --rewrite-db=*)
+                if [[ ! "${argument#--rewrite-db=}" =~ $rewrite_pattern ]]; then
+                    printf 'Connex mysqlbinlog requires schema identifiers in --rewrite-db=FROM->TO (1-64 ASCII letters, digits, underscores, dollar signs or hyphens each)\n' >&2
+                    return 64
+                fi
+                ;;
+            /*)
+                input="$(realpath -e "$argument")" || return 64
+                if [[ "$input" != "$backup_root/"* || "$argument" == *:* || "$argument" == *$'\n'* ]] ||
+                    [ ! -f "$input" ] || [ "$(od -An -tx1 -N4 "$input" | tr -d ' \n')" != fe62696e ]; then
+                    printf 'Connex mysqlbinlog only mounts binary-log inputs under the backup root\n' >&2
+                    return 64
+                fi
+                mounts+=(-v "$input:$argument:ro")
+                ;;
+            *)
+                printf 'Connex container mysqlbinlog supports local decoding only; use a native client for remote archiving\n' >&2
+                return 64
+                ;;
+        esac
+    done
+    docker_value="${CONNEX_BACKUP_DOCKER_BIN:-docker}"
+    read -r -a docker_command <<< "$docker_value"
+    [ "${#docker_command[@]}" -gt 0 ] || return 64
+    "${docker_command[@]}" run --rm -i --user "$(id -u):$(id -g)" \
+        --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+        -e TZ=UTC "${mounts[@]}" \
+        --entrypoint mysqlbinlog "$image" --no-defaults "$@"
+}
+
 shim_extract_defaults_file() {
     local argument
     for argument in "$@"; do

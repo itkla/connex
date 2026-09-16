@@ -2,10 +2,15 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,6 +24,8 @@ import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.WorkspaceService.LockedPermissionSnapshot;
+import ooo.klae.connex.backend.tenant.Permission;
 
 @ExtendWith(MockitoExtension.class)
 class DuplicateDecisionLockServiceTest {
@@ -158,6 +165,58 @@ class DuplicateDecisionLockServiceTest {
 
         verify(workspaceMapper, never()).lockAuthorizationMembership(5, 9);
         verify(organizationMapper).lockDuplicateDecision(3);
+    }
+
+    @Test
+    void permissionAwareGrantRetainsSortedWorkspaceRootsBeforePermissionAndMutexLocks() {
+        when(workspaceService.getCurrentUserId()).thenReturn(9);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(7);
+        when(workspaceService.getCurrentOrgId()).thenReturn(3);
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(workspaceMapper.lockActiveWorkspaceForShare(5)).thenReturn(3);
+        when(workspaceMapper.lockActiveWorkspaceForShare(7)).thenReturn(3);
+        when(workspaceMapper.lockAuthorizationMembership(5, 9))
+            .thenReturn(membership("active"));
+        when(workspaceMapper.lockAuthorizationMembership(7, 9))
+            .thenReturn(membership("active"));
+        Map<Integer, Set<Permission>> required = Map.of(9, Set.of(Permission.SHARE_MANAGE));
+        LockedPermissionSnapshot authority = mock(LockedPermissionSnapshot.class);
+        when(workspaceService.lockAndRequirePermissionsSnapshot(7, required)).thenReturn(authority);
+        when(organizationMapper.lockActiveByIdForShare(3)).thenReturn(3);
+
+        var locked = service().lockCurrentOrganizationWithMemberWorkspace(5, Permission.SHARE_MANAGE);
+
+        assertEquals(3, locked.orgId());
+        assertEquals(authority, locked.authority());
+        InOrder order = inOrder(userMapper, workspaceMapper, workspaceService, organizationMapper);
+        order.verify(userMapper).lockByIdForShare(9);
+        order.verify(workspaceMapper).lockActiveWorkspaceForShare(5);
+        order.verify(workspaceMapper).lockActiveWorkspaceForShare(7);
+        order.verify(workspaceMapper).lockAuthorizationMembership(5, 9);
+        order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
+        order.verify(workspaceService).lockAndRequirePermissionsSnapshot(7, required);
+        order.verify(organizationMapper).lockActiveByIdForShare(3);
+        order.verify(organizationMapper).lockDuplicateDecision(3);
+    }
+
+    @Test
+    void revokedPermissionRejectsBeforeDuplicateMutex() {
+        when(workspaceService.getCurrentUserId()).thenReturn(9);
+        when(workspaceService.getCurrentWorkspaceId()).thenReturn(5);
+        when(workspaceService.getCurrentOrgId()).thenReturn(3);
+        when(userMapper.lockByIdForShare(9)).thenReturn(9);
+        when(workspaceMapper.lockActiveWorkspaceForShare(5)).thenReturn(3);
+        when(workspaceMapper.lockAuthorizationMembership(5, 9))
+            .thenReturn(membership("active"));
+        doThrow(new ForbiddenException("Revoked permission"))
+            .when(workspaceService).lockAndRequirePermissionsSnapshot(
+                5, Map.of(9, Set.of(Permission.PERSON_UPDATE)));
+
+        assertThrows(ForbiddenException.class,
+            () -> service().lockCurrentOrganization(Permission.PERSON_UPDATE));
+
+        verify(organizationMapper, never()).lockActiveByIdForShare(3);
+        verify(organizationMapper, never()).lockDuplicateDecision(3);
     }
 
     @Test

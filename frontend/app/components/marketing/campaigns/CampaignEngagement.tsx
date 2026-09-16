@@ -33,6 +33,7 @@ const SKIP_REASON_KEYS = new Set([
     "quiet_hours",
     "no_address",
     "consent_missing",
+    "not_dispatchable",
 ]);
 
 function isSendStatus(status: string): status is CampaignSendStatus {

@@ -19,6 +19,8 @@ import java.security.MessageDigest;
 import java.util.HexFormat;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -35,6 +37,9 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.mail.MailConfigResolver;
 import ooo.klae.connex.backend.mail.ResolvedMailConfig;
 import ooo.klae.connex.backend.mappers.DeliveryProviderConfigMapper;
+import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.mappers.CampaignDeliveryMapper;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
 import ooo.klae.connex.backend.services.SessionSecurityService;
@@ -57,6 +62,9 @@ class DeliveryProviderConfigServiceTest {
     private static final String SMS_API_KEY = "sms_api_key_secret_1234";
     private static final String SMS_ENDPOINT = "https://sms.example.com/v1/messages";
 
+    @Mock private UserMapper userMapper;
+    @Mock private WorkspaceMapper workspaceMapper;
+    @Mock private CampaignDeliveryMapper deliveryMapper;
     @Mock private MailConfigResolver mailConfigResolver;
     @Mock private DeliveryProviderConfigMapper mapper;
     @Mock private DeliveryProviderSecretCipher cipher;
@@ -67,8 +75,10 @@ class DeliveryProviderConfigServiceTest {
     @Mock private SessionSecurityService sessionSecurityService;
 
     private DeliveryProviderConfigService service() {
+        lenient().when(workspaceMapper.lockWorkspaceForShare(WORKSPACE)).thenReturn(WORKSPACE);
         return new DeliveryProviderConfigService(mailConfigResolver, mapper, cipher, endpointValidator,
-                workspaceService, authService, auditService, sessionSecurityService);
+                workspaceService, authService, auditService, sessionSecurityService,
+                userMapper, workspaceMapper, deliveryMapper);
     }
 
     private void currentWorkspaceAndActor() {
@@ -104,8 +114,8 @@ class DeliveryProviderConfigServiceTest {
     void save_acceptsTheSmsProviderOnTheSmsChannelAndStoresOnlyASecretReference() {
         currentWorkspaceAndActor();
         when(endpointValidator.isFetchable("sms.example.com", false)).thenReturn(true);
-        when(cipher.encryptCredential(WORKSPACE, SMS_API_KEY)).thenReturn("secret:v1:77");
-        when(mapper.findByWorkspaceChannel(WORKSPACE, "sms")).thenReturn(null, enabledSms());
+        when(cipher.encryptCredential(WORKSPACE, DeliveryChannel.SMS, SMS_API_KEY)).thenReturn("secret:v1:77");
+        when(mapper.findByWorkspaceChannelForUpdate(WORKSPACE, "sms")).thenReturn(null, enabledSms());
 
         service().save(smsRequest());
 
@@ -157,8 +167,8 @@ class DeliveryProviderConfigServiceTest {
     void save_acceptsAWellFormedEmailFromAddressOnTheEmailChannel() {
         currentWorkspaceAndActor();
         when(endpointValidator.isFetchable("esp.example.com", false)).thenReturn(true);
-        when(cipher.encryptCredential(WORKSPACE, API_KEY)).thenReturn("secret:v1:9");
-        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(null, enabledEsp());
+        when(cipher.encryptCredential(WORKSPACE, DeliveryChannel.EMAIL, API_KEY)).thenReturn("secret:v1:9");
+        when(mapper.findByWorkspaceChannelForUpdate(WORKSPACE, "email")).thenReturn(null, enabledEsp());
         DeliveryProviderConfigRequest request = espRequest();
         request.setFromAddress("no-reply+campaigns@mail.sender.test");
 
@@ -173,8 +183,8 @@ class DeliveryProviderConfigServiceTest {
     void save_flagsACredentialRotationOnlyWhenANewSecretWasSubmitted() {
         currentWorkspaceAndActor();
         when(endpointValidator.isFetchable("esp.example.com", false)).thenReturn(true);
-        when(cipher.encryptCredential(WORKSPACE, API_KEY)).thenReturn("secret:v1:55");
-        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(enabledEsp());
+        when(cipher.encryptCredential(WORKSPACE, DeliveryChannel.EMAIL, API_KEY)).thenReturn("secret:v1:55");
+        when(mapper.findByWorkspaceChannelForUpdate(WORKSPACE, "email")).thenReturn(enabledEsp());
 
         service().save(espRequest());
 
@@ -185,14 +195,14 @@ class DeliveryProviderConfigServiceTest {
     void save_doesNotFlagARotationWhenTheStoredCredentialIsReused() {
         currentWorkspaceAndActor();
         when(endpointValidator.isFetchable("esp.example.com", false)).thenReturn(true);
-        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(enabledEsp());
+        when(mapper.findByWorkspaceChannelForUpdate(WORKSPACE, "email")).thenReturn(enabledEsp());
         DeliveryProviderConfigRequest request = espRequest();
         request.setApiKey(null);
 
         service().save(request);
 
         verify(mapper).upsert(any(), eq(false));
-        verify(cipher, never()).encryptCredential(eq(WORKSPACE), any());
+        verify(cipher, never()).encryptCredential(eq(WORKSPACE), eq(DeliveryChannel.EMAIL), any());
     }
 
     @Test
@@ -208,8 +218,8 @@ class DeliveryProviderConfigServiceTest {
 
     @Test
     void resolveForWorkspace_resolvesAnEnabledSmsConfigWithItsDecryptedCredential() {
-        when(mapper.findByWorkspaceChannel(WORKSPACE, "sms")).thenReturn(enabledSms());
-        when(cipher.decryptCredential(WORKSPACE, "secret:v1:77")).thenReturn(SMS_API_KEY);
+        when(mapper.findByWorkspaceChannelForShare(WORKSPACE, "sms")).thenReturn(enabledSms());
+        when(cipher.decryptCredential(WORKSPACE, DeliveryChannel.SMS, "secret:v1:77")).thenReturn(SMS_API_KEY);
 
         ResolvedDeliveryProvider resolved = service().resolveForWorkspace(WORKSPACE, DeliveryChannel.SMS);
 
@@ -221,7 +231,7 @@ class DeliveryProviderConfigServiceTest {
 
     @Test
     void resolveForWorkspace_neverFallsBackToSmtpForSms() {
-        when(mapper.findByWorkspaceChannel(WORKSPACE, "sms")).thenReturn(null);
+        when(mapper.findByWorkspaceChannelForShare(WORKSPACE, "sms")).thenReturn(null);
 
         assertThrows(DeliveryProviderException.class,
                 () -> service().resolveForWorkspace(WORKSPACE, DeliveryChannel.SMS));
@@ -249,8 +259,8 @@ class DeliveryProviderConfigServiceTest {
     void save_storesOnlyASecretReferenceAndLast4_neverThePlaintext() {
         currentWorkspaceAndActor();
         when(endpointValidator.isFetchable("esp.example.com", false)).thenReturn(true);
-        when(cipher.encryptCredential(WORKSPACE, API_KEY)).thenReturn("secret:v1:55");
-        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(null, enabledEsp());
+        when(cipher.encryptCredential(WORKSPACE, DeliveryChannel.EMAIL, API_KEY)).thenReturn("secret:v1:55");
+        when(mapper.findByWorkspaceChannelForUpdate(WORKSPACE, "email")).thenReturn(null, enabledEsp());
 
         service().save(espRequest());
 
@@ -277,7 +287,7 @@ class DeliveryProviderConfigServiceTest {
     @Test
     void save_repointingEspEndpointToANewHostWithoutReenteringCredential_isRejected() {
         currentWorkspaceAndActor();
-        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(enabledEsp());
+        when(mapper.findByWorkspaceChannelForUpdate(WORKSPACE, "email")).thenReturn(enabledEsp());
         when(endpointValidator.isFetchable("evil.example.com", false)).thenReturn(true);
         DeliveryProviderConfigRequest request = espRequest();
         request.setApiKey(null);
@@ -287,11 +297,29 @@ class DeliveryProviderConfigServiceTest {
         verify(mapper, never()).upsert(any(), anyBoolean());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"https://esp.example.com/another-account/send", "https://esp.example.com:8443/v1/send"})
+    void blankKeyCannotReuseTheCredentialForAnotherPathOrPort(String endpoint) {
+        currentWorkspaceAndActor();
+        when(mapper.findByWorkspaceChannelForUpdate(WORKSPACE, "email")).thenReturn(enabledEsp());
+        when(endpointValidator.isFetchable("esp.example.com", false)).thenReturn(true);
+        DeliveryProviderConfigRequest request = espRequest();
+        request.setEndpoint(endpoint);
+        request.setApiKey("");
+
+        assertThrows(BadRequestException.class, () -> service().save(request));
+
+        verify(mapper, never()).upsert(any(), anyBoolean());
+        verify(cipher, never()).encryptCredential(eq(WORKSPACE), eq(DeliveryChannel.EMAIL), any());
+        verify(workspaceService).lockAndRequirePermissionsWithWorkspaceMutex(
+                WORKSPACE, java.util.Map.of(ACTOR, java.util.Set.of(Permission.WORKSPACE_SETTINGS)));
+    }
+
     @Test
     void resolveForWorkspace_prefersAnEnabledEspConfigOverSmtp() {
         DeliveryProviderConfig config = enabledEsp();
-        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(config);
-        when(cipher.decryptCredential(WORKSPACE, "secret:v1:55")).thenReturn(API_KEY);
+        when(mapper.findByWorkspaceChannelForShare(WORKSPACE, "email")).thenReturn(config);
+        when(cipher.decryptCredential(WORKSPACE, DeliveryChannel.EMAIL, "secret:v1:55")).thenReturn(API_KEY);
 
         ResolvedDeliveryProvider resolved = service().resolveForWorkspace(WORKSPACE, DeliveryChannel.EMAIL);
 
@@ -305,10 +333,10 @@ class DeliveryProviderConfigServiceTest {
     void connectorIdempotencyIsDisabledByDefaultAndMustBeExplicitlyEnabled() {
         currentWorkspaceAndActor();
         when(endpointValidator.isFetchable("esp.example.com", false)).thenReturn(true);
-        when(cipher.encryptCredential(WORKSPACE, API_KEY)).thenReturn("secret:v1:55");
+        when(cipher.encryptCredential(WORKSPACE, DeliveryChannel.EMAIL, API_KEY)).thenReturn("secret:v1:55");
         DeliveryProviderConfig stored = enabledEsp();
         stored.setIdempotentSubmission(true);
-        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(null, stored);
+        when(mapper.findByWorkspaceChannelForUpdate(WORKSPACE, "email")).thenReturn(null, stored);
         DeliveryProviderConfigRequest request = espRequest();
 
         assertFalse(request.isIdempotentSubmission());
@@ -319,8 +347,8 @@ class DeliveryProviderConfigServiceTest {
                 ArgumentCaptor.forClass(DeliveryProviderConfig.class);
         verify(mapper).upsert(captor.capture(), anyBoolean());
         assertTrue(captor.getValue().isIdempotentSubmission());
-        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(stored);
-        when(cipher.decryptCredential(WORKSPACE, "secret:v1:55")).thenReturn(API_KEY);
+        when(mapper.findByWorkspaceChannelForShare(WORKSPACE, "email")).thenReturn(stored);
+        when(cipher.decryptCredential(WORKSPACE, DeliveryChannel.EMAIL, "secret:v1:55")).thenReturn(API_KEY);
         assertTrue(service().resolveForWorkspace(
                 WORKSPACE, DeliveryChannel.EMAIL).idempotentSubmission());
     }
@@ -334,9 +362,9 @@ class DeliveryProviderConfigServiceTest {
         endpointChanged.setEndpoint("https://esp-b.example.com/v1/send");
         DeliveryProviderConfig credentialChanged = enabledEsp();
         credentialChanged.setCredentialRef("secret:v1:99");
-        when(mapper.findByWorkspaceChannel(WORKSPACE, "email"))
+        when(mapper.findByWorkspaceChannelForShare(WORKSPACE, "email"))
                 .thenReturn(first, generationChanged, endpointChanged, credentialChanged);
-        when(cipher.decryptCredential(eq(WORKSPACE), any()))
+        when(cipher.decryptCredential(eq(WORKSPACE), eq(DeliveryChannel.EMAIL), any()))
                 .thenReturn(API_KEY);
 
         String firstFingerprint = service().resolveForWorkspace(
@@ -357,7 +385,7 @@ class DeliveryProviderConfigServiceTest {
 
     @Test
     void resolveForWorkspace_fallsBackToSmtpWhenNoEspConfig() {
-        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(null);
+        when(mapper.findByWorkspaceChannelForShare(WORKSPACE, "email")).thenReturn(null);
         ResolvedMailConfig mail = usableMail();
         when(mailConfigResolver.resolveForWorkspace(WORKSPACE)).thenReturn(mail);
 
@@ -380,7 +408,7 @@ class DeliveryProviderConfigServiceTest {
     void issueWebhookToken_persistsOnlyTheHashAndReference_andRevealsTheRawPairOnce() {
         currentWorkspaceAndActor();
         DeliveryProviderConfig config = enabledEsp();
-        when(mapper.findByWorkspaceChannel(WORKSPACE, "email")).thenReturn(config);
+        when(mapper.findByWorkspaceChannelForUpdate(WORKSPACE, "email")).thenReturn(config);
         when(cipher.encryptWebhookSecret(eq(WORKSPACE), org.mockito.ArgumentMatchers.anyString()))
                 .thenReturn("secret:v1:88");
 

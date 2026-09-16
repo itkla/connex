@@ -19,6 +19,14 @@
       AND password_enc NOT LIKE 'secret:v1:%'
   </select>
 
+  <select id="findByWorkspaceForUpdate" resultType="WorkspaceMailConfig">
+    SELECT workspace_id, enabled, host, port, username, password_enc,
+           from_address, from_name, starttls, `ssl`, `auth`, updated_at
+    FROM workspace_mail_config
+    WHERE workspace_id = #{workspaceId}
+    FOR UPDATE
+  </select>
+
   <insert id="upsert">
     INSERT INTO workspace_mail_config
       (workspace_id, enabled, host, port, username, password_enc,

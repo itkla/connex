@@ -52,7 +52,8 @@ class PasswordResetServiceLockingTest {
                 mock(PasswordResetEmailService.class),
                 mock(PasswordResetRateLimiter.class),
                 auditService,
-                new AccountSessionRevocationService(mock(SessionRegistry.class), mock(SpringSessionMapper.class)),
+                new AccountSessionRevocationService(mock(SessionRegistry.class), mock(SpringSessionMapper.class),
+                    mock(ooo.klae.connex.backend.notifications.WebSocketSessionRegistry.class)),
                 mock(SsoConnectionService.class));
         PasswordResetToken token = new PasswordResetToken();
         token.setUserId(41);

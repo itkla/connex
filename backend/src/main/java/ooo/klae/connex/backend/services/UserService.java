@@ -158,6 +158,9 @@ public class UserService implements UserDetailsService {
         if (after == null) {
             throw new ResourceNotFoundException("User not found with id: " + id);
         }
+        if (!Objects.equals(before.getUsername(), after.getUsername())) {
+            accountSessionRevocationService.closeWebSocketsAfterRename(id);
+        }
         auditService.record("user.update", "user", id, after.getUsername(),
             "Updated user " + after.getUsername(),
             auditService.diff(before, after, AUDIT_FIELDS));
@@ -247,12 +250,8 @@ public class UserService implements UserDetailsService {
      * tenant-routed pool; enumerating with a workspace pinned would look for control-plane rows in a
      * tenant catalog and find none.
      *
-     * <p>Best effort for the HTTP plane, where the session epoch filter already refuses every
-     * request once the account row is gone. It is <strong>not</strong> best effort for WebSockets: a
-     * socket established before the deletion passes through no servlet filter, so the expiry marker
-     * this writes is the only thing that closes it. A transient failure here therefore leaves that
-     * socket subscribed until its own timeout, which is why the failure is logged at error rather
-     * than swallowed quietly, and why the residual is stated in the pull request.
+     * <p>Enumeration immediately closes known sockets. If it fails or misses a raced session,
+     * the HTTP epoch filter and WebSocket delivery checks independently refuse the deleted account.
      *
      * <p>Logs the exception type only. A failure enumerating sessions surfaces driver messages that
      * can carry row content, and these rows hold a serialized principal.
@@ -264,8 +263,8 @@ public class UserService implements UserDetailsService {
                 return null;
             });
         } catch (RuntimeException exception) {
-            log.error("Could not expire sessions for deleted account {}; an open WebSocket may "
-                + "survive until it times out: {}", id, exception.getClass().getSimpleName());
+            log.error("Could not expire indexed sessions for deleted account {}: {}",
+                id, exception.getClass().getSimpleName());
         }
     }
 
