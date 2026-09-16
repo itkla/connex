@@ -51,6 +51,7 @@ import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiMediaAdmissionService;
 import ooo.klae.connex.backend.ai.AiOrganizationBudgetCoordinator;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.masking.Demasker;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
@@ -1118,8 +1119,10 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                 "deterministic", null, "deterministic-model", "https://provider.example.test/v1",
                 null, null, null, false, true, AiCredentials.of(Map.of())));
         AiOrganizationBudgetCoordinator budget = fixtureMock(AiOrganizationBudgetCoordinator.class);
+        AiOrganizationBudgetCoordinator.Lease budgetLease = fixtureMock(AiOrganizationBudgetCoordinator.Lease.class);
+        when(budgetLease.deadline()).thenAnswer(call -> AiRequestDeadline.afterMillis(60_000));
         when(budget.reserve(eq(workspace.getOrgId()), any(AiInvocation.class), anyString()))
-                .thenReturn(fixtureMock(AiOrganizationBudgetCoordinator.Lease.class));
+                .thenReturn(budgetLease);
         AiFeatureGate gate = fixtureMock(AiFeatureGate.class);
         when(gate.isAiUsable(AiFeature.ASSISTANT_CHAT)).thenReturn(true);
         AiInvocationService invocationService = new AiInvocationService(
