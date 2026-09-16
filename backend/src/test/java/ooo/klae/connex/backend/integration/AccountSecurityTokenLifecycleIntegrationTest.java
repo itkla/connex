@@ -20,6 +20,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -50,7 +54,9 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -81,6 +87,7 @@ import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService.Purpose;
 import ooo.klae.connex.backend.services.PasswordResetEmailService;
 import ooo.klae.connex.backend.services.PasswordResetService;
+import ooo.klae.connex.backend.services.SessionSecurityService;
 import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
@@ -155,6 +162,42 @@ class AccountSecurityTokenLifecycleIntegrationTest {
                 .content("{\"username\":\"" + user.getUsername() + "\",\"password\":\"" + PASSWORD + "\"}"))
             .andExpect(status().isOk()).andReturn();
         authenticatedSession = session(loggedIn);
+        roundTripSessionPrincipal();
+    }
+
+    private void roundTripSessionPrincipal() throws Exception {
+        String contextKey = HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY;
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ObjectOutputStream output = new ObjectOutputStream(bytes)) {
+            output.writeObject(authenticatedSession.getAttribute(contextKey));
+        }
+        try (ObjectInputStream input = new ObjectInputStream(new ByteArrayInputStream(bytes.toByteArray()))) {
+            if (!(input.readObject() instanceof SecurityContext restored)
+                    || restored.getAuthentication() == null
+                    || !(restored.getAuthentication().getPrincipal() instanceof User principal)) {
+                throw new IllegalStateException("Expected a serialized authenticated user");
+            }
+            assertEquals(user.getId(), principal.getId());
+            assertNull(principal.getSessionEpoch(), "session storage must drop the transient principal epoch");
+            authenticatedSession.setAttribute(contextKey, restored);
+        }
+        assertEquals(userMapper.currentSessionEpoch(user.getId()),
+            authenticatedSession.getAttribute(SessionSecurityService.SESSION_EPOCH_ATTR));
+    }
+
+    @Test
+    void emailChangeSucceedsAfterSessionRoundTripAtNonzeroEpoch() throws Exception {
+        assertEquals(1, userMapper.bumpSessionEpoch(user.getId()));
+        logIn();
+
+        String token = requestEmailChange();
+
+        EmailChangeToken pending = emailChangeTokenMapper.findByHash(OneTimeTokenDigest.sha256(token));
+        assertNotNull(pending);
+        assertEquals(userMapper.currentSessionEpoch(user.getId()), pending.getCredentialGeneration());
+        Browser recipient = browser();
+        confirmEmail(recipient, exchangeEmail(token, recipient), 200);
+        assertEquals(newEmail, userMapper.getUserById(user.getId()).getEmail());
     }
 
     @ParameterizedTest

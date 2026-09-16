@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -17,6 +18,8 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
 import ooo.klae.connex.backend.beans.PasswordResetToken;
 import ooo.klae.connex.backend.beans.User;
@@ -50,6 +53,7 @@ class EmailChangeServiceTest extends AbstractServiceTest {
     @Autowired private PasswordResetTokenMapper passwordResetTokenMapper;
     @Autowired private UserService userService;
     @Autowired private PasswordEncoder passwordEncoder;
+    @Autowired private SessionSecurityService sessionSecurityService;
     @Autowired private CapturingEmailChangeService email;
 
     private static final String PASSWORD = "Str0ng-Pw1!";
@@ -71,6 +75,11 @@ class EmailChangeServiceTest extends AbstractServiceTest {
         currentUser = newUser();
         authenticateAs(currentUser, workspace.getId());
         userMapper.updatePasswordHash(currentUser.getId(), passwordEncoder.encode(PASSWORD));
+        ServletRequestAttributes attributes = assertInstanceOf(ServletRequestAttributes.class,
+            RequestContextHolder.currentRequestAttributes());
+        Integer epoch = userMapper.currentSessionEpoch(currentUser.getId());
+        assertNotNull(epoch);
+        sessionSecurityService.stampSessionEpoch(attributes.getRequest(), epoch);
         email.reset();
     }
 
@@ -79,6 +88,26 @@ class EmailChangeServiceTest extends AbstractServiceTest {
         assertThrows(ForbiddenException.class,
             () -> emailChangeService.requestChange("new_" + unique() + "@example.com", "wrong-password", CLIENT_IP));
         assertNull(email.lastToken, "no verification email should be sent when the password is wrong");
+    }
+
+    @Test
+    void requestChange_missingSessionEpoch_forbidden() {
+        ServletRequestAttributes attributes = assertInstanceOf(ServletRequestAttributes.class,
+            RequestContextHolder.currentRequestAttributes());
+        attributes.getRequest().getSession().removeAttribute(SessionSecurityService.SESSION_EPOCH_ATTR);
+
+        assertThrows(ForbiddenException.class,
+            () -> emailChangeService.requestChange("new_" + unique() + "@example.com", PASSWORD, CLIENT_IP));
+        assertNull(email.lastToken);
+    }
+
+    @Test
+    void requestChange_staleSessionEpoch_forbidden() {
+        assertEquals(1, userMapper.bumpSessionEpoch(currentUser.getId()));
+
+        assertThrows(ForbiddenException.class,
+            () -> emailChangeService.requestChange("new_" + unique() + "@example.com", PASSWORD, CLIENT_IP));
+        assertNull(email.lastToken);
     }
 
     @Test

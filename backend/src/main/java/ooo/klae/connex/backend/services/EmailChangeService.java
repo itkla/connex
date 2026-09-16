@@ -39,6 +39,7 @@ public class EmailChangeService {
     private final PasswordResetTokenMapper passwordResetTokenMapper;
     private final EmailChangeEmailService emailChangeEmailService;
     private final AuthService authService;
+    private final SessionSecurityService sessionSecurityService;
     private final AuditService auditService;
     private final LoginRateLimiter loginRateLimiter;
 
@@ -56,7 +57,8 @@ public class EmailChangeService {
      * emails the link to that new address. Requires the caller's current password
      * (step-up) and rejects an address already in use.
      * The account lock serializes issuance with recovery; the locked credential
-     * snapshot must still match the one whose password was confirmed.
+     * snapshot must still match the one whose password was confirmed and the persisted
+     * servlet-session epoch captured before confirmation, never the transient principal epoch.
      *
      * <p>The proof runs through the shared login/confirmation throttle, so repeated failures here
      * also consume the account's login failure budget: a session holder without the password can
@@ -78,6 +80,7 @@ public class EmailChangeService {
     @Transactional
     public void requestChange(String newEmailRaw, String currentPassword, ResolvedClientIp requestIp) {
         User user = authService.getCurrentUser();
+        Integer sessionEpoch = sessionSecurityService.currentSessionEpoch();
         try {
             authService.requireCurrentPassword(user.getId(), currentPassword, requestIp);
         } catch (TooManyRequestsException exception) {
@@ -97,7 +100,7 @@ public class EmailChangeService {
         User lockedUser = userMapper.getUserByIdForShare(user.getId());
         if (lockedUser == null || lockedUser.getSessionEpoch() == null
                 || !Objects.equals(user.getPasswordHash(), lockedUser.getPasswordHash())
-                || !Objects.equals(user.getSessionEpoch(), lockedUser.getSessionEpoch())) {
+                || !Objects.equals(sessionEpoch, lockedUser.getSessionEpoch())) {
             throw new ForbiddenException("Your current password is incorrect");
         }
         user = lockedUser;
