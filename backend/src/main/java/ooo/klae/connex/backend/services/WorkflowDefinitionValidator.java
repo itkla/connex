@@ -52,6 +52,28 @@ public class WorkflowDefinitionValidator {
         return compilation.compiled();
     }
 
+    /**
+     * Compiles a manual claim using the requester's membership and permission snapshots locked
+     * before the runtime gate and workflow root. No non-locking authorization is consumed here.
+     */
+    public CompiledWorkflow validateForManualDispatch(
+            String recordType,
+            String executionMode,
+            WorkflowDefinition definition,
+            boolean lockedBuiltInAdministrator,
+            Set<Permission> lockedPermissions) {
+        Compilation compilation = compile(definition);
+        ruleDefinitionValidator.validateWorkflowNodesForManualDispatch(
+            recordType,
+            compilation.trigger(),
+            compilation.conditions(),
+            compilation.actions(),
+            executionMode,
+            lockedBuiltInAdministrator,
+            lockedPermissions);
+        return compilation.compiled();
+    }
+
     public Set<Permission> validateForMutation(
             String recordType,
             String executionMode,

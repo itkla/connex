@@ -56,7 +56,7 @@ class AnalyticsMemberScopeGateTest {
     private void denyNonManager() {
         when(memberScopeResolver.resolve(any(), any(), anyInt())).thenReturn(MEMBER_SCOPE);
         doThrow(new ForbiddenException("Requires ADMIN role in this workspace"))
-            .when(workspaceService).requireRole(WorkspaceService.Role.ADMIN);
+            .when(workspaceService).requireBuiltInAdministrator();
     }
 
     private void allowAllTeam() {
@@ -102,7 +102,7 @@ class AnalyticsMemberScopeGateTest {
         allowAllTeam();
         dealController().getDealKpis(
             null, "90d", null, null, null, null, null, null, null);
-        verify(workspaceService, never()).requireRole(any());
+        verify(workspaceService, never()).requireBuiltInAdministrator();
         verify(dealService).getDealKpis(any(), eq(90), any());
     }
 
@@ -120,7 +120,7 @@ class AnalyticsMemberScopeGateTest {
     void taskSummaryAllowsAllTeamWithoutManagerCheck() {
         allowAllTeam();
         taskController().getTaskSummary(null, null);
-        verify(workspaceService, never()).requireRole(any());
+        verify(workspaceService, never()).requireBuiltInAdministrator();
         verify(taskService).getTaskSummary(any());
     }
 }

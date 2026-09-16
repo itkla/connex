@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -29,6 +30,16 @@ class WorkspaceServiceTest extends AbstractServiceTest {
     @Autowired TenantContext tenantContext;
     @Autowired OrganizationMapper organizationMapper;
     @Autowired JdbcTemplate jdbcTemplate;
+
+    @Test
+    void roleAuthorizationSeparatesCreationFromNonNullableMutation() throws Exception {
+        assertNotNull(WorkspaceService.class.getDeclaredMethod(
+            "lockRoleCreationAuthorization", int.class, int.class, Set.class));
+        assertNotNull(WorkspaceService.class.getDeclaredMethod(
+            "lockRoleMutationAuthorization", int.class, int.class, int.class, Set.class));
+        assertThrows(NoSuchMethodException.class, () -> WorkspaceService.class.getDeclaredMethod(
+            "lockRoleMutationAuthorization", int.class, int.class, Integer.class, Set.class));
+    }
 
     @Test
     void createWorkspace_makesCallerOwner() {

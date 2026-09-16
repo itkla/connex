@@ -22,8 +22,8 @@ import ooo.klae.connex.backend.dto.WorkflowDiagnosticCode;
 import ooo.klae.connex.backend.dto.WorkflowDiagnosticDto;
 import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
-import ooo.klae.connex.backend.services.WorkspaceService.Role;
 import ooo.klae.connex.backend.tenant.Permission;
 
 /**
@@ -143,6 +143,34 @@ public class RuleDefinitionValidator {
             recordTypeValue, trigger, conditions, actions, executionMode);
         requireCurrentSystemRole(executionMode);
         requireCurrentPermissions(required);
+    }
+
+    /**
+     * Validates a manual dispatch using requester authorization retained before runtime record
+     * locks. The ordinary validation entry points use non-locking authorization for previews and
+     * preliminary validation; their results are not authorization snapshots for a later claim.
+     */
+    void validateWorkflowNodesForManualDispatch(
+            String recordTypeValue,
+            WorkflowNode.Trigger trigger,
+            List<WorkflowNode.Condition> conditions,
+            List<WorkflowNode.Action> actions,
+            String executionMode,
+            boolean lockedBuiltInAdministrator,
+            Set<Permission> lockedPermissions) {
+        Set<Permission> required = validateWorkflowNodesForMutation(
+            recordTypeValue, trigger, conditions, actions, executionMode);
+        if ("system".equals(normalize(executionMode))) {
+            workspaceService.requireLockedBuiltInAdministrator(lockedBuiltInAdministrator);
+        }
+        EnumSet<Permission> dispatchPermissions = EnumSet.of(Permission.RULE_MANAGE);
+        dispatchPermissions.addAll(required);
+        for (Permission permission : dispatchPermissions) {
+            if (!lockedPermissions.contains(permission)) {
+                throw new ForbiddenException(
+                    "Requires the " + permission + " permission in this workspace");
+            }
+        }
     }
 
     Set<Permission> validateWorkflowNodesForMutation(
@@ -382,7 +410,7 @@ public class RuleDefinitionValidator {
 
     private void requireCurrentSystemRole(String executionMode) {
         if ("system".equals(normalize(executionMode))) {
-            workspaceService.requireRole(Role.ADMIN);
+            workspaceService.requireBuiltInAdministrator();
         }
     }
 

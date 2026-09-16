@@ -4,6 +4,7 @@ import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,7 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.WorkflowInvocation;
 import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
@@ -26,11 +28,13 @@ import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
+import ooo.klae.connex.backend.tenant.Permission;
 
 /**
  * Serializes runtime ownership and dedupe claims on the exact workflow root. A paired workflow keeps
@@ -53,6 +57,8 @@ public class WorkflowRuntimeClaimService {
     private final WorkflowDefinitionValidator definitionValidator;
     private final WorkflowDedupeKey dedupeKey;
     private final SystemActor systemActor;
+    private final WorkflowOperationsMapper operationsMapper;
+    private final WorkspaceService workspaceService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
     public CanonicalClaim claimEntity(
@@ -202,6 +208,10 @@ public class WorkflowRuntimeClaimService {
             "queued");
     }
 
+    /**
+     * Retains the saved requester's current authorization before any runtime record lock, for both
+     * HTTP confirmation and restart recovery. Validation consumes only those locked snapshots.
+     */
     @Transactional(propagation = Propagation.MANDATORY)
     public CanonicalClaim claimManual(
             int workspaceId,
@@ -209,6 +219,17 @@ public class WorkflowRuntimeClaimService {
             long expectedVersionId,
             long invocationId,
             int recordId) {
+        WorkflowInvocation invocation = operationsMapper.getInvocation(
+            workspaceId, workflowId, invocationId);
+        if (invocation == null || invocation.getRequestedById() == null
+                || invocation.getWorkflowVersionId() != expectedVersionId) {
+            return CanonicalClaim.rejectedClaim();
+        }
+        int requesterId = invocation.getRequestedById();
+        boolean lockedBuiltInAdministrator = workspaceService.isLockedBuiltInAdministrator(
+            workspaceId, requesterId);
+        Set<Permission> lockedPermissions = workspaceService.lockedMemberPermissionsFor(
+            workspaceId, requesterId);
         workflowTriggerOutboxMapper.ensureWorkspaceGate(workspaceId);
         Workflow workflow = workflowMapper.getByIdForUpdate(workspaceId, workflowId);
         if (!canonicalOwnerCanClaim(workflow)
@@ -217,7 +238,9 @@ public class WorkflowRuntimeClaimService {
             return CanonicalClaim.rejectedClaim();
         }
         WorkflowVersion version = activeVersion(workflow);
-        CompiledWorkflow compiled = compiled(workflow, version);
+        CompiledWorkflow compiled = definitionValidator.validateForManualDispatch(
+            version.getRecordType(), version.getExecutionMode(), verifiedDefinition(version),
+            lockedBuiltInAdministrator, lockedPermissions);
         String triggerKey = Long.toString(invocationId);
         String key = "manual:" + invocationId + ":" + recordId;
         return claimCanonical(
@@ -440,6 +463,11 @@ public class WorkflowRuntimeClaimService {
     }
 
     private CompiledWorkflow compiled(Workflow workflow, WorkflowVersion version) {
+        return definitionValidator.validate(
+            version.getRecordType(), version.getExecutionMode(), verifiedDefinition(version));
+    }
+
+    private WorkflowDefinition verifiedDefinition(WorkflowVersion version) {
         CanonicalDraft canonical = canonicalizer.canonicalizeDraftJson(
             version.getName(),
             version.getDescription(),
@@ -455,9 +483,7 @@ public class WorkflowRuntimeClaimService {
                 "The active workflow definition failed its integrity check.",
                 true);
         }
-        WorkflowDefinition definition = canonicalizer.parseDefinition(canonical.definitionJson());
-        return definitionValidator.validate(
-            version.getRecordType(), version.getExecutionMode(), definition);
+        return canonicalizer.parseDefinition(canonical.definitionJson());
     }
 
     private boolean entityTriggerMatches(

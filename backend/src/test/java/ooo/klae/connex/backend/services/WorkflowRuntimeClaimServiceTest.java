@@ -20,6 +20,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,6 +34,7 @@ import org.springframework.dao.DuplicateKeyException;
 import ooo.klae.connex.backend.beans.Rule;
 import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.WorkflowInvocation;
 import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
 import ooo.klae.connex.backend.beans.WorkflowVersion;
@@ -42,11 +44,13 @@ import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
 import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.services.WorkflowDefinitionValidator.CompiledWorkflow;
 import ooo.klae.connex.backend.services.WorkflowDraftCanonicalizer.CanonicalDraft;
+import ooo.klae.connex.backend.tenant.Permission;
 
 @ExtendWith(MockitoExtension.class)
 class WorkflowRuntimeClaimServiceTest {
@@ -60,6 +64,8 @@ class WorkflowRuntimeClaimServiceTest {
     @Mock private WorkflowDraftCanonicalizer canonicalizer;
     @Mock private WorkflowDefinitionValidator definitionValidator;
     @Mock private SystemActor systemActor;
+    @Mock private WorkflowOperationsMapper operationsMapper;
+    @Mock private WorkspaceService workspaceService;
     @Mock private CompiledWorkflow compiled;
 
     private WorkflowRuntimeClaimService service;
@@ -80,7 +86,9 @@ class WorkflowRuntimeClaimServiceTest {
             definitionValidator,
             new WorkflowDedupeKey(Clock.fixed(
                 Instant.parse("2026-08-03T12:00:00Z"), ZoneOffset.UTC)),
-            systemActor);
+            systemActor,
+            operationsMapper,
+            workspaceService);
         workflow = workflow("canonical");
         version = version();
         dispatch = new WorkflowTriggerDispatch.EntityChange(
@@ -234,6 +242,56 @@ class WorkflowRuntimeClaimServiceTest {
         InOrder lockOrder = inOrder(workflowTriggerOutboxMapper, workflowMapper);
         lockOrder.verify(workflowTriggerOutboxMapper).ensureWorkspaceGate(7);
         lockOrder.verify(workflowMapper).getByIdForUpdate(7, 11);
+    }
+
+    @Test
+    void manualClaimLocksSavedRequesterBeforeRuntimeRecordsAndPassesSnapshotsToValidation() {
+        WorkflowInvocation invocation = new WorkflowInvocation();
+        invocation.setRequestedById(29);
+        invocation.setWorkflowVersionId(19L);
+        when(operationsMapper.getInvocation(7, 11, 31L)).thenReturn(invocation);
+        Set<Permission> permissions = Set.of(Permission.RULE_MANAGE, Permission.COMPANY_UPDATE);
+        when(workspaceService.isLockedBuiltInAdministrator(7, 29)).thenReturn(false);
+        when(workspaceService.lockedMemberPermissionsFor(7, 29)).thenReturn(permissions);
+        when(workflowMapper.getByIdForUpdate(7, 11)).thenReturn(workflow);
+        when(workflowVersionMapper.getById(7, 11, 19L)).thenReturn(version);
+        CanonicalDraft canonical = new CanonicalDraft(
+            "Workflow", null, "company", "user", "{}", "{}", new byte[32]);
+        when(canonicalizer.canonicalizeDraftJson(
+            "Workflow", null, "company", "user", "{}", "{}"))
+            .thenReturn(canonical);
+        WorkflowDefinition definition = new WorkflowDefinition(1, "trigger", List.of(), List.of());
+        when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
+        when(definitionValidator.validateForManualDispatch(
+            "company", "user", definition, false, permissions)).thenReturn(compiled);
+        when(compiled.entryNodeId()).thenReturn("trigger");
+
+        assertTrue(service.claimManual(7, 11, 19L, 31L, 41).started());
+
+        InOrder order = inOrder(workspaceService, workflowTriggerOutboxMapper, workflowMapper,
+            definitionValidator, workflowRunMapper);
+        order.verify(workspaceService).isLockedBuiltInAdministrator(7, 29);
+        order.verify(workspaceService).lockedMemberPermissionsFor(7, 29);
+        order.verify(workflowTriggerOutboxMapper).ensureWorkspaceGate(7);
+        order.verify(workflowMapper).getByIdForUpdate(7, 11);
+        order.verify(definitionValidator).validateForManualDispatch(
+            "company", "user", definition, false, permissions);
+        order.verify(workflowRunMapper).insertRun(any());
+        verify(definitionValidator, never()).validate(anyString(), anyString(), any());
+        verify(workspaceService, never()).getCurrentUserId();
+    }
+
+    @Test
+    void manualClaimRejectsErasedRequesterBeforeRuntimeLocks() {
+        WorkflowInvocation invocation = new WorkflowInvocation();
+        invocation.setWorkflowVersionId(19L);
+        when(operationsMapper.getInvocation(7, 11, 31L)).thenReturn(invocation);
+
+        assertTrue(service.claimManual(7, 11, 19L, 31L, 41).rejected());
+
+        verify(workflowTriggerOutboxMapper, never()).ensureWorkspaceGate(anyInt());
+        verify(workflowMapper, never()).getByIdForUpdate(anyInt(), anyInt());
+        verify(workflowRunMapper, never()).insertRun(any());
     }
 
     @Test

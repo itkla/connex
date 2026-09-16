@@ -61,15 +61,16 @@ public interface WorkspaceMapper {
     List<MemberDto> getMembersWithRoles(int workspaceId);
     MemberDto getMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getMemberRoleId(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
-    boolean hasMembersWithCustomRole(
+    /** Locks the workspace's active owner rows without waiting, before acquiring role roots. */
+    List<WorkspaceMember> lockActiveOwnerMembers(@Param("workspaceId") int workspaceId);
+    /** Locks every membership currently overlaid by the role without waiting. */
+    List<WorkspaceMember> lockRoleAssignees(
         @Param("workspaceId") int workspaceId,
         @Param("roleId") int roleId);
     int setMemberCustomRole(@Param("workspaceId") int workspaceId, @Param("userId") int userId, @Param("roleId") int roleId);
-    int countOwners(int workspaceId);
     java.util.List<Integer> workspaceIdsOwnedBy(@Param("userId") int userId);
     Integer lockWorkspace(@Param("workspaceId") int workspaceId);
     Integer lockWorkspaceForShare(@Param("workspaceId") int workspaceId);
-    java.util.List<Integer> lockOwnerIds(@Param("workspaceId") int workspaceId);
     Integer lockActiveWorkspaceForShare(@Param("workspaceId") int workspaceId);
     Integer lockWorkspaceOrgIdForShare(@Param("workspaceId") int workspaceId);
     int removeMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);

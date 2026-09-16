@@ -34,6 +34,7 @@ import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationDelivery;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
+import ooo.klae.connex.backend.services.AccountDeletionReservationRead;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.OrgAllowedDomainService;
 import ooo.klae.connex.backend.services.OrgMemberService;
@@ -85,6 +86,7 @@ class ApiCredentialManagementLockOrderTest {
             auditService,
             mock(SystemActor.class),
             sessionSecurityService,
+            mock(AccountDeletionReservationRead.class),
             mock(RegistrationVerificationService.class));
         service = new ApiCredentialService(
             apiCredentialMapper,
