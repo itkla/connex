@@ -97,12 +97,12 @@ public final class OutboundLeakScan {
         }
     }
 
-    /** Visits every key and scalar separately, including earlier values of duplicate keys. */
+    /** Visits every key and non-null scalar separately, including earlier values of duplicate keys. */
     private static List<String> decodedJsonFields(String payload, ObjectMapper objectMapper) {
         List<String> fields = new ArrayList<>();
         try (JsonParser parser = objectMapper.createParser(payload)) {
             for (JsonToken token = parser.nextToken(); token != null; token = parser.nextToken()) {
-                if (token == JsonToken.PROPERTY_NAME || token.isScalarValue()) {
+                if (token == JsonToken.PROPERTY_NAME || (token.isScalarValue() && token != JsonToken.VALUE_NULL)) {
                     fields.add(parser.getString());
                 }
             }
