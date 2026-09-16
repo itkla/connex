@@ -10,8 +10,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-import java.net.URI;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,6 +23,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
+import org.springframework.security.oauth2.core.oidc.OidcIdToken;
 import org.springframework.security.oauth2.core.oidc.user.OidcUser;
 
 import ooo.klae.connex.backend.beans.User;
@@ -90,13 +92,12 @@ class SsoErrorBranchSessionTest {
     @Test
     void anUnknownOidcRegistrationCannotEstablishASession() throws Exception {
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example");
-        lenient().when(oidcUser.getIssuer()).thenReturn(URI.create("https://issuer.example").toURL());
-        lenient().when(oidcUser.getSubject()).thenReturn("subject");
+        lenient().when(oidcUser.getIdToken()).thenReturn(idToken());
         lenient().when(oidcUser.getEmail()).thenReturn("member@example.com");
         lenient().when(oidcUser.getEmailVerified()).thenReturn(true);
         lenient().when(oidcUser.getFullName()).thenReturn("Member");
         lenient().when(ssoLoginService.resolve(
-                any(), any(), any(), any(), anyBoolean(), anyInt(), any()))
+                any(), any(), any(), any(), anyBoolean(), anyInt(), any(), any()))
                 .thenReturn(new SsoLoginResult.Login(new User()));
 
         handler.onAuthenticationSuccess(request, response,
@@ -125,13 +126,12 @@ class SsoErrorBranchSessionTest {
     @Test
     void aFailedResolutionLeavesNoAuthenticatedSession() throws Exception {
         when(mailProperties.getAppBaseUrl()).thenReturn("https://app.example");
-        when(oidcUser.getIssuer()).thenReturn(URI.create("https://issuer.example").toURL());
-        when(oidcUser.getSubject()).thenReturn("subject");
+        when(oidcUser.getIdToken()).thenReturn(idToken());
         when(oidcUser.getEmail()).thenReturn("member@example.com");
         when(oidcUser.getEmailVerified()).thenReturn(true);
         when(oidcUser.getFullName()).thenReturn("Member");
         when(ssoLoginService.resolve(
-                "oidc", "https://issuer.example", "subject", "member@example.com", true, 7, "Member"))
+                "oidc", "https://issuer.example", "subject", "member@example.com", true, 7, "Member", "client"))
                 .thenThrow(new ForbiddenException("connection vanished"));
 
         handler.onAuthenticationSuccess(request, response,
@@ -143,6 +143,12 @@ class SsoErrorBranchSessionTest {
     private void assertDowngraded() {
         verify(authService).downgradeToUnauthenticatedSession(request, response);
         assertEquals(LOGIN_ERROR, response.getRedirectedUrl());
+    }
+
+    private static OidcIdToken idToken() {
+        Instant issuedAt = Instant.now();
+        return new OidcIdToken("id-token", issuedAt, issuedAt.plusSeconds(60),
+                Map.of("iss", "https://issuer.example", "sub", "subject", "aud", List.of("client")));
     }
 
     /**

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.SocketTimeoutException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -14,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.registration.ClientRegistrations;
@@ -24,7 +26,6 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.util.UriComponentsBuilder;
 
-import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.SsoConnection;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 
@@ -38,12 +39,12 @@ import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
  * as a secret-free template; every returned registration receives a fresh decrypted
  * client secret.
  *
- * <p>Every resolution re-validates the issuer and all discovered destinations against the
+ * <p>Every successful resolution re-validates the issuer and all discovered destinations against the
  * outbound address policy, in a single bounded transport task, so a warm cache hit costs one
- * unit of transport capacity rather than one per endpoint.
+ * unit of transport capacity rather than one per endpoint. Provider failures are cached for the
+ * discovery TTL against the connection identity; shared-capacity failures remain retryable.
  */
 @Component
-@RequiredArgsConstructor
 public class DbClientRegistrationRepository implements ClientRegistrationRepository {
 
     private static final Logger log = LoggerFactory.getLogger(DbClientRegistrationRepository.class);
@@ -60,9 +61,27 @@ public class DbClientRegistrationRepository implements ClientRegistrationReposit
     private final SsoSecretCipher ssoSecretCipher;
     private final SsoProperties ssoProperties;
     private final SsoHttpClient ssoHttpClient;
+    private final Clock clock;
 
     private final ConcurrentHashMap<String, CachedTemplate> cache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, CachedFailure> failures = new ConcurrentHashMap<>();
     private final SsoTransportSlots registrationSlots = new SsoTransportSlots(RESOLUTIONS_PER_REGISTRATION);
+
+    /** Creates the repository with the system clock for discovery cache expiry. */
+    @Autowired
+    public DbClientRegistrationRepository(SsoConnectionMapper ssoConnectionMapper, SsoSecretCipher ssoSecretCipher,
+            SsoProperties ssoProperties, SsoHttpClient ssoHttpClient) {
+        this(ssoConnectionMapper, ssoSecretCipher, ssoProperties, ssoHttpClient, Clock.systemUTC());
+    }
+
+    DbClientRegistrationRepository(SsoConnectionMapper ssoConnectionMapper, SsoSecretCipher ssoSecretCipher,
+            SsoProperties ssoProperties, SsoHttpClient ssoHttpClient, Clock clock) {
+        this.ssoConnectionMapper = ssoConnectionMapper;
+        this.ssoSecretCipher = ssoSecretCipher;
+        this.ssoProperties = ssoProperties;
+        this.ssoHttpClient = ssoHttpClient;
+        this.clock = clock;
+    }
 
     @Override
     public ClientRegistration findByRegistrationId(String registrationId) {
@@ -84,7 +103,16 @@ public class DbClientRegistrationRepository implements ClientRegistrationReposit
             log.warn("Enterprise OIDC resolution refused for org {}: the stored connection is incomplete", orgId);
             return null;
         }
-        Instant now = Instant.now();
+        Instant now = clock.instant();
+        CachedFailure failure = failures.get(orgId);
+        if (failure != null) {
+            if (failure.identity().equals(identity)
+                    && failure.allowPrivateIssuerHosts() == ssoProperties.isAllowPrivateIssuerHosts()
+                    && now.isBefore(failure.cachedAt().plus(DISCOVERY_CACHE_TTL))) {
+                return null;
+            }
+            failures.remove(orgId, failure);
+        }
         try (var lease = registrationSlots.acquire(Integer.toString(orgId), 0)) {
             CachedTemplate cached = cache.get(registrationId);
             ClientRegistration template;
@@ -110,11 +138,27 @@ public class DbClientRegistrationRepository implements ClientRegistrationReposit
             }
             return registration;
         } catch (IOException | RuntimeException e) {
+            if (cacheableFailure(e)) {
+                failures.put(orgId, new CachedFailure(identity, ssoProperties.isAllowPrivateIssuerHosts(),
+                        clock.instant()));
+            }
             log.warn("Enterprise OIDC resolution refused for org {}: {} [{}]",
                     orgId, refusalReason(e), e.getClass().getName());
             log.debug("Enterprise OIDC resolution failure for org {}", orgId, e);
             return null;
         }
+    }
+
+    /** Excludes shared-capacity deadlines and interruption, including wrapped transport failures. */
+    private static boolean cacheableFailure(Exception failure) {
+        Throwable cause = failure;
+        for (int depth = 0; cause != null && depth < MAX_CAUSE_DEPTH; depth++) {
+            if (cause instanceof SsoTransportSaturatedException || cause instanceof SsoTransportException) {
+                return false;
+            }
+            cause = cause.getCause();
+        }
+        return cause == null;
     }
 
     private static String refusalReason(Exception failure) {
@@ -158,6 +202,7 @@ public class DbClientRegistrationRepository implements ClientRegistrationReposit
      */
     public void evict(int orgId) {
         cache.remove(REGISTRATION_PREFIX + orgId);
+        failures.remove(orgId);
     }
 
     private ClientRegistration buildTemplate(int orgId, String registrationId, ConnectionIdentity identity,
@@ -173,9 +218,16 @@ public class DbClientRegistrationRepository implements ClientRegistrationReposit
                 .build();
     }
 
+    /**
+     * Removes terminal path slashes only for discovery URL composition. Metadata issuer and token
+     * {@code iss} validation retain the configured issuer byte-for-byte, including its trailing slash.
+     */
     private ClientRegistration.Builder discover(int orgId, String issuer) {
         URI uri = URI.create(issuer);
         String path = uri.getRawPath();
+        while (path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
         List<String> paths = List.of(path + "/.well-known/openid-configuration",
                 "/.well-known/openid-configuration" + path,
                 "/.well-known/oauth-authorization-server" + path);
@@ -306,5 +358,8 @@ public class DbClientRegistrationRepository implements ClientRegistrationReposit
         boolean expired(Instant now) {
             return cachedAt.plus(DISCOVERY_CACHE_TTL).isBefore(now);
         }
+    }
+
+    private record CachedFailure(ConnectionIdentity identity, boolean allowPrivateIssuerHosts, Instant cachedAt) {
     }
 }
