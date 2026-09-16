@@ -115,6 +115,45 @@ class DocumentAcceptanceAdmissionFilterTest {
     }
 
     @Test
+    void rotatingGrantCookiesFromABlockedSourceLeaveFreshRecipientsAdmissible() throws Exception {
+        SignatureProperties properties = new SignatureProperties();
+        properties.setMaxRequestsPerSource(1);
+        properties.setRateLimitMaxKeys(3);
+        DocumentAcceptanceAdmissionFilter realFilter = new DocumentAcceptanceAdmissionFilter(
+            new DocumentAcceptanceRateLimiter(properties,
+                Clock.fixed(Instant.parse("2026-09-02T00:00:00Z"), ZoneOffset.UTC)),
+            clientIpResolver);
+        when(clientIpResolver.resolve(any())).thenAnswer(invocation -> {
+            MockHttpServletRequest request = invocation.getArgument(0, MockHttpServletRequest.class);
+            return request.getRemoteAddr();
+        });
+
+        for (int index = 1; index <= 3; index++) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/document-acceptance");
+            request.setRemoteAddr(SOURCE);
+            request.setCookies(new Cookie(OneTimeLinkFlowCookie.DOCUMENT_ACCEPTANCE,
+                String.format("%064x", index)));
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+
+            realFilter.doFilter(request, response, chain);
+
+            assertEquals(index == 1 ? 200 : 429, response.getStatus());
+            assertEquals(index == 1, chain.getRequest() != null);
+        }
+        MockHttpServletRequest recipient = new MockHttpServletRequest("GET", "/api/document-acceptance");
+        recipient.setRemoteAddr("198.51.100.21");
+        recipient.setCookies(new Cookie(OneTimeLinkFlowCookie.DOCUMENT_ACCEPTANCE, "f".repeat(64)));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        realFilter.doFilter(recipient, response, chain);
+
+        assertEquals(200, response.getStatus());
+        assertNotNull(chain.getRequest());
+    }
+
+    @Test
     void throttleRejectsBeforeMalformedJsonCanBeParsed() throws Exception {
         TrackingJsonRequest request = request("/decline", GRANT);
         MockHttpServletResponse response = new MockHttpServletResponse();
