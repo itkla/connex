@@ -13,7 +13,7 @@ declare global {
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-const api = vi.hoisted(() => ({ backlinks: vi.fn(), person: vi.fn(), deal: vi.fn(), user: vi.fn(), report: vi.fn() }));
+const api = vi.hoisted(() => ({ backlinks: vi.fn(), person: vi.fn(), deal: vi.fn(), user: vi.fn(), report: vi.fn(), row: vi.fn() }));
 const scope = vi.hoisted(() => ({ workspaceId: 7, switching: false }));
 vi.mock("@/app/lib/api", () => ({
     getNotesReferencing: api.backlinks,
@@ -26,8 +26,10 @@ vi.mock("@/app/hooks/useApiErrorToast", () => ({ useApiErrorToast: () => api.rep
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
 vi.mock("@/app/components/me/TimelineDeepLinkFallback", () => ({ default: () => null }));
 vi.mock("@/app/components/me/TimelineRow", () => ({
-    default: ({ entry }: { entry: TimelineEntry }) =>
-        entry.kind === "note" ? <li data-note-id={entry.note.id}>{entry.note.content}</li> : null,
+    default: (props: { entry: TimelineEntry; persons: unknown[]; deals: unknown[] }) => {
+        api.row(props);
+        return props.entry.kind === "note" ? <li data-note-id={props.entry.note.id}>{props.entry.note.content}</li> : null;
+    },
 }));
 
 function note(id: number): Note {
@@ -127,12 +129,24 @@ describe("note pagination", () => {
         expect(container.querySelectorAll("li")).toHaveLength(25);
         await loadMore();
         expect(fetch).toHaveBeenLastCalledWith(31, {
-            page: 2, size: 25, beforeAt: refreshed[24].updatedAt, beforeId: refreshed[24].id,
+            page: 1, size: 25, beforeAt: refreshed[24].updatedAt, beforeId: refreshed[24].id,
         }, expect.anything());
         const ids = Array.from(container.querySelectorAll("li"), (element) => element.getAttribute("data-note-id"));
         expect(ids[0]).toBe("1");
         expect(ids).toHaveLength(26);
         expect(new Set(ids).size).toBe(26);
+    });
+
+    it("keeps omitted record option arrays stable across timeline renders", async () => {
+        api.person.mockResolvedValueOnce([note(26)]);
+        await act(async () => root.render(<TimelineContent tasks={[]} activities={[]} notes={firstPage}
+            noteTarget={{ type: "person", id: 31 }} originWorkspaceId={7} />));
+        const first = api.row.mock.calls[0]?.[0];
+        expect(first).toBeDefined();
+        await loadMore();
+        const last = api.row.mock.lastCall?.[0];
+        expect(last.persons).toBe(first.persons);
+        expect(last.deals).toBe(first.deals);
     });
 
     it("orders equal-time notes by descending id across a continuation boundary", async () => {
@@ -144,7 +158,7 @@ describe("note pagination", () => {
         expect(Array.from(container.querySelectorAll("li"), (element) => Number(element.getAttribute("data-note-id"))))
             .toEqual(Array.from({ length: 26 }, (_, index) => 26 - index));
         expect(api.person).toHaveBeenCalledWith(31, {
-            page: 2, size: 25, beforeAt: initial[24].updatedAt, beforeId: 2,
+            page: 1, size: 25, beforeAt: initial[24].updatedAt, beforeId: 2,
         }, expect.anything());
     });
 
@@ -156,21 +170,21 @@ describe("note pagination", () => {
         expect(fetch).not.toHaveBeenCalled();
         expect(container.querySelectorAll("li")).toHaveLength(25);
         await loadMore();
-        expect(fetch).toHaveBeenCalledWith(31, { page: 2, size: 25, beforeAt: firstPage[24].updatedAt, beforeId: 25 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+        expect(fetch).toHaveBeenCalledWith(31, { page: 1, size: 25, beforeAt: firstPage[24].updatedAt, beforeId: 25 }, expect.objectContaining({ signal: expect.any(AbortSignal) }));
         expect(container.querySelector('[data-note-id="26"]')).not.toBeNull();
         expect(container.querySelectorAll("li")).toHaveLength(26);
         expect(container.querySelector("button")).toBeNull();
     });
 
     it("reaches the 101st authored note through both user timelines' bounded continuation", async () => {
-        api.user.mockImplementation((_id: number, { page }: { page: number }) => Promise.resolve(
-            Array.from({ length: page === 5 ? 1 : 25 }, (_, index) => note((page - 1) * 25 + index + 1))));
+        api.user.mockImplementation((_id: number, { beforeId }: { beforeId: number }) => Promise.resolve(
+            Array.from({ length: beforeId === 100 ? 1 : 25 }, (_, index) => note(beforeId + index + 1))));
         await act(async () => root.render(<TimelineContent tasks={[]} activities={[]} notes={firstPage}
             noteTarget={{ type: "user", id: 51 }} originWorkspaceId={7} />));
         for (let page = 2; page <= 5; page++) await loadMore();
         expect(container.querySelectorAll("li")).toHaveLength(101);
         expect(container.querySelector('[data-note-id="101"]')).not.toBeNull();
-        expect(api.user).toHaveBeenLastCalledWith(51, { page: 5, size: 25, beforeAt: note(100).updatedAt, beforeId: 100 }, expect.anything());
+        expect(api.user).toHaveBeenLastCalledWith(51, { page: 1, size: 25, beforeAt: note(100).updatedAt, beforeId: 100 }, expect.anything());
         expect(container.querySelector("button")).toBeNull();
     });
 
@@ -188,7 +202,7 @@ describe("note pagination", () => {
         expect(container.querySelector("button")?.disabled).toBe(false);
         api.person.mockResolvedValueOnce([note(27)]);
         await loadMore();
-        expect(api.person).toHaveBeenLastCalledWith(31, { page: 2, size: 25, beforeAt: firstPage[24].updatedAt, beforeId: 25 }, expect.anything());
+        expect(api.person).toHaveBeenLastCalledWith(31, { page: 1, size: 25, beforeAt: firstPage[24].updatedAt, beforeId: 25 }, expect.anything());
         expect(container.querySelector('[data-note-id="27"]')).not.toBeNull();
     });
 

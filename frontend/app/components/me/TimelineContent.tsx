@@ -10,8 +10,15 @@ import NotePageControl from "@/app/components/activity/notes/NotePageControl";
 import { buildTimeline, entryAuthorId, entryId } from "./timelineEntries";
 import TimelineDeepLinkFallback from "./TimelineDeepLinkFallback";
 import TimelineRow from "./TimelineRow";
-import type { NotePageCursor } from "@/app/lib/types";
+import type { Contact, ContactLifecycleHistoryEntry, Deal, NotePageCursor, PersonCampaignTouch, RecordComment, UserReference } from "@/app/lib/types";
 import type { TimelineProps } from "./Timeline";
+
+const EMPTY_USERS: UserReference[] = [];
+const EMPTY_PERSONS: Contact[] = [];
+const EMPTY_DEALS: Deal[] = [];
+const EMPTY_LIFECYCLE_HISTORY: ContactLifecycleHistoryEntry[] = [];
+const EMPTY_COMMENTS: RecordComment[] = [];
+const EMPTY_CAMPAIGN_TOUCHES: PersonCampaignTouch[] = [];
 
 /** Renders record history with explicit continuation for SQL-bounded note previews. */
 export default function TimelineContent(props: TimelineProps & { originWorkspaceId: number | null }) {
@@ -21,15 +28,15 @@ export default function TimelineContent(props: TimelineProps & { originWorkspace
 }
 
 function ScopedTimelineContent({
-    tasks, activities, notes, users = [], persons = [], deals = [], lifecycleHistory = [],
-    comments = [], campaignTouches = [], currentUserId, companyId, limit, noteTarget, originWorkspaceId,
+    tasks, activities, notes, users = EMPTY_USERS, persons = EMPTY_PERSONS, deals = EMPTY_DEALS, lifecycleHistory = EMPTY_LIFECYCLE_HISTORY,
+    comments = EMPTY_COMMENTS, campaignTouches = EMPTY_CAMPAIGN_TOUCHES, currentUserId, companyId, limit, noteTarget, originWorkspaceId,
 }: TimelineProps & { originWorkspaceId: number | null }) {
     const t = useTranslations("MeTimeline");
     const loadPage = useCallback((page: number, init: RequestInit, cursor?: NotePageCursor) => {
         if (!noteTarget) return Promise.resolve([]);
         const fetchNotes = noteTarget.type === "person" ? getNotesForPerson
             : noteTarget.type === "deal" ? getNotesForDeal : getUserNotes;
-        return fetchNotes(noteTarget.id, { page, size: NOTE_PAGE_SIZE, ...cursor }, init);
+        return fetchNotes(noteTarget.id, { page: cursor ? 1 : page, size: NOTE_PAGE_SIZE, ...cursor }, init);
     }, [noteTarget]);
     const { notes: loadedNotes, loading, hasMore, failed, loadMore } = useNotePages(
         noteTarget ? loadPage : undefined, notes);

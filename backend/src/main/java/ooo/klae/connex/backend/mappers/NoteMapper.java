@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Param;
 import ooo.klae.connex.backend.beans.HistoryImportProvenance;
 import ooo.klae.connex.backend.beans.HistoryImportWrite;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.dto.NoteActivityDayDto;
 import ooo.klae.connex.backend.util.NotePageCursor;
 
 /**
@@ -88,6 +89,10 @@ public interface NoteMapper {
         @Param("before") NotePageCursor before);
     long countVisibleNotesByAuthorId(@Param("workspaceId") int workspaceId, @Param("authorId") int authorId,
         @Param("currentUserId") int currentUserId);
+    /** Counts all eligible creation timestamps without selecting note text. */
+    List<NoteActivityDayDto> getVisibleNoteActivityByAuthorId(@Param("workspaceId") int workspaceId,
+        @Param("authorId") int authorId, @Param("currentUserId") int currentUserId,
+        @Param("from") LocalDateTime from, @Param("until") LocalDateTime until);
     List<Note> getVisibleCompanyNotes(@Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId, @Param("currentUserId") int currentUserId,
             @Param("limit") int limit);

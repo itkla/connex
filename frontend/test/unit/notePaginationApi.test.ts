@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getNotesForDeal, getNotesForPerson, getNotesReferencing, getUserNotes, getUserNotesPage } from "@/app/lib/api";
+import { getNotesForDeal, getNotesForPerson, getNotesReferencing, getUserNotes, getUserNotesPage, getUserNoteActivityResultFromCookie } from "@/app/lib/api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -18,6 +18,17 @@ describe("note page API parameters", () => {
             expect(url.searchParams.get("beforeId")).toBe("29");
             expect(url.searchParams.get("page")).toBe("2");
         }
+    });
+
+    it("reads the body-free pulse aggregate separately with the authenticated workspace cookie", async () => {
+        const fetch = vi.fn().mockResolvedValue(new Response('[{"date":"2026-09-15","count":105}]', {
+            headers: { "content-type": "application/json" },
+        }));
+        vi.stubGlobal("fetch", fetch);
+        expect(await getUserNoteActivityResultFromCookie(51, "connex_workspace=7"))
+            .toEqual({ ok: true, data: [{ date: "2026-09-15", count: 105 }] });
+        expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/users/51/notes/pulse"),
+            expect.objectContaining({ method: "GET", cache: "no-store" }));
     });
 
     it("forwards the page, size, and request scope to all collection routes", async () => {

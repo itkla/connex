@@ -2318,6 +2318,12 @@ export function getUserNotesFromCookie(id: number, cookie: string | null, params
     return safeReadWithCookie<Types.Note>((init) => getUserNotes(id, params, init), cookie);
 }
 
+/** Reads the complete visible 84-day note activity aggregate independently of timeline pages. */
+export function getUserNoteActivityResultFromCookie(id: number, cookie: string | null) {
+    return resultWithCookie<Types.NoteActivityDay[]>(
+        (init) => getJson<Types.NoteActivityDay[]>(`/api/users/${id}/notes/pulse`, init), cookie);
+}
+
 export function getUserNotesPageResultFromCookie(id: number, cookie: string | null) {
     return resultWithCookie<Types.Page<Types.Note>>((init) => getUserNotesPage(id, {}, init), cookie);
 }

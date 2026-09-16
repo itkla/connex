@@ -89,6 +89,16 @@ describe("timeline note editing", () => {
         expect(api.report).toHaveBeenCalledOnce();
     });
 
+    it("clears a rejected read's busy state and allows a successful retry", async () => {
+        api.read.mockRejectedValueOnce(new Error("Unavailable")).mockResolvedValueOnce(preview);
+        await edit();
+        const button = [...container.querySelectorAll("button")].find((item) => item.textContent === "edit");
+        expect(button?.disabled).toBe(false);
+        await edit();
+        expect(api.read).toHaveBeenCalledTimes(2);
+        expect(container.querySelector("textarea")?.value).toBe(preview.content);
+    });
+
     it.each(["delete", "edit"] as const)("reconciles a second-page %s after refresh with an unchanged first page", async (mutation) => {
         const firstPage = Array.from({ length: 25 }, (_, index) => ({ ...preview, id: index + 1, content: `First-page note ${index + 1}` }));
         const later = { ...preview, id: 26, content: "Later-page note" };
@@ -125,7 +135,7 @@ describe("timeline note editing", () => {
         expect(container.querySelectorAll("li")).toHaveLength(25);
         expect(container.textContent).not.toContain("Later-page note");
         await loadMore();
-        expect(api.page).toHaveBeenLastCalledWith(31, expect.objectContaining({ page: 2, size: 25, beforeId: 25 }), expect.anything());
+        expect(api.page).toHaveBeenLastCalledWith(31, expect.objectContaining({ page: 1, size: 25, beforeId: 25 }), expect.anything());
         expect(container.textContent).toContain("Following note");
         if (mutation === "edit") {
             expect(container.textContent).toContain("Updated later-page note");

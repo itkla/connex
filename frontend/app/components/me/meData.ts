@@ -3,7 +3,7 @@ import type {
     Contact,
     Deal,
     DealRisk,
-    Note,
+    NoteActivityDay,
     RelationshipTemperature,
     Task,
     TemperatureBand,
@@ -99,7 +99,7 @@ function utcDayKey(ts: string): string {
 export function activityPulse(
     activities: Activity[],
     tasks: Task[],
-    notes: Note[],
+    noteActivity: NoteActivityDay[],
     dayCount: number,
 ): { days: PulseDay[]; totalTouches: number; streak: number } {
     const counts = new Map<string, number>();
@@ -109,7 +109,7 @@ export function activityPulse(
         counts.set(key, (counts.get(key) ?? 0) + 1);
     };
     for (const a of activities) bump(a.timestamp);
-    for (const n of notes) bump(n.createdAt);
+    for (const day of noteActivity) counts.set(day.date, (counts.get(day.date) ?? 0) + day.count);
     for (const t of tasks) if (t.completed) bump(t.updatedAt);
 
     const days: PulseDay[] = [];

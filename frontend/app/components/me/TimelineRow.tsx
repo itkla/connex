@@ -188,10 +188,8 @@ export default function TimelineRow({
         } catch (error) {
             if (!controller.signal.aborted) showApiError(error);
         } finally {
-            if (!controller.signal.aborted) {
-                noteRequest.current = null;
-                setLoadingNote(false);
-            }
+            noteRequest.current = null;
+            setLoadingNote(false);
         }
     };
 

@@ -18,6 +18,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.NoteDto;
+import ooo.klae.connex.backend.dto.NoteActivityDayDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.dto.TaskDto;
@@ -159,9 +160,16 @@ public class UserController {
             @RequestParam(defaultValue = "25") int size,
             @RequestParam(required = false) String beforeAt,
             @RequestParam(required = false) Integer beforeId) {
-        PageBounds bounds = PageBounds.of(page, size);
-        return userService.getNotesByUserId(id, bounds.size(), bounds.offset(), NotePageCursor.parse(beforeAt, beforeId))
+        NotePageCursor cursor = NotePageCursor.parse(beforeAt, beforeId);
+        PageBounds bounds = PageBounds.of(cursor == null ? page : 1, size);
+        return userService.getNotesByUserId(id, bounds.size(), bounds.offset(), cursor)
             .stream().map(NoteDto::from).toList();
+    }
+
+    /** Returns visible authored-note counts for today and the preceding 83 UTC days. */
+    @GetMapping("/{id}/notes/pulse")
+    public List<NoteActivityDayDto> getNoteActivityForUser(@PathVariable int id) {
+        return userService.getNoteActivityByUserId(id);
     }
 
     /** Returns bounded authored-note previews and the complete visible total. */

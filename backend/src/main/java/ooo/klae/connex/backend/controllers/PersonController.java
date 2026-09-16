@@ -552,8 +552,9 @@ public class PersonController {
             @RequestParam(defaultValue = "25") int size,
             @RequestParam(required = false) String beforeAt,
             @RequestParam(required = false) Integer beforeId) {
-        PageBounds bounds = PageBounds.of(page, size);
-        return personService.getNotesByPersonId(id, bounds.size(), bounds.offset(), NotePageCursor.parse(beforeAt, beforeId))
+        NotePageCursor cursor = NotePageCursor.parse(beforeAt, beforeId);
+        PageBounds bounds = PageBounds.of(cursor == null ? page : 1, size);
+        return personService.getNotesByPersonId(id, bounds.size(), bounds.offset(), cursor)
             .stream().map(NoteDto::from).toList();
     }
 

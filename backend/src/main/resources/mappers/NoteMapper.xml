@@ -301,6 +301,16 @@
       AND (visibility = 'workspace' OR author_id = #{currentUserId})
   </select>
 
+  <select id="getVisibleNoteActivityByAuthorId" resultType="ooo.klae.connex.backend.dto.NoteActivityDayDto">
+    SELECT DATE(created_at) AS date, COUNT(*) AS count FROM note
+    WHERE workspace_id = #{workspaceId} AND author_id = #{authorId}
+      AND (visibility = 'workspace' OR author_id = #{currentUserId})
+      AND created_at &gt;= #{from} AND created_at &lt; #{until}
+    GROUP BY DATE(created_at)
+    ORDER BY date
+    LIMIT 84
+  </select>
+
   <select id="getVisibleCompanyNotes" resultMap="NoteResult">
     SELECT <include refid="noteColumns"/> FROM note n
     WHERE n.workspace_id = #{workspaceId}

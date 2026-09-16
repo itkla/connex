@@ -35,7 +35,7 @@ export function missingTimelineDeepLink(
         return {
             kind: consumer.kind,
             id,
-            href: outsideWindow
+            href: outsideWindow || consumer.kind === 'note'
                 ? `${consumer.path}?${consumer.key}=${id}`
                 : consumer.path,
             state: outsideWindow ? 'outside_window' : 'unavailable',
