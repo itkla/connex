@@ -32,6 +32,7 @@ import org.xml.sax.InputSource;
 /**
  * Restricts note bodies to bounded lists, bounded assistant history, and singleton reads.
  * The caller inventory covers timelines, search, briefs through record services, and note mutations.
+ * Attachment upload admission and its locking recheck each read one workspace-visible note by exact ID.
  * Subject disclosure serializes complete exports in pages of at most 100 preflight IDs.
  * Its SQL flushes earlier pages from the session cache and applies no visibility filter, because a
  * statutory disclosure must carry every note held about the subject, private ones included.
@@ -44,8 +45,9 @@ class NoteBodyReadBoundaryArchTest {
     private static final Map<String, Set<String>> APPROVED_CALLERS = Map.ofEntries(
         Map.entry(NOTE_MAPPER + "getNoteById", Set.of()),
         Map.entry(NOTE_MAPPER + "getVisibleNoteById",
-            Set.of("NoteService", "AttachmentService", "ReferenceService")),
-        Map.entry(NOTE_MAPPER + "getVisibleNoteByIdForUpdate", Set.of("NoteService")),
+            Set.of("NoteService", "AttachmentService", "AttachmentWriteOperations", "ReferenceService")),
+        Map.entry(NOTE_MAPPER + "getVisibleNoteByIdForUpdate",
+            Set.of("NoteService", "AttachmentWriteOperations")),
         Map.entry(NOTE_MAPPER + "getVisibleNotesPage", Set.of("NoteService", "SearchService")),
         Map.entry(NOTE_MAPPER + "getWorkspaceNotesPage", Set.of("NoteService")),
         Map.entry(NOTE_MAPPER + "getVisibleNotesFilteredPage", Set.of("NoteService")),

@@ -41,6 +41,7 @@ import org.springframework.context.annotation.Import;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.services.ScoringService;
+import ooo.klae.connex.backend.services.RuleScheduler;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 
 import java.util.LinkedHashMap;
@@ -112,11 +113,13 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.notifications.RealtimeNotificationPayload;
 import ooo.klae.connex.backend.notifications.RealtimeRoutingIdentityResolver;
@@ -189,6 +192,18 @@ class CoreRecordSecurityIntegrationTest {
             .flatMap(link -> Stream.of("POST", "PUT")
                 .flatMap(method -> Stream.of(false, true)
                     .map(embedded -> Arguments.of(link, method, embedded))));
+    }
+
+    @Test
+    void cachedContextDoesNotEnumerateOrEnqueueScheduledWorkflows() {
+        statementProbe.reset();
+
+        context.getBean(RuleScheduler.class).evaluate();
+
+        assertFalse(statementProbe.ids.contains(
+            RuleMapper.class.getName() + ".workspaceIdsWithEnabledScheduleRules"));
+        assertFalse(statementProbe.ids.contains(
+            WorkflowMapper.class.getName() + ".workspaceIdsWithEnabledScheduleWorkflows"));
     }
 
     @Test
