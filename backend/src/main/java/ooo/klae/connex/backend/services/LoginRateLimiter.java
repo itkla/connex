@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.services;
 import java.net.InetAddress;
 import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -16,7 +17,9 @@ import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
  * exchanges use a separate per-IP namespace with the same cap and window, plus a higher-capacity
  * shared-source circuit breaker when the client cannot be attributed safely, so unauthenticated
  * database amplification cannot consume or reset login failure state. Username buckets clear on a
- * successful login. Enforcement is per JVM replica.
+ * successful login. Password confirmations also retain an immutable-account failure bucket for
+ * the same window and per-user limit, independent of username changes and successful logins.
+ * Enforcement is per JVM replica.
  */
 @Component
 public class LoginRateLimiter {
@@ -89,6 +92,34 @@ public class LoginRateLimiter {
     }
 
     /**
+     * Checks the immutable-account confirmation budget alongside the existing login budgets.
+     * @param userId the account whose current password is being confirmed
+     * @param clientIp the resolved client address and proxy provenance
+     * @param username the account's current username
+     * @param nowMillis the current epoch time in milliseconds
+     * @return true when any applicable failure budget is exhausted
+     */
+    public boolean isPasswordConfirmationBlocked(
+            int userId, ResolvedClientIp clientIp, String username, long nowMillis) {
+        return countWithin(passwordConfirmationKey(userId), nowMillis) >= maxPerUser
+                || isBlockedForClient(clientIp, username, nowMillis);
+    }
+
+    /**
+     * Records a confirmation failure against the immutable account and existing login budgets.
+     * The account budget expires with its window and cannot be cleared by renaming or logging in.
+     * @param userId the account whose current password was rejected
+     * @param clientIp the resolved client address and proxy provenance
+     * @param username the account's current username
+     * @param nowMillis the current epoch time in milliseconds
+     */
+    public void recordPasswordConfirmationFailure(
+            int userId, ResolvedClientIp clientIp, String username, long nowMillis) {
+        increment(passwordConfirmationKey(userId), nowMillis);
+        recordFailureForClient(clientIp, username, nowMillis);
+    }
+
+    /**
      * Clears the username bucket after a successful login. The IP bucket is retained so a
      * single valid credential cannot reset a source that is stuffing many accounts.
      * @param username the username that logged in
@@ -98,6 +129,26 @@ public class LoginRateLimiter {
         if (key != null) {
             windows.remove(key);
         }
+    }
+
+    /**
+     * Admits one password-confirmation throttle audit per account per configured login window.
+     * This separate bucket survives successful logins and never changes authentication budgets.
+     * Admission is atomic and local to this JVM, matching the authentication limiter.
+     * @param userId the authenticated account whose confirmation was throttled
+     * @param nowMillis the current epoch time in milliseconds
+     * @return true when this request owns the window's audit attempt
+     */
+    public boolean tryAcquirePasswordConfirmationThrottleAudit(int userId, long nowMillis) {
+        AtomicBoolean acquired = new AtomicBoolean();
+        windows.compute("password-confirmation-audit:user:" + userId, (key, existing) -> {
+            if (existing == null || nowMillis - existing.start >= windowMillis) {
+                acquired.set(true);
+                return new Window(nowMillis, 1);
+            }
+            return existing;
+        });
+        return acquired.get();
     }
 
     /**
@@ -203,6 +254,10 @@ public class LoginRateLimiter {
         return username == null || username.isBlank()
                 ? null
                 : "user:" + username.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static String passwordConfirmationKey(int userId) {
+        return "password-confirmation:user:" + userId;
     }
 
     private static final class Window {

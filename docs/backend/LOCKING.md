@@ -60,7 +60,49 @@ Member removal/leave/invitation decline also lock the departing user root. The t
 
 Invite grants lock creator/known-recipient users ascending, reject deletion reservations, then lock active workspace/organization, memberships ascending, and creator custom role when applicable before testing grantability. Claim paths repeat authorization immediately before the exact claim.
 
-Pending-membership approval locks user, workspace exclusively, organization for share, and exact pending membership before domain/version-gated activation.
+Token-invite acceptance checks the current address under the recipient root and authorizes only that invitation. It does not write `app_user.email_verified` or emit a global email-verification audit event: the creator receives the token and can control the workspace SMTP sender. Global registration verification requires the separate instance-delivered token consumed by `RegistrationVerificationService`.
+
+Pending-membership approval locks user, workspace exclusively, organization for share, and exact pending membership before domain/version-gated activation. Its mailbox-proof and organization-domain checks read the account through the locked `app_user` row, not the pre-transaction membership projection.
+
+#### Verified email change as a pending-grant writer
+
+Every account email-change mutation uses the same account-before-token order. Request validation
+and token lookup are preliminary, non-locking reads. `requestChange` then locks `app_user` exclusively
+before invalidating or inserting `email_change_token` rows; the token's foreign key must never cause
+a request to acquire its user lock after holding an old token row. After invalidation clears the
+MyBatis read cache, request validation repeats against the locked account and current uniqueness
+and rate-limit reads. A refusal rolls back the invalidation. `exchangeToken` likewise discovers the
+account without locks, locks that root, then conditionally claims the still-redeemable token; this
+also governs the self-claim in programmatic `confirmChange`. Browser `confirmChangeByHash` discovers
+the exchanged token without locks, locks the account, rechecks uniqueness, then conditionally
+consumes the still-redeemable token before applying the change. No request or confirmation may lock
+an email-change token and then acquire its account root.
+
+`EmailChangeService.confirmChangeByHash` is a second writer of `workspace_member` pending rows: a pending grant is an offer to one mailbox, so moving the account off that mailbox revokes it. It runs from the account side rather than a workspace path, and follows the same hierarchy:
+
+1. Lock the `app_user` root exclusively (already held for the email write).
+2. Discover the account's pending grants without locks and take them in ascending `workspace_id`.
+3. Lock each of those workspace roots exclusively in that order.
+4. Lock the recipient's globally ordered `workspace_member` set (`NotificationMapper.lockRecipientMemberships`) — the same point invitation decline takes it, so notification cleanup cannot invert membership lock order.
+5. Per workspace: delete the pending row, and only when that delete claimed it, delete the recipient's notification baselines and notifications and write the scoped audit event.
+6. Bump the recipient's notification state version once, after all deletions.
+
+Discovery is deliberately unfiltered by `lifecycle_state`, so a grant parked in a suspended or tearing-down tenant is revoked too. The account root is held throughout, and every invite-grant writer locks the recipient root first, so no new pending row can be committed behind the sweep.
+
+The sweep runs single-catalog: it issues each workspace's tenant-plane notification deletes on the request's own connection without installing that workspace's placement, which is inert while every workspace lives in one database. Before placement routing is enabled it must run each workspace's deletes inside `tenantWorkScope.withWorkspacePlacement`.
+
+The following boundaries run at `READ_COMMITTED` rather than the default isolation and must stay that way:
+
+- `EmailChangeService.requestChange` — after acquiring the account root and invalidating tokens,
+  repeated uniqueness and request-count reads must observe requests committed while it waited.
+- `EmailChangeService.exchangeToken` — when a conditional claim fails after waiting for the account
+  root, the same-browser retry check must observe a concurrent replacement's token invalidation.
+- `EmailChangeService.confirmChange` / `confirmChangeByHash` — the pending-grant discovery in step 2 happens after waiting for the account lock. Under `REPEATABLE_READ` it would read the transaction's opening snapshot and miss a grant another transaction committed while this one queued, leaving a revoked-address grant behind.
+- `OneTimeLinkFlowService.consumeEmailChange` — the browser-flow entry point that opens the surrounding transaction for the confirm operation. Its isolation is what the service method actually joins, so leaving it at the default would silently restore the stale snapshot.
+
+The request token only names a candidate address. Delivery is dispatched off-thread and best-effort
+by `MailService.sendInstance`; confirmation re-locks the account and rechecks address uniqueness
+before applying the change.
 
 ### Workspace teams
 
@@ -649,6 +691,45 @@ Detailed storage behavior lives in `docs/backend/OBJECT_STORAGE.md`. Lock-order 
 - Profile-image replacement holds the user-row lock before shared backlog admission/object write.
 - Cleanup/retry workers lock/revalidate exact queue/tombstone identities before provider I/O.
 - Preserve deletion-queue → quota → audit ordering, including business-card binary storage before company/person/audit writes.
+
+## Account recovery and emailed credential tokens
+
+Password reset and verified email change are one hierarchy, not two: a reset exists to evict the
+holder of the old password and an email change moves the recovery mailbox, so each must evict the
+other family's outstanding tokens. The class order is:
+
+0. `one_time_link_flow` — the browser grant held by `OneTimeLinkFlowService.consume` (or
+   `consumePasswordReset`) across the confirm/reset operation.
+1. `app_user` — the account root, exclusive (`FOR UPDATE`) for every credential write and every
+   token claim; shared (`FOR SHARE`) for reset issuance, which only re-reads the mailbox.
+2. `password_reset_token` / `email_change_token` — the two emailed token families.
+3. The audit integrity head and its foreign-key parents.
+
+Source-token exchange and browser-grant issue run in separate transactions.
+
+Both token families are locked under the same exclusive account root, so their relative order inside
+one transaction is unconstrained; do not rely on that, and never acquire either one before the
+account root.
+
+- `PasswordResetService.requestReset` takes `app_user FOR SHARE` and re-reads the mailbox under that
+  lock before issuing, so a verified email change committing concurrently cannot leave the link
+  addressed to the mailbox it just moved away from.
+- Both public exchange endpoints (`PasswordResetService.exchangeToken`,
+  `EmailChangeService.exchangeToken`) resolve the token's owner without a lock, then take
+  `app_user FOR UPDATE` before claiming. A same-owner retry re-reads the claimed token `FOR SHARE`,
+  because its `REPEATABLE READ` snapshot predates the invalidation it waited behind.
+- `PasswordResetService.resetPasswordByHash` and `EmailChangeService.confirmChangeByHash` hold the
+  exclusive account root across the credential write and both `invalidateForUser` calls.
+- `EmailChangeService.requestChange` proves the current password through the shared throttled
+  confirmation, then re-reads the account under the exclusive root and refuses when the password
+  hash or `session_epoch` moved since the proof.
+
+The audit head sits below `app_user` in this order, and an independent audit append re-acquires the
+actor's `app_user` row shared. `AuthService.requireCurrentPassword` therefore writes no audit of its
+own: `MfaRecoveryService.recover` calls it while holding that row exclusively, so an append there
+would wait on the caller's own lock until the InnoDB timeout, lose the event, and pin a second
+pooled connection. Callers that are not already holding the account root —
+`EmailChangeService.requestChange` — record the confirmation outcome themselves, before acquiring it.
 
 ## Connected-provider credentials
 

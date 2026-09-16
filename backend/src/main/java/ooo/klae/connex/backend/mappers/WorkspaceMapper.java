@@ -9,6 +9,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.OrganizationLayoutWorkspaceMemberDto;
+import ooo.klae.connex.backend.dto.RevokedInvitationDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 
 /**
@@ -74,6 +75,7 @@ public interface WorkspaceMapper {
     int removeMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getLastActiveWorkspaceId(int userId);
     int setLastActiveWorkspaceId(@Param("userId") int userId, @Param("workspaceId") int workspaceId);
+    int clearLastActiveWorkspaceId(int userId);
     int insert(Workspace workspace);
     int updateIdentity(
         @Param("workspaceId") int workspaceId,
@@ -108,6 +110,12 @@ public interface WorkspaceMapper {
     );
     int activateMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     List<WorkspaceMembershipDto> getPendingMemberships(int userId);
+    /**
+     * Finds all of a user's pending grants in ascending workspace id, including grants in inactive
+     * workspaces and organizations, so revocation cannot leave one behind.
+     */
+    List<RevokedInvitationDto> findPendingGrants(int userId);
+    int removePendingMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     int updateMemberRole(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,

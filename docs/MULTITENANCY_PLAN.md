@@ -227,11 +227,31 @@ first policy landed is the email-domain ceiling — **`org_allowed_domain`** (V4
   Managed by org admin/owner via `/api/orgs/{orgId}/allowed-domains`.
 - **Verified-email pairing** on the self-serve link path: when the org (or workspace) restricts domains and
   registration verification is enabled, the joiner's email must be verified. The domain ceiling is only as
-  strong as email ownership, so an instance that relies on it should enable registration verification —
-  the token/admin paths (accept, create, add-existing) prove the address by possession or admin action, but
-  the unbound link channel does not.
+  strong as email ownership, so an instance that relies on it should enable registration verification.
+  The emailed-token path (accept) authorizes only the named invitation for an account with a matching
+  current address; it does not set `email_verified`. Its creator receives the raw token, and delivery
+  uses workspace-selected SMTP, so possession cannot establish global mailbox ownership. Registration
+  verification requires the separate token issued by `RegistrationVerificationService`, delivered
+  through `MailService.sendInstance`, and never returned by an API. Token-invited accounts remain
+  unverified until they redeem that instance verification mail. **No path lets local authority assert
+  global identity:** admin-created
+  accounts (`POST /api/users`) start unverified and are emailed their own verification link, and the
+  in-app grant paths — add-existing (`/members`), invite-by-email's existing-account branch,
+  pending-membership activation, and new org-member grants — refuse an account that has not proven its
+  address, routing it to the emailed token invite instead. The org check covers the grant only: a user
+  who already holds an `org_member` row can still be re-roled or removed.
+  Every one of those refusals is conditioned on registration verification being **enabled**, exactly like
+  the link gate: with the feature off no account can obtain proof (no token is issued and resend is a
+  no-op), so a leftover `email_verified = 0` row from an earlier enabled period must not become
+  permanently un-invitable.
 - **Re-checked at activation:** `approveMembership` re-applies the org ceiling before flipping a pending
   member active, so a row that predates a later-tightened policy (or the feature deploy) cannot slip in.
+  It reads the address from the locked `app_user` row rather than the pending projection, so a since
+  changed address is measured against the current policy.
+- **Address changes revoke pending grants:** a pending row is an offer to one mailbox, so completing a
+  verified email change drops the account's pending grants (`EmailChangeService.confirmChangeByHash`) with
+  the same notification cleanup and scoped audit event as a decline, and reports them in the confirmation
+  response. Without this, a grant addressed to an allowed domain would survive a move to a disallowed one.
 - **Ceiling on ALL membership:** the org allowlist caps every path, including **SSO JIT provisioning**
   (`SsoLoginService.resolve`) — SSO requires a verified email whose domain the org proved it owns
   (`sso_domain`, V39) AND, when set, the `org_allowed_domain` ceiling. So SSO cannot provision a member the

@@ -115,6 +115,7 @@ class FreshMembershipTransactionTest {
                 String.class,
                 boolean.class,
                 int.class,
+                String.class,
                 String.class)
             .getAnnotation(Transactional.class));
     }

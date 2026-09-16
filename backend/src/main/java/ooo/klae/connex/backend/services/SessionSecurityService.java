@@ -129,6 +129,15 @@ public class SessionSecurityService {
         return session == null ? null : integerAttribute(session, SESSION_EPOCH_ATTR);
     }
 
+    /**
+     * Returns the persisted epoch of the current servlet session, never the transient principal field.
+     * @return the authenticated session's stamp, or null when the request or stamp is absent
+     */
+    public Integer currentSessionEpoch() {
+        HttpServletRequest request = currentRequest();
+        return sessionEpoch(request == null ? null : request.getSession(false));
+    }
+
     /** Clears all account-bound session stamps while preserving unrelated anonymous flow state. */
     public void clearAuthenticationState(HttpServletRequest request) {
         HttpSession session = request.getSession(false);

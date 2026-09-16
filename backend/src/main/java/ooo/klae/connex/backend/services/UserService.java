@@ -137,6 +137,8 @@ public class UserService implements UserDetailsService {
      * intentionally immutable here: because email is a trust anchor (email-bound
      * invites rely on it), it can only change through the verified, ownership-proving
      * flow in {@code EmailChangeService}, so any email in the request body is ignored.
+     * A fresh profile-only bean and credential-free update statement also prevent a stale
+     * profile read from overwriting a concurrently confirmed mailbox or password.
      *
      * @param id the user being updated (must be the caller)
      * @param user the submitted profile fields
@@ -146,16 +148,16 @@ public class UserService implements UserDetailsService {
     public User update(int id, User user) {
         workspaceService.requireSelf(id);
         User before = getUserById(id);
-        user.setId(id);
-        user.setEmail(before.getEmail());
+        User profile = new User();
+        profile.setId(id);
+        profile.setUsername(user.getUsername());
+        profile.setDisplayName(user.getDisplayName());
         if (user.getTimezone() == null || user.getTimezone().isBlank()) {
-            user.setTimezone(before.getTimezone());
+            profile.setTimezone(before.getTimezone());
         } else {
-            user.setTimezone(TimezoneSupport.validateIana(user.getTimezone(), null));
+            profile.setTimezone(TimezoneSupport.validateIana(user.getTimezone(), null));
         }
-        user.setLocale(before.getLocale());
-        user.setProfilePictureUrl(before.getProfilePictureUrl());
-        userMapper.update(user);
+        userMapper.update(profile);
         User after = userMapper.getUserById(id);
         if (after == null) {
             throw new ResourceNotFoundException("User not found with id: " + id);
