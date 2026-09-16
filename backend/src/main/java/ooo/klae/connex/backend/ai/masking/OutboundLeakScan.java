@@ -1,20 +1,22 @@
 package ooo.klae.connex.backend.ai.masking;
 
-import java.text.Normalizer;
+import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashSet;
-import java.util.Locale;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Pattern;
 
-import tools.jackson.databind.JsonNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.JsonToken;
 import tools.jackson.databind.ObjectMapper;
 
 /**
  * Runtime final gate for serialized AI provider payloads. It scans the exact outbound string for
  * request-local raw identifiers and throws without echoing the matched value, turning masking into
- * a per-request invariant immediately before send.
+ * a per-request invariant immediately before send. Decoded fields never share a matching domain.
+ * Canonical-ineligible raw values retain exact-text coverage without a second normalization.
  *
  * <p>An identifier whose raw value the request's registered server-authored text provably contains
  * is skipped: the server emits that word in every prompt regardless of tenant data, so its presence
@@ -27,7 +29,6 @@ public final class OutboundLeakScan {
      * replacement pass so the replacer always covers at least what this scan can refuse.
      */
     static final int MIN_IDENTIFIER_LENGTH = 4;
-    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
     private OutboundLeakScan() {
     }
@@ -68,14 +69,24 @@ public final class OutboundLeakScan {
         Objects.requireNonNull(serializedOutboundPayload, "serializedOutboundPayload");
         Objects.requireNonNull(ctx, "ctx");
         Objects.requireNonNull(objectMapper, "objectMapper");
-        String rawPayload = normalizeForScan(serializedOutboundPayload);
-        String decodedPayload = decodedJsonText(serializedOutboundPayload, objectMapper);
+        List<String> fields = decodedJsonFields(serializedOutboundPayload, objectMapper);
+        List<String> unprotectedFields = fields.stream()
+                .flatMap(field -> MaskingEngine.unprotectedTextSegments(field, ctx).stream())
+                .toList();
+        List<String> canonicalFields = unprotectedFields.stream().map(OutboundLeakScan::normalizeForScan).toList();
+        List<String> labelFields = unprotectedFields.stream()
+                .map(field -> CanonicalText.projectLabels(field).value()).toList();
         Set<String> leakedTokens = new LinkedHashSet<>();
         Set<EntityKind> leakedKinds = EnumSet.noneOf(EntityKind.class);
-        for (MaskingContext.IdentifierEntry entry : ctx.identifierEntriesByLongestRawValue()) {
-            String normalizedIdentifier = normalizeForScan(entry.rawValue());
-            if (normalizedIdentifier.length() >= MIN_IDENTIFIER_LENGTH
-                    && (rawPayload.contains(normalizedIdentifier) || decodedPayload.contains(normalizedIdentifier))
+        for (MaskingContext.IdentifierEntry entry : ctx.identifierEntries()) {
+            String identifier = entry.canonicalValue();
+            boolean canonicalLeak = identifier.length() >= MIN_IDENTIFIER_LENGTH
+                    && canonicalFields.stream().anyMatch(field -> field.contains(identifier));
+            boolean labelLeak = entry.labelEligible() && entry.labelValue().length() >= MIN_IDENTIFIER_LENGTH
+                    && labelFields.stream().anyMatch(field -> field.contains(entry.labelValue()));
+            boolean exactRawLeak = !entry.replacementEligible() && entry.rawValue().length() >= MIN_IDENTIFIER_LENGTH
+                    && unprotectedFields.stream().anyMatch(field -> field.contains(entry.rawValue()));
+            if ((canonicalLeak || labelLeak || exactRawLeak)
                     && !(honorTrustedText && ctx.isTrustedTextCollision(entry.rawValue()))) {
                 leakedTokens.add(entry.token());
                 leakedKinds.add(entry.kind());
@@ -86,43 +97,23 @@ public final class OutboundLeakScan {
         }
     }
 
-    private static String decodedJsonText(String serializedOutboundPayload, ObjectMapper objectMapper) {
-        try {
-            JsonNode root = objectMapper.readTree(serializedOutboundPayload);
-            if (root == null) {
-                return "";
+    /** Visits every key and scalar separately, including earlier values of duplicate keys. */
+    private static List<String> decodedJsonFields(String payload, ObjectMapper objectMapper) {
+        List<String> fields = new ArrayList<>();
+        try (JsonParser parser = objectMapper.createParser(payload)) {
+            for (JsonToken token = parser.nextToken(); token != null; token = parser.nextToken()) {
+                if (token == JsonToken.PROPERTY_NAME || token.isScalarValue()) {
+                    fields.add(parser.getString());
+                }
             }
-            StringBuilder decoded = new StringBuilder(serializedOutboundPayload.length());
-            appendTextValues(root, decoded);
-            return normalizeForScan(decoded.toString());
-        } catch (Exception exception) {
-            return "";
+        } catch (JacksonException exception) {
+            fields.add(payload);
         }
+        return fields;
     }
 
-    private static void appendTextValues(JsonNode node, StringBuilder decoded) {
-        if (node.isString()) {
-            decoded.append('\u0000').append(node.asString()).append('\u0000');
-            return;
-        }
-        if (node.isObject()) {
-            node.properties().forEach(entry -> {
-                decoded.append('\u0000').append(entry.getKey()).append('\u0000');
-                appendTextValues(entry.getValue(), decoded);
-            });
-            return;
-        }
-        for (JsonNode child : node) {
-            appendTextValues(child, decoded);
-        }
-    }
-
-    /**
-     * The exact canonicalization this scan matches with, shared with the masking engine's residual
-     * replacement pass so replacement coverage is measured the same way scan coverage is.
-     */
+    /** Uses the same canonical form as registration, lookup admission and replacement. */
     static String normalizeForScan(String value) {
-        String normalized = Normalizer.normalize(value.trim(), Normalizer.Form.NFKC).toLowerCase(Locale.ROOT);
-        return WHITESPACE.matcher(normalized).replaceAll(" ");
+        return CanonicalText.canonical(value);
     }
 }

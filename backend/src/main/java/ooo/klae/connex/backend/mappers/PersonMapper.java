@@ -94,10 +94,6 @@ public interface PersonMapper {
     /** True only when the workspace owns the contact AND it is archived; for restore write scoping. */
     boolean existsOwnedArchived(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Integer lockById(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<Person> findMentionedRecords(
-            @Param("workspaceId") int workspaceId,
-            @Param("text") String text,
-            @Param("limit") int limit);
     List<Person> search(@Param("workspaceId") int workspaceId, @Param("query") String query);
     /** Existing contacts in the workspace whose email matches one of the given (normalized) emails; for import dedup. */
     List<Person> findByEmails(@Param("workspaceId") int workspaceId, @Param("emails") List<String> emails);
