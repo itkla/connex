@@ -5,9 +5,9 @@ import type { LandingTranslation } from "./sampleWorkspace";
 import { DOCS_AVAILABLE } from "@/app/lib/deploymentSurface";
 
 const OPTIONS = [
-    { key: "free", Icon: UserIcon },
-    { key: "pro", Icon: CloudIcon },
-    { key: "enterprise", Icon: BuildingOffice2Icon },
+    { key: "free", Icon: UserIcon, highlights: ["seats", "workspaces", "records", "ask"] },
+    { key: "pro", Icon: CloudIcon, highlights: ["seats", "workspaces", "records", "expansion", "ask", "clientWorkspaces"] },
+    { key: "enterprise", Icon: BuildingOffice2Icon, highlights: ["sso", "hosting", "capacity", "support"] },
 ] as const;
 type Plan = typeof OPTIONS[number]["key"];
 type ComparisonValue = boolean | "one" | "two" | "five" | "recordsFree" | "recordsPro" | "smallMonthly" | "sharedPool" | "custom" | "upgrade" | "perSeat" | "addOn" | "selfService" | "productSupport" | "quoted";
@@ -46,17 +46,27 @@ function FeatureStatus({ value, t }: { value: ComparisonValue; t: LandingTransla
 export default function LandingPricing({ t, ctaHref, ctaLabel, preLaunch = false }: { t: LandingTranslation; ctaHref: string; ctaLabel: string; preLaunch?: boolean }) {
     return (
         <>
-            <div className="mt-10 grid gap-y-5 lg:mt-12 lg:grid-cols-4">
-                <p className="hidden self-end pb-6 pr-6 text-sm leading-relaxed text-muted-foreground lg:block">{t("pricing.allFeatures")}</p>
-                {OPTIONS.map(({ key, Icon }) => (
-                    <article key={key} aria-labelledby={`pricing-${key}-title`} className={`flex min-w-0 flex-col rounded-xl border p-6 lg:mx-2.5 ${key === "pro" ? "border-brand/40 bg-brand/5" : "border-border"}`}>
+            <div className="mt-10 grid gap-5 lg:mt-12 lg:grid-cols-3 lg:gap-y-0">
+                {OPTIONS.map(({ key, Icon, highlights }) => (
+                    <article key={key} aria-labelledby={`pricing-${key}-title`} className={`flex min-w-0 flex-col rounded-xl border p-6 sm:p-8 lg:grid lg:grid-rows-subgrid ${preLaunch ? "lg:row-span-4" : "lg:row-span-5"} ${key === "pro" ? "border-brand/40 bg-brand/5" : "border-border"}`}>
                         <Icon aria-hidden="true" className="size-8 text-brand-dark dark:text-brand" />
                         <h3 id={`pricing-${key}-title`} className="mt-6 text-3xl tracking-tight">{t(`pricing.${key}.name`)}</h3>
-                        <div className="mt-3 flex-1 space-y-3 text-base leading-relaxed text-muted-foreground">
-                            <p>{t(`pricing.${key}.body`)}</p>
-                            {key === "pro" && <p className="text-sm">{t("pricing.pro.hosting")}<br />{t("pricing.pro.highlights.clientWorkspaces")}</p>}
+                        <p className="mt-3 text-base leading-relaxed text-muted-foreground">
+                            {t(`pricing.${key}.body`)}
+                            {key === "pro" && <span className="mt-3 block text-sm">{t("pricing.pro.hosting")}</span>}
+                        </p>
+                        <div className={`mt-7 flex-1 border-t border-border pt-6 ${preLaunch ? "" : "mb-8"}`}>
+                            <p className="text-sm font-medium">{t(`pricing.${key}.includes`)}</p>
+                            <ul className="mt-4 space-y-3">
+                                {highlights.map((feature) => (
+                                    <li key={feature} className="flex items-start gap-3 text-base leading-relaxed">
+                                        <CheckIcon aria-hidden="true" className="mt-1 size-4 shrink-0 text-brand-dark dark:text-brand" />
+                                        <span>{t(`pricing.${key}.highlights.${feature}`)}</span>
+                                    </li>
+                                ))}
+                            </ul>
                         </div>
-                        {!preLaunch && <Button asChild={key !== "enterprise"} disabled={key === "enterprise"} variant={key === "pro" ? "brand" : "outline"} size="page" className="mt-7 h-auto min-h-11 w-full whitespace-normal px-5 py-3 text-base">
+                        {!preLaunch && <Button asChild={key !== "enterprise"} disabled={key === "enterprise"} variant={key === "pro" ? "brand" : "outline"} size="page" className="h-auto min-h-11 w-full whitespace-normal px-5 py-3 text-base">
                             {key === "enterprise"
                                 ? <>{t("pricing.enterprise.cta")}<ArrowRightIcon aria-hidden="true" className="size-4 shrink-0" /></>
                                 : <Link href={ctaHref}>{ctaLabel}<ArrowRightIcon aria-hidden="true" className="size-4 shrink-0" /></Link>}
@@ -64,14 +74,14 @@ export default function LandingPricing({ t, ctaHref, ctaLabel, preLaunch = false
                     </article>
                 ))}
             </div>
-            <p className="mt-8 text-sm leading-relaxed text-muted-foreground lg:hidden">{t("pricing.allFeatures")}</p>
+            <p className="mt-8 max-w-[85ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.allFeatures")}</p>
             <table className="mt-6 w-full table-fixed border-collapse text-sm">
                 <caption className="sr-only">{t("pricing.compare")}</caption>
                 <colgroup><col className="w-1/3 lg:w-1/4" /><col /><col /><col /></colgroup>
                 <thead>
                     <tr>
-                        <th scope="col" className="pb-4 pr-3 text-left font-medium lg:p-0"><span className="lg:sr-only">{t("pricing.feature")}</span></th>
-                        {OPTIONS.map(({ key }) => <th key={key} scope="col" className="px-1 pb-4 text-center text-xs font-semibold sm:text-sm lg:p-0"><span className="lg:sr-only">{t(`pricing.${key}.name`)}</span></th>)}
+                        <th scope="col" className="pb-4 pr-3 text-left font-medium">{t("pricing.feature")}</th>
+                        {OPTIONS.map(({ key }) => <th key={key} scope="col" className="px-1 pb-4 text-center text-xs font-semibold sm:text-sm">{t(`pricing.${key}.name`)}</th>)}
                     </tr>
                 </thead>
                 {COMPARISON.map(({ group, rows }) => (
