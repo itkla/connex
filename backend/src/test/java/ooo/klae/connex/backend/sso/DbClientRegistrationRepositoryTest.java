@@ -15,6 +15,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
@@ -547,7 +548,10 @@ class DbClientRegistrationRepositoryTest {
         if ("decrypt".equals(reason)) {
             when(cipher.decryptOidcClientSecret(17, "reference-a")).thenThrow(new IllegalStateException("retired"));
         }
-        repository = new DbClientRegistrationRepository(mapper, cipher, properties, http, clock);
+        try (var clocks = mockStatic(Clock.class)) {
+            clocks.when(Clock::systemUTC).thenReturn(clock);
+            repository = new DbClientRegistrationRepository(mapper, cipher, properties, http);
+        }
 
         assertNull(repository.findByRegistrationId("org-17"));
         int initialResolutions = resolutions.get();

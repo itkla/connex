@@ -15,7 +15,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.registration.ClientRegistrations;
@@ -26,6 +25,7 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.SsoConnection;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 
@@ -45,6 +45,7 @@ import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
  * discovery TTL against the connection identity; shared-capacity failures remain retryable.
  */
 @Component
+@RequiredArgsConstructor
 public class DbClientRegistrationRepository implements ClientRegistrationRepository {
 
     private static final Logger log = LoggerFactory.getLogger(DbClientRegistrationRepository.class);
@@ -61,27 +62,11 @@ public class DbClientRegistrationRepository implements ClientRegistrationReposit
     private final SsoSecretCipher ssoSecretCipher;
     private final SsoProperties ssoProperties;
     private final SsoHttpClient ssoHttpClient;
-    private final Clock clock;
+    private final Clock clock = Clock.systemUTC();
 
     private final ConcurrentHashMap<String, CachedTemplate> cache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Integer, CachedFailure> failures = new ConcurrentHashMap<>();
     private final SsoTransportSlots registrationSlots = new SsoTransportSlots(RESOLUTIONS_PER_REGISTRATION);
-
-    /** Creates the repository with the system clock for discovery cache expiry. */
-    @Autowired
-    public DbClientRegistrationRepository(SsoConnectionMapper ssoConnectionMapper, SsoSecretCipher ssoSecretCipher,
-            SsoProperties ssoProperties, SsoHttpClient ssoHttpClient) {
-        this(ssoConnectionMapper, ssoSecretCipher, ssoProperties, ssoHttpClient, Clock.systemUTC());
-    }
-
-    DbClientRegistrationRepository(SsoConnectionMapper ssoConnectionMapper, SsoSecretCipher ssoSecretCipher,
-            SsoProperties ssoProperties, SsoHttpClient ssoHttpClient, Clock clock) {
-        this.ssoConnectionMapper = ssoConnectionMapper;
-        this.ssoSecretCipher = ssoSecretCipher;
-        this.ssoProperties = ssoProperties;
-        this.ssoHttpClient = ssoHttpClient;
-        this.clock = clock;
-    }
 
     @Override
     public ClientRegistration findByRegistrationId(String registrationId) {
