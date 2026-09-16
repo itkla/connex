@@ -118,10 +118,10 @@ public class SmtpDeliveryProvider implements MessageDispatcher {
     public DispatchReceipt dispatch(ResolvedDeliveryProvider target, DeliveryRequest request) {
         Long deadlineNanos = request.providerDeadlineNanos();
         if (deadlineNanos == null) {
-            return DispatchReceipt.rejected("SMTP request has no provider deadline");
+            return DispatchReceipt.rejectedBeforeEgress("SMTP request has no provider deadline");
         }
         if (expired(deadlineNanos)) {
-            return DispatchReceipt.rejected("SMTP deadline expired before egress");
+            return DispatchReceipt.rejectedBeforeEgress("SMTP deadline expired before egress");
         }
         Cancellation cancellation = new Cancellation();
         ScheduledFuture<?> deadlineTask;
@@ -131,17 +131,17 @@ public class SmtpDeliveryProvider implements MessageDispatcher {
                     remainingNanos(deadlineNanos),
                     TimeUnit.NANOSECONDS);
         } catch (RejectedExecutionException exception) {
-            return DispatchReceipt.rejected("SMTP deadline enforcement is unavailable");
+            return DispatchReceipt.rejectedBeforeEgress("SMTP deadline enforcement is unavailable");
         }
         AtomicBoolean egressStarted = new AtomicBoolean();
         try {
             ResolvedMailConfig config = target.mailConfig();
             if (config == null || !config.usable()) {
-                return DispatchReceipt.rejected("No usable mail transport is configured");
+                return DispatchReceipt.rejectedBeforeEgress("No usable mail transport is configured");
             }
             ResolvedDestination destination = resolve(config, deadlineNanos, cancellation);
             if (expired(deadlineNanos)) {
-                return DispatchReceipt.rejected("SMTP deadline expired before egress");
+                return DispatchReceipt.rejectedBeforeEgress("SMTP deadline expired before egress");
             }
             DeadlineBoundSender deadlineBound =
                     javaMailSenderFactory.deadlineBoundForConfig(
@@ -169,7 +169,7 @@ public class SmtpDeliveryProvider implements MessageDispatcher {
                 mime.setHeader("Message-ID", messageId(request.dedupeKey()));
             }
             if (expired(deadlineNanos)) {
-                return DispatchReceipt.rejected("SMTP deadline expired before egress");
+                return DispatchReceipt.rejectedBeforeEgress("SMTP deadline expired before egress");
             }
             deadlineBound.connectAndSend(mime, () -> egressStarted.set(true));
             if (cancellation.triggered() || expired(deadlineNanos)) {
@@ -179,7 +179,7 @@ public class SmtpDeliveryProvider implements MessageDispatcher {
             return DispatchReceipt.sent(null, "smtp accepted");
         } catch (Exception exception) {
             if (JavaMailSenderFactory.isDeadlineBeforeTransport(exception)) {
-                return DispatchReceipt.rejected(
+                return DispatchReceipt.rejectedBeforeEgress(
                         "SMTP deadline expired before transport creation");
             }
             if (egressStarted.get()) {
@@ -187,7 +187,7 @@ public class SmtpDeliveryProvider implements MessageDispatcher {
                         ? "SMTP request exceeded its hard deadline after egress began"
                         : bounded(exception.getMessage()));
             }
-            return DispatchReceipt.rejected(bounded(exception.getMessage()));
+            return DispatchReceipt.rejectedBeforeEgress(bounded(exception.getMessage()));
         } finally {
             deadlineTask.cancel(false);
             cancellation.clearResolution();
