@@ -1,6 +1,10 @@
 package ooo.klae.connex.backend.config;
 
 import java.util.List;
+import java.util.Set;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.servlet.filter.OrderedFormContentFilter;
@@ -13,6 +17,28 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.oauth2.client.oidc.authentication.OidcIdTokenDecoderFactory;
+import org.springframework.security.oauth2.client.endpoint.OAuth2AccessTokenResponseClient;
+import org.springframework.security.oauth2.client.endpoint.OAuth2AuthorizationCodeGrantRequest;
+import org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient;
+import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
+import org.springframework.security.oauth2.client.userinfo.OAuth2UserService;
+import org.springframework.security.oauth2.core.user.OAuth2User;
+import org.springframework.http.client.ClientHttpRequestFactory;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.security.config.ObjectPostProcessor;
+import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter;
+import org.springframework.security.oauth2.client.http.OAuth2ErrorResponseErrorHandler;
+import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserService;
+import org.springframework.security.oauth2.client.registration.ClientRegistration;
+import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
+import org.springframework.security.oauth2.core.http.converter.OAuth2AccessTokenResponseHttpMessageConverter;
+import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
+import org.springframework.security.oauth2.jwt.JwtDecoderFactory;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.http.converter.FormHttpMessageConverter;
+import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.security.oauth2.client.oidc.authentication.OidcIdTokenValidator;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.jwt.JwtClaimNames;
@@ -60,6 +86,7 @@ import ooo.klae.connex.backend.publicapi.PublicApiCorsProcessor;
 import ooo.klae.connex.backend.publicapi.PublicApiPaths;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
+import ooo.klae.connex.backend.sso.SsoHttpClient;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.notifications.WebSocketSessionRegistry;
 import ooo.klae.connex.backend.services.AuditService;
@@ -93,6 +120,8 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
     private static final List<String> API_CORS_ALLOWED_HEADERS = List.of(
         "Accept",
         "Accept-Language",
@@ -199,6 +228,7 @@ public class SecurityConfig {
             SessionRegistry sessionRegistry,
             CompositeClientRegistrationRepository compositeClientRegistrationRepository,
             SocialLoginClientRegistrations socialLoginClientRegistrations,
+            SsoHttpClient ssoHttpClient,
             DbRelyingPartyRegistrationRepository dbRelyingPartyRegistrationRepository,
             SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler,
             SessionSecurityService sessionSecurityService,
@@ -373,13 +403,28 @@ public class SecurityConfig {
             .requestCache(RequestCacheConfigurer::disable);
         if (oauthEnabled) {
             http
-                .oauth2Login(o -> o
-                    .clientRegistrationRepository(compositeClientRegistrationRepository)
+                .oauth2Login(o -> {
+                    o.addObjectPostProcessor(new ObjectPostProcessor<OAuth2AuthorizationRequestRedirectFilter>() {
+                        @Override
+                        public <O extends OAuth2AuthorizationRequestRedirectFilter> O postProcess(O filter) {
+                            filter.setAuthenticationFailureHandler((request, response, exception) -> {
+                                log.warn("OAuth2 initiation failed [{}]", exception.getClass().getName());
+                                response.sendRedirect("/auth/login?sso_error=1");
+                            });
+                            return filter;
+                        }
+                    });
+                    o.clientRegistrationRepository(compositeClientRegistrationRepository)
+                    .tokenEndpoint(t -> t.accessTokenResponseClient(
+                            oidcTokenResponseClient(ssoHttpClient, socialLoginClientRegistrations)))
+                    .userInfoEndpoint(u -> u
+                            .oidcUserService(oidcUserService(ssoHttpClient, socialLoginClientRegistrations))
+                            .userService(oauth2UserService(ssoHttpClient, socialLoginClientRegistrations)))
                     .authorizationEndpoint(a -> a.baseUri("/api/oauth2/authorization"))
                     .redirectionEndpoint(r -> r.baseUri("/api/login/oauth2/code/*"))
                     .successHandler(ssoAuthenticationSuccessHandler)
-                    .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"))
-                );
+                    .failureHandler((rq, rs, ex) -> rs.sendRedirect("/auth/login?sso_error=1"));
+                });
         }
         if (ssoEnabled) {
             http.saml2Login(s -> s
@@ -443,24 +488,151 @@ public class SecurityConfig {
      * fixed-issuer validator would reject. Microsoft id-tokens are still validated for signature
      * (via the configured JWK set), expiry, a genuine Microsoft issuer, and our own audience; every
      * other registration keeps the default strict OIDC validator.
+     *
+     * <p>The JWK set is fetched through {@link SsoHttpClient} so signature-key retrieval obeys the
+     * same address-pinned, redirect-refusing egress policy as discovery and the token exchange.
+     * @param ssoHttpClient the guarded OIDC transport used to fetch the JWK set
+     * @param socialLoginClientRegistrations tells consumer social registrations from enterprise ones
      * @return the id-token decoder factory
      */
     @Bean
-    OidcIdTokenDecoderFactory idTokenDecoderFactory() {
-        OidcIdTokenDecoderFactory factory = new OidcIdTokenDecoderFactory();
-        factory.setJwtValidatorFactory(registration -> {
+    JwtDecoderFactory<ClientRegistration> idTokenDecoderFactory(SsoHttpClient ssoHttpClient,
+            SocialLoginClientRegistrations socialLoginClientRegistrations) {
+        return new GuardedIdTokenDecoderFactory(ssoHttpClient, socialLoginClientRegistrations);
+    }
+
+    /**
+     * Caches one id-token decoder per registration identity so a login does not rebuild the decoder
+     * — and therefore does not refetch the JWK set through the bounded transport — on every attempt.
+     * The cache key carries the JWK set URI, client id, issuer, and scopes, so a registration that
+     * changes identity resolves to a new decoder instead of a stale one.
+     */
+    static final class GuardedIdTokenDecoderFactory implements JwtDecoderFactory<ClientRegistration> {
+
+        private static final int MAX_CACHED_DECODERS = 256;
+
+        private final SsoHttpClient ssoHttpClient;
+        private final SocialLoginClientRegistrations socialLoginClientRegistrations;
+        private final ConcurrentHashMap<DecoderKey, JwtDecoder> decoders = new ConcurrentHashMap<>();
+
+        GuardedIdTokenDecoderFactory(SsoHttpClient ssoHttpClient,
+                SocialLoginClientRegistrations socialLoginClientRegistrations) {
+            this.ssoHttpClient = ssoHttpClient;
+            this.socialLoginClientRegistrations = socialLoginClientRegistrations;
+        }
+
+        @Override
+        public JwtDecoder createDecoder(ClientRegistration registration) {
+            if (decoders.size() >= MAX_CACHED_DECODERS) {
+                decoders.clear();
+            }
+            return decoders.computeIfAbsent(key(registration), ignored -> build(registration));
+        }
+
+        private static DecoderKey key(ClientRegistration registration) {
+            return new DecoderKey(registration.getRegistrationId(), registration.getProviderDetails().getJwkSetUri(),
+                    registration.getClientId(), registration.getProviderDetails().getIssuerUri(),
+                    Set.copyOf(registration.getScopes()));
+        }
+
+        private record DecoderKey(String registrationId, String jwkSetUri, String clientId, String issuer,
+                Set<String> scopes) {
+        }
+
+        private JwtDecoder build(ClientRegistration registration) {
+            NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSetUri(
+                    registration.getProviderDetails().getJwkSetUri())
+                    .jwsAlgorithm(SignatureAlgorithm.RS256)
+                    .restOperations(new RestTemplate(transport(ssoHttpClient, socialLoginClientRegistrations,
+                            registration))).build();
+            decoder.setClaimSetConverter(OidcIdTokenDecoderFactory.createDefaultClaimTypeConverter());
             if (SocialLoginClientRegistrations.MICROSOFT.equals(registration.getRegistrationId())) {
-                return new DelegatingOAuth2TokenValidator<>(
+                decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
                         new JwtTimestampValidator(),
                         new JwtClaimValidator<String>(JwtClaimNames.ISS, SecurityConfig::isMicrosoftIssuer),
                         new JwtClaimValidator<Object>(JwtClaimNames.AUD,
                                 aud -> audienceContains(aud, registration.getClientId())),
                         new JwtClaimValidator<String>("azp",
-                                azp -> azp == null || azp.equals(registration.getClientId())));
+                                azp -> azp == null || azp.equals(registration.getClientId()))));
+            } else {
+                decoder.setJwtValidator(new OidcIdTokenValidator(registration));
             }
-            return new OidcIdTokenValidator(registration);
-        });
-        return factory;
+            return decoder;
+        }
+    }
+
+    /**
+     * Picks the guarded transport for a registration. Consumer social login always keeps the strict
+     * destination policy; only per-organization enterprise registrations may use the deployment's
+     * on-premises issuer exemption.
+     */
+    private static ClientHttpRequestFactory transport(SsoHttpClient ssoHttpClient,
+            SocialLoginClientRegistrations socialLoginClientRegistrations, ClientRegistration registration) {
+        return socialLoginClientRegistrations.isSocialRegistration(registration.getRegistrationId())
+                ? ssoHttpClient : ssoHttpClient.forEnterpriseRegistration(registration.getRegistrationId());
+    }
+
+    /**
+     * Builds the authorization-code token client on the guarded transport so the server-side token
+     * exchange cannot reach a destination the registration's admission checks refused.
+     * @param ssoHttpClient the guarded OIDC transport
+     * @param socialLoginClientRegistrations tells consumer social registrations from enterprise ones
+     * @return the token-response client
+     */
+    static OAuth2AccessTokenResponseClient<OAuth2AuthorizationCodeGrantRequest> oidcTokenResponseClient(
+            SsoHttpClient ssoHttpClient, SocialLoginClientRegistrations socialLoginClientRegistrations) {
+        RestClientAuthorizationCodeTokenResponseClient strict = tokenResponseClient(ssoHttpClient);
+        return grantRequest -> (socialLoginClientRegistrations.isSocialRegistration(
+                grantRequest.getClientRegistration().getRegistrationId()) ? strict : tokenResponseClient(
+                        ssoHttpClient.forEnterpriseRegistration(grantRequest.getClientRegistration().getRegistrationId())))
+                .getTokenResponse(grantRequest);
+    }
+
+    private static RestClientAuthorizationCodeTokenResponseClient tokenResponseClient(
+            ClientHttpRequestFactory requestFactory) {
+        RestClientAuthorizationCodeTokenResponseClient client = new RestClientAuthorizationCodeTokenResponseClient();
+        client.setRestClient(RestClient.builder().requestFactory(requestFactory)
+                .configureMessageConverters(converters -> converters.addCustomConverter(
+                        new FormHttpMessageConverter()).addCustomConverter(
+                        new OAuth2AccessTokenResponseHttpMessageConverter()))
+                .defaultStatusHandler(new OAuth2ErrorResponseErrorHandler()).build());
+        return client;
+    }
+
+    /**
+     * Builds the OAuth2 userinfo client on the guarded transport.
+     * @param ssoHttpClient the guarded OIDC transport
+     * @param socialLoginClientRegistrations tells consumer social registrations from enterprise ones
+     * @return the userinfo user service
+     */
+    static OAuth2UserService<OAuth2UserRequest, OAuth2User> oauth2UserService(SsoHttpClient ssoHttpClient,
+            SocialLoginClientRegistrations socialLoginClientRegistrations) {
+        DefaultOAuth2UserService strict = userService(ssoHttpClient);
+        return userRequest -> (socialLoginClientRegistrations.isSocialRegistration(
+                userRequest.getClientRegistration().getRegistrationId()) ? strict : userService(
+                        ssoHttpClient.forEnterpriseRegistration(userRequest.getClientRegistration().getRegistrationId())))
+                .loadUser(userRequest);
+    }
+
+    private static DefaultOAuth2UserService userService(ClientHttpRequestFactory requestFactory) {
+        RestTemplate rest = new RestTemplate(requestFactory);
+        rest.setErrorHandler(new OAuth2ErrorResponseErrorHandler());
+        DefaultOAuth2UserService service = new DefaultOAuth2UserService();
+        service.setRestOperations(rest);
+        return service;
+    }
+
+    /**
+     * Builds the OIDC userinfo client on the guarded transport.
+     * @param ssoHttpClient the guarded OIDC transport
+     * @param socialLoginClientRegistrations tells consumer social registrations from enterprise ones
+     * @return the OIDC user service
+     */
+    static OidcUserService oidcUserService(SsoHttpClient ssoHttpClient,
+            SocialLoginClientRegistrations socialLoginClientRegistrations) {
+        OidcUserService service = new OidcUserService();
+        service.setOauth2UserService(oauth2UserService(ssoHttpClient, socialLoginClientRegistrations));
+        return service;
     }
 
     private static boolean isMicrosoftIssuer(String issuer) {

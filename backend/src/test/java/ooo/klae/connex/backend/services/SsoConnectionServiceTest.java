@@ -187,8 +187,6 @@ class SsoConnectionServiceTest extends AbstractServiceTest {
         String replacementSecret = "replacement-client-secret";
         try (var safety = mockStatic(SsoUrlSafety.class);
                 var discovery = mockStatic(ClientRegistrations.class)) {
-            safety.when(() -> SsoUrlSafety.isFetchableHttpUrl("https://idp.example.com", false)).thenReturn(true);
-            safety.when(() -> SsoUrlSafety.isFetchableHttpUrl(replacementIssuer, false)).thenReturn(true);
             discovery.when(() -> ClientRegistrations.fromIssuerLocation("https://idp.example.com"))
                     .thenReturn(discoveredRegistration("https://idp.example.com"));
             discovery.when(() -> ClientRegistrations.fromIssuerLocation(replacementIssuer))
