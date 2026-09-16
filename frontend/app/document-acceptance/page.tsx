@@ -10,7 +10,7 @@ export async function generateMetadata(): Promise<Metadata> {
         namespace: "DocumentAcceptance",
     });
     return {
-        title: `${t("metaTitle")} | Connex`,
+        title: t("metaTitle"),
         robots: { index: false, follow: false },
     };
 }

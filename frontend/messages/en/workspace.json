@@ -33,6 +33,7 @@
         "joinInvalid": "That doesn't look like a valid invite link."
     },
     "InviteAccept": {
+        "metaTitle": "Accept your invitation",
         "heading": "Join {workspace}",
         "roleLine": "You've been invited as {role}.",
         "invitedBy": "Invited by {name}",
@@ -49,6 +50,7 @@
         "roleMember": "a member"
     },
     "InviteLinkAccept": {
+        "metaTitle": "Join a workspace",
         "heading": "Join {workspace}",
         "roleLine": "You'll join as {role}.",
         "accept": "Join workspace",
@@ -967,7 +969,7 @@
         "oidcIssuerHint": "The IdP's OpenID discovery URL. Connex reads its endpoints automatically.",
         "oidcClientId": "Client ID",
         "oidcClientSecret": "Client secret",
-        "oidcClientSecretHint": "Stored encrypted and never shown again. Leave blank to keep the current secret.",
+        "oidcClientSecretHint": "Stored encrypted and never shown again. Leave blank to keep the current secret only while the issuer URL and client ID stay the same; changing either requires entering a new secret.",
         "secretConfigured": "•••••••• configured",
         "oidcScopes": "Scopes",
         "samlEntityId": "IdP entity ID",

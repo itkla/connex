@@ -47,6 +47,7 @@ import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
+import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
 class DocumentAcceptanceAdmissionFilterTest {
@@ -68,7 +69,28 @@ class DocumentAcceptanceAdmissionFilterTest {
 
     @BeforeEach
     void setUp() {
-        filter = new DocumentAcceptanceAdmissionFilter(rateLimiter, clientIpResolver);
+        filter = new DocumentAcceptanceAdmissionFilter(rateLimiter, clientIpResolver, new ObjectMapper());
+    }
+
+    @Test
+    void invalidPathsAreRejectedBeforeTheEarlierAdmissionFilterCanReachTheChain() throws Exception {
+        for (String path : new String[] {"/api/%2565xports/persons", "/api/document-acceptance%2faccept",
+                "/api/v1/%zz"}) {
+            TrackingJsonRequest request = request("", null);
+            request.setRequestURI(path);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+            filter.doFilter(request, response, chain);
+            assertEquals(400, response.getStatus());
+            assertNull(chain.getRequest());
+            assertFalse(request.bodyAccessed());
+            if (path.startsWith("/api/v1/")) {
+                assertEquals("invalid_request", new ObjectMapper().readTree(response.getContentAsByteArray())
+                        .path("error").path("code").asString());
+                assertEquals("no-store", response.getHeader("Cache-Control"));
+            }
+        }
+        verifyNoInteractions(rateLimiter, clientIpResolver);
     }
 
     @Test
@@ -97,7 +119,7 @@ class DocumentAcceptanceAdmissionFilterTest {
             properties,
             Clock.fixed(Instant.parse("2026-09-02T00:00:00Z"), ZoneOffset.UTC));
         DocumentAcceptanceAdmissionFilter realFilter =
-            new DocumentAcceptanceAdmissionFilter(realRateLimiter, clientIpResolver);
+            new DocumentAcceptanceAdmissionFilter(realRateLimiter, clientIpResolver, new ObjectMapper());
         TrackingJsonRequest firstRequest = request("/accept", "first-malformed");
         TrackingJsonRequest secondRequest = request("/accept", "second-malformed");
         when(clientIpResolver.resolve(firstRequest)).thenReturn(SOURCE);
@@ -112,6 +134,45 @@ class DocumentAcceptanceAdmissionFilterTest {
         assertEquals(429, secondResponse.getStatus());
         assertFalse(firstRequest.bodyAccessed());
         assertFalse(secondRequest.bodyAccessed());
+    }
+
+    @Test
+    void rotatingGrantCookiesFromABlockedSourceLeaveFreshRecipientsAdmissible() throws Exception {
+        SignatureProperties properties = new SignatureProperties();
+        properties.setMaxRequestsPerSource(1);
+        properties.setRateLimitMaxKeys(3);
+        DocumentAcceptanceAdmissionFilter realFilter = new DocumentAcceptanceAdmissionFilter(
+            new DocumentAcceptanceRateLimiter(properties,
+                Clock.fixed(Instant.parse("2026-09-02T00:00:00Z"), ZoneOffset.UTC)),
+            clientIpResolver, new ObjectMapper());
+        when(clientIpResolver.resolve(any())).thenAnswer(invocation -> {
+            MockHttpServletRequest request = invocation.getArgument(0, MockHttpServletRequest.class);
+            return request.getRemoteAddr();
+        });
+
+        for (int index = 1; index <= 3; index++) {
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/document-acceptance");
+            request.setRemoteAddr(SOURCE);
+            request.setCookies(new Cookie(OneTimeLinkFlowCookie.DOCUMENT_ACCEPTANCE,
+                String.format("%064x", index)));
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            MockFilterChain chain = new MockFilterChain();
+
+            realFilter.doFilter(request, response, chain);
+
+            assertEquals(index == 1 ? 200 : 429, response.getStatus());
+            assertEquals(index == 1, chain.getRequest() != null);
+        }
+        MockHttpServletRequest recipient = new MockHttpServletRequest("GET", "/api/document-acceptance");
+        recipient.setRemoteAddr("198.51.100.21");
+        recipient.setCookies(new Cookie(OneTimeLinkFlowCookie.DOCUMENT_ACCEPTANCE, "f".repeat(64)));
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        realFilter.doFilter(recipient, response, chain);
+
+        assertEquals(200, response.getStatus());
+        assertNotNull(chain.getRequest());
     }
 
     @Test
@@ -186,6 +247,20 @@ class DocumentAcceptanceAdmissionFilterTest {
         }
         verify(rateLimiter, org.mockito.Mockito.times(3))
             .acquire(DocumentAcceptanceToken.hashForAdmission(null), SOURCE);
+    }
+
+    @Test
+    void encodedAcceptancePathStillRequiresAGrantBeforeReadingTheBody() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/connex/%61pi/document-acceptance/accept");
+        request.setContextPath("/connex");
+        when(clientIpResolver.resolve(any())).thenReturn(SOURCE);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+        filter.doFilter(request, response, chain);
+        assertEquals(404, response.getStatus());
+        assertEquals(UNAVAILABLE_BODY, response.getContentAsString());
+        assertNull(chain.getRequest());
+        verify(rateLimiter).acquire(DocumentAcceptanceToken.hashForAdmission(null), SOURCE);
     }
 
     @Test

@@ -12,7 +12,8 @@ import lombok.ToString;
  * Upsert of a workspace's SMTP config. Structural constraints only; the
  * "required when enabled" and password-encryption rules live in
  * {@code WorkspaceMailConfigService}. A null/blank {@code password} leaves any
- * stored password unchanged; a blank string is never persisted as the password.
+ * stored password unchanged only when its connection settings are unchanged; a blank string is never
+ * persisted as the password.
  */
 @Data
 @ToString(exclude = "password")

@@ -27,6 +27,8 @@ public interface AttachmentScanMapper {
         @Param("expiresAt") LocalDateTime expiresAt);
     int retry(@Param("workspaceId") int workspaceId, @Param("url") String url,
         @Param("owner") String owner);
+    int refuse(@Param("workspaceId") int workspaceId, @Param("url") String url,
+        @Param("owner") String owner);
     int recordLegacyClean(@Param("workspaceId") int workspaceId, @Param("id") int id,
         @Param("report") ooo.klae.connex.backend.storage.malware.MalwareScanReport report,
         @Param("expiresAt") LocalDateTime expiresAt);

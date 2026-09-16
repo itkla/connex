@@ -23,6 +23,7 @@ on:
       - Agent guide context budget
       - CI
       - Deploy smoke
+      - Landing
       - React Doctor
       - Security
     types: [completed]

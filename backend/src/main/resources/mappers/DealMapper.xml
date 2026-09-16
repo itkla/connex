@@ -1153,6 +1153,16 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id}
   </update>
 
+  <update id="updateOutcome">
+    UPDATE deal
+    SET stage_id = #{stageId},
+        position = #{position},
+        closed_at = #{closedAt},
+        closed_reason = #{closedReason},
+        won = #{won}
+    WHERE workspace_id = #{workspaceId} AND id = #{id}
+  </update>
+
   <update id="updateName">
     UPDATE deal
     SET name = #{name},
