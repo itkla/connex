@@ -182,12 +182,25 @@ public class WorkspaceService {
         return TimezoneSupport.validateIana(workspace.getTimezone(), actorTimezone);
     }
 
+    /** Returns the raw last-active workspace id, or null, without validating membership or selecting a fallback. */
+    public Integer rememberedWorkspaceIdFor(int userId) {
+        return workspaceMapper.getLastActiveWorkspaceId(userId);
+    }
+
     /** The workspace to activate when none is supplied: remembered last-active, else first membership, else null. */
     public Integer defaultWorkspaceIdFor(int userId) {
         Integer last = workspaceMapper.getLastActiveWorkspaceId(userId);
         if (last != null && workspaceMapper.isMember(last, userId)) {
             return last;
         }
+        return firstMembershipWorkspaceIdFor(userId);
+    }
+
+    /**
+     * The caller's lowest-id active membership, or null when none remains. Lets a caller that has
+     * already read the remembered selection finish resolution without re-reading it.
+     */
+    public Integer firstMembershipWorkspaceIdFor(int userId) {
         List<Workspace> workspaces = workspaceMapper.getWorkspacesForUser(userId);
         return workspaces.isEmpty() ? null : workspaces.getFirst().getId();
     }
@@ -288,6 +301,19 @@ public class WorkspaceService {
 
     public void rememberActive(int userId, int workspaceId) {
         workspaceMapper.setLastActiveWorkspaceId(userId, workspaceId);
+    }
+
+    /**
+     * Drops a remembered selection that has been proven dead, so the caller resolves no workspace
+     * at all rather than a workspace they were removed from. Without this the remembered id
+     * survives revocation forever and every later pinless request re-derives the revoked
+     * workspace, which would lock a member out of the very endpoints that let them join or create
+     * a workspace again (#1649).
+     *
+     * @param userId the member whose remembered selection is no longer resolvable
+     */
+    public void forgetActive(int userId) {
+        workspaceMapper.clearLastActiveWorkspaceId(userId);
     }
 
     public boolean isSelfServiceCreationAllowed() {
@@ -1655,6 +1681,8 @@ public class WorkspaceService {
                 Integer nextWorkspaceId = defaultWorkspaceIdFor(userId);
                 if (nextWorkspaceId != null) {
                     rememberActive(userId, nextWorkspaceId);
+                } else {
+                    forgetActive(userId);
                 }
                 return Optional.ofNullable(nextWorkspaceId);
             }).orElse(null);

@@ -144,6 +144,8 @@ records. The hero keeps text and actions vertically centered below navigation, o
 SVG Mount Fuji skyline with a green gradient fading down from the summit and a plain sky. The
 base fades into mist, and soft cloud layers drift at different speeds and move with scroll depth. A pause
 control freezes the scenery. Reduced motion and no JavaScript show the static illustration.
+A small green marker pulses on the left ridge and ascends with scroll, leaving a fading trail
+along the silhouette and stopping below the summit. It shares the scenery's pause and reduced-motion behavior.
 Cloud motion pauses outside the hero and in hidden tabs. The slow, linear drift uses landing-only
 multiples of the expressive duration token, separate from interface feedback timings.
 The connected-record section uses shared tabs to reveal one explanation and icon diagram at a time.

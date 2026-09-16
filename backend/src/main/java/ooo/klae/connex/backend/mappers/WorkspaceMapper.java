@@ -74,6 +74,7 @@ public interface WorkspaceMapper {
     int removeMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getLastActiveWorkspaceId(int userId);
     int setLastActiveWorkspaceId(@Param("userId") int userId, @Param("workspaceId") int workspaceId);
+    int clearLastActiveWorkspaceId(int userId);
     int insert(Workspace workspace);
     int updateIdentity(
         @Param("workspaceId") int workspaceId,

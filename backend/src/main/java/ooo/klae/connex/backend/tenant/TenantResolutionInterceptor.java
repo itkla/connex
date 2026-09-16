@@ -20,6 +20,7 @@ import org.springframework.web.servlet.HandlerMapping;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.config.RequestPathNormalizer;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.observability.CorrelationIds;
@@ -31,20 +32,50 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 /**
  * Resolves the active workspace once per authenticated request and stores it in
  * {@link TenantContext}. Precedence: {@code X-Workspace-Id} header, then the
- * {@code connex_workspace} cookie, then the user's remembered/first membership.
+ * {@code connex_workspace} cookie, then the user's raw remembered workspace id,
+ * or first membership only when no workspace is remembered.
  * The candidate is always re-validated against membership, so a forged header or
  * cookie cannot grant access to a workspace the caller does not belong to.
  * Public API requests retain the authoritative workspace and catalog already
  * resolved by the credential filter and deliberately ignore both browser
  * selection mechanisms.
  *
- * <p>A stale matching cookie/header pair — or a cookie-only pin — that fails
- * membership after the caller was removed from that workspace falls back to
- * {@link WorkspaceService#defaultWorkspaceIdFor(int)} and rewrites or clears the
+ * <p>A stale matching cookie/header pair, cookie-only pin, or implicit remembered
+ * selection with no header or cookie that fails membership after the caller was
+ * removed from that workspace falls back on
+ * {@code GET}, {@code HEAD}, and {@code OPTIONS} requests to
+ * {@link WorkspaceService#defaultWorkspaceIdFor(int)} and rewrites the
  * workspace cookie so the next request stops targeting the revoked id (#1108).
+ * Other methods return 403 before changing the selection, so a pending mutation
+ * cannot be redirected into another workspace (#1649).
  * An explicit foreign {@code X-Workspace-Id} (header without that cookie, or
  * disagreeing with it) still returns 403 when the caller is not a member.
  * Only a membership the caller still holds is ever installed in {@link TenantContext}.
+ *
+ * <p>When no membership remains at all the request falls through <em>unresolved</em> for
+ * every method, and the dead selection is forgotten — the cookie is cleared and
+ * {@link WorkspaceService#forgetActive(int)} NULLs the remembered id. There is no workspace a
+ * write could be redirected into, {@link TenantScopeInterceptor} still refuses every
+ * workspace-scoped statement without a resolved scope, and refusing instead would lock the
+ * caller out of {@code POST /api/workspaces} and invite acceptance — the only endpoints that
+ * can give them a workspace again (#1649).
+ *
+ * <p>{@code SELECTION_PATH} lists the selection and link-bootstrap routes that are exempt from the
+ * stale-candidate 403 and fall through unresolved instead: {@code POST /api/workspaces},
+ * {@code POST /api/workspaces/{id}/switch|accept|decline|leave},
+ * {@code POST /api/invites/exchange|accept}, {@code POST /api/invite-links/exchange|accept},
+ * {@code POST /api/delivery/unsubscribe/exchange} and {@code POST /api/document-acceptance/exchange}.
+ * Each authorizes its own path or bearer target independently of {@link TenantContext}; token
+ * exchange must remain reachable before the client's first healing read. No fallback scope is
+ * installed, and the endpoint's token, CSRF and admission checks still apply. Nothing else is exempt.
+ *
+ * <p>The write protection is scoped to the first request that observes the revocation. A safe
+ * read heals the selection to a workspace the caller still belongs to, and subsequent writes go
+ * to the healed workspace by design — that is the pre-existing #1108 contract, and the healed
+ * cookie is what the client reads back to render the active workspace. Requiring an explicit
+ * reselection for the next unsafe request instead would need per-client state the interceptor
+ * does not have (the cookie is the client's only selection channel), so a composer that must
+ * not follow a heal has to compare its origin workspace before submitting (frontend follow-up #1732).
  *
  * <p>{@link TenantContext} is a {@code ThreadLocal} on a pooled container thread,
  * so the scope's teardown is load-bearing for tenant isolation (#988). Two rules
@@ -75,6 +106,11 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
         "/api/orgs/\\d+/workspaces/\\d+");
     private static final Pattern ORGANIZATION_LIFECYCLE_PATH = Pattern.compile(
         "/api/orgs/\\d+");
+    private static final Set<String> WORKSPACE_RECOVERY_METHODS = Set.of("GET", "HEAD", "OPTIONS");
+    private static final Pattern SELECTION_PATH = Pattern.compile(
+        "/api/workspaces|/api/workspaces/\\d+/(?:switch|accept|decline|leave)"
+            + "|/api/invites/(?:exchange|accept)|/api/invite-links/(?:exchange|accept)"
+            + "|/api/delivery/unsubscribe/exchange|/api/document-acceptance/exchange");
     private static final Set<String> JOURNAL_METHODS = Set.of(
         "DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT");
     private static final Logger log = LoggerFactory.getLogger(TenantResolutionInterceptor.class);
@@ -113,20 +149,28 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
 
         String role = workspaceService.getRole(candidate, user.getId());
         if (role == null) {
-            if (!workspaceRequestResolver.isStaleWorkspacePin(request, candidate)) {
+            boolean selectionRequest = isSelectionRequest(request);
+            if (!selectionRequest
+                    && !workspaceRequestResolver.isStaleWorkspacePin(request, candidate)) {
                 throw new ForbiddenException("Not a member of workspace " + candidate);
             }
             Integer fallback = workspaceService.defaultWorkspaceIdFor(user.getId());
             if (fallback == null) {
-                workspaceCookie.clear(response);
+                forgetStaleSelection(user.getId(), response);
                 return true;
+            }
+            if (selectionRequest) {
+                return true;
+            }
+            if (!WORKSPACE_RECOVERY_METHODS.contains(request.getMethod())) {
+                throw new ForbiddenException("Not a member of workspace " + candidate);
             }
             workspaceService.rememberActive(user.getId(), fallback);
             workspaceCookie.set(response, fallback);
             candidate = fallback;
             role = workspaceService.getRole(candidate, user.getId());
             if (role == null) {
-                workspaceCookie.clear(response);
+                forgetStaleSelection(user.getId(), response);
                 return true;
             }
         }
@@ -136,6 +180,21 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
         tenantContext.set(candidate, orgId, user.getId(), role, catalog);
         request.setAttribute(ORGANIZATION_ID_ATTRIBUTE, orgId);
         return true;
+    }
+
+    /**
+     * Whether the request targets a selection or link-bootstrap route with independent target
+     * authorization. Those routes fall through unresolved rather than 403 on a stale candidate,
+     * so clients can exchange a bearer before their first healing read.
+     */
+    private static boolean isSelectionRequest(HttpServletRequest request) {
+        return "POST".equals(request.getMethod())
+            && SELECTION_PATH.matcher(RequestPathNormalizer.apiPath(request)).matches();
+    }
+
+    private void forgetStaleSelection(int userId, HttpServletResponse response) {
+        workspaceCookie.clear(response);
+        workspaceService.forgetActive(userId);
     }
 
     private boolean retainPublicApiBinding(
