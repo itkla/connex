@@ -42,7 +42,7 @@ public class EmailChangeController {
     public Map<String, String> request(@Valid @RequestBody EmailChangeRequestDto dto,
             HttpServletRequest httpRequest) {
         emailChangeService.requestChange(dto.getNewEmail(), dto.getCurrentPassword(),
-                clientIpResolver.resolve(httpRequest));
+                clientIpResolver.resolveWithProvenance(httpRequest));
         return Map.of("message", "Check your new email address for a verification link");
     }
 

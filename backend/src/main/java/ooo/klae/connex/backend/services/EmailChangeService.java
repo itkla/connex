@@ -1,7 +1,9 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.Objects;
+
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,8 +14,11 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.EmailChangeTokenMapper;
+import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
+import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
 
 /**
@@ -31,10 +36,11 @@ public class EmailChangeService {
 
     private final UserMapper userMapper;
     private final EmailChangeTokenMapper emailChangeTokenMapper;
+    private final PasswordResetTokenMapper passwordResetTokenMapper;
     private final EmailChangeEmailService emailChangeEmailService;
-    private final PasswordEncoder passwordEncoder;
     private final AuthService authService;
     private final AuditService auditService;
+    private final LoginRateLimiter loginRateLimiter;
 
     @Value("${connex.email-change.token-expiry-minutes:30}")
     private int tokenExpiryMinutes;
@@ -49,16 +55,52 @@ public class EmailChangeService {
      * Issues a verification token for the current user's requested new email and
      * emails the link to that new address. Requires the caller's current password
      * (step-up) and rejects an address already in use.
+     * The account lock serializes issuance with recovery; the locked credential
+     * snapshot must still match the one whose password was confirmed.
+     *
+     * <p>The proof runs through the shared login/confirmation throttle, so repeated failures here
+     * also consume the account's login failure budget: a session holder without the password can
+     * therefore lock the owner out of password login for the remainder of the window. That is the
+     * accepted trade for closing the unmetered guessing oracle; the owner's emailed reset path is
+     * unaffected.
+     *
+     * <p>Confirmation outcomes are audited here rather than inside the shared confirmation step,
+     * which other callers reach while already holding {@code app_user} exclusively; the audit
+     * append takes its own shared lock on that row in an independent transaction, so it is emitted
+     * before this method acquires the account lock. Throttle audit attempts are limited to one
+     * per account per login window per JVM; wrong-password failures remain individually audited.
+     *
      * @param newEmailRaw the requested new email address
      * @param currentPassword the caller's current password, verified before issuing
-     * @param requestIp the requesting client IP, recorded for abuse audit
+     * @param requestIp the resolved client address and trusted-proxy provenance, recorded for
+     *     abuse audit and used by the shared confirmation throttle
      */
     @Transactional
-    public void requestChange(String newEmailRaw, String currentPassword, String requestIp) {
+    public void requestChange(String newEmailRaw, String currentPassword, ResolvedClientIp requestIp) {
         User user = authService.getCurrentUser();
-        if (currentPassword == null || !passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
+        try {
+            authService.requireCurrentPassword(user.getId(), currentPassword, requestIp);
+        } catch (TooManyRequestsException exception) {
+            if (loginRateLimiter.tryAcquirePasswordConfirmationThrottleAudit(user.getId(), System.currentTimeMillis())) {
+                auditService.recordFailure("auth.password_confirmation_throttled", "user", user.getId(), null,
+                        "Current-password confirmation throttled", null);
+            }
+            throw exception;
+        } catch (BadCredentialsException exception) {
+            auditService.recordFailure("auth.password_confirmation", "user", user.getId(), null,
+                    "Current-password confirmation failed", "incorrect_password");
             throw new ForbiddenException("Your current password is incorrect");
         }
+        if (userMapper.lockById(user.getId()) == null) {
+            throw new ForbiddenException("Your current password is incorrect");
+        }
+        User lockedUser = userMapper.getUserByIdForShare(user.getId());
+        if (lockedUser == null || lockedUser.getSessionEpoch() == null
+                || !Objects.equals(user.getPasswordHash(), lockedUser.getPasswordHash())
+                || !Objects.equals(user.getSessionEpoch(), lockedUser.getSessionEpoch())) {
+            throw new ForbiddenException("Your current password is incorrect");
+        }
+        user = lockedUser;
         String newEmail = normalizeEmail(newEmailRaw);
         if (newEmail.equalsIgnoreCase(normalizeEmail(user.getEmail()))) {
             throw new BadRequestException("That is already your email address");
@@ -73,8 +115,8 @@ public class EmailChangeService {
         emailChangeTokenMapper.invalidateForUser(user.getId());
 
         String rawToken = OneTimeTokenDigest.generate();
-        emailChangeTokenMapper.insert(
-            user.getId(), newEmail, OneTimeTokenDigest.sha256(rawToken), requestIp, tokenExpiryMinutes);
+        emailChangeTokenMapper.insert(user.getId(), newEmail, OneTimeTokenDigest.sha256(rawToken),
+            requestIp == null ? null : requestIp.address(), tokenExpiryMinutes, user.getSessionEpoch());
         emailChangeEmailService.sendVerificationEmail(user, newEmail, rawToken);
 
         auditService.record("user.email_change_requested", "user", user.getId(), user.getDisplayName(),
@@ -94,7 +136,8 @@ public class EmailChangeService {
     }
 
     /**
-     * Claims the raw token for one browser and server-session lineage.
+     * Claims the raw token for one browser and server-session lineage, after comparing its
+     * issuance generation against the locked account's current session epoch.
      * @param rawToken raw fragment bearer
      * @param exchangeOwnerHash one-way owner of the browser and server-session exchange
      * @return persisted source-token digest
@@ -107,9 +150,18 @@ public class EmailChangeService {
         if (tokenHash == null || exchangeOwnerHash == null || exchangeOwnerHash.isBlank()) {
             throw invalidLink();
         }
+        EmailChangeToken token = emailChangeTokenMapper.findRedeemableByHash(tokenHash);
+        if (token == null || userMapper.lockById(token.getUserId()) == null) {
+            throw invalidLink();
+        }
+        User user = userMapper.getUserByIdForShare(token.getUserId());
+        if (user == null || token.getCredentialGeneration() == null
+                || !token.getCredentialGeneration().equals(user.getSessionEpoch())) {
+            throw invalidLink();
+        }
         int claimed = emailChangeTokenMapper.claimExchange(tokenHash, exchangeOwnerHash);
         if (claimed != 1
-                && !emailChangeTokenMapper.isExchangeOwnedBy(tokenHash, exchangeOwnerHash)) {
+                && emailChangeTokenMapper.lockExchangeOwnedBy(tokenHash, exchangeOwnerHash) == null) {
             throw invalidLink();
         }
         return tokenHash;
@@ -123,7 +175,8 @@ public class EmailChangeService {
 
     /**
      * Applies the pending email change bound to a redeemable token, then consumes
-     * the token and invalidates the user's other outstanding email-change tokens.
+     * the token and invalidates outstanding email-change and password-reset tokens
+     * under the account lock.
      * Re-checks uniqueness at confirm time in case the address was claimed since.
      * @param rawToken the unhashed token from the verification link
      */
@@ -133,7 +186,7 @@ public class EmailChangeService {
         confirmChangeByHash(exchangeToken(rawToken, programmaticExchangeOwner(tokenHash)));
     }
 
-    /** Applies an email change through a purpose-bound browser-flow source digest. */
+    /** Applies an email change only while its issuance generation matches the locked account. */
     @Transactional
     public void confirmChangeByHash(String tokenHash) {
         EmailChangeToken token = tokenHash == null ? null
@@ -142,12 +195,14 @@ public class EmailChangeService {
             throw invalidLink();
         }
 
-        if (emailChangeTokenMapper.markConsumed(tokenHash) == 0) {
+        if (userMapper.lockById(token.getUserId()) == null) {
             throw invalidLink();
         }
 
-        User user = userMapper.getUserById(token.getUserId());
-        if (user == null) {
+        User user = userMapper.getUserByIdForShare(token.getUserId());
+        if (user == null || token.getCredentialGeneration() == null
+                || !token.getCredentialGeneration().equals(user.getSessionEpoch())
+                || emailChangeTokenMapper.markConsumed(tokenHash) == 0) {
             throw invalidLink();
         }
 
@@ -157,10 +212,9 @@ public class EmailChangeService {
         }
 
         userMapper.updateEmail(user.getId(), token.getNewEmail());
-        // Redeeming this token proved control of the new address, so the account is email-verified
-        // — the same trust signal registration verification records, shared across both flows.
         userMapper.markEmailVerified(user.getId());
         emailChangeTokenMapper.invalidateForUser(user.getId());
+        passwordResetTokenMapper.invalidateForUser(user.getId());
 
         auditService.record("user.email_change_completed", "user", user.getId(), user.getDisplayName(),
                 "Completed a verified email change", null);

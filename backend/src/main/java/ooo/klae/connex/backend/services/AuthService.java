@@ -310,7 +310,16 @@ public void downgradeToUnauthenticatedSession(
     }
 
     /**
-     * Confirms the current password with provenance-aware per-client throttling.
+     * Confirms the current password with immutable-account, username, and provenance-aware
+     * per-client throttling. Account failures persist for the configured login window.
+     *
+     * <p>This method writes no audit event of its own. It is a shared confirmation step that
+     * callers reach while already holding the account row exclusively — {@code MfaRecoveryService}
+     * takes {@code app_user FOR UPDATE} before the passkey-recovery bootstrap check — and audit
+     * appends run in an independent transaction that locks the actor's {@code app_user} row shared.
+     * Emitting from here would make the inner append wait on the caller's own exclusive lock until
+     * the InnoDB lock-wait timeout, losing the event and pinning two pooled connections per failed
+     * attempt. Callers that are not holding the account lock record their own outcome instead.
      *
      * @param userId the account whose password is being confirmed
      * @param password the submitted current password
@@ -323,11 +332,11 @@ public void downgradeToUnauthenticatedSession(
         }
         long now = System.currentTimeMillis();
         String username = user.getUsername();
-        if (loginRateLimiter.isBlockedForClient(clientIp, username, now)) {
+        if (loginRateLimiter.isPasswordConfirmationBlocked(userId, clientIp, username, now)) {
             throw new TooManyRequestsException("Too many login attempts. Please try again later.");
         }
         if (password == null || user.getPassword() == null || !passwordEncoder.matches(password, user.getPassword())) {
-            loginRateLimiter.recordFailureForClient(clientIp, username, now);
+            loginRateLimiter.recordPasswordConfirmationFailure(userId, clientIp, username, now);
             throw new BadCredentialsException("Incorrect password");
         }
         loginRateLimiter.recordSuccess(username);

@@ -24,6 +24,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import ooo.klae.connex.backend.beans.PasswordResetToken;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.BreachedPasswordCheckUnavailableException;
+import ooo.klae.connex.backend.mappers.EmailChangeTokenMapper;
 import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -46,6 +47,7 @@ class PasswordResetServiceLockingTest {
         PasswordResetService service = new PasswordResetService(
                 userMapper,
                 tokenMapper,
+                mock(EmailChangeTokenMapper.class),
                 credentialService,
                 mock(PasswordResetEmailService.class),
                 mock(PasswordResetRateLimiter.class),
@@ -54,11 +56,14 @@ class PasswordResetServiceLockingTest {
                 mock(SsoConnectionService.class));
         PasswordResetToken token = new PasswordResetToken();
         token.setUserId(41);
+        token.setCredentialGeneration(0);
         User user = new User();
         user.setId(41);
+        user.setSessionEpoch(0);
         when(tokenMapper.findExchangedRedeemableByHash("token-hash")).thenReturn(token);
         when(userMapper.lockById(41)).thenReturn(41);
         when(userMapper.getUserById(41)).thenReturn(user);
+        when(userMapper.getUserByIdForShare(41)).thenReturn(user);
         when(userMapper.isPrivilegedAccount(41)).thenReturn(true);
         when(lookup.isBreached(anyString())).thenThrow(
                 new BreachedPasswordSourceUnavailableException(
@@ -71,6 +76,7 @@ class PasswordResetServiceLockingTest {
         lockOrder.verify(lookup).isBreached(anyString());
         lockOrder.verify(userMapper).getUserById(41);
         lockOrder.verify(userMapper).lockById(41);
+        lockOrder.verify(userMapper).getUserByIdForShare(41);
         lockOrder.verify(userMapper).lockAssignedCustomRoleIds(41);
         lockOrder.verify(userMapper).isPrivilegedAccount(41);
         verify(encoder, never()).encode(anyString());
