@@ -76,7 +76,7 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
             reject(response, HttpServletResponse.SC_FORBIDDEN, Rejection.CAPABILITY_UNAVAILABLE);
             return;
         }
-        Integer workspaceId = workspaceRequestResolver.resolve(request, user.getId());
+        Integer workspaceId = admissionWorkspaceId(request, user.getId(), admission);
         if (workspaceId == null) {
             reject(response, HttpServletResponse.SC_FORBIDDEN, Rejection.WORKSPACE_REQUIRED);
             return;
@@ -100,6 +100,22 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
             return;
         }
         chain.doFilter(request, response);
+    }
+
+    /**
+     * The workspace this admission check runs against. The resolver hands back the caller's raw
+     * remembered selection, which survives revocation, so on the safe status read this filter
+     * heals to the caller's remaining membership exactly as {@code TenantResolutionInterceptor}
+     * does; the unsafe operations keep failing closed on the stale candidate (#1649).
+     */
+    private Integer admissionWorkspaceId(
+            HttpServletRequest request, int userId, Operation admission) {
+        Integer candidate = workspaceRequestResolver.resolve(request, userId);
+        if (admission != Operation.STATUS
+                || (candidate != null && workspaceService.getRole(candidate, userId) != null)) {
+            return candidate;
+        }
+        return workspaceService.defaultWorkspaceIdFor(userId);
     }
 
     private static Operation operation(HttpServletRequest request) {

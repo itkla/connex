@@ -49,6 +49,7 @@ import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.sso.CompositeClientRegistrationRepository;
 import ooo.klae.connex.backend.sso.DbRelyingPartyRegistrationRepository;
 import ooo.klae.connex.backend.sso.SocialLoginClientRegistrations;
+import ooo.klae.connex.backend.sso.SsoHttpClient;
 import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
@@ -105,6 +106,7 @@ class AiGenerationEndpointSecurityTest {
     @MockitoBean private WarmPathService warmPathService;
     @MockitoBean private CompositeClientRegistrationRepository clientRegistrationRepository;
     @MockitoBean private SocialLoginClientRegistrations socialLoginClientRegistrations;
+    @MockitoBean private SsoHttpClient ssoHttpClient;
     @MockitoBean private DbRelyingPartyRegistrationRepository relyingPartyRegistrationRepository;
     @MockitoBean private SsoAuthenticationSuccessHandler ssoAuthenticationSuccessHandler;
     @MockitoBean private RequestBodySizeProperties requestBodySizeProperties;

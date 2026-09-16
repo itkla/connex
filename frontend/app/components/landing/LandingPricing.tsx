@@ -48,9 +48,9 @@ export default function LandingPricing({ t, ctaHref, ctaLabel, preLaunch = false
         <>
             <div className="mt-10 grid gap-5 lg:mt-12 lg:grid-cols-3 lg:gap-y-0">
                 {OPTIONS.map(({ key, Icon, highlights }) => (
-                    <article key={key} className={`flex min-w-0 flex-col rounded-xl border p-6 sm:p-8 lg:grid lg:grid-rows-subgrid ${preLaunch ? "lg:row-span-4" : "lg:row-span-5"} ${key === "pro" ? "border-brand/40 bg-brand/5" : "border-border"}`}>
+                    <article key={key} aria-labelledby={`pricing-${key}-title`} className={`flex min-w-0 flex-col rounded-xl border p-6 sm:p-8 lg:grid lg:grid-rows-subgrid ${preLaunch ? "lg:row-span-4" : "lg:row-span-5"} ${key === "pro" ? "border-brand/40 bg-brand/5" : "border-border"}`}>
                         <Icon aria-hidden="true" className="size-8 text-brand-dark dark:text-brand" />
-                        <h3 className="mt-6 text-3xl tracking-tight">{t(`pricing.${key}.name`)}</h3>
+                        <h3 id={`pricing-${key}-title`} className="mt-6 text-3xl tracking-tight">{t(`pricing.${key}.name`)}</h3>
                         <p className="mt-3 text-base leading-relaxed text-muted-foreground">
                             {t(`pricing.${key}.body`)}
                             {key === "pro" && <span className="mt-3 block text-sm">{t("pricing.pro.hosting")}</span>}
@@ -74,36 +74,34 @@ export default function LandingPricing({ t, ctaHref, ctaLabel, preLaunch = false
                     </article>
                 ))}
             </div>
-            <div id="pricing-pooling-note" className="mt-8 max-w-[85ch] space-y-3 text-base leading-relaxed text-muted-foreground">
+            <p className="mt-8 max-w-[75ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.allFeatures")}</p>
+            <table aria-describedby="pricing-notes" className="mt-6 w-full table-fixed border-collapse text-sm">
+                <caption className="sr-only">{t("pricing.compare")}</caption>
+                <colgroup><col className="w-1/3 lg:w-1/4" /><col /><col /><col /></colgroup>
+                <thead>
+                    <tr>
+                        <th scope="col" className="pb-4 pr-3 text-left font-medium">{t("pricing.feature")}</th>
+                        {OPTIONS.map(({ key }) => <th key={key} scope="col" className="px-1 pb-4 text-center text-xs font-semibold sm:text-sm">{t(`pricing.${key}.name`)}</th>)}
+                    </tr>
+                </thead>
+                {COMPARISON.map(({ group, rows }) => (
+                    <tbody key={group}>
+                        <tr><th scope="rowgroup" colSpan={4} className="border-y border-border bg-muted/50 px-3 py-3 text-left font-semibold">{t(`pricing.groups.${group}`)}</th></tr>
+                        {rows.map(({ feature, values }) => (
+                            <tr key={feature} data-pricing-feature={feature} className="border-b border-border/60">
+                                <th scope="row" className="py-4 pr-3 text-left font-normal leading-relaxed text-muted-foreground">{t(`pricing.features.${feature}`)}{feature === "records" && <span className="mt-1 block text-xs">{t("pricing.combinedTotal")}</span>}</th>
+                                {OPTIONS.map(({ key }) => <td key={key} data-pricing-plan={key} className={`px-1 py-4 text-center text-xs font-medium leading-relaxed sm:text-sm ${key === "pro" ? "bg-brand/5" : ""}`}><FeatureStatus value={values[key]} t={t} /></td>)}
+                            </tr>
+                        ))}
+                    </tbody>
+                ))}
+            </table>
+            <div id="pricing-notes" className="mt-8 max-w-[75ch] space-y-3 text-sm leading-relaxed text-muted-foreground">
                 <p>{t("pricing.poolingNote")}</p>
                 <p>{t("pricing.subscriptionNote")}</p>
-            </div>
-            <div className="mt-16 sm:mt-20">
-                <h3 id="pricing-comparison-title" className="text-3xl tracking-tight sm:text-4xl">{t("pricing.compare")}</h3>
-                <p className="mt-4 max-w-[70ch] text-base leading-relaxed text-muted-foreground sm:text-lg">{t("pricing.allFeatures")}</p>
-                <table aria-labelledby="pricing-comparison-title" aria-describedby="pricing-pooling-note pricing-ai-note pricing-service-note" className="mt-8 w-full table-fixed border-collapse text-sm sm:text-base">
-                    <colgroup><col className="w-1/3 sm:w-2/5" /><col /><col /><col /></colgroup>
-                    <thead>
-                        <tr className="border-b border-border">
-                            <th scope="col" className="pb-4 pr-3 text-left font-medium">{t("pricing.feature")}</th>
-                            {OPTIONS.map(({ key }) => <th key={key} scope="col" className={`px-1 pb-4 text-center text-xs font-semibold sm:text-base ${key === "pro" ? "bg-brand/5" : ""}`}>{t(`pricing.${key}.name`)}</th>)}
-                        </tr>
-                    </thead>
-                    {COMPARISON.map(({ group, rows }) => (
-                        <tbody key={group}>
-                            <tr><th scope="rowgroup" colSpan={4} className="border-b border-border bg-muted/50 px-3 py-3 text-left text-sm font-semibold">{t(`pricing.groups.${group}`)}</th></tr>
-                            {rows.map(({ feature, values }) => (
-                                <tr key={feature} data-pricing-feature={feature} className="border-b border-border">
-                                    <th scope="row" className="py-4 pr-3 text-left font-normal leading-relaxed">{t(`pricing.features.${feature}`)}{feature === "records" && <span className="mt-1 block text-xs text-muted-foreground">{t("pricing.combinedTotal")}</span>}</th>
-                                    {OPTIONS.map(({ key }) => <td key={key} data-pricing-plan={key} className={`px-1 py-4 text-center text-xs leading-relaxed sm:text-base ${key === "pro" ? "bg-brand/5" : ""}`}><FeatureStatus value={values[key]} t={t} /></td>)}
-                                </tr>
-                            ))}
-                        </tbody>
-                    ))}
-                </table>
-                <p id="pricing-ai-note" className="mt-5 max-w-[75ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.aiNote")}{DOCS_AVAILABLE && <> <Link href="/docs/relationship-intelligence/ai-insights" className="text-foreground underline underline-offset-4">{t("pricing.aiDocs")}</Link></>}</p>
-                <p className="mt-3 max-w-[75ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.usageNote")}</p>
-                <p id="pricing-service-note" className="mt-3 max-w-[75ch] text-sm leading-relaxed text-muted-foreground">{t("pricing.serviceNote")}</p>
+                <p>{t("pricing.aiNote")}{DOCS_AVAILABLE && <> <Link href="/docs/relationship-intelligence/ai-insights" className="text-foreground underline underline-offset-4">{t("pricing.aiDocs")}</Link></>}</p>
+                <p>{t("pricing.usageNote")}</p>
+                <p>{t("pricing.serviceNote")}</p>
             </div>
         </>
     );
