@@ -936,7 +936,8 @@ case_binlog_shim_refuses_mutable_images_before_docker() {
 case_binlog_shim_only_mounts_readonly_binlog_inputs() {
     write_recording_docker
     local input="$SANDBOX/binlog-inputs/mysql-bin.000001"
-    local image="client@sha256:$(printf 'a%.0s' {1..64})" status
+    local image status
+    image="client@sha256:$(printf 'a%.0s' {1..64})"
     mkdir -p "$SANDBOX/binlog-inputs" "$SANDBOX/credentials"
     write_fake_binlog "$input"
     printf '[client]\npassword=synthetic-secret\n' > "$SANDBOX/credentials/source.cnf"
@@ -979,7 +980,7 @@ initialize_pitr_shim_fixture() {
     : > "$SANDBOX/restore-effects"
     : > "$SANDBOX/replay-sql"
     export PITR_TEST_SHIM="$BACKUP_DIR/shims/mysqlbinlog"
-    export PITR_TEST_FOREIGN_OPTION= PITR_TEST_REWRITE=
+    export PITR_TEST_FOREIGN_OPTION='' PITR_TEST_REWRITE=''
     cat > "$SANDBOX/replay-client" <<'EOF'
 #!/bin/bash
 set -euo pipefail
