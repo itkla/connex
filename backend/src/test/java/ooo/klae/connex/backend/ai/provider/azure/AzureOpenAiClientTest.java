@@ -79,7 +79,7 @@ class AzureOpenAiClientTest {
                 eq(ContentType.APPLICATION_JSON),
                 any(byte[].class),
                 same(deadline),
-                eq("Azure OpenAI invocation")))
+                eq("Azure OpenAI invocation"), any(Runnable.class)))
                 .thenReturn(new FixedAiProviderClient.Response(
                         200, "{\"choices\":[]}".getBytes(StandardCharsets.UTF_8)));
         AzureOpenAiClient client = new AzureOpenAiClient(properties, providerClient);
@@ -94,7 +94,7 @@ class AzureOpenAiClientTest {
                 eq(ContentType.APPLICATION_JSON),
                 any(byte[].class),
                 same(deadline),
-                eq("Azure OpenAI invocation"));
+                eq("Azure OpenAI invocation"), any(Runnable.class));
     }
 
     @Test

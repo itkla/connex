@@ -224,6 +224,28 @@ requests — `POST /api/document-acceptance/accept`, `POST /api/document-accepta
 `POST /api/delivery/unsubscribe` — also carry a JSON body echoing the `flowId` the preview returned; a
 body whose `flowId` does not name the grant the browser currently holds is refused without any state change.
 
+### V212 AI budget reservation cutover
+
+`V212__ai_budget_reservation_state.sql` introduces durable `reserved`, `dispatched`, and `settled`
+states. Older backends delete expired dispatched reservations without charging them and count
+retained settled rows as reserved capacity. The release is therefore **not rolling-deploy safe**.
+
+Treat the release containing V212 as a coordinated restart: close ingress, stop every old backend
+replica and AI worker, apply the migration, then start only the new version. Resume AI admission
+only after every instance has been upgraded. Existing reservations are conservatively backfilled
+as `dispatched` because the previous schema has no reliable dispatch evidence.
+
+Rollback requires quiescing AI work and reconciling dispatched and settled reservations with
+`organization_ai_budget_usage` before restoring older code. Reverting the application alone is not
+budget-safe; follow the full backup/restore policy below if reverting the database as well.
+
+The new sweeper charges expired dispatched work and releases expired pre-dispatch work in batches
+of 100, up to 10,000 reservations per run. Settled tombstones are purged in separate batches of 100
+(up to 10,000 per run) seven days after the later of lease expiry and settlement. Late settlement
+of a purged id remains a no-op. Provider deadlines are capped at one hour and leases include a one-minute settlement margin.
+The daily usage breakdown labels ledger consumption absent from successful-call audits as
+`Conservative / unattributed charges`; this can also include successful settlements awaiting audit.
+
 ## Triggered-send rollback quiescence
 
 The triggered-send fence is captured at backend startup; changing an environment file does not close

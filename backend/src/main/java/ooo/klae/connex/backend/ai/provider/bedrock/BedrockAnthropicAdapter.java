@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.AiProviderGateExceptions;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
@@ -94,11 +95,13 @@ public class BedrockAnthropicAdapter implements AiProvider {
             String requestBody = buildRequestBody(request, enforcement);
             String responseBody = request.providerAttemptExecutor().execute(() ->
                     bedrockClient.invokeModel(
-                            region, target.modelId(), request.credentials(), requestBody, deadline));
+                            region, target.modelId(), request.credentials(), requestBody, deadline,
+                                    request.providerAttemptExecutor()::beforeSend));
             return parseResponse(responseBody, enforcement, request.reasoningMode());
         } catch (AiProviderException exception) {
             throw exception;
         } catch (Exception exception) {
+            AiProviderGateExceptions.rethrowIfGate(exception);
             throw new AiProviderException("Bedrock Anthropic adapter failed", exception);
         }
     }
