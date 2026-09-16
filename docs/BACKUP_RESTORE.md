@@ -66,17 +66,20 @@ backup** (the full run logs `event=backup_summary status=success`).
    sudo deploy/backup/install.sh
    ```
 
-   This installs the scripts, systemd units, and timers (daily full dump, 15-minute binlog
-   archive, daily prune), and creates `/etc/connex-backup/backup.env` (mode 0600) from the example
-   on first run.
+   On first run this creates `/etc/connex-backup/backup.env` (mode 0600) from the example, then
+   exits 64 until the prerequisites below are configured. It validates the preserved configuration
+   before installing scripts, systemd units, or enabling timers (daily full dump, 15-minute binlog
+   archive, daily prune). Existing installations must complete the mandatory TLS and PITR image
+   migration in [UPGRADING.md](UPGRADING.md) before rerunning the installer.
 
 2. Edit `/etc/connex-backup/backup.env`: point it at your `db` container and
    credentials file, and set the backup root (a filesystem with room for ~35 daily dumps plus
    binlogs). Credentials go in a mode-0600 MySQL defaults file — never on a command line.
 
    Source, verification, restore, and native remote-binlog connections require identity-verified
-   TLS by default. Configure each effective client defaults file with the trusted CA path, and
-   ensure the server certificate's identity matches the configured database host:
+   TLS by default. Configure each effective client defaults file's `[client]` section with an
+   absolute trusted `ssl-ca` file or `ssl-capath` directory, and ensure the server certificate's
+   identity matches the configured database host:
 
    ```ini
    [client]
@@ -109,12 +112,17 @@ backup** (the full run logs `event=backup_summary status=success`).
    community client tools on the restore host and set `MYSQLBINLOG` to that executable, or set
    `CONNEX_BACKUP_DOCKER_BINLOG_IMAGE` to an independently approved client-tools image containing
    it, using `IMAGE@sha256:<64 lowercase hex digits>`. The release owner must review the image
-   and record its immutable registry digest before deployment. A mutable tag alone is refused
+   and record its immutable registry digest before deployment. For the former Percona sample, use
+   `CONNEX_BACKUP_DOCKER_BINLOG_IMAGE=percona/percona-server@sha256:<64 lowercase hex digits>`,
+   substituting the approved digest; this repository does not supply an approved Percona digest.
+   Preserved mutable tags such as `percona/percona-server:8.4` must be replaced before the installer
+   will enable timers. A mutable tag alone is also refused
    with exit 64 before Docker runs, including for `--version`. Docker verifies downloaded
    content against the digest; the digest does not establish publisher trust by itself.
-   Confirm the configured shim at install time:
+   After configuring these prerequisites, rerun the installer, then confirm the configured shim:
 
    ```bash
+   sudo deploy/backup/install.sh
    sudo CONNEX_BACKUP_ENV_FILE=/etc/connex-backup/backup.env \
      /usr/local/lib/connex-backup/shims/mysqlbinlog --version
    ```
@@ -133,7 +141,8 @@ backup** (the full run logs `event=backup_summary status=success`).
    `CONNEX_BACKUP_SCHEMA_SCRATCH_OVERRIDE`, which lifts only that prefix rule and leaves the rest
    of the backup scope alone.
 
-3. Verify the first run end-to-end:
+3. Verify the first run end-to-end. Installation checks the configuration offline; it does not
+   verify certificate files inside containers, TLS handshakes, or image/native-client availability:
 
    ```bash
    sudo systemctl start connex-backup.service

@@ -170,6 +170,118 @@ case_installer_migrates_retired_database_network() {
     assert_equals custom_network_silent '' "$(cat "$log")" || return 1
 }
 
+initialize_installer_fixture() {
+    INSTALL_FIXTURE_ROOT="$(mktemp -d "$SANDBOX/install-upgrade.XXXXXX")"
+    mkdir -p "$INSTALL_FIXTURE_ROOT/config" "$INSTALL_FIXTURE_ROOT/systemd"
+    cat > "$INSTALL_FIXTURE_ROOT/config/backup.env" <<EOF
+CONNEX_BACKUP_ROOT=$INSTALL_FIXTURE_ROOT/backups
+CONNEX_BACKUP_LOCK_DIR=$INSTALL_FIXTURE_ROOT/locks
+CONNEX_BACKUP_DB_HOST=localhost
+CONNEX_BACKUP_VERIFY_DB_HOST=127.0.0.1
+CONNEX_BACKUP_RESTORE_DB_HOST=::1
+CONNEX_BACKUP_SOURCE_DEFAULTS_FILE=$INSTALL_FIXTURE_ROOT/config/source.cnf
+CONNEX_BACKUP_DOCKER_CLIENT_MODE=exec
+CONNEX_BACKUP_DOCKER_NETWORK=auto
+CONNEX_BACKUP_DOCKER_BINLOG_IMAGE=
+EOF
+    printf '[client]\npassword=synthetic-upgrade-secret\n' > "$INSTALL_FIXTURE_ROOT/config/source.cnf"
+    chmod 0600 "$INSTALL_FIXTURE_ROOT/config/backup.env" "$INSTALL_FIXTURE_ROOT/config/source.cnf"
+}
+
+run_installer_fixture() {
+    : > "$INSTALL_FIXTURE_ROOT/systemctl.log"
+    env -i PATH="$PATH" bash -s -- "$SANDBOX" "$BACKUP_DIR" "$INSTALL_FIXTURE_ROOT" \
+        > "$INSTALL_FIXTURE_ROOT/output.log" 2>&1 <<'EOF'
+set -euo pipefail
+# shellcheck source=deploy/backup/install.sh
+source "$1/install-lib.sh"
+SCRIPT_DIR="$2"
+CONFIG_ROOT="$3/config"
+INSTALL_ROOT="$3/programs"
+SYSTEMD_ROOT="$3/systemd"
+install_require_root() { :; }
+systemctl() { printf '%s\n' "$*" >> "$CONFIG_ROOT/../systemctl.log"; }
+main
+EOF
+}
+
+assert_installer_refused() {
+    local expected_message="$1" status=0
+    run_installer_fixture || status=$?
+    assert_status install_refused 64 "$status" || return 1
+    assert_contains actionable_message "$expected_message" "$INSTALL_FIXTURE_ROOT/output.log" || return 1
+    assert_contains rerun_instruction 'rerun install.sh' "$INSTALL_FIXTURE_ROOT/output.log" || return 1
+    assert_equals timers_untouched '' "$(cat "$INSTALL_FIXTURE_ROOT/systemctl.log")" || return 1
+    assert_file_missing programs_untouched "$INSTALL_FIXTURE_ROOT/programs" || return 1
+    assert_absent credentials_not_logged synthetic-upgrade-secret "$INSTALL_FIXTURE_ROOT/output.log" || return 1
+}
+
+assert_installer_accepted() {
+    local status=0
+    cp "$INSTALL_FIXTURE_ROOT/config/backup.env" "$INSTALL_FIXTURE_ROOT/expected.env"
+    run_installer_fixture || status=$?
+    assert_status install_accepted 0 "$status" || return 1
+    assert_contains timers_enabled \
+        'enable --now connex-backup.timer connex-binlog-archive.timer connex-backup-prune.timer' \
+        "$INSTALL_FIXTURE_ROOT/systemctl.log" || return 1
+    cmp -s "$INSTALL_FIXTURE_ROOT/expected.env" "$INSTALL_FIXTURE_ROOT/config/backup.env" || return 1
+}
+
+case_installer_requires_profile_tls_migration() {
+    initialize_installer_fixture
+    local profile
+    for profile in SOURCE VERIFY RESTORE; do
+        assert_installer_refused "CONNEX_BACKUP_${profile}_ALLOW_LOOPBACK_PLAINTEXT=true" || return 1
+        printf 'CONNEX_BACKUP_%s_ALLOW_LOOPBACK_PLAINTEXT=true\n' "$profile" \
+            >> "$INSTALL_FIXTURE_ROOT/config/backup.env"
+    done
+    assert_installer_accepted
+}
+
+case_installer_requires_ca_in_each_defaults_file() {
+    initialize_installer_fixture
+    local profile
+    for profile in verify restore; do
+        cp "$INSTALL_FIXTURE_ROOT/config/source.cnf" "$INSTALL_FIXTURE_ROOT/config/$profile.cnf"
+        printf 'CONNEX_BACKUP_%s_DEFAULTS_FILE=%s/config/%s.cnf\n' "${profile^^}" "$INSTALL_FIXTURE_ROOT" "$profile" \
+            >> "$INSTALL_FIXTURE_ROOT/config/backup.env"
+    done
+    printf 'ssl-ca=/container/mysql-ca.pem\n' >> "$INSTALL_FIXTURE_ROOT/config/source.cnf"
+    assert_installer_refused "$INSTALL_FIXTURE_ROOT/config/verify.cnf" || return 1
+    printf 'ssl-capath=/container/certs\n' >> "$INSTALL_FIXTURE_ROOT/config/verify.cnf"
+    printf '# ssl-ca=/ignored.pem\nssl-ca=""\n[mysqldump]\nssl-ca=/wrong-group.pem\n' \
+        >> "$INSTALL_FIXTURE_ROOT/config/restore.cnf"
+    assert_installer_refused "$INSTALL_FIXTURE_ROOT/config/restore.cnf" || return 1
+    printf '[client]\nssl_ca="/container/mysql-ca.pem"\n' >> "$INSTALL_FIXTURE_ROOT/config/restore.cnf"
+    assert_installer_accepted
+}
+
+case_installer_refuses_nonloopback_exception() {
+    local profile host_key
+    for profile in SOURCE VERIFY RESTORE; do
+        initialize_installer_fixture
+        printf 'CONNEX_BACKUP_%s_ALLOW_LOOPBACK_PLAINTEXT=true\n' SOURCE VERIFY RESTORE \
+            >> "$INSTALL_FIXTURE_ROOT/config/backup.env"
+        host_key="CONNEX_BACKUP_${profile}_DB_HOST"
+        [ "$profile" != SOURCE ] || host_key=CONNEX_BACKUP_DB_HOST
+        printf '%s=db\n' "$host_key" >> "$INSTALL_FIXTURE_ROOT/config/backup.env"
+        assert_installer_refused "CONNEX_BACKUP_${profile}_ALLOW_LOOPBACK_PLAINTEXT" || return 1
+    done
+}
+
+case_installer_requires_binlog_digest_migration() {
+    initialize_installer_fixture
+    printf 'ssl-ca=/container/mysql-ca.pem\n' >> "$INSTALL_FIXTURE_ROOT/config/source.cnf"
+    printf 'CONNEX_BACKUP_DOCKER_BINLOG_IMAGE=percona/percona-server:8.4\n' \
+        >> "$INSTALL_FIXTURE_ROOT/config/backup.env"
+    assert_installer_refused 'CONNEX_BACKUP_DOCKER_BINLOG_IMAGE' || return 1
+    assert_contains approval_required 'independently approved' "$INSTALL_FIXTURE_ROOT/output.log" || return 1
+    assert_contains migration_example 'percona/percona-server@sha256:' "$INSTALL_FIXTURE_ROOT/output.log" || return 1
+    printf 'CONNEX_BACKUP_DOCKER_BINLOG_IMAGE=percona/percona-server@sha256:%s\n' \
+        "$(printf 'a%.0s' {1..64})" >> "$INSTALL_FIXTURE_ROOT/config/backup.env"
+    assert_installer_accepted
+}
+
 case_docker_client_resolves_and_validates_database_network() {
     set +e
     # shellcheck source=deploy/backup/shims/docker-client-lib.sh
@@ -1280,6 +1392,10 @@ run_case() {
 }
 
 run_case case_installer_migrates_retired_database_network
+run_case case_installer_requires_profile_tls_migration
+run_case case_installer_requires_ca_in_each_defaults_file
+run_case case_installer_refuses_nonloopback_exception
+run_case case_installer_requires_binlog_digest_migration
 run_case case_docker_client_resolves_and_validates_database_network
 run_case case_binlog_shim_refuses_mutable_images_before_docker
 run_case case_binlog_shim_only_mounts_readonly_binlog_inputs

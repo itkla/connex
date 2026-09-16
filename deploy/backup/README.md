@@ -16,6 +16,10 @@ sudo chmod 0600 /etc/connex-backup/backup.env /etc/connex-backup/source.cnf
 sudo ./deploy/backup/install.sh
 ```
 
+The first invocation creates the mode-0600 configuration and exits 64 until the TLS and PITR
+prerequisites below are configured. The installer validates those settings before replacing
+programs or enabling timers; correct any migration diagnostic and rerun it.
+
 Set `CONNEX_BACKUP_DB_CONTAINER` to the running container for the Compose `db` service:
 
 ```bash
@@ -62,8 +66,12 @@ Air-gapped operators must mirror the configured client-tools image alongside the
 The replay shim runs a throwaway client-tools container with `--network none`, a read-only container filesystem, no credentials mount, and no extra operator mounts. It mounts only the requested files under the backup root, after checking binary-log magic, read-only at their requested absolute paths. The `--version` check has no host mounts. Output streams to the host; backup sentinels and checksum manifests are never mounted. The shim ignores client defaults and accepts only local decoding options. Use native `mysqlbinlog` for remote archive mode. `CONNEX_BACKUP_DOCKER_CLIENT_MODE=run` retains the same throwaway-container option for `mysql` and `mysqldump`; the default is `exec`. With `CONNEX_BACKUP_DOCKER_NETWORK=auto`, every database-transfer client discovers the physical network currently attached to `CONNEX_BACKUP_DB_CONTAINER` with Compose's logical `db` label. This follows `-p` and `COMPOSE_PROJECT_NAME` overrides without granting access to the edge, application, or OCR networks. When selecting run mode, set `CONNEX_BACKUP_DB_HOST`, `CONNEX_BACKUP_VERIFY_DB_HOST`, and `CONNEX_BACKUP_RESTORE_DB_HOST` to `db`; the default `localhost` values are for exec mode inside the DB container. An explicit custom network remains supported, but the shim refuses a missing network and refuses a network that differs from the running DB container when the target host is `db`. Native clients remain supported through `MYSQL`, `MYSQLDUMP`, and `MYSQLBINLOG`. Docker socket access is root-equivalent; systemd retains `ProtectSystem=strict`, `NoNewPrivileges`, and `PrivateTmp` but intentionally allows `/var/run/docker.sock`.
 
 Rerunning `install.sh` during an upgrade preserves operator settings but migrates any retired
-`<project>_default` value to `auto`. Any other configured network name is treated as an operator
-override, validated at runtime, and left unchanged. The mandatory upgrade sequence is in
+`<project>_default` value to `auto`. Before enabling timers it requires an absolute `ssl-ca` or
+`ssl-capath` in each profile defaults file's `[client]` section, or that profile's explicit loopback
+exception, and rejects configured mutable PITR image references. These offline checks do not prove
+TLS handshakes or decoder availability; verify backups, archives, and a PITR drill after installation.
+Any other configured network name is treated as an operator override, validated at runtime, and left
+unchanged. The mandatory upgrade sequence is in
 [`docs/UPGRADING.md`](../../docs/UPGRADING.md).
 
 ## Commands
