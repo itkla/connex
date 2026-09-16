@@ -18,6 +18,7 @@ import {
     validateEmailChangeToken,
 } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
+import type { RevokedInvitation } from "@/app/lib/types";
 import { toastError } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 
@@ -34,6 +35,7 @@ export function VerifyEmailForm() {
 
     const [status, setStatus] = useState<Status>("validating");
     const [submitting, setSubmitting] = useState(false);
+    const [revokedInvitations, setRevokedInvitations] = useState<RevokedInvitation[]>([]);
 
     useEffect(() => {
         let active = true;
@@ -63,7 +65,8 @@ export function VerifyEmailForm() {
     async function onConfirm() {
         setSubmitting(true);
         try {
-            await confirmEmailChange();
+            const result = await confirmEmailChange();
+            setRevokedInvitations(result.revokedInvitations);
             setStatus("success");
         } catch (err) {
             if (err instanceof ApiError && err.status === 400) {
@@ -157,6 +160,23 @@ export function VerifyEmailForm() {
                                 <p className="mt-3 text-base leading-relaxed text-muted-foreground text-pretty">
                                     {t("successBody")}
                                 </p>
+                                {revokedInvitations.length > 0 && (
+                                    <section className="mt-6 border-t border-border pt-6" aria-labelledby="revoked-invitations-title">
+                                        <h2 id="revoked-invitations-title" className="text-base font-semibold text-foreground">
+                                            {t("revokedInvitationsTitle")}
+                                        </h2>
+                                        <p className="mt-2 text-sm leading-relaxed text-muted-foreground text-pretty">
+                                            {t("revokedInvitationsBody")}
+                                        </p>
+                                        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-relaxed text-foreground">
+                                            {revokedInvitations.map((invitation) => (
+                                                <li key={invitation.workspaceId} className="break-words">
+                                                    {invitation.workspaceName}
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </section>
+                                )}
                                 <Link
                                     href="/dashboard"
                                     className="mt-8 inline-flex items-center justify-center gap-2 rounded-full bg-brand px-6 py-3.5 text-base font-semibold text-brand-foreground transition-[transform,background-color] duration-150 ease-out hover:bg-brand-hover active:scale-[0.98]"

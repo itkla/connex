@@ -152,7 +152,7 @@ class InviteServiceClaimTest {
         WorkspaceInvite invite = pendingInvite();
         User initialUser = user("recipient@example.com");
         User lockedUser = user("changed@example.com");
-        stubPreliminaryValidation(invite, initialUser);
+        stubPreliminaryValidation(invite, lockedUser);
         when(userMapper.getUserByIdForShare(initialUser.getId())).thenReturn(lockedUser);
 
         assertThrows(

@@ -16,6 +16,9 @@ public interface EmailChangeTokenMapper {
 
     boolean existsRedeemableByHash(String tokenHash);
 
+    /** Returns the redeemable token without locks so callers can acquire its account root first. */
+    EmailChangeToken findRedeemableByHash(String tokenHash);
+
     int claimExchange(@Param("tokenHash") String tokenHash,
         @Param("exchangeOwnerHash") String exchangeOwnerHash);
 

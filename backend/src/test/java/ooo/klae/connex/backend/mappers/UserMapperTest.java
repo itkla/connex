@@ -127,11 +127,12 @@ class UserMapperTest extends AbstractMapperTest {
     }
 
     /**
-     * Updates a user and checks if the new values are persisted.
+     * Persists editable profile fields while preserving the ownership-bound email.
      */
     @Test
-    void update_persistsNewValues() {
+    void update_persistsProfileWithoutChangingEmail() {
         User user = newUser();
+        String originalEmail = user.getEmail();
         user.setDisplayName("Mr. New Name");
         user.setEmail("renamed_" + unique() + "@example.com");
 
@@ -139,7 +140,7 @@ class UserMapperTest extends AbstractMapperTest {
 
         User found = userMapper.getUserById(user.getId());
         assertEquals("Mr. New Name", found.getDisplayName());
-        assertEquals(user.getEmail(), found.getEmail());
+        assertEquals(originalEmail, found.getEmail());
     }
 
     @Test
