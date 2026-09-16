@@ -20,15 +20,22 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.i18n.LocaleContextHolder;
 
 import ooo.klae.connex.backend.ai.AiRelationshipContext;
+import ooo.klae.connex.backend.ai.masking.Demasker;
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
@@ -78,6 +85,65 @@ class DealBriefAssemblerTest {
             }
             return people;
         });
+    }
+
+    /**
+     * Four workers hold the whole pool while they screen five 50 000-character notes each against a
+     * seeded identifier; a fifth submission is queued behind them, not run concurrently, so the
+     * assertion is that screening releases its worker soon enough for the queued assembly to
+     * finish inside the deadline.
+     */
+    @Test
+    void longUnicodeNoteAssembliesReleaseTheirWorkersForAQueuedAssembly() throws Exception {
+        CountDownLatch notesLoaded = new CountDownLatch(4);
+        CountDownLatch startScreening = new CountDownLatch(1);
+        List<Note> notes = new ArrayList<>();
+        List<String> fillers = List.of("\u03a3", "\u0130", "\u03a3", "\u0130", "\u03a3");
+        for (int index = 0; index < fillers.size(); index++) {
+            Note note = new Note();
+            note.setId(301 + index);
+            note.setContent("Note " + fillers.get(index).repeat(50_000) + " end");
+            notes.add(note);
+        }
+        for (int id = DEAL_ID; id < DEAL_ID + 4; id++) {
+            Deal deal = deal();
+            deal.setId(id);
+            when(dealService.getDealById(id)).thenReturn(deal);
+            lenient().when(dealService.getDealSummary(id)).thenReturn(new DealSummaryDto(
+                    id, "Acme expansion", new BigDecimal("125000.00"), new BigDecimal("0.00"),
+                    "USD", "open", "2026-08-31", "Evaluation", "Enterprise",
+                    "Northwind Partners", "Owner Name"));
+            lenient().when(dealService.getNotesByDealId(id)).thenAnswer(invocation -> {
+                notesLoaded.countDown();
+                assertTrue(startScreening.await(20, TimeUnit.SECONDS));
+                return notes;
+            });
+        }
+        Deal otherWorkspaceDeal = deal();
+        otherWorkspaceDeal.setId(99);
+        when(dealService.getDealById(99)).thenReturn(otherWorkspaceDeal);
+        var workers = Executors.newFixedThreadPool(4);
+        List<Future<BriefAssembly>> longNoteBriefs = new ArrayList<>();
+        try {
+            for (int id = DEAL_ID; id < DEAL_ID + 4; id++) {
+                int dealId = id;
+                longNoteBriefs.add(workers.submit(() -> assembler.assemble(WORKSPACE_ID, dealId)));
+            }
+            assertTrue(notesLoaded.await(20, TimeUnit.SECONDS));
+            Future<BriefAssembly> otherWorkspace = workers.submit(() -> assembler.assemble(14, 99));
+            startScreening.countDown();
+
+            assertTrue(serialized(otherWorkspace.get(20, TimeUnit.SECONDS).prompt())
+                    .contains("CRM_CONTEXT_END"));
+            for (Future<BriefAssembly> longNoteBrief : longNoteBriefs) {
+                BriefAssembly assembly = longNoteBrief.get(20, TimeUnit.SECONDS);
+                assertEquals(5, assembly.sourceRegistry().values().stream()
+                        .filter(source -> "note".equals(source.kind())).count());
+            }
+        } finally {
+            startScreening.countDown();
+            workers.shutdownNow();
+        }
     }
 
     @Test
@@ -175,6 +241,36 @@ class DealBriefAssemblerTest {
         assertEquals(new DealBriefSource("task", 401), assembly.sourceRegistry().get("task.0"));
         verify(scoringService).scoreContacts(WORKSPACE_ID, Set.of(PERSON_ID));
         verify(dealRiskService).assessDeal(WORKSPACE_ID, DEAL_ID);
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "John {Smith}|John Smith",
+            "John \uFF33mith|John Smith",
+            "Cafe\u0301 Smith|Caf\u00e9 Smith"
+    })
+    void assemble_preservesDistinctStakeholderIdentitiesDespiteMatchingCollisions(
+            String first, String second) {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        for (List<String> names : List.of(List.of(first, second), List.of(second, first))) {
+            when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(
+                    new DealPerson(person(PERSON_ID, names.getFirst()), "Champion"),
+                    new DealPerson(person(PERSON_ID + 1, names.getLast()), "Decision maker")));
+
+            BriefAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID);
+            String prompt = serialized(assembly.prompt());
+
+            assertTrue(prompt.contains("- Name: {{P1}}; Role: Champion; Source: person.0"));
+            assertTrue(prompt.contains("- Name: {{P2}}; Role: Decision maker; Source: person.1"));
+            assertFalse(prompt.contains(first));
+            assertFalse(prompt.contains(second));
+            assertEquals(new DealBriefSource("person", PERSON_ID), assembly.sourceRegistry().get("person.0"));
+            assertEquals(new DealBriefSource("person", PERSON_ID + 1), assembly.sourceRegistry().get("person.1"));
+            Demasker.DemaskResult demasked = Demasker.demask(prompt, assembly.context());
+            assertEquals(0, demasked.warnings());
+            assertTrue(demasked.text().contains("- Name: " + names.getFirst() + "; Role: Champion; Source: person.0"));
+            assertTrue(demasked.text().contains("- Name: " + names.getLast() + "; Role: Decision maker; Source: person.1"));
+        }
     }
 
     @Test
