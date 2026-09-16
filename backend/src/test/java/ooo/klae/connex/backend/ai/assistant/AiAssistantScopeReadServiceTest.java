@@ -30,6 +30,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.SavedView;
 import ooo.klae.connex.backend.dto.MemberScope;
@@ -86,6 +89,103 @@ class AiAssistantScopeReadServiceTest {
                 scoringService, dealRiskService, personMapper, companyMapper, dealMapper,
                 workspaceService, workspaceScopeControlAccess, objectMapper,
                 Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    @Test
+    void allActivityIdentifiersAreSeededBeforeAnyFieldIsTruncated() throws Exception {
+        assertActivityIdentifiersCannotReachPromptFragments(
+                "First Person", "x".repeat(498) + "Johnathan Smith");
+    }
+
+    @Test
+    void unmatchedBracesCannotProtectActivityIdentifiersAcrossTheFieldCap() throws Exception {
+        for (String boundary : List.of(
+                "x".repeat(498) + "Johnathan Smith}",
+                "x".repeat(498) + "{Johnathan Smith",
+                "{" + "x".repeat(498) + "Johnathan Smith}")) {
+            assertActivityIdentifiersCannotReachPromptFragments("First Person", boundary);
+        }
+    }
+
+    @Test
+    void canonicalLengthPrecedenceProtectsActivityIdentifiersAcrossTheFieldCap() throws Exception {
+        assertActivityIdentifiersCannotReachPromptFragments(
+                "\u0085".repeat(20) + "Smith", "x".repeat(498) + "Johnathan Smith");
+    }
+
+    @Test
+    void simpleFoldedSurnameOverlapCannotExposeActivityIdentifiersAcrossTheFieldCap() throws Exception {
+        String name = "Johnathan " + "\u0130".repeat(11);
+        assertActivityIdentifiersCannotReachPromptFragments(
+                "i".repeat(11), name, "x".repeat(498) + name);
+    }
+
+    @Test
+    void partiallyOverlappingActivityIdentifiersAreRemovedAcrossTheFieldCap() throws Exception {
+        assertActivityIdentifiersCannotReachPromptFragments(
+                "Smith International", "x".repeat(498) + "Johnathan Smith International");
+    }
+
+    @Test
+    void contactDataOverlapCannotExposeActivityIdentifiersAcrossTheFieldCap() throws Exception {
+        assertActivityIdentifiersCannotReachPromptFragments(
+                "First Person", "x".repeat(498) + "Johnathan Smith@example.com");
+    }
+
+    @Test
+    void selfOverlappingActivityIdentifierCannotExposeASuffixAcrossTheFieldCap() throws Exception {
+        assertActivityIdentifiersCannotReachPromptFragments("First Person", "Johnathan Johnathan",
+                "x".repeat(488) + " Johnathan Johnathan Johnathan");
+    }
+
+    @Test
+    void fullwidthDelimiterIdentifiersAreScreenedBeforeTheProductionFieldCap() throws Exception {
+        String name = "John\uFF5B\uFF5B\uFF5D\uFF5Dathan Smith";
+        assertActivityIdentifiersCannotReachPromptFragments("First Person", name, "x".repeat(498) + name);
+    }
+
+    private void assertActivityIdentifiersCannotReachPromptFragments(String firstName, String boundary)
+            throws Exception {
+        assertActivityIdentifiersCannotReachPromptFragments(firstName, "Johnathan Smith", boundary);
+    }
+
+    private void assertActivityIdentifiersCannotReachPromptFragments(
+            String firstName, String laterName, String boundary)
+            throws Exception {
+        Person first = new Person();
+        first.setId(1);
+        first.setName(firstName);
+        Person later = new Person();
+        later.setId(2);
+        later.setName(laterName);
+        when(personMapper.getAssistantProcessablePersonIds(WORKSPACE_ID)).thenReturn(List.of(1, 2));
+        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenReturn(List.of(first, later));
+        when(activityMapper.countAiAssistantScopeActivities(
+                anyInt(), anyList(), anyString(), anyList(), any(), any(), anyList(), anyBoolean()))
+                .thenReturn(2L);
+        when(activityMapper.getAiAssistantScopeActivities(
+                anyInt(), anyList(), anyString(), anyList(), any(), any(), anyList(),
+                anyBoolean(), anyInt(), anyInt())).thenReturn(List.of(
+                        new AiAssistantScopeActivity(1, 1, boundary, boundary, boundary, "2026-08-22 10:00:00", 1, null),
+                        new AiAssistantScopeActivity(2, 2, "meeting", "Follow up", "Next step", "2026-08-22 11:00:00", 2, null)));
+        MaskingContext context = new MaskingContext();
+        AiChatResourceRegistry resources = new AiChatResourceRegistry(context);
+
+        AiAssistantToolResult result = service.scopeActivities(
+                AiChatQueryScope.none(), "person", null, List.of(), 30, 50, 5, resources);
+        ObjectMapper mapper = JsonMapper.builder().build();
+        String providerInput = mapper.writeValueAsString(new AiAssistantPromptAssembler(
+                mapper, new AiAssistantToolCatalog()).assemble(
+                        List.of(), new AiAssistantToolResult(Map.of(), List.of()),
+                        List.of(new AiAssistantPromptAssembler.ToolTurn(1, "scope_activities", result)),
+                        context, resources).getMessages());
+
+        assertFalse(providerInput.contains("Johnathan Smith"));
+        assertFalse(providerInput.contains("Johnathan Smit"));
+        assertFalse(providerInput.contains("Johnathan"));
+        assertTrue(providerInput.contains("{{P"));
+        assertFalse(mapper.writeValueAsString(result.data().get("activities")).contains("Johnathan"));
+        OutboundLeakScan.assertNoLeak(providerInput, context, mapper);
     }
 
     @Test

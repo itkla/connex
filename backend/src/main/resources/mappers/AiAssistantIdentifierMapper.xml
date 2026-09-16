@@ -9,6 +9,50 @@
     <result property="value" column="value"/>
   </resultMap>
 
+  <sql id="canonicalOperand">
+    LOWER(TRIM(REGEXP_REPLACE(
+        REGEXP_REPLACE(${operand}, '[{}｛｝﹛﹜︷︸]', ''), '[[:space:][:cntrl:]]+', ' ')))
+  </sql>
+
+  <sql id="canonicalCandidate">
+    <include refid="canonicalOperand"><property name="operand" value="${nameColumn}"/></include>
+  </sql>
+
+  <sql id="canonicalTurn">
+    <include refid="canonicalOperand"><property name="operand" value="#{text}"/></include>
+  </sql>
+
+  <!--
+    SQL is only a visibility-scoped superset prefilter, never the admission decision. Both operands
+    delete every compatibility brace before collapsing separators and lowercasing. MySQL has no
+    NFKC operation and cannot delete Java's default-ignorable set, so a stored name that leaves
+    printable ASCII may canonicalize differently here than in Java; those rows are admitted without
+    a containment test and Java's single canonical form decides. LOWER also cannot unify dotless I
+    with i or final sigma with ordinary sigma; those SQL names remain non-ASCII and therefore take
+    the same stored-name fallback, as does a stored decomposed i plus combining dot above.
+    Java deletes that dot after a folded i; ASCII stored names match the already folded turn.
+    Names containing a label bracket also reach Java for the shared source-mapped label projection.
+    The lookup operand includes both canonical literal and label forms; admission still checks
+    each original-source projection separately and never trusts link targets as record identities.
+    The turn operand needs no such fallback and must not have one: the only production caller
+    (AiAssistantIdentifierResolver) passes the already Java-canonical turn, so NFKC, ignorable
+    deletion, separator folding and the case fold have all been applied to it before SQL sees it.
+    A turn-side fallback made every turn carrying one non-ASCII character — any Japanese turn, any
+    smart quote — return the entire visible corpus.
+    Candidate volume alone never refuses a turn: the resolver bounds gated mentions, not rows.
+    Length, rather than collation equality with an empty string, retains combining-only names.
+    Includes substitute only fixed column identifiers; tenant values remain bound parameters.
+  -->
+  <sql id="candidatePredicate">
+    AND CHAR_LENGTH(<include refid="canonicalCandidate"/>) &gt; 0
+    AND (
+      LOCATE(<include refid="canonicalCandidate"/>, <include refid="canonicalTurn"/>) &gt; 0
+      OR REGEXP_LIKE(<include refid="canonicalCandidate"/>, '[^ -~]', 'c')
+      OR LOCATE('[', ${nameColumn}) &gt; 0
+      OR LOCATE(']', ${nameColumn}) &gt; 0
+    )
+  </sql>
+
   <select id="findMentionedRecords" resultMap="IdentifierMention">
     SELECT matched.kind, matched.id, matched.value
     FROM (
@@ -23,15 +67,7 @@
         AND p.suspended_at IS NULL
         AND p.provision_ceased_at IS NULL
         AND p.name IS NOT NULL
-        AND p.name != ''
-        AND (TRIM(p.name) = TRIM(#{text})
-          OR (TRIM(p.name) REGEXP '^[A-Za-z0-9_]+([[:space:]][A-Za-z0-9_]+)*$'
-            AND REGEXP_LIKE(
-              #{text},
-              CONCAT('(^|[^A-Za-z0-9_])', TRIM(p.name), '([^A-Za-z0-9_]|$)'),
-              'i'))
-          OR LENGTH(TRIM(p.name)) &gt; CHAR_LENGTH(TRIM(p.name)))
-        AND LOCATE(p.name, #{text}) &gt; 0
+        <include refid="candidatePredicate"><property name="nameColumn" value="p.name"/></include>
       UNION ALL
       SELECT 'company' AS kind, c.id, c.name AS value
       FROM company c
@@ -42,31 +78,17 @@
           WHERE cs.company_id = c.id AND cs.workspace_id = #{workspaceId}))
         AND c.archived_at IS NULL
         AND c.name IS NOT NULL
-        AND c.name != ''
-        AND (TRIM(c.name) = TRIM(#{text})
-          OR (TRIM(c.name) REGEXP '^[A-Za-z0-9_]+([[:space:]][A-Za-z0-9_]+)*$'
-            AND REGEXP_LIKE(
-              #{text},
-              CONCAT('(^|[^A-Za-z0-9_])', TRIM(c.name), '([^A-Za-z0-9_]|$)'),
-              'i'))
-          OR LENGTH(TRIM(c.name)) &gt; CHAR_LENGTH(TRIM(c.name)))
-        AND LOCATE(c.name, #{text}) &gt; 0
+        <include refid="candidatePredicate"><property name="nameColumn" value="c.name"/></include>
       UNION ALL
       SELECT 'deal' AS kind, d.id, d.name AS value
       FROM deal d
       WHERE d.workspace_id = #{workspaceId}
         AND d.name IS NOT NULL
-        AND d.name != ''
-        AND (TRIM(d.name) = TRIM(#{text})
-          OR (TRIM(d.name) REGEXP '^[A-Za-z0-9_]+([[:space:]][A-Za-z0-9_]+)*$'
-            AND REGEXP_LIKE(
-              #{text},
-              CONCAT('(^|[^A-Za-z0-9_])', TRIM(d.name), '([^A-Za-z0-9_]|$)'),
-              'i'))
-          OR LENGTH(TRIM(d.name)) &gt; CHAR_LENGTH(TRIM(d.name)))
-        AND LOCATE(d.name, #{text}) &gt; 0
+        <include refid="candidatePredicate"><property name="nameColumn" value="d.name"/></include>
     ) matched
-    ORDER BY CHAR_LENGTH(matched.value) DESC, matched.kind, matched.id
+    WHERE matched.kind &gt; #{afterKind}
+      OR (matched.kind = #{afterKind} AND matched.id &gt; #{afterId})
+    ORDER BY matched.kind, matched.id
     LIMIT #{limit}
   </select>
 

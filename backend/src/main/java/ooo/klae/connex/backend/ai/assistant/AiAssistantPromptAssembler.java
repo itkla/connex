@@ -5,7 +5,6 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
@@ -1213,6 +1212,7 @@ public class AiAssistantPromptAssembler {
         List<Map<String, String>> transcript = new ArrayList<>();
         for (AiChatMessage message : sourceMessages) {
             String content = message.getContent();
+            Map<String, String> replayHandles = Map.of();
             if ("assistant".equals(message.getAuthorKind())) {
                 if (message.getStructuredJson() == null) {
                     continue;
@@ -1222,6 +1222,7 @@ public class AiAssistantPromptAssembler {
                     continue;
                 }
                 content = replay.content();
+                replayHandles = replay.handles();
             } else if ("user".equals(message.getAuthorKind())) {
                 content = reauthorizeUser(message, resources, context);
                 if (content == null) {
@@ -1230,17 +1231,19 @@ public class AiAssistantPromptAssembler {
             }
             transcript.add(Map.of(
                     "role", message.getAuthorKind(),
-                    "content", MaskingEngine.maskFreeText(content, context)));
+                    "content", MaskingEngine.maskFreeText(
+                            content, context, replayHandles)));
         }
         Map<String, Object> data = new LinkedHashMap<>();
         if (existingSummary != null) {
             String content = reauthorizeSummary(existingSummary, resources, context);
             if (content != null) {
-                data.put("priorSummary", MaskingEngine.maskFreeText(content, context));
+                data.put("priorSummary", MaskingEngine.maskFreeText(
+                        content, context));
             }
         }
         data.put("messages", transcript);
-        prompt.userTurn(crmData("conversation_compaction", data, context));
+        prompt.userTurn(crmDataMasked("conversation_compaction", objectMapper.valueToTree(data)));
         return prompt.build();
     }
 
@@ -1410,8 +1413,8 @@ public class AiAssistantPromptAssembler {
             if (summary == null) {
                 return;
             }
-            prompt.userTurn(crmData(
-                    "conversation_summary", Map.of("summary", summary), context));
+            prompt.userTurn(crmDataMasked("conversation_summary", objectMapper.valueToTree(Map.of(
+                    "summary", MaskingEngine.maskFreeText(summary, context)))));
             return;
         }
         if ("assistant".equals(message.getAuthorKind())) {
@@ -1420,7 +1423,7 @@ public class AiAssistantPromptAssembler {
                 return;
             }
             String masked = MaskingEngine.maskConversationalFreeText(
-                    AiChatRecordLinkRewriter.stripDurableLinks(replay.content()), context);
+                    replay.content(), context, replay.handles());
             prompt.assistantTurn(serialize(Map.of(
                     "content", masked,
                     "citations", replay.citations())));
@@ -1431,7 +1434,7 @@ public class AiAssistantPromptAssembler {
             return;
         }
         String masked = MaskingEngine.maskConversationalFreeText(
-                AiChatRecordLinkRewriter.stripDurableLinks(content), context);
+                content, context);
         String serialized = serialize(Map.of("content", masked));
         prompt.userTurn(USER_REQUEST_BEGIN + "\n" + serialized + "\n" + USER_REQUEST_END);
     }
@@ -1439,7 +1442,7 @@ public class AiAssistantPromptAssembler {
     private ReplayAnswer reauthorizeAnswer(
             AiChatMessage message, AiChatResourceRegistry resources) {
         if (message.getStructuredJson() == null) {
-            return new ReplayAnswer(message.getContent(), List.of());
+            return new ReplayAnswer(message.getContent(), List.of(), Map.of());
         }
         JsonNode metadata;
         try {
@@ -1447,11 +1450,11 @@ public class AiAssistantPromptAssembler {
         } catch (JacksonException exception) {
             throw new IllegalStateException("Assistant citation metadata could not be read", exception);
         }
-        Map<String, String> remappedHandles = new LinkedHashMap<>();
         JsonNode storedResources = metadata.get("resources");
         if (storedResources == null || !storedResources.isArray()) {
             storedResources = metadata.get("citations");
         }
+        Map<String, String> handles = new LinkedHashMap<>();
         if (storedResources != null && storedResources.isArray()) {
             for (JsonNode resource : storedResources) {
                 StoredResource stored = storedResource(resource);
@@ -1459,7 +1462,7 @@ public class AiAssistantPromptAssembler {
                 if (freshHandle == null) {
                     return null;
                 }
-                remappedHandles.put(stored.handle(), freshHandle);
+                handles.put(stored.handle(), freshHandle);
             }
         }
         List<String> citations = new ArrayList<>();
@@ -1472,9 +1475,10 @@ public class AiAssistantPromptAssembler {
                     return null;
                 }
                 citations.add(freshHandle);
+                handles.put(stored.handle(), freshHandle);
             }
         }
-        return new ReplayAnswer(remapHandles(message.getContent(), remappedHandles), citations);
+        return new ReplayAnswer(message.getContent(), citations, Map.copyOf(handles));
     }
 
     private String reauthorizeSummary(
@@ -1597,18 +1601,6 @@ public class AiAssistantPromptAssembler {
                     "Assistant summary identifier metadata is invalid");
         };
         return new StoredSummaryIdentifier(entityKind, value.asString());
-    }
-
-    private static String remapHandles(String content, Map<String, String> handles) {
-        Matcher matcher = HANDLE_REFERENCE.matcher(content);
-        StringBuilder remapped = new StringBuilder(content.length());
-        while (matcher.find()) {
-            matcher.appendReplacement(
-                    remapped,
-                    Matcher.quoteReplacement(handles.getOrDefault(matcher.group(), matcher.group())));
-        }
-        matcher.appendTail(remapped);
-        return remapped.toString();
     }
 
     private String crmData(String type, Map<String, Object> rawData, MaskingContext context) {
@@ -1739,6 +1731,6 @@ public class AiAssistantPromptAssembler {
     private record StoredSummaryIdentifier(EntityKind kind, String value) {
     }
 
-    private record ReplayAnswer(String content, List<String> citations) {
+    private record ReplayAnswer(String content, List<String> citations, Map<String, String> handles) {
     }
 }

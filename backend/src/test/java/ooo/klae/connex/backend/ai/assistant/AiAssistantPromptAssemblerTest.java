@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
@@ -34,6 +35,34 @@ class AiAssistantPromptAssemblerTest {
     private final JsonMapper objectMapper = JsonMapper.builder().build();
     private final AiAssistantPromptAssembler assembler = new AiAssistantPromptAssembler(
             objectMapper, new AiAssistantToolCatalog());
+
+    @Test
+    void unsafeStoredNamesAreLocallyRedactedInPageAndToolDataWhileHistoryStillRefuses() throws Exception {
+        String raw = "[".repeat(17) + "John O'Connor" + "](person:1)".repeat(17);
+        AiAssistantToolResult data = new AiAssistantToolResult(
+                Map.of("records", List.of(Map.of("handle", "r1", "name", raw, "status", "active"))),
+                List.of(new Identifier("person", raw)));
+        MaskingContext context = new MaskingContext();
+        AiChatResourceRegistry resources = new AiChatResourceRegistry(context);
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("An unrelated turn");
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(request), data, List.of(new ToolTurn(1, "get_records", data)), context, resources);
+
+        String payload = objectMapper.writeValueAsString(prompt.getMessages());
+        assertTrue(payload.contains("An unrelated turn"));
+        assertTrue(payload.contains("[redacted]"));
+        assertTrue(payload.contains("active"));
+        assertFalse(payload.contains("John"));
+        assertFalse(payload.contains("Connor"));
+        OutboundLeakScan.assertNoLeakStrict(payload, context, objectMapper);
+
+        request.setContent(raw);
+        assertThrows(MaskingLeakException.class, () -> assembler.assemble(
+                List.of(request), data, List.of(new ToolTurn(1, "get_records", data)), context, resources));
+    }
 
     @Test
     void promptIncludesWorkedStepsCostDisciplineAndBoundedRepairData() {
@@ -737,7 +766,11 @@ class AiAssistantPromptAssemblerTest {
         assertFalse(serialized.contains("Atlas renewal"));
         assertFalse(serialized.contains("71"));
         assertFalse(serialized.contains("73"));
-        assertTrue(prompt.getMessages().getFirst().getContent().contains("r2"));
+        JsonNode replay = objectMapper.readTree(prompt.getMessages().getFirst().getContent());
+        assertEquals("{{P1}} is advancing the {{D1}} from r2.", replay.get("content").asString());
+        assertEquals("r2", replay.get("citations").get(0).asString());
+        assertEquals(new AiChatResourceRegistry.ResourceRef("person", 71),
+                freshResources.resolve(replay.get("citations").get(0).asString()));
     }
 
     @Test

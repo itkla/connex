@@ -20,6 +20,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
@@ -35,6 +37,9 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolTurn;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
+import ooo.klae.connex.backend.ai.masking.EntityKind;
+import ooo.klae.connex.backend.ai.masking.MaskingEngine;
+import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
@@ -67,7 +72,111 @@ import tools.jackson.databind.json.JsonMapper;
 
 class AiAssistantPromptInjectionGoldenTest {
     @Test
-    void locallyResolvedNameWithoutPageContextOrToolResultNeverLeavesTheMaskedPrompt() throws Exception {
+    void linkedProseUsesTheSamePreparationInHistoryAndSummaryCompaction() throws Exception {
+        ObjectMapper mapper = JsonMapper.builder().build();
+        AiAssistantPromptAssembler assembler = new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog());
+        MaskingContext context = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.PERSON, "John O'Connor", context);
+        AiChatMessage user = new AiChatMessage();
+        user.setAuthorKind("user");
+        user.setContent("Ask John [O'Connor](person:999) today.");
+        AiChatMessage assistant = new AiChatMessage();
+        assistant.setAuthorKind("assistant");
+        assistant.setContent("Ask [John](record:r1) O'Connor today.");
+        assistant.setStructuredJson(assembler.finalMetadata(1, List.of(), List.of(), Map.of()));
+        AiChatMessage summary = new AiChatMessage();
+        summary.setAuthorKind("system");
+        summary.setContent("Ask John [O'Connor](record:r1) today.");
+        summary.setStructuredJson(mapper.writeValueAsString(Map.of(
+                "kind", "history_summary", "resources", List.of(), "identifiers", List.of(
+                        Map.of("kind", "person", "value", "John O'Connor")))));
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+
+        for (MaskedPrompt prompt : List.of(
+                assembler.assemble(List.of(user, assistant, summary), new AiAssistantToolResult(Map.of(), List.of()),
+                        List.of(), context, resources),
+                assembler.assembleSummary(summary, List.of(user, assistant), context, resources))) {
+            String input = mapper.writeValueAsString(prompt.getMessages());
+            assertFalse(input.contains("John"));
+            assertFalse(input.contains("Connor"));
+            assertFalse(input.contains("person:"));
+            assertFalse(input.contains("record:"));
+            assertEquals(3, java.util.regex.Pattern.compile(java.util.regex.Pattern.quote("Ask {{P1}} today."))
+                    .matcher(input).results().count());
+            OutboundLeakScan.assertNoLeakStrict(input, context, mapper);
+        }
+    }
+
+    @Test
+    void historyReauthorizesProseAndCitationsToTheSameOriginalRecords() throws Exception {
+        ObjectMapper mapper = JsonMapper.builder().build();
+        AiAssistantPromptAssembler assembler = new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog());
+        AiChatMessage assistant = new AiChatMessage();
+        assistant.setAuthorKind("assistant");
+        assistant.setContent("r1 Logistics says r1 needs follow-up; r2 is next.");
+        assistant.setStructuredJson(assembler.finalMetadata(1, List.of("r1", "r2"), List.of(),
+                Map.of("r1", new AiChatResourceRegistry.ResourceRef("person", 71),
+                        "r2", new AiChatResourceRegistry.ResourceRef("deal", 73))));
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("company", 99);
+        resources.register("person", 71);
+        resources.register("deal", 73);
+        MaskingContext context = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.COMPANY, "r1 Logistics", context);
+
+        MaskedPrompt prompt = assembler.assemble(List.of(assistant), new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(), context, resources);
+        JsonNode content = mapper.readTree(prompt.getMessages().getFirst().getContent());
+
+        assertEquals("{{C1}} says r2 needs follow-up; r3 is next.", content.get("content").asString());
+        assertEquals("r2", content.get("citations").get(0).asString());
+        assertEquals("r3", content.get("citations").get(1).asString());
+        assertEquals(new AiChatResourceRegistry.ResourceRef("person", 71), resources.resolve("r2"));
+        assertEquals(new AiChatResourceRegistry.ResourceRef("deal", 73), resources.resolve("r3"));
+        OutboundLeakScan.assertNoLeakStrict(mapper.writeValueAsString(prompt.getMessages()), context, mapper);
+
+        MaskedPrompt summary = assembler.assembleSummary(null, List.of(assistant), context, resources);
+        String envelope = summary.getMessages().getFirst().getContent();
+        JsonNode data = mapper.readTree(envelope.substring(envelope.indexOf('{'), envelope.lastIndexOf('}') + 1));
+        assertEquals("{{C1}} says r2 needs follow-up; r3 is next.",
+                data.get("data").get("messages").get(0).get("content").asString());
+    }
+
+    @Test
+    void reverseHandleNameCollisionIsMaskedThroughReplayCompactionAndTheOutboundGate() throws Exception {
+        ObjectMapper mapper = JsonMapper.builder().build();
+        AiAssistantPromptAssembler assembler = new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog());
+        AiChatMessage assistant = new AiChatMessage();
+        assistant.setAuthorKind("assistant");
+        assistant.setContent("Johnathan Smith says r1 Logistics needs follow-up; r1 is next.");
+        assistant.setStructuredJson(assembler.finalMetadata(1, List.of("r1"), List.of(),
+                Map.of("r1", new AiChatResourceRegistry.ResourceRef("person", 71))));
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("company", 99);
+        resources.register("person", 71);
+        MaskingContext context = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.COMPANY, "r2 Logistics", context);
+        MaskingEngine.maskField(EntityKind.PERSON, "Johnathan Smith", context);
+
+        MaskedPrompt replay = assembler.assemble(List.of(assistant), new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(), context, resources);
+        JsonNode content = mapper.readTree(replay.getMessages().getFirst().getContent());
+        String expected = "{{P1}} says {{C1}} needs follow-up; r2 is next.";
+        assertEquals(expected, content.get("content").asString());
+        assertEquals("r2", content.get("citations").get(0).asString());
+        assertEquals(new AiChatResourceRegistry.ResourceRef("person", 71), resources.resolve("r2"));
+        OutboundLeakScan.assertNoLeakStrict(mapper.writeValueAsString(replay.getMessages()), context, mapper);
+
+        MaskedPrompt summary = assembler.assembleSummary(null, List.of(assistant), context, resources);
+        String envelope = summary.getMessages().getFirst().getContent();
+        JsonNode data = mapper.readTree(envelope.substring(envelope.indexOf('{'), envelope.lastIndexOf('}') + 1));
+        assertEquals(expected, data.get("data").get("messages").get(0).get("content").asString());
+        OutboundLeakScan.assertNoLeakStrict(mapper.writeValueAsString(summary.getMessages()), context, mapper);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"Kenji Sato", "Kenji [Sato](person:999)", "[Kenji](record:r1) Sato"})
+    void locallyResolvedNameWithoutPageContextOrToolResultNeverLeavesTheMaskedPrompt(String spelling) throws Exception {
         ObjectMapper objectMapper = JsonMapper.builder().build();
         AiAssistantIdentifierMapper identifierMapper = mock(AiAssistantIdentifierMapper.class);
         WorkspaceService workspaceService = mock(WorkspaceService.class);
@@ -81,16 +190,17 @@ class AiAssistantPromptInjectionGoldenTest {
         mentioned.setId(31);
         mentioned.setValue("Kenji Sato");
         when(identifierMapper.findMentionedRecords(
-                7, "[7]", "What is happening with Kenji Sato?", 21))
+                7, "[7]", MaskingEngine.mentionScanText("What is happening with " + spelling + "?").lookupText(),
+                200, "", 0))
                 .thenReturn(List.of(mentioned));
         MaskingContext context = new MaskingContext();
         AiAssistantIdentifierResolver resolver = new AiAssistantIdentifierResolver(
                 identifierMapper, workspaceService, workspaceScopeControlAccess);
         resolver.seed(
-                resolver.resolve("What is happening with Kenji Sato?"), context);
+                resolver.resolve("What is happening with " + spelling + "?"), context);
         AiChatMessage userRequest = new AiChatMessage();
         userRequest.setAuthorKind("user");
-        userRequest.setContent("What is happening with Kenji Sato?");
+        userRequest.setContent("What is happening with " + spelling + "?");
 
         String serialized = objectMapper.writeValueAsString(
                 new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog())
