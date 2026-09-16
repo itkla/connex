@@ -20,6 +20,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.AiProviderGateExceptions;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
 import ooo.klae.connex.backend.ai.egress.FixedAiProviderClient;
@@ -98,6 +99,7 @@ public class VertexClient {
         } catch (RestClientException exception) {
             throw new AiProviderException("Vertex invocation failed during transport");
         } catch (RuntimeException exception) {
+            AiProviderGateExceptions.rethrowIfGate(exception);
             throw new AiProviderException("Vertex invocation failed during transport");
         }
         if (response.statusCode() < 200 || response.statusCode() > 299) {

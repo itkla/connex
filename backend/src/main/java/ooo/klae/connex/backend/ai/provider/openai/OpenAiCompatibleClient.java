@@ -45,6 +45,7 @@ import org.springframework.web.client.RestClientException;
 import jakarta.annotation.PreDestroy;
 import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.AiProviderGateExceptions;
 import ooo.klae.connex.backend.ai.egress.AiEndpointAddressValidator;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.egress.PinnedHostDnsResolver;
@@ -165,6 +166,7 @@ public class OpenAiCompatibleClient {
         } catch (RestClientException exception) {
             throw new AiProviderException("OpenAI-compatible invocation failed during transport");
         } catch (RuntimeException exception) {
+            AiProviderGateExceptions.rethrowIfGate(exception);
             throw new AiProviderException("OpenAI-compatible invocation failed during transport");
         }
         if (response.statusCode() < 200 || response.statusCode() > 299) {
@@ -416,6 +418,7 @@ public class OpenAiCompatibleClient {
         } catch (AiProviderException exception) {
             throw exception;
         } catch (RuntimeException exception) {
+            AiProviderGateExceptions.rethrowIfGate(exception);
             if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
                 throw deadlineExceeded();
             }

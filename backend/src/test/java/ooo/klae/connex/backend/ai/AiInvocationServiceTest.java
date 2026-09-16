@@ -146,7 +146,11 @@ class AiInvocationServiceTest {
         lenient().when(aiMediaAdmissionService.acquire(anyInt(), anyList())).thenReturn(mediaLease);
         lenient().when(budgetCoordinator.reserve(
                 eq(ORG_ID), any(AiInvocation.class), anyString()))
-                .thenReturn(budgetLease, fallbackBudgetLease);
+                .thenReturn(budgetLease);
+        lenient().when(budgetCoordinator.reserve(
+                eq(ORG_ID), any(AiInvocation.class), anyString(), any(AiRequestDeadline.class)))
+                .thenReturn(fallbackBudgetLease);
+        lenient().when(budgetLease.deadline()).thenAnswer(call -> AiRequestDeadline.afterMillis(60_000));
     }
 
     @Test
@@ -1634,12 +1638,15 @@ class AiInvocationServiceTest {
     void providerDeadlineIsBoundedByCallerBudgetAndSharedAcrossFallbacks() {
         AiInvocation invocation = invocation(
                 "Summarize relationship state", NOW.plusMillis(250));
+        AiRequestDeadline reservedDeadline = AiRequestDeadline.afterMillis(250);
+        when(budgetLease.deadline()).thenReturn(reservedDeadline);
         AtomicReference<AiRequestDeadline> firstDeadline = new AtomicReference<>();
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
             AiCompletionRequest request = call.getArgument(0);
             AiRequestDeadline first = request.providerAttemptExecutor().deadline(60_000);
             AiRequestDeadline fallback = request.providerAttemptExecutor().deadline(60_000);
             firstDeadline.set(first);
+            assertSame(reservedDeadline, first);
             assertSame(first, fallback);
             request.providerAttemptExecutor().execute(() -> "provider response");
             return new AiCompletionResult("Done", 20, 8, "end_turn");
@@ -1661,6 +1668,7 @@ class AiInvocationServiceTest {
                 Clock.systemUTC());
         AiInvocation invocation = invocation(
                 "Summarize relationship state", Instant.now().plusMillis(100));
+        when(budgetLease.deadline()).thenReturn(AiRequestDeadline.afterMillis(100));
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
             AiCompletionRequest request = call.getArgument(0);
             AiRequestDeadline deadline = request.providerAttemptExecutor().deadline(60_000);
@@ -1735,6 +1743,8 @@ class AiInvocationServiceTest {
     @Test
     void structuredFallbackGetsItsOwnQuotaCommitAuditAndEgressChecks() {
         AiInvocation invocation = invocation("Summarize relationship state");
+        AiRequestDeadline originalDeadline = AiRequestDeadline.afterMillis(60_000);
+        when(budgetLease.deadline()).thenReturn(originalDeadline);
         when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
             AiCompletionRequest request = call.getArgument(0);
@@ -1764,8 +1774,9 @@ class AiInvocationServiceTest {
         verify(fallbackAdmission).commitInvocation();
         verify(fallbackAdmission).close();
         verify(providerTransport, times(2)).run();
-        verify(budgetCoordinator, times(2)).reserve(
-                eq(ORG_ID), same(invocation), anyString());
+        verify(budgetCoordinator).reserve(eq(ORG_ID), same(invocation), anyString());
+        verify(budgetCoordinator).reserve(
+                eq(ORG_ID), same(invocation), anyString(), same(originalDeadline));
         verify(budgetLease).close();
         verify(budgetLease).markDispatched();
         verify(fallbackBudgetLease).markDispatched();

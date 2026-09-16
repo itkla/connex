@@ -143,13 +143,15 @@ class AiBudgetReservationV212MigrationIntegrationTest {
             try (PreparedStatement index = connection.prepareStatement("""
                     SELECT COLUMN_NAME FROM information_schema.STATISTICS
                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'organization_ai_budget_reservation'
-                      AND INDEX_NAME = 'idx_organization_ai_budget_reservation_expiry_state'
+                      AND INDEX_NAME = 'idx_organization_ai_budget_reservation_state_expiry'
                     ORDER BY SEQ_IN_INDEX
                     """); ResultSet columns = index.executeQuery()) {
                 assertTrue(columns.next());
+                assertEquals("state", columns.getString(1));
+                assertTrue(columns.next());
                 assertEquals("expires_at", columns.getString(1));
                 assertTrue(columns.next());
-                assertEquals("state", columns.getString(1));
+                assertEquals("reservation_id", columns.getString(1));
                 assertFalse(columns.next());
             }
         }

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -115,6 +116,12 @@ public class AiBudgetControlOperations {
         return budgetMapper.listExpiredReservationIds(now);
     }
 
+    /** Purges one bounded batch after the settlement idempotency horizon without ledger locks. */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public int purgeSettledReservations(LocalDateTime cutoff) {
+        return budgetMapper.deleteSettledReservationsBefore(cutoff);
+    }
+
     /** Rechecks one expired lease under budget, usage, then reservation locks. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void expireReservation(String reservationId, LocalDateTime now) {
@@ -159,14 +166,22 @@ public class AiBudgetControlOperations {
         }
     }
 
-    /** Returns the current limit, ledger state, and audit-derived daily usage. */
+    /** Returns daily usage with unaudited ledger consumption explicitly reconciled as unattributed. */
     @Transactional
     public Snapshot snapshot(int orgId, LocalDate usageDay, LocalDateTime now) {
         AiOrganizationBudget budget = budgetMapper.get(orgId);
         long limit = budget == null ? 0 : budget.getDailyTokenLimit();
         long consumed = budgetMapper.getConsumedTokens(orgId, usageDay);
         long reserved = budgetMapper.sumReservedTokens(orgId, usageDay);
-        List<AiUsageBreakdownDto> usage = budgetMapper.listDailyUsage(orgId, usageDay);
+        List<AiUsageBreakdownDto> usage = new ArrayList<>(budgetMapper.listDailyUsage(orgId, usageDay));
+        long attributed = 0;
+        for (AiUsageBreakdownDto entry : usage) {
+            attributed = saturatedAdd(attributed, saturatedAdd(entry.inputUsage(), entry.outputUsage()));
+        }
+        if (consumed > attributed) {
+            usage.add(new AiUsageBreakdownDto(
+                    null, "Conservative / unattributed charges", "unattributed", consumed - attributed, 0));
+        }
         return new Snapshot(limit, consumed, reserved, usage);
     }
 

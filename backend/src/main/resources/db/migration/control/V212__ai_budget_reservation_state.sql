@@ -15,4 +15,5 @@ ALTER TABLE organization_ai_budget_reservation
     MODIFY COLUMN state VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'dispatched',
     ADD CONSTRAINT chk_organization_ai_budget_reservation_state
         CHECK (state IN ('reserved', 'dispatched', 'settled')),
-    ADD INDEX idx_organization_ai_budget_reservation_expiry_state (expires_at, state);
+    DROP INDEX idx_organization_ai_budget_reservation_expiry,
+    ADD INDEX idx_organization_ai_budget_reservation_state_expiry (state, expires_at, reservation_id);

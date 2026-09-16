@@ -202,29 +202,31 @@ public class FixedAiProviderClient {
                 throw deadlineExceeded(operation);
             }
             beforeSend.run();
-            Response response = pinned.httpClient().execute(request, providerResponse -> {
-                HttpEntity entity = providerResponse.getEntity();
-                byte[] responseBody = entity == null
-                        ? new byte[0]
-                        : readBounded(entity.getContent(), operation);
-                return new Response(providerResponse.getCode(), responseBody);
-            });
-            if (deadline.isExpired()) {
-                throw deadlineExceeded(operation);
+            try {
+                Response response = pinned.httpClient().execute(request, providerResponse -> {
+                    HttpEntity entity = providerResponse.getEntity();
+                    byte[] responseBody = entity == null
+                            ? new byte[0]
+                            : readBounded(entity.getContent(), operation);
+                    return new Response(providerResponse.getCode(), responseBody);
+                });
+                if (deadline.isExpired()) {
+                    throw deadlineExceeded(operation);
+                }
+                return response;
+            } catch (IOException exception) {
+                if (isDeadlineFailure(exception, deadlineTriggered.get(), request.isCancelled(), deadline)) {
+                    throw deadlineExceeded(operation);
+                }
+                throw retryableTransportFailure(operation);
+            } catch (AiProviderException exception) {
+                throw exception;
+            } catch (RuntimeException exception) {
+                if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
+                    throw deadlineExceeded(operation);
+                }
+                throw transportFailure(operation);
             }
-            return response;
-        } catch (IOException exception) {
-            if (isDeadlineFailure(exception, deadlineTriggered.get(), request.isCancelled(), deadline)) {
-                throw deadlineExceeded(operation);
-            }
-            throw retryableTransportFailure(operation);
-        } catch (AiProviderException exception) {
-            throw exception;
-        } catch (RuntimeException exception) {
-            if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
-                throw deadlineExceeded(operation);
-            }
-            throw transportFailure(operation);
         } finally {
             deadlineTask.cancel(false);
         }
@@ -265,42 +267,44 @@ public class FixedAiProviderClient {
                 throw deadlineExceeded(operation);
             }
             beforeSend.run();
-            StreamResponse<T> response = pinned.httpClient().execute(request, providerResponse -> {
-                HttpEntity entity = providerResponse.getEntity();
-                int status = providerResponse.getCode();
-                if (status >= 200 && status <= 299 && entity != null) {
-                    T value = bodyReader.read(new BoundedInputStream(
-                            entity.getContent(), maxResponseBytes, operation));
-                    return new StreamResponse<>(status, value, new byte[0]);
+            try {
+                StreamResponse<T> response = pinned.httpClient().execute(request, providerResponse -> {
+                    HttpEntity entity = providerResponse.getEntity();
+                    int status = providerResponse.getCode();
+                    if (status >= 200 && status <= 299 && entity != null) {
+                        T value = bodyReader.read(new BoundedInputStream(
+                                entity.getContent(), maxResponseBytes, operation));
+                        return new StreamResponse<>(status, value, new byte[0]);
+                    }
+                    byte[] responseBody = entity == null
+                            ? new byte[0]
+                            : readBounded(entity.getContent(), operation);
+                    return new StreamResponse<>(status, null, responseBody);
+                });
+                if (deadline.isExpired()) {
+                    throw deadlineExceeded(operation);
                 }
-                byte[] responseBody = entity == null
-                        ? new byte[0]
-                        : readBounded(entity.getContent(), operation);
-                return new StreamResponse<>(status, null, responseBody);
-            });
-            if (deadline.isExpired()) {
-                throw deadlineExceeded(operation);
+                return response;
+            } catch (IOException exception) {
+                if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
+                    throw deadlineExceeded(operation);
+                }
+                if (exception instanceof SocketTimeoutException) {
+                    throw new ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException(
+                            operation + " stream became idle");
+                }
+                throw retryableTransportFailure(operation);
+            } catch (AiProviderException exception) {
+                if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
+                    throw deadlineExceeded(operation);
+                }
+                throw exception;
+            } catch (RuntimeException exception) {
+                if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
+                    throw deadlineExceeded(operation);
+                }
+                throw transportFailure(operation);
             }
-            return response;
-        } catch (IOException exception) {
-            if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
-                throw deadlineExceeded(operation);
-            }
-            if (exception instanceof SocketTimeoutException) {
-                throw new ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException(
-                        operation + " stream became idle");
-            }
-            throw retryableTransportFailure(operation);
-        } catch (AiProviderException exception) {
-            if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
-                throw deadlineExceeded(operation);
-            }
-            throw exception;
-        } catch (RuntimeException exception) {
-            if (deadlineTriggered.get() || request.isCancelled() || deadline.isExpired()) {
-                throw deadlineExceeded(operation);
-            }
-            throw transportFailure(operation);
         } finally {
             streamObserver.onTransportClosed();
             deadlineTask.cancel(false);

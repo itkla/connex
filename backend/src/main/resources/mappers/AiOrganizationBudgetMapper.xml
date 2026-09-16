@@ -63,9 +63,9 @@
 
     <select id="listExpiredReservationIds" resultType="string">
         SELECT reservation_id
-        FROM organization_ai_budget_reservation
+        FROM organization_ai_budget_reservation FORCE INDEX (idx_organization_ai_budget_reservation_state_expiry)
         WHERE state IN ('reserved', 'dispatched') AND expires_at &lt;= #{now}
-        ORDER BY expires_at, reservation_id
+        ORDER BY state, expires_at, reservation_id
         LIMIT 100
     </select>
 
@@ -96,7 +96,8 @@
 
     <update id="markReservationSettled">
         UPDATE organization_ai_budget_reservation
-        SET state = 'settled', consumed_tokens = #{consumedTokens}
+        SET state = 'settled', consumed_tokens = #{consumedTokens},
+            expires_at = GREATEST(expires_at, CURRENT_TIMESTAMP(6))
         WHERE reservation_id = #{reservationId} AND state != 'settled'
     </update>
 
@@ -106,6 +107,13 @@
         WHERE reservation_id = #{reservationId}
         FOR UPDATE
     </select>
+
+    <delete id="deleteSettledReservationsBefore">
+        DELETE FROM organization_ai_budget_reservation
+        WHERE state = 'settled' AND expires_at &lt; #{cutoff}
+        ORDER BY state, expires_at, reservation_id
+        LIMIT 100
+    </delete>
 
     <delete id="deleteReservation">
         DELETE FROM organization_ai_budget_reservation

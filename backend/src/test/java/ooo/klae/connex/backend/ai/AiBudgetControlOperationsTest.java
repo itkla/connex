@@ -14,12 +14,14 @@ import static org.mockito.Mockito.when;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.transaction.annotation.Transactional;
 
 import ooo.klae.connex.backend.beans.AiOrganizationBudget;
+import ooo.klae.connex.backend.dto.AiUsageBreakdownDto;
 import ooo.klae.connex.backend.beans.AiOrganizationBudgetReservation;
 import ooo.klae.connex.backend.beans.AiOrganizationBudgetUsage;
 import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
@@ -113,6 +115,44 @@ class AiBudgetControlOperationsTest {
     }
 
     @Test
+    void snapshotsReconcileConservativeConsumptionWithoutInventingActorOrFeatureAttribution() {
+        AiUsageBreakdownDto successful = new AiUsageBreakdownDto(11, "Member", "deal_brief", 7, 5);
+        when(mapper.getConsumedTokens(3, DAY)).thenReturn(32L);
+        when(mapper.listDailyUsage(3, DAY)).thenReturn(List.of(successful));
+
+        AiBudgetControlOperations.Snapshot snapshot = operations.snapshot(3, DAY, NOW);
+
+        assertEquals(List.of(successful, new AiUsageBreakdownDto(
+                null, "Conservative / unattributed charges", "unattributed", 20, 0)), snapshot.usage());
+        assertEquals(snapshot.consumedTokens(), snapshot.usage().stream()
+                .mapToLong(entry -> entry.inputUsage() + entry.outputUsage()).sum());
+        verify(mapper).getConsumedTokens(3, DAY);
+        verify(mapper).listDailyUsage(3, DAY);
+    }
+
+    @Test
+    void snapshotsDoNotAddNegativeChargesForUnmeteredAuditsOrOverflowedTotals() {
+        when(mapper.getConsumedTokens(3, DAY)).thenReturn(20L);
+        List<AiUsageBreakdownDto> usage = List.of(
+                new AiUsageBreakdownDto(11, "Member", "deal_brief", Long.MAX_VALUE, 1));
+        when(mapper.listDailyUsage(3, DAY)).thenReturn(usage);
+
+        assertEquals(usage, operations.snapshot(3, DAY, NOW).usage());
+    }
+
+    @Test
+    void retentionUsesItsOwnBoundedMapperTransactionWithoutLedgerLocks() throws Exception {
+        when(mapper.deleteSettledReservationsBefore(NOW.minusDays(7))).thenReturn(100);
+
+        assertEquals(100, operations.purgeSettledReservations(NOW.minusDays(7)));
+        verify(mapper).deleteSettledReservationsBefore(NOW.minusDays(7));
+        verify(mapper, never()).getForUpdate(3);
+        assertEquals(org.springframework.transaction.annotation.Propagation.REQUIRES_NEW,
+                AiBudgetControlOperations.class.getMethod("purgeSettledReservations", LocalDateTime.class)
+                        .getAnnotation(Transactional.class).propagation());
+    }
+
+    @Test
     void releaseAfterAnAmbiguousDispatchCommitChargesTheDurableDispatch() {
         AiOrganizationBudgetReservation stored = storedReservation("dispatched");
         when(mapper.markReservationSettled("reservation", 20)).thenReturn(1);
@@ -136,6 +176,16 @@ class AiBudgetControlOperationsTest {
 
         verify(mapper, never()).addConsumedTokens(3, DAY, 20);
         verify(mapper, never()).deleteReservation("reservation");
+    }
+
+    @Test
+    void lateSettlementAfterTombstonePurgeCannotChargeAgainOrDispatch() {
+        operations.settle("purged", 20);
+        operations.release("purged");
+        assertThrows(IllegalStateException.class, () -> operations.markDispatched("purged", NOW));
+
+        verify(mapper, never()).addConsumedTokens(3, DAY, 20);
+        verify(mapper, never()).markReservationSettled("purged", 20);
     }
 
     @Test

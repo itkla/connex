@@ -459,7 +459,7 @@ class AiOrganizationBudgetMapperTest extends AbstractMapperTest {
             }).when(budgetMapper).getForUpdate(orgId);
             Clock expiredClock = Clock.offset(clock, Duration.ofMinutes(11));
             AiOrganizationBudgetCoordinator recovery = new AiOrganizationBudgetCoordinator(
-                    operations, controlAccess, expiredClock);
+                    operations, controlAccess, expiredClock, new AiProperties());
             var sweep = executor.submit(recovery::sweepExpiredReservations);
             assertTrue(expiryLocked.await(10, TimeUnit.SECONDS));
             var lateSettlement = executor.submit(() -> operations.settle(id, 1));

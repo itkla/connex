@@ -36,6 +36,7 @@ public interface AiOrganizationBudgetMapper {
             @Param("consumedTokens") long consumedTokens);
     AiOrganizationBudgetReservation getReservationForUpdate(
             @Param("reservationId") String reservationId);
+    int deleteSettledReservationsBefore(@Param("cutoff") LocalDateTime cutoff);
     int deleteReservation(@Param("reservationId") String reservationId);
     int addConsumedTokens(
             @Param("orgId") int orgId,

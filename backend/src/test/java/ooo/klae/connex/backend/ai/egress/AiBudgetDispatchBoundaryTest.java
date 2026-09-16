@@ -1,15 +1,25 @@
 package ooo.klae.connex.backend.ai.egress;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.RETURNS_DEFAULTS;
+import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,13 +34,22 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.ContentType;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.MockedStatic;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import ooo.klae.connex.backend.ai.AiBudgetControlAccess;
 import ooo.klae.connex.backend.ai.AiBudgetControlOperations;
@@ -44,6 +63,7 @@ import ooo.klae.connex.backend.ai.AiOrganizationBudgetCoordinator;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.PromptAssembly;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
@@ -54,10 +74,17 @@ import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
 import ooo.klae.connex.backend.ai.provider.ResolvedAiProvider;
 import ooo.klae.connex.backend.ai.provider.azure.AzureOpenAiAdapter;
 import ooo.klae.connex.backend.ai.provider.azure.AzureOpenAiClient;
+import ooo.klae.connex.backend.ai.provider.bedrock.BedrockAnthropicAdapter;
+import ooo.klae.connex.backend.ai.provider.bedrock.BedrockClient;
+import ooo.klae.connex.backend.ai.provider.openai.OpenAiCompatibleAdapter;
+import ooo.klae.connex.backend.ai.provider.openai.OpenAiCompatibleClient;
 import ooo.klae.connex.backend.ai.provider.vertex.GoogleAccessTokenClient;
 import ooo.klae.connex.backend.ai.provider.vertex.VertexAdapter;
 import ooo.klae.connex.backend.ai.provider.vertex.VertexClient;
+import ooo.klae.connex.backend.exceptions.AiBudgetExhaustedException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.WorkspaceService;
@@ -98,8 +125,9 @@ class AiBudgetDispatchBoundaryTest {
         }
     }
 
-    @Test
-    void vertexSecondCheckpointReleasesAfterSuccessfulOAuth() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void vertexSecondCheckpointReleasesAfterSuccessfulOAuth(boolean streaming) throws Exception {
         FixedAiProviderClient oauth = mock(FixedAiProviderClient.class);
         AtomicBoolean authenticated = new AtomicBoolean();
         when(oauth.post(any(URI.class), anySet(), anyMap(), any(ContentType.class),
@@ -123,8 +151,13 @@ class AiBudgetDispatchBoundaryTest {
         });
         try {
             AiInvocationService service = vertexService(oauth, model);
+            AiInvocation request = streaming
+                    ? invocation().withStreamObserver(text -> {
+                        throw new AssertionError("Refused invocation emitted output");
+                    })
+                    : invocation();
 
-            assertThrows(AiProviderException.class, () -> service.complete(invocation()));
+            assertThrows(ForbiddenException.class, () -> service.complete(request));
 
             assertEquals(0, modelResolutions.get());
             assertReleasedWithoutConsumption();
@@ -181,6 +214,149 @@ class AiBudgetDispatchBoundaryTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"openai_compatible", "azure_openai", "vertex", "bedrock"})
+    void bufferedClientsPreservePreSendRefusalsAndReleaseReservations(String provider) throws Exception {
+        assertPreSendRefusals(provider, false);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"openai_compatible", "azure_openai"})
+    void streamingAdaptersPreservePreSendRefusalsAndReleaseReservations(String provider) throws Exception {
+        assertPreSendRefusals(provider, true);
+    }
+
+    private void assertPreSendRefusals(String provider, boolean streaming) throws Exception {
+        AiProperties.ModelOverride streamingOverride = new AiProperties.ModelOverride();
+        streamingOverride.setProvider("openai_compatible");
+        streamingOverride.setModelId("gpt-4o");
+        streamingOverride.setEndpoint("https://lane.example.test/v1");
+        streamingOverride.setStreaming(true);
+        properties.setModelOverrides(List.of(streamingOverride));
+        AtomicBoolean resolved = new AtomicBoolean();
+        AtomicInteger dispatches = new AtomicInteger();
+        AtomicReference<RuntimeException> transportFailure = new AtomicReference<>();
+        CloseableHttpClient http = mock(CloseableHttpClient.class, call -> {
+            if (call.getMethod().getName().equals("execute")) {
+                dispatches.incrementAndGet();
+                RuntimeException failure = transportFailure.get();
+                if (failure != null) {
+                    throw failure;
+                }
+                throw new AssertionError("Refused invocation reached model transport");
+            }
+            return RETURNS_DEFAULTS.answer(call);
+        });
+        HttpClientBuilder builder = mock(HttpClientBuilder.class, RETURNS_SELF);
+        when(builder.build()).thenReturn(http);
+        FixedAiProviderClient fixed = new FixedAiProviderClient(properties, host -> {
+            resolved.set(true);
+            return InetAddress.getLoopbackAddress();
+        });
+        AiEndpointAddressValidator validator = mock(AiEndpointAddressValidator.class);
+        when(validator.resolveFetchable(anyString(), anyBoolean()))
+                .thenAnswer(call -> {
+                    resolved.set(true);
+                    return InetAddress.getLoopbackAddress();
+                });
+        OpenAiCompatibleClient openAi = new OpenAiCompatibleClient(properties, validator);
+        try (MockedStatic<HttpClients> clients = mockStatic(HttpClients.class)) {
+            clients.when(HttpClients::custom).thenReturn(builder);
+            AiInvocationService service = switch (provider) {
+                case "azure_openai" -> azureService(fixed);
+                case "vertex" -> vertexService(successfulOAuth(), fixed);
+                case "bedrock" -> service(new ResolvedAiProvider(
+                        "bedrock", "us-east-1", "anthropic.claude-3-sonnet-v1:0",
+                        null, null, null, null, false, false, AiPrivacyMode.UNMASKED,
+                        AiCredentials.of(Map.of("accessKeyId", "TEST_KEY", "secretAccessKey", "test-secret"))),
+                        new BedrockAnthropicAdapter(new BedrockClient(properties, fixed), objectMapper, properties));
+                case "openai_compatible" -> service(new ResolvedAiProvider(
+                        "openai_compatible", null, "gpt-4o", "https://lane.example.test/v1",
+                        null, null, null, false, false, AiPrivacyMode.UNMASKED,
+                        AiCredentials.of(Map.of("apiKey", "test-key"))),
+                        new OpenAiCompatibleAdapter(openAi, objectMapper, properties));
+                default -> throw new AssertionError("Unknown test provider");
+            };
+            RuntimeException restriction = restrictionEpochRefusal();
+            for (RuntimeException refusal : List.of(
+                    new ForbiddenException("AI permission was revoked"), restriction,
+                    new AiBudgetExhaustedException(),
+                    new AiAssistantLoopException("cancelled", "cancelled"),
+                    new ConflictException("Assistant turn is no longer active"),
+                    new ResourceNotFoundException("Assistant session is no longer accessible"))) {
+                resolved.set(false);
+                clearInvocations(operations);
+                doAnswer(call -> {
+                    if (resolved.get()) {
+                        throw refusal;
+                    }
+                    return null;
+                }).when(featureGate).requireAiUsable(AiFeature.DEAL_BRIEF);
+                AiInvocation request = streaming
+                        ? invocation().withStreamObserver(text -> {
+                            throw new AssertionError("Refused invocation emitted output");
+                        })
+                        : invocation();
+
+                RuntimeException failure = assertThrows(RuntimeException.class, () -> service.complete(request));
+
+                if (refusal == restriction) {
+                    assertEquals(IllegalStateException.class, failure.getClass());
+                    assertEquals("AI restrictions changed before provider egress", failure.getMessage());
+                } else {
+                    assertSame(refusal, failure);
+                }
+                assertTrue(resolved.get());
+                assertEquals(0, dispatches.get());
+                assertReleasedWithoutConsumption();
+            }
+            resolved.set(false);
+            clearInvocations(operations);
+            doNothing().when(featureGate).requireAiUsable(AiFeature.DEAL_BRIEF);
+            transportFailure.set(new IllegalStateException("private transport detail"));
+
+            AiInvocation request = streaming
+                    ? invocation().withStreamObserver(text -> {
+                        throw new AssertionError("Failed transport emitted output");
+                    })
+                    : invocation();
+            AiProviderException failure = assertThrows(AiProviderException.class,
+                    () -> service.complete(request));
+
+            assertFalse(failure.getMessage().contains("private transport detail"));
+            assertNull(failure.getCause());
+            assertEquals(1, dispatches.get());
+            verify(operations).markDispatched(anyString(), any(LocalDateTime.class));
+            verify(operations).settle("reservation", 100L);
+            verify(operations, never()).release(anyString());
+        } finally {
+            fixed.shutdown();
+            ReflectionTestUtils.invokeMethod(openAi, "shutdown");
+        }
+    }
+
+    private FixedAiProviderClient successfulOAuth() {
+        FixedAiProviderClient oauth = mock(FixedAiProviderClient.class);
+        when(oauth.post(any(URI.class), anySet(), anyMap(), any(ContentType.class),
+                any(byte[].class), any(AiRequestDeadline.class), anyString()))
+                .thenReturn(new FixedAiProviderClient.Response(200,
+                        "{\"access_token\":\"test-token\",\"expires_in\":3600}"
+                                .getBytes(StandardCharsets.UTF_8)));
+        return oauth;
+    }
+
+    private RuntimeException restrictionEpochRefusal() {
+        AiRestrictionEpoch epoch = new AiRestrictionEpoch();
+        long expected = epoch.current(7);
+        epoch.bump(7);
+        Supplier<Boolean> provider = () -> Boolean.TRUE;
+        Runnable checkpoint = () -> ReflectionTestUtils.invokeMethod(epoch, "invokeAtEgress", 7, provider);
+        RuntimeException refusal = assertThrows(RuntimeException.class,
+                () -> ReflectionTestUtils.invokeMethod(epoch, "runWithExpectedEgressEpoch", 7, expected, checkpoint));
+        assertEquals("EgressRejectedException", refusal.getClass().getSimpleName());
+        return refusal;
+    }
+
     private AiInvocationService vertexService(
             FixedAiProviderClient oauth, FixedAiProviderClient model) throws Exception {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
@@ -222,7 +398,7 @@ class AiBudgetDispatchBoundaryTest {
                 .thenReturn(new AiBudgetControlOperations.Reservation(
                         "reservation", 3, LocalDate.of(2026, 8, 10), 100, true));
         AiOrganizationBudgetCoordinator coordinator = new AiOrganizationBudgetCoordinator(
-                operations, access, CLOCK);
+                operations, access, CLOCK, properties);
         WorkspaceService workspace = mock(WorkspaceService.class);
         when(workspace.getCurrentWorkspaceId()).thenReturn(7);
         when(workspace.getCurrentOrgId()).thenReturn(3);

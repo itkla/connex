@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -15,19 +16,38 @@ import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiBudgetControlOperations.Reservation;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
+import ooo.klae.connex.backend.ai.provider.AiProviderCallerDeadlineExceededException;
 
 /** Cluster-coordinated organization daily token-budget reservation lifecycle. */
 @Service
 @RequiredArgsConstructor
 public class AiOrganizationBudgetCoordinator {
-    private static final Duration RESERVATION_TTL = Duration.ofMinutes(10);
+    private static final Duration MAX_PROVIDER_DURATION = Duration.ofHours(1);
+    private static final Duration SETTLEMENT_MARGIN = Duration.ofMinutes(1);
+    private static final Duration SETTLEMENT_RETENTION = Duration.ofDays(7);
+    private static final int MAX_SWEEP_BATCHES = 100;
 
     private final AiBudgetControlOperations operations;
     private final AiBudgetControlAccess controlAccess;
     private final Clock clock;
+    private final AiProperties aiProperties;
 
     /** Reserves a conservative token ceiling before a provider call. */
     public Lease reserve(int orgId, AiInvocation invocation, String serializedPrompt) {
+        return reserve(orgId, invocation, serializedPrompt, deadline(invocation));
+    }
+
+    /** Reserves fallback work within the original invocation's absolute provider deadline. */
+    public Lease reserve(
+            int orgId, AiInvocation invocation, String serializedPrompt, AiRequestDeadline deadline) {
+        long remainingNanos = deadline.remainingNanos();
+        if (remainingNanos <= 0) {
+            throw new AiProviderCallerDeadlineExceededException();
+        }
+        if (remainingNanos > MAX_PROVIDER_DURATION.toNanos()) {
+            throw new IllegalArgumentException("AI provider deadline exceeds the maximum duration");
+        }
         long reservedTokens = estimatedTokenCeiling(invocation, serializedPrompt);
         LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         LocalDate usageDay = now.toLocalDate();
@@ -37,8 +57,8 @@ public class AiOrganizationBudgetCoordinator {
                 reservedTokens,
                 UUID.randomUUID().toString(),
                 now,
-                now.plus(RESERVATION_TTL)));
-        return new Lease(this, reservation);
+                now.plusNanos(remainingNanos).plus(SETTLEMENT_MARGIN)));
+        return new Lease(this, reservation, deadline);
     }
 
     /** Reserves a conservative ceiling for callers without an enriched serialized envelope. */
@@ -50,13 +70,38 @@ public class AiOrganizationBudgetCoordinator {
     @Scheduled(fixedDelay = 1, initialDelay = 1, timeUnit = TimeUnit.MINUTES)
     public void sweepExpiredReservations() {
         LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
-        List<String> expiredIds = controlAccess.execute(() -> operations.expiredReservationIds(now));
-        for (String reservationId : expiredIds) {
-            controlAccess.execute(() -> {
-                operations.expireReservation(reservationId, now);
-                return null;
-            });
+        for (int batch = 0; batch < MAX_SWEEP_BATCHES; batch++) {
+            List<String> expiredIds = controlAccess.execute(() -> operations.expiredReservationIds(now));
+            if (expiredIds.isEmpty()) break;
+            for (String reservationId : expiredIds) {
+                controlAccess.execute(() -> {
+                    operations.expireReservation(reservationId, now);
+                    return null;
+                });
+            }
         }
+        LocalDateTime cutoff = now.minus(SETTLEMENT_RETENTION);
+        for (int batch = 0; batch < MAX_SWEEP_BATCHES; batch++) {
+            int purged = controlAccess.execute(() -> operations.purgeSettledReservations(cutoff));
+            if (purged == 0) break;
+        }
+    }
+
+    private AiRequestDeadline deadline(AiInvocation invocation) {
+        long timeoutMillis = aiProperties.getRequestTimeoutMs();
+        if (timeoutMillis <= 0) {
+            throw new IllegalStateException("AI request timeout must be positive");
+        }
+        Duration remaining = Duration.ofMillis(Math.min(timeoutMillis, MAX_PROVIDER_DURATION.toMillis()));
+        Instant callerDeadline = invocation.callerDeadline();
+        if (callerDeadline != null) {
+            Duration callerRemaining = Duration.between(clock.instant(), callerDeadline);
+            if (callerRemaining.compareTo(remaining) < 0) remaining = callerRemaining;
+        }
+        if (remaining.isNegative() || remaining.isZero()) {
+            throw new AiProviderCallerDeadlineExceededException();
+        }
+        return AiRequestDeadline.afterNanos(remaining.toNanos());
     }
 
     private void markDispatched(Reservation reservation) {
@@ -119,13 +164,21 @@ public class AiOrganizationBudgetCoordinator {
     public static final class Lease implements AutoCloseable {
         private final AiOrganizationBudgetCoordinator coordinator;
         private final Reservation reservation;
+        private final AiRequestDeadline deadline;
         private Long settlementTokens;
         private boolean dispatched;
         private boolean closed;
 
-        private Lease(AiOrganizationBudgetCoordinator coordinator, Reservation reservation) {
+        private Lease(
+                AiOrganizationBudgetCoordinator coordinator, Reservation reservation, AiRequestDeadline deadline) {
             this.coordinator = coordinator;
             this.reservation = reservation;
+            this.deadline = deadline;
+        }
+
+        /** Returns the absolute deadline shared by the lease and all provider attempts. */
+        public AiRequestDeadline deadline() {
+            return deadline;
         }
 
         /** Marks the final handoff to provider transport after pre-dispatch checks pass. */
