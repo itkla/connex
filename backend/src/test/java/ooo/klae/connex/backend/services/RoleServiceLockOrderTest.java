@@ -39,8 +39,8 @@ class RoleServiceLockOrderTest {
         InOrder order = inOrder(workspaceService, sessionSecurityService, roleMapper);
         order.verify(workspaceService).requirePermission(7, 1, Permission.ROLE_MANAGE);
         order.verify(sessionSecurityService).requireRecentAuthentication(1);
-        order.verify(workspaceService).lockRoleMutationAuthorization(
-            7, 1, null, Set.of(Permission.PERSON_CREATE));
+        order.verify(workspaceService).lockRoleCreationAuthorization(
+            7, 1, Set.of(Permission.PERSON_CREATE));
         order.verify(roleMapper).insertRole(any(WorkspaceRole.class));
     }
 

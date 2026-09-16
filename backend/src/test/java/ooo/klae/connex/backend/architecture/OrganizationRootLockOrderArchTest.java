@@ -62,7 +62,8 @@ class OrganizationRootLockOrderArchTest {
     private static final String SHARED_WORKSPACE_ROOT_CALL = "workspaceMapper.lockWorkspaceForShare(";
 
     private static final List<String> WORKSPACE_MEMBER_ROW_LOCK_CALLS = List.of(
-        "workspaceMapper.lockOwnerIds(",
+        "workspaceMapper.lockActiveOwnerMembers(",
+        "workspaceMapper.lockRoleAssignees(",
         "workspaceMapper.lockAuthorizationMembership(",
         "workspaceMapper.lockActiveMembership(",
         "workspaceMapper.getMembershipForUserForShare(",

@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.beans.DocumentDeliveryArtifact;
 import ooo.klae.connex.backend.beans.DealPerson;
 import ooo.klae.connex.backend.beans.DealStageHistory;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.util.NotePageCursor;
 import ooo.klae.connex.backend.beans.Notification;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
@@ -1382,10 +1383,12 @@ public class DealService {
     @RequirePermission(Permission.DEAL_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministrator(
+            workspaceId, workspaceService.getCurrentUserId());
         duplicateDecisionLockService.lockCurrentOrganization();
         Deal before = requireDealForUpdate(workspaceId, id);
         if (dealDocumentMapper.countNonDraftByDeal(workspaceId, id) > 0) {
-            workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+            workspaceService.requireLockedBuiltInAdministrator(builtInAdministrator);
         }
         for (DocumentDeliveryArtifact artifact
                 : documentDeliveryMapper.getArtifactsByDeal(workspaceId, id)) {
@@ -1651,9 +1654,19 @@ public class DealService {
      * @return
      */
     public List<Note> getNotesByDealId(int dealId) {
+        return getNotesByDealId(dealId, 25, 0);
+    }
+
+    /** Returns a bounded page of reader-redacted note previews for the record. */
+    public List<Note> getNotesByDealId(int dealId, int limit, int offset) {
+        return getNotesByDealId(dealId, limit, offset, null);
+    }
+
+    public List<Note> getNotesByDealId(int dealId, int limit, int offset, NotePageCursor before) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) throw new ResourceNotFoundException("Deal not found");
-        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByDealId(workspaceId, dealId, workspaceService.getCurrentUserId()));
+        return referenceService.hydrateNotePreviews(workspaceId, noteMapper.getVisibleNotesByDealId(
+            workspaceId, dealId, workspaceService.getCurrentUserId(), limit, before == null ? offset : 0, before));
     }
 
     /**

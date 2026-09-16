@@ -17,6 +17,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import com.fasterxml.jackson.annotation.JsonRawValue;
+
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.mapping.MappedStatement;
 import org.apache.ibatis.session.Configuration;
@@ -26,12 +28,16 @@ import ooo.klae.connex.backend.dto.DataSubjectDisclosureDto;
 
 /** Verifies disclosure SQL stays parameter-bound and tenant-plane pure. */
 class DataSubjectDisclosureMapperXmlTest {
+    private static final Pattern VISIBILITY_FILTER = Pattern.compile(
+        "visibility\\s*(?:=|!=|<>|(?:NOT\\s+)?IN\\b)", Pattern.CASE_INSENSITIVE);
 
     @Test
     void disclosureSectionsAndExclusionsHaveAnExplicitInventory() throws Exception {
         String procedure = Files.readString(Path.of("../docs/APPI_DATA_SUBJECT_REQUEST_PROCEDURE.md"));
         Set<String> sections = Arrays.stream(DataSubjectDisclosureDto.class.getDeclaredFields())
-            .filter(field -> field.getType().equals(List.class) || field.getName().equals("person"))
+            .filter(field -> field.getType().equals(List.class)
+                || field.isAnnotationPresent(JsonRawValue.class)
+                || field.getName().equals("person"))
             .map(java.lang.reflect.Field::getName)
             .collect(Collectors.toSet());
         Set<String> documentedSections = Pattern.compile("(?m)^\\| `([A-Za-z]+)` \\|")
@@ -62,9 +68,10 @@ class DataSubjectDisclosureMapperXmlTest {
         parameters.put("workspaceId", 4);
         parameters.put("personId", 5);
         parameters.put("workspaceIds", List.of(4, 6));
+        parameters.put("noteIds", List.of(7, 8));
         Set<String> expectedStatements = Set.of(
             "subjectPersonExists", "lockSubjectPersonForShare", "findPerson", "findIdentities", "findTags",
-            "findCustomFields", "findActivities", "findNotes", "findTasks", "findAttachments",
+            "findCustomFields", "findActivities", "findNoteIds", "findNotePage", "findTasks", "findAttachments",
             "findEmployment", "findLifecycleHistory", "findQualificationAnswers", "findLifecyclePasses",
             "findEdges", "findDeals", "findIntroductions",
             "findProvisions", "findConsentState", "findConsentHistory", "findAudienceExportEvidence",
@@ -86,6 +93,17 @@ class DataSubjectDisclosureMapperXmlTest {
             }
             if ("lockSubjectPersonForShare".equals(statementName)) {
                 assertTrue(sql.contains("FOR SHARE"), statementName);
+            }
+            if ("findNotePage".equals(statementName)) {
+                assertTrue(sql.contains("LIMIT 100"), statementName);
+                assertTrue(sql.contains("n.id IN"), statementName);
+                assertTrue(sql.contains("ORDER BY n.id"), statementName);
+                assertTrue(statement.isFlushCacheRequired(), "Previous pages must leave the session cache");
+                assertFalse(statement.isUseCache(), "Body pages must not enter a second-level cache");
+            }
+            if (Set.of("findNoteIds", "findNotePage").contains(statementName)) {
+                assertFalse(VISIBILITY_FILTER.matcher(sql).find(),
+                    statementName + " must not drop a note visibility class from a statutory disclosure");
             }
         }
         assertTrue(found.equals(expectedStatements), found.toString());

@@ -558,5 +558,11 @@
   "LibraryTagsLayout": {
     "title": "Library / Tags",
     "description": "Organize records with tags"
+  },
+  "NotePagination": {
+    "loadMore": "Load more notes",
+    "loading": "Loading notes…",
+    "retry": "Try again",
+    "failed": "Notes couldn't be loaded. Try again."
   }
 }

@@ -84,12 +84,19 @@ After preliminary authorization:
 2. Lock the exact workspace exclusively.
 3. Lock actor and target memberships in ascending user id.
 4. Revalidate actor active and target state.
-5. Lock distinct actor/requested custom `workspace_role` roots in ascending id, then their complete permission sets with ordered locking reads.
-6. Perform final authorization from the locked actor membership/role state.
+5. When a role is addressed (edit/delete), lock every assignee of that role through `lockRoleAssignees` (`FOR UPDATE NOWAIT`). When the mutation can affect an owner — the target is an owner, or the addressed role has an active-owner assignee — additionally lock the active owner memberships through `lockActiveOwnerMembers` (`FOR UPDATE NOWAIT`). Both phases precede every role root. Mutations that cannot touch an owner (role creation, and member-scoped changes against a non-owner target) take neither, so an unrelated `workspace_member` row lock — `NotificationService.markAllRead` holding an owner's membership, for example — cannot fail them.
+6. Lock distinct actor/requested/active-owner custom `workspace_role` roots in ascending role id, then their complete permission sets with ordered locking reads.
+7. Perform final authorization from the locked actor membership/role state.
 
-Owner demotion locks exact workspace owner rows while the workspace root is already held; do not reacquire broader owned-workspace roots.
+The owner/assignee snapshots abort contention with 409 instead of waiting: departure cleanup can already hold a membership before requesting the workspace root. Waiting while holding that root would close a cycle. Only MySQL NOWAIT error 3572 with SQLSTATE HY000 is translated; other failures propagate. There is no retry: the caller resubmits.
 
-Custom-role update/deletion locks the exact role after the common roots. Assigned custom roles cannot be deleted until members are reassigned through the permission-ceiling-checked mutation.
+An owner is a *recovery owner* when they are active, carry no live account-deletion reservation, and either hold no custom overlay or hold one that still grants the complete grantable catalog — reassigning oneself the built-in owner role clears the overlay and passes the grant ceiling, so both cases can restore full authority. Overlay assignment and role edits may not narrow any active owner's effective permissions unless a recovery owner remains afterwards; a change that takes nothing away is always allowed, so a no-op or repairing edit is never blocked by a workspace that already has no recovery path. Built-in owner demotion, member removal, departure, and account deletion must leave at least one active owner, and — when the departing user is an active owner — a recovery owner among the rest. Raw ownership still governs who may change another owner. Owner demotion uses the existing exact workspace root; it must not reacquire broader owned-workspace roots. Departure takes the NOWAIT owner snapshot after its existing ordered workspace and recipient-membership locks. Account deletion takes that snapshot after its workspace-root pass, once per owned workspace and in the same ascending order. Both exclude the departing account before any cleanup or deletion reservation.
+
+Recovery candidates come from locked memberships, and their overlays' permission sets from the role roots locked in step 6. `AccountDeletionReservationRead` reads only their reservation flags in a fresh read-only `REQUIRES_NEW` / `READ_COMMITTED` transaction, without acquiring user locks after workspace locks; account deletion collects the candidates across every owned workspace and issues that read once. Reservation creation and renewal take the user and ascending owned-workspace roots before updating the lease, retaining those roots through commit. This prevents an uncommitted renewal from extending a lease after another transaction has counted its old expiry as available. `AccountDeletionReservationFenceArchTest` is the rot alarm on that coupling. Renewal rejects expired leases; expiry/release only restore availability. The fresh read avoids an old repeatable-read snapshot counting a reserved owner as available.
+
+The built-in administrator exception (`WorkspaceService.requireBuiltInAdministrator`) is not a grantable permission, so any overlay denies it whatever that overlay contains. Transactions that act on the exception while holding record locks must take the exception's authorization snapshot — user root `FOR SHARE`, active workspace root `FOR SHARE`, exact membership `FOR UPDATE` — through `isLockedBuiltInAdministrator` **before** their first record lock, and assert it later with `requireLockedBuiltInAdministrator`. Report deletion, report-snapshot deletion, deal deletion, and deal-document deletion take it at the top of the transaction, ahead of `lockDefinitions`, the duplicate-decision mutex, and the deal/document row locks respectively; approval cancellation asserts it in place because `lockApprovalMutationRecipients` already holds those exact rows. The plain non-locking form remains correct for the read-only member-scope analytics gates, which take no lock afterwards.
+
+Custom-role creation uses `lockRoleCreationAuthorization`, which takes no role id and checks the grant ceiling after locking current role-management authority. Existing-role updates use `lockRoleMutationAuthorization` with a non-nullable role id and always enforce owner authority, retained recovery, and the grant ceiling after locking. Custom-role update/deletion locks the exact role after the common roots. Assigned custom roles cannot be deleted until members are reassigned through the permission-ceiling-checked mutation.
 
 Member removal/leave/invitation decline also lock the departing user root. The target user's globally ordered membership set is acquired at the documented point during removal so notification cleanup cannot invert membership lock order.
 
@@ -285,7 +292,7 @@ service-level cleanup.
   the organization-root inversion inside `removeMemberInTransaction`, which takes the workspace root
   exclusively first (`lockRoleMutation` → `lockWorkspaceMutationRoot`,
   `WorkspaceService.java:1296`) and therefore does not invert on the workspace root at all, but
-  reaches the organization root only after X-locking active owner rows (`lockOwnerIds`, `:1454`)
+  reaches the organization root only after X-locking active owner rows (`lockActiveOwnerMembers`, `:1509`)
   and entering credential cleanup, whose `lockWorkspaceOrgIdForShare` and `lockByIdForShare` pair
   consequently runs after those owner rows — the reverse of the erasure's
   organization-roots-then-owner-rows pass; the
@@ -343,10 +350,21 @@ execution and prevents offboarding's user-before-workflow order from forming a c
 
 Task creation/full update lock the requested active membership first. Mutations that can change board positions run at `READ_COMMITTED` and acquire the exact tenant-plane `task_board_lock` workspace root through the atomic insert-or-update mapper statement.
 
-- Create: membership → board root → insert.
-- Full update: membership → board root → exact task rows.
+- Create: membership → board root → linked people → exact visibility grants → insert.
+- Full update: membership → board root → exact task rows → linked people → exact visibility grants.
 - Completion/deletion/movement: board root → exact task rows.
 - Due-date-only reschedule: exact task only; no board root.
+
+Task-history imports retain their authorization and duplicate-decision roots first, then acquire
+that same board root before locking resolved people in ascending id order. Assistant task creation
+also acquires the board before its processable-record target and restriction fence. These callers
+must never enter task creation while holding a person lock acquired before the board. Existing
+task rows precede people on updates; imports and creates insert new task rows after people while
+holding the board mutex. Person visibility/processing locks use `FOR SHARE` for task links,
+history imports, and activity updates, which do not mutate the person. The exact share grant is
+retained through commit and permissions are rechecked after contention. Activity creation keeps
+`FOR UPDATE` because recording the first-response timestamp can update the person; taking a
+shared lock first would permit a concurrent lock-upgrade cycle.
 
 After the board root is held, discover workspace task ids without locks, add the requested root, Java-sort the union, and lock exact `(workspace_id,id)` rows individually. Skip siblings that vanished before lock; fail closed if the requested root vanished. Derive ordering only from locked rows.
 
@@ -715,6 +733,45 @@ Detailed storage behavior lives in `docs/backend/OBJECT_STORAGE.md`. Lock-order 
 - Profile-image replacement holds the user-row lock before shared backlog admission/object write.
 - Cleanup/retry workers lock/revalidate exact queue/tombstone identities before provider I/O.
 - Preserve deletion-queue → quota → audit ordering, including business-card binary storage before company/person/audit writes.
+
+## Account recovery and emailed credential tokens
+
+Password reset and verified email change are one hierarchy, not two: a reset exists to evict the
+holder of the old password and an email change moves the recovery mailbox, so each must evict the
+other family's outstanding tokens. The class order is:
+
+0. `one_time_link_flow` — the browser grant held by `OneTimeLinkFlowService.consume` (or
+   `consumePasswordReset`) across the confirm/reset operation.
+1. `app_user` — the account root, exclusive (`FOR UPDATE`) for every credential write and every
+   token claim; shared (`FOR SHARE`) for reset issuance, which only re-reads the mailbox.
+2. `password_reset_token` / `email_change_token` — the two emailed token families.
+3. The audit integrity head and its foreign-key parents.
+
+Source-token exchange and browser-grant issue run in separate transactions.
+
+Both token families are locked under the same exclusive account root, so their relative order inside
+one transaction is unconstrained; do not rely on that, and never acquire either one before the
+account root.
+
+- `PasswordResetService.requestReset` takes `app_user FOR SHARE` and re-reads the mailbox under that
+  lock before issuing, so a verified email change committing concurrently cannot leave the link
+  addressed to the mailbox it just moved away from.
+- Both public exchange endpoints (`PasswordResetService.exchangeToken`,
+  `EmailChangeService.exchangeToken`) resolve the token's owner without a lock, then take
+  `app_user FOR UPDATE` before claiming. A same-owner retry re-reads the claimed token `FOR SHARE`,
+  because its `REPEATABLE READ` snapshot predates the invalidation it waited behind.
+- `PasswordResetService.resetPasswordByHash` and `EmailChangeService.confirmChangeByHash` hold the
+  exclusive account root across the credential write and both `invalidateForUser` calls.
+- `EmailChangeService.requestChange` proves the current password through the shared throttled
+  confirmation, then re-reads the account under the exclusive root and refuses when the password
+  hash or `session_epoch` moved since the proof.
+
+The audit head sits below `app_user` in this order, and an independent audit append re-acquires the
+actor's `app_user` row shared. `AuthService.requireCurrentPassword` therefore writes no audit of its
+own: `MfaRecoveryService.recover` calls it while holding that row exclusively, so an append there
+would wait on the caller's own lock until the InnoDB timeout, lose the event, and pin a second
+pooled connection. Callers that are not already holding the account root —
+`EmailChangeService.requestChange` — record the confirmation outcome themselves, before acquiring it.
 
 ## Connected-provider credentials
 

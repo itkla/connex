@@ -13,9 +13,11 @@ import {
     getMyWorkResultFromCookie,
     getUserActivitiesFromCookie,
     getUserNotesFromCookie,
+    getUserNoteActivityResultFromCookie,
     getUserTasksFromCookie,
     getUsers,
 } from "@/app/lib/api";
+import SectionUnavailable from "@/app/components/SectionUnavailable";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 import type { Activity, Contact, Deal, DealRisk, Note, RelationshipTemperature, Task, User } from "@/app/lib/types";
 import { formatDate, formatDateTime, pickDominantCurrency } from "@/app/lib/utils";
@@ -62,15 +64,16 @@ export default async function MePage() {
     }
 
     const init = { headers: { cookie: cookie ?? "" } } as const;
-    const [contacts, deals, tasks, activities, notes, users, myWorkResult]
+    const [contacts, deals, tasks, activities, notes, users, myWorkResult, noteActivityResult]
         = await Promise.all([
             getContactsFromCookie(cookie).catch(() => [] as Contact[]),
             getDealsFromCookie(cookie).catch(() => [] as Deal[]),
             getUserTasksFromCookie(user.id, cookie).catch(() => [] as Task[]),
             getUserActivitiesFromCookie(user.id, cookie).catch(() => [] as Activity[]),
-            getUserNotesFromCookie(user.id, cookie).catch(() => [] as Note[]),
+            getUserNotesFromCookie(user.id, cookie, { size: 25 }).catch(() => [] as Note[]),
             getUsers(init).catch(() => [] as User[]),
             getMyWorkResultFromCookie(cookie),
+            getUserNoteActivityResultFromCookie(user.id, cookie),
         ]);
     const myDeals = deals.filter((deal) => deal.ownerId === user.id);
     const [temps, dealRisks] = await Promise.all([
@@ -85,7 +88,7 @@ export default async function MePage() {
     const nodes = constellationNodes(temps, contacts, 18);
     const cooling = coolingRelationships(temps, contacts, 6);
     const risks = riskItems(dealRisks, myDeals, 6);
-    const pulse = activityPulse(activities, tasks, notes, 84);
+    const pulse = noteActivityResult.ok ? activityPulse(activities, tasks, noteActivityResult.data, 84) : null;
     const coolingCount = temps.filter((temp) => temp.trend === "cooling").length;
     const greeting = t(`greeting_${greetingKey(user.timezone)}`);
     const hasWork = tasks.length + activities.length + notes.length > 0;
@@ -115,7 +118,8 @@ export default async function MePage() {
                 </Rise>
 
                 <Rise delay={0.26}>
-                    <PulseStrip days={pulse.days} totalTouches={pulse.totalTouches} streak={pulse.streak} />
+                    {pulse ? <PulseStrip days={pulse.days} totalTouches={pulse.totalTouches} streak={pulse.streak} />
+                        : <SectionUnavailable />}
                 </Rise>
 
                 {hasWork && (
@@ -126,7 +130,8 @@ export default async function MePage() {
                                 <Timeline
                                     tasks={tasks}
                                     activities={activities}
-                                    notes={notes}
+                                    notes={notes.slice(0, 25)}
+                                    noteTarget={{ type: "user", id: user.id }}
                                     users={users}
                                     persons={contacts}
                                     deals={deals}

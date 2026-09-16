@@ -19,6 +19,15 @@ class NotificationDtoTest {
     }
 
     @Test
+    void replyProjectionClearsPersistedAttachmentLabels() {
+        Notification notification = new Notification();
+        notification.setType("comment.reply");
+        notification.setSourceLabel("@Acquisition-Target-Secret.pdf");
+
+        assertNull(NotificationDto.from(notification).getSourceLabel());
+    }
+
+    @Test
     void nonMentionProjectionKeepsSourceLabels() {
         Notification notification = new Notification();
         notification.setType("task.due");

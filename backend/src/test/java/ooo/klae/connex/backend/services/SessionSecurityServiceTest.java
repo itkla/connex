@@ -111,6 +111,28 @@ class SessionSecurityServiceTest {
     }
 
     @Test
+    void currentSessionEpochReadsOnlyThePersistedServletStamp() {
+        User principal = new User();
+        principal.setId(7);
+        principal.setSessionEpoch(99);
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+        assertNull(service.currentSessionEpoch());
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        assertNull(service.currentSessionEpoch());
+        assertNull(request.getSession(false));
+        request.getSession().setAttribute(SessionSecurityService.SESSION_EPOCH_ATTR, "3");
+        assertNull(service.currentSessionEpoch());
+
+        service.stampSessionEpoch(request, 3);
+        assertEquals(3, service.currentSessionEpoch());
+        principal.setSessionEpoch(null);
+        assertEquals(3, service.currentSessionEpoch());
+    }
+
+    @Test
     void markAuthenticatedRotatesOpaqueRequestIdentityForEverySessionGeneration() {
         MockHttpServletRequest request = new MockHttpServletRequest();
         authenticateUser(7);

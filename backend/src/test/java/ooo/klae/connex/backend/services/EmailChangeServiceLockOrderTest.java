@@ -11,12 +11,12 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 
 import ooo.klae.connex.backend.beans.EmailChangeToken;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.EmailChangeTokenMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
+import ooo.klae.connex.backend.mappers.PasswordResetTokenMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
@@ -33,15 +33,18 @@ class EmailChangeServiceLockOrderTest {
         EmailChangeService service = new EmailChangeService(
             userMapper, workspaceMapper, mock(NotificationMapper.class),
             mock(NotificationStateVersionService.class), tokenMapper,
-            mock(EmailChangeEmailService.class), mock(PasswordEncoder.class),
-            mock(AuthService.class), mock(AuditService.class));
+            mock(PasswordResetTokenMapper.class), mock(EmailChangeEmailService.class),
+            mock(AuthService.class), mock(SessionSecurityService.class), mock(AuditService.class),
+            mock(LoginRateLimiter.class));
         String rawToken = OneTimeTokenDigest.generate();
         String tokenHash = OneTimeTokenDigest.sha256(rawToken);
         User user = new User();
         user.setId(41);
         user.setEmail("previous@example.com");
+        user.setSessionEpoch(0);
         EmailChangeToken token = new EmailChangeToken();
         token.setUserId(user.getId());
+        token.setCredentialGeneration(user.getSessionEpoch());
         token.setNewEmail("next@example.com");
         when(tokenMapper.findRedeemableByHash(tokenHash)).thenReturn(token);
         when(tokenMapper.findExchangedRedeemableByHash(tokenHash)).thenReturn(token);

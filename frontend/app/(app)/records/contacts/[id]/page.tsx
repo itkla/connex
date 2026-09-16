@@ -469,6 +469,7 @@ export default async function ContactPage({ params }: ContactPageProps) {
                                 tasks={tasks}
                                 activities={activities}
                                 notes={notes}
+                                noteTarget={{ type: "person", id: contact.id }}
                                 users={interactionUsers}
                                 persons={[contact]}
                                 deals={deals}

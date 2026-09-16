@@ -127,20 +127,28 @@ class UserMapperTest extends AbstractMapperTest {
     }
 
     /**
-     * Persists editable profile fields while preserving the ownership-bound email.
+     * Persists editable profile fields without replacing the stored email or password.
      */
     @Test
     void update_persistsProfileWithoutChangingEmail() {
         User user = newUser();
         String originalEmail = user.getEmail();
+        String originalPasswordHash = user.getPasswordHash();
+        user.setUsername("renamed_" + unique());
         user.setDisplayName("Mr. New Name");
+        user.setTimezone("Asia/Tokyo");
         user.setEmail("renamed_" + unique() + "@example.com");
+        user.setPasswordHash("replacement_" + unique());
 
         userMapper.update(user);
 
         User found = userMapper.getUserById(user.getId());
+        assertNotNull(found);
+        assertEquals(user.getUsername(), found.getUsername());
         assertEquals("Mr. New Name", found.getDisplayName());
+        assertEquals("Asia/Tokyo", found.getTimezone());
         assertEquals(originalEmail, found.getEmail());
+        assertEquals(originalPasswordHash, found.getPasswordHash());
     }
 
     @Test

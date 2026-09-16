@@ -18,6 +18,9 @@
         <result property="orgId" column="org_id" />
         <result property="usageDay" column="usage_day" />
         <result property="reservedTokens" column="reserved_tokens" />
+        <result property="expiresAt" column="expires_at" />
+        <result property="state" column="state" />
+        <result property="consumedTokens" column="consumed_tokens" />
     </resultMap>
 
     <select id="get" resultMap="budgetMap">
@@ -58,30 +61,59 @@
         WHERE org_id = #{orgId} AND usage_day = #{usageDay}
     </select>
 
-    <delete id="deleteExpiredReservations">
-        DELETE FROM organization_ai_budget_reservation
-        WHERE expires_at &lt;= #{now}
-    </delete>
+    <select id="listExpiredReservationIds" resultType="string">
+        SELECT reservation_id
+        FROM organization_ai_budget_reservation FORCE INDEX (idx_organization_ai_budget_reservation_state_expiry)
+        WHERE state IN ('reserved', 'dispatched') AND expires_at &lt;= #{now}
+        ORDER BY state, expires_at, reservation_id
+        LIMIT 100
+    </select>
 
     <select id="sumReservedTokens" resultType="long">
         SELECT COALESCE(SUM(reserved_tokens), 0)
         FROM organization_ai_budget_reservation
-        WHERE org_id = #{orgId} AND usage_day = #{usageDay}
+        WHERE org_id = #{orgId} AND usage_day = #{usageDay} AND state != 'settled'
     </select>
 
     <insert id="insertReservation">
         INSERT INTO organization_ai_budget_reservation
-            (reservation_id, org_id, usage_day, reserved_tokens, expires_at)
+            (reservation_id, org_id, usage_day, reserved_tokens, expires_at, state)
         VALUES
-            (#{reservationId}, #{orgId}, #{usageDay}, #{reservedTokens}, #{expiresAt})
+            (#{reservationId}, #{orgId}, #{usageDay}, #{reservedTokens}, #{expiresAt}, 'reserved')
     </insert>
 
+    <select id="getReservation" resultMap="reservationMap">
+        SELECT reservation_id, org_id, usage_day, reserved_tokens, expires_at, state, consumed_tokens
+        FROM organization_ai_budget_reservation
+        WHERE reservation_id = #{reservationId}
+    </select>
+
+    <update id="markReservationDispatched">
+        UPDATE organization_ai_budget_reservation
+        SET state = 'dispatched'
+        WHERE reservation_id = #{reservationId} AND state = 'reserved'
+    </update>
+
+    <update id="markReservationSettled">
+        UPDATE organization_ai_budget_reservation
+        SET state = 'settled', consumed_tokens = #{consumedTokens},
+            expires_at = GREATEST(expires_at, CURRENT_TIMESTAMP(6))
+        WHERE reservation_id = #{reservationId} AND state != 'settled'
+    </update>
+
     <select id="getReservationForUpdate" resultMap="reservationMap">
-        SELECT reservation_id, org_id, usage_day, reserved_tokens
+        SELECT reservation_id, org_id, usage_day, reserved_tokens, expires_at, state, consumed_tokens
         FROM organization_ai_budget_reservation
         WHERE reservation_id = #{reservationId}
         FOR UPDATE
     </select>
+
+    <delete id="deleteSettledReservationsBefore">
+        DELETE FROM organization_ai_budget_reservation
+        WHERE state = 'settled' AND expires_at &lt; #{cutoff}
+        ORDER BY state, expires_at, reservation_id
+        LIMIT 100
+    </delete>
 
     <delete id="deleteReservation">
         DELETE FROM organization_ai_budget_reservation

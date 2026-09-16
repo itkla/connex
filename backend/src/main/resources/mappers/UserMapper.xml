@@ -130,6 +130,13 @@
     FOR SHARE
   </select>
 
+  <select id="findAccountDeletionReservedIds" resultType="int">
+    SELECT id FROM app_user
+    WHERE id IN
+    <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+      AND account_deletion_reservation_until &gt; UTC_TIMESTAMP(6)
+  </select>
+
   <select id="isAccountDeletionReservationOwner" resultType="boolean">
     SELECT COALESCE(
       account_deletion_reservation_owner = #{owner}
@@ -238,7 +245,6 @@
       username = #{username},
       display_name = #{displayName},
       timezone = COALESCE(#{timezone}, timezone),
-      <if test="passwordHash != null">password_hash = #{passwordHash},</if>
     </set>
     WHERE id = #{id}
   </update>

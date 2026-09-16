@@ -128,5 +128,6 @@ export function buildTimeline({
             campaign,
         })),
     ];
-    return entries.sort((a, b) => b.sortAt - a.sortAt);
+    return entries.sort((a, b) => b.sortAt - a.sortAt
+        || (a.kind === "note" && b.kind === "note" ? b.note.id - a.note.id : 0));
 }
