@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Runs mysqlbinlog from a native host binary when no client-tools image is set,
-# otherwise from that image with the backup root mounted at the identical path.
+# otherwise from a digest-pinned image with read-only, offline backup access.
 # shellcheck source=deploy/backup/shims/docker-client-lib.sh
 
 set -euo pipefail
@@ -23,10 +23,7 @@ main() {
         printf 'ts=%s level=error event=config_error reason=binlog_tool_image_unset\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&2
         return 64
     fi
-    CONNEX_BACKUP_DOCKER_IMAGE="$CONNEX_BACKUP_DOCKER_BINLOG_IMAGE"
-    SHIM_DIRECT_ENTRYPOINT=true
-    export CONNEX_BACKUP_DOCKER_IMAGE
-    shim_run mysqlbinlog "$@"
+    shim_run_local_binlog "$@"
 }
 
 main "$@"
