@@ -70,6 +70,7 @@ public class WorkspaceService {
     private final AuditService auditService;
     private final SystemActor systemActor;
     private final SessionSecurityService sessionSecurityService;
+    private final RegistrationVerificationService registrationVerificationService;
 
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int WORKSPACE_NAME_MAX = 128;
@@ -1521,9 +1522,12 @@ public class WorkspaceService {
     }
 
     /**
-     * The user accepts a pending invitation, becoming an active member. The organization's
-     * email-domain ceiling (#316) is re-applied at activation, so a pending row that predates a
-     * later-tightened org policy cannot slip an out-of-policy member into the workspace.
+     * The user accepts a pending invitation, becoming an active member. When the instance runs
+     * registration verification, the account must have proven mailbox ownership first, so a
+     * preregistered address the inviter meant for someone else cannot be activated by whoever
+     * typed it. The organization's email-domain ceiling (#316) is re-applied at activation from the
+     * locked account row, so a pending row that predates a later-tightened org policy — or a since
+     * changed address — cannot slip an out-of-policy member into the workspace.
      */
     @Transactional
     public WorkspaceMembershipDto approveMembership(int workspaceId, int userId) {
@@ -1544,7 +1548,14 @@ public class WorkspaceService {
         if (pending == null) {
             throw pendingMembershipNotFound();
         }
-        if (!orgAllowedDomainService.isJoinAllowed(workspace.getOrgId(), pending.getEmail())) {
+        User user = userMapper.getUserByIdForShare(userId);
+        if (user == null) {
+            throw pendingMembershipNotFound();
+        }
+        if (registrationVerificationService.requiresMailboxProof(user)) {
+            throw new ForbiddenException("Verify your email address before joining this workspace");
+        }
+        if (!orgAllowedDomainService.isJoinAllowed(workspace.getOrgId(), user.getEmail())) {
             throw new ForbiddenException("This organization only allows members from approved email domains");
         }
         if (workspaceMapper.activateMember(workspaceId, userId) == 0) {

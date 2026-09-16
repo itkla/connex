@@ -16,6 +16,13 @@
     )
   </select>
 
+  <select id="findRedeemableByHash" resultType="EmailChangeToken">
+    SELECT id, user_id, new_email, token_hash, expires_at, exchanged_at, consumed_at, requested_ip, created_at
+    FROM email_change_token
+    WHERE token_hash = #{tokenHash}
+      AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP()
+  </select>
+
   <update id="claimExchange">
     UPDATE email_change_token
     SET exchanged_at = COALESCE(exchanged_at, UTC_TIMESTAMP()),

@@ -14,6 +14,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.OrgMemberDto;
 import ooo.klae.connex.backend.dto.OrgMembershipDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.OrgMemberMapper;
@@ -45,6 +46,7 @@ public class OrgMemberService {
     private final UserMapper userMapper;
     private final AuditService auditService;
     private final SessionSecurityService sessionSecurityService;
+    private final RegistrationVerificationService registrationVerificationService;
 
     /** Records a user as the founding owner of a freshly created organization. */
     public void addFoundingOwner(int orgId, int userId) {
@@ -131,9 +133,12 @@ public class OrgMemberService {
 
     /**
      * Adds an org administrator by email, or changes their role if already a member. Owner-gated;
-     * the email must belong to an existing Connex account. Transactional so the delegated
-     * {@link #setMember} — reached by an internal call that bypasses the transactional proxy — still
-     * runs under this boundary, keeping its last-owner row lock and audit write atomic.
+     * the email must belong to an existing Connex account that still holds it. Mailbox proof for a
+     * new grant is enforced by the delegated {@link #setMember}, which every org-membership write
+     * goes through.
+     * Transactional so that delegated call — reached by an internal call that bypasses the
+     * transactional proxy — still runs under this boundary, keeping its last-owner row lock and
+     * audit write atomic.
      */
     @Transactional
     public void setMemberByEmail(int orgId, int actorId, String emailRaw, String roleRaw) {
@@ -143,6 +148,11 @@ public class OrgMemberService {
         User target = userMapper.getUserByEmail(email);
         if (target == null) {
             throw new BadRequestException("No Connex account uses that email address");
+        }
+        lockMembershipUserRoots(actorId, target.getId());
+        User fresh = userMapper.getUserByIdForShare(target.getId());
+        if (fresh == null || !email.equalsIgnoreCase(fresh.getEmail())) {
+            throw new ConflictException("The account's email changed; refresh and try again");
         }
         setMember(orgId, actorId, target.getId(), roleRaw);
     }
@@ -154,6 +164,13 @@ public class OrgMemberService {
      * sorted actor/target users, the organization, and owner rows are locked in
      * that order so role changes serialize with organization mutations, audit
      * attribution, and account deletion.
+     *
+     * <p>This is the single writer of {@code org_member} for both the by-id and by-email
+     * endpoints, so the mailbox-proof check lives here: while the instance runs registration
+     * verification, an account that has not proven its address cannot be <em>granted</em> org-wide
+     * authority, whichever endpoint addressed it. The check is scoped to that grant — an account
+     * that already holds an {@code org_member} row keeps being manageable, so a legacy unverified
+     * member can still be re-roled or removed rather than being frozen at its current authority.
      */
     @Transactional
     public void setMember(int orgId, int actorId, int targetUserId, String roleRaw) {
@@ -164,11 +181,15 @@ public class OrgMemberService {
         if (organizationMapper.lockById(orgId) == null) {
             throw new ForbiddenException("Requires the organization owner role");
         }
-        User target = userMapper.getUserById(targetUserId);
+        User target = userMapper.getUserByIdForShare(targetUserId);
         if (target == null) {
             throw new ResourceNotFoundException("User not found: " + targetUserId);
         }
         List<Integer> ownerIds = lockCurrentOwnerIds(orgId, actorId);
+        if (orgMemberMapper.getRoleForUpdate(orgId, targetUserId) == null
+                && registrationVerificationService.requiresMailboxProof(target)) {
+            throw new BadRequestException("The account must verify its email before joining the organization");
+        }
         if (role != OrgRole.OWNER && isSoleOwner(ownerIds, targetUserId)) {
             throw new BadRequestException("An organization must keep at least one owner");
         }

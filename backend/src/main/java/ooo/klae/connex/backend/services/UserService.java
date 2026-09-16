@@ -143,7 +143,6 @@ public class UserService implements UserDetailsService {
         workspaceService.requireSelf(id);
         User before = getUserById(id);
         user.setId(id);
-        user.setEmail(before.getEmail());
         if (user.getTimezone() == null || user.getTimezone().isBlank()) {
             user.setTimezone(before.getTimezone());
         } else {

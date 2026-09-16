@@ -411,4 +411,20 @@
       AND w.lifecycle_state = 'active' AND o.lifecycle_state = 'active'
     ORDER BY w.name, w.id
   </select>
+
+  <!-- Deliberately unfiltered by lifecycle_state: a verified email change must revoke every grant
+       addressed to the old address, including ones parked in a suspended or tearing-down tenant.
+       Ordered so the caller acquires the workspace roots in the contract's ascending id order. -->
+  <select id="findPendingGrants" resultType="ooo.klae.connex.backend.dto.RevokedInvitationDto">
+    SELECT wm.workspace_id AS workspaceId, w.org_id AS orgId, w.name AS workspaceName
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id
+    WHERE wm.user_id = #{userId} AND wm.status = 'pending'
+    ORDER BY wm.workspace_id
+  </select>
+
+  <delete id="removePendingMember">
+    DELETE FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND status = 'pending'
+  </delete>
 </mapper>
