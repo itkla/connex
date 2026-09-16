@@ -35,10 +35,12 @@ type FormState = {
     auth: boolean;
 };
 
+const FALLBACK_PORT = 587;
+
 const EMPTY: FormState = {
     enabled: false,
     host: "",
-    port: "587",
+    port: String(FALLBACK_PORT),
     username: "",
     password: "",
     fromAddress: "",
@@ -48,11 +50,17 @@ const EMPTY: FormState = {
     auth: true,
 };
 
+/**
+ * Maps the saved config onto the form. A stored `null` port inherits the instance default, which the
+ * server reports as `defaultPort`; resubmitting a hardcoded literal instead would read as an
+ * endpoint change on an instance configured for another port and would reject an otherwise
+ * unrelated blank-password edit.
+ */
 function toForm(config: MailConfig): FormState {
     return {
         enabled: config.enabled,
         host: config.host ?? "",
-        port: config.port != null ? String(config.port) : "587",
+        port: String(config.port ?? config.defaultPort),
         username: config.username ?? "",
         password: "",
         fromAddress: config.fromAddress ?? "",
@@ -85,6 +93,7 @@ export default function EmailPanel({
     const { activeWorkspaceId } = useWorkspace();
 
     const [form, setForm] = useState<FormState>(EMPTY);
+    const [defaultPort, setDefaultPort] = useState(FALLBACK_PORT);
     const [hasPassword, setHasPassword] = useState(false);
     const [configured, setConfigured] = useState(false);
     const [savedEnabled, setSavedEnabled] = useState(false);
@@ -104,6 +113,7 @@ export default function EmailPanel({
                 const config = await getWorkspaceMailConfig(activeWorkspaceId);
                 if (cancelled) return;
                 setForm(toForm(config));
+                setDefaultPort(config.defaultPort);
                 setHasPassword(config.hasPassword);
                 setConfigured(config.configured);
                 setSavedEnabled(config.enabled);
@@ -183,7 +193,7 @@ export default function EmailPanel({
         setSaving(true);
         try {
             await deleteWorkspaceMailConfig(activeWorkspaceId);
-            setForm(EMPTY);
+            setForm({ ...EMPTY, port: String(defaultPort) });
             setHasPassword(false);
             setConfigured(false);
             setSavedEnabled(false);
@@ -256,7 +266,7 @@ export default function EmailPanel({
                                         id="mail-port"
                                         inputMode="numeric"
                                         value={form.port}
-                                        placeholder="587"
+                                        placeholder={String(defaultPort)}
                                         onChange={(e) => set("port", e.target.value)}
                                     />
                                 </div>

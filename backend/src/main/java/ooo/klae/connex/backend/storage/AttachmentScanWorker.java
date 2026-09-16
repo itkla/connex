@@ -102,12 +102,15 @@ public class AttachmentScanWorker {
             return false;
         }
         try {
-            String key = managedObjects.managedAttachmentKey(workspaceId, claimed.getUrl())
-                .orElseThrow(() -> new IllegalStateException("Invalid attachment object reference"));
+            var key = managedObjects.managedAttachmentKey(workspaceId, claimed.getUrl());
+            if (key.isEmpty()) {
+                transactions.refuse(claimed);
+                return false;
+            }
             byte[] bytes;
             int maximum = Math.toIntExact(properties.getMaxScanBytes());
             try (StoredObject object = readAdmission.admit(actorId, Duration.ofSeconds(30),
-                    () -> storage.get(key))) {
+                    () -> storage.get(key.get()))) {
                 if (object.contentLength() > maximum) {
                     throw new IOException("Stored attachment exceeds scan limit");
                 }
