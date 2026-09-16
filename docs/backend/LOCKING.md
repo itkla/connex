@@ -306,6 +306,36 @@ catalog may be synthesized only while the workspace mutex is held. First-edit ma
 the same mutex, so it cannot commit between a lifecycle miss and the row-less check. Persist the code
 returned by the locked resolution, never a separately compared caller value.
 
+## SMTP configuration
+
+A workspace's own SMTP transport (`workspace_mail_config`) has two sides with deliberately different
+lock sets.
+
+Mutations — `WorkspaceMailConfigService.saveConfig` and `deleteConfig` — take the standard settings
+order and re-assert `WORKSPACE_SETTINGS` after locking:
+
+1. Lock the actor's `app_user` root and check its account-deletion reservation.
+2. Lock the active workspace root exclusively (the workspace mutation mutex).
+3. Lock and revalidate membership, custom role, and the required permission.
+4. Re-read the exact `workspace_mail_config` row `FOR UPDATE`; the pre-lock read is preliminary only.
+5. Write the config and its secret in that same transaction.
+
+The credential is bound to its destination: a blank submitted password may reuse the stored one only
+when host, effective port, username, and the STARTTLS/SSL/AUTH transport-security settings are all
+unchanged. Any other change requires re-entry, so a settings delegate cannot redirect a stored
+password to a new endpoint. Port comparison uses the resolved effective port, so a client that echoes
+the instance default for a stored `NULL` port is not treated as an endpoint change.
+
+Resolution — `MailConfigResolver.resolveForWorkspace` and `resolveWorkspaceOnly` — locks the
+authenticated actor's `app_user` root `FOR SHARE` when a `User` principal is present, then the workspace
+root `FOR SHARE`. It holds these roots across the configuration and secret reads so the endpoint and
+password come from one generation. `SecretStore.get` reacquires those same roots in that order;
+acquiring the actor root first avoids an inversion with a queued exclusive user lock. Background
+resolution without an actor takes only the workspace root. Callers already holding roots must follow
+the same actor-before-workspace order. Resolution performs no provider I/O; the SMTP connection is
+made after the resolving transaction. A missing actor row or workspace root resolves to `null` — "sending
+disabled" — so fire-and-forget senders keep their contract instead of seeing an exception escape.
+
 ## Campaign mutations
 
 Campaign update, live-audience replacement, snapshot creation, and send creation acquire current
