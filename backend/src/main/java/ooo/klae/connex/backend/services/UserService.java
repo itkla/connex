@@ -13,6 +13,7 @@ import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Note;
+import ooo.klae.connex.backend.util.NotePageCursor;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -295,9 +296,26 @@ public class UserService implements UserDetailsService {
      * @return
      */
     public List<Note> getNotesByUserId(int userId) {
+        return getNotesByUserId(userId, 25, 0);
+    }
+
+    /** Returns a bounded page of visible authored notes with redacted previews. */
+    public List<Note> getNotesByUserId(int userId, int limit, int offset) {
+        return getNotesByUserId(userId, limit, offset, null);
+    }
+
+    public List<Note> getNotesByUserId(int userId, int limit, int offset, NotePageCursor before) {
         getUserById(userId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        return referenceService.hydrate(workspaceId, noteMapper.getVisibleNotesByAuthorId(workspaceId, userId, workspaceService.getCurrentUserId()));
+        return referenceService.hydrateNotePreviews(workspaceId, noteMapper.getVisibleNotesByAuthorId(
+            workspaceId, userId, workspaceService.getCurrentUserId(), limit, before == null ? offset : 0, before));
+    }
+
+    /** Counts all authored notes visible to the current workspace member. */
+    public long countNotesByUserId(int userId) {
+        getUserById(userId);
+        return noteMapper.countVisibleNotesByAuthorId(workspaceService.getCurrentWorkspaceId(),
+            userId, workspaceService.getCurrentUserId());
     }
 
     public User updateCurrentProfilePicture(int userId, UploadSource source) {

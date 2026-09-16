@@ -36,6 +36,12 @@ public interface PersonMapper {
             @Param("workspaceId") int workspaceId,
             @Param("reference") LocalDateTime reference,
             @Param("model") SqlParameters model);
+    /** Returns full-corpus aggregates scoped to the requested visible records. */
+    List<RelationshipScoreAggregateDto> getRelationshipScoreAggregatesByIds(
+            @Param("workspaceId") int workspaceId,
+            @Param("reference") LocalDateTime reference,
+            @Param("model") SqlParameters model,
+            @Param("ids") List<Integer> ids);
     List<RelationshipScoreAggregateDto> getRelationshipScoreAggregatesExcludingHistoryImports(
             @Param("workspaceId") int workspaceId,
             @Param("reference") LocalDateTime reference,
@@ -73,7 +79,10 @@ public interface PersonMapper {
             @Param("id") int id,
             @Param("memberScope") MemberScope memberScope);
     Person getVisiblePersonByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    Person getVisiblePersonByIdForShare(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Person getOwnedPersonByIdForUpdate(@Param("workspaceId") int workspaceId, @Param("id") int id);
+    /** Locks an owned, unarchived contact for linked writes that do not mutate the contact. */
+    Person getOwnedPersonByIdForShare(@Param("workspaceId") int workspaceId, @Param("id") int id);
     /** The owned contact only when it is archived; the restore path's pre-image read. */
     Person getOwnedArchivedPersonById(@Param("workspaceId") int workspaceId, @Param("id") int id);
     List<Integer> getProcessablePersonIds(@Param("workspaceId") int workspaceId,

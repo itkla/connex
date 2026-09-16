@@ -310,6 +310,41 @@
     ORDER BY p.id
   </select>
 
+  <select id="getRelationshipScoreAggregatesByIds"
+          resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
+    SELECT p.id,
+           COALESCE(SUM(touch.weight
+             * POW(#{model.decayBase}, -touch.age_days / #{model.halfLifeDays})), 0.0) AS raw_weight,
+           COALESCE(SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                             THEN touch.weight ELSE 0.0 END), 0.0)
+             AS recent_weight,
+           COALESCE(SUM(CASE WHEN touch.age_days &gt; #{model.recentWindowDays}
+                               AND touch.age_days &lt;= #{model.priorWindowDays}
+                             THEN touch.weight ELSE 0.0 END), 0.0) AS prior_weight,
+           DATE_FORMAT(MAX(touch.touched_at), '%Y-%m-%d %H:%i:%s') AS last_touch_at,
+           SUM(CASE WHEN touch.age_days &lt;= #{model.recentWindowDays}
+                    THEN 1 ELSE 0 END) AS recent_touch_count
+    FROM person p
+    LEFT JOIN (
+      SELECT source.entity_id, source.touched_at, source.weight,
+             GREATEST(0.0,
+               TIMESTAMPDIFF(MICROSECOND, source.touched_at, #{reference})
+                 / #{model.microsecondsPerDay}) AS age_days
+      FROM (
+        <include refid="relationshipTouchSources"/>
+      ) source
+      WHERE source.touched_at IS NOT NULL AND source.touched_at &lt;= #{reference}
+        AND source.entity_id IN
+        <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+    ) touch ON touch.entity_id = p.id
+    WHERE <include refid="visible"/>
+      AND p.suspended_at IS NULL
+      AND p.id IN
+      <foreach item="id" collection="ids" open="(" separator="," close=")">#{id}</foreach>
+    GROUP BY p.id
+    ORDER BY p.id
+  </select>
+
   <select id="getRelationshipScoreAggregatesExcludingHistoryImports"
           resultType="ooo.klae.connex.backend.dto.RelationshipScoreAggregateDto">
     SELECT p.id,
@@ -499,11 +534,26 @@
     FOR UPDATE
   </select>
 
+  <select id="getVisiblePersonByIdForShare" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/>, p.company_id
+    FROM person p
+    WHERE <include refid="visible"/> AND p.id = #{id}
+    FOR SHARE
+  </select>
+
   <select id="getOwnedPersonByIdForUpdate" resultMap="PersonResult">
     SELECT <include refid="personColumns"/>, p.company_id
     FROM person p
     WHERE p.workspace_id = #{workspaceId} AND p.id = #{id}
     FOR UPDATE
+  </select>
+
+  <select id="getOwnedPersonByIdForShare" resultMap="PersonResult">
+    SELECT <include refid="personColumns"/>, p.company_id
+    FROM person p
+    WHERE p.workspace_id = #{workspaceId} AND p.id = #{id}
+      AND p.archived_at IS NULL
+    FOR SHARE
   </select>
 
   <select id="getOwnedArchivedPersonById" resultMap="PersonResult">

@@ -558,5 +558,11 @@
   "LibraryTagsLayout": {
     "title": "ライブラリ / タグ",
     "description": "タグでレコードを整理"
+  },
+  "NotePagination": {
+    "loadMore": "メモをさらに読み込む",
+    "loading": "メモを読み込み中…",
+    "retry": "再試行",
+    "failed": "メモを読み込めませんでした。もう一度お試しください。"
   }
 }

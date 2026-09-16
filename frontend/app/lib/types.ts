@@ -7,6 +7,10 @@ export type Page<T> = {
     total: number;
 };
 
+/** The last update timestamp and id returned by a timeline note page. */
+export type NotePageCursor = { beforeAt: string; beforeId: number };
+export type NotePageParams = PageParams & Partial<NotePageCursor>;
+
 export type PageParams = {
     page?: number;
     size?: number;

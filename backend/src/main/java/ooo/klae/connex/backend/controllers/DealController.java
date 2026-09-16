@@ -69,6 +69,7 @@ import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.Window;
 import ooo.klae.connex.backend.util.DealFilterNormalizer;
 import ooo.klae.connex.backend.util.LikePattern;
+import ooo.klae.connex.backend.util.NotePageCursor;
 import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
 
@@ -811,8 +812,15 @@ public class DealController {
      * @return
      */
     @GetMapping("/{id}/notes")
-    public List<NoteDto> getNotesForDeal(@PathVariable int id) {
-        return dealService.getNotesByDealId(id).stream().map(NoteDto::from).toList();
+    public List<NoteDto> getNotesForDeal(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String beforeAt,
+            @RequestParam(required = false) Integer beforeId) {
+        PageBounds bounds = PageBounds.of(page, size);
+        return dealService.getNotesByDealId(id, bounds.size(), bounds.offset(), NotePageCursor.parse(beforeAt, beforeId))
+            .stream().map(NoteDto::from).toList();
     }
 
     /**

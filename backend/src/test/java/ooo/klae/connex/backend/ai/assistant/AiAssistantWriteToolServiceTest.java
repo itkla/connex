@@ -605,14 +605,19 @@ class AiAssistantWriteToolServiceTest {
         storedToolCall.setCreatedAt("2026-03-05 12:00:00.000000");
         Person edited = person(31);
         edited.setUpdatedAt("2026-03-05 12:00:30.000000");
-        when(personService.lockProcessablePersonForUpdate(31)).thenReturn(edited);
+        when(personService.lockProcessablePersonForShare(31)).thenReturn(edited);
         when(personService.getPersonById(31)).thenReturn(edited);
 
         assertEquals(
                 "executed",
                 service.executeAuto(TURN, 29, result -> { }).toolResult().data().get("status"));
 
-        verify(taskService).create(any(Task.class));
+        InOrder order = inOrder(taskService, personService, restrictionEpoch);
+        order.verify(taskService).lockBoardForCreation();
+        order.verify(personService).lockProcessablePersonForShare(31);
+        order.verify(restrictionEpoch).retainReadFenceUntilTransactionCompletionIfCurrent(
+                TURN.workspaceId(), TURN.restrictionEpoch());
+        order.verify(taskService).create(any(Task.class));
     }
 
     @Test

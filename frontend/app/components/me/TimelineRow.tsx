@@ -8,13 +8,13 @@ import { useLocale, useTranslations } from 'next-intl';
 import { toastSuccess } from '@/app/lib/toast';
 import { CheckIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, UserIcon } from '@heroicons/react/24/outline';
 
-import { type Contact, type ContactLifecycleStage, type Deal, type UserReference } from '@/app/lib/types';
+import { type Contact, type ContactLifecycleStage, type Deal, type Note, type UserReference } from '@/app/lib/types';
 import { formatShortDate } from '@/app/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { IconButton } from '@/components/ui/icon-button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { deleteActivity, deleteNote, deleteTask } from '@/app/lib/api';
+import { deleteActivity, deleteNote, deleteTask, getNoteById } from '@/app/lib/api';
 import { ACTIVITY_URL_KEY, COMMENT_URL_KEY, NOTE_URL_KEY, TASK_URL_KEY } from '@/app/hooks/listStateUrl';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { type TimelineEntry } from '@/app/components/me/timelineEntries';
@@ -141,6 +141,9 @@ export default function TimelineRow({
     const router = useRouter();
     const pathname = usePathname();
     const [editOpen, setEditOpen] = useState(false);
+    const [editingNote, setEditingNote] = useState<Note | null>(null);
+    const [loadingNote, setLoadingNote] = useState(false);
+    const noteRequest = useRef<AbortController | null>(null);
     const rowRef = useRef<HTMLLIElement>(null);
     const searchParams = useSearchParams();
     const reduceMotion = useReducedMotion();
@@ -165,6 +168,32 @@ export default function TimelineRow({
             rowRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
         }
     }, [isHighlighted, reduceMotion]);
+
+    useEffect(() => () => noteRequest.current?.abort(), []);
+
+    const handleEdit = async () => {
+        if (entry.kind !== 'note') {
+            setEditOpen(true);
+            return;
+        }
+        if (noteRequest.current) return;
+        const controller = new AbortController();
+        noteRequest.current = controller;
+        setLoadingNote(true);
+        try {
+            const fullNote = await getNoteById(entry.note.id, { signal: controller.signal });
+            if (controller.signal.aborted) return;
+            setEditingNote(fullNote);
+            setEditOpen(true);
+        } catch (error) {
+            if (!controller.signal.aborted) showApiError(error);
+        } finally {
+            if (!controller.signal.aborted) {
+                noteRequest.current = null;
+                setLoadingNote(false);
+            }
+        }
+    };
 
     const handleDelete = async () => {
         try {
@@ -357,12 +386,12 @@ export default function TimelineRow({
             {!readOnlyEntry && (entry.kind !== 'activity' || !isProviderOwnedActivity(entry.activity)) ? (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <IconButton variant="ghost" size="icon-inline" label={t('actionsAria')}>
+                        <IconButton variant="ghost" size="icon-inline" label={t('actionsAria')} aria-busy={loadingNote}>
                             <EllipsisVerticalIcon className="text-muted-foreground" />
                         </IconButton>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setEditOpen(true)}>
+                        <DropdownMenuItem disabled={loadingNote} onClick={handleEdit}>
                             <PencilIcon className="size-4 text-muted-foreground" />
                             {t('edit')}
                         </DropdownMenuItem>
@@ -396,10 +425,10 @@ export default function TimelineRow({
                     originWorkspaceId={originWorkspaceId}
                 />
             )}
-            {entry.kind === 'note' && currentUserId != null && (
+            {entry.kind === 'note' && editingNote !== null && currentUserId != null && (
                 <NoteDialog
                     key={entry.note.id}
-                    note={entry.note}
+                    note={editingNote}
                     open={editOpen}
                     onOpenChange={setEditOpen}
                     persons={personSearch.contacts}

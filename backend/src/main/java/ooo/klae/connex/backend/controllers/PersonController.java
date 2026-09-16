@@ -20,6 +20,7 @@ import ooo.klae.connex.backend.beans.PersonFirstResponseState;
 import ooo.klae.connex.backend.beans.PersonLeadSource;
 import ooo.klae.connex.backend.beans.PersonLifecycleStage;
 import ooo.klae.connex.backend.util.LikePattern;
+import ooo.klae.connex.backend.util.NotePageCursor;
 import ooo.klae.connex.backend.util.PageBounds;
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -545,8 +546,15 @@ public class PersonController {
      * @return
      */
     @GetMapping("/{id}/notes")
-    public List<NoteDto> getNotesForPerson(@PathVariable int id) {
-        return personService.getNotesByPersonId(id).stream().map(NoteDto::from).toList();
+    public List<NoteDto> getNotesForPerson(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String beforeAt,
+            @RequestParam(required = false) Integer beforeId) {
+        PageBounds bounds = PageBounds.of(page, size);
+        return personService.getNotesByPersonId(id, bounds.size(), bounds.offset(), NotePageCursor.parse(beforeAt, beforeId))
+            .stream().map(NoteDto::from).toList();
     }
 
     /**

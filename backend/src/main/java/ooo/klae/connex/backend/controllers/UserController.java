@@ -18,6 +18,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import ooo.klae.connex.backend.dto.ActivityDto;
 import ooo.klae.connex.backend.dto.NoteDto;
+import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.dto.TaskDto;
 import ooo.klae.connex.backend.dto.UpdateLocaleDto;
@@ -31,6 +32,7 @@ import ooo.klae.connex.backend.services.UserService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.util.NotePageCursor;
 import ooo.klae.connex.backend.util.PageBounds;
 
 import java.util.LinkedHashSet;
@@ -151,8 +153,27 @@ public class UserController {
      * @return
      */
     @GetMapping("/{id}/notes")
-    public List<NoteDto> getNotesForUser(@PathVariable int id) {
-        return userService.getNotesByUserId(id).stream().map(NoteDto::from).toList();
+    public List<NoteDto> getNotesForUser(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String beforeAt,
+            @RequestParam(required = false) Integer beforeId) {
+        PageBounds bounds = PageBounds.of(page, size);
+        return userService.getNotesByUserId(id, bounds.size(), bounds.offset(), NotePageCursor.parse(beforeAt, beforeId))
+            .stream().map(NoteDto::from).toList();
+    }
+
+    /** Returns bounded authored-note previews and the complete visible total. */
+    @GetMapping("/{id}/notes/page")
+    public PageResponse<NoteDto> getNotesPageForUser(
+            @PathVariable int id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "25") int size) {
+        PageBounds bounds = PageBounds.of(page, size);
+        List<NoteDto> items = userService.getNotesByUserId(id, bounds.size(), bounds.offset())
+            .stream().map(NoteDto::from).toList();
+        return new PageResponse<>(items, userService.countNotesByUserId(id));
     }
 
     /**

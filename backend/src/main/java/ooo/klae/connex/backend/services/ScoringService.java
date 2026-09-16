@@ -26,7 +26,6 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.Activity;
-import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
@@ -123,7 +122,8 @@ public class ScoringService {
      */
     public List<RelationshipTemperatureDto> scoreContacts(int workspaceId) {
         Instant reference = scoringInstant(Instant.now(clock));
-        return computeContactScores(workspaceId, reference, reference);
+        return temperatures(personMapper.getRelationshipScoreAggregates(
+            workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
     }
 
     /** Scores all contacts and companies from compact aggregates computed by the database. */
@@ -156,7 +156,8 @@ public class ScoringService {
      */
     public List<RelationshipTemperatureDto> scoreContacts(int workspaceId, Instant asOf) {
         Instant reference = scoringInstant(asOf);
-        return computeContactScores(workspaceId, reference, reference);
+        return temperatures(personMapper.getRelationshipScoreAggregates(
+            workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
     }
 
     List<RelationshipTemperatureDto> scoreContactsExcludingHistoryImports(
@@ -202,7 +203,7 @@ public class ScoringService {
                         Double.toString(activityWeight(activity.getType()))));
             }
         }
-        for (Note note : noteMapper.getAllNotes(workspaceId)) {
+        for (Note note : workspaceNoteMetadata(workspaceId)) {
             Integer personId = personId(note.getPerson());
             if (personId != null
                     && !excludedNoteIds.contains(note.getId())
@@ -255,7 +256,7 @@ public class ScoringService {
                     touches);
             }
         }
-        for (Note note : noteMapper.getAllNotes(workspaceId)) {
+        for (Note note : workspaceNoteMetadata(workspaceId)) {
             if (isSharedNote(note) && epoch(note.getCreatedAt()) != null) {
                 addCompanySourceTouch(
                     note.getPerson(),
@@ -288,6 +289,18 @@ public class ScoringService {
             }
         }
         return sourceStateHashes(touches);
+    }
+
+    /** Reads timestamp/linkage metadata in fixed SQL pages for replay and change fingerprints. */
+    private List<Note> workspaceNoteMetadata(int workspaceId) {
+        List<Note> notes = new ArrayList<>();
+        int afterId = 0;
+        while (true) {
+            List<Note> page = noteMapper.getWorkspaceNoteMetadataPage(workspaceId, afterId, 100);
+            notes.addAll(page);
+            if (page.size() < 100) return notes;
+            afterId = page.getLast().getId();
+        }
     }
 
     static String emptyContactSourceStateHash() {
@@ -412,78 +425,13 @@ public class ScoringService {
             return List.of();
         }
         Instant reference = scoringInstant(Instant.now(clock));
-        Set<Integer> existing = new HashSet<>(personMapper.getProcessablePersonIds(workspaceId, requested));
-        List<Integer> processable = requested.stream().filter(existing::contains).toList();
-        if (processable.isEmpty()) {
-            return List.of();
+        Map<Integer, RelationshipTemperatureDto> scores = new HashMap<>();
+        for (RelationshipTemperatureDto score : temperatures(personMapper.getRelationshipScoreAggregatesByIds(
+                workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC),
+                WARMTH_MODEL.sqlParameters(), requested), reference)) {
+            scores.put(score.getId(), score);
         }
-        Map<Integer, List<Touch>> touches = new HashMap<>();
-        for (Activity activity : activityMapper.getActivitiesByPersonIds(workspaceId, processable)) {
-            Integer personId = personId(activity.getPerson());
-            Long timestamp = epoch(activity.getTimestamp());
-            if (personId != null && timestamp != null) {
-                add(touches, personId, new Touch(timestamp, activityWeight(activity.getType())));
-            }
-        }
-        for (Note note : noteMapper.getNotesByPersonIds(workspaceId, processable)) {
-            if (!isSharedNote(note)) continue;
-            Integer personId = personId(note.getPerson());
-            Long timestamp = epoch(note.getCreatedAt());
-            if (personId != null && timestamp != null) {
-                add(touches, personId, new Touch(timestamp, WARMTH_MODEL.noteWeight()));
-            }
-        }
-        for (Task task : taskMapper.getTasksByPersonIds(workspaceId, processable)) {
-            Integer personId = personId(task.getPerson());
-            Long timestamp = epoch(task.getCreatedAt());
-            if (personId != null && timestamp != null) {
-                add(touches, personId, new Touch(timestamp, WARMTH_MODEL.taskWeight()));
-            }
-        }
-        List<RelationshipTemperatureDto> out = new ArrayList<>(existing.size());
-        for (Integer personId : processable) {
-            out.add(temperature(personId, touches.getOrDefault(personId, List.of()), reference, reference));
-        }
-        return out;
-    }
-
-    private List<RelationshipTemperatureDto> computeContactScores(
-            int workspaceId, Instant reference, Instant cutoff) {
-        List<Person> persons = personMapper.getProcessablePersons(workspaceId);
-        Map<Integer, List<Touch>> byPerson = collectContactTouches(workspaceId, personIds(persons));
-        List<RelationshipTemperatureDto> out = new ArrayList<>(persons.size());
-        for (Person p : persons) {
-            out.add(temperature(p.getId(), byPerson.getOrDefault(p.getId(), List.of()), reference, cutoff));
-        }
-        return out;
-    }
-
-    /** Buckets every contact-linked touch (activities, notes, tasks) by contact id. */
-    private Map<Integer, List<Touch>> collectContactTouches(int workspaceId, Set<Integer> processablePersonIds) {
-        Map<Integer, List<Touch>> byPerson = new HashMap<>();
-        for (Activity a : activityMapper.getAllActivities(workspaceId)) {
-            Integer pid = personId(a.getPerson());
-            Long ts = epoch(a.getTimestamp());
-            if (pid != null && processablePersonIds.contains(pid) && ts != null) {
-                add(byPerson, pid, new Touch(ts, activityWeight(a.getType())));
-            }
-        }
-        for (Note n : noteMapper.getAllNotes(workspaceId)) {
-            if (!isSharedNote(n)) continue;
-            Integer pid = personId(n.getPerson());
-            Long ts = epoch(n.getCreatedAt());
-            if (pid != null && processablePersonIds.contains(pid) && ts != null) {
-                add(byPerson, pid, new Touch(ts, WARMTH_MODEL.noteWeight()));
-            }
-        }
-        for (Task t : taskMapper.getAllTasks(workspaceId)) {
-            Integer pid = personId(t.getPerson());
-            Long ts = epoch(t.getCreatedAt());
-            if (pid != null && processablePersonIds.contains(pid) && ts != null) {
-                add(byPerson, pid, new Touch(ts, WARMTH_MODEL.taskWeight()));
-            }
-        }
-        return byPerson;
+        return requested.stream().map(scores::get).filter(java.util.Objects::nonNull).toList();
     }
 
     /**
@@ -493,7 +441,8 @@ public class ScoringService {
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId) {
         Instant reference = scoringInstant(Instant.now(clock));
-        return computeCompanyScores(workspaceId, reference, reference);
+        return temperatures(companyMapper.getRelationshipScoreAggregates(
+            workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
     }
 
     /**
@@ -526,68 +475,13 @@ public class ScoringService {
         }
         if (requested.isEmpty()) return List.of();
         Instant reference = scoringInstant(Instant.now(clock));
-        List<Company> companies = companyMapper.getByIds(workspaceId, requested);
-        if (companies.isEmpty()) return List.of();
-        List<Integer> visibleIds = companies.stream().map(Company::getId).toList();
-        List<Person> persons = personMapper.getPersonsByCompanyIds(workspaceId, visibleIds);
-        List<Deal> deals = dealMapper.getDealsByCompanyIds(workspaceId, visibleIds);
-        List<Activity> activities = companyActivities(workspaceId, persons, visibleIds);
-        List<Note> notes = noteMapper.getWorkspaceNotesByCompanyIds(workspaceId, visibleIds).stream()
-            .filter(ScoringService::isSharedNote)
-            .toList();
-        List<Task> tasks = companyTasks(workspaceId, persons, visibleIds);
-        Map<Integer, Integer> personCompany = personCompanyMap(persons);
-        Map<Integer, Integer> dealCompany = dealCompanyMap(deals);
-        Map<Integer, List<Touch>> byCompany = new HashMap<>();
-        collectCompanyTouches(
-            activities,
-            notes,
-            tasks,
-            personCompany,
-            processablePersonIds(workspaceId, activities, notes, tasks),
-            dealCompany,
-            byCompany);
         Map<Integer, RelationshipTemperatureDto> scores = new HashMap<>();
-        for (Company company : companies) {
-            scores.put(company.getId(), temperature(
-                company.getId(), byCompany.getOrDefault(company.getId(), List.of()),
-                reference, reference));
+        for (RelationshipTemperatureDto score : temperatures(companyMapper.getRelationshipScoreAggregatesByIds(
+                workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC),
+                WARMTH_MODEL.sqlParameters(), requested), reference)) {
+            scores.put(score.getId(), score);
         }
         return requested.stream().map(scores::get).filter(java.util.Objects::nonNull).toList();
-    }
-
-    private List<Task> companyTasks(
-            int workspaceId, List<Person> persons, List<Integer> companyIds) {
-        Map<Integer, Task> tasks = new LinkedHashMap<>();
-        List<Integer> authorizedPersonIds = persons.stream().map(Person::getId).distinct().toList();
-        for (int from = 0; from < authorizedPersonIds.size(); from += MAX_BATCH_CONTACTS) {
-            int to = Math.min(authorizedPersonIds.size(), from + MAX_BATCH_CONTACTS);
-            for (Task task : taskMapper.getTasksByPersonCompanyIds(
-                    workspaceId, authorizedPersonIds.subList(from, to), companyIds)) {
-                tasks.putIfAbsent(task.getId(), task);
-            }
-        }
-        for (Task task : taskMapper.getTasksByDealCompanyIds(workspaceId, companyIds)) {
-            tasks.putIfAbsent(task.getId(), task);
-        }
-        return List.copyOf(tasks.values());
-    }
-
-    private List<Activity> companyActivities(
-            int workspaceId, List<Person> persons, List<Integer> companyIds) {
-        Map<Integer, Activity> activities = new LinkedHashMap<>();
-        List<Integer> authorizedPersonIds = persons.stream().map(Person::getId).distinct().toList();
-        for (int from = 0; from < authorizedPersonIds.size(); from += MAX_BATCH_CONTACTS) {
-            int to = Math.min(authorizedPersonIds.size(), from + MAX_BATCH_CONTACTS);
-            for (Activity activity : activityMapper.getActivitiesByPersonIds(
-                    workspaceId, authorizedPersonIds.subList(from, to))) {
-                activities.putIfAbsent(activity.getId(), activity);
-            }
-        }
-        for (Activity activity : activityMapper.getActivitiesByDealCompanyIds(workspaceId, companyIds)) {
-            activities.putIfAbsent(activity.getId(), activity);
-        }
-        return List.copyOf(activities.values());
     }
 
     /**
@@ -617,7 +511,8 @@ public class ScoringService {
      */
     public List<RelationshipTemperatureDto> scoreCompanies(int workspaceId, Instant asOf) {
         Instant reference = scoringInstant(asOf);
-        return computeCompanyScores(workspaceId, reference, reference);
+        return temperatures(companyMapper.getRelationshipScoreAggregates(
+            workspaceId, LocalDateTime.ofInstant(reference, ZoneOffset.UTC), WARMTH_MODEL.sqlParameters()), reference);
     }
 
     /**
@@ -716,66 +611,6 @@ public class ScoringService {
         return days != null && days >= minimum && days <= maximum;
     }
 
-    private List<RelationshipTemperatureDto> computeCompanyScores(
-            int workspaceId, Instant reference, Instant cutoff) {
-        Map<Integer, List<Touch>> byCompany = collectCompanyTouches(workspaceId);
-        List<Company> companies = companyMapper.getAllCompanies(workspaceId);
-        List<RelationshipTemperatureDto> out = new ArrayList<>(companies.size());
-        for (Company c : companies) {
-            out.add(temperature(c.getId(), byCompany.getOrDefault(c.getId(), List.of()), reference, cutoff));
-        }
-        return out;
-    }
-
-    /** Buckets every touch by the company of its linked contact and/or deal (present-day parentage). */
-    private Map<Integer, List<Touch>> collectCompanyTouches(int workspaceId) {
-        List<Person> persons = personMapper.getProcessablePersons(workspaceId);
-        Map<Integer, Integer> personCompany = personCompanyMap(persons);
-        Map<Integer, Integer> dealCompany = dealCompanyMap(dealMapper.getAllDeals(workspaceId));
-        Map<Integer, List<Touch>> byCompany = new HashMap<>();
-        collectCompanyTouches(
-            activityMapper.getAllActivities(workspaceId),
-            noteMapper.getAllNotes(workspaceId).stream().filter(ScoringService::isSharedNote).toList(),
-            taskMapper.getAllTasks(workspaceId),
-            personCompany,
-            personIds(persons),
-            dealCompany,
-            byCompany);
-        return byCompany;
-    }
-
-    private void collectCompanyTouches(
-            List<Activity> activities,
-            List<Note> notes,
-            List<Task> tasks,
-            Map<Integer, Integer> personCompany,
-            Set<Integer> processablePersonIds,
-            Map<Integer, Integer> dealCompany,
-            Map<Integer, List<Touch>> byCompany) {
-        for (Activity activity : activities) {
-            Long timestamp = epoch(activity.getTimestamp());
-            if (timestamp != null) {
-                attribute(activity.getPerson(), activity.getDeal(),
-                    new Touch(timestamp, activityWeight(activity.getType())),
-                    personCompany, processablePersonIds, dealCompany, byCompany);
-            }
-        }
-        for (Note note : notes) {
-            Long timestamp = epoch(note.getCreatedAt());
-            if (timestamp != null) {
-                attribute(note.getPerson(), note.getDeal(), new Touch(timestamp, WARMTH_MODEL.noteWeight()),
-                    personCompany, processablePersonIds, dealCompany, byCompany);
-            }
-        }
-        for (Task task : tasks) {
-            Long timestamp = epoch(task.getCreatedAt());
-            if (timestamp != null) {
-                attribute(task.getPerson(), task.getDeal(), new Touch(timestamp, WARMTH_MODEL.taskWeight()),
-                    personCompany, processablePersonIds, dealCompany, byCompany);
-            }
-        }
-    }
-
     private static Map<Integer, Integer> personCompanyMap(List<Person> persons) {
         Map<Integer, Integer> result = new HashMap<>();
         for (Person person : persons) {
@@ -787,25 +622,6 @@ public class ScoringService {
 
     private static Set<Integer> personIds(List<Person> persons) {
         return persons.stream().map(Person::getId).collect(java.util.stream.Collectors.toUnmodifiableSet());
-    }
-
-    private Set<Integer> processablePersonIds(
-            int workspaceId, List<Activity> activities, List<Note> notes, List<Task> tasks) {
-        Set<Integer> requested = new HashSet<>();
-        activities.stream().map(Activity::getPerson).map(ScoringService::personId)
-            .filter(java.util.Objects::nonNull).forEach(requested::add);
-        notes.stream().map(Note::getPerson).map(ScoringService::personId)
-            .filter(java.util.Objects::nonNull).forEach(requested::add);
-        tasks.stream().map(Task::getPerson).map(ScoringService::personId)
-            .filter(java.util.Objects::nonNull).forEach(requested::add);
-        if (requested.isEmpty()) return Set.of();
-        List<Integer> ids = List.copyOf(requested);
-        Set<Integer> processable = new HashSet<>();
-        for (int from = 0; from < ids.size(); from += MAX_BATCH_CONTACTS) {
-            int to = Math.min(ids.size(), from + MAX_BATCH_CONTACTS);
-            processable.addAll(personMapper.getProcessablePersonIds(workspaceId, ids.subList(from, to)));
-        }
-        return Set.copyOf(processable);
     }
 
     private static Map<Integer, Integer> dealCompanyMap(List<Deal> deals) {
@@ -837,7 +653,7 @@ public class ScoringService {
             collectTouch(epoch(a.getTimestamp()), activityWeight(a.getType()), a.getPerson(), a.getDeal(),
                 processablePersonIds, dealCompany, byPerson, companyTouches);
         }
-        for (Note n : noteMapper.getAllNotes(workspaceId)) {
+        for (Note n : workspaceNoteMetadata(workspaceId)) {
             if (!isSharedNote(n)) continue;
             collectTouch(epoch(n.getCreatedAt()), WARMTH_MODEL.noteWeight(), n.getPerson(), n.getDeal(),
                 processablePersonIds, dealCompany, byPerson, companyTouches);
@@ -1144,17 +960,6 @@ public class ScoringService {
             WARMTH_MODEL.version(),
             reference
         );
-    }
-
-    /** Attributes a touch to its contact's company and/or its deal's company (deduplicated). */
-    private void attribute(Person person, Deal deal, Touch touch,
-            Map<Integer, Integer> personCompany, Set<Integer> processablePersonIds,
-            Map<Integer, Integer> dealCompany,
-            Map<Integer, List<Touch>> byCompany) {
-        for (Integer companyId : attributedCompanyIds(
-                person, deal, personCompany, processablePersonIds, dealCompany)) {
-            add(byCompany, companyId, touch);
-        }
     }
 
     private void addCompanySourceTouch(

@@ -68,7 +68,7 @@ export default async function MePage() {
             getDealsFromCookie(cookie).catch(() => [] as Deal[]),
             getUserTasksFromCookie(user.id, cookie).catch(() => [] as Task[]),
             getUserActivitiesFromCookie(user.id, cookie).catch(() => [] as Activity[]),
-            getUserNotesFromCookie(user.id, cookie).catch(() => [] as Note[]),
+            getUserNotesFromCookie(user.id, cookie, { size: 100 }).catch(() => [] as Note[]),
             getUsers(init).catch(() => [] as User[]),
             getMyWorkResultFromCookie(cookie),
         ]);
@@ -126,7 +126,8 @@ export default async function MePage() {
                                 <Timeline
                                     tasks={tasks}
                                     activities={activities}
-                                    notes={notes}
+                                    notes={notes.slice(0, 25)}
+                                    noteTarget={{ type: "user", id: user.id }}
                                     users={users}
                                     persons={contacts}
                                     deals={deals}
