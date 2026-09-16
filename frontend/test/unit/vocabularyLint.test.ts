@@ -252,6 +252,22 @@ describe("message catalogue vocabulary", () => {
         }
     });
 
+    it("limits the conditional creation notice to grants that require email verification", () => {
+        const notices = messageEntries().filter((entry) => entry.file === "users.json"
+            && entry.keyPath === "UsersNewUserDialog.toastCreatedVerification");
+
+        expect(notices).toHaveLength(2);
+        const english = notices.find((entry) => entry.locale === "en")?.value;
+        const japanese = notices.find((entry) => entry.locale === "ja")?.value;
+        expect(english).toContain("When this instance requires email verification");
+        expect(english).toContain("domain-restricted invite links and in-app membership grants");
+        expect(english).toContain("join through an emailed invitation before verifying");
+        expect(japanese).toContain("このインスタンスでメール確認が必要な場合");
+        expect(japanese).toContain("ドメイン制限付きの招待リンク");
+        expect(japanese).toContain("アプリ内でメンバーとして追加される場合");
+        expect(japanese).toContain("メールで届いた招待からは、確認前でも参加できます");
+    });
+
     it("says nothing false about where records are shared", () => {
         const shared = new Map(messageEntries().map((entry) => [`${entry.locale}/${entry.file}:${entry.keyPath}`, entry.value]));
         const scopeClaims = [

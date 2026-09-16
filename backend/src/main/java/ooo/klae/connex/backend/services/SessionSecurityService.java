@@ -15,6 +15,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.config.SessionSecurityProperties;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
@@ -43,6 +44,7 @@ public class SessionSecurityService {
         "connex.passkeyBootstrapConfirmedUserId";
 
     private final SessionSecurityProperties properties;
+    private final PrivilegedMfaProperties privilegedMfaProperties;
     private final Clock clock;
     private final UserMapper userMapper;
     private final SpringSessionMapper springSessionMapper;
@@ -125,6 +127,15 @@ public class SessionSecurityService {
      */
     public Integer sessionEpoch(HttpSession session) {
         return session == null ? null : integerAttribute(session, SESSION_EPOCH_ATTR);
+    }
+
+    /**
+     * Returns the persisted epoch of the current servlet session, never the transient principal field.
+     * @return the authenticated session's stamp, or null when the request or stamp is absent
+     */
+    public Integer currentSessionEpoch() {
+        HttpServletRequest request = currentRequest();
+        return sessionEpoch(request == null ? null : request.getSession(false));
     }
 
     /** Clears all account-bound session stamps while preserving unrelated anonymous flow state. */
@@ -290,6 +301,35 @@ public class SessionSecurityService {
         if (integerAttribute(session, AUTHENTICATED_USER_ATTR) == null) {
             session.setAttribute(AUTHENTICATED_USER_ATTR, currentUserId);
         }
+    }
+
+    /**
+     * Applies the staged-rollout export policy at the service boundary.
+     *
+     * <p>Guarded methods must run on a servlet request thread. The proof is held in the caller's
+     * HTTP session, so a scheduled job or an async continuation that has lost the request context
+     * observes no session and is refused rather than exempted. Any future background export has to
+     * carry its own authorization instead of calling a guarded method.
+     */
+    public void requireExportStepUp() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        Integer userId = authentication != null && authentication.isAuthenticated()
+                && authentication.getPrincipal() instanceof User user ? user.getId() : null;
+        HttpServletRequest request = currentRequest();
+        if (!isExportStepUpSatisfied(request == null ? null : request.getSession(false), userId)) {
+            throw new RecentAuthenticationRequiredException();
+        }
+    }
+
+    /**
+     * Evaluates the shared filter and service export policy, including the staged-rollout exception.
+     * @param session current HTTP session, or null when absent
+     * @param userId authenticated account, or null when absent
+     * @return whether export step-up is disabled or a fresh account-bound passkey assertion exists
+     */
+    public boolean isExportStepUpSatisfied(HttpSession session, Integer userId) {
+        return !privilegedMfaProperties.isEnforced()
+                || (userId != null && hasFreshRecentAuthentication(session, userId));
     }
 
     public void requireRecentAuthentication(int userId) {

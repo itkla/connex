@@ -3,10 +3,18 @@ package ooo.klae.connex.backend.services;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -15,40 +23,125 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+
+import jakarta.servlet.Filter;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpSession;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpHeaders;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockCookie;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.mock.web.MockHttpSession;
+import org.springframework.session.Session;
+import org.springframework.session.SessionRepository;
+import org.springframework.session.web.http.CookieSerializer;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.context.request.RequestAttributes;
+import org.mybatis.spring.SqlSessionTemplate;
 
 import ooo.klae.connex.backend.beans.ProviderConnection;
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.connectedaccounts.ConnectedAccountProperties;
+import ooo.klae.connex.backend.connectedaccounts.ConnectedCaptureProperties;
 import ooo.klae.connex.backend.connectedaccounts.ProviderConnectionService;
 import ooo.klae.connex.backend.connectedaccounts.ProviderTokenClient;
 import ooo.klae.connex.backend.connectedaccounts.ProviderTokenResponse;
 import ooo.klae.connex.backend.connectedaccounts.UserProviderSecretCipher;
+import ooo.klae.connex.backend.controllers.ProviderConnectionController;
 import ooo.klae.connex.backend.dto.ProviderConnectionDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ProviderConnectionMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 class ProviderConnectionServiceTest extends AbstractServiceTest {
+    private static final String PENDING_STATE = "connex.connectedAccounts.pendingState";
 
     @Autowired ProviderConnectionService connectionService;
     @Autowired ConnectedAccountProperties properties;
+    @Autowired ConnectedCaptureProperties captureProperties;
     @Autowired UserProviderSecretCipher secretCipher;
     @Autowired ProviderConnectionMapper providerConnectionMapper;
+    @Autowired OrganizationMapper organizationMapper;
+    @Autowired SessionRepository<? extends Session> sessionRepository;
+    @Autowired CookieSerializer cookieSerializer;
+    @Autowired @Qualifier("springSessionRepositoryFilter") Filter sessionFilter;
+    @Autowired PlatformTransactionManager transactionManager;
+    @Autowired SqlSessionTemplate sqlSessionTemplate;
+    @Autowired JdbcTemplate jdbcTemplate;
+    @MockitoSpyBean SpringSessionMapper springSessionMapper;
     @MockitoBean ProviderTokenClient tokenClient;
-    // This rollback-wrapped suite must not self-block the service's REQUIRES_NEW audit appends.
     @MockitoBean AuditService auditService;
 
+    private final List<Integer> fixtureUsers = new ArrayList<>();
+    private Organization organization;
+    private String sessionId;
+    private MockMvc mockMvc;
+    private int originalSchedulerBatchSize;
+
+    @Override
     @BeforeEach
-    void enableGoogle() {
+    protected void setUpWorkspaceAndAuthentication() {
+        clearRequestContext();
+        String suffix = unique();
+        organization = new Organization();
+        organization.setName("Provider callback " + suffix);
+        organization.setSlug("provider-callback-" + suffix);
+        organizationMapper.insert(organization);
+        workspace = new Workspace();
+        workspace.setOrgId(organization.getId());
+        workspace.setName("Provider callback " + suffix);
+        workspace.setSlug("provider-callback-" + suffix);
+        workspaceMapper.insert(workspace);
+        currentUser = newUser();
+        authenticateAs(currentUser, workspace.getId());
+        enableGoogle();
+    }
+
+    @Override
+    protected User newUser() {
+        User user = super.newUser();
+        fixtureUsers.add(user.getId());
+        return user;
+    }
+
+    private void enableGoogle() {
         properties.getGoogle().setEnabled(true);
         properties.getGoogle().setClientId("client-id");
         properties.getGoogle().setClientSecret("client-secret");
+        MockHttpSession session = persistSession(sessionRepository, currentSession());
+        sessionId = session.getId();
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setSession(session);
+        RequestContextHolder.setRequestAttributes(new ServletRequestAttributes(request));
+        mockMvc = MockMvcBuilders.standaloneSetup(new ProviderConnectionController(connectionService))
+            .addFilters(sessionFilter)
+            .build();
     }
 
     @AfterEach
@@ -59,6 +152,35 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
         properties.getMicrosoft().setEnabled(false);
         properties.getMicrosoft().setClientId(null);
         properties.getMicrosoft().setClientSecret(null);
+        if (sessionId != null) {
+            sessionRepository.deleteById(sessionId);
+        }
+        clearRequestContext();
+        if (workspace != null) {
+            jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
+        }
+        for (int userId : fixtureUsers) {
+            userMapper.delete(userId);
+        }
+        if (organization != null) {
+            jdbcTemplate.update("DELETE FROM organization WHERE id = ?", organization.getId());
+        }
+    }
+
+    /**
+     * Sweeps every workspace in one purge page. The reset advances one bounded page per call and
+     * leaves the rest to the retry scheduler, so a default-sized page would strand the tombstone
+     * whenever other suites have left more workspaces than that page holds in the shared schema.
+     */
+    @BeforeEach
+    void sweepEveryWorkspaceInOnePurgePage() {
+        originalSchedulerBatchSize = captureProperties.getSchedulerBatchSize();
+        captureProperties.setSchedulerBatchSize(Integer.MAX_VALUE);
+    }
+
+    @AfterEach
+    void restoreSchedulerBatchSize() {
+        captureProperties.setSchedulerBatchSize(originalSchedulerBatchSize);
     }
 
     private static String fakeIdToken(String email, String accountId) {
@@ -71,6 +193,7 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
 
     private String beginAndExtractState() {
         String url = connectionService.beginAuthorization("google");
+        persistPendingState(sessionRepository, currentSession());
         assertTrue(url.startsWith("https://accounts.google.com/o/oauth2/v2/auth?"));
         assertTrue(url.contains("access_type=offline"));
         for (String param : url.substring(url.indexOf('?') + 1).split("&")) {
@@ -79,6 +202,71 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
             }
         }
         throw new AssertionError("authorize URL carries no state: " + url);
+    }
+
+    private static HttpSession currentSession() {
+        if (RequestContextHolder.currentRequestAttributes() instanceof ServletRequestAttributes attributes) {
+            HttpSession session = attributes.getRequest().getSession(false);
+            assertNotNull(session);
+            return session;
+        }
+        throw new AssertionError("Missing servlet request");
+    }
+
+    private static <S extends Session> MockHttpSession persistSession(
+            SessionRepository<S> repository, HttpSession original) {
+        S stored = repository.createSession();
+        MockHttpSession session = new MockHttpSession(null, stored.getId());
+        var names = original.getAttributeNames();
+        while (names.hasMoreElements()) {
+            String name = names.nextElement();
+            Object value = original.getAttribute(name);
+            stored.setAttribute(name, value);
+            session.setAttribute(name, value);
+        }
+        repository.save(stored);
+        return session;
+    }
+
+    private static <S extends Session> void persistPendingState(
+            SessionRepository<S> repository, HttpSession session) {
+        S stored = repository.findById(session.getId());
+        assertNotNull(stored);
+        stored.setAttribute(PENDING_STATE, session.getAttribute(PENDING_STATE));
+        repository.save(stored);
+    }
+
+    /**
+     * Uses the active serializer because this mock web context takes cookie settings from its
+     * servlet context, not the embedded server configuration. Verifies that the generated cookie
+     * resolves the same JDBC session that holds the pending state.
+     */
+    private Cookie sessionCookie() {
+        MockHttpServletResponse written = new MockHttpServletResponse();
+        cookieSerializer.writeCookieValue(new CookieSerializer.CookieValue(
+            new MockHttpServletRequest(), written, sessionId));
+        String header = written.getHeader(HttpHeaders.SET_COOKIE);
+        assertNotNull(header);
+        Cookie cookie = MockCookie.parse(header);
+        MockHttpServletRequest carrier = new MockHttpServletRequest();
+        carrier.setCookies(cookie);
+        assertEquals(List.of(sessionId), cookieSerializer.readCookieValues(carrier));
+        return cookie;
+    }
+
+    private String httpCallback(String provider, String state, boolean denied) throws Exception {
+        var request = get("/api/account/connections/callback/" + provider)
+            .cookie(sessionCookie()).param("state", state);
+        if (denied) {
+            request.param("error", "access_denied");
+        } else {
+            request.param("code", "auth-code");
+        }
+        var response = mockMvc.perform(request).andReturn().getResponse();
+        assertEquals(302, response.getStatus());
+        String redirect = response.getRedirectedUrl();
+        assertNotNull(redirect);
+        return redirect;
     }
 
     private void stubExchange(String refreshToken, String email) {
@@ -136,6 +324,20 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void forgedGetCallbackPreservesThePendingFlowAndTheRealCallbackSucceedsOnce() throws Exception {
+        String state = beginAndExtractState();
+
+        assertTrue(httpCallback("google", "forged", true).contains("error=state"));
+        verifyNoInteractions(tokenClient);
+
+        stubExchange("refresh-token", "sales@example.com");
+        assertTrue(httpCallback("google", state, false).contains("connected=google"));
+        assertEquals(1, connectionService.getForCurrentUser().size());
+        assertTrue(httpCallback("google", state, false).contains("error=state"));
+        verify(tokenClient).exchange(anyString(), any());
+    }
+
+    @Test
     void callbackRequiresMatchingProviderState() {
         properties.getMicrosoft().setEnabled(true);
         properties.getMicrosoft().setClientId("ms-id");
@@ -143,6 +345,115 @@ class ProviderConnectionServiceTest extends AbstractServiceTest {
         String state = beginAndExtractState();
 
         assertTrue(connectionService.completeCallback("microsoft", "code", state, null).contains("error=state"));
+        stubExchange("refresh-token", "sales@example.com");
+        assertTrue(connectionService.completeCallback("google", "code", state, null).contains("connected=google"));
+        assertTrue(connectionService.completeCallback("google", "code", state, null).contains("error=state"));
+    }
+
+    @Test
+    void expiredCallbackDoesNotMutatePendingState() throws Exception {
+        String state = beginAndExtractState();
+        String stored = assertInstanceOf(String.class, currentSession().getAttribute(PENDING_STATE));
+        String[] parts = stored.split("\\|", 4);
+        String expired = parts[0] + "|" + parts[1] + "|0|" + parts[3];
+        currentSession().setAttribute(PENDING_STATE, expired);
+        persistPendingState(sessionRepository, currentSession());
+
+        assertTrue(httpCallback("google", state, false).contains("error=state"));
+
+        Session persisted = sessionRepository.findById(sessionId);
+        assertNotNull(persisted);
+        assertEquals(expired, persisted.getAttribute(PENDING_STATE));
+        verifyNoInteractions(tokenClient);
+    }
+
+    @Test
+    void concurrentCallbacksContendOnTheStoredStateAndOnlyOneConsumesIt() throws Exception {
+        String state = beginAndExtractState();
+        CountDownLatch firstClaimLocked = new CountDownLatch(1);
+        CountDownLatch secondClaimAttempted = new CountDownLatch(1);
+        CountDownLatch releaseFirstClaim = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        SpringSessionMapper realMapper = sqlSessionTemplate.getMapper(SpringSessionMapper.class);
+        doAnswer(invocation -> {
+            String id = invocation.getArgument(0, String.class);
+            byte[] expected = invocation.getArgument(1, byte[].class);
+            byte[] consumed = invocation.getArgument(2, byte[].class);
+            if (calls.incrementAndGet() == 1) {
+                return new TransactionTemplate(transactionManager).execute(status -> {
+                    int result = realMapper.consumeProviderConnectionState(id, expected, consumed);
+                    assertEquals(1, result);
+                    firstClaimLocked.countDown();
+                    await(releaseFirstClaim);
+                    return result;
+                });
+            }
+            secondClaimAttempted.countDown();
+            return realMapper.consumeProviderConnectionState(id, expected, consumed);
+        }).when(springSessionMapper).consumeProviderConnectionState(anyString(), any(), any());
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> callbackOnWorker(state));
+            assertTrue(firstClaimLocked.await(10, TimeUnit.SECONDS));
+            var second = executor.submit(() -> callbackOnWorker(state));
+            assertTrue(secondClaimAttempted.await(10, TimeUnit.SECONDS));
+            assertThrows(TimeoutException.class, () -> second.get(250, TimeUnit.MILLISECONDS));
+
+            releaseFirstClaim.countDown();
+
+            assertTrue(first.get(15, TimeUnit.SECONDS).contains("error=denied"));
+            assertTrue(second.get(15, TimeUnit.SECONDS).contains("error=state"));
+            verifyNoInteractions(tokenClient);
+        } finally {
+            releaseFirstClaim.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void callbackResponseCannotOverwriteANewerAuthorization() throws Exception {
+        String state = beginAndExtractState();
+        RequestAttributes originalRequest = RequestContextHolder.currentRequestAttributes();
+        AtomicReference<String> replacementState = new AtomicReference<>();
+        when(tokenClient.exchange(anyString(), any())).thenAnswer(invocation -> {
+            RequestAttributes callbackRequest = RequestContextHolder.currentRequestAttributes();
+            try {
+                RequestContextHolder.setRequestAttributes(originalRequest);
+                replacementState.set(beginAndExtractState());
+            } finally {
+                RequestContextHolder.setRequestAttributes(callbackRequest);
+            }
+            return new ProviderTokenResponse("access-token", "refresh-token", 3600L,
+                "openid email scope-a", fakeIdToken("sales@example.com", "provider-account"));
+        });
+
+        assertTrue(httpCallback("google", state, false).contains("connected=google"));
+        String replacement = replacementState.get();
+        assertNotNull(replacement);
+        assertTrue(httpCallback("google", state, true).contains("error=state"));
+        assertTrue(httpCallback("google", replacement, true).contains("error=denied"));
+        assertTrue(httpCallback("google", replacement, true).contains("error=state"));
+    }
+
+    private String callbackOnWorker(String state) throws Exception {
+        authenticateAs(currentUser, workspace.getId());
+        try {
+            return httpCallback("google", state, true);
+        } finally {
+            clearAuthentication();
+        }
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Provider state claim was not released");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Provider state claim was interrupted", exception);
+        }
     }
 
     @Test

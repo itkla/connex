@@ -62,6 +62,7 @@
     "cancel": "Cancel",
     "create": "Create",
     "toastCreated": "User created",
+    "toastCreatedVerification": "When this instance requires email verification, a verification link was sent to their address. Verification is required for domain-restricted invite links and in-app membership grants. They can still join through an emailed invitation before verifying.",
     "toastFailed": "Couldn't create the user"
   },
   "UsersLayout": {

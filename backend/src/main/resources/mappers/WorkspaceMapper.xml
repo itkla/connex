@@ -85,6 +85,12 @@
     UPDATE app_user SET last_active_workspace_id = #{workspaceId} WHERE id = #{userId}
   </update>
 
+  <!-- The only writer that NULLs the remembered selection. Without it a user removed from their
+       last workspace keeps pointing at a workspace they can never resolve again (#1649). -->
+  <update id="clearLastActiveWorkspaceId">
+    UPDATE app_user SET last_active_workspace_id = NULL WHERE id = #{userId}
+  </update>
+
   <select id="isMember" resultType="boolean">
     SELECT EXISTS(
       SELECT 1
@@ -109,6 +115,13 @@
     FROM workspace_member
     WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
     FOR UPDATE
+  </select>
+
+  <select id="lockAuthorizationMembershipForShare" resultType="WorkspaceMember">
+    SELECT workspace_id, user_id, role, role_id, status, created_at
+    FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId}
+    FOR SHARE
   </select>
 
   <select id="getAuthorizationMembership" resultType="WorkspaceMember">
@@ -411,4 +424,20 @@
       AND w.lifecycle_state = 'active' AND o.lifecycle_state = 'active'
     ORDER BY w.name, w.id
   </select>
+
+  <!-- Deliberately unfiltered by lifecycle_state: a verified email change must revoke every grant
+       addressed to the old address, including ones parked in a suspended or tearing-down tenant.
+       Ordered so the caller acquires the workspace roots in the contract's ascending id order. -->
+  <select id="findPendingGrants" resultType="ooo.klae.connex.backend.dto.RevokedInvitationDto">
+    SELECT wm.workspace_id AS workspaceId, w.org_id AS orgId, w.name AS workspaceName
+    FROM workspace_member wm
+    JOIN workspace w ON w.id = wm.workspace_id
+    WHERE wm.user_id = #{userId} AND wm.status = 'pending'
+    ORDER BY wm.workspace_id
+  </select>
+
+  <delete id="removePendingMember">
+    DELETE FROM workspace_member
+    WHERE workspace_id = #{workspaceId} AND user_id = #{userId} AND status = 'pending'
+  </delete>
 </mapper>

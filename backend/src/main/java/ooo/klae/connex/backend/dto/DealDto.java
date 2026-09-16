@@ -6,6 +6,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
@@ -43,9 +44,12 @@ public class DealDto {
     @NotNull
     @DecimalMin("0.00")
     @Digits(integer = 13, fraction = 2)
+    @DecimalMax("9999999999999.99")
     private BigDecimal value;
 
     @Digits(integer = 13, fraction = 2)
+    @DecimalMin("-9999999999999.99")
+    @DecimalMax("9999999999999.99")
     private BigDecimal actualValue;
 
     @JsonProperty(access = JsonProperty.Access.READ_ONLY)

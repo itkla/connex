@@ -1,9 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const background = vi.hoisted(() => {
+    const tasks: Array<() => Promise<void>> = [];
+    return { tasks };
+});
+vi.mock("next/server", () => ({ after: (task: () => Promise<void>) => background.tasks.push(task) }));
+
 const SEGMENT_ID = "78261eea-8f8b-4381-83c6-79fa7120f1cf";
 const CONTACT_ID = "479e3145-dd38-476b-932c-529ceb705947";
 const ORIGIN = "https://connex.example";
 const EMAIL = "launch@example.com";
+const ADMISSION_INTERVAL_MS = 3300;
+const PROVIDER_INTERVAL_MS = 550;
+const PROVIDER_TIMEOUT_MS = 8000;
+const GLOBAL_WINDOW_MS = 60 * 1000;
+const GLOBAL_SIGNUPS = 18;
 
 type Post = typeof import("@/app/api/launch-signups/route").POST;
 let post: Post;
@@ -45,11 +56,16 @@ function providerSuccess(email = EMAIL, existing = false): void {
 async function submit(input = request()): Promise<Response> {
     const result = post(input);
     await vi.runAllTimersAsync();
-    return result;
+    const response = await result;
+    const tasks = background.tasks.splice(0).map((task) => task());
+    if (tasks.length > 0) await vi.advanceTimersByTimeAsync(8000);
+    await Promise.all(tasks);
+    return response;
 }
 
 beforeEach(async () => {
     vi.resetModules();
+    background.tasks.length = 0;
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-09-12T03:00:00Z"));
     vi.stubEnv("RESEND_API_KEY", "re_test_only_never_sent");
@@ -68,7 +84,58 @@ afterEach(() => {
 });
 
 describe("anonymous launch signup persistence", () => {
-    it("confirms the contact and launch membership before returning success, without forwarding credentials", async () => {
+    it("returns identical public responses for eligible and globally opted-out contacts", async () => {
+        providerSuccess(EMAIL, true);
+        const eligible = await submit();
+        fetcher.mockReset().mockResolvedValueOnce(Response.json({ id: CONTACT_ID, email: EMAIL, unsubscribed: true }));
+        const optedOut = await submit();
+        expect(optedOut.status).toBe(200);
+        expect(optedOut.status).toBe(eligible.status);
+        expect([...optedOut.headers]).toEqual([...eligible.headers]);
+        expect(await optedOut.json()).toEqual(await eligible.json());
+        expect(fetcher).toHaveBeenCalledOnce();
+        expect(fetcher.mock.calls[0][1]?.method).toBe("GET");
+    });
+
+    it.each([false, true])("acknowledges before preference lookup and admits again on a constant interval for opt-out %s", async (unsubscribed) => {
+        providerSuccess(EMAIL, true);
+        fetcher.mockResolvedValueOnce(Response.json({ id: CONTACT_ID, email: EMAIL, unsubscribed }));
+        const admittedAt = Date.now();
+        let acknowledged = false;
+        const response = post(request()).then((value) => {
+            acknowledged = true;
+            return value;
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(acknowledged).toBe(true);
+        expect(fetcher).not.toHaveBeenCalled();
+        expect(await (await response).json()).toEqual({ status: "subscribed" });
+        const blocked = await post(request(undefined, { "X-Connex-Client-IP": "192.0.2.2" }));
+        expect(blocked.status).toBe(429);
+        expect(blocked.headers.get("Retry-After")).toBe("4");
+
+        const tasks = background.tasks.splice(0).map((task) => task());
+        for (const elapsed of [1000, 2000, ADMISSION_INTERVAL_MS - 1]) {
+            await vi.advanceTimersByTimeAsync(admittedAt + elapsed - Date.now());
+            const startedAt = Date.now();
+            const refused = await post(request(undefined, { "X-Connex-Client-IP": "192.0.2.2" }));
+            expect(Date.now()).toBe(startedAt);
+            expect(refused.status).toBe(429);
+            const expectedHeaders = new Headers(blocked.headers);
+            expectedHeaders.set("Retry-After", String(Math.ceil((ADMISSION_INTERVAL_MS - elapsed) / 1000)));
+            expect([...refused.headers]).toEqual([...expectedHeaders]);
+            expect(await refused.json()).toEqual({ error: "rate_limited" });
+        }
+        await vi.advanceTimersByTimeAsync(1);
+        const admitted = await post(request(undefined, { "X-Connex-Client-IP": "192.0.2.2" }));
+        expect(admitted.status).toBe(200);
+        background.tasks.length = 0;
+        await vi.advanceTimersByTimeAsync(PROVIDER_TIMEOUT_MS);
+        await Promise.all(tasks);
+        expect(fetcher).toHaveBeenCalledTimes(unsubscribed ? 1 : 2);
+    });
+
+    it("persists the contact and launch membership after acknowledgment, without forwarding credentials", async () => {
         providerSuccess();
         const response = await submit(request({ email: ` ${EMAIL} `, website: "" }, {
             Cookie: "JSESSIONID=browser-only",
@@ -129,7 +196,7 @@ describe("anonymous launch signup persistence", () => {
         expect(lookup.hash).toBe("");
     });
 
-    it("accepts a repeat signup only when the returned contact is subscribed and in the launch segment", async () => {
+    it("preserves launch membership for an eligible repeat signup", async () => {
         providerSuccess();
         expect((await submit()).status).toBe(200);
         providerSuccess(EMAIL, true);
@@ -138,13 +205,13 @@ describe("anonymous launch signup persistence", () => {
         expect(fetcher.mock.calls.slice(4).map(([, init]) => init?.method)).toEqual(["GET", "GET"]);
     });
 
-    it("does not treat a duplicate conflict as proof of signup", async () => {
+    it("acknowledges a duplicate conflict without further writes", async () => {
         fetcher
             .mockResolvedValueOnce(new Response(null, { status: 404 }))
             .mockResolvedValueOnce(Response.json({ name: "conflict", message: "Contact already exists", id: CONTACT_ID }, { status: 409 }));
         const response = await submit();
-        expect(response.status).toBe(503);
-        expect(await response.json()).toEqual({ error: "unavailable" });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ status: "subscribed" });
         expect(fetcher).toHaveBeenCalledTimes(2);
     });
 
@@ -162,24 +229,24 @@ describe("anonymous launch signup persistence", () => {
         expect(fetcher.mock.calls[2][1]?.body).toBeUndefined();
     });
 
-    it("does not claim success when segment membership is still absent after an accepted add", async () => {
+    it("acknowledges without revealing absent segment membership after an accepted add", async () => {
         fetcher
             .mockResolvedValueOnce(Response.json({ object: "contact", id: CONTACT_ID, email: EMAIL, unsubscribed: false }))
             .mockResolvedValueOnce(Response.json({ object: "list", data: [], has_more: false }))
             .mockResolvedValueOnce(Response.json({ id: SEGMENT_ID }))
             .mockResolvedValueOnce(Response.json({ object: "list", data: [], has_more: true }));
         const response = await submit();
-        expect(await response.json()).toEqual({ error: "unavailable" });
+        expect(await response.json()).toEqual({ status: "subscribed" });
         expect(fetcher).toHaveBeenCalledTimes(4);
     });
 
-    it("does not claim success after a segment-add failure", async () => {
+    it("acknowledges without revealing a segment-add failure", async () => {
         fetcher
             .mockResolvedValueOnce(Response.json({ object: "contact", id: CONTACT_ID, email: EMAIL, unsubscribed: false }))
             .mockResolvedValueOnce(Response.json({ object: "list", data: [], has_more: false }))
             .mockResolvedValueOnce(Response.json({ error: "Provider unavailable" }, { status: 503 }));
         const response = await submit();
-        expect(await response.json()).toEqual({ error: "unavailable" });
+        expect(await response.json()).toEqual({ status: "subscribed" });
         expect(fetcher).toHaveBeenCalledTimes(3);
     });
 
@@ -187,7 +254,7 @@ describe("anonymous launch signup persistence", () => {
         fetcher
             .mockResolvedValueOnce(Response.json({ object: "contact", id: CONTACT_ID, email: EMAIL, unsubscribed: false }))
             .mockResolvedValueOnce(Response.json({ object: "unknown", data: [] }));
-        expect((await submit()).status).toBe(503);
+        expect((await submit()).status).toBe(200);
         expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(["GET", "GET"]);
     });
 
@@ -195,7 +262,7 @@ describe("anonymous launch signup persistence", () => {
         fetcher
             .mockResolvedValueOnce(Response.json({ object: "contact", id: CONTACT_ID, email: EMAIL, unsubscribed: true }));
         const response = await submit();
-        expect(await response.json()).toEqual({ error: "unavailable" });
+        expect(await response.json()).toEqual({ status: "subscribed" });
         expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(["GET"]);
         expect(fetcher.mock.calls[0][1]?.body).toBeUndefined();
     });
@@ -204,11 +271,11 @@ describe("anonymous launch signup persistence", () => {
         {},
         { object: "contact", id: "../../another-resource" },
         { object: "contact", id: EMAIL },
-    ])("rejects an invalid contact creation response: %j", async (body) => {
+    ])("stops provider work after an invalid contact creation response: %j", async (body) => {
         fetcher
             .mockResolvedValueOnce(new Response(null, { status: 404 }))
             .mockResolvedValueOnce(Response.json(body));
-        expect((await submit()).status).toBe(503);
+        expect((await submit()).status).toBe(200);
         expect(fetcher).toHaveBeenCalledTimes(2);
     });
 
@@ -216,12 +283,12 @@ describe("anonymous launch signup persistence", () => {
         { id: CONTACT_ID, email: "different@example.com", unsubscribed: false },
         { id: CONTACT_ID, email: EMAIL },
         { id: SEGMENT_ID, email: EMAIL, unsubscribed: false },
-    ])("rejects a contact that does not confirm the submitted address and preferences: %j", async (body) => {
+    ])("stops provider work when the contact does not confirm the submitted address and preferences: %j", async (body) => {
         fetcher
             .mockResolvedValueOnce(new Response(null, { status: 404 }))
             .mockResolvedValueOnce(Response.json({ object: "contact", id: CONTACT_ID }))
             .mockResolvedValueOnce(Response.json(body));
-        expect((await submit()).status).toBe(503);
+        expect((await submit()).status).toBe(200);
         expect(fetcher).toHaveBeenCalledTimes(3);
     });
 });
@@ -344,11 +411,73 @@ describe("request validation and availability", () => {
 });
 
 describe("bounded provider calls and throttles", () => {
+    it.each([4, 6])("finishes every admitted signup before its deadline during a burst needing %i provider calls each", async (callsPerSignup) => {
+        const providerWork = new Map<AbortSignal, Response[]>();
+        const aborted = vi.fn();
+        const timestamps: number[] = [];
+        fetcher.mockImplementation(async (input, options) => {
+            const signal = options?.signal;
+            if (!signal) throw new Error("Missing signup deadline");
+            timestamps.push(Date.now());
+            let responses = providerWork.get(signal);
+            if (!responses) {
+                const email = decodeURIComponent(new URL(String(input)).pathname.slice("/contacts/".length));
+                const id = `479e3145-dd38-476b-932c-${String(providerWork.size).padStart(12, "0")}`;
+                responses = [
+                    new Response(null, { status: 404 }),
+                    Response.json({ object: "contact", id }),
+                    Response.json({ object: "contact", id, email, unsubscribed: false }),
+                    ...(callsPerSignup === 6 ? [
+                        Response.json({ object: "list", data: [], has_more: false }),
+                        Response.json({ id: SEGMENT_ID }),
+                    ] : []),
+                    Response.json({ object: "list", data: [{ id: SEGMENT_ID }], has_more: false }),
+                ];
+                providerWork.set(signal, responses);
+                signal.addEventListener("abort", aborted, { once: true });
+            }
+            const response = responses.shift();
+            if (!response) throw new Error("Unexpected provider call");
+            return response;
+        });
+        const tasks: Promise<void>[] = [];
+        const durations: number[] = [];
+        const burstDeadline = Date.now() + 2 * GLOBAL_WINDOW_MS;
+        for (let client = 1; client <= GLOBAL_SIGNUPS; client += 1) {
+            let response: Response;
+            do {
+                response = await post(request({ email: `launch-${client}@example.com` }, { "X-Connex-Client-IP": `192.0.2.${client}` }));
+                if (response.status === 429) {
+                    expect(Date.now()).toBeLessThan(burstDeadline);
+                    await vi.advanceTimersByTimeAsync(100);
+                }
+            } while (response.status === 429);
+            expect(response.status).toBe(200);
+            expect(await response.json()).toEqual({ status: "subscribed" });
+            const admittedAt = Date.now();
+            const task = background.tasks.shift();
+            if (!task) throw new Error("Missing background signup");
+            tasks.push(task().then(() => { durations.push(Date.now() - admittedAt); }));
+        }
+        await vi.runAllTimersAsync();
+        await Promise.all(tasks);
+
+        expect(providerWork.size).toBe(GLOBAL_SIGNUPS);
+        expect(fetcher).toHaveBeenCalledTimes(GLOBAL_SIGNUPS * callsPerSignup);
+        for (const responses of providerWork.values()) expect(responses).toHaveLength(0);
+        expect(aborted).not.toHaveBeenCalled();
+        expect(durations).toHaveLength(GLOBAL_SIGNUPS);
+        for (const duration of durations) expect(duration).toBeLessThan(PROVIDER_TIMEOUT_MS);
+        for (let index = 1; index < timestamps.length; index += 1) {
+            expect(timestamps[index] - timestamps[index - 1]).toBeGreaterThanOrEqual(PROVIDER_INTERVAL_MS);
+        }
+    });
+
     it.each([401, 409, 429, 500, 503])("keeps provider failure %s generic without leaking its body", async (status) => {
         fetcher.mockResolvedValue(Response.json({ message: `Provider detail for ${EMAIL}` }, { status }));
         const response = await submit();
-        expect(response.status).toBe(503);
-        expect(await response.json()).toEqual({ error: "unavailable" });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ status: "subscribed" });
         expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(["GET"]);
     });
 
@@ -356,7 +485,7 @@ describe("bounded provider calls and throttles", () => {
         fetcher.mockImplementationOnce(async (_url, options) => new Promise<Response>((_resolve, reject) => {
             options?.signal?.addEventListener("abort", () => reject(new Error("Provider timed out")), { once: true });
         }));
-        expect((await submit()).status).toBe(503);
+        expect((await submit()).status).toBe(200);
         expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
         providerSuccess();
         expect((await submit()).status).toBe(200);
@@ -364,7 +493,7 @@ describe("bounded provider calls and throttles", () => {
 
     it("bounds provider response bytes and does not read error pages as success", async () => {
         fetcher.mockResolvedValue(new Response("x".repeat(65537), { headers: { "Content-Type": "application/json" } }));
-        expect((await submit()).status).toBe(503);
+        expect((await submit()).status).toBe(200);
         expect(fetcher).toHaveBeenCalledOnce();
     });
 
@@ -373,7 +502,7 @@ describe("bounded provider calls and throttles", () => {
         fetcher.mockResolvedValue(new Response(new ReadableStream<Uint8Array>({ cancel }), {
             headers: { "Content-Type": "application/json" },
         }));
-        expect((await submit()).status).toBe(503);
+        expect((await submit()).status).toBe(200);
         expect(cancel).toHaveBeenCalledOnce();
     });
 
@@ -404,7 +533,7 @@ describe("bounded provider calls and throttles", () => {
             expect((await submit(request({ email: "invalid" }))).status).toBe(400);
         }
         for (let client = 1; client < 2048; client += 1) {
-            expect((await submit(request({ email: "invalid" }, { "X-Connex-Client-IP": `2001:db8::${client.toString(16)}` }))).status).toBe(400);
+            expect((await submit(request({ email: "invalid" }, { "X-Connex-Client-IP": `2001:db8:0:${client.toString(16)}::1` }))).status).toBe(400);
         }
         expect((await submit(request({ email: "invalid" }))).status).toBe(429);
         expect((await submit(request({ email: "invalid" }, { "X-Connex-Client-IP": "192.0.2.2" }))).status).toBe(400);
@@ -412,7 +541,67 @@ describe("bounded provider calls and throttles", () => {
         expect(fetcher).not.toHaveBeenCalled();
     });
 
-    it("rejects concurrent provider work without allocating an unbounded queue", async () => {
+    it("shares one client bucket across an IPv6 subscriber's whole /64 network", async () => {
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+            const address = `2001:db8:0:1::${(attempt + 1).toString(16)}`;
+            expect((await submit(request({ email: "invalid" }, { "X-Connex-Client-IP": address }))).status).toBe(400);
+        }
+        expect((await submit(request({ email: "invalid" }, { "X-Connex-Client-IP": "2001:db8:0:1::ffff" }))).status).toBe(429);
+        expect((await submit(request({ email: "invalid" }, { "X-Connex-Client-IP": "2001:db8:0:2::1" }))).status).toBe(400);
+    });
+
+    it("keeps IPv4-mapped clients on the bucket of the address they carry", async () => {
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+            expect((await submit(request({ email: "invalid" }, { "X-Connex-Client-IP": "::ffff:192.0.2.50" }))).status).toBe(400);
+        }
+        expect((await submit(request({ email: "invalid" }, { "X-Connex-Client-IP": "::ffff:192.0.2.50" }))).status).toBe(429);
+        expect((await submit(request({ email: "invalid" }, { "X-Connex-Client-IP": "::ffff:192.0.2.51" }))).status).toBe(400);
+        expect((await submit(request({ email: "invalid" }, { "X-Connex-Client-IP": "::1" }))).status).toBe(400);
+        expect((await submit(request({ email: "invalid" }, { "X-Connex-Client-IP": "192.0.2.50" }))).status).toBe(429);
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it("paces every provider call while background operations overlap", async () => {
+        const timestamps: number[] = [];
+        fetcher.mockImplementation(async (input) => {
+            timestamps.push(Date.now());
+            return String(input).endsWith("/segments")
+                ? Response.json({ object: "list", data: [{ id: SEGMENT_ID }], has_more: false })
+                : Response.json({ object: "contact", id: CONTACT_ID, email: EMAIL, unsubscribed: false });
+        });
+        expect((await post(request(undefined, { "X-Connex-Client-IP": "192.0.2.10" }))).status).toBe(200);
+        await vi.advanceTimersByTimeAsync(ADMISSION_INTERVAL_MS);
+        expect((await post(request(undefined, { "X-Connex-Client-IP": "192.0.2.11" }))).status).toBe(200);
+
+        const tasks = background.tasks.splice(0).map((task) => task());
+        await vi.runAllTimersAsync();
+        await Promise.all(tasks);
+
+        expect(timestamps).toHaveLength(4);
+        const ordered = [...timestamps].sort((first, second) => first - second);
+        for (let index = 1; index < ordered.length; index += 1) {
+            expect(ordered[index] - ordered[index - 1]).toBeGreaterThanOrEqual(PROVIDER_INTERVAL_MS);
+        }
+    });
+
+    it("returns the attempt a concurrent submission cost a visitor at the shared reservation", async () => {
+        providerSuccess(EMAIL, true);
+        const first = post(request(undefined, { "X-Connex-Client-IP": "192.0.2.10" }));
+        const second = post(request(undefined, { "X-Connex-Client-IP": "192.0.2.11" }));
+        await vi.runAllTimersAsync();
+        const responses = [await first, await second];
+        background.tasks.length = 0;
+        expect(responses.map((response) => response.status).sort()).toEqual([200, 429]);
+        const refused = responses[0].status === 429 ? "192.0.2.10" : "192.0.2.11";
+
+        await vi.advanceTimersByTimeAsync(ADMISSION_INTERVAL_MS);
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+            expect((await post(request({ email: "invalid" }, { "X-Connex-Client-IP": refused }))).status).toBe(400);
+        }
+        expect((await post(request({ email: "invalid" }, { "X-Connex-Client-IP": refused }))).status).toBe(429);
+    });
+
+    it("spaces admission by a constant interval that never tracks provider work", async () => {
         fetcher.mockImplementationOnce(async (_url, options) => new Promise<Response>((_resolve, reject) => {
             options?.signal?.addEventListener("abort", () => reject(new Error("Provider timed out")), { once: true });
         }));
@@ -420,19 +609,46 @@ describe("bounded provider calls and throttles", () => {
         await vi.advanceTimersByTimeAsync(0);
         const second = await post(request(undefined, { "X-Connex-Client-IP": "192.0.2.2" }));
         expect(second.status).toBe(429);
-        expect(second.headers.get("Retry-After")).toBe("8");
+        expect(second.headers.get("Retry-After")).toBe("4");
+
+        const tasks = background.tasks.splice(0).map((task) => task());
+        await vi.advanceTimersByTimeAsync(ADMISSION_INTERVAL_MS);
+        const third = await post(request(undefined, { "X-Connex-Client-IP": "192.0.2.2" }));
+        expect(third.status).toBe(200);
+        background.tasks.length = 0;
         await vi.runAllTimersAsync();
-        expect((await first).status).toBe(503);
+        await Promise.all(tasks);
+        expect((await first).status).toBe(200);
         expect(fetcher).toHaveBeenCalledOnce();
     });
 
-    it("caps global provider load across distinct clients", async () => {
-        fetcher.mockImplementation(async () => Response.json({ error: "Provider unavailable" }, { status: 503 }));
-        for (let client = 1; client <= 30; client += 1) {
-            expect((await submit(request(undefined, { "X-Connex-Client-IP": `192.0.2.${client}` }))).status).toBe(503);
+    it("does not spend a visitor's own attempts on submissions the shared interval refuses", async () => {
+        expect((await post(request(undefined, { "X-Connex-Client-IP": "192.0.2.9" }))).status).toBe(200);
+        background.tasks.length = 0;
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+            expect((await post(request(undefined, { "X-Connex-Client-IP": "192.0.2.2" }))).status).toBe(429);
         }
-        const limited = await submit(request(undefined, { "X-Connex-Client-IP": "192.0.2.31" }));
+        await vi.advanceTimersByTimeAsync(ADMISSION_INTERVAL_MS);
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+            expect((await post(request({ email: "invalid" }, { "X-Connex-Client-IP": "192.0.2.2" }))).status).toBe(400);
+        }
+        expect((await post(request({ email: "invalid" }, { "X-Connex-Client-IP": "192.0.2.2" }))).status).toBe(429);
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+
+    it("caps admitted signups per global window across distinct clients", async () => {
+        for (let client = 1; client <= GLOBAL_SIGNUPS; client += 1) {
+            const admitted = await post(request(undefined, { "X-Connex-Client-IP": `192.0.2.${client}` }));
+            expect(admitted.status).toBe(200);
+            background.tasks.length = 0;
+            await vi.advanceTimersByTimeAsync(ADMISSION_INTERVAL_MS);
+        }
+        const limited = await post(request(undefined, { "X-Connex-Client-IP": "192.0.2.200" }));
         expect(limited.status).toBe(429);
-        expect(fetcher).toHaveBeenCalledTimes(30);
+        expect(Number(limited.headers.get("Retry-After"))).toBeGreaterThan(0);
+
+        await vi.advanceTimersByTimeAsync(GLOBAL_WINDOW_MS);
+        expect((await post(request(undefined, { "X-Connex-Client-IP": "192.0.2.200" }))).status).toBe(200);
+        expect(fetcher).not.toHaveBeenCalled();
     });
 });

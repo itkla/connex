@@ -159,6 +159,13 @@ jobs:
       - name: Audit (fail on high+)
         working-directory: frontend
         run: pnpm audit --audit-level=high
+      # landing/ is a separate pnpm project with its own lockfile, deployed to Cloudflare Workers.
+      - name: Install landing
+        working-directory: landing
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Audit landing (fail on high+)
+        working-directory: landing
+        run: pnpm audit --audit-level=high
 
   ocr-audit:
     name: OCR dependency audit

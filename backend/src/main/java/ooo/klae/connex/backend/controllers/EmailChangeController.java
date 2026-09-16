@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.controllers;
 
+import java.util.List;
 import java.util.Map;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -16,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.config.OneTimeLinkFlowCookie;
 import ooo.klae.connex.backend.dto.EmailChangeRequestDto;
 import ooo.klae.connex.backend.dto.OneTimeLinkExchangeRequest;
+import ooo.klae.connex.backend.dto.RevokedInvitationDto;
 import ooo.klae.connex.backend.services.EmailChangeService;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService;
 import ooo.klae.connex.backend.services.OneTimeLinkFlowService.IssuedGrant;
@@ -42,7 +44,7 @@ public class EmailChangeController {
     public Map<String, String> request(@Valid @RequestBody EmailChangeRequestDto dto,
             HttpServletRequest httpRequest) {
         emailChangeService.requestChange(dto.getNewEmail(), dto.getCurrentPassword(),
-                clientIpResolver.resolve(httpRequest));
+                clientIpResolver.resolveWithProvenance(httpRequest));
         return Map.of("message", "Check your new email address for a verification link");
     }
 
@@ -67,14 +69,25 @@ public class EmailChangeController {
         return Map.of("valid", emailChangeService.validateExchangedTokenHash(tokenHash));
     }
 
+    /**
+     * Applies the change and reports the pending workspace invitations it revoked. Those grants
+     * were addressed to the previous mailbox, so they are dropped rather than carried across;
+     * naming them keeps an otherwise silent loss visible to the account holder.
+     * @param grant the email-change flow cookie value
+     * @param request the current browser request
+     * @param response the response whose email-change flow cookie is cleared
+     * @return the confirmation message and the revoked pending invitations
+     */
     @PostMapping("/api/auth/email-change/confirm")
-    public Map<String, String> confirm(
+    public Map<String, Object> confirm(
             @CookieValue(name = OneTimeLinkFlowCookie.EMAIL_CHANGE, required = false) String grant,
             HttpServletRequest request,
             HttpServletResponse response) {
-        oneTimeLinkFlowService.consume(
-            request, Purpose.EMAIL_CHANGE, grant, emailChangeService::confirmChangeByHash);
+        List<RevokedInvitationDto> revoked = oneTimeLinkFlowService.consumeEmailChange(
+            request, grant, emailChangeService::confirmChangeByHash);
         oneTimeLinkFlowCookie.clear(response, Purpose.EMAIL_CHANGE);
-        return Map.of("message", "Your email address has been updated");
+        return Map.of(
+            "message", "Your email address has been updated",
+            "revokedInvitations", revoked);
     }
 }

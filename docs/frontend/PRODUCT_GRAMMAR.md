@@ -122,6 +122,9 @@ inspectable history, with no invented customer score. Missing history stays dist
 The following Radar/Introductions chapter owns priorities, risk, and recommended next steps.
 
 Pricing appears immediately before practical questions, with Free, Pro, and Enterprise plans.
+Overview cards retain each plan's summary and key inclusions. Detailed comparisons follow outside
+the cards in three columns aligned with them, with shared headers for each feature group. On narrow
+screens, each group lists the plans vertically with explicit plan headings.
 The approved pricing draft includes all CRM features on every plan; company-managed SSO is reserved
 for Enterprise and does not restrict ordinary account sign-in. Free includes 1 full-member seat,
 1 workspace, and 250 contacts and companies combined. Pro is hosted SaaS with 2 included full-member
@@ -144,6 +147,8 @@ records. The hero keeps text and actions vertically centered below navigation, o
 SVG Mount Fuji skyline with a green gradient fading down from the summit and a plain sky. The
 base fades into mist, and soft cloud layers drift at different speeds and move with scroll depth. A pause
 control freezes the scenery. Reduced motion and no JavaScript show the static illustration.
+A small green marker pulses on the left ridge and ascends with scroll, leaving a fading trail
+along the silhouette and stopping below the summit. It shares the scenery's pause and reduced-motion behavior.
 Cloud motion pauses outside the hero and in hidden tabs. The slow, linear drift uses landing-only
 multiples of the expressive duration token, separate from interface feedback timings.
 The connected-record section uses shared tabs to reveal one explanation and icon diagram at a time.

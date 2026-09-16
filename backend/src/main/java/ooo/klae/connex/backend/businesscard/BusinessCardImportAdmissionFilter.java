@@ -16,6 +16,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.capability.Capability;
 import ooo.klae.connex.backend.capability.CapabilityEntitlement;
+import ooo.klae.connex.backend.config.RequestPathNormalizer;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
@@ -75,7 +76,7 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
             reject(response, HttpServletResponse.SC_FORBIDDEN, Rejection.CAPABILITY_UNAVAILABLE);
             return;
         }
-        Integer workspaceId = workspaceRequestResolver.resolve(request, user.getId());
+        Integer workspaceId = admissionWorkspaceId(request, user.getId(), admission);
         if (workspaceId == null) {
             reject(response, HttpServletResponse.SC_FORBIDDEN, Rejection.WORKSPACE_REQUIRED);
             return;
@@ -101,18 +102,25 @@ public class BusinessCardImportAdmissionFilter extends OncePerRequestFilter {
         chain.doFilter(request, response);
     }
 
-    private static String apiPath(HttpServletRequest request) {
-        String uri = request.getRequestURI();
-        String contextPath = request.getContextPath();
-        if (contextPath != null && !contextPath.isBlank() && uri.startsWith(contextPath)) {
-            return uri.substring(contextPath.length());
+    /**
+     * The workspace this admission check runs against. The resolver hands back the caller's raw
+     * remembered selection, which survives revocation, so on the safe status read this filter
+     * heals to the caller's remaining membership exactly as {@code TenantResolutionInterceptor}
+     * does; the unsafe operations keep failing closed on the stale candidate (#1649).
+     */
+    private Integer admissionWorkspaceId(
+            HttpServletRequest request, int userId, Operation admission) {
+        Integer candidate = workspaceRequestResolver.resolve(request, userId);
+        if (admission != Operation.STATUS
+                || (candidate != null && workspaceService.getRole(candidate, userId) != null)) {
+            return candidate;
         }
-        return uri;
+        return workspaceService.defaultWorkspaceIdFor(userId);
     }
 
     private static Operation operation(HttpServletRequest request) {
         String method = request.getMethod();
-        String path = apiPath(request);
+        String path = RequestPathNormalizer.apiPath(request);
         if ("POST".equals(method) && SCAN_PATH.equals(path)) {
             return Operation.SCAN;
         }

@@ -22,6 +22,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.dto.MemberDto;
@@ -56,6 +57,7 @@ class WorkspaceNotificationLockOrderTest {
     @Mock private AuditService auditService;
     @Mock private SystemActor systemActor;
     @Mock private SessionSecurityService sessionSecurityService;
+    @Mock private RegistrationVerificationService registrationVerificationService;
 
     @InjectMocks private WorkspaceService service;
 
@@ -472,6 +474,7 @@ class WorkspaceNotificationLockOrderTest {
         stubActiveWorkspaceIdentity();
         when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenReturn(membership);
         when(workspaceMapper.getMember(7, 9)).thenReturn(pending);
+        stubVerifiedPendingUser();
         when(orgAllowedDomainService.isJoinAllowed(3, "pending@example.com")).thenReturn(true);
         when(workspaceMapper.activateMember(7, 9)).thenReturn(1);
         when(workspaceMapper.getMembershipsForUser(9)).thenReturn(List.of(activated));
@@ -490,6 +493,7 @@ class WorkspaceNotificationLockOrderTest {
         order.verify(organizationMapper).lockActiveByIdForShare(3);
         order.verify(workspaceMapper).lockAuthorizationMembership(7, 9);
         order.verify(workspaceMapper).getMember(7, 9);
+        order.verify(userMapper).getUserByIdForShare(9);
         order.verify(orgAllowedDomainService).isJoinAllowed(3, "pending@example.com");
         order.verify(workspaceMapper).activateMember(7, 9);
         order.verify(stateVersionService).markChanged(9);
@@ -519,6 +523,7 @@ class WorkspaceNotificationLockOrderTest {
         stubActiveWorkspaceIdentity();
         when(workspaceMapper.lockAuthorizationMembership(7, 9)).thenReturn(membership);
         when(workspaceMapper.getMember(7, 9)).thenReturn(pending);
+        stubVerifiedPendingUser();
         when(orgAllowedDomainService.isJoinAllowed(3, "pending@example.com")).thenReturn(true);
         when(workspaceMapper.activateMember(7, 9)).thenReturn(0);
 
@@ -539,6 +544,14 @@ class WorkspaceNotificationLockOrderTest {
 
         verifyNoInteractions(orgAllowedDomainService);
         verify(workspaceMapper, never()).activateMember(7, 9);
+    }
+
+    private void stubVerifiedPendingUser() {
+        User user = new User();
+        user.setId(9);
+        user.setEmail("pending@example.com");
+        user.setEmailVerified(true);
+        when(userMapper.getUserByIdForShare(9)).thenReturn(user);
     }
 
     @Test

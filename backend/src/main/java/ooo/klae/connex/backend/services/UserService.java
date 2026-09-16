@@ -133,6 +133,8 @@ public class UserService implements UserDetailsService {
      * intentionally immutable here: because email is a trust anchor (email-bound
      * invites rely on it), it can only change through the verified, ownership-proving
      * flow in {@code EmailChangeService}, so any email in the request body is ignored.
+     * A fresh profile-only bean and credential-free update statement also prevent a stale
+     * profile read from overwriting a concurrently confirmed mailbox or password.
      *
      * @param id the user being updated (must be the caller)
      * @param user the submitted profile fields
@@ -142,19 +144,22 @@ public class UserService implements UserDetailsService {
     public User update(int id, User user) {
         workspaceService.requireSelf(id);
         User before = getUserById(id);
-        user.setId(id);
-        user.setEmail(before.getEmail());
+        User profile = new User();
+        profile.setId(id);
+        profile.setUsername(user.getUsername());
+        profile.setDisplayName(user.getDisplayName());
         if (user.getTimezone() == null || user.getTimezone().isBlank()) {
-            user.setTimezone(before.getTimezone());
+            profile.setTimezone(before.getTimezone());
         } else {
-            user.setTimezone(TimezoneSupport.validateIana(user.getTimezone(), null));
+            profile.setTimezone(TimezoneSupport.validateIana(user.getTimezone(), null));
         }
-        user.setLocale(before.getLocale());
-        user.setProfilePictureUrl(before.getProfilePictureUrl());
-        userMapper.update(user);
+        userMapper.update(profile);
         User after = userMapper.getUserById(id);
         if (after == null) {
             throw new ResourceNotFoundException("User not found with id: " + id);
+        }
+        if (!Objects.equals(before.getUsername(), after.getUsername())) {
+            accountSessionRevocationService.closeWebSocketsAfterRename(id);
         }
         auditService.record("user.update", "user", id, after.getUsername(),
             "Updated user " + after.getUsername(),
@@ -245,12 +250,8 @@ public class UserService implements UserDetailsService {
      * tenant-routed pool; enumerating with a workspace pinned would look for control-plane rows in a
      * tenant catalog and find none.
      *
-     * <p>Best effort for the HTTP plane, where the session epoch filter already refuses every
-     * request once the account row is gone. It is <strong>not</strong> best effort for WebSockets: a
-     * socket established before the deletion passes through no servlet filter, so the expiry marker
-     * this writes is the only thing that closes it. A transient failure here therefore leaves that
-     * socket subscribed until its own timeout, which is why the failure is logged at error rather
-     * than swallowed quietly, and why the residual is stated in the pull request.
+     * <p>Enumeration immediately closes known sockets. If it fails or misses a raced session,
+     * the HTTP epoch filter and WebSocket delivery checks independently refuse the deleted account.
      *
      * <p>Logs the exception type only. A failure enumerating sessions surfaces driver messages that
      * can carry row content, and these rows hold a serialized principal.
@@ -262,8 +263,8 @@ public class UserService implements UserDetailsService {
                 return null;
             });
         } catch (RuntimeException exception) {
-            log.error("Could not expire sessions for deleted account {}; an open WebSocket may "
-                + "survive until it times out: {}", id, exception.getClass().getSimpleName());
+            log.error("Could not expire indexed sessions for deleted account {}: {}",
+                id, exception.getClass().getSimpleName());
         }
     }
 

@@ -12,6 +12,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
@@ -125,6 +126,7 @@ class SmsHttpDeliveryProviderTest {
 
             assertEquals(DispatchStatus.REJECTED, receipt.status());
             assertNull(receipt.providerMessageId());
+            assertFalse(receipt.provenBeforeEgress());
             server.verify();
         }
     }
@@ -153,14 +155,17 @@ class SmsHttpDeliveryProviderTest {
         SmsHttpDeliveryProvider provider = new SmsHttpDeliveryProvider(builder.build(), 1024, objectMapper);
 
         try (MockedStatic<AiEgressGuard> ignored = mockStatic(AiEgressGuard.class)) {
-            assertEquals(DispatchStatus.REJECTED,
-                    provider.dispatch(smsTarget(null, Map.of("apiKey", API_KEY)), request()).status());
-            assertEquals(DispatchStatus.REJECTED, provider.dispatch(
-                    smsTarget("http://sms.example.com/v1/messages", Map.of("apiKey", API_KEY)), request()).status());
-            assertEquals(DispatchStatus.REJECTED, provider.dispatch(smsTarget(ENDPOINT, Map.of()), request()).status());
-            assertEquals(DispatchStatus.REJECTED, provider.dispatch(smsTarget(), new DeliveryRequest(
-                    DeliveryChannel.SMS, RECIPIENT,
-                    new RenderedMessage("Subject", "<p>Html</p>", null), 42, "send:1:2")).status());
+            for (DispatchReceipt refused : List.of(
+                    provider.dispatch(smsTarget(null, Map.of("apiKey", API_KEY)), request()),
+                    provider.dispatch(
+                            smsTarget("http://sms.example.com/v1/messages", Map.of("apiKey", API_KEY)), request()),
+                    provider.dispatch(smsTarget(ENDPOINT, Map.of()), request()),
+                    provider.dispatch(smsTarget(), new DeliveryRequest(
+                            DeliveryChannel.SMS, RECIPIENT,
+                            new RenderedMessage("Subject", "<p>Html</p>", null), 42, "send:1:2")))) {
+                assertEquals(DispatchStatus.REJECTED, refused.status());
+                assertTrue(refused.provenBeforeEgress());
+            }
             server.verify();
         }
     }

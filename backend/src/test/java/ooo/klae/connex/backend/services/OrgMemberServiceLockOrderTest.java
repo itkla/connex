@@ -29,6 +29,7 @@ class OrgMemberServiceLockOrderTest {
     @Mock private UserMapper userMapper;
     @Mock private AuditService auditService;
     @Mock private SessionSecurityService sessionSecurityService;
+    @Mock private RegistrationVerificationService registrationVerificationService;
 
     @InjectMocks private OrgMemberService service;
 
@@ -39,7 +40,7 @@ class OrgMemberServiceLockOrderTest {
         when(organizationMapper.lockById(7)).thenReturn(7);
         when(userMapper.lockByIdForShare(1)).thenReturn(1);
         when(userMapper.lockByIdForShare(9)).thenReturn(9);
-        when(userMapper.getUserById(1)).thenReturn(target);
+        when(userMapper.getUserByIdForShare(1)).thenReturn(target);
         when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(9));
 
         service.setMember(7, 9, 1, "admin");
@@ -49,7 +50,7 @@ class OrgMemberServiceLockOrderTest {
         order.verify(userMapper).lockByIdForShare(1);
         order.verify(userMapper).lockByIdForShare(9);
         order.verify(organizationMapper).lockById(7);
-        order.verify(userMapper).getUserById(1);
+        order.verify(userMapper).getUserByIdForShare(1);
         order.verify(orgMemberMapper).lockOwnerIds(7);
         order.verify(orgMemberMapper).addMember(7, 1, "admin");
     }
@@ -81,7 +82,7 @@ class OrgMemberServiceLockOrderTest {
         when(organizationMapper.lockById(7)).thenReturn(7);
         when(userMapper.lockByIdForShare(1)).thenReturn(1);
         when(userMapper.lockByIdForShare(9)).thenReturn(9);
-        when(userMapper.getUserById(9)).thenReturn(target);
+        when(userMapper.getUserByIdForShare(9)).thenReturn(target);
         when(orgMemberMapper.lockOwnerIds(7)).thenReturn(List.of(2));
 
         assertThrows(ForbiddenException.class, () -> service.setMember(7, 1, 9, "admin"));

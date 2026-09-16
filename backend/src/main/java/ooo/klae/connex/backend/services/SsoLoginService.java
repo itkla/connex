@@ -28,15 +28,14 @@ import ooo.klae.connex.backend.mappers.UserMapper;
  * <ol>
  *   <li>a known {@code (org, provider, issuer, subject)} link signs the linked user straight in —
  *       the lookup is scoped to the organization, so one org's IdP cannot match another's identity;</li>
- *   <li>otherwise the IdP email must be <em>verified</em> and its domain must be one this
- *       organization owns in its {@code sso_domain} routing list (globally unique), binding the
- *       asserted email to the org so no IdP can assert or claim an address belonging to another org,
- *       and — when the org has set an {@code org_allowed_domain} membership ceiling (#316) — the
+ *   <li>otherwise the IdP email must be <em>verified</em> and its domain must be in this
+ *       organization's {@code sso_domain} routing list (globally unique), and — when the org has
+ *       set an {@code org_allowed_domain} membership ceiling (#316) — the
  *       domain must also satisfy that ceiling, so SSO cannot provision a member the org's own policy
  *       forbids;</li>
  *   <li>a matching existing password account never auto-links — it returns
  *       {@link SsoLoginResult.LinkRequired} so ownership is proven first, and a passwordless account
- *       already federated to a different organization is refused;</li>
+ *       is refused because an email assertion does not prove ownership of its existing login method;</li>
  *   <li>a new email is JIT-provisioned into the connection's workspace and the identity recorded.</li>
  * </ol>
  * The target workspace, organization, and default role are read only from the stored
@@ -77,19 +76,21 @@ public class SsoLoginService {
      * @param emailVerified whether the IdP asserts the email is verified
      * @param orgId the organization whose connection minted this login
      * @param displayName the IdP-asserted display name, used when provisioning
+     * @param oidcClientId the authenticated ID token client (azp or sole aud), null for SAML
      * @return a login outcome, or a link-required outcome when the email collides with a password account
-     * @throws ForbiddenException when the organization is being removed, the email is unverified,
-     *         its domain is not owned by this organization, or the account is already federated to
-     *         a different organization
+     * @throws ForbiddenException when the current OIDC connection no longer matches the authenticated
+     *         identity, the organization is being removed, the email is unverified,
+     *         its domain is not routed to this organization, or an existing passwordless account
+     *         would be linked solely by email
      * @throws BadRequestException when the organization has no SSO connection
      */
     public SsoLoginResult resolve(String provider, String issuer, String subject, String email,
-            boolean emailVerified, int orgId, String displayName) {
+            boolean emailVerified, int orgId, String displayName, String oidcClientId) {
         FederatedIdentity identity = federatedIdentityMapper.findByOrgProviderIssuerSubject(
                 orgId, provider, issuer, subject);
         if (identity != null) {
             SsoLoginResult result = transactionTemplate.execute(status ->
-                resolveReturningIdentity(identity, provider, issuer, subject, orgId));
+                resolveReturningIdentity(identity, provider, issuer, subject, orgId, oidcClientId));
             return Objects.requireNonNull(result, "returning SSO login result");
         }
 
@@ -106,7 +107,8 @@ public class SsoLoginService {
                 emailVerified,
                 orgId,
                 displayName,
-                jitWorkspaceId));
+                jitWorkspaceId,
+                oidcClientId));
     }
 
     private SsoLoginResult resolveFreshIdentity(
@@ -117,11 +119,12 @@ public class SsoLoginService {
             boolean emailVerified,
             int orgId,
             String displayName,
-            int expectedJitWorkspaceId) {
+            int expectedJitWorkspaceId,
+            String oidcClientId) {
         FederatedIdentity identity = federatedIdentityMapper.findByOrgProviderIssuerSubject(
                 orgId, provider, issuer, subject);
         if (identity != null) {
-            return resolveReturningIdentity(identity, provider, issuer, subject, orgId);
+            return resolveReturningIdentity(identity, provider, issuer, subject, orgId, oidcClientId);
         }
 
         requireProvisioningAllowed(email, emailVerified, orgId);
@@ -141,13 +144,16 @@ public class SsoLoginService {
                 issuer,
                 subject,
                 email,
-                orgId);
+                orgId,
+                oidcClientId);
             if (user.getPassword() != null) {
                 return SsoLoginResult.linkRequired(user.getId(), provider, issuer, subject, orgId);
             }
             if (federatedIdentityMapper.countByUserIdExcludingOrg(user.getId(), orgId) > 0) {
                 throw new ForbiddenException("This account is managed by a different organization");
             }
+            throw new ForbiddenException(
+                    "An account already exists for this email. Sign in with the method you first used.");
         } else {
             lockNewJitRoots(
                 connection,
@@ -155,7 +161,8 @@ public class SsoLoginService {
                 issuer,
                 subject,
                 email,
-                orgId);
+                orgId,
+                oidcClientId);
             user = ssoUserProvisioner.provision(email, displayName, true);
             auditService.record("org.sso_user.provision", "organization", orgId, user.getDisplayName(),
                     "SSO user provisioned", Map.of("userId", user.getId(), "provider", provider));
@@ -214,12 +221,16 @@ public class SsoLoginService {
             String provider,
             String issuer,
             String subject,
-            int orgId) {
+            int orgId,
+            String oidcClientId) {
         User user = userMapper.getUserByIdForShare(discovered.getUserId());
         if (user == null) {
             throw new ForbiddenException("This organization is not accepting sign-ins");
         }
         requireActiveOrganization(orgId);
+        if ("oidc".equals(provider)) {
+            requireCurrentOidcConnection(provider, issuer, oidcClientId, orgId);
+        }
         FederatedIdentity current = federatedIdentityMapper.findByOrgProviderIssuerSubject(
             orgId,
             provider,
@@ -239,14 +250,15 @@ public class SsoLoginService {
             String issuer,
             String subject,
             String email,
-            int orgId) {
+            int orgId,
+            String oidcClientId) {
         User user = userMapper.getUserByIdForShare(discovered.getId());
         if (user == null) {
             throw new ForbiddenException("SSO account resolution changed; retry sign-in");
         }
         lockJitWorkspace(connection, orgId);
         requireActiveOrganization(orgId);
-        requireJitStateUnchanged(connection, provider, issuer, subject, email, orgId);
+        requireJitStateUnchanged(connection, provider, issuer, subject, email, orgId, oidcClientId);
         User currentByEmail = userMapper.getUserByEmail(email);
         if (currentByEmail == null || currentByEmail.getId() != user.getId()) {
             throw new ForbiddenException("SSO account resolution changed; retry sign-in");
@@ -260,10 +272,11 @@ public class SsoLoginService {
             String issuer,
             String subject,
             String email,
-            int orgId) {
+            int orgId,
+            String oidcClientId) {
         lockJitWorkspace(connection, orgId);
         requireActiveOrganization(orgId);
-        requireJitStateUnchanged(connection, provider, issuer, subject, email, orgId);
+        requireJitStateUnchanged(connection, provider, issuer, subject, email, orgId, oidcClientId);
         if (userMapper.getUserByEmail(email) != null) {
             throw new ForbiddenException("SSO account resolution changed; retry sign-in");
         }
@@ -288,8 +301,9 @@ public class SsoLoginService {
             String issuer,
             String subject,
             String email,
-            int orgId) {
-        SsoConnection current = ssoConnectionMapper.findByOrg(orgId);
+            int orgId,
+            String oidcClientId) {
+        SsoConnection current = requireCurrentOidcConnection(provider, issuer, oidcClientId, orgId);
         if (!discovered.equals(current)
                 || federatedIdentityMapper.findByProviderIssuerSubject(
                     provider,
@@ -299,6 +313,27 @@ public class SsoLoginService {
                 || !orgAllowedDomainService.isJoinAllowedForShare(orgId, email)) {
             throw new ForbiddenException("SSO account resolution changed; retry sign-in");
         }
+    }
+
+    /**
+     * Revalidates OIDC completion under user/workspace/organization roots, before identity or account
+     * writes. The locked read sees configuration commits hidden by a repeatable-read snapshot. Issuer
+     * comparison retains the ID token's exact iss string; discovery-only slash normalization does not
+     * apply. The client is taken from the authenticated token, never a new registration lookup.
+     */
+    private SsoConnection requireCurrentOidcConnection(
+            String provider, String issuer, String oidcClientId, int orgId) {
+        if (!"oidc".equals(provider)) {
+            return ssoConnectionMapper.findByOrg(orgId);
+        }
+        SsoConnection current = ssoConnectionMapper.findByOrgForUpdate(orgId);
+        if (current == null || !current.isEnabled() || !"oidc".equals(current.getProtocol())
+                || issuer == null || !issuer.equals(current.getOidcIssuer())
+                || oidcClientId == null || oidcClientId.isBlank()
+                || !oidcClientId.equals(current.getOidcClientId())) {
+            throw new ForbiddenException("This organization is not accepting sign-ins");
+        }
+        return current;
     }
 
     private void requireActiveOrganization(int orgId) {

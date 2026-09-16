@@ -80,12 +80,13 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
             FilterChain filterChain) throws ServletException, IOException {
         User user = currentUser();
-        if (user == null || !properties.isEnforced()) {
+        if (user == null) {
             filterChain.doFilter(request, response);
             return;
         }
-        String path = RequestPathNormalizer.stripPathParameters(request.getRequestURI());
-        if (privilegedAccountService.isPrivileged(user.getId())
+        String path = RequestPathNormalizer.apiPath(request);
+        if (properties.isEnforced()
+                && privilegedAccountService.isPrivileged(user.getId())
                 && !webAuthnService.hasPasskey(user.getId())
                 && !isEnrollmentPath(request.getMethod(), path)
                 && !isLinkFlowPath(path)) {
@@ -97,9 +98,10 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             return;
         }
         if (requiresExportStepUp(request.getMethod(), path)
-                && !sessionSecurityService.hasFreshRecentAuthentication(request.getSession(false), user.getId())) {
-            auditService.recordFailureScoped("auth.mfa.step_up.required", "user", user.getId(), null, null,
-                    user.getDisplayName(), "Recent MFA required for data export", "step_up_required");
+                && !sessionSecurityService.isExportStepUpSatisfied(request.getSession(false), user.getId())) {
+            auditService.recordFailureScoped(AuditService.EXPORT_STEP_UP_ACTION, "user", user.getId(),
+                    null, null, user.getDisplayName(), AuditService.EXPORT_STEP_UP_SUMMARY,
+                    "step_up_required");
             deny(response, RECENT_AUTHENTICATION_REQUIRED_CODE,
                     "Recent passkey verification is required");
             return;

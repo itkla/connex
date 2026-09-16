@@ -4,6 +4,12 @@ const API_BASE =
         : "";
 
 import { clearAllDrafts } from "@/app/lib/formDrafts";
+import {
+    adoptBrowserAccount,
+    invalidateAccountStorage,
+    reconcileBrowserAccount,
+    resetBrowserAccount,
+} from "@/app/lib/browserAccountStorage";
 import { resolveAiGeneration } from '@/app/lib/aiGeneration';
 import { isProtectedPath } from "@/app/lib/protectedRoutes";
 import { isProtectedMediaPath } from "@/app/lib/protectedMedia";
@@ -18,27 +24,9 @@ import type {
 
 import * as Types from '@/app/lib/types';
 import { localeFromCookieHeader } from '@/i18n/config';
+export { subscribeToLaunch, type LaunchSignupResult } from "@/app/lib/launchSignup";
+
 // Types
-
-export type LaunchSignupResult = "success" | "invalid" | "error" | "rateLimited";
-
-/** Uses the public Next.js endpoint without application cookies, CSRF, or workspace context. */
-export async function subscribeToLaunch(email: string, website = ""): Promise<LaunchSignupResult> {
-    const response = await fetch("/api/launch-signups", {
-        method: "POST",
-        credentials: "omit",
-        cache: "no-store",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, website }),
-        signal: AbortSignal.timeout(15_000),
-    });
-    if (response.status === 429) return "rateLimited";
-    const body: unknown = await response.json();
-    if (typeof body !== "object" || body === null) return "error";
-    if (response.ok && "status" in body && body.status === "subscribed") return "success";
-    if ("error" in body && body.error === "invalid_email") return "invalid";
-    return "error";
-}
 
 function requestLocale(init: RequestInit): string {
     const cookieHeader = typeof document === "undefined"
@@ -109,20 +97,23 @@ const clientRequestIdentityInvalidationListeners = new Set<() => void>();
 
 if (typeof window !== "undefined") {
     window.addEventListener("storage", (event) => {
-        if (event.key === CLIENT_IDENTITY_EVENT_KEY) {
-            invalidateClientRequestIdentity();
-            if (event.newValue?.startsWith("logout:")) {
-                clearAllDrafts();
-                window.location.reload();
-            } else if (event.newValue?.startsWith("workspace:")) {
-                if (isProtectedPath(window.location.pathname)) {
-                    window.location.replace("/dashboard");
-                } else {
-                    window.location.reload();
-                }
-            } else if (event.newValue?.startsWith("refresh:")) {
+        if (event.key !== CLIENT_IDENTITY_EVENT_KEY) return;
+        const action = event.newValue?.split(":")[0];
+        if (action === "logout") resetBrowserAccount();
+        else if (action === "account") invalidateAccountStorage();
+        else if (action === "refresh") reconcileBrowserAccount();
+        invalidateClientRequestIdentity();
+        if (action === "logout") {
+            clearAllDrafts();
+            window.location.reload();
+        } else if (action === "workspace") {
+            if (isProtectedPath(window.location.pathname)) {
+                window.location.replace("/dashboard");
+            } else {
                 window.location.reload();
             }
+        } else if (action === "refresh") {
+            window.location.reload();
         }
     });
 }
@@ -222,7 +213,7 @@ export function fetchProtectedMediaResponse(
     });
 }
 
-type ClientIdentityTransition = "invalidate" | "refresh" | "logout" | "workspace";
+type ClientIdentityTransition = "invalidate" | "account" | "refresh" | "logout" | "workspace";
 
 function broadcastClientRequestIdentityTransition(action: ClientIdentityTransition) {
     if (typeof window === "undefined") return;
@@ -237,8 +228,22 @@ function broadcastClientRequestIdentityTransition(action: ClientIdentityTransiti
 }
 
 function signalClientRequestIdentityTransition(action: ClientIdentityTransition) {
+    if (action === "account") invalidateAccountStorage();
+    if (action === "logout") resetBrowserAccount();
     invalidateClientRequestIdentity();
     broadcastClientRequestIdentityTransition(action);
+}
+
+/**
+ * Synchronizes storage after server-rendered authentication. Only a different account discards the
+ * previous account's browser data; re-authenticating the same user keeps that user's own data.
+ * @param userId the account the server authenticated for this document
+ */
+export function synchronizeBrowserAccount(userId: number): void {
+    if (adoptBrowserAccount(userId) !== "replaced") return;
+    clearAllDrafts();
+    invalidateClientRequestIdentity();
+    broadcastClientRequestIdentityTransition("refresh");
 }
 
 async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIdentity | null> {
@@ -1463,15 +1468,41 @@ function isDocumentBodyMark(value: unknown): value is Types.DocumentBodyMark {
         && (value.attrs === undefined || isObjectRecord(value.attrs));
 }
 
-function isDocumentBodyNode(value: unknown): value is Types.DocumentBodyNode {
-    return isObjectRecord(value)
-        && typeof value.type === "string"
-        && (value.attrs === undefined || isObjectRecord(value.attrs))
-        && (value.content === undefined
-            || (Array.isArray(value.content) && value.content.every(isDocumentBodyNode)))
-        && (value.marks === undefined
-            || (Array.isArray(value.marks) && value.marks.every(isDocumentBodyMark)))
-        && (value.text === undefined || typeof value.text === "string");
+function isDocumentBodyNode(
+    value: unknown,
+    parent = "root",
+    depth = 0,
+    budget = { nodes: 0 },
+): value is Types.DocumentBodyNode {
+    if (depth > 50 || ++budget.nodes > 5000 || !isObjectRecord(value)
+            || typeof value.type !== "string"
+            || (value.attrs !== undefined && !isObjectRecord(value.attrs))
+            || (value.content !== undefined && !Array.isArray(value.content))
+            || (value.marks !== undefined
+                && (!Array.isArray(value.marks) || !value.marks.every(isDocumentBodyMark)))
+            || (value.text !== undefined && typeof value.text !== "string")) {
+        return false;
+    }
+    const blocks = [
+        "paragraph", "heading", "bulletList", "orderedList", "blockquote", "codeBlock",
+        "horizontalRule", "lineItems",
+    ];
+    const allowed = parent === "root" ? ["doc"]
+        : ["doc", "blockquote", "listItem"].includes(parent) ? blocks
+        : ["bulletList", "orderedList"].includes(parent) ? ["listItem"]
+        : ["paragraph", "heading"].includes(parent) ? ["text", "hardBreak", "mergeToken"]
+        : parent === "codeBlock" ? ["text"] : [];
+    if (!allowed.includes(value.type)
+            || (value.type === "text" && typeof value.text !== "string")) {
+        return false;
+    }
+    const content = Array.isArray(value.content) ? value.content : [];
+    if (value.type === "listItem"
+            && (!isObjectRecord(content[0]) || content[0].type !== "paragraph")) {
+        return false;
+    }
+    const type = value.type;
+    return content.every((child: unknown) => isDocumentBodyNode(child, type, depth + 1, budget));
 }
 
 function isDealLineItem(value: unknown): value is Types.DealLineItem {
@@ -1713,6 +1744,7 @@ export async function getPublicPageUserFromCookie(cookie: string | null): Promis
 }
 
 export function logout() {
+    signalClientRequestIdentityTransition("account");
     clearAllDrafts();
     return withClientRequestIdentityReset(() => postJson<void>("/api/auth/logout"), "logout");
 }
@@ -1826,10 +1858,10 @@ export function validateEmailChangeToken(init: RequestInit = {}) {
 
 /**
  * Applies a pending email change behind a valid confirmation token.
- * @returns A promise resolving to the confirmation message
+ * @returns The confirmation message and pending workspace invitations revoked by the change
  */
 export function confirmEmailChange() {
-    return postJson<Types.AuthResponse>("/api/auth/email-change/confirm", {});
+    return postJson<Types.EmailChangeConfirmation>("/api/auth/email-change/confirm", {});
 }
 
 export function getPasskeys(init: RequestInit = {}) {

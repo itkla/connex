@@ -35,10 +35,10 @@ class SignupModeTest {
 
     @Test
     void adminCreatePath_isExemptWhenSignupModeNotOpen() {
-        User created = authService.register(dto("admin_made", "admin.made@example.com"), true);
+        User created = authService.register(dto("admin_made", "admin.made@example.com"), null);
 
         assertNotNull(created.getId());
-        assertTrue(created.isEmailVerified(), "admin-created accounts are trusted and start verified");
+        assertTrue(created.isEmailVerified(), "accounts start verified when registration verification is disabled");
     }
 
     private static RegisterDto dto(String username, String email) {

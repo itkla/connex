@@ -1,12 +1,15 @@
 package ooo.klae.connex.backend.observability;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -21,16 +24,19 @@ class MetricsScrapeTokenFilterTest {
         SecurityContextHolder.clearContext();
     }
 
-    @Test
-    void validTokenAuthenticatesOnlyForTheFilterChainSpanWithoutCreatingSession() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/metrics", "/%61pi/%6detrics", "//api/metrics;x"})
+    void validTokenAuthenticatesOnlyForTheFilterChainSpanWithoutCreatingSession(String path) throws Exception {
         MetricsScrapeTokenFilter filter = new MetricsScrapeTokenFilter(TOKEN);
-        MockHttpServletRequest request = request("/api/metrics", "Bearer " + TOKEN);
+        MockHttpServletRequest request = request("/connex" + path, "Bearer " + TOKEN);
+        request.setContextPath("/connex");
         MockHttpServletResponse response = new MockHttpServletResponse();
         AtomicReference<Authentication> duringRequest = new AtomicReference<>();
 
         filter.doFilter(request, response, (servletRequest, servletResponse) ->
                 duringRequest.set(SecurityContextHolder.getContext().getAuthentication()));
 
+        assertNotNull(duringRequest.get());
         assertEquals("metrics-scraper", duringRequest.get().getPrincipal());
         assertEquals("METRICS_SCRAPE", duringRequest.get().getAuthorities().iterator().next().getAuthority());
         assertNull(request.getSession(false));

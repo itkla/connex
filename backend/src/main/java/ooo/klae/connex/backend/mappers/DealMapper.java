@@ -343,6 +343,8 @@ public interface DealMapper {
     /** Bulk-insert deals in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Deal> deals);
     int update(Deal deal);
+    /** Updates only outcome and stage fields on the workspace-scoped, locked parent deal. */
+    int updateOutcome(Deal deal);
     int updateName(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id,

@@ -225,7 +225,11 @@ export function AuthForm({
             return tMode("registerFailed");
         }
 
-        return err.message;
+        if (err.status === 429) {
+            return tForm("tooManyAttempts");
+        }
+
+        return tForm("genericError");
     }
 
     function getPasskeyErrorMessage(err: unknown) {
@@ -262,7 +266,10 @@ export function AuthForm({
                 });
             }
 
-            toastSuccess(tMode("successMessage"));
+            const successDetail = mode === "register"
+                ? { description: tMode("verificationNotice", { email: values.email.trim() }) }
+                : undefined;
+            toastSuccess(tMode("successMessage"), successDetail);
             routeAfterAuth();
         } catch (err) {
             const nextFieldErrors = err instanceof ApiError && err.code === BREACHED_PASSWORD_CODE
@@ -280,7 +287,9 @@ export function AuthForm({
 
             setError(message);
             setFieldErrors(nextFieldErrors);
-            toastError(message);
+            if (!hasFieldErrors) {
+                toastError(message);
+            }
         } finally {
             setSubmitting(false);
         }
@@ -383,7 +392,7 @@ export function AuthForm({
                                             )}
                                         </div>
                                         {fieldError && (
-                                            <p id={errorId} className="mt-1.5 px-1 text-sm text-destructive">
+                                            <p id={errorId} role="alert" className="mt-1.5 px-1 text-sm text-destructive">
                                                 {fieldError}
                                             </p>
                                         )}

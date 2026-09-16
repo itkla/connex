@@ -1,21 +1,27 @@
 package ooo.klae.connex.backend.storage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
+import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.AttachmentScanMapper;
 import ooo.klae.connex.backend.services.PlacementRegistry;
@@ -26,6 +32,31 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /** Pins bounded catalog rotation independently of scanner/provider latency. */
 class AttachmentScanWorkerTest {
+    @Test
+    void malformedCandidateIsPermanentlyRefusedWithoutProviderIoOrRetry() {
+        AttachmentScanMapper scans = mock(AttachmentScanMapper.class);
+        AttachmentScanTransactions transactions = mock(AttachmentScanTransactions.class);
+        ManagedObjectService managedObjects = mock(ManagedObjectService.class);
+        ObjectStorage storage = mock(ObjectStorage.class);
+        MalwareScannerClient scanner = mock(MalwareScannerClient.class);
+        Attachment claimed = new Attachment();
+        claimed.setWorkspaceId(7);
+        claimed.setId(13);
+        claimed.setUrl("/api/attachments/content/not-a-token.txt");
+        when(transactions.claim(7, 13)).thenReturn(claimed);
+        when(managedObjects.managedAttachmentKey(7, claimed.getUrl())).thenReturn(Optional.empty());
+        AttachmentScanWorker worker = new AttachmentScanWorker(scans, transactions,
+            managedObjects, storage, mock(ManagedObjectReadAdmissionService.class), scanner,
+            new MalwareScanProperties(), mock(PlacementRegistry.class), mock(TenantWorkScope.class),
+            mock(SystemActor.class));
+
+        assertFalse(worker.scan(7, 13, 99));
+
+        verify(transactions).refuse(claimed);
+        verify(transactions, never()).retry(claimed);
+        verifyNoInteractions(storage, scanner);
+    }
+
     @Test
     void catalogCursorsAdvanceThroughIdleWorkspacesAndWrapDespiteNewArrivals() {
         AttachmentScanMapper scans = mock(AttachmentScanMapper.class);

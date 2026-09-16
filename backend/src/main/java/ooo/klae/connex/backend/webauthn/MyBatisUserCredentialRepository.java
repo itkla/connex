@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.web.webauthn.api.AuthenticatorTransport;
 import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.security.web.webauthn.api.CredentialRecord;
@@ -34,8 +35,11 @@ public class MyBatisUserCredentialRepository implements UserCredentialRepository
     @Override
     public void save(CredentialRecord credentialRecord) {
         WebauthnCredentialRow row = toRow(credentialRecord);
-        if (mapper.findByCredentialId(row.getCredentialId()) != null) {
-            mapper.updateMutable(row);
+        WebauthnCredentialRow existing = mapper.findByCredentialId(row.getCredentialId());
+        if (existing != null) {
+            if (mapper.updateMutable(row, existing.getSignatureCount()) != 1) {
+                throw new BadCredentialsException("Passkey signature counter is no longer current");
+            }
         } else {
             mapper.insert(row);
         }
