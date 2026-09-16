@@ -72,6 +72,9 @@ class BusinessCardImportAdmissionFilterTest {
             .when(workspaceRequestResolver.resolve(
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(9)))
             .thenReturn(7);
+        org.mockito.Mockito.lenient()
+            .when(workspaceService.getRole(7, 9))
+            .thenReturn("member");
         SecurityContextHolder.getContext().setAuthentication(
             new TestingAuthenticationToken(user, null, "ROLE_USER"));
     }
@@ -305,6 +308,48 @@ class BusinessCardImportAdmissionFilterTest {
             "Too many business-card requests");
         assertNull(chain.getRequest());
         assertFalse(request.bodyAccessed());
+    }
+
+    /**
+     * The resolver hands back the caller's raw remembered selection, so a member removed from that
+     * workspace must not have the safe status read refused before the interceptor can heal it.
+     */
+    @Test
+    void statusReadHealsARevokedRememberedWorkspaceInsteadOfRejectingIt() throws Exception {
+        when(workspaceService.getRole(7, 9)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(9)).thenReturn(19);
+        TrackingMultipartRequest request = request(
+            "GET", "/api/business-cards/import", IDEMPOTENCY_KEY);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(200, response.getStatus());
+        assertNotNull(chain.getRequest());
+        verify(workspaceService).requirePermission(19, 9, Permission.PERSON_CREATE);
+        verify(workspaceService).requirePermission(19, 9, Permission.ATTACHMENT_CREATE);
+        verify(rateLimiter).requireStatusAllowed(9);
+    }
+
+    @Test
+    void unsafeOperationsStillFailClosedOnARevokedRememberedWorkspace() throws Exception {
+        doThrow(new ForbiddenException("denied"))
+            .when(workspaceService).requirePermission(7, 9, Permission.PERSON_CREATE);
+        TrackingMultipartRequest request = request(
+            "POST", "/api/business-cards/scan", null);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(403, response.getStatus());
+        assertJsonRejection(
+            response,
+            "BUSINESS_CARD_PERMISSION_DENIED",
+            "Business-card permission is required");
+        assertNull(chain.getRequest());
+        verify(workspaceService, never()).defaultWorkspaceIdFor(9);
     }
 
     private static TrackingMultipartRequest request(String idempotencyKey) {

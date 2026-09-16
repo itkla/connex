@@ -85,6 +85,12 @@
     UPDATE app_user SET last_active_workspace_id = #{workspaceId} WHERE id = #{userId}
   </update>
 
+  <!-- The only writer that NULLs the remembered selection. Without it a user removed from their
+       last workspace keeps pointing at a workspace they can never resolve again (#1649). -->
+  <update id="clearLastActiveWorkspaceId">
+    UPDATE app_user SET last_active_workspace_id = NULL WHERE id = #{userId}
+  </update>
+
   <select id="isMember" resultType="boolean">
     SELECT EXISTS(
       SELECT 1
