@@ -109,21 +109,22 @@ public class WorkflowService {
         if (request == null) {
             throw new BadRequestException("Workflow request is required");
         }
+        WorkflowExecutionMode executionMode = WorkflowExecutionMode.parse(request.getExecutionMode());
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
         CanonicalDraft draft = canonicalizer.canonicalizeDraftNodes(
             request.getName(),
             request.getDescription(),
             request.getRecordType(),
-            request.getExecutionMode(),
+            executionMode.value(),
             request.getDefinition(),
             request.getCanvas());
         LockedPrincipals principals = lockAuthoringPrincipals(
             workspaceId,
             actorId,
-            draft.executionMode(),
+            executionMode,
             new TreeSet<>(List.of(actorId, runAsUserId)),
-            "user".equals(draft.executionMode()) ? Set.of(runAsUserId) : Set.of(),
+            runAsUserId,
             admitTriggerCapacity);
         Set<Permission> requiredPermissions = workflowDefinitionValidator.validateDraftActionsForMutation(
             draft.recordType(),
@@ -142,8 +143,10 @@ public class WorkflowService {
         workflow.setDraftRevision(0);
         workflow.setDraftRecordType(draft.recordType());
         workflow.setDraftExecutionMode(draft.executionMode());
-        workflow.setDraftRunAsUserId(
-            "user".equals(draft.executionMode()) ? runAsUserId : null);
+        workflow.setDraftRunAsUserId(switch (executionMode) {
+            case USER -> runAsUserId;
+            case SYSTEM -> null;
+        });
         workflow.setDraftDefinitionJson(draft.definitionJson());
         workflow.setDraftCanvasJson(draft.canvasJson());
         workflow.setActiveVersionId(null);
@@ -173,6 +176,7 @@ public class WorkflowService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = workspaceService.getCurrentUserId();
         int expectedRevision = request.getExpectedRevision();
+        WorkflowExecutionMode executionMode = WorkflowExecutionMode.parse(request.getExecutionMode());
         Workflow discovered = requireWorkflow(workspaceId, id);
         requireMutable(discovered);
         if (expectedRevision == Integer.MAX_VALUE) {
@@ -182,20 +186,18 @@ public class WorkflowService {
             request.getName(),
             request.getDescription(),
             request.getRecordType(),
-            request.getExecutionMode(),
+            executionMode.value(),
             request.getDefinition(),
             request.getCanvas());
-        Integer discoveredRunAsUserId = resolveDraftRunAs(discovered, draft.executionMode());
+        Integer discoveredRunAsUserId = resolveDraftRunAs(discovered, executionMode);
         TreeSet<Integer> principalIds = workflowPrincipalIds(discovered);
         addPrincipal(principalIds, discoveredRunAsUserId);
         LockedPrincipals principals = lockAuthoringPrincipals(
             workspaceId,
             actorId,
-            draft.executionMode(),
+            executionMode,
             principalIds,
-            "user".equals(draft.executionMode())
-                ? Set.of(discoveredRunAsUserId)
-                : Set.of(),
+            discoveredRunAsUserId,
             false);
         Set<Permission> requiredPermissions = workflowDefinitionValidator.validateDraftActionsForMutation(
             draft.recordType(),
@@ -209,7 +211,7 @@ public class WorkflowService {
         if (existing.getDraftRevision() != expectedRevision) {
             throw new ConflictException("Workflow draft revision does not match");
         }
-        Integer runAsUserId = resolveDraftRunAs(existing, draft.executionMode());
+        Integer runAsUserId = resolveDraftRunAs(existing, executionMode);
         if (!Objects.equals(discoveredRunAsUserId, runAsUserId)) {
             throw new ConflictException("Workflow principal state changed during authorization");
         }
@@ -247,9 +249,11 @@ public class WorkflowService {
         Workflow workflow = requireWorkflow(workspaceId, id);
         requireMutable(workflow);
         CanonicalDraft draft = canonicalPersistedDraft(workflow);
-        boolean systemAuthoringAllowed = !"system".equals(draft.executionMode())
-            || workspaceService.isBuiltInAdmin(
+        boolean systemAuthoringAllowed = switch (WorkflowExecutionMode.parse(draft.executionMode())) {
+            case USER -> true;
+            case SYSTEM -> workspaceService.isBuiltInAdmin(
                 workspaceId, workspaceService.getCurrentUserId());
+        };
         Set<Permission> requiredPermissions;
         try {
             canonicalizer.requirePublishableCanvas(draft);
@@ -324,23 +328,21 @@ public class WorkflowService {
         MutationDiscovery discovery = discoverMutation(workspaceId, id, true);
         Workflow discovered = discovery.workflow();
         requireMutable(discovered);
-        String discoveredExecutionMode = discovered.getDraftExecutionMode();
-        TreeSet<Integer> requiredActiveIds = new TreeSet<>();
-        if ("user".equals(discoveredExecutionMode)) {
-            addRequiredPrincipal(requiredActiveIds, discovered.getDraftRunAsUserId());
-        }
-        LockedPrincipals principals = lockAuthoringPrincipals(
-            workspaceId,
-            actorId,
-            discoveredExecutionMode,
-            discovery.principalIds(),
-            requiredActiveIds,
-            true);
-        if ("system".equals(discoveredExecutionMode)) {
-            principals.requireExisting(
-                discovered.getCreatedById(),
-                "System workflow creator account no longer exists");
-        }
+        WorkflowExecutionMode executionMode = WorkflowExecutionMode.parse(discovered.getDraftExecutionMode());
+        LockedPrincipals principals = switch (executionMode) {
+            case USER -> lockAuthoringPrincipals(
+                workspaceId, actorId, executionMode, discovery.principalIds(),
+                discovered.getDraftRunAsUserId(), true);
+            case SYSTEM -> {
+                LockedPrincipals locked = lockAuthoringPrincipals(
+                    workspaceId, actorId, executionMode, discovery.principalIds(),
+                    discovered.getDraftRunAsUserId(), true);
+                locked.requireExisting(
+                    discovered.getCreatedById(),
+                    "System workflow creator account no longer exists");
+                yield locked;
+            }
+        };
         Workflow workflow = requireWorkflowForUpdate(workspaceId, id);
         requireMutable(workflow);
         requireStableAuthorizationDiscovery(discovered, workflow);
@@ -351,7 +353,7 @@ public class WorkflowService {
 
         CanonicalDraft draft = canonicalPersistedDraft(workflow);
         canonicalizer.requirePublishableCanvas(draft);
-        if (!Objects.equals(discoveredExecutionMode, draft.executionMode())) {
+        if (!Objects.equals(executionMode.value(), draft.executionMode())) {
             throw new ConflictException("Workflow execution mode changed during authorization");
         }
         WorkflowDefinition definition = canonicalizer.parseDefinition(draft.definitionJson());
@@ -529,26 +531,33 @@ public class WorkflowService {
             requireMutable(discovery.workflow());
         }
         WorkflowVersion discoveredActive = discovery.activeVersion();
-        String executionMode = discoveredActive == null
+        WorkflowExecutionMode executionMode = WorkflowExecutionMode.parse(discoveredActive == null
             ? discovery.workflow().getDraftExecutionMode()
-            : discoveredActive.getExecutionMode();
-        TreeSet<Integer> requiredActiveIds = new TreeSet<>();
-        if (enabled && discoveredActive != null && "user".equals(executionMode)) {
-            addRequiredPrincipal(requiredActiveIds, discoveredActive.getRunAsUserId());
-        }
-        LockedPrincipals principals = enabled && "system".equals(executionMode)
-            ? principalLockService.lockSystemMutation(
-                workspaceId, actorId, discovery.principalIds(), true)
+            : discoveredActive.getExecutionMode());
+        LockedPrincipals principals = enabled
+            ? switch (executionMode) {
+                case USER -> {
+                    TreeSet<Integer> requiredActiveIds = new TreeSet<>();
+                    if (discoveredActive != null) {
+                        addRequiredPrincipal(requiredActiveIds, discoveredActive.getRunAsUserId());
+                    }
+                    yield principalLockService.lockUserMutation(
+                        workspaceId, actorId, discovery.principalIds(), requiredActiveIds, true);
+                }
+                case SYSTEM -> {
+                    LockedPrincipals locked = principalLockService.lockSystemMutation(
+                        workspaceId, actorId, discovery.principalIds(), true);
+                    locked.requireExisting(
+                        discovery.workflow().getCreatedById(),
+                        "System workflow creator account no longer exists");
+                    locked.requireExisting(
+                        discoveredActive == null ? null : discoveredActive.getCreatedById(),
+                        "System workflow creator account no longer exists");
+                    yield locked;
+                }
+            }
             : principalLockService.lockUserMutation(
-                workspaceId, actorId, discovery.principalIds(), requiredActiveIds, enabled);
-        if (enabled && "system".equals(executionMode)) {
-            principals.requireExisting(
-                discovery.workflow().getCreatedById(),
-                "System workflow creator account no longer exists");
-            principals.requireExisting(
-                discoveredActive == null ? null : discoveredActive.getCreatedById(),
-                "System workflow creator account no longer exists");
-        }
+                workspaceId, actorId, discovery.principalIds(), Set.of(), false);
         Workflow workflow = requireWorkflowForUpdate(workspaceId, id);
         if (enabled) {
             requireMutable(workflow);
@@ -556,9 +565,10 @@ public class WorkflowService {
         requireStableAuthorizationDiscovery(discovery.workflow(), workflow);
         PrincipalMatchPolicy principalMatchPolicy = !enabled
             ? PrincipalMatchPolicy.IGNORE
-            : "user".equals(executionMode)
-                ? PrincipalMatchPolicy.REDACTED_CREATOR
-                : PrincipalMatchPolicy.STRICT;
+            : switch (executionMode) {
+                case USER -> PrincipalMatchPolicy.REDACTED_CREATOR;
+                case SYSTEM -> PrincipalMatchPolicy.STRICT;
+            };
         boolean allowBrokenPrincipals = principalMatchPolicy != PrincipalMatchPolicy.STRICT;
         if (!allowBrokenPrincipals) {
             principals.requireCurrentReferences(workflowPrincipalIds(workflow));
@@ -617,22 +627,25 @@ public class WorkflowService {
         boolean activating = !paused
             && discoveredActive != null
             && discovery.workflow().isEnabled();
-        String executionMode = discoveredActive == null
+        WorkflowExecutionMode executionMode = WorkflowExecutionMode.parse(discoveredActive == null
             ? discovery.workflow().getDraftExecutionMode()
-            : discoveredActive.getExecutionMode();
-        TreeSet<Integer> requiredActiveIds = new TreeSet<>();
-        if (activating && "user".equals(executionMode)) {
-            addRequiredPrincipal(requiredActiveIds, discoveredActive.getRunAsUserId());
-        }
-        LockedPrincipals principals = activating && "system".equals(executionMode)
-            ? principalLockService.lockSystemMutation(
-                workspaceId, actorId, discovery.principalIds(), true)
+            : discoveredActive.getExecutionMode());
+        LockedPrincipals principals = activating
+            ? switch (executionMode) {
+                case USER -> lockAuthoringPrincipals(
+                    workspaceId, actorId, executionMode, discovery.principalIds(),
+                    discoveredActive.getRunAsUserId(), true);
+                case SYSTEM -> {
+                    LockedPrincipals locked = principalLockService.lockSystemMutation(
+                        workspaceId, actorId, discovery.principalIds(), true);
+                    locked.requireExisting(
+                        discoveredActive.getCreatedById(),
+                        "System workflow creator account no longer exists");
+                    yield locked;
+                }
+            }
             : principalLockService.lockUserMutation(
-                workspaceId, actorId, discovery.principalIds(), requiredActiveIds, activating);
-        if (activating && "system".equals(executionMode)) {
-            principals.requireExisting(
-                discoveredActive.getCreatedById(), "System workflow creator account no longer exists");
-        }
+                workspaceId, actorId, discovery.principalIds(), Set.of(), false);
         Workflow workflow = requireWorkflowForUpdate(workspaceId, id);
         requireMutable(workflow);
         requireStableAuthorizationDiscovery(discovery.workflow(), workflow);
@@ -645,9 +658,10 @@ public class WorkflowService {
             throw new ConflictException("Workflow state changed during authorization");
         }
         if (activating && workflow.isEnabled()) {
-            PrincipalMatchPolicy principalMatchPolicy = "user".equals(executionMode)
-                ? PrincipalMatchPolicy.REDACTED_CREATOR
-                : PrincipalMatchPolicy.STRICT;
+            PrincipalMatchPolicy principalMatchPolicy = switch (executionMode) {
+                case USER -> PrincipalMatchPolicy.REDACTED_CREATOR;
+                case SYSTEM -> PrincipalMatchPolicy.STRICT;
+            };
             LockedVersionState versions = lockDiscoveredVersions(workflow, discovery, principals);
             Rule linkedRule = lockDiscoveredRule(
                 workflow, discovery, principals, principalMatchPolicy != PrincipalMatchPolicy.STRICT);
@@ -891,40 +905,45 @@ public class WorkflowService {
         }
     }
 
-    private Integer resolveDraftRunAs(Workflow existing, String executionMode) {
-        if ("system".equals(executionMode)) {
-            return null;
-        }
-        if ("user".equals(existing.getDraftExecutionMode())) {
-            Integer runAsUserId = existing.getDraftRunAsUserId();
-            if (runAsUserId == null) {
-                throw new ConflictException("Workflow run-as user is not an active workspace member");
-            }
-            return runAsUserId;
-        }
-        Integer creatorId = existing.getCreatedById();
-        if (creatorId == null) {
-            throw new ConflictException("Workflow creator is not an active workspace member");
-        }
-        return creatorId;
+    private Integer resolveDraftRunAs(Workflow existing, WorkflowExecutionMode executionMode) {
+        return switch (executionMode) {
+            case SYSTEM -> null;
+            case USER -> switch (WorkflowExecutionMode.parse(existing.getDraftExecutionMode())) {
+                case USER -> {
+                    Integer runAsUserId = existing.getDraftRunAsUserId();
+                    if (runAsUserId == null) {
+                        throw new ConflictException("Workflow run-as user is not an active workspace member");
+                    }
+                    yield runAsUserId;
+                }
+                case SYSTEM -> {
+                    Integer creatorId = existing.getCreatedById();
+                    if (creatorId == null) {
+                        throw new ConflictException("Workflow creator is not an active workspace member");
+                    }
+                    yield creatorId;
+                }
+            };
+        };
     }
 
     private LockedPrincipals lockAuthoringPrincipals(
             int workspaceId,
             int actorId,
-            String executionMode,
+            WorkflowExecutionMode executionMode,
             Collection<Integer> principalIds,
-            Collection<Integer> requiredActiveIds,
+            Integer runAsUserId,
             boolean admitTriggerCapacity) {
-        if ("system".equals(executionMode)) {
-            return principalLockService.lockSystemMutation(
+        return switch (executionMode) {
+            case USER -> {
+                TreeSet<Integer> requiredActiveIds = new TreeSet<>();
+                addRequiredPrincipal(requiredActiveIds, runAsUserId);
+                yield principalLockService.lockUserMutation(
+                    workspaceId, actorId, principalIds, requiredActiveIds, admitTriggerCapacity);
+            }
+            case SYSTEM -> principalLockService.lockSystemMutation(
                 workspaceId, actorId, principalIds, admitTriggerCapacity);
-        }
-        if (!"user".equals(executionMode)) {
-            throw inconsistentWorkflow();
-        }
-        return principalLockService.lockUserMutation(
-            workspaceId, actorId, principalIds, requiredActiveIds, admitTriggerCapacity);
+        };
     }
 
     private int nextVersionNumber(PublishedState current, WorkflowVersion latest) {

@@ -20,6 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -318,6 +319,49 @@ class WorkflowActivationIntegrationTest {
                 releaseListener.countDown();
             }
         }
+    }
+
+    @Test
+    void unknownExecutionModeIsRejectedAtTheDraftRequestBoundary() throws Exception {
+        int ruleId = createRule(manager, ruleBody(false, "person.owner_changed", "notify"));
+        Workflow workflow = workflowMapper.getByLegacyRuleId(workspace.getId(), ruleId);
+        assertNotNull(workflow);
+        Map<String, Object> body = workflowDraftBody(workflow, "unknown");
+
+        perform(manager, post("/api/workflows").content(objectMapper.writeValueAsString(body)))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("Workflow execution mode must be user or system"));
+        body.put("expectedRevision", workflow.getDraftRevision());
+        perform(manager, put("/api/workflows/{id}/draft", Integer.MAX_VALUE)
+                .content(objectMapper.writeValueAsString(body)))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.message").value("Workflow execution mode must be user or system"));
+
+        assertEquals(1, workflowMapper.listByWorkspace(workspace.getId(), false).size());
+        assertEquals(workflow.getDraftRevision(),
+            workflowMapper.getById(workspace.getId(), workflow.getId()).getDraftRevision());
+    }
+
+    @Test
+    void systemDraftCreationAndUpdateRequireTheActorsSystemAuthorization() throws Exception {
+        int ruleId = createRule(manager, ruleBody(false, "person.owner_changed", "notify"));
+        Workflow workflow = workflowMapper.getByLegacyRuleId(workspace.getId(), ruleId);
+        assertNotNull(workflow);
+        Map<String, Object> body = workflowDraftBody(workflow, "system");
+
+        perform(manager, post("/api/workflows").content(objectMapper.writeValueAsString(body)))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.message").value("Requires a built-in admin role in this workspace"));
+        body.put("expectedRevision", workflow.getDraftRevision());
+        perform(manager, put("/api/workflows/{id}/draft", workflow.getId())
+                .content(objectMapper.writeValueAsString(body)))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.message").value("Requires a built-in admin role in this workspace"));
+
+        Workflow unchanged = workflowMapper.getById(workspace.getId(), workflow.getId());
+        assertEquals("user", unchanged.getDraftExecutionMode());
+        assertEquals(workflow.getDraftRevision(), unchanged.getDraftRevision());
+        assertEquals(1, workflowMapper.listByWorkspace(workspace.getId(), false).size());
     }
 
     @Test
@@ -761,6 +805,15 @@ class WorkflowActivationIntegrationTest {
         MvcResult result = perform(actor, post("/api/rules").content(body))
             .andExpect(status().isOk()).andReturn();
         return objectMapper.readTree(result.getResponse().getContentAsString()).get("id").intValue();
+    }
+
+    private Map<String, Object> workflowDraftBody(Workflow workflow, String executionMode) throws Exception {
+        return new LinkedHashMap<>(Map.of(
+            "name", workflow.getName(),
+            "recordType", workflow.getDraftRecordType(),
+            "executionMode", executionMode,
+            "definition", objectMapper.readTree(workflow.getDraftDefinitionJson()),
+            "canvas", objectMapper.readTree(workflow.getDraftCanvasJson())));
     }
 
     private String ruleBody(boolean enabled, String event, String actionType) throws Exception {

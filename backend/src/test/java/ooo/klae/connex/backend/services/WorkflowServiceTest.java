@@ -32,6 +32,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -241,6 +242,88 @@ class WorkflowServiceTest {
         assertThrows(ForbiddenException.class, () -> service.create(createRequest("user")));
 
         verify(workflowMapper, never()).insert(any());
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"unknown", "USERX"})
+    void unknownExecutionModeIsRejectedBeforeDraftParsing(String executionMode) throws Exception {
+        WorkflowCreateRequest request = createRequest(executionMode);
+        request.setDefinition(null);
+
+        BadRequestException failure = assertThrows(BadRequestException.class, () -> service.create(request));
+
+        assertEquals("Workflow execution mode must be user or system", failure.getMessage());
+        verifyNoInteractions(principalLockService, workflowMapper, workflowVersionMapper, ruleMapper,
+            workflowDefinitionValidator, auditService);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"unknown", "USERX"})
+    void unknownExecutionModeIsRejectedBeforeDraftDiscovery(String executionMode) throws Exception {
+        WorkflowDraftRequest request = draftRequest("Workflow", executionMode, 0);
+
+        BadRequestException failure = assertThrows(
+            BadRequestException.class, () -> service.saveDraft(101, request));
+
+        assertEquals("Workflow execution mode must be user or system", failure.getMessage());
+        verifyNoInteractions(principalLockService, workflowMapper, workflowVersionMapper, ruleMapper,
+            workflowDefinitionValidator, auditService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void systemDraftMutationsRequireLockedSystemAuthorization(boolean update) throws Exception {
+        if (update) {
+            when(workflowMapper.getById(7, 101))
+                .thenReturn(workflow("Workflow", "user", 0, 41, null, null, false));
+        }
+        doThrow(new ForbiddenException("Requires a built-in admin role in this workspace"))
+            .when(principalLockService).lockSystemMutation(7, 41, Set.of(41), false);
+
+        ForbiddenException failure = assertThrows(ForbiddenException.class, () -> {
+            if (update) {
+                service.saveDraft(101, draftRequest("Workflow", "SYSTEM", 0));
+            } else {
+                service.create(createRequest("SYSTEM"));
+            }
+        });
+
+        assertEquals("Requires a built-in admin role in this workspace", failure.getMessage());
+        verify(principalLockService).lockSystemMutation(7, 41, Set.of(41), false);
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowMapper, never()).getByIdForUpdate(7, 101);
+        verifyNoInteractions(workflowVersionMapper, ruleMapper, workflowDefinitionValidator, auditService);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void systemDraftMutationsRequireLockedActorActionPermissions(boolean update) throws Exception {
+        if (update) {
+            when(workflowMapper.getById(7, 101))
+                .thenReturn(workflow("Workflow", "user", 0, 41, null, null, false));
+        }
+        when(principalLockService.lockSystemMutation(7, 41, Set.of(41), false))
+            .thenReturn(new LockedPrincipals(Set.of(41), Set.of(41), Set.of(Permission.RULE_MANAGE)));
+        when(workflowDefinitionValidator.validateDraftActionsForMutation(any(), eq("system"), any()))
+            .thenReturn(Set.of(Permission.TASK_CREATE));
+
+        ForbiddenException failure = assertThrows(ForbiddenException.class, () -> {
+            if (update) {
+                service.saveDraft(101, draftRequest("Workflow", "system", 0));
+            } else {
+                service.create(createRequest("system"));
+            }
+        });
+
+        assertEquals("Requires the TASK_CREATE permission in this workspace", failure.getMessage());
+        InOrder order = inOrder(principalLockService, workflowDefinitionValidator);
+        order.verify(principalLockService).lockSystemMutation(7, 41, Set.of(41), false);
+        order.verify(workflowDefinitionValidator).validateDraftActionsForMutation(any(), eq("system"), any());
+        verify(workflowMapper, never()).insert(any());
+        verify(workflowMapper, never()).getByIdForUpdate(7, 101);
+        verifyNoInteractions(workflowVersionMapper, ruleMapper, auditService);
     }
 
     @Test
