@@ -228,7 +228,8 @@ class SsoLifecycleFenceUnitTest {
                 "user@example.test",
                 true,
                 ORG_ID,
-                "User"));
+                "User",
+                "client"));
 
         InOrder order = inOrder(lifecycleMapper);
         order.verify(lifecycleMapper).lockWorkspaceForShare(9);
@@ -273,7 +274,8 @@ class SsoLifecycleFenceUnitTest {
                 "user@example.test",
                 true,
                 ORG_ID,
-                "User"));
+                "User",
+                "client"));
 
         InOrder order = inOrder(identityMapper, userMapper, lifecycleMapper);
         order.verify(identityMapper).findByOrgProviderIssuerSubject(
