@@ -7,4 +7,14 @@
     SELECT PRIMARY_ID FROM SPRING_SESSION WHERE SESSION_ID = #{sessionId}
   </select>
 
+  <update id="consumeProviderConnectionState">
+    UPDATE SPRING_SESSION_ATTRIBUTES attribute
+    JOIN SPRING_SESSION session ON session.PRIMARY_ID = attribute.SESSION_PRIMARY_ID
+    SET attribute.ATTRIBUTE_BYTES = #{consumedState}
+    WHERE session.SESSION_ID = #{sessionId}
+      AND attribute.ATTRIBUTE_NAME = 'connex.connectedAccounts.pendingState'
+      AND attribute.ATTRIBUTE_BYTES = #{expectedState}
+      AND session.EXPIRY_TIME > UNIX_TIMESTAMP(CURRENT_TIMESTAMP(3)) * 1000
+  </update>
+
 </mapper>
