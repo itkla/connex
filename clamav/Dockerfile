@@ -6,7 +6,7 @@ ARG SOURCE_DATE_EPOCH
 # Same digest-pinned base as ocr/, deliberately: the supervisor and HTTP front are stdlib-only
 # Python, so this image needs no pip dependencies and therefore no requirements lock at all.
 # ClamAV itself comes from Debian's packages, matching ocr/'s unpinned-apt precedent.
-FROM python:3.12-slim-bookworm@sha256:4766d8b510c428e595d74b9cc5bbb2fae8e26316fffb4adc89908d79aacd58a2
+FROM python:3.14-slim-bookworm@sha256:9ab8d9c8514b44f90cf0029dd42fdd7e9e211e639c8b995304cc04568dee900f
 
 ARG VERSION=0.0.0-dev
 LABEL org.opencontainers.image.title="connex-clamav" \
