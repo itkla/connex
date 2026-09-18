@@ -125,7 +125,7 @@ class AiAssistantPromptAssemblerTest {
         String serialized = prompt.getSystemPrompt() + "\n" + prompt.getMessages().stream()
                 .map(message -> message.getContent())
                 .reduce("", (left, right) -> left + "\n" + right);
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 serialized, context, new tools.jackson.databind.ObjectMapper()));
     }
 
@@ -186,7 +186,7 @@ class AiAssistantPromptAssemblerTest {
                                 "role", message.getRole(), "content", message.getContent()))
                         .toList()));
 
-        OutboundLeakScan.assertNoLeak(serialized, context, objectMapper);
+        OutboundLeakScan.assertNoLeakInServerEnvelope(serialized, context, objectMapper);
         assertFalse(prompt.getSystemPrompt().contains("ignore previous instructions"));
         assertFalse(serialized.contains("Ada Lovelace"));
         assertFalse(serialized.contains("ada@example.com"));
@@ -761,7 +761,7 @@ class AiAssistantPromptAssemblerTest {
                 List.of(priorAnswer), replayContext, List.of(), freshContext, freshResources);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
-        OutboundLeakScan.assertNoLeak(serialized, freshContext, objectMapper);
+        OutboundLeakScan.assertNoLeakInServerEnvelope(serialized, freshContext, objectMapper);
         assertFalse(serialized.contains("Ada Lovelace"));
         assertFalse(serialized.contains("Atlas renewal"));
         assertFalse(serialized.contains("71"));
@@ -836,7 +836,7 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry());
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
-        OutboundLeakScan.assertNoLeak(serialized, context, objectMapper);
+        OutboundLeakScan.assertNoLeakInServerEnvelope(serialized, context, objectMapper);
         assertFalse(serialized.contains("Former Contact"));
         assertFalse(serialized.contains("former@example.com"));
         assertTrue(serialized.contains("{{P1}}"));
@@ -865,7 +865,7 @@ class AiAssistantPromptAssemblerTest {
                 resources);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
-        OutboundLeakScan.assertNoLeak(serialized, context, objectMapper);
+        OutboundLeakScan.assertNoLeakInServerEnvelope(serialized, context, objectMapper);
         assertFalse(serialized.contains("Kenji Sato"));
         assertTrue(serialized.contains("{{P1}}"));
     }

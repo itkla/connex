@@ -899,7 +899,7 @@ class AiInvocationServiceTest {
         when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
         MaskingContext context = new MaskingContext();
         String placeholder = MaskingEngine.maskField(EntityKind.COMPANY, "Google", context);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use concise analysis")
                 .userTurn("Summarize " + placeholder)
                 .build();
@@ -944,7 +944,7 @@ class AiInvocationServiceTest {
         MaskingContext context = new MaskingContext();
         MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", context);
         MaskingEngine.maskField(EntityKind.COMPANY, "Acme Holdings", context);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use concise analysis")
                 .userTurn("Summarize Mina Patel at Acme Holdings")
                 .build();
@@ -1979,6 +1979,75 @@ class AiInvocationServiceTest {
                 propertyNames(serialized.getValue()));
     }
 
+    /**
+     * The richest envelope — response schema and native tool definitions — nests two JSON trees
+     * whose keys this service does not write itself. They are still server-authored: they come
+     * from the declared schema and the tool catalog. This asserts exactly that, so a key entering
+     * the envelope from anywhere else fails rather than quietly landing in a skipped position.
+     */
+    @Test
+    void aSchemaAndToolBearingEnvelopeDrawsEveryPropertyFromServerAuthoredStructure() {
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
+        MaskingContext context = new MaskingContext();
+        String placeholder = MaskingEngine.maskField(EntityKind.COMPANY, "Google", context);
+        MaskedPrompt prompt = PromptAssembly.builder(context)
+                .system("Use concise analysis")
+                .userTurn("Summarize " + placeholder)
+                .build();
+        AiInvocation base = new AiInvocation(FEATURE, context, prompt, 64, 0.2);
+        AiInvocation invocation = new AiInvocation(
+                base.feature(), base.context(), base.prompt(), base.images(), base.maxTokens(),
+                base.temperature(), base.reasoningRequested(), base.callerDeadline(),
+                AiInvocationProtocol.NATIVE_TOOLS);
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
+        AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        AiNativeToolRequest nativeTools = new AiNativeToolRequest(
+                catalog.nativeDefinitions(new ObjectMapper()),
+                List.of(new AiToolExchange(
+                        new AiToolCall(
+                                "call_1", "search_records",
+                                "{\"query\":\"" + placeholder + "\"}",
+                                "sig-opaque-bytes"),
+                        "{\"records\":[]}")));
+        providerReturns(new AiCompletionResult(
+                "", 12, 7, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA, "",
+                AiReasoningMode.NONE,
+                List.of(new AiToolCall(
+                        "call_2", "search_records", "{\"query\":\"" + placeholder + "\"}"))));
+
+        service.completeNativeToolsRepairable(
+                invocation,
+                AiAssistantStep.FinalAnswer.class,
+                guard.forIssuedPlaceholders(Set.of(placeholder)),
+                guard.finalAnswerForIssuedPlaceholders(Set.of(placeholder)),
+                schema.finalResponseSchema(),
+                nativeTools,
+                directAdmission,
+                providerAttemptGuard);
+
+        ArgumentCaptor<String> serialized = ArgumentCaptor.forClass(String.class);
+        verify(budgetCoordinator).reserve(eq(ORG_ID), same(invocation), serialized.capture());
+
+        Set<String> serverAuthored = new java.util.LinkedHashSet<>(ENVELOPE_PROPERTY_NAMES);
+        serverAuthored.addAll(propertyNames(schema.finalResponseSchema().schema().toString()));
+        for (AiToolDefinition definition : nativeTools.definitions()) {
+            serverAuthored.addAll(propertyNames(definition.parametersSchema().toString()));
+        }
+        Set<String> unexplained = new java.util.LinkedHashSet<>(
+                propertyNames(serialized.getValue()));
+        unexplained.removeAll(serverAuthored);
+
+        assertEquals(Set.of(), unexplained);
+    }
+
+    private static final Set<String> ENVELOPE_PROPERTY_NAMES = Set.of(
+            "system", "messages", "role", "content", "responseSchema", "tools", "name",
+            "description", "parameters", "toolExchanges", "call", "id", "arguments",
+            "thoughtSignature", "result", "repairMessage");
+
     private Set<String> propertyNames(String payload) {
         Set<String> names = new java.util.LinkedHashSet<>();
         try (JsonParser parser = new ObjectMapper().createParser(payload)) {
@@ -1994,7 +2063,7 @@ class AiInvocationServiceTest {
     private AiInvocation invocation(String maskedPromptText) {
         MaskingContext context = new MaskingContext();
         String person = MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", context);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use concise analysis")
                 .userTurn(maskedPromptText + " for " + person)
                 .build();
@@ -2003,7 +2072,7 @@ class AiInvocationServiceTest {
 
     private AiInvocation unmaskedStreamingInvocation() {
         MaskingContext context = new MaskingContext(AiPrivacyMode.UNMASKED);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use concise analysis")
                 .userTurn("Summarize relationship state")
                 .build();

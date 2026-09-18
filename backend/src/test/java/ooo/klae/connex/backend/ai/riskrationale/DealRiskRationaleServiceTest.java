@@ -405,7 +405,7 @@ class DealRiskRationaleServiceTest {
     private static RationaleAssembly assembly() {
         MaskingContext context = new MaskingContext();
         String person = MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", context);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use only the supplied risk factors.")
                 .userTurn("Stakeholder: " + person)
                 .build();

@@ -345,7 +345,7 @@ class IntroRationaleServiceTest {
         MaskingContext context = new MaskingContext();
         String personA = MaskingEngine.maskField(EntityKind.PERSON, "Alice Ng", context);
         String personB = MaskingEngine.maskField(EntityKind.PERSON, "Bob Lee", context);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use only the supplied introduction signals.")
                 .userTurn("Person A: " + personA + "; Person B: " + personB)
                 .build();

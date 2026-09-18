@@ -517,7 +517,7 @@ class DealBriefServiceTest {
             Map<String, DealBriefSource> sourceRegistry, boolean degraded) {
         MaskingContext context = new MaskingContext();
         String person = MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", context);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use only the supplied context.")
                 .userTurn("Stakeholder: " + person)
                 .build();

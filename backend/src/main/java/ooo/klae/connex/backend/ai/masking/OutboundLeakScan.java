@@ -46,13 +46,21 @@ public final class OutboundLeakScan {
     }
 
     /**
-     * Requires that the serialized provider payload contains none of the request's raw identifiers.
-     * @param serializedOutboundPayload exact JSON or text body about to be sent
+     * Requires that a payload this server serialized contains none of the request's raw
+     * identifiers in any position that can carry tenant text.
+     *
+     * <p>The name states a precondition the caller must honour: the payload's structure — its
+     * property names and its message-role discriminator — must be written by this codebase, not by
+     * a provider or a tenant, because those positions are skipped. Provider-authored text goes to
+     * {@link #assertNoLeakStrict} instead, which trusts no position.
+     *
+     * @param serializedOutboundPayload exact JSON or text body this server built and is about to send
      * @param ctx request-local masking context
      * @param objectMapper provider payload JSON decoder
      * @throws MaskingLeakException when a raw identifier is present
      */
-    public static void assertNoLeak(String serializedOutboundPayload, MaskingContext ctx, ObjectMapper objectMapper) {
+    public static void assertNoLeakInServerEnvelope(
+            String serializedOutboundPayload, MaskingContext ctx, ObjectMapper objectMapper) {
         assertNoLeak(serializedOutboundPayload, ctx, objectMapper, false);
     }
 

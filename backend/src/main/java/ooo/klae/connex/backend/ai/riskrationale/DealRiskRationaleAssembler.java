@@ -87,7 +87,7 @@ public class DealRiskRationaleAssembler {
                 risk, overallLevel(factors), score(factors), summary, deal,
                 factors, stakeholderTokens, warmth, companyToken, ownerToken, context,
                 connectionPersonIds);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(userPrompt)
                 .build();

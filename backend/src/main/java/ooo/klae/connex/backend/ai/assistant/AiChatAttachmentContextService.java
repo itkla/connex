@@ -116,7 +116,7 @@ public class AiChatAttachmentContextService {
         AiInvocation invocation = new AiInvocation(
                 AiFeature.ASSISTANT_CHAT,
                 context,
-                PromptAssembly.builder()
+                PromptAssembly.builder(context)
                         .system(IMAGE_SYSTEM_PROMPT)
                         .userTurn("Analyze the attached image.")
                         .build(),

@@ -116,10 +116,11 @@ class AiOrganizationBudgetCoordinatorTest {
                 operations,
                 controlAccess,
                 Clock.fixed(Instant.parse("2026-08-10T00:00:00Z"), ZoneOffset.UTC), new AiProperties());
+        MaskingContext context = new MaskingContext();
         AiInvocation invocation = new AiInvocation(
                 AiFeature.ASSISTANT_CHAT,
-                new MaskingContext(),
-                PromptAssembly.builder().system("system").userTurn("user").build(),
+                context,
+                PromptAssembly.builder(context).system("system").userTurn("user").build(),
                 64,
                 0.1);
 
@@ -133,10 +134,11 @@ class AiOrganizationBudgetCoordinatorTest {
     void reservationCeilingUsesUtf8BytesForMultilingualPrompts() {
         String system = "簡潔に回答";
         String user = "関係性を要約";
+        MaskingContext context = new MaskingContext();
         AiInvocation invocation = new AiInvocation(
                 AiFeature.ASSISTANT_CHAT,
-                new MaskingContext(),
-                PromptAssembly.builder().system(system).userTurn(user).build(),
+                context,
+                PromptAssembly.builder(context).system(system).userTurn(user).build(),
                 64,
                 0.1);
 
@@ -171,10 +173,11 @@ class AiOrganizationBudgetCoordinatorTest {
                 operations,
                 controlAccess,
                 Clock.fixed(Instant.parse("2026-08-10T00:00:00Z"), ZoneOffset.UTC), new AiProperties());
+        MaskingContext context = new MaskingContext();
         AiInvocation invocation = new AiInvocation(
                 AiFeature.ASSISTANT_CHAT,
-                new MaskingContext(),
-                PromptAssembly.builder().system("system").userTurn("user").build(),
+                context,
+                PromptAssembly.builder(context).system("system").userTurn("user").build(),
                 64,
                 0.1);
         AiOrganizationBudgetCoordinator.Lease lease = coordinator.reserve(3, invocation);
@@ -299,8 +302,9 @@ class AiOrganizationBudgetCoordinatorTest {
     }
 
     private static AiInvocation invocation() {
+        MaskingContext context = new MaskingContext();
         return new AiInvocation(
-                AiFeature.ASSISTANT_CHAT, new MaskingContext(),
-                PromptAssembly.builder().system("system").userTurn("user").build(), 64, 0.1);
+                AiFeature.ASSISTANT_CHAT, context,
+                PromptAssembly.builder(context).system("system").userTurn("user").build(), 64, 0.1);
     }
 }

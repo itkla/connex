@@ -13,6 +13,12 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
 class OutboundLeakScanTest {
+    private static final String SYSTEM_PROMPT = "Using ONLY the supplied CRM context, give the "
+            + "real read on this deal. Respond with exactly one JSON object and nothing else. Each "
+            + "section has a title (a short plain-text heading) and a body (plain-text prose, never "
+            + "Markdown). Some field values contain placeholder tokens wrapped in double curly "
+            + "braces; copy every such token exactly as it appears.";
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
@@ -20,7 +26,7 @@ class OutboundLeakScanTest {
         MaskingContext context = new MaskingContext();
         MaskingEngine.maskField(EntityKind.PERSON, "null", context);
 
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak("null", context, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope("null", context, objectMapper));
         assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakStrict("null", context, objectMapper));
         assertThrows(MaskingLeakException.class,
                 () -> OutboundLeakScan.assertNoLeakStrict("\"null\"", context, objectMapper));
@@ -72,8 +78,9 @@ class OutboundLeakScanTest {
                 "Tokens", "Messages", "Tools", "Result")) {
             MaskingContext context = new MaskingContext();
             String masked = MaskingEngine.maskField(EntityKind.COMPANY, name, context);
+            PromptAssembly.builder(context).system(SYSTEM_PROMPT).build();
 
-            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                     envelope("Summarize " + masked + "."), context, objectMapper),
                     "a record named " + name + " must not poison its own request");
         }
@@ -85,7 +92,7 @@ class OutboundLeakScanTest {
         MaskingContext context = new MaskingContext();
         MaskingEngine.maskField(EntityKind.COMPANY, "Content", context);
 
-        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 envelope("Summarize Content."), context, objectMapper));
     }
 
@@ -102,7 +109,7 @@ class OutboundLeakScanTest {
                 "call", Map.of("id", "c1", "name", "search_records", "arguments", "{}"),
                 "result", "{\"Ann Smith\":{\"rows\":1}}")));
 
-        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 objectMapper.writeValueAsString(payload), context, objectMapper));
     }
 
@@ -133,7 +140,7 @@ class OutboundLeakScanTest {
         MaskingContext context = new MaskingContext();
         MaskingEngine.maskField(EntityKind.COMPANY, "Ann Smith", context);
 
-        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 "{\"messages\":[{\"role\":\"Ann Smith\",\"content\":\"hi\"}]}",
                 context, objectMapper));
         assertEquals(java.util.Set.of("user", "assistant"), MaskedMessage.ROLES);
@@ -146,13 +153,13 @@ class OutboundLeakScanTest {
         MaskingContext context = new MaskingContext();
         MaskingEngine.maskField(EntityKind.COMPANY, "Assistant", context);
 
-        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 envelope("Ask Assistant about the renewal."), context, objectMapper));
     }
 
     private String envelope(String userContent) {
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("system", "You are an analyst.");
+        payload.put("system", SYSTEM_PROMPT);
         payload.put("messages", List.of(
                 Map.of("role", "user", "content", userContent),
                 Map.of("role", "assistant", "content", "Working.")));
