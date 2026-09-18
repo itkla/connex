@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
@@ -436,6 +437,81 @@ class AzureOpenAiAdapterTest {
 
         assertThrows(AiProviderException.class, () -> adapter.complete(request));
         verifyNoInteractions(azureOpenAiClient);
+    }
+
+    /**
+     * An Azure resource serves operator-named deployments of models whose streaming nobody here
+     * verified, and an adapter that cannot stream fails the turn outright rather than falling back
+     * to a whole response. Streaming is therefore declared, not assumed.
+     */
+    @Test
+    void streamingIsDeclaredByAnOperatorRatherThanAssumed() {
+        AiProviderTarget target = target("gpt-5.2");
+
+        assertFalse(adapter.supportsStreaming(target));
+
+        aiProperties.setModelOverrides(List.of(
+                streamingOverride("gpt-5.2", "https://connex.openai.azure.com", true)));
+
+        assertTrue(adapter.supportsStreaming(target));
+        assertFalse(adapter.supportsStreaming(target("gpt-4o")));
+    }
+
+    /**
+     * The same model id behind two Azure resources is two different answers to whether streaming
+     * works, so verifying one resource must never speak for the other.
+     */
+    @Test
+    void aStreamingDeclarationNeverEscapesTheEndpointItNames() {
+        aiProperties.setModelOverrides(List.of(
+                streamingOverride("gpt-5.2", "https://connex.openai.azure.com", true)));
+
+        assertTrue(adapter.supportsStreaming(target("gpt-5.2")));
+        assertFalse(adapter.supportsStreaming(new AiProviderTarget(
+                "azure_openai", null, "gpt-5.2", "https://other.openai.azure.com",
+                "2025-01-01-preview", "contacts-prod", null, false)));
+    }
+
+    /**
+     * An Azure deployment name is operator-chosen and carries no model identity, so the
+     * declaration keys on the configured model id and a deployment-named declaration matches
+     * nothing.
+     */
+    @Test
+    void aStreamingDeclarationKeysOnTheModelIdNotTheDeploymentName() {
+        aiProperties.setModelOverrides(List.of(
+                streamingOverride("contacts-prod", "https://connex.openai.azure.com", true)));
+
+        assertFalse(adapter.supportsStreaming(target("gpt-5.2")));
+
+        aiProperties.setModelOverrides(List.of(
+                streamingOverride("gpt-5.2", "https://connex.openai.azure.com", true)));
+
+        assertTrue(adapter.supportsStreaming(new AiProviderTarget(
+                "azure_openai", null, "gpt-5.2", "https://connex.openai.azure.com",
+                "2025-01-01-preview", "renamed-deployment", null, false)));
+    }
+
+    /** Declarations resolve exactly as every other override does: nulls skipped, last one wins. */
+    @Test
+    void streamingDeclarationsResolveLikeEveryOtherOverride() {
+        List<AiProperties.ModelOverride> overrides = new java.util.ArrayList<>();
+        overrides.add(null);
+        overrides.add(streamingOverride("gpt-5.2", "https://connex.openai.azure.com", true));
+        overrides.add(streamingOverride("gpt-5.2", "https://connex.openai.azure.com", false));
+        aiProperties.setModelOverrides(overrides);
+
+        assertFalse(adapter.supportsStreaming(target("gpt-5.2")));
+    }
+
+    private static AiProperties.ModelOverride streamingOverride(
+            String modelId, String endpoint, Boolean streaming) {
+        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
+        override.setProvider("azure_openai");
+        override.setModelId(modelId);
+        override.setEndpoint(endpoint);
+        override.setStreaming(streaming);
+        return override;
     }
 
     private static AiCompletionRequest validRequest(String endpoint, String systemPrompt) {

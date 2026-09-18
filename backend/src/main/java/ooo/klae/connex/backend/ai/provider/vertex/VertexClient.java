@@ -32,11 +32,16 @@ import ooo.klae.connex.backend.ai.provider.AiProviderException;
 /**
  * Minimal Vertex AI transport. The production path accepts only constructed regional Vertex
  * hosts and uses bounded, validated, pinned DNS under the caller's absolute provider deadline.
+ *
+ * <p>Endpoints carry no query string, with one allowlisted exception: {@code streamGenerateContent}
+ * answers as server-sent events only when {@code ?alt=sse} is present, and returns a chunked JSON
+ * array otherwise, so the streaming path permits that one raw query verbatim and nothing else.
  */
 @Component
 public class VertexClient {
     private static final Pattern VERTEX_HOST = Pattern.compile(
             "^[a-z]+-[a-z]+[0-9]{1,2}-aiplatform\\.googleapis\\.com$");
+    private static final String SSE_QUERY = "alt=sse";
     private static final int BUFFER_BYTES = 8192;
 
     private final RestClient restClient;
@@ -128,7 +133,7 @@ public class VertexClient {
             VertexSseAccumulator accumulator,
             AiProviderStreamObserver observer,
             Runnable beforeSend) {
-        String host = requireVertexEndpoint(endpoint);
+        String host = requireVertexEndpoint(endpoint, SSE_QUERY);
         requireHeaderValue(accessToken);
         requireText(requestBodyJson, "request body");
         Objects.requireNonNull(deadline, "deadline");
@@ -231,9 +236,14 @@ public class VertexClient {
     }
 
     private static String requireVertexEndpoint(URI endpoint) {
+        return requireVertexEndpoint(endpoint, null);
+    }
+
+    private static String requireVertexEndpoint(URI endpoint, String permittedRawQuery) {
         if (endpoint == null || !"https".equalsIgnoreCase(endpoint.getScheme())
                 || endpoint.getUserInfo() != null || endpoint.getFragment() != null
-                || endpoint.getQuery() != null || endpoint.getPort() != -1) {
+                || !permittedQuery(endpoint.getRawQuery(), permittedRawQuery)
+                || endpoint.getPort() != -1) {
             throw new AiProviderException("Invalid Vertex endpoint");
         }
         String host = endpoint.getHost();
@@ -245,6 +255,10 @@ public class VertexClient {
             throw new AiProviderException("Invalid Vertex endpoint");
         }
         return normalizedHost;
+    }
+
+    private static boolean permittedQuery(String rawQuery, String permittedRawQuery) {
+        return rawQuery == null || rawQuery.equals(permittedRawQuery);
     }
 
     private static void requireHeaderValue(String accessToken) {
