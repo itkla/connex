@@ -6,8 +6,10 @@ import { IconButton } from "@/components/ui/icon-button";
 import styles from "./fuji.module.css";
 
 const MOTION_QUERY = "(prefers-reduced-motion: reduce)";
-/** Share of the hero that scrolls past before the ascent marker reaches the summit. */
+/** Upper bound on the share of the hero that scrolls past before the ascent marker reaches the summit. */
 const ASCENT_SCROLL_SPAN = 0.55;
+/** Screen clearance the summit keeps below the header on arrival, so the marker visibly rests at the peak. */
+const ASCENT_SUMMIT_DWELL = 80;
 
 function subscribeMotion(onChange: () => void) {
     const preference = window.matchMedia(MOTION_QUERY);
@@ -65,12 +67,32 @@ export function FujiMotion({ children, pauseLabel, resumeLabel }: { children: Re
         if (!running) return;
 
         const routeLength = route?.getTotalLength() ?? 0;
+        const summit = route?.getPointAtLength(routeLength);
+        const ridgeDepth = Number(marker?.closest<SVGGElement>("[data-fuji-depth]")?.dataset.fujiDepth);
+        const header = document.querySelector("header");
         let frame: number | undefined;
+
+        // Scroll distance at which the summit slides under the sticky header. The ridge scrolls away
+        // faster than a short viewport can spend a generous fixed span, so capping by the measured
+        // geometry keeps the settle at the peak on screen instead of finishing it out of sight.
+        const summitReach = (distance: number) => {
+            const ctm = route?.ownerSVGElement?.getScreenCTM?.();
+            if (!summit || !ctm || !Number.isFinite(ridgeDepth)) return Infinity;
+            const closing = 1 - ridgeDepth * ctm.d;
+            if (closing <= 0) return Infinity;
+            const occluded = header?.getBoundingClientRect().height ?? 0;
+            // The measured y already carries the current scroll, so adding it back keeps the answer a
+            // fixed scroll offset rather than one that drifts as the page moves.
+            const room = summit.matrixTransform(ctm).y + distance - occluded - ASCENT_SUMMIT_DWELL;
+            return Math.max(1, room / closing);
+        };
+
         const updateScenery = () => {
             frame = undefined;
             const bounds = section.getBoundingClientRect();
             const distance = Math.max(0, -bounds.top);
-            const progress = easeAscent(Math.min(1, distance / Math.max(1, bounds.height * ASCENT_SCROLL_SPAN)));
+            const span = Math.min(bounds.height * ASCENT_SCROLL_SPAN, summitReach(distance));
+            const progress = easeAscent(Math.min(1, distance / Math.max(1, span)));
             const point = route?.getPointAtLength(routeLength * progress);
             if (point && marker && trail) {
                 marker.style.transform = `translate(${point.x}px, ${point.y}px)`;

@@ -32,6 +32,53 @@ function Example() {
     );
 }
 
+const ROUTE_LENGTH = 400;
+const RIDGE_DEPTH = 0.16;
+/** Chosen so the summit's own exit caps the ascent at exactly ASCENT_SPAN, inside the hero-share bound. */
+const SUMMIT_SCREEN_Y = 416;
+const ASCENT_SPAN = 400;
+
+/** A scene carrying the ascent route, so the marker/trail branch of the effect runs under jsdom. */
+function AscentExample() {
+    return (
+        <TooltipProvider>
+            <section>
+                <FujiMotion pauseLabel="Pause clouds" resumeLabel="Resume clouds">
+                    <svg aria-hidden="true">
+                        <path data-fuji-ascent-route d="M0 0" />
+                        <g data-fuji-depth={String(RIDGE_DEPTH)}>
+                            <rect data-fuji-ascent-fade />
+                            <g data-fuji-ascent-marker />
+                        </g>
+                    </svg>
+                </FujiMotion>
+            </section>
+        </TooltipProvider>
+    );
+}
+
+/** Stubs the SVG geometry jsdom does not implement, mapping route length straight onto x. */
+function stubAscentGeometry() {
+    const route = container.querySelector("[data-fuji-ascent-route]") as SVGPathElement;
+    const svg = container.querySelector("svg") as SVGSVGElement;
+    Object.defineProperty(route, "ownerSVGElement", { configurable: true, get: () => svg });
+    route.getTotalLength = () => ROUTE_LENGTH;
+    // The real matrix carries the page scroll, so the stub tracks sectionTop: the component adds the
+    // scrolled distance back, and the resulting span must stay put however far the hero has moved.
+    route.getPointAtLength = (length: number) => ({
+        x: length,
+        y: length,
+        matrixTransform: () => ({ x: length, y: SUMMIT_SCREEN_Y + sectionTop }),
+    }) as unknown as DOMPoint;
+    svg.getScreenCTM = () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }) as DOMMatrix;
+    return route;
+}
+
+function markerX() {
+    const transform = container.querySelector<SVGGElement>("[data-fuji-ascent-marker]")?.style.transform ?? "";
+    return Number(/translate\(([-\d.]+)px/.exec(transform)?.[1] ?? NaN);
+}
+
 function scene() {
     const element = container.querySelector<HTMLDivElement>("[data-fuji-scene]");
     if (!element) throw new Error("Missing Fuji scene");
@@ -135,6 +182,54 @@ describe("Fuji cloud motion", () => {
         await act(async () => control().click());
         expect(scene().dataset.fujiMotion).toBe("running");
         expect(offsets()[0]).toBe("translate3d(0, 20px, 0)");
+    });
+
+    it("eases the ascent and caps its span so the marker settles at the summit in view", async () => {
+        await act(async () => root.render(<AscentExample />));
+        const section = container.querySelector("section");
+        if (!section) throw new Error("Missing hero section");
+        vi.spyOn(section, "getBoundingClientRect").mockImplementation(() => ({ top: sectionTop, bottom: sectionTop + 800, left: 0, right: 1200, x: 0, y: sectionTop, width: 1200, height: 800, toJSON: () => ({}) }));
+        stubAscentGeometry();
+        await act(async () => notifyIntersection(true));
+
+        // No header in this fixture, so the summit's own exit caps the span below the 0.55 hero share.
+        const span = ASCENT_SPAN;
+        expect(span).toBeLessThan(800 * 0.55);
+
+        sectionTop = 0;
+        window.dispatchEvent(new Event("scroll"));
+        flushFrames();
+        expect(markerX()).toBe(0);
+
+        // Smoothstep: a tenth of the way through the span moves far less than a tenth of the route.
+        sectionTop = -span * 0.1;
+        window.dispatchEvent(new Event("scroll"));
+        flushFrames();
+        const early = markerX();
+        expect(early).toBeGreaterThan(0);
+        expect(early).toBeLessThan(ROUTE_LENGTH * 0.1);
+
+        // Halfway through the span sits exactly halfway along the route, and the tail decelerates.
+        sectionTop = -span * 0.5;
+        window.dispatchEvent(new Event("scroll"));
+        flushFrames();
+        expect(markerX()).toBeCloseTo(ROUTE_LENGTH * 0.5, 6);
+
+        sectionTop = -span * 0.9;
+        window.dispatchEvent(new Event("scroll"));
+        flushFrames();
+        expect(markerX()).toBeGreaterThan(ROUTE_LENGTH * 0.9);
+
+        // The summit is reached within the capped span and never overshoots past it.
+        sectionTop = -span;
+        window.dispatchEvent(new Event("scroll"));
+        flushFrames();
+        expect(markerX()).toBeCloseTo(ROUTE_LENGTH, 6);
+
+        sectionTop = -span * 3;
+        window.dispatchEvent(new Event("scroll"));
+        flushFrames();
+        expect(markerX()).toBeCloseTo(ROUTE_LENGTH, 6);
     });
 
     it("freezes while offscreen or in a hidden tab and cancels pending work", async () => {
