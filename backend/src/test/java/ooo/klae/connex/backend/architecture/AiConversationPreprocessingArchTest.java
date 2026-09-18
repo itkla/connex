@@ -59,7 +59,7 @@ class AiConversationPreprocessingArchTest {
                 "reauthorizeSummary", "reauthorizeUser", "replay.citations", "replay.content", "replay.handles", "serialize"));
         assertCalls(assembler, "assembleSummary", Set.of(
                 "Map.of", "MaskingEngine.maskFreeText", "PromptAssembly.builder",
-                "context.addTrustedStaticText", "crmDataMasked", "data.put", "equals", "message.getAuthorKind",
+                "crmDataMasked", "data.put", "equals", "message.getAuthorKind",
                 "message.getContent", "message.getStructuredJson", "objectMapper.valueToTree", "prompt.build",
                 "prompt.userTurn", "reauthorizeAnswer", "reauthorizeSummary", "reauthorizeUser", "replay.content",
                 "replay.handles", "system", "transcript.add"));

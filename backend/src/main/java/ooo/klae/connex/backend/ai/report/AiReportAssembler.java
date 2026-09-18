@@ -60,7 +60,7 @@ public class AiReportAssembler {
             appendSource(registry, source, figures, maskingContext, trustedStaticText);
         }
         registry.append("REPORT_CONTEXT_END");
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(maskingContext)
                 .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(registry.toString())
                 .build();

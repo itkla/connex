@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.masking;
 
+import java.util.Objects;
+
 /**
  * Public facade for assembling prompts after values have crossed the masking boundary. Callers
  * MUST pass values already masked with {@link MaskingEngine#maskField(EntityKind, String,
@@ -14,11 +16,13 @@ public final class PromptAssembly {
     }
 
     /**
-     * Starts a masked prompt builder.
+     * Starts a masked prompt builder bound to the request's masking context.
+     *
+     * @param ctx request-local masking context the prompt's identifiers were seeded into
      * @return prompt builder
      */
-    public static Builder builder() {
-        return new Builder();
+    public static Builder builder(MaskingContext ctx) {
+        return new Builder(Objects.requireNonNull(ctx, "ctx"));
     }
 
     /**
@@ -26,17 +30,27 @@ public final class PromptAssembly {
      */
     public static final class Builder {
         private final MaskedPrompt.Builder delegate = MaskedPrompt.builder();
+        private final MaskingContext ctx;
 
-        private Builder() {
+        private Builder(MaskingContext ctx) {
+            this.ctx = ctx;
         }
 
         /**
-         * Sets the masked system prompt.
+         * Sets the masked system prompt and registers it as server-authored text.
+         *
+         * <p>A system prompt is written by this codebase, so every word in it is emitted whatever
+         * the tenant's records are called. Registering it here — rather than leaving each caller
+         * to remember — is what stops a record named after one of those words (a company named
+         * {@code Tokens} against a directive mentioning "placeholder tokens") from making the
+         * outbound leak scan refuse every request that seeds it.
+         *
          * @param maskedSystemText masked system text, or null
          * @return this builder
          */
         public Builder system(String maskedSystemText) {
             delegate.systemPrompt(maskedSystemText);
+            ctx.addTrustedStaticText(maskedSystemText);
             return this;
         }
 
@@ -46,7 +60,7 @@ public final class PromptAssembly {
          * @return this builder
          */
         public Builder userTurn(String maskedContent) {
-            delegate.addMessage("user", maskedContent);
+            delegate.addMessage(MaskedMessage.ROLE_USER, maskedContent);
             return this;
         }
 
@@ -56,7 +70,7 @@ public final class PromptAssembly {
          * @return this builder
          */
         public Builder assistantTurn(String maskedContent) {
-            delegate.addMessage("assistant", maskedContent);
+            delegate.addMessage(MaskedMessage.ROLE_ASSISTANT, maskedContent);
             return this;
         }
 

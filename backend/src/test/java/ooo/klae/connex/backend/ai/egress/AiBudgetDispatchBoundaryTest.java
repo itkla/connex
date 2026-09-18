@@ -432,8 +432,10 @@ class AiBudgetDispatchBoundaryTest {
     }
 
     private static AiInvocation invocation() {
-        return new AiInvocation(AiFeature.DEAL_BRIEF, new MaskingContext(AiPrivacyMode.UNMASKED),
-                PromptAssembly.builder().system("Respond concisely").userTurn("Summarize").build(),
+        MaskingContext context = new MaskingContext(AiPrivacyMode.UNMASKED);
+        return new AiInvocation(AiFeature.DEAL_BRIEF, context,
+                PromptAssembly.builder(context)
+                        .system("Respond concisely").userTurn("Summarize").build(),
                 64, 0.1);
     }
 }

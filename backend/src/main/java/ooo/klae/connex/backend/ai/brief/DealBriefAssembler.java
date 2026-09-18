@@ -101,7 +101,7 @@ public class DealBriefAssembler {
         PromptResult promptResult = userPrompt(deal, summary, stageHistory, stakeholders, warmth, risk,
                 promptActivities, promptNotes, promptTasks,
                 companyToken, context, sourceRegistry);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(promptResult.prompt())
                 .build();

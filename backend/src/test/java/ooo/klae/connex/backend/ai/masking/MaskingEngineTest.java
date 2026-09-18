@@ -143,7 +143,7 @@ class MaskingEngineTest {
         assertTrue(MaskingEngine.trustedStaticTextContainsIdentifier("what is each one waiting on?", "[what]"));
         assertEquals("what is each one waiting on?",
                 MaskingEngine.maskConversationalFreeText("what is each one waiting on?", context));
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak("what is each one waiting on?", context, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope("what is each one waiting on?", context, objectMapper));
         assertThrows(MaskingLeakException.class,
                 () -> OutboundLeakScan.assertNoLeakStrict("what is each one waiting on?", context, objectMapper));
     }
@@ -384,12 +384,12 @@ class MaskingEngineTest {
                 context.addTrustedStaticText("Ordinary server instructions");
                 assertFalse(context.isTrustedTextCollision(raw));
                 assertFalse(MaskingEngine.trustedStaticTextContainsIdentifier("Ordinary server instructions", raw));
-                OutboundLeakScan.assertNoLeak("An unrelated turn", context, objectMapper);
+                OutboundLeakScan.assertNoLeakInServerEnvelope("An unrelated turn", context, objectMapper);
 
                 assertDoesNotThrow(() -> MaskingEngine.mentionScanText(literalMention));
                 assertTrue(MaskingEngine.containsIdentifierMention(literalMention, raw));
                 assertThrows(MaskingLeakException.class,
-                        () -> OutboundLeakScan.assertNoLeak(literalMention, context, objectMapper));
+                        () -> OutboundLeakScan.assertNoLeakInServerEnvelope(literalMention, context, objectMapper));
                 if (mode == AiPrivacyMode.MASKED) {
                     String masked = MaskingEngine.maskConversationalFreeText(literalMention, context);
                     assertFalse(masked.contains("John"));
@@ -1134,7 +1134,7 @@ class MaskingEngineTest {
                 "warmth", "hot",
                 "stage", "renewal"));
 
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(serialized, ctx, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(serialized, ctx, objectMapper));
         for (String rawValue : ctx.identifierDictionary()) {
             assertFalse(containsIgnoreCase(serialized, rawValue), rawValue);
         }
@@ -1150,7 +1150,7 @@ class MaskingEngineTest {
 
         MaskingLeakException exception = assertThrows(
                 MaskingLeakException.class,
-                () -> OutboundLeakScan.assertNoLeak(serialized, ctx, objectMapper));
+                () -> OutboundLeakScan.assertNoLeakInServerEnvelope(serialized, ctx, objectMapper));
 
         assertEquals(Set.of(EntityKind.PERSON, EntityKind.COMPANY), exception.leakedKinds());
         assertEquals(2, exception.leakedCount());
@@ -1158,6 +1158,11 @@ class MaskingEngineTest {
         assertFalse(exception.getMessage().contains("Acme Holdings"));
     }
 
+    /**
+     * Escaping must never hide a raw identifier from the scan, in a value or in a key. The key
+     * carrier is asserted on the provider-authored path, which is the only one where an untrusted
+     * party chooses property names; the server's own envelope writes them from literals.
+     */
     @Test
     void leakScanThrowsWhenJsonEscapingHidesRawIdentifiers() throws Exception {
         MaskingContext quoted = new MaskingContext();
@@ -1169,16 +1174,19 @@ class MaskingEngineTest {
         String slashedPayload = objectMapper.writeValueAsString(Map.of("message", "Acme\\North is ready"));
 
         assertThrows(MaskingLeakException.class,
-                () -> OutboundLeakScan.assertNoLeak(quotedPayload, quoted, objectMapper));
+                () -> OutboundLeakScan.assertNoLeakInServerEnvelope(quotedPayload, quoted, objectMapper));
         assertThrows(MaskingLeakException.class,
-                () -> OutboundLeakScan.assertNoLeak(slashedPayload, slashed, objectMapper));
+                () -> OutboundLeakScan.assertNoLeakInServerEnvelope(slashedPayload, slashed, objectMapper));
 
         MaskingContext keyed = new MaskingContext();
         MaskingEngine.maskField(EntityKind.PERSON, "Bob Smith", keyed);
         String keyedPayload = "{\"Bob\\u0020Smith\":\"safe\"}";
+        String valuedPayload = "{\"message\":\"Bob\\u0020Smith\"}";
 
         assertThrows(MaskingLeakException.class,
-                () -> OutboundLeakScan.assertNoLeak(keyedPayload, keyed, objectMapper));
+                () -> OutboundLeakScan.assertNoLeakInServerEnvelope(valuedPayload, keyed, objectMapper));
+        assertThrows(MaskingLeakException.class,
+                () -> OutboundLeakScan.assertNoLeakStrict(keyedPayload, keyed, objectMapper));
     }
 
     @Test
@@ -1202,7 +1210,7 @@ class MaskingEngineTest {
         assertFalse(masked.contains(url));
         assertFalse(masked.contains(bareUrl));
         assertFalse(masked.contains(accountNumber));
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(masked, ctx, objectMapper));
     }
 
     @Test
@@ -1366,7 +1374,7 @@ class MaskingEngineTest {
             String masked = MaskingEngine.maskFreeText("Meeting with " + spelling + " tomorrow", context);
 
             assertEquals("Meeting with " + token + " tomorrow", masked);
-            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, context, objectMapper));
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(masked, context, objectMapper));
         }
     }
 
@@ -1532,7 +1540,7 @@ class MaskingEngineTest {
         String masked = MaskingEngine.maskFreeText("Met Acme  Corp and Ａｃｍｅ Ｃｏｒｐ.", ctx);
 
         assertEquals("Met " + company + " and " + company + ".", masked);
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(masked, ctx, objectMapper));
     }
 
     /**
@@ -1553,7 +1561,7 @@ class MaskingEngineTest {
 
         assertEquals(company + "の担当者は" + person + "さんです。"
                 + company + "との取引を確認して。", masked);
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(masked, ctx, objectMapper));
     }
 
     /**
@@ -1571,7 +1579,7 @@ class MaskingEngineTest {
         String masked = MaskingEngine.maskFreeText("Market notes remarked on Mark.", ctx);
 
         assertEquals("[redacted] notes [redacted] on " + token + ".", masked);
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(masked, ctx, objectMapper));
     }
 
     /**
@@ -1621,7 +1629,7 @@ class MaskingEngineTest {
 
         assertEquals("Contact [redacted] or call [redacted].", masked);
         assertFalse(containsIgnoreCase(masked, "gmail"));
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(masked, ctx, objectMapper));
     }
 
     /**
@@ -1640,7 +1648,7 @@ class MaskingEngineTest {
 
         assertEquals("[redacted]の件", masked);
         assertFalse(masked.contains("Acme楽天"));
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(masked, ctx, objectMapper));
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(masked, ctx, objectMapper));
     }
 
     /**
@@ -1674,12 +1682,12 @@ class MaskingEngineTest {
         String payload = "{\"prompt\":\"and what is each one waiting on?\"}";
 
         assertThrows(MaskingLeakException.class,
-                () -> OutboundLeakScan.assertNoLeak(payload, ctx, objectMapper));
+                () -> OutboundLeakScan.assertNoLeakInServerEnvelope(payload, ctx, objectMapper));
 
         ctx.addTrustedStaticText("State plainly what is missing before answering.");
 
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(payload, ctx, objectMapper));
-        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(payload, ctx, objectMapper));
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 "{\"prompt\":\"met Acme Corp about what\"}", ctx, objectMapper));
     }
 

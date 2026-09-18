@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -88,6 +89,8 @@ import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.JsonToken;
 import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -897,7 +900,7 @@ class AiInvocationServiceTest {
         when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
         MaskingContext context = new MaskingContext();
         String placeholder = MaskingEngine.maskField(EntityKind.COMPANY, "Google", context);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use concise analysis")
                 .userTurn("Summarize " + placeholder)
                 .build();
@@ -942,7 +945,7 @@ class AiInvocationServiceTest {
         MaskingContext context = new MaskingContext();
         MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", context);
         MaskingEngine.maskField(EntityKind.COMPANY, "Acme Holdings", context);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use concise analysis")
                 .userTurn("Summarize Mina Patel at Acme Holdings")
                 .build();
@@ -1957,10 +1960,177 @@ class AiInvocationServiceTest {
         throw new AssertionError("Expected a malformed structured outcome but was " + outcome);
     }
 
+    /**
+     * The outbound leak scan skips the envelope's property names because this service writes every
+     * one of them from a literal. Pinning the key set keeps that premise true: a field that carried
+     * tenant text into a key position would change this set, and the scan would stop covering it.
+     */
+    @Test
+    void theSerializedEnvelopeNamesEveryPropertyFromAServerAuthoredLiteral() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        providerReturns(new AiCompletionResult("{{P1}} is ready.", 12, 7, "end_turn"));
+
+        service.complete(invocation);
+
+        ArgumentCaptor<String> serialized = ArgumentCaptor.forClass(String.class);
+        verify(budgetCoordinator).reserve(eq(ORG_ID), same(invocation), serialized.capture());
+
+        assertEquals(
+                Set.of("system", "messages", "role", "content"),
+                propertyNames(serialized.getValue()));
+    }
+
+    /**
+     * The tagged reasoning directive joins the envelope after the prompt is assembled, so nothing
+     * the feature registered covers it. A company named {@code Thinking} — a word only that
+     * directive carries — must not refuse every Ask Connex turn that seeds it.
+     */
+    @Test
+    void theTaggedReasoningDirectiveIsServerAuthoredTextRatherThanScannedTenantText() {
+        when(aiProvider.reasoningCapability(resolved.target())).thenReturn(AiReasoningMode.TAGGED);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
+        MaskingContext context = new MaskingContext();
+        String placeholder = MaskingEngine.maskField(EntityKind.COMPANY, "Thinking", context);
+        MaskedPrompt prompt = PromptAssembly.builder(context)
+                .system("Use concise analysis")
+                .userTurn("Summarize " + placeholder)
+                .build();
+        AiInvocation base = new AiInvocation(FEATURE, context, prompt, 64, 0.2);
+        AiInvocation invocation = new AiInvocation(
+                base.feature(), base.context(), base.prompt(), base.images(), base.maxTokens(),
+                base.temperature(), true, base.callerDeadline());
+        providerReturns(new AiCompletionResult("Ready.", 12, 7, "end_turn"));
+
+        assertDoesNotThrow(() -> service.complete(invocation));
+    }
+
+    /**
+     * Native tool definitions ride the envelope as scanned values and the native system prompt does
+     * not repeat them, so the catalogue registers itself. A company named after a word only a tool
+     * description carries must not refuse every native-tools request that seeds it.
+     */
+    @Test
+    void theNativeToolCatalogueIsServerAuthoredTextRatherThanScannedTenantText() {
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
+        MaskingContext context = new MaskingContext();
+        String placeholder = MaskingEngine.maskField(EntityKind.COMPANY, "Pipeline", context);
+        MaskedPrompt prompt = PromptAssembly.builder(context)
+                .system("Use concise analysis")
+                .userTurn("Summarize " + placeholder)
+                .build();
+        AiInvocation base = new AiInvocation(FEATURE, context, prompt, 64, 0.2);
+        AiInvocation invocation = new AiInvocation(
+                base.feature(), base.context(), base.prompt(), base.images(), base.maxTokens(),
+                base.temperature(), base.reasoningRequested(), base.callerDeadline(),
+                AiInvocationProtocol.NATIVE_TOOLS);
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
+        AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        AiNativeToolRequest nativeTools = new AiNativeToolRequest(
+                catalog.nativeDefinitions(new ObjectMapper()), List.of());
+        providerReturns(new AiCompletionResult(
+                "", 12, 7, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA, "",
+                AiReasoningMode.NONE,
+                List.of(new AiToolCall("call_1", "search_records", "{\"query\":\"x\"}"))));
+
+        assertDoesNotThrow(() -> service.completeNativeToolsRepairable(
+                invocation,
+                AiAssistantStep.FinalAnswer.class,
+                guard.forIssuedPlaceholders(Set.of(placeholder)),
+                guard.finalAnswerForIssuedPlaceholders(Set.of(placeholder)),
+                schema.finalResponseSchema(),
+                nativeTools,
+                directAdmission,
+                providerAttemptGuard));
+    }
+
+    /**
+     * The richest envelope — response schema and native tool definitions — nests two JSON trees
+     * whose keys this service does not write itself. They are still server-authored: they come
+     * from the declared schema and the tool catalog. This asserts exactly that, so a key entering
+     * the envelope from anywhere else fails rather than quietly landing in a skipped position.
+     */
+    @Test
+    void aSchemaAndToolBearingEnvelopeDrawsEveryPropertyFromServerAuthoredStructure() {
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
+        MaskingContext context = new MaskingContext();
+        String placeholder = MaskingEngine.maskField(EntityKind.COMPANY, "Google", context);
+        MaskedPrompt prompt = PromptAssembly.builder(context)
+                .system("Use concise analysis")
+                .userTurn("Summarize " + placeholder)
+                .build();
+        AiInvocation base = new AiInvocation(FEATURE, context, prompt, 64, 0.2);
+        AiInvocation invocation = new AiInvocation(
+                base.feature(), base.context(), base.prompt(), base.images(), base.maxTokens(),
+                base.temperature(), base.reasoningRequested(), base.callerDeadline(),
+                AiInvocationProtocol.NATIVE_TOOLS);
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
+        AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        AiNativeToolRequest nativeTools = new AiNativeToolRequest(
+                catalog.nativeDefinitions(new ObjectMapper()),
+                List.of(new AiToolExchange(
+                        new AiToolCall(
+                                "call_1", "search_records",
+                                "{\"query\":\"" + placeholder + "\"}",
+                                "sig-opaque-bytes"),
+                        "{\"records\":[]}")));
+        providerReturns(new AiCompletionResult(
+                "", 12, 7, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA, "",
+                AiReasoningMode.NONE,
+                List.of(new AiToolCall(
+                        "call_2", "search_records", "{\"query\":\"" + placeholder + "\"}"))));
+
+        service.completeNativeToolsRepairable(
+                invocation,
+                AiAssistantStep.FinalAnswer.class,
+                guard.forIssuedPlaceholders(Set.of(placeholder)),
+                guard.finalAnswerForIssuedPlaceholders(Set.of(placeholder)),
+                schema.finalResponseSchema(),
+                nativeTools,
+                directAdmission,
+                providerAttemptGuard);
+
+        ArgumentCaptor<String> serialized = ArgumentCaptor.forClass(String.class);
+        verify(budgetCoordinator).reserve(eq(ORG_ID), same(invocation), serialized.capture());
+
+        Set<String> serverAuthored = new java.util.LinkedHashSet<>(ENVELOPE_PROPERTY_NAMES);
+        serverAuthored.addAll(propertyNames(schema.finalResponseSchema().schema().toString()));
+        for (AiToolDefinition definition : nativeTools.definitions()) {
+            serverAuthored.addAll(propertyNames(definition.parametersSchema().toString()));
+        }
+        Set<String> unexplained = new java.util.LinkedHashSet<>(
+                propertyNames(serialized.getValue()));
+        unexplained.removeAll(serverAuthored);
+
+        assertEquals(Set.of(), unexplained);
+    }
+
+    private static final Set<String> ENVELOPE_PROPERTY_NAMES = Set.of(
+            "system", "messages", "role", "content", "responseSchema", "tools", "name",
+            "description", "parameters", "toolExchanges", "call", "id", "arguments",
+            "thoughtSignature", "result", "repairMessage");
+
+    private Set<String> propertyNames(String payload) {
+        Set<String> names = new java.util.LinkedHashSet<>();
+        try (JsonParser parser = new ObjectMapper().createParser(payload)) {
+            for (JsonToken token = parser.nextToken(); token != null; token = parser.nextToken()) {
+                if (token == JsonToken.PROPERTY_NAME) {
+                    names.add(parser.getString());
+                }
+            }
+        }
+        return names;
+    }
+
     private AiInvocation invocation(String maskedPromptText) {
         MaskingContext context = new MaskingContext();
         String person = MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", context);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use concise analysis")
                 .userTurn(maskedPromptText + " for " + person)
                 .build();
@@ -1969,7 +2139,7 @@ class AiInvocationServiceTest {
 
     private AiInvocation unmaskedStreamingInvocation() {
         MaskingContext context = new MaskingContext(AiPrivacyMode.UNMASKED);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use concise analysis")
                 .userTurn("Summarize relationship state")
                 .build();

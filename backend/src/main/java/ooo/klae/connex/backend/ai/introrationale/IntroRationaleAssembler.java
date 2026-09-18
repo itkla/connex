@@ -66,7 +66,7 @@ public class IntroRationaleAssembler {
                 personBWarmth,
                 String.join(", ", reasonCodes),
                 sharedCompany);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(userPrompt)
                 .build();

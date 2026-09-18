@@ -54,7 +54,7 @@ class AiReportAssemblerTest {
         String serialized = serialize(assembly);
         String modelVisibleText = assembly.prompt().getMessages().getFirst().getContent();
 
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 serialized, assembly.context(), objectMapper));
         assertTrue(modelVisibleText.contains("{{C1}}"));
         assertFalse(modelVisibleText.toLowerCase(Locale.ROOT)
@@ -79,7 +79,7 @@ class AiReportAssemblerTest {
         String serialized = serialize(assembly);
         String modelVisibleText = assembly.prompt().getMessages().getFirst().getContent();
 
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 serialized, assembly.context(), objectMapper));
         assertTrue(modelVisibleText.contains("Measure: Warm-intro opportunity value"));
         assertTrue(modelVisibleText.contains("Group: [tenant label omitted]"));
@@ -104,7 +104,7 @@ class AiReportAssemblerTest {
         String serialized = serialize(assembly);
         String modelVisibleText = assembly.prompt().getMessages().getFirst().getContent();
 
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 serialized, assembly.context(), objectMapper));
         assertTrue(modelVisibleText.contains("Report: [tenant label omitted]"));
         assertTrue(modelVisibleText.contains("Group: [tenant label omitted]"));
@@ -137,7 +137,7 @@ class AiReportAssemblerTest {
         String serialized = serialize(assembly);
         String modelVisibleText = assembly.prompt().getMessages().getFirst().getContent();
 
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 serialized, assembly.context(), objectMapper));
         assertTrue(modelVisibleText.contains("Report: [tenant label omitted]"));
         assertTrue(modelVisibleText.contains("metric.0.0; Measure: Won revenue; "
@@ -168,7 +168,7 @@ class AiReportAssemblerTest {
                         .map(AiReportAssemblerTest::message)
                         .toList()));
 
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 finalEnvelope, assembly.context(), objectMapper));
         assertTrue(assembly.prompt().getMessages().getFirst().getContent()
                 .contains("Measure: [tenant label omitted]"));

@@ -757,6 +757,7 @@ public class AiInvocationService {
         AiInvocation effectiveInvocation = invocationOutputTokensClamped
                 ? withMaxTokens(invocation, providerMaxOutputTokens)
                 : invocation;
+        registerEnvelopeAuthoredText(effectiveInvocation.context(), reasoningMode, nativeTools);
 
         String serializedPrompt;
         try {
@@ -778,7 +779,7 @@ public class AiInvocationService {
         }
 
         try {
-            OutboundLeakScan.assertNoLeak(serializedPrompt, effectiveInvocation.context(), objectMapper);
+            OutboundLeakScan.assertNoLeakInServerEnvelope(serializedPrompt, effectiveInvocation.context(), objectMapper);
         } catch (MaskingLeakException exception) {
             emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
                     null, null, null, null, "leak", structured, null, exception,
@@ -999,6 +1000,36 @@ public class AiInvocationService {
                         normalized.rejectionReason() == null
                                 ? "narration_shape"
                                 : normalized.rejectionReason()));
+    }
+
+    /**
+     * Registers the server-authored text this method appends to the envelope after the prompt was
+     * assembled.
+     *
+     * <p>{@link PromptAssembly} registers the system prompt a feature wrote, but the tagged
+     * reasoning directive and the native tool catalogue are attached here, later, and would
+     * otherwise be scanned as tenant text nobody vouched for — a record named after a word only
+     * those carry ({@code Thinking}, a tool description's {@code Pipeline}) would refuse every
+     * request that seeded it. Both are static, provider-neutral and contain no tenant data.
+     *
+     * @param ctx request-local masking context
+     * @param reasoningMode resolved provider reasoning protocol
+     * @param nativeTools resolved native tool request, or {@code null}
+     */
+    private static void registerEnvelopeAuthoredText(
+            MaskingContext ctx,
+            AiReasoningMode reasoningMode,
+            AiNativeToolRequest nativeTools) {
+        if (reasoningMode == AiReasoningMode.TAGGED) {
+            ctx.addTrustedStaticText(TAGGED_REASONING_INSTRUCTION);
+        }
+        if (nativeTools == null) {
+            return;
+        }
+        for (AiToolDefinition definition : nativeTools.definitions()) {
+            ctx.addTrustedStaticText(definition.name());
+            ctx.addTrustedStaticText(definition.description());
+        }
     }
 
     private String serializeProviderInput(

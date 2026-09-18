@@ -185,7 +185,7 @@ class AiAssistantScopeReadServiceTest {
         assertFalse(providerInput.contains("Johnathan"));
         assertTrue(providerInput.contains("{{P"));
         assertFalse(mapper.writeValueAsString(result.data().get("activities")).contains("Johnathan"));
-        OutboundLeakScan.assertNoLeak(providerInput, context, mapper);
+        OutboundLeakScan.assertNoLeakInServerEnvelope(providerInput, context, mapper);
     }
 
     @Test

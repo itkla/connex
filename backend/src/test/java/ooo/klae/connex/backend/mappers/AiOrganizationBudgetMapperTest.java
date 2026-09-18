@@ -525,9 +525,11 @@ class AiOrganizationBudgetMapperTest extends AbstractMapperTest {
     }
 
     private static AiInvocation streamingInvocation(AiProviderStreamObserver observer) {
+        MaskingContext context = new MaskingContext(AiPrivacyMode.UNMASKED);
         return new AiInvocation(
-                AiFeature.ASSISTANT_CHAT, new MaskingContext(AiPrivacyMode.UNMASKED),
-                PromptAssembly.builder().system("Respond concisely").userTurn("Summarize").build(),
+                AiFeature.ASSISTANT_CHAT, context,
+                PromptAssembly.builder(context)
+                        .system("Respond concisely").userTurn("Summarize").build(),
                 64, 0.1).withStreamObserver(observer);
     }
 

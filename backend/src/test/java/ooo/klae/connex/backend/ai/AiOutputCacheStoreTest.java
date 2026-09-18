@@ -346,7 +346,7 @@ class AiOutputCacheStoreTest {
     }
 
     private static MaskedPrompt prompt(String userTurn) {
-        return PromptAssembly.builder()
+        return PromptAssembly.builder(new MaskingContext())
                 .system("Use only the supplied context.")
                 .userTurn(userTurn)
                 .build();
