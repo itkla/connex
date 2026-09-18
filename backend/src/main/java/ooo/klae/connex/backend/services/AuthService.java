@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -19,7 +20,6 @@ import ooo.klae.connex.backend.dto.LoginDto;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
-import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -388,7 +388,7 @@ public void downgradeToUnauthenticatedSession(
     public boolean hasPasswordCredential(int userId) {
         User user = userMapper.getUserById(userId);
         if (user == null) {
-            throw new ResourceNotFoundException("Not authenticated");
+            throw new AuthenticationCredentialsNotFoundException("Not authenticated");
         }
         return user.getPassword() != null;
     }
@@ -397,28 +397,33 @@ public void downgradeToUnauthenticatedSession(
      * Retrieves the authenticated session principal without refreshing it from persistence.
      *
      * @return the authenticated user principal
+     * @throws AuthenticationException when the security context holds no authenticated user
      */
     public User getCurrentPrincipal() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !authentication.isAuthenticated()
                 || !(authentication.getPrincipal() instanceof User principal)) {
-            throw new ResourceNotFoundException("Not authenticated");
+            throw new AuthenticationCredentialsNotFoundException("Not authenticated");
         }
         return principal;
     }
 
     /**
-     * Retrieves the currently authenticated user based on the security context. Throws {@code ResourceNotFoundException} if no user is currently authenticated.
-     * @return
+     * Retrieves the currently authenticated user, refreshed from persistence.
+     *
+     * <p>A principal that no longer resolves — the session is real but the account row is gone —
+     * is an authentication failure, not a missing resource, so it answers 401 like every other
+     * signed-out state. Answering 404 left a browser holding a valid cookie stuck on a retryable
+     * "unavailable" screen that re-read the same rejection forever.
+     *
+     * @return the authenticated user as persisted
+     * @throws AuthenticationException when no authenticated principal resolves
      */
     public User getCurrentUser() {
         User principal = getCurrentPrincipal();
-
-        // handles cases where the user updates their info but is not returned
-        // reduntant if the user is not updated; just returns the same value
         User fresh = userMapper.getUserById(principal.getId());
         if (fresh == null) {
-            throw new ResourceNotFoundException("Not authenticated");
+            throw new AuthenticationCredentialsNotFoundException("Not authenticated");
         }
         return fresh;
     }

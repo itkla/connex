@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import java.time.Clock;
 import java.util.Map;
 
@@ -13,7 +14,6 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
-import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
@@ -59,7 +59,7 @@ public class MfaRecoveryService {
         String ceremonySessionId = ceremonySession.getId();
         User user = authService.getCurrentUser();
         if (userMapper.lockById(user.getId()) == null) {
-            throw new ResourceNotFoundException("Not authenticated");
+            throw new AuthenticationCredentialsNotFoundException("Not authenticated");
         }
         String ceremonySessionPrimaryId = springSessionMapper.primaryIdBySessionId(ceremonySessionId);
         if (ceremonySessionPrimaryId == null) {

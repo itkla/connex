@@ -14,6 +14,8 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RegisterDto;
@@ -203,6 +205,45 @@ class AuthServiceTest extends AbstractServiceTest {
 
         assertThrows(BadCredentialsException.class, () -> authService.establishAuthenticatedSession(
             member, new MockHttpServletRequest(), new MockHttpServletResponse()));
+    }
+
+    /**
+     * A session whose account row is gone is a signed-out caller, not a missing resource. Answering
+     * 404 left the app shell — which reads only 401 as signed out — stuck on a retryable
+     * "unavailable" state that re-read the same rejection forever (#1479).
+     */
+    @Test
+    void aPrincipalWhoseAccountRowIsGoneFailsAuthenticationRatherThanReadingAsMissing() {
+        User member = passwordlessUser();
+        authenticateAs(member, workspace.getId());
+        assertEquals(member.getId(), authService.getCurrentUser().getId());
+
+        userMapper.delete(member.getId());
+
+        assertThrows(AuthenticationException.class, () -> authService.getCurrentUser());
+        assertEquals(member.getId(), authService.getCurrentPrincipal().getId(),
+            "the session principal itself still resolves; only the refresh fails");
+    }
+
+    /** An empty security context is the same authentication failure, not a 404. */
+    @Test
+    void anEmptySecurityContextFailsAuthentication() {
+        SecurityContextHolder.clearContext();
+
+        assertThrows(AuthenticationException.class, () -> authService.getCurrentPrincipal());
+        assertThrows(AuthenticationException.class, () -> authService.getCurrentUser());
+    }
+
+    /** A credential probe for an account that no longer exists answers the same way. */
+    @Test
+    void aPasswordCredentialProbeForADeletedAccountFailsAuthentication() {
+        User member = passwordlessUser();
+        assertFalse(authService.hasPasswordCredential(member.getId()));
+
+        userMapper.delete(member.getId());
+
+        assertThrows(AuthenticationException.class,
+            () -> authService.hasPasswordCredential(member.getId()));
     }
 
     private User passwordlessUser() {

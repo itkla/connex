@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.storage;
 
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.Duration;
@@ -158,7 +159,7 @@ public class ManagedObjectReadAdmissionService {
         if (authentication == null || !authentication.isAuthenticated()
                 || !(authentication.getPrincipal() instanceof User user)
                 || user.getId() <= 0) {
-            throw new ResourceNotFoundException("Not authenticated");
+            throw new AuthenticationCredentialsNotFoundException("Not authenticated");
         }
         return user.getId();
     }
