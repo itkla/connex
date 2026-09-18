@@ -54,9 +54,23 @@ public class AzureOpenAiAdapter implements AiProvider {
         return PROVIDER_AZURE_OPENAI;
     }
 
+    /**
+     * Whether this configured Azure OpenAI endpoint accepts a streamed request.
+     *
+     * <p>Declared by an operator per endpoint rather than assumed: an Azure resource serves
+     * operator-named deployments of models whose streaming support nobody here verified, and an
+     * endpoint that rejects the streamed request fails the turn outright rather than falling back
+     * to a whole response, so an unverified endpoint is not streamed.
+     *
+     * <p>The declaration keys on the configured model id, never the deployment name, because a
+     * deployment name is operator-chosen and carries no model identity.
+     *
+     * @see AiModelCatalog#streamingDeclared
+     */
     @Override
     public boolean supportsStreaming(AiProviderTarget target) {
-        return true;
+        return AiModelCatalog.streamingDeclared(
+                AiModelCatalog.Family.AZURE_OPENAI, target, aiProperties.getModelOverrides());
     }
 
     @Override
