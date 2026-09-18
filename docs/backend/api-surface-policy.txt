@@ -50,7 +50,7 @@ src/main/java/ooo/klae/connex/backend/ai/provider/bedrock/AwsSigV4Signer.java	89
 src/main/java/ooo/klae/connex/backend/ai/provider/bedrock/BedrockClient.java	49f0e7e7680c0cf65b4153a34faa2d6f15583814f06eafe2cb7d3e94c9ec17ff
 src/main/java/ooo/klae/connex/backend/ai/provider/openai/OpenAiCompatibleAdapter.java	094b1a2b8ecb75914634030c705c0433f767cc11c1edc25f4beeff6cf743d996
 src/main/java/ooo/klae/connex/backend/ai/provider/openai/OpenAiCompatibleClient.java	020e24c19c3a7a1efaf06dc3b90d0ed931f942342035eee99ae524c181a5da96
-src/main/java/ooo/klae/connex/backend/ai/provider/vertex/VertexClient.java	c7d4aaeccc6ea7e6eaa364ca01090d8296c32d6442111b7566e5fa4264c0fe10
+src/main/java/ooo/klae/connex/backend/ai/provider/vertex/VertexClient.java	1b268c9cd791fb34355c5ec2756915696612a9994df44c80bfd2ae23d7ee8370
 src/main/java/ooo/klae/connex/backend/ai/report/AiReportNarrativeService.java	6b1caf9204695ab291efe74e74c6c6eecafb75f5b3635f7dafe30624b1db2808
 src/main/java/ooo/klae/connex/backend/ai/riskrationale/DealRiskRationaleService.java	7cc27817828bd532ffa5079f50a810ad1e4b24e6e3d922a2bb8932b5a5b6a638
 src/main/java/ooo/klae/connex/backend/beans/NativeConnectSession.java	1ca8692a2cfc7ea7946ce42c0c0e47fbf9b194dd649e5a475021ae2eaef76a21
