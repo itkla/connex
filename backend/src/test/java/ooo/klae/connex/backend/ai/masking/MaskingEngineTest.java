@@ -1158,6 +1158,11 @@ class MaskingEngineTest {
         assertFalse(exception.getMessage().contains("Acme Holdings"));
     }
 
+    /**
+     * Escaping must never hide a raw identifier from the scan, in a value or in a key. The key
+     * carrier is asserted on the provider-authored path, which is the only one where an untrusted
+     * party chooses property names; the server's own envelope writes them from literals.
+     */
     @Test
     void leakScanThrowsWhenJsonEscapingHidesRawIdentifiers() throws Exception {
         MaskingContext quoted = new MaskingContext();
@@ -1176,9 +1181,12 @@ class MaskingEngineTest {
         MaskingContext keyed = new MaskingContext();
         MaskingEngine.maskField(EntityKind.PERSON, "Bob Smith", keyed);
         String keyedPayload = "{\"Bob\\u0020Smith\":\"safe\"}";
+        String valuedPayload = "{\"message\":\"Bob\\u0020Smith\"}";
 
         assertThrows(MaskingLeakException.class,
-                () -> OutboundLeakScan.assertNoLeak(keyedPayload, keyed, objectMapper));
+                () -> OutboundLeakScan.assertNoLeak(valuedPayload, keyed, objectMapper));
+        assertThrows(MaskingLeakException.class,
+                () -> OutboundLeakScan.assertNoLeakStrict(keyedPayload, keyed, objectMapper));
     }
 
     @Test

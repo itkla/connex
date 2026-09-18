@@ -46,7 +46,7 @@ public final class PromptAssembly {
          * @return this builder
          */
         public Builder userTurn(String maskedContent) {
-            delegate.addMessage("user", maskedContent);
+            delegate.addMessage(MaskedMessage.ROLE_USER, maskedContent);
             return this;
         }
 
@@ -56,7 +56,7 @@ public final class PromptAssembly {
          * @return this builder
          */
         public Builder assistantTurn(String maskedContent) {
-            delegate.addMessage("assistant", maskedContent);
+            delegate.addMessage(MaskedMessage.ROLE_ASSISTANT, maskedContent);
             return this;
         }
 

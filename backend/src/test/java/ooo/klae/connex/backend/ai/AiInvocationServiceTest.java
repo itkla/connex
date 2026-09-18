@@ -88,6 +88,8 @@ import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.JsonToken;
 import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -1955,6 +1957,38 @@ class AiInvocationServiceTest {
             return malformed;
         }
         throw new AssertionError("Expected a malformed structured outcome but was " + outcome);
+    }
+
+    /**
+     * The outbound leak scan skips the envelope's property names because this service writes every
+     * one of them from a literal. Pinning the key set keeps that premise true: a field that carried
+     * tenant text into a key position would change this set, and the scan would stop covering it.
+     */
+    @Test
+    void theSerializedEnvelopeNamesEveryPropertyFromAServerAuthoredLiteral() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        providerReturns(new AiCompletionResult("{{P1}} is ready.", 12, 7, "end_turn"));
+
+        service.complete(invocation);
+
+        ArgumentCaptor<String> serialized = ArgumentCaptor.forClass(String.class);
+        verify(budgetCoordinator).reserve(eq(ORG_ID), same(invocation), serialized.capture());
+
+        assertEquals(
+                Set.of("system", "messages", "role", "content"),
+                propertyNames(serialized.getValue()));
+    }
+
+    private Set<String> propertyNames(String payload) {
+        Set<String> names = new java.util.LinkedHashSet<>();
+        try (JsonParser parser = new ObjectMapper().createParser(payload)) {
+            for (JsonToken token = parser.nextToken(); token != null; token = parser.nextToken()) {
+                if (token == JsonToken.PROPERTY_NAME) {
+                    names.add(parser.getString());
+                }
+            }
+        }
+        return names;
     }
 
     private AiInvocation invocation(String maskedPromptText) {

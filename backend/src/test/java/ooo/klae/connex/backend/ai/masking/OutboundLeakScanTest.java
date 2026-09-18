@@ -1,9 +1,12 @@
 package ooo.klae.connex.backend.ai.masking;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 
@@ -55,5 +58,117 @@ class OutboundLeakScanTest {
             assertThrows(MaskingLeakException.class,
                     () -> OutboundLeakScan.assertNoLeakStrict(payload, context, objectMapper));
         }
+    }
+
+    /**
+     * A record named after an envelope key used to poison every request that seeded it: the scan
+     * read the server's own property names as tenant text and refused, fail-closed, before send.
+     * The envelope's structure is authored here from literals, so it carries no tenant signal.
+     */
+    @Test
+    void recordsNamedAfterEnvelopeStructureNoLongerRefuseACorrectlyMaskedRequest() {
+        for (String name : List.of(
+                "Content", "Role", "Model", "System", "Text", "Type", "User", "Assistant",
+                "Tokens", "Messages", "Tools", "Result")) {
+            MaskingContext context = new MaskingContext();
+            String masked = MaskingEngine.maskField(EntityKind.COMPANY, name, context);
+
+            assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+                    envelope("Summarize " + masked + "."), context, objectMapper),
+                    "a record named " + name + " must not poison its own request");
+        }
+    }
+
+    /** Values are where tenant text lives, so an unmasked identifier in one is still a leak. */
+    @Test
+    void anIdentifierLeakedIntoAnEnvelopeValueIsStillRefused() {
+        MaskingContext context = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.COMPANY, "Content", context);
+
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(
+                envelope("Summarize Content."), context, objectMapper));
+    }
+
+    /**
+     * A masked tool result reaches the envelope as one string scalar, so its own JSON keys are
+     * ordinary text to this parser and an identifier among them is still refused.
+     */
+    @Test
+    void anIdentifierAmongTheKeysOfANestedResultStringIsStillRefused() {
+        MaskingContext context = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.COMPANY, "Ann Smith", context);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("toolExchanges", List.of(Map.of(
+                "call", Map.of("id", "c1", "name", "search_records", "arguments", "{}"),
+                "result", "{\"Ann Smith\":{\"rows\":1}}")));
+
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(
+                objectMapper.writeValueAsString(payload), context, objectMapper));
+    }
+
+    /**
+     * Provider-authored text has no trustworthy position: a raw identifier the model emitted as a
+     * property name is a leak, so the strict variant keeps scanning structure.
+     */
+    @Test
+    void providerAuthoredStructureIsNeverExempt() {
+        MaskingContext context = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.PERSON, "Ann Smith", context);
+
+        for (String payload : List.of(
+                "{\"Ann Smith\":\"noted\"}",
+                "{\"role\":\"Ann Smith\"}",
+                "{\"messages\":[{\"Ann Smith\":null}]}")) {
+            assertThrows(MaskingLeakException.class,
+                    () -> OutboundLeakScan.assertNoLeakStrict(payload, context, objectMapper));
+        }
+    }
+
+    /**
+     * The role exemption covers one closed vocabulary, not the property name: a value outside it
+     * is scanned like any other, so a future writer cannot smuggle tenant text through {@code role}.
+     */
+    @Test
+    void theRoleExemptionIsBoundedByItsClosedVocabulary() {
+        MaskingContext context = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.COMPANY, "Ann Smith", context);
+
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(
+                "{\"messages\":[{\"role\":\"Ann Smith\",\"content\":\"hi\"}]}",
+                context, objectMapper));
+        assertEquals(java.util.Set.of("user", "assistant"), MaskedMessage.ROLES);
+        assertThrows(IllegalArgumentException.class, () -> new MaskedMessage("tool", "hi"));
+    }
+
+    /** A record named a role is exempt only where the role discriminator actually sits. */
+    @Test
+    void aRecordNamedAfterARoleIsStillRefusedOutsideTheDiscriminator() {
+        MaskingContext context = new MaskingContext();
+        MaskingEngine.maskField(EntityKind.COMPANY, "Assistant", context);
+
+        assertThrows(MaskingLeakException.class, () -> OutboundLeakScan.assertNoLeak(
+                envelope("Ask Assistant about the renewal."), context, objectMapper));
+    }
+
+    private String envelope(String userContent) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("system", "You are an analyst.");
+        payload.put("messages", List.of(
+                Map.of("role", "user", "content", userContent),
+                Map.of("role", "assistant", "content", "Working.")));
+        payload.put("responseSchema", Map.of(
+                "type", "object",
+                "properties", Map.of(
+                        "model", Map.of("type", "string"),
+                        "text", Map.of("type", "string"),
+                        "tokens", Map.of("type", "integer")),
+                "additionalProperties", false));
+        payload.put("tools", List.of(Map.of(
+                "name", "search_records", "description", "Search records",
+                "parameters", Map.of("type", "object"))));
+        payload.put("toolExchanges", List.of(Map.of(
+                "call", Map.of("id", "c1", "name", "search_records", "arguments", "{}"),
+                "result", "{}")));
+        return objectMapper.writeValueAsString(payload);
     }
 }

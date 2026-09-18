@@ -22,6 +22,16 @@ import tools.jackson.databind.ObjectMapper;
  * is skipped: the server emits that word in every prompt regardless of tenant data, so its presence
  * carries no tenant signal, and refusing it would make a record named a common envelope word poison
  * every request that seeds it. Tenant occurrences of the value are still tokenized by the replacer.
+ *
+ * <p>The same reasoning applies positionally, and more sharply. A server-authored envelope holds
+ * tenant text only in its values; its property names and its message-role discriminator are emitted
+ * by this codebase from literals no matter what the tenant's records are called. Scanning them as
+ * tenant text refused every request seeding a record named after an envelope key — {@code Content},
+ * {@code Role}, {@code System}, {@code Messages} — or after a role, {@code User} or
+ * {@code Assistant}. Those positions are therefore skipped when the payload is the server's own
+ * envelope, and scanned as ordinary text when the payload is provider-authored, where no position
+ * is trustworthy. Nested JSON that arrives as a string value — a masked tool result — is one scalar
+ * to this parser, so identifiers among its own keys are still covered.
  */
 public final class OutboundLeakScan {
     /**
@@ -29,6 +39,8 @@ public final class OutboundLeakScan {
      * replacement pass so the replacer always covers at least what this scan can refuse.
      */
     static final int MIN_IDENTIFIER_LENGTH = 4;
+
+    private static final String ROLE_PROPERTY = "role";
 
     private OutboundLeakScan() {
     }
@@ -41,7 +53,7 @@ public final class OutboundLeakScan {
      * @throws MaskingLeakException when a raw identifier is present
      */
     public static void assertNoLeak(String serializedOutboundPayload, MaskingContext ctx, ObjectMapper objectMapper) {
-        assertNoLeak(serializedOutboundPayload, ctx, objectMapper, true);
+        assertNoLeak(serializedOutboundPayload, ctx, objectMapper, false);
     }
 
     /**
@@ -49,7 +61,9 @@ public final class OutboundLeakScan {
      *
      * <p>Provider-authored output — reasoning being normalized for return — is not the server's
      * own prompt: a raw identifier there is a leak regardless of which words the request envelope
-     * happens to contain, so the trusted-text exemption must not apply.
+     * happens to contain, so neither the trusted-text exemption nor the structural-position
+     * exemption applies. Property names and role values the provider chose are scanned as the
+     * tenant text they may well be.
      *
      * @param serializedOutboundPayload provider-authored text under validation
      * @param ctx request-local masking context
@@ -58,20 +72,22 @@ public final class OutboundLeakScan {
      */
     public static void assertNoLeakStrict(
             String serializedOutboundPayload, MaskingContext ctx, ObjectMapper objectMapper) {
-        assertNoLeak(serializedOutboundPayload, ctx, objectMapper, false);
+        assertNoLeak(serializedOutboundPayload, ctx, objectMapper, true);
     }
 
     private static void assertNoLeak(
             String serializedOutboundPayload,
             MaskingContext ctx,
             ObjectMapper objectMapper,
-            boolean honorTrustedText) {
+            boolean providerAuthored) {
         Objects.requireNonNull(serializedOutboundPayload, "serializedOutboundPayload");
         Objects.requireNonNull(ctx, "ctx");
         Objects.requireNonNull(objectMapper, "objectMapper");
-        List<String> fields = decodedJsonFields(serializedOutboundPayload, objectMapper);
+        boolean honorTrustedText = !providerAuthored;
+        List<ScannedField> fields = decodedJsonFields(serializedOutboundPayload, objectMapper);
         List<String> unprotectedFields = fields.stream()
-                .flatMap(field -> MaskingEngine.unprotectedTextSegments(field, ctx).stream())
+                .filter(field -> providerAuthored || field.tenantBearing())
+                .flatMap(field -> MaskingEngine.unprotectedTextSegments(field.text(), ctx).stream())
                 .toList();
         List<String> canonicalFields = unprotectedFields.stream().map(OutboundLeakScan::normalizeForScan).toList();
         List<String> labelFields = unprotectedFields.stream()
@@ -98,18 +114,28 @@ public final class OutboundLeakScan {
     }
 
     /** Visits every key and non-null scalar separately, including earlier values of duplicate keys. */
-    private static List<String> decodedJsonFields(String payload, ObjectMapper objectMapper) {
-        List<String> fields = new ArrayList<>();
+    private static List<ScannedField> decodedJsonFields(String payload, ObjectMapper objectMapper) {
+        List<ScannedField> fields = new ArrayList<>();
         try (JsonParser parser = objectMapper.createParser(payload)) {
             for (JsonToken token = parser.nextToken(); token != null; token = parser.nextToken()) {
-                if (token == JsonToken.PROPERTY_NAME || (token.isScalarValue() && token != JsonToken.VALUE_NULL)) {
-                    fields.add(parser.getString());
+                if (token == JsonToken.PROPERTY_NAME) {
+                    fields.add(new ScannedField(parser.getString(), false));
+                } else if (token.isScalarValue() && token != JsonToken.VALUE_NULL) {
+                    String value = parser.getString();
+                    fields.add(new ScannedField(value, !isRoleDiscriminator(parser.currentName(), value)));
                 }
             }
         } catch (JacksonException exception) {
-            fields.add(payload);
+            fields.add(new ScannedField(payload, true));
         }
         return fields;
+    }
+
+    private static boolean isRoleDiscriminator(String propertyName, String value) {
+        return ROLE_PROPERTY.equals(propertyName) && MaskedMessage.ROLES.contains(value);
+    }
+
+    private record ScannedField(String text, boolean tenantBearing) {
     }
 
     /** Uses the same canonical form as registration, lookup admission and replacement. */
