@@ -6,6 +6,8 @@ import { IconButton } from "@/components/ui/icon-button";
 import styles from "./fuji.module.css";
 
 const MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+/** Share of the hero that scrolls past before the ascent marker reaches the summit. */
+const ASCENT_SCROLL_SPAN = 0.55;
 
 function subscribeMotion(onChange: () => void) {
     const preference = window.matchMedia(MOTION_QUERY);
@@ -22,6 +24,11 @@ function motionSnapshot() { return window.matchMedia(MOTION_QUERY).matches; }
 function visibilitySnapshot() { return !document.hidden; }
 function serverMotionSnapshot() { return true; }
 function serverVisibilitySnapshot() { return false; }
+
+/** Smoothstep, so the ascent eases away from the foot and settles into the summit instead of tracking scroll linearly. */
+function easeAscent(travelled: number) {
+    return travelled * travelled * (3 - 2 * travelled);
+}
 
 /** Coordinates the scenery and ridge ascent with visibility, pause, and reduced-motion controls. */
 export function FujiMotion({ children, pauseLabel, resumeLabel }: { children: ReactNode; pauseLabel: string; resumeLabel: string }) {
@@ -63,7 +70,7 @@ export function FujiMotion({ children, pauseLabel, resumeLabel }: { children: Re
             frame = undefined;
             const bounds = section.getBoundingClientRect();
             const distance = Math.max(0, -bounds.top);
-            const progress = Math.min(1, distance / Math.max(1, bounds.height * 0.3));
+            const progress = easeAscent(Math.min(1, distance / Math.max(1, bounds.height * ASCENT_SCROLL_SPAN)));
             const point = route?.getPointAtLength(routeLength * progress);
             if (point && marker && trail) {
                 marker.style.transform = `translate(${point.x}px, ${point.y}px)`;
