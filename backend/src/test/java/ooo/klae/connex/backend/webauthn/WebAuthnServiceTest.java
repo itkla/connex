@@ -9,6 +9,7 @@ import static org.mockito.Mockito.any;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.webauthn.api.Bytes;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialCreationOptions;
 import org.springframework.security.web.webauthn.api.PublicKeyCredentialUserEntity;
@@ -57,6 +58,56 @@ class WebAuthnServiceTest {
      * cannot satisfy the first-enrollment confirmation, and such an account has never enrolled.
      * Refusing it here would leave that route unexecutable.
      */
+    /**
+     * Recovery takes an account id the controller already authenticated. If that row is gone by the
+     * time the lock runs, the caller is no longer authenticated — not looking at something missing.
+     */
+    @Test
+    void recoverForAnAccountThatNoLongerExistsFailsAuthentication() {
+        UserMapper userMapper = mock(UserMapper.class);
+        WebAuthnService service = new WebAuthnService(
+                mock(WebAuthnRelyingPartyOperations.class),
+                mock(UserCredentialRepository.class),
+                mock(WebauthnUserEntityMapper.class),
+                mock(WebauthnCredentialMapper.class),
+                userMapper,
+                mock(PrivilegedAccountService.class),
+                mock(PasskeyBootstrapConfirmationPolicy.class),
+                mock(AuditService.class));
+        when(userMapper.lockById(7)).thenReturn(null);
+
+        assertThrows(AuthenticationException.class, () -> service.recover(7));
+    }
+
+    /** The audit subject lookup answers the same way when the account vanished mid-flow. */
+    @Test
+    void deletingAPasskeyForAnAccountThatVanishedMidFlowFailsAuthentication() {
+        UserCredentialRepository credentials = mock(UserCredentialRepository.class);
+        WebauthnUserEntityMapper userEntities = mock(WebauthnUserEntityMapper.class);
+        WebauthnCredentialMapper credentialMapper = mock(WebauthnCredentialMapper.class);
+        UserMapper userMapper = mock(UserMapper.class);
+        PrivilegedAccountService privilegedAccounts = mock(PrivilegedAccountService.class);
+        WebAuthnService service = new WebAuthnService(
+                mock(WebAuthnRelyingPartyOperations.class), credentials, userEntities,
+                credentialMapper, userMapper, privilegedAccounts,
+                mock(PasskeyBootstrapConfirmationPolicy.class), mock(AuditService.class));
+        Bytes credentialId = Bytes.random();
+        WebauthnUserEntityRow entity = new WebauthnUserEntityRow();
+        entity.setId("handle");
+        WebauthnCredentialRow target = new WebauthnCredentialRow();
+        target.setCredentialId(credentialId.getBytes());
+        target.setLabel("Work key");
+        WebauthnCredentialRow retained = new WebauthnCredentialRow();
+        retained.setCredentialId(Bytes.random().getBytes());
+        when(userMapper.lockById(7)).thenReturn(7);
+        when(userEntities.findByUserId(7)).thenReturn(entity);
+        when(credentialMapper.findByUserEntityUserIdForUpdate("handle"))
+                .thenReturn(List.of(target, retained));
+
+        assertThrows(AuthenticationException.class,
+                () -> service.delete(7, credentialId.toBase64UrlString()));
+    }
+
     @Test
     void recoverRemovesNothingWhenTheAccountHasNoCredentialEntity() {
         WebauthnUserEntityMapper userEntities = mock(WebauthnUserEntityMapper.class);

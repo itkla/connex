@@ -25,6 +25,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.session.SessionInformation;
 import org.springframework.security.core.session.SessionRegistry;
 
@@ -70,6 +71,24 @@ class MfaRecoveryServiceTest {
         when(userMapper.grantEpochRestamp(eq(7), any(), eq(4))).thenReturn(1);
         when(springSessionMapper.primaryIdBySessionId(any()))
                 .thenReturn("ceremony-session-primary-id");
+    }
+
+    /**
+     * The ceremony locks the subject row before spending either proof. An account deleted between
+     * the session read and that lock is an authentication failure, not a missing resource.
+     */
+    @Test
+    void recoveryForAnAccountDeletedBeforeTheSubjectLockFailsAuthentication() {
+        User user = user();
+        MockHttpServletRequest httpRequest = new MockHttpServletRequest();
+        httpRequest.getSession();
+        when(authService.getCurrentUser()).thenReturn(user);
+        when(userMapper.lockById(7)).thenReturn(null);
+
+        assertThrows(AuthenticationException.class,
+            () -> service.recover(request("operator-proof"), httpRequest));
+
+        verify(webAuthnService, never()).recover(anyInt());
     }
 
     @Test
