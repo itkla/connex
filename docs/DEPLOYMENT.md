@@ -402,6 +402,8 @@ connex:
         model-id: team-model-a          # the exact configured model id (never the Azure deployment name)
         context-window-tokens: 400000
         max-output-tokens: 128000
+        endpoint: https://connex.openai.azure.com
+        streaming: true                 # only after verifying this exact resource streams
       - provider: openai_compatible
         model-id: llama3.3:70b
         context-window-tokens: 131072
@@ -418,17 +420,22 @@ connex:
         thoughts: true                  # only after verifying this exact endpoint returns thought summaries
 ```
 
-`streaming` declares that one OpenAI-compatible endpoint accepts the streamed completion request
-Connex builds, and it is the only way Ask Connex will stream an answer. It is unlike the other
-fields in two ways, both deliberate. It defaults to **off**: this adapter serves any endpoint under
-any name, several of which reject a streamed request outright, and an adapter that cannot stream
-fails the turn rather than falling back to a whole response — an unverified endpoint therefore
-streams nothing rather than risking every turn. And it applies **only together with `endpoint`**:
-the same model id behind two gateways is two different answers to whether streaming works, so a
-declaration names the endpoint it was verified against — matched character-for-character against
-the configured value, because URI paths are case-sensitive and a near-match is a different route —
-and never speaks for another. Verify with a
-real streamed request — including the `tools` array Ask Connex sends — before setting it.
+`streaming` declares that one `openai_compatible` or `azure_openai` endpoint accepts the streamed
+completion request Connex builds, and it is the only way Ask Connex will stream an answer from
+either. It is unlike the other fields in two ways, both deliberate. It defaults to **off**: these
+adapters serve any endpoint under any name — an OpenAI-compatible gateway serving an arbitrary
+model, an Azure resource serving an operator-named deployment — several of which reject a streamed
+request outright, and an adapter that cannot stream fails the turn rather than falling back to a
+whole response, so an unverified endpoint streams nothing rather than risking every turn. And it
+applies **only together with `endpoint`**: the same model id behind two gateways is two different
+answers to whether streaming works, so a declaration names the endpoint it was verified against —
+matched character-for-character against the configured value, because URI paths are case-sensitive
+and a near-match is a different route — and never speaks for another. Like every other override it
+keys on the configured model id, never the Azure deployment name. Verify with a real streamed
+request — including the `tools` array Ask Connex sends — before setting it.
+
+Bedrock and Vertex declare streaming in code rather than by configuration: Bedrock does not stream,
+and Vertex streams its Gemini publisher models over `:streamGenerateContent?alt=sse`.
 
 `thoughts` declares that the endpoint returns Gemini-style thought summaries when asked, and it is
 the only way Ask Connex will *ask* for thinking. (An endpoint that volunteers reasoning in the

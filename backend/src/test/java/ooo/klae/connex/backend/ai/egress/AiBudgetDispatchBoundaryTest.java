@@ -188,6 +188,7 @@ class AiBudgetDispatchBoundaryTest {
     @Test
     void cancellationOnTransportRegistrationReleasesBeforeModelSend() {
         AtomicInteger registrations = new AtomicInteger();
+        properties.setModelOverrides(List.of(azureStreamingOverride()));
         FixedAiProviderClient transport = new FixedAiProviderClient(
                 properties, host -> InetAddress.getLoopbackAddress());
         try {
@@ -227,12 +228,10 @@ class AiBudgetDispatchBoundaryTest {
     }
 
     private void assertPreSendRefusals(String provider, boolean streaming) throws Exception {
-        AiProperties.ModelOverride streamingOverride = new AiProperties.ModelOverride();
-        streamingOverride.setProvider("openai_compatible");
-        streamingOverride.setModelId("gpt-4o");
-        streamingOverride.setEndpoint("https://lane.example.test/v1");
-        streamingOverride.setStreaming(true);
-        properties.setModelOverrides(List.of(streamingOverride));
+        properties.setModelOverrides(List.of(
+                streamingOverride(
+                        "openai_compatible", "gpt-4o", "https://lane.example.test/v1"),
+                azureStreamingOverride()));
         AtomicBoolean resolved = new AtomicBoolean();
         AtomicInteger dispatches = new AtomicInteger();
         AtomicReference<RuntimeException> transportFailure = new AtomicReference<>();
@@ -376,6 +375,20 @@ class AiBudgetDispatchBoundaryTest {
                 new GoogleAccessTokenClient(properties, oauth, objectMapper, CLOCK),
                 objectMapper, properties);
         return service(resolved, adapter);
+    }
+
+    private static AiProperties.ModelOverride azureStreamingOverride() {
+        return streamingOverride("azure_openai", "gpt-4o", "https://lane.openai.azure.com");
+    }
+
+    private static AiProperties.ModelOverride streamingOverride(
+            String provider, String modelId, String endpoint) {
+        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
+        override.setProvider(provider);
+        override.setModelId(modelId);
+        override.setEndpoint(endpoint);
+        override.setStreaming(true);
+        return override;
     }
 
     private AiInvocationService azureService(FixedAiProviderClient transport) {

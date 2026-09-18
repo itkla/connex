@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.provider.vertex;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.ArgumentMatchers.any;
@@ -13,6 +14,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
@@ -37,11 +39,19 @@ import ooo.klae.connex.backend.ai.egress.AiEgressGuard;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.egress.FixedAiProviderClient;
+import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
+import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
+import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
+import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
+import tools.jackson.databind.ObjectMapper;
 
 class VertexClientTest {
     private static final URI ENDPOINT = URI.create("https://us-central1-aiplatform.googleapis.com/v1/projects/"
             + "connex-prod1/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent");
+    private static final URI STREAM_ENDPOINT = URI.create(
+            "https://us-central1-aiplatform.googleapis.com/v1/projects/connex-prod1/locations/"
+            + "us-central1/publishers/google/models/gemini-2.5-flash:streamGenerateContent?alt=sse");
     private static final String ACCESS_TOKEN = "vertex_access_token_secret";
     private static final String REQUEST_BODY = "{\"contents\":[{\"role\":\"user\",\"parts\":[{\"text\":\"Hello?\"}]}]}";
 
@@ -145,5 +155,83 @@ class VertexClientTest {
                 ENDPOINT,
                 ACCESS_TOKEN + "\r\nInjected: true",
                 REQUEST_BODY));
+    }
+
+    /**
+     * Vertex answers {@code streamGenerateContent} as server-sent events only when {@code alt=sse}
+     * is on the query string, so the endpoint the adapter builds has to survive validation and
+     * reach the transport rather than being refused for carrying a query at all.
+     */
+    @Test
+    void stream_sseEndpointReachesTheTransportWithItsQueryIntact() {
+        AiProperties properties = new AiProperties();
+        FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
+        AiCompletionResult completion = new AiCompletionResult(
+                "Hello", 3, 2, "stop", AiStructuredOutputEnforcement.PROMPT_ONLY);
+        when(providerClient.<AiCompletionResult>postStream(
+                any(URI.class), anySet(), anyMap(), any(ContentType.class), any(byte[].class),
+                any(AiRequestDeadline.class), any(), any(AiProviderStreamObserver.class), any(),
+                any(Runnable.class)))
+                .thenReturn(new FixedAiProviderClient.StreamResponse<>(200, completion, null));
+        VertexClient client = new VertexClient(properties, providerClient);
+        AiProviderStreamObserver observer = text -> {
+        };
+
+        AiCompletionResult result = client.stream(
+                STREAM_ENDPOINT, ACCESS_TOKEN, REQUEST_BODY,
+                AiRequestDeadline.afterMillis(5_000), accumulator(observer), observer);
+
+        assertSame(completion, result);
+        verify(providerClient).<AiCompletionResult>postStream(
+                eq(STREAM_ENDPOINT),
+                eq(java.util.Set.of("us-central1-aiplatform.googleapis.com")),
+                argThat(headers -> ("Bearer " + ACCESS_TOKEN).equals(headers.get("Authorization"))),
+                eq(ContentType.APPLICATION_JSON),
+                aryEq(REQUEST_BODY.getBytes(StandardCharsets.UTF_8)),
+                any(AiRequestDeadline.class),
+                eq("Vertex invocation"),
+                eq(observer),
+                any(),
+                any(Runnable.class));
+    }
+
+    /** The streaming allowance is that one raw query verbatim, never a query string in general. */
+    @Test
+    void stream_rejectsEveryQueryOtherThanTheExactSseSelector() {
+        FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
+        VertexClient client = new VertexClient(new AiProperties(), providerClient);
+        AiProviderStreamObserver observer = text -> {
+        };
+
+        for (String query : java.util.List.of(
+                "?alt=json", "?alt=sse&trace=1", "?alt=SSE", "?alt=sse%26x=1", "?x=1&alt=sse")) {
+            URI endpoint = URI.create(STREAM_ENDPOINT.toString().replace("?alt=sse", query));
+
+            AiProviderException exception = assertThrows(AiProviderException.class,
+                    () -> client.stream(endpoint, ACCESS_TOKEN, REQUEST_BODY,
+                            AiRequestDeadline.afterMillis(5_000), accumulator(observer), observer));
+
+            assertEquals("Invalid Vertex endpoint", exception.getMessage());
+        }
+        verifyNoInteractions(providerClient);
+    }
+
+    /** Only the streaming path needs the selector; a buffered call still carries no query. */
+    @Test
+    void complete_stillRejectsTheStreamingSseQuery() {
+        FixedAiProviderClient providerClient = mock(FixedAiProviderClient.class);
+        VertexClient client = new VertexClient(new AiProperties(), providerClient);
+
+        AiProviderException exception = assertThrows(AiProviderException.class,
+                () -> client.complete(STREAM_ENDPOINT, ACCESS_TOKEN, REQUEST_BODY));
+
+        assertEquals("Invalid Vertex endpoint", exception.getMessage());
+        verifyNoInteractions(providerClient);
+    }
+
+    private static VertexSseAccumulator accumulator(AiProviderStreamObserver observer) {
+        return new VertexSseAccumulator(
+                new ObjectMapper(), observer, AiStructuredOutputEnforcement.PROMPT_ONLY,
+                AiReasoningMode.NONE);
     }
 }
