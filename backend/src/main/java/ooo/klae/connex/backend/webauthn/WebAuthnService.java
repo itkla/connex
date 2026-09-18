@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.webauthn;
 import java.security.MessageDigest;
 import java.util.List;
 
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.web.webauthn.api.AuthenticatorAssertionResponse;
@@ -297,7 +298,7 @@ public class WebAuthnService {
     @Transactional
     public int recover(int callerUserId) {
         if (userMapper.lockById(callerUserId) == null) {
-            throw new ResourceNotFoundException("Not authenticated");
+            throw new AuthenticationCredentialsNotFoundException("Not authenticated");
         }
         WebauthnUserEntityRow entity = userEntityMapper.findByUserId(callerUserId);
         if (entity == null) {
@@ -341,7 +342,7 @@ public class WebAuthnService {
     private User requireUser(int userId) {
         User user = userMapper.getUserById(userId);
         if (user == null) {
-            throw new ResourceNotFoundException("Not authenticated");
+            throw new AuthenticationCredentialsNotFoundException("Not authenticated");
         }
         return user;
     }

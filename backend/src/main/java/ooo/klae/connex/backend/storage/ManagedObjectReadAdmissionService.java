@@ -22,6 +22,7 @@ import java.util.function.Supplier;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -158,7 +159,7 @@ public class ManagedObjectReadAdmissionService {
         if (authentication == null || !authentication.isAuthenticated()
                 || !(authentication.getPrincipal() instanceof User user)
                 || user.getId() <= 0) {
-            throw new ResourceNotFoundException("Not authenticated");
+            throw new AuthenticationCredentialsNotFoundException("Not authenticated");
         }
         return user.getId();
     }
