@@ -168,6 +168,15 @@ jobs:
       - name: Audit (fail on high+)
         working-directory: frontend
         run: pnpm audit --audit-level=high
+      # frontend/emails/ is a separate pnpm project with its own lockfile, not a workspace package of
+      # frontend/. Only a frozen install makes pnpm re-check a lockfile against the release-age and
+      # trust policy, so every covered project needs one.
+      - name: Install emails
+        working-directory: frontend/emails
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Audit emails (fail on high+)
+        working-directory: frontend/emails
+        run: pnpm audit --audit-level=high
       # landing/ is a separate pnpm project with its own lockfile, deployed to Cloudflare Workers.
       - name: Install landing
         working-directory: landing
