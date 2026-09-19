@@ -768,6 +768,31 @@ account root.
 - `EmailChangeService.requestChange` proves the current password through the shared throttled
   confirmation, then re-reads the account under the exclusive root and refuses when the password
   hash or `session_epoch` moved since the proof.
+- `EmailChangeService.requestChange` also gates privileged accounts on an enrolled passkey and a
+  fresh WebAuthn step-up (#1506). It evaluates the gate first before taking the account root and
+  audits a refusal there. Under the root, after the `session_epoch` check, it locks the account's
+  assigned custom roles `FOR SHARE` through `lockAssignedCustomRoleIds`, as
+  `PasswordResetService` and `WebAuthnService.finishRegistration` do, and evaluates the gate again
+  against committed state. That statement is mapped with `flushCache="true"`: the request is one
+  MyBatis session, so without the flush the re-check would return the privilege and passkey answers
+  cached by the pre-lock evaluation. A refusal that appears only under the root is not audited (see
+  below).
+
+Operator break-glass recovery (`MfaRecoveryService.recover`) spends its token in the same
+hierarchy (#1532). Its order is:
+
+1. `app_user` exclusive (`lockById`).
+2. `privileged_mfa_recovery_redemption`: an `INSERT IGNORE` of the token's ledger row. Zero rows
+   inserted means the token is already spent, and the ceremony is refused before anything is
+   removed.
+3. The account's `webauthn_user_entity` / `webauthn_credential` rows, through
+   `WebAuthnService.recover`. That call re-takes the `app_user` lock it already holds.
+4. The audit integrity head.
+
+The token digest is bound to one account id, so only that account's root can reach a given ledger
+row. The account root therefore already serializes concurrent redemptions, and the primary key is
+the backstop. The ledger row belongs to the recovery transaction, so any later failure rolls it back
+with the credential removal and leaves the token unspent.
 
 The audit head sits below `app_user` in this order, and an independent audit append re-acquires the
 actor's `app_user` row shared. `AuthService.requireCurrentPassword` therefore writes no audit of its
@@ -775,6 +800,9 @@ own: `MfaRecoveryService.recover` calls it while holding that row exclusively, s
 would wait on the caller's own lock until the InnoDB timeout, lose the event, and pin a second
 pooled connection. Callers that are not already holding the account root —
 `EmailChangeService.requestChange` — record the confirmation outcome themselves, before acquiring it.
+The same rule places the `auth.email_change.refused` audit ahead of `lockById`. The under-lock
+re-check of the privileged gate throws without auditing, because any append there would block on
+the request's own exclusive lock.
 
 The breached-password decision in `PasswordResetService.resetPasswordByHash` follows the same rule.
 The corpus lookup runs before any lock, but the fail-open decision reads account privilege under

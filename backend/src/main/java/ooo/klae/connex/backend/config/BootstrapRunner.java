@@ -6,6 +6,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -31,8 +33,16 @@ import ooo.klae.connex.backend.services.AuthService;
     name = "mode",
     havingValue = "off",
     matchIfMissing = true)
+@Order(BootstrapRunner.ORDER)
 @RequiredArgsConstructor
 public class BootstrapRunner implements ApplicationListener<ApplicationReadyEvent> {
+
+    /**
+     * Ready-listener order of owner provisioning. Ready listeners that must observe the founding
+     * owner, such as the privileged-MFA posture audit, order after it; the lowest-precedence
+     * readiness marker still runs last.
+     */
+    static final int ORDER = Ordered.LOWEST_PRECEDENCE - 2;
 
     private static final Logger log = LoggerFactory.getLogger(BootstrapRunner.class);
 

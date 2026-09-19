@@ -18,6 +18,8 @@ import ooo.klae.connex.backend.dto.RevokedInvitationDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.PasskeyEnrollmentRequiredException;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.EmailChangeTokenMapper;
 import ooo.klae.connex.backend.mappers.NotificationMapper;
@@ -27,6 +29,7 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationStateVersionService;
 import ooo.klae.connex.backend.util.ClientIpResolver.ResolvedClientIp;
 import ooo.klae.connex.backend.util.OneTimeTokenDigest;
+import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 /**
  * Drives the verified account email-change flow. Changing an account email is a
@@ -52,6 +55,8 @@ public class EmailChangeService {
     private final SessionSecurityService sessionSecurityService;
     private final AuditService auditService;
     private final LoginRateLimiter loginRateLimiter;
+    private final PrivilegedAccountService privilegedAccountService;
+    private final WebAuthnService webAuthnService;
 
     @Value("${connex.email-change.token-expiry-minutes:30}")
     private int tokenExpiryMinutes;
@@ -87,6 +92,19 @@ public class EmailChangeService {
      * invalidation. Delivery is dispatched off-thread and best-effort by {@code MailService.sendInstance};
      * confirmation rechecks address uniqueness before applying it.
      *
+     * <p>A privileged account's address is where its first-passkey enrollment confirmation is
+     * delivered, so moving it behind the password alone would let a stolen password redirect that
+     * second factor (#1506). A privileged account must therefore hold a passkey and present a fresh
+     * WebAuthn step-up, whether or not {@code privileged-mfa.enforced} confines it. The gate is
+     * evaluated after the password proof and again under the account lock, after the assigned
+     * custom roles are locked. That role lock also clears this transaction's mapper read cache, so
+     * the second evaluation re-reads privilege and passkey state instead of reusing the pre-lock
+     * answers, and a promotion committed while this request waited is observed.
+     * The refusal audit is an independent append that takes the actor's {@code app_user} row
+     * shared, so it is written only on the pre-lock refusal; a refusal that first appears under the
+     * lock is not audited, because appending there would wait on this transaction's own exclusive
+     * lock until the InnoDB timeout.
+     *
      * @param newEmailRaw the requested new email address
      * @param currentPassword the caller's current password, verified before issuing
      * @param requestIp the resolved client address and trusted-proxy provenance, recorded for
@@ -109,6 +127,7 @@ public class EmailChangeService {
                     "Current-password confirmation failed", "incorrect_password");
             throw new ForbiddenException("Your current password is incorrect");
         }
+        requirePrivilegedStepUpAuditingRefusal(user.getId());
         String newEmail = normalizeEmail(newEmailRaw);
         validateRequest(user, newEmail);
 
@@ -121,6 +140,8 @@ public class EmailChangeService {
                 || !Objects.equals(sessionEpoch, lockedUser.getSessionEpoch())) {
             throw new ForbiddenException("Your current password is incorrect");
         }
+        userMapper.lockAssignedCustomRoleIds(user.getId());
+        requirePrivilegedStepUp(user.getId());
         user = lockedUser;
         emailChangeTokenMapper.invalidateForUser(user.getId());
         validateRequest(user, newEmail);
@@ -132,6 +153,46 @@ public class EmailChangeService {
 
         auditService.record("user.email_change_requested", "user", user.getId(), user.getDisplayName(),
                 "Requested a verified email change", null);
+    }
+
+    /**
+     * Applies the privileged-account gate before the account lock, auditing a refusal. The audit
+     * is an independent append, so it must not run while this transaction holds {@code app_user}.
+     *
+     * @param userId the requesting account
+     */
+    private void requirePrivilegedStepUpAuditingRefusal(int userId) {
+        try {
+            requirePrivilegedStepUp(userId);
+        } catch (PasskeyEnrollmentRequiredException exception) {
+            auditEmailChangeRefusal(userId, "privileged_mfa_enrollment_required");
+            throw exception;
+        } catch (RecentAuthenticationRequiredException exception) {
+            auditEmailChangeRefusal(userId, "recent_authentication_required");
+            throw exception;
+        }
+    }
+
+    /**
+     * Requires a privileged account to hold a passkey and a fresh WebAuthn step-up. Unprivileged
+     * accounts pass unchanged. Only a WebAuthn ceremony writes the step-up stamp, so an account
+     * that has never enrolled cannot satisfy it and is refused with the enrollment code instead.
+     *
+     * @param userId the requesting account
+     */
+    private void requirePrivilegedStepUp(int userId) {
+        if (!privilegedAccountService.isPrivileged(userId)) {
+            return;
+        }
+        if (!webAuthnService.hasPasskey(userId)) {
+            throw new PasskeyEnrollmentRequiredException();
+        }
+        sessionSecurityService.requireRecentAuthentication(userId);
+    }
+
+    private void auditEmailChangeRefusal(int userId, String reason) {
+        auditService.recordFailure("auth.email_change.refused", "user", userId, null,
+                "Email change refused for a privileged account", reason);
     }
 
     private void validateRequest(User user, String newEmail) {
