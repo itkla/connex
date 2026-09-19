@@ -7,8 +7,12 @@ import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Map;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.BreachedPasswordCheckUnavailableException;
@@ -28,7 +32,11 @@ import ooo.klae.connex.backend.services.AuditService;
 @Service
 @RequiredArgsConstructor
 public class PasswordCredentialService {
+    private static final Logger log = LoggerFactory.getLogger(PasswordCredentialService.class);
     private static final int MAX_CREDENTIAL_BYTES = 72;
+    private static final String BREACH_CHECK_UNAVAILABLE_ACTION = "auth.password.breach_check_unavailable";
+    private static final String DECISION_TARGET = "password-policy";
+    private static final String DECISION_SUMMARY = "Breached-password policy decision";
 
     private final BreachedPasswordLookup breachedPasswordLookup;
     private final PasswordEncoder passwordEncoder;
@@ -81,6 +89,15 @@ public class PasswordCredentialService {
      * <p>Privilege is read here rather than at screening time so a caller that revalidates under a
      * lock observes a promotion that committed while it was waiting.
      *
+     * <p>The decision taken when the corpus could not answer is audited, but never by an independent
+     * append while the caller's transaction is open: that append re-locks the actor's
+     * {@code app_user} row shared, and a password-reset caller holds the same row exclusively when the
+     * redeemer is signed in as the account owner. Inside a transaction a {@code fail_open} decision is
+     * therefore appended in that transaction just before it commits, so it lands atomically with the
+     * credential and after every other lock the caller takes; a {@code fail_closed} decision is
+     * appended independently once the transaction has completed and released its locks. Outside a
+     * transaction either decision is appended independently at once.
+     *
      * @param screening the result of {@link #screen}
      * @param candidate the proposed password
      * @param flow the credential-write context whose availability policy applies
@@ -93,14 +110,12 @@ public class PasswordCredentialService {
             PasswordScreeningFlow flow, Integer userId) {
         requireEncodable(candidate, flow);
         if (!screening.answered()) {
-            String decision = mayFailOpen(flow, userId, screening.unavailableReason())
-                    ? "fail_open"
-                    : "fail_closed";
-            auditDecision("auth.password.breach_check_unavailable", flow, userId, decision,
-                    screening.unavailableReason());
-            if (!"fail_open".equals(decision)) {
+            BreachedPasswordUnavailableReason reason = screening.unavailableReason();
+            if (!mayFailOpen(flow, userId, reason)) {
+                auditFailClosed(flow, userId, reason);
                 throw new BreachedPasswordCheckUnavailableException(flow.field());
             }
+            auditFailOpen(flow, userId, reason);
         }
         return passwordEncoder.encode(candidate);
     }
@@ -124,21 +139,68 @@ public class PasswordCredentialService {
                 && reason != BreachedPasswordUnavailableReason.MALFORMED_RESPONSE;
     }
 
-    private void auditDecision(String action, PasswordScreeningFlow flow, Integer userId,
-            String decision, BreachedPasswordUnavailableReason reason) {
-        Map<String, String> changes = reason == null
+    /**
+     * Audits a decision to store an unscreened credential so that the credential cannot commit
+     * without it: in the caller's transaction just before commit, where a failed append aborts the
+     * commit, or independently at once when there is no transaction.
+     */
+    private void auditFailOpen(PasswordScreeningFlow flow, Integer userId,
+            BreachedPasswordUnavailableReason reason) {
+        Map<String, String> changes = decisionChanges(flow, "fail_open", reason);
+        if (!inTransaction()) {
+            auditIndependently(userId, changes);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void beforeCommit(boolean readOnly) {
+                auditService.recordStrictScoped(BREACH_CHECK_UNAVAILABLE_ACTION, "user", userId, null,
+                        null, DECISION_TARGET, DECISION_SUMMARY, changes);
+            }
+        });
+    }
+
+    /**
+     * Audits a refusal independently of the transaction the refusal rolls back. Inside a transaction
+     * the append waits until completion has released the caller's locks; a failure there is logged
+     * rather than thrown because the refusal already stands.
+     */
+    private void auditFailClosed(PasswordScreeningFlow flow, Integer userId,
+            BreachedPasswordUnavailableReason reason) {
+        Map<String, String> changes = decisionChanges(flow, "fail_closed", reason);
+        if (!inTransaction()) {
+            auditIndependently(userId, changes);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                try {
+                    auditIndependently(userId, changes);
+                } catch (RuntimeException exception) {
+                    log.error("Breached-password fail_closed decision could not be audited: flow={} exception={}",
+                            flow.auditValue(), exception.getClass().getName());
+                }
+            }
+        });
+    }
+
+    private void auditIndependently(Integer userId, Map<String, String> changes) {
+        auditService.recordStrictIndependentScoped(BREACH_CHECK_UNAVAILABLE_ACTION, "user", userId, null,
+                null, DECISION_TARGET, DECISION_SUMMARY, changes);
+    }
+
+    private static boolean inTransaction() {
+        return TransactionSynchronizationManager.isSynchronizationActive()
+                && TransactionSynchronizationManager.isActualTransactionActive();
+    }
+
+    private static Map<String, String> decisionChanges(PasswordScreeningFlow flow, String decision,
+            BreachedPasswordUnavailableReason reason) {
+        return reason == null
                 ? Map.of("flow", flow.auditValue(), "decision", decision)
                 : Map.of("flow", flow.auditValue(), "decision", decision,
                         "reason", reason.name().toLowerCase(Locale.ROOT));
-        auditService.recordStrictIndependentScoped(
-                action,
-                "user",
-                userId,
-                null,
-                null,
-                "password-policy",
-                "Breached-password policy decision",
-                changes);
     }
 
     /**

@@ -776,6 +776,21 @@ would wait on the caller's own lock until the InnoDB timeout, lose the event, an
 pooled connection. Callers that are not already holding the account root —
 `EmailChangeService.requestChange` — record the confirmation outcome themselves, before acquiring it.
 
+The breached-password decision in `PasswordResetService.resetPasswordByHash` follows the same rule.
+The corpus lookup runs before any lock, but the fail-open decision reads account privilege under
+the exclusive account root so a promotion that commits while the reset waits is observed; do not
+hoist that read above `lockById`. Only the decision's audit moves.
+`PasswordCredentialService.encodeScreened` never appends it independently while a transaction is
+open:
+
+- `fail_open` is appended in the caller's transaction from a `beforeCommit` synchronization, so it
+  takes the audit head after `markConsumed` and both `invalidateForUser` calls (class 3 after class
+  2), and a failed append aborts the credential write with it.
+- `fail_closed` is appended independently from an `afterCompletion` synchronization, after the
+  rollback its own exception causes has released the account root. A failure there is logged, not
+  thrown, because the refusal already stands.
+- Outside a transaction, either decision is appended independently at once.
+
 ## Connected-provider credentials
 
 Provider credential transitions lock the owning `app_user` shared before the exact
