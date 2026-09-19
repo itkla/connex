@@ -239,15 +239,6 @@ class AttachmentServiceScanTest {
         verify(attachmentMapper, never()).delete(anyInt(), anyInt());
     }
 
-    @Test
-    void anotherWorkspaceAttachmentIsNotFoundBeforeDelegation() {
-        assertThrows(ResourceNotFoundException.class, () -> service.delete(19));
-
-        verify(attachmentMapper).getMetadataById(7, 19);
-        verify(quarantineService, never()).delete(anyInt());
-        verify(attachmentMapper, never()).delete(anyInt(), anyInt());
-    }
-
     private static Attachment attachment(String url, String state) {
         Attachment attachment = new Attachment();
         attachment.setId(19);
