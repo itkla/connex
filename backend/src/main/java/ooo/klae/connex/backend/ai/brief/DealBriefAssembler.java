@@ -13,6 +13,7 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiCancellation;
 import ooo.klae.connex.backend.ai.AiRelationshipContext;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
@@ -79,6 +80,7 @@ public class DealBriefAssembler {
         List<Note> notes = safeList(dealService.getNotesByDealId(dealId));
         List<Task> tasks = safeList(dealService.getTasksByDealId(dealId));
         Set<Integer> allowedPersonIds = allowedPersonIds(workspaceId, people, activities, notes, tasks);
+        AiCancellation.throwIfInterrupted();
 
         MaskingContext context = new MaskingContext();
         String companyToken = companyToken(summary, context);
@@ -89,6 +91,7 @@ public class DealBriefAssembler {
                 personIds.add(stakeholder.personId());
             }
         }
+        AiCancellation.throwIfInterrupted();
 
         Map<Integer, RelationshipTemperatureDto> warmth = warmthByPerson(
                 scoringService.scoreContacts(workspaceId, personIds));
@@ -105,6 +108,7 @@ public class DealBriefAssembler {
                 .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(promptResult.prompt())
                 .build();
+        AiCancellation.throwIfInterrupted();
         return new BriefAssembly(
                 context,
                 prompt,
@@ -148,13 +152,17 @@ public class DealBriefAssembler {
         appendValue(prompt, "Expected close", expectedClose);
         appendValue(prompt, "Value", value);
         boolean degraded = aiRelationshipContext.appendCompanyProfile(prompt, companyId, context);
+        AiCancellation.throwIfInterrupted();
 
         appendStageHistory(prompt, stageHistory, context, dealSourceId);
+        AiCancellation.throwIfInterrupted();
         appendStakeholders(prompt, stakeholders, warmth, context, sourceRegistry);
         degraded |= appendStakeholderBackground(prompt, stakeholders, context, sourceRegistry);
+        AiCancellation.throwIfInterrupted();
         appendRisk(prompt, risk, stakeholders, context, dealSourceId);
         degraded |= aiRelationshipContext.appendAccountHistory(
                 prompt, companyId, deal.getId(), context, sourceRegistry::register);
+        AiCancellation.throwIfInterrupted();
         appendActivities(prompt, activities, context, sourceRegistry);
         appendNotes(prompt, notes, context, sourceRegistry);
         appendTasks(prompt, tasks, context, sourceRegistry);
@@ -170,6 +178,7 @@ public class DealBriefAssembler {
         int enriched = 0;
         boolean degraded = false;
         for (MaskedStakeholder stakeholder : stakeholders) {
+            AiCancellation.throwIfInterrupted();
             if (stakeholder.personId() <= 0) {
                 continue;
             }
@@ -469,6 +478,7 @@ public class DealBriefAssembler {
     }
 
     private static String digest(MaskingContext context, String... values) {
+        AiCancellation.throwIfInterrupted();
         StringBuilder digest = new StringBuilder();
         for (String value : values) {
             if (isBlank(value)) {

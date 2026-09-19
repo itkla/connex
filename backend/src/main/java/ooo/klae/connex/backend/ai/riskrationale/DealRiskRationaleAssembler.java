@@ -17,6 +17,7 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiCancellation;
 import ooo.klae.connex.backend.ai.AiRelationshipContext;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
@@ -70,6 +71,7 @@ public class DealRiskRationaleAssembler {
         Deal deal = dealService.getDealById(dealId);
         DealSummaryDto summary = dealService.getDealSummary(dealId);
         List<DealPerson> people = safeList(dealService.getPeopleByDealId(dealId));
+        AiCancellation.throwIfInterrupted();
 
         MaskingContext context = new MaskingContext();
         String companyToken = identifierToken(
@@ -80,6 +82,7 @@ public class DealRiskRationaleAssembler {
         List<MaskedFactor> factors = registerFactorPeople(risk.getFactors(), stakeholderTokens);
         Map<Integer, RelationshipTemperatureDto> warmth = warmthByPerson(
                 scoringService.scoreContacts(workspaceId, stakeholderTokens.keySet()));
+        AiCancellation.throwIfInterrupted();
         Set<Integer> connectionPersonIds = new LinkedHashSet<>();
         Set<String> factorCodes = factorCodes(factors);
 
@@ -91,6 +94,7 @@ public class DealRiskRationaleAssembler {
                 .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(userPrompt)
                 .build();
+        AiCancellation.throwIfInterrupted();
         return new RationaleAssembly(
                 context,
                 prompt,
@@ -119,7 +123,9 @@ public class DealRiskRationaleAssembler {
         appendFactors(prompt, factors, context);
         appendStakeholders(prompt, stakeholderTokens, warmth, context);
         appendDealContext(prompt, summary, risk, companyToken, ownerToken, context);
+        AiCancellation.throwIfInterrupted();
         aiRelationshipContext.appendAccountHistory(prompt, companyId, deal == null ? 0 : deal.getId(), context);
+        AiCancellation.throwIfInterrupted();
         appendStakeholderBackground(prompt, stakeholderTokens, context, connectionPersonIds);
         return prompt.append("CRM_CONTEXT_END").toString();
     }
@@ -161,6 +167,7 @@ public class DealRiskRationaleAssembler {
         StringBuilder block = new StringBuilder();
         int enriched = 0;
         for (Map.Entry<Integer, String> stakeholder : stakeholderTokens.entrySet()) {
+            AiCancellation.throwIfInterrupted();
             if (stakeholder.getKey() <= 0) {
                 continue;
             }

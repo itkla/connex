@@ -2,9 +2,12 @@ package ooo.klae.connex.backend.ai.riskrationale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -13,6 +16,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -113,6 +117,36 @@ class DealRiskRationaleAssemblerTest {
         assertFalse(serialized.contains("+1 415 555 0199"));
         verify(dealService).getDealSummary(DEAL_ID);
         verify(dealService).getPeopleByDealId(DEAL_ID);
+    }
+
+    /**
+     * The account-history helper swallows failures and reports degraded context; an interrupt it
+     * absorbed must still stop assembly before any stakeholder background is loaded.
+     */
+    @Test
+    void interruptAbsorbedByAccountHistoryCancelsAssemblyBeforeStakeholderBackground() {
+        Person person = new Person();
+        person.setId(PERSON_ID);
+        person.setName("Mina Patel");
+        DealRiskDto risk = new DealRiskDto(
+                DEAL_ID, new BigDecimal("125000.00"), "USD", "high", 80,
+                List.of(new DealRiskFactor("close_overdue", "high", Map.of("daysOverdue", 5))),
+                "2026-07-09 18:30:00");
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(new DealPerson(person, null)));
+        when(aiRelationshipContext.appendAccountHistory(any(StringBuilder.class), anyInt(), anyInt(), any()))
+                .thenAnswer(invocation -> {
+                    Thread.currentThread().interrupt();
+                    return true;
+                });
+
+        try {
+            assertThrows(CancellationException.class, () -> assembler.assemble(WORKSPACE_ID, DEAL_ID, risk));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+        verify(aiRelationshipContext, never()).appendStakeholderBackground(
+                any(StringBuilder.class), anyInt(), any(), any());
     }
 
     @Test

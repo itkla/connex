@@ -3,8 +3,10 @@ package ooo.klae.connex.backend.ai.brief;
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -20,6 +22,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -144,6 +147,34 @@ class DealBriefAssemblerTest {
             startScreening.countDown();
             workers.shutdownNow();
         }
+    }
+
+    /**
+     * The company-profile helper stands in for any best-effort phase that swallows a failure and
+     * reports the context as degraded: the interrupt it absorbed must still stop assembly at the
+     * next phase boundary, before another stakeholder or account-history load is paid for.
+     */
+    @Test
+    void interruptAbsorbedByADegradingPhaseCancelsAssemblyAtTheNextPhaseBoundary() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(new DealPerson(person(), null)));
+        when(aiRelationshipContext.appendCompanyProfile(any(StringBuilder.class), anyInt(), any()))
+                .thenAnswer(invocation -> {
+                    Thread.currentThread().interrupt();
+                    return true;
+                });
+
+        try {
+            assertThrows(CancellationException.class, () -> assembler.assemble(WORKSPACE_ID, DEAL_ID));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+        verify(aiRelationshipContext, never()).appendStakeholderBackground(
+                any(StringBuilder.class), anyInt(), any(), any(), any());
+        verify(aiRelationshipContext, never()).appendAccountHistory(
+                any(StringBuilder.class), anyInt(), anyInt(), any(),
+                any(AiRelationshipContext.SourceIdProvider.class));
     }
 
     @Test

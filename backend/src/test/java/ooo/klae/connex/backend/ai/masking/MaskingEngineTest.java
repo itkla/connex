@@ -22,6 +22,7 @@ import java.util.regex.Pattern;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -65,6 +66,33 @@ class MaskingEngineTest {
                 MaskingEngine.maskConversationalFreeText("Ask " + name + " today.", context));
         assertEquals(MaskingEngine.REDACTED,
                 MaskingEngine.screenFreeTextBeforeTruncation("x".repeat(498) + name, context));
+    }
+
+    /**
+     * A timed-out generation interrupts its worker; screening a long note against the dictionary
+     * must observe that between identifiers instead of finishing work whose result is discarded.
+     */
+    @Test
+    void interruptedScreeningOfLongTextIsCancelledAndRecoversOnceCleared() {
+        MaskingContext context = new MaskingContext();
+        for (String name : List.of("Mina Patel", "Olivia Chen", "Acme Holdings")) {
+            MaskingEngine.maskField(EntityKind.PERSON, name, context);
+        }
+        String note = "Mina Patel asked Olivia Chen about the Acme Holdings renewal. ".repeat(800);
+
+        Thread.currentThread().interrupt();
+        try {
+            assertThrows(CancellationException.class, () -> MaskingEngine.maskFreeText(note, context));
+            assertThrows(CancellationException.class,
+                    () -> MaskingEngine.screenFreeTextBeforeTruncation(note, context));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+
+        String masked = MaskingEngine.maskFreeText(note, context);
+        assertFalse(masked.contains("Mina Patel"));
+        assertFalse(masked.contains("Acme Holdings"));
     }
 
     /** Includes transient allocation so repeatedly rebuilding otherwise small maps also fails. */

@@ -23,6 +23,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -42,6 +43,9 @@ import ooo.klae.connex.backend.ai.assistant.AiChatDurableTerminal;
 import ooo.klae.connex.backend.ai.assistant.AiChatQueuedTurn;
 import ooo.klae.connex.backend.ai.assistant.AiChatTurnPersistenceService;
 import ooo.klae.connex.backend.ai.assistant.AiChatTurnTerminalCoordinator;
+import ooo.klae.connex.backend.ai.masking.EntityKind;
+import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.dto.AiChatStepFrameDto;
 import ooo.klae.connex.backend.dto.AiGenerationStatusDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
@@ -587,6 +591,72 @@ class AiGenerationServiceTest {
         assertEquals("generation_timeout", timedOut.reason());
     }
 
+    /**
+     * With a single worker, a generation that times out while screening a long note must release
+     * that worker, so a generation started afterwards resolves within its own lifetime instead of
+     * queueing behind masking whose result has already been discarded.
+     */
+    @Test
+    void timedOutMaskingGenerationReleasesTheOnlyWorkerForALaterGeneration() throws Exception {
+        service.shutdown();
+        AiProperties singleWorker = properties(Duration.ofSeconds(2));
+        singleWorker.setGenerationWorkerThreads(1);
+        service = new AiGenerationService(
+                singleWorker,
+                workspaceService,
+                aiFeatureGate,
+                aiRestrictionEpoch,
+                contextRunner,
+                JsonMapper.builder().build(),
+                Clock.systemUTC());
+        CountDownLatch masking = new CountDownLatch(1);
+        AiGenerationStatusDto stuck = service.start(
+                AiFeature.DEAL_BRIEF,
+                "deal-17",
+                Set.of(Permission.AI_USE),
+                "unavailable",
+                () -> {
+                    MaskingContext context = new MaskingContext();
+                    MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", context);
+                    String note = "Mina Patel reviewed the renewal terms. ".repeat(1_000);
+                    masking.countDown();
+                    long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                    while (System.nanoTime() < until) {
+                        MaskingEngine.maskFreeText(note, context);
+                    }
+                    return AiGenerationTaskResult.resolved("late");
+                });
+
+        assertTrue(masking.await(5, TimeUnit.SECONDS));
+        assertEquals("generation_timeout",
+                awaitStatus(stuck.handle(), "timed_out", Duration.ofSeconds(10)).reason());
+        AiGenerationStatusDto later = service.start(
+                AiFeature.DEAL_BRIEF,
+                "deal-18",
+                Set.of(Permission.AI_USE),
+                "unavailable",
+                () -> AiGenerationTaskResult.resolved("ready"));
+
+        assertEquals("ready",
+                awaitStatus(later.handle(), "resolved", Duration.ofSeconds(10)).result().asString());
+    }
+
+    @Test
+    void cancellationRaisedByAGenerationIsRecordedAsCancelled() {
+        AiGenerationStatusDto accepted = service.start(
+                AiFeature.DEAL_BRIEF,
+                "deal-19",
+                Set.of(Permission.AI_USE),
+                "unavailable",
+                () -> {
+                    throw new CancellationException("AI work was cancelled");
+                });
+
+        AiGenerationStatusDto failed = awaitStatus(accepted.handle(), "failed");
+
+        assertEquals("cancelled", failed.reason());
+    }
+
     @Test
     void pollAfterPermissionLossIsRefusedAndInvalidated() throws Exception {
         CountDownLatch running = new CountDownLatch(1);
@@ -980,7 +1050,11 @@ class AiGenerationServiceTest {
     }
 
     private AiGenerationStatusDto awaitStatus(String handle, String expected) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        return awaitStatus(handle, expected, Duration.ofSeconds(3));
+    }
+
+    private AiGenerationStatusDto awaitStatus(String handle, String expected, Duration window) {
+        long deadline = System.nanoTime() + window.toNanos();
         AiGenerationStatusDto current = service.status(handle);
         while (!expected.equals(current.status()) && System.nanoTime() < deadline) {
             Thread.onSpinWait();
