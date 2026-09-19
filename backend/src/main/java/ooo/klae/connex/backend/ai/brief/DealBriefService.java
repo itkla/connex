@@ -166,10 +166,10 @@ public class DealBriefService {
     }
 
     /**
-     * Refuses a request that admission would certainly reject before the deal is loaded and masked.
-     * A stored brief can only be validated against a fresh assembly, so a non-forced request with
-     * a stored row always proceeds and a valid cache hit is never refused for quota; a forced
-     * refresh, or a request with no stored row, can only end in a new provider attempt.
+     * Refuses, before the deal is loaded and masked, a request that admission would currently
+     * reject. A stored brief can only be validated against a fresh assembly, so a non-forced
+     * request with a stored row always proceeds and a valid cache hit is never refused for quota;
+     * a forced refresh, or a request with no stored row, can only end in a new provider attempt.
      */
     private boolean refusedBeforeAssembly(
             int workspaceId,

@@ -42,7 +42,7 @@ src/main/java/ooo/klae/connex/backend/ai/assistant/AiSkillRouter.java	b96d136a1e
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiWatchEvaluationService.java	5ead91a6adf6e53367d42008c5b9146124ab75f1fb645928052d01e91e714762
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiWatchService.java	c5edbb76a6a4eab1ddd8acd0f679a79cbcd6ebe65affdf92ac57609b831b3ae0
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiWatchSubjectReader.java	458d69644c7fcb0f9bf6d1fd9157695c1e23275c91a86ef17b127336376b613b
-src/main/java/ooo/klae/connex/backend/ai/brief/DealBriefService.java	ba28dfa08acc809f20c28abbe755aa38be3cd26dcbc097cd4309b264757c358c
+src/main/java/ooo/klae/connex/backend/ai/brief/DealBriefService.java	69c73a9dca5dd03ea4cc17c2a3c559693d51d2fa48bf1077f188e0e3521767d2
 src/main/java/ooo/klae/connex/backend/ai/introrationale/IntroRationaleService.java	1829da8342146e025bfaa24914125f9fd85bef54c4934fafec6655976e175a62
 src/main/java/ooo/klae/connex/backend/ai/masking/ConversationText.java	1e643dbdbc8f5efc4cdcb01ed63f26c083e78579f55c3722af568d8c1cfd533b
 src/main/java/ooo/klae/connex/backend/ai/masking/MaskingEngine.java	1468065b05fe5373ef6a7ccbb7897079af4eff026b4c59439ac65fdc5f27411f
@@ -52,7 +52,7 @@ src/main/java/ooo/klae/connex/backend/ai/provider/openai/OpenAiCompatibleAdapter
 src/main/java/ooo/klae/connex/backend/ai/provider/openai/OpenAiCompatibleClient.java	020e24c19c3a7a1efaf06dc3b90d0ed931f942342035eee99ae524c181a5da96
 src/main/java/ooo/klae/connex/backend/ai/provider/vertex/VertexClient.java	1b268c9cd791fb34355c5ec2756915696612a9994df44c80bfd2ae23d7ee8370
 src/main/java/ooo/klae/connex/backend/ai/report/AiReportNarrativeService.java	6b1caf9204695ab291efe74e74c6c6eecafb75f5b3635f7dafe30624b1db2808
-src/main/java/ooo/klae/connex/backend/ai/riskrationale/DealRiskRationaleService.java	b18fdf931dc80badff45a0e60efd3370df7134e2be471a6f84745349134548de
+src/main/java/ooo/klae/connex/backend/ai/riskrationale/DealRiskRationaleService.java	aaafd181aef67d71db8fc25bf9160c804f9fe0597b42064629a2d49aa60a3552
 src/main/java/ooo/klae/connex/backend/beans/NativeConnectSession.java	1ca8692a2cfc7ea7946ce42c0c0e47fbf9b194dd649e5a475021ae2eaef76a21
 src/main/java/ooo/klae/connex/backend/beans/OrgMember.java	0316cfc554953c11ef88bf6145771bf211e4bdf17caffabcd7a8b34fb6b4d588
 src/main/java/ooo/klae/connex/backend/beans/PersonDisqualificationReason.java	f886d1e6f1b7146b6a83d8eb465afe1611f5eab59b2ef22a16310138f41928b4
