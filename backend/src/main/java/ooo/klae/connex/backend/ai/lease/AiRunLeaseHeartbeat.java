@@ -144,6 +144,16 @@ public class AiRunLeaseHeartbeat {
         return Optional.empty();
     }
 
+    /**
+     * Returns the fixed heartbeat thread count, so the sizing rule that keeps one slow renewal from
+     * head-of-line-blocking another run's tick is assertable rather than assumed.
+     *
+     * @return the heartbeat pool's thread count
+     */
+    int poolSize() {
+        return scheduler.getCorePoolSize();
+    }
+
     @PreDestroy
     void shutdown() {
         scheduler.shutdownNow();
