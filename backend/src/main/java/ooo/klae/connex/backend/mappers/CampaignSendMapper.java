@@ -46,6 +46,28 @@ public interface CampaignSendMapper {
             @Param("workspaceId") int workspaceId,
             @Param("triggeredSendEnabled") boolean triggeredSendEnabled);
 
+    /**
+     * Returns one bounded page of audience sends that own an unresolved reconciliation row and are not
+     * yet settled: their failed counter disagrees with their failed deliveries, or they are still
+     * running with no pending delivery. The predicate is durable, so a settlement that fails after a
+     * recovery sweep is found again on a later pass.
+     * @param workspaceId the owning workspace
+     * @param limit the page size
+     * @return the send ids, ordered by id
+     */
+    List<Integer> audienceSendsAwaitingRecoverySettlement(
+            @Param("workspaceId") int workspaceId,
+            @Param("limit") int limit);
+
+    /**
+     * Enumerates the pinned catalog's workspaces with dispatch or recovery work: queued or running
+     * sends, triggered work, abandoned audience attempts whose reservation expired past the grace, and
+     * audience sends whose failed counter is stale while they own an unresolved reconciliation row.
+     * @param triggeredSendEnabled whether pending triggered deliveries count as work
+     * @param audienceReservationGraceMicros how long past its reservation an audience attempt is abandoned
+     * @return the workspace ids
+     */
     List<Integer> workspaceIdsWithQueuedSends(
-            @Param("triggeredSendEnabled") boolean triggeredSendEnabled);
+            @Param("triggeredSendEnabled") boolean triggeredSendEnabled,
+            @Param("audienceReservationGraceMicros") long audienceReservationGraceMicros);
 }

@@ -643,6 +643,42 @@ complete a replacement claim. SMTP is consequently a best-effort campaign transp
 fence is captured at startup, rollback must follow the quiescence procedure in
 `docs/backend/AUTOMATION.md`; editing an environment file does not close a running instance.
 
+Audience delivery dispatch claims with a bare `pending` → `dispatching` compare-and-set and stores
+no lease owner, lease expiry, or attempt-target fingerprint. Its only persisted age anchor is the
+frequency reservation, which the worker writes as database time plus the hard provider deadline in
+`CampaignFrequencyAdmissionService`'s short workspace → delivery transaction before egress, after
+capturing that deadline. A worker that dies between reservation and its terminal write therefore
+leaves a `dispatching` row whose reservation would cap the contact/channel for the whole frequency
+window. The same workspace sweep that recovers triggered claims also selects unleased audience rows
+that are still `dispatching`, have no `submitted_at`, and whose `frequency_reserved_at` is older than
+the delivery lease safety margin (lease duration minus provider deadline, which covers
+database-clock adjustment and the post-return terminal write). It never returns such a row to
+`pending`: `submitted_at` is written only after the provider returns, and without an owner fence or
+fingerprint a replay could double-send. Each row instead becomes a terminal ambiguous `failed` row
+with `deadline_ambiguous` and `reconciliation_required_at`, keeping `frequency_reserved_at` so the
+cap stays in force until an operator resolves it. The sweep is one auto-commit compare-and-set per
+row on the delivery joined to its send for `origin` — the same statement shape and lock footprint as
+the triggered expired-claim sweep. It never runs inside the reservation transaction, holds no
+workspace root, and adds no lock edge. Send status is not filtered, because a completed, paused, or
+cancelled send can own the stranded row; scheduler discovery includes workspaces whose only work is
+such a row. The same pass then settles every audience send that owns an unresolved reconciliation
+row and either has a `failed_count` that disagrees with its failed rows or is still `running` with
+nothing pending: it refreshes the counters and completes such a running send without resolving a
+provider, so a connector disabled after the worker died cannot keep the send running. Those sends
+are selected by that durable predicate, not remembered from the sweep, because a marked row no
+longer matches the sweep: a settlement that fails is found again on a later pass, and scheduler
+discovery includes workspaces whose only work is such a stale counter. Settlement reuses the
+auto-commit counter refresh and `running` → `completed` compare-and-set the dispatch loop already
+runs, so it adds no lock edge. A slow but live worker that writes after the sweep loses its
+`status = 'dispatching'` compare-and-set and leaves the row reconcilable. It then attaches its
+provider id and message id to that swept row through a second single-row compare-and-set that
+accepts only a still-unresolved swept row with no provider id, and changes neither status,
+reconciliation state, nor the reservation, so provider bounce and complaint webhooks still resolve to
+the row and record suppression and consent revocation. An expired triggered claim marked ambiguous
+stores no message id, so its webhooks match no row; operators apply those by hand
+(`docs/DELIVERABILITY.md` §3.1). Audience rows stranded before any reservation, and rows without a
+person (which are never reserved), have no age anchor and are not swept.
+
 Operator reconciliation takes locked membership permission roots first and requires both
 `CAMPAIGN_MANAGE` and `CONSENT_MANAGE`, then locks campaign, send, and delivery in that
 order. Audience and triggered deliveries use the same compare-and-set, which accepts only `failed`
