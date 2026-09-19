@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2Icon } from "lucide-react";
 
@@ -23,19 +23,26 @@ function roleKey(role: WorkspaceRole): "roleOwner" | "roleAdmin" | "roleMember" 
     return role === "owner" ? "roleOwner" : role === "admin" ? "roleAdmin" : "roleMember";
 }
 
-/** Exchanges a shareable invite fragment and renders its token-free acceptance state. */
+/**
+ * Exchanges a shareable invite fragment and renders its token-free acceptance state. A bearer whose
+ * exchange failed without a definitive rejection stays in memory only, so retrying re-sends it
+ * without restoring the fragment to the address bar or refreshing the router.
+ */
 export default function InviteLinkPage() {
     const t = useTranslations("InviteLinkAccept");
     const tUnavailable = useTranslations("WorkspaceUnavailable");
     const [state, setState] = useState<InviteLinkPageState>({ status: "loading" });
+    const [attempt, setAttempt] = useState(0);
+    const retainedBearer = useRef<string | null>(null);
 
     useReloadOnFragmentNavigation();
 
     useEffect(() => {
         let active = true;
+        const token = takeOneTimeLinkToken() ?? retainedBearer.current;
+        retainedBearer.current = null;
 
         const establish = async () => {
-            const token = takeOneTimeLinkToken();
             if (token) {
                 await exchangeInviteLinkToken(token);
                 window.location.replace("/invite-link");
@@ -50,20 +57,27 @@ export default function InviteLinkPage() {
         };
 
         establish().catch((error: unknown) => {
+            const rejected = error instanceof ApiError && error.status === 400;
+            if (token && !rejected) {
+                retainedBearer.current = token;
+            }
             if (!active) return;
             if (error instanceof ApiError && error.status === 401) {
                 window.location.replace("/auth/login?redirect=%2Finvite-link");
                 return;
             }
-            setState(error instanceof ApiError && error.status === 400
-                ? { status: "invalid" }
-                : { status: "unavailable" });
+            setState(rejected ? { status: "invalid" } : { status: "unavailable" });
         });
 
         return () => {
             active = false;
         };
-    }, []);
+    }, [attempt]);
+
+    const retry = async () => {
+        setState({ status: "loading" });
+        setAttempt((current) => current + 1);
+    };
 
     if (state.status === "unavailable") {
         return (
@@ -74,6 +88,7 @@ export default function InviteLinkPage() {
                     <WorkspaceUnavailableRetry
                         label={tUnavailable("retry")}
                         pendingLabel={tUnavailable("retrying")}
+                        onRetry={retry}
                     />
                 )}
             />

@@ -210,6 +210,7 @@ test("unsubscribe removes its fragment bearer before exchange navigation", async
 const FIRST_LINK = "browser_only_first_link_bearer_123456789";
 const SECOND_LINK = "browser_only_second_link_bearer_987654321";
 const INVALID_LINK_HEADING = "This link is invalid or has expired";
+const UNAVAILABLE_HEADING = "We couldn't check your workspaces";
 
 /** Records every requested URL so a test can prove neither bearer ever left the fragment. */
 function recordRequestedUrls(page: Page): string[] {
@@ -218,17 +219,30 @@ function recordRequestedUrls(page: Page): string[] {
     return requestedUrls;
 }
 
-/** Fulfils a fragment-bearer exchange with the grant redirect and records the bearer it received. */
+/**
+ * Fulfils a fragment-bearer exchange with the grant redirect and records the bearer it received.
+ * The first `rateLimitedAttempts` exchanges are refused with 429 instead, as the admission filter
+ * does, so a test can drive the retry path.
+ */
 async function routeGrantExchange(
     page: Page,
     exchangePath: string,
     grant: { location: string; cookie: string; cookiePath: string },
     exchanged: string[],
+    rateLimitedAttempts = 0,
 ) {
     await page.route(`**${exchangePath}`, async (route) => {
         const body: unknown = route.request().postDataJSON();
         const token = typeof body === "object" && body !== null && "token" in body ? String(body.token) : "";
         exchanged.push(token);
+        if (exchanged.length <= rateLimitedAttempts) {
+            await route.fulfill({
+                status: 429,
+                contentType: "application/json",
+                body: JSON.stringify({ code: "RATE_LIMITED", message: "Too many requests" }),
+            });
+            return;
+        }
         await route.fulfill({
             status: 303,
             headers: {
@@ -263,6 +277,100 @@ async function openSecondLinkInSameTab(
     await expect(page).toHaveURL(canonical);
     expect(requestedUrls.every((url) => !url.includes(FIRST_LINK) && !url.includes(SECOND_LINK))).toBe(true);
 }
+
+/**
+ * Opens a link whose first exchange is refused, retries from the unavailable state, and proves the
+ * retry re-sends the in-memory bearer without ever restoring the fragment to the address bar.
+ */
+async function retryRefusedExchange(
+    page: Page,
+    path: string,
+    heading: string,
+    requestedUrls: string[],
+) {
+    const canonical = new RegExp(`${path.replace(/\//g, "\\/")}$`);
+
+    await page.goto(`${path}#token=${FIRST_LINK}`);
+    await expect(page.getByRole("heading", { name: UNAVAILABLE_HEADING })).toBeVisible();
+    await expect(page).toHaveURL(canonical);
+
+    await page.getByRole("button", { name: "Try again" }).click();
+
+    await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    await expect(page).toHaveURL(canonical);
+    expect(requestedUrls.every((url) => !url.includes(FIRST_LINK))).toBe(true);
+}
+
+test("workspace invite retries a refused exchange without restoring its fragment bearer", async ({ page }) => {
+    const requestedUrls = recordRequestedUrls(page);
+    const exchanged: string[] = [];
+    await mockCsrf(page);
+    await routeGrantExchange(page, "/api/invites/exchange", {
+        location: "/invite",
+        cookie: "connex_workspace_invite_flow",
+        cookiePath: "/api/invites",
+    }, exchanged, 1);
+    await page.route("**/api/auth/me", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ id: 7, email: "recipient@example.com" }),
+        });
+    });
+    await page.route("**/api/invites", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                flowId: "a".repeat(64),
+                workspaceId: 42,
+                workspaceName: "Retried Workspace",
+                email: "recipient@example.com",
+                role: "member",
+                invitedByLabel: "Workspace Admin",
+                status: "pending",
+                valid: true,
+            }),
+        });
+    });
+
+    await retryRefusedExchange(page, "/invite", "Join Retried Workspace", requestedUrls);
+    expect(exchanged).toEqual([FIRST_LINK, FIRST_LINK]);
+});
+
+test("workspace invite link retries a refused exchange without restoring its fragment bearer", async ({ page }) => {
+    const requestedUrls = recordRequestedUrls(page);
+    const exchanged: string[] = [];
+    await mockCsrf(page);
+    await routeGrantExchange(page, "/api/invite-links/exchange", {
+        location: "/invite-link",
+        cookie: "connex_workspace_invite_link_flow",
+        cookiePath: "/api/invite-links",
+    }, exchanged, 1);
+    await page.route("**/api/auth/me", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ id: 7, email: "recipient@example.com" }),
+        });
+    });
+    await page.route("**/api/invite-links", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                flowId: "b".repeat(64),
+                workspaceId: 43,
+                workspaceName: "Retried Workspace",
+                role: "member",
+                valid: true,
+            }),
+        });
+    });
+
+    await retryRefusedExchange(page, "/invite-link", "Join Retried Workspace", requestedUrls);
+    expect(exchanged).toEqual([FIRST_LINK, FIRST_LINK]);
+});
 
 test("password reset re-opens a second link that lands in the same tab", async ({ page }) => {
     const requestedUrls = recordRequestedUrls(page);
