@@ -11,9 +11,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -511,8 +513,13 @@ public class AiInvocationAdmissionService {
         }
 
         /**
-         * Blocks a follower until its registered leader publishes a terminal outcome.
+         * Blocks a follower until its registered leader publishes a terminal outcome. A follower
+         * that waits past the follower deadline fails the flight so a stuck leader cannot hold its
+         * identity. An interrupted follower, such as a timed-out generation worker, stops waiting
+         * with its interrupt status restored and leaves the leader's flight untouched, because its
+         * own cancellation says nothing about the leader.
          * @return leader outcome
+         * @throws CancellationException when the waiting thread is interrupted
          */
         public LeaderOutcome awaitLeader() {
             if (decision != Decision.FOLLOWER || owner == null || identity == null || flight == null) {
@@ -520,9 +527,11 @@ public class AiInvocationAdmissionService {
             }
             try {
                 return flight.completion.copy()
-                        .orTimeout(owner.followerWait.toMillis(), TimeUnit.MILLISECONDS)
-                        .join();
-            } catch (CompletionException exception) {
+                        .get(owner.followerWait.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new CancellationException("AI invocation follower wait was cancelled");
+            } catch (ExecutionException | TimeoutException exception) {
                 owner.complete(identity, flight, LeaderOutcome.FAILED);
                 return LeaderOutcome.FAILED;
             }

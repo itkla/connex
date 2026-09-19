@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
@@ -15,6 +16,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -253,6 +255,46 @@ class AiInvocationAdmissionServiceTest {
             assertEquals(0, service.activeFlightCount());
             try (Admission retry = service.acquire(identity, "hash", false)) {
                 assertEquals(Decision.LEADER, retry.decision());
+            }
+        }
+    }
+
+    /**
+     * A timed-out generation interrupts its worker; a worker waiting as a follower must stop
+     * waiting instead of holding the worker until the leader or the follower deadline resolves,
+     * and must not fail the leader's flight, which other callers may still be following.
+     */
+    @Test
+    void interruptedFollowerStopsWaitingWithoutFailingTheLeaderFlight() throws Exception {
+        AiInvocationAdmissionService service = service();
+        CacheIdentity identity = identity(7, 29);
+        AtomicReference<Throwable> thrown = new AtomicReference<>();
+        AtomicReference<Boolean> interruptRestored = new AtomicReference<>();
+
+        try (Admission leader = service.acquire(identity, "hash", false);
+                Admission follower = service.acquire(identity, "hash", false)) {
+            assertEquals(Decision.FOLLOWER, follower.decision());
+            Thread waiter = new Thread(() -> {
+                try {
+                    follower.awaitLeader();
+                } catch (RuntimeException exception) {
+                    thrown.set(exception);
+                    interruptRestored.set(Thread.currentThread().isInterrupted());
+                }
+            });
+            waiter.start();
+            waiter.interrupt();
+            waiter.join(TimeUnit.SECONDS.toMillis(10));
+
+            assertFalse(waiter.isAlive());
+            assertInstanceOf(CancellationException.class, thrown.get());
+            assertEquals(Boolean.TRUE, interruptRestored.get());
+            assertEquals(1, service.activeFlightCount());
+            try (Admission joined = service.acquire(identity, "hash", false)) {
+                assertEquals(Decision.FOLLOWER, joined.decision());
+                leader.commitLeaderInvocation();
+                leader.completeLeader(LeaderOutcome.CACHE_READY);
+                assertEquals(LeaderOutcome.CACHE_READY, joined.awaitLeader());
             }
         }
     }
