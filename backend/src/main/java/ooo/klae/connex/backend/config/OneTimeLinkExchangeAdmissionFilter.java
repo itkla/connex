@@ -1,16 +1,19 @@
 package ooo.klae.connex.backend.config;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Set;
 
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.LoginRateLimiter;
 import ooo.klae.connex.backend.util.ClientIpResolver;
 
@@ -35,6 +38,9 @@ public class OneTimeLinkExchangeAdmissionFilter extends OncePerRequestFilter {
         "/api/account/connections/native/prepare",
         "/api/account/connections/native/complete");
 
+    private static final String THROTTLED_BODY = "{\"code\":\"" + TooManyRequestsException.CODE
+        + "\",\"message\":\"Too many attempts. Please try again later.\"}";
+
     private final LoginRateLimiter rateLimiter;
     private final ClientIpResolver clientIpResolver;
 
@@ -52,11 +58,23 @@ public class OneTimeLinkExchangeAdmissionFilter extends OncePerRequestFilter {
         if (isExchange(request)
                 && !rateLimiter.tryAcquireOneTimeLinkExchange(
                     clientIpResolver.resolveWithProvenance(request), System.currentTimeMillis())) {
-            response.sendError(HttpStatus.TOO_MANY_REQUESTS.value(),
-                "Too many attempts. Please try again later.");
+            reject(response);
             return;
         }
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Writes the throttle refusal directly with {@code setStatus}. {@code sendError} would trigger a
+     * container ERROR dispatch to {@code /error}, which an anonymous caller cannot reach, so a real
+     * servlet container would rewrite the 429 into the entry point's 401. The body matches the
+     * {@code GlobalExceptionHandler} mapping of {@link TooManyRequestsException}.
+     */
+    private static void reject(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.getWriter().write(THROTTLED_BODY);
     }
 
     private static boolean isExchange(HttpServletRequest request) {
