@@ -77,6 +77,15 @@ class CiChangeClassificationTest(unittest.TestCase):
         self.assertTrue(categories["frontend_audit"])
         self.assertFalse(categories["backend"])
 
+    def test_every_pnpm_workspace_policy_file_adds_the_audit(self) -> None:
+        for path in (
+            "frontend/pnpm-workspace.yaml",
+            "frontend/emails/pnpm-workspace.yaml",
+            "landing/pnpm-workspace.yaml",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(self.classify(path)["frontend_audit"])
+
     def test_ocr_dependencies_add_the_ocr_audit_only(self) -> None:
         categories = self.classify("ocr/requirements.lock")
         self.assertTrue(categories["ocr"])

@@ -125,6 +125,13 @@ class SecurityWorkflowTest(unittest.TestCase):
         runs = [step.get("run", "") for step in self.steps("action-pins")]
         self.assertIn("python .github/scripts/check-doc-placeholders.py", runs)
         self.assertIn("python .github/scripts/test_doc_placeholders.py", runs)
+    def test_the_pnpm_supply_chain_policy_is_checked_before_any_frontend_install(self) -> None:
+        runs = [step.get("run", "") for step in self.steps("frontend-audit")]
+        guard = runs.index("python3 .github/scripts/check-pnpm-supply-chain-policy.py")
+        self.assertLess(guard, runs.index("pnpm install --frozen-lockfile --ignore-scripts"))
+        pin_runs = [step.get("run", "") for step in self.steps("action-pins")]
+        self.assertIn("python .github/scripts/test_pnpm_supply_chain_policy.py", pin_runs)
+
     def test_the_canary_proof_is_regression_tested_in_the_pin_policy_job(self) -> None:
         runs = [step.get("run", "") for step in self.steps("action-pins")]
         self.assertIn("python .github/scripts/test_sast_canary_proof.py", runs)

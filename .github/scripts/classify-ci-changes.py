@@ -50,6 +50,7 @@ FRONTEND_DEPENDENCY_FILES = {
     "frontend/.npmrc",
     "frontend/bun.lock",
     "frontend/bun.lockb",
+    "frontend/emails/pnpm-workspace.yaml",
     "frontend/npm-shrinkwrap.json",
     "frontend/package-lock.json",
     "frontend/package.json",
