@@ -197,7 +197,12 @@ public class IntroRationaleService {
      * fresh ranking and assembly, so a request with a stored row always proceeds and a valid cache
      * hit is never refused for quota. A request with no stored row can only end in a new provider
      * attempt or in a refusal, so under an exhausted quota it reports rate limiting even for a pair
-     * that the ranking would have refused as no longer suggested.
+     * that the ranking would have refused as no longer suggested. A concurrent caller can publish
+     * a rationale and release its flight between the first probe and the precheck, and its
+     * completed attempt may be what fills the quota, so a refused request probes again and
+     * proceeds to the hash-validated cache read when a row now exists. Generation runs outside any
+     * transaction, so each probe reads committed rows in its own session rather than a
+     * session-cached empty result.
      */
     private boolean refusedBeforeSuggestionRanking(
             int workspaceId,
@@ -205,10 +210,17 @@ public class IntroRationaleService {
             int lo,
             int hi,
             CacheIdentity identity) {
-        if (aiOutputCacheStore.find(workspaceId, cacheFeature, lo, hi).isPresent()) {
+        if (hasStoredRationale(workspaceId, cacheFeature, lo, hi)) {
             return false;
         }
-        return aiInvocationAdmissionService.precheck(identity, false) != Rejection.NONE;
+        if (aiInvocationAdmissionService.precheck(identity, false) == Rejection.NONE) {
+            return false;
+        }
+        return !hasStoredRationale(workspaceId, cacheFeature, lo, hi);
+    }
+
+    private boolean hasStoredRationale(int workspaceId, String cacheFeature, int lo, int hi) {
+        return aiOutputCacheStore.find(workspaceId, cacheFeature, lo, hi).isPresent();
     }
 
     private IntroRationaleDto cached(

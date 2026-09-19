@@ -23,6 +23,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -186,6 +187,40 @@ class IntroRationaleServiceTest {
         assertEquals("Stored under quota.", result.getRationale());
         assertEquals("2026-07-01T09:00:00Z", result.getGeneratedAt());
         verify(aiInvocationAdmissionService, never()).precheck(any(), anyBoolean());
+        verify(aiInvocationAdmissionService, never()).acquire(any(), anyString(), anyBoolean());
+        verify(aiInvocationService, never()).completeStructured(
+                any(AiInvocation.class), eq(IntroRationaleContent.class), any(Admission.class));
+    }
+
+    /**
+     * A concurrent caller publishes a valid rationale while this request's precheck runs, and its
+     * completed attempt is what exhausts the quota; the refusal must yield to the published row.
+     */
+    @Test
+    void generate_quotaRefusalServesARationalePublishedWhileThePrecheckRan() {
+        IntroSuggestionDto suggestion = suggestion(PERSON_A_ID, PERSON_B_ID);
+        IntroRationaleAssembly assembly = assembly();
+        AtomicReference<AiOutputCache> committed = new AtomicReference<>();
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, PERSON_A_ID, PERSON_B_ID))
+                .thenAnswer(invocation -> Optional.ofNullable(committed.get()));
+        when(aiInvocationAdmissionService.precheck(any(), eq(false))).thenAnswer(invocation -> {
+            committed.set(row(HASH, 0, "2026-07-01T09:00:00Z"));
+            return Rejection.ORGANIZATION_QUOTA;
+        });
+        lenient().when(admission.decision()).thenReturn(Decision.RATE_LIMITED);
+        when(introductionService.computeCancellableSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
+                .thenReturn(List.of(suggestion));
+        when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly);
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.read("payload", IntroRationaleContent.class))
+                .thenReturn(Optional.of(content("Published by a concurrent caller.")));
+
+        IntroRationaleDto result = service.generate(PERSON_A_ID, PERSON_B_ID);
+
+        assertTrue(result.isAvailable());
+        assertEquals("Published by a concurrent caller.", result.getRationale());
+        assertEquals("2026-07-01T09:00:00Z", result.getGeneratedAt());
+        verify(aiInvocationAdmissionService).precheck(any(), eq(false));
         verify(aiInvocationAdmissionService, never()).acquire(any(), anyString(), anyBoolean());
         verify(aiInvocationService, never()).completeStructured(
                 any(AiInvocation.class), eq(IntroRationaleContent.class), any(Admission.class));

@@ -170,6 +170,11 @@ public class DealBriefService {
      * reject. A stored brief can only be validated against a fresh assembly, so a non-forced
      * request with a stored row always proceeds and a valid cache hit is never refused for quota;
      * a forced refresh, or a request with no stored row, can only end in a new provider attempt.
+     * A concurrent caller can publish a brief and release its flight between the first probe and
+     * the precheck, and its completed attempt may be what fills the quota, so a refused non-forced
+     * request probes again and proceeds to the hash-validated cache read when a row now exists.
+     * Generation runs outside any transaction, so each probe reads committed rows in its own
+     * session rather than a session-cached empty result.
      */
     private boolean refusedBeforeAssembly(
             int workspaceId,
@@ -177,11 +182,18 @@ public class DealBriefService {
             int dealId,
             CacheIdentity identity,
             boolean refresh) {
-        if (!refresh && aiOutputCacheStore.find(
-                workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT).isPresent()) {
+        if (!refresh && hasStoredBrief(workspaceId, cacheFeature, dealId)) {
             return false;
         }
-        return aiInvocationAdmissionService.precheck(identity, refresh) != Rejection.NONE;
+        if (aiInvocationAdmissionService.precheck(identity, refresh) == Rejection.NONE) {
+            return false;
+        }
+        return refresh || !hasStoredBrief(workspaceId, cacheFeature, dealId);
+    }
+
+    private boolean hasStoredBrief(int workspaceId, String cacheFeature, int dealId) {
+        return aiOutputCacheStore.find(
+                workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT).isPresent();
     }
 
     private DealBriefDto cached(

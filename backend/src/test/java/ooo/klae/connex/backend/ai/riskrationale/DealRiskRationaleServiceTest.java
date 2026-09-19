@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -460,6 +461,39 @@ class DealRiskRationaleServiceTest {
         assertEquals("Stored under quota.", result.getNarrative());
         verify(aiInvocationAdmissionService, never()).precheck(any(), anyBoolean());
         verify(aiInvocationAdmissionService, never()).acquire(any(), anyString(), anyBoolean());
+    }
+
+    /**
+     * A concurrent caller publishes a valid rationale while this request's precheck runs, and its
+     * completed attempt is what exhausts the quota; the refusal must yield to the published row.
+     */
+    @Test
+    void generate_quotaRefusalServesARationalePublishedWhileThePrecheckRan() {
+        RationaleAssembly assembly = assembly();
+        DealRiskDto risk = atRisk();
+        AtomicReference<AiOutputCache> committed = new AtomicReference<>();
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+                .thenAnswer(invocation -> Optional.ofNullable(committed.get()));
+        when(aiInvocationAdmissionService.precheck(any(), eq(false))).thenAnswer(invocation -> {
+            committed.set(row(HASH, 0, "2026-07-01T09:00:00Z"));
+            return Rejection.ORGANIZATION_QUOTA;
+        });
+        lenient().when(admission.decision()).thenReturn(Decision.RATE_LIMITED);
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
+        when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.read("payload", DealRiskRationaleContent.class))
+                .thenReturn(Optional.of(content(
+                        "Published by a concurrent caller.", List.of("Published action."))));
+
+        DealRationaleDto result = service.generate(DEAL_ID);
+
+        assertTrue(result.isAvailable());
+        assertEquals("Published by a concurrent caller.", result.getNarrative());
+        verify(aiInvocationAdmissionService).precheck(any(), eq(false));
+        verify(aiInvocationAdmissionService, never()).acquire(any(), anyString(), anyBoolean());
+        verify(aiInvocationService, never()).completeStructured(
+                any(AiInvocation.class), eq(DealRiskRationaleContent.class), any(Admission.class));
     }
 
     private void arrangeMiss(RationaleAssembly assembly) {
