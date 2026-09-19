@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -33,6 +34,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import ooo.klae.connex.backend.beans.CampaignDelivery;
+import ooo.klae.connex.backend.beans.CampaignDeliveryEvent;
 import ooo.klae.connex.backend.beans.CampaignMessageRevision;
 import ooo.klae.connex.backend.beans.CampaignSend;
 import ooo.klae.connex.backend.capability.Capability;
@@ -45,6 +47,10 @@ import ooo.klae.connex.backend.services.AudienceEligibilityService;
 import ooo.klae.connex.backend.services.WorkflowTriggeredSendGate;
 
 class CampaignDispatchServiceTest {
+
+    private static final String EXPIRED_AUDIENCE_RESERVATION =
+            "AMBIGUOUS: Audience dispatch did not finish before its reservation expired";
+    private static final long RESERVATION_GRACE_MICROS = 30_000_000L;
 
     @Test
     void providerDetailsMapToTheBoundedRecipientReasonVocabulary() {
@@ -596,6 +602,111 @@ class CampaignDispatchServiceTest {
         if (refusedAtAdmission) {
             verifyNoInteractions(dispatcher);
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void theAudienceReservationSweepRunsFromBothDispatchEntryPoints(boolean workspacePass) {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        CampaignDispatchService service = service(
+                sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
+
+        if (workspacePass) {
+            assertEquals(0, service.processWorkspace(7));
+        } else {
+            assertTrue(service.processSend(7, 11));
+        }
+
+        verify(deliveryMapper).expiredAudienceReservationsPage(7, RESERVATION_GRACE_MICROS, 200);
+    }
+
+    @Test
+    void anAbandonedAudienceAttemptBecomesAmbiguousWithOneEventAndRefreshedCounters() {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(deliveryMapper.expiredAudienceReservationsPage(7, RESERVATION_GRACE_MICROS, 200))
+                .thenReturn(List.of(abandonedAudienceAttempt(13, 11), abandonedAudienceAttempt(14, 11)));
+        when(deliveryMapper.markExpiredAudienceReservationAmbiguous(
+                eq(7), anyInt(), eq(RESERVATION_GRACE_MICROS), anyString(), anyString())).thenReturn(1);
+        CampaignDispatchService service = service(
+                sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
+
+        assertEquals(0, service.processWorkspace(7));
+
+        for (int deliveryId : List.of(13, 14)) {
+            verify(deliveryMapper).markExpiredAudienceReservationAmbiguous(
+                    7, deliveryId, RESERVATION_GRACE_MICROS, EXPIRED_AUDIENCE_RESERVATION,
+                    CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token());
+        }
+        ArgumentCaptor<CampaignDeliveryEvent> events = ArgumentCaptor.forClass(CampaignDeliveryEvent.class);
+        verify(deliveryMapper, times(2)).insertEvent(events.capture());
+        assertEquals(List.of(13, 14), events.getAllValues().stream()
+                .map(CampaignDeliveryEvent::getDeliveryId).toList());
+        for (CampaignDeliveryEvent event : events.getAllValues()) {
+            assertEquals("failed", event.getEventType());
+            assertEquals(EXPIRED_AUDIENCE_RESERVATION, event.getDetail());
+        }
+        verify(sendMapper, times(1)).refreshCounters(7, 11);
+        verify(deliveryMapper, never()).markAmbiguous(anyInt(), anyInt(), anyString(), anyString());
+        verify(deliveryMapper, never()).claim(anyInt(), anyInt());
+    }
+
+    @Test
+    void aLostAudienceReservationCompareAndSetAppendsNothing() {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(deliveryMapper.expiredAudienceReservationsPage(7, RESERVATION_GRACE_MICROS, 200))
+                .thenReturn(List.of(abandonedAudienceAttempt(13, 11)));
+        when(deliveryMapper.markExpiredAudienceReservationAmbiguous(
+                eq(7), eq(13), eq(RESERVATION_GRACE_MICROS), anyString(), anyString())).thenReturn(0);
+        CampaignDispatchService service = service(
+                sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
+
+        assertEquals(0, service.processWorkspace(7));
+
+        verify(deliveryMapper).markExpiredAudienceReservationAmbiguous(
+                7, 13, RESERVATION_GRACE_MICROS, EXPIRED_AUDIENCE_RESERVATION,
+                CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token());
+        verify(deliveryMapper, never()).insertEvent(any());
+        verify(sendMapper, never()).refreshCounters(anyInt(), anyInt());
+    }
+
+    @Test
+    void anAudienceReservationEventFailureIsSwallowedAndTheSweepContinues() {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(deliveryMapper.expiredAudienceReservationsPage(7, RESERVATION_GRACE_MICROS, 200))
+                .thenReturn(List.of(abandonedAudienceAttempt(13, 11), abandonedAudienceAttempt(14, 12)));
+        when(deliveryMapper.markExpiredAudienceReservationAmbiguous(
+                eq(7), anyInt(), eq(RESERVATION_GRACE_MICROS), anyString(), anyString())).thenReturn(1);
+        doThrow(new IllegalStateException("event store unavailable"))
+                .when(deliveryMapper).insertEvent(any());
+        CampaignDispatchService service = service(
+                sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
+
+        assertEquals(0, service.processWorkspace(7));
+
+        verify(deliveryMapper).markExpiredAudienceReservationAmbiguous(
+                eq(7), eq(14), eq(RESERVATION_GRACE_MICROS), anyString(), anyString());
+        verify(deliveryMapper, times(2)).insertEvent(any());
+        verify(sendMapper).refreshCounters(7, 11);
+        verify(sendMapper).refreshCounters(7, 12);
+    }
+
+    private static CampaignDelivery abandonedAudienceAttempt(int deliveryId, int sendId) {
+        CampaignDelivery abandoned = new CampaignDelivery();
+        abandoned.setId(deliveryId);
+        abandoned.setSendId(sendId);
+        return abandoned;
     }
 
     private static CampaignDispatchService triggeredDispatch(
