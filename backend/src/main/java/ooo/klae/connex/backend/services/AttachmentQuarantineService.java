@@ -23,6 +23,8 @@ import ooo.klae.connex.backend.tenant.RequirePermission;
 @Service
 @RequiredArgsConstructor
 public class AttachmentQuarantineService {
+    private static final Set<String> DENIED_SCAN_STATES = Set.of("quarantined", "infected", "unscannable");
+
     private final WorkspaceService workspaceService;
     private final AttachmentScanMapper scanMapper;
     private final AttachmentMapper attachmentMapper;
@@ -72,6 +74,27 @@ public class AttachmentQuarantineService {
         attachmentMapper.delete(locked.workspaceId(), id);
         referenceService.deleteReferencesTo(locked.workspaceId(), ReferenceService.TYPE_FILE, id);
         audit("malware.quarantine_deleted", locked, "Deleted quarantined attachment");
+    }
+
+    /**
+     * Reports whether removing this reference is quarantine administration rather than ordinary
+     * deletion, and therefore needs {@link Permission#ATTACHMENT_QUARANTINE_MANAGE} and a strict audit.
+     *
+     * <p>Only managed objects carrying a denied verdict or lifecycle state qualify: {@code quarantined},
+     * {@code infected} and {@code unscannable}. Pre-verdict states ({@code pending}, {@code scanning},
+     * {@code error}) stay ordinary because {@code pending} is the default for every legacy and
+     * server-generated reference and is permanent while scanning is disabled. Unmanaged references
+     * are outside the quarantine lifecycle and are never scanned.
+     *
+     * @param attachment attachment row whose scan state was read under the caller's lock contract
+     * @param managedObjectService classifier for the managed attachment URL namespace
+     * @return {@code true} when only quarantine authority may delete the reference
+     */
+    public static boolean requiresQuarantineAuthority(
+            Attachment attachment, ManagedObjectService managedObjectService) {
+        String scanState = attachment.getScanState();
+        return scanState != null && DENIED_SCAN_STATES.contains(scanState)
+            && managedObjectService.isManagedAttachmentUrl(attachment.getUrl());
     }
 
     private LockedAttachment lock(int id) {
