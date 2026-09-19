@@ -86,7 +86,7 @@ public class AttachmentQuarantineService {
      * server-generated reference and is permanent while scanning is disabled. Unmanaged references
      * are outside the quarantine lifecycle and are never scanned.
      *
-     * @param attachment attachment row whose scan state was read under the caller's lock contract
+     * @param attachment attachment row whose persisted scan state and URL decide the route
      * @param managedObjectService classifier for the managed attachment URL namespace
      * @return {@code true} when only quarantine authority may delete the reference
      */
