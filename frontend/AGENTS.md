@@ -125,4 +125,11 @@ This repository uses **pnpm**, not npm.
 - Verify production build assets: `node ci/verify_build_chunks.mjs .next`
 - Regenerate vocabulary model: `node scripts/generate-vocabulary.mjs`
 
+### Package manager supply-chain policy
+
+`pnpm-workspace.yaml` here, in `emails/`, and in `../landing/` enforces the #835 policy: `minimumReleaseAge: 1440` with `minimumReleaseAgeStrict: true` (versions younger than one day are refused, never silently swapped for an older one), `minimumReleaseAgeIgnoreMissingTime: false` (packages whose registry metadata has no publish time are refused), and `trustPolicy: no-downgrade` (a version with weaker provenance/signature evidence than an earlier release is refused). pnpm 11 also re-checks every committed lockfile entry against these policies on `--frozen-lockfile` installs, so CI and the Docker build fail if a lockfile bypassed them. Never drop or relax these settings to get an install through.
+
+- **Emergency exception (release age):** only for an urgent framework security patch, and only with the owner's approval. Add the exact version (`name@x.y.z`, never a bare name or wildcard) to `minimumReleaseAgeExclude` beside the setting, with a YAML comment naming the advisory (GHSA/CVE), the approver, and the removal condition. Exclude every young package the fix pulls in, including platform-specific optional binaries; pnpm lists each refused `name@version` in its error. Remove the entry in a follow-up PR once the version is older than one day. The same comment rule applies to `trustPolicyExclude`, which holds only verified legacy-line backports published without provenance.
+- **Dependabot:** npm version updates for `/frontend` and `/landing` carry a one-day `cooldown` to match. Security updates ignore cooldown, so a same-day security PR fails its frozen install until the release ages or the owner approves an exclusion as above.
+
 Build-pipeline changes must preserve every invocation and artifact boundary documented in `../docs/frontend/BUILD_ASSET_GATE.md`.

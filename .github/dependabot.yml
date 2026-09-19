@@ -48,6 +48,9 @@ updates:
     directory: /frontend
     schedule:
       interval: weekly
+    # Matches minimumReleaseAge (#835): pnpm refuses versions younger than one day.
+    cooldown:
+      default-days: 1
     open-pull-requests-limit: 5
     labels:
       - dependencies
@@ -55,6 +58,9 @@ updates:
     directory: /landing
     schedule:
       interval: weekly
+    # Matches minimumReleaseAge (#835): pnpm refuses versions younger than one day.
+    cooldown:
+      default-days: 1
     open-pull-requests-limit: 5
     labels:
       - dependencies
