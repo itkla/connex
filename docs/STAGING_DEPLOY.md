@@ -193,7 +193,7 @@ digests, and both embedded identities again before using the pair.
 
 ### Reclaiming quarantine
 
-`connex-staging-prune` (`deploy/staging/connex-staging-prune.sh`) runs daily from
+`connex-staging-prune` (`deploy/staging/connex-staging-prune.sh`) runs hourly from
 `connex-staging-prune.timer` and is the only thing permitted to unlink a quarantined tree. The
 deploy script's invariant is unchanged.
 
@@ -203,7 +203,7 @@ It removes an entry only when every one of these holds:
    a bare 40-character SHA;
 2. it is not the committed, rollback, or attested-running release;
 3. it is not within the two most recent entries, which are kept for post-mortems;
-4. it is older than `CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS` (default 24h), measured from **ctime** —
+4. it is older than `CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS` (default 4h), measured from **ctime** —
    `rename(2)` preserves mtime, so mtime is when the release was built, not when it was retired;
 5. the running frontend started *after* the entry was quarantined, since a process cannot hold a
    tree that was already quarantined before that process existed;
@@ -213,6 +213,12 @@ It removes an entry only when every one of these holds:
 It takes the deploy lock non-blocking and exits quietly if a deploy holds it, so it never races the
 rename it reasons about. It refuses outright, removing nothing, if the markers are unreadable or the
 frontend start time cannot be established, and rejects any argument other than `--dry-run`.
+
+It also removes **orphaned build scratch**. A build writes into
+`.staging/.target-release-<sha>.XXXXXX` and deletes it on both the success and failure paths, but a
+build that is *killed* never reaches that cleanup, stranding most of a frontend and backend build —
+close to 900 MB. The reaper removes such a directory once it is past the minimum age, holds the
+deploy lock, and no live process references it.
 
 ```bash
 # Report what would be reclaimed, without touching anything.
