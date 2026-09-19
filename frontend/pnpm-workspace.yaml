@@ -35,12 +35,14 @@ minimumReleaseAgeIgnoreMissingTime: false
 trustPolicy: no-downgrade
 # Exact versions exempt from no-downgrade, each a verified legacy-line backport.
 trustPolicyExclude:
-  # eslint-import-resolver-typescript@3.10.1 (2025-04-21) is the 3.x maintenance
-  # release by the same maintainer (jounqin) after 4.2.6 started shipping provenance;
-  # pulled in by eslint-config-next. Remove once eslint-config-next moves to 4.x.
+  # The same maintainer's 3.x maintenance release after 4.2.6 started shipping
+  # provenance; pulled in by eslint-config-next.
+  # Publisher: jounqin. Line: 3.x. Published: 2025-04-21.
+  # Remove once eslint-config-next moves to 4.x.
   - eslint-import-resolver-typescript@3.10.1
-  # semver@6.3.1 (2023-07-10) is the npm team's legacy-line backport of the
-  # CVE-2022-25883 ReDoS fix, published by maintainer lukekarrys without provenance
-  # after the 7.5.x line gained it; the backport, not a takeover, trips no-downgrade.
+  # The npm team's legacy-line backport of the CVE-2022-25883 ReDoS fix, published
+  # without provenance after the 7.5.x line gained it; the backport, not a takeover,
+  # trips no-downgrade.
+  # Publisher: lukekarrys. Line: 6.x. Published: 2023-07-10.
   # Remove once nothing in the lockfile resolves semver@6.
   - semver@6.3.1

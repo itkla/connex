@@ -265,9 +265,9 @@ class PnpmSupplyChainPolicyGuardTest(unittest.TestCase):
         text = (
             POLICY
             + "trustPolicyExclude:\n"
-            + "  # 3.x maintenance release by the same maintainer. Remove once eslint-config-next moves to 4.x.\n"
+            + "  # Publisher: jounqin. Line: 3.x. Published: 2025-04-21. Remove once eslint-config-next moves to 4.x.\n"
             + "  - eslint-import-resolver-typescript@3.10.1\n"
-            + "  # Legacy-line backport.\n"
+            + "  # Publisher: lukekarrys. Line: 6.x. Published: 2023-07-10.\n"
             + "  - semver@6.3.1\n"
             + "  - lodash\n"
         )
@@ -282,6 +282,30 @@ class PnpmSupplyChainPolicyGuardTest(unittest.TestCase):
             ],
             self.violations(text),
         )
+
+    def test_a_trust_exclusion_must_carry_publisher_release_line_and_publication_date(self) -> None:
+        text = POLICY + "trustPolicyExclude:\n  # Remove sometime.\n  - totally-unknown@1.2.3\n"
+        self.assertEqual(
+            [
+                "frontend/pnpm-workspace.yaml:10: trustPolicyExclude entry 'totally-unknown@1.2.3' "
+                "comment names no publisher (`Publisher: <npm user>`)",
+                "frontend/pnpm-workspace.yaml:10: trustPolicyExclude entry 'totally-unknown@1.2.3' "
+                "comment names no legacy release line (`Line: <major>.x`)",
+                "frontend/pnpm-workspace.yaml:10: trustPolicyExclude entry 'totally-unknown@1.2.3' "
+                "comment gives no publication date (`Published: <YYYY-MM-DD>`)",
+            ],
+            self.violations(text),
+        )
+
+    def test_a_trust_exclusion_with_its_evidence_passes(self) -> None:
+        text = (
+            POLICY
+            + "trustPolicyExclude:\n"
+            + "  # Publisher: lukekarrys. Line: 6.x. Published: 2023-07-10.\n"
+            + "  # Remove once nothing resolves semver@6.\n"
+            + "  - semver@6.3.1\n"
+        )
+        self.assertEqual([], self.violations(text))
 
     def test_a_version_union_continued_onto_the_next_line_fails(self) -> None:
         text = (

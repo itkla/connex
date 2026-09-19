@@ -114,6 +114,9 @@ EXACT_VERSION_ENTRY = re.compile(
 ADVISORY = re.compile(r"\b(?:GHSA(?:-[0-9a-z]{4}){3}|CVE-[0-9]{4}-[0-9]{4,})\b")
 APPROVAL = re.compile(r"\bApproved:\s*[^\s,][^,]*,\s*[0-9]{4}-[0-9]{2}-[0-9]{2}\b")
 REMOVAL = re.compile(r"\bremove\b", re.IGNORECASE)
+PUBLISHER = re.compile(r"\bPublisher:[ \t]*[^\s.,;][^.,;]*")
+RELEASE_LINE = re.compile(r"\bLine:[ \t]*[0-9]+(?:\.[0-9]+)*\.x\b")
+PUBLISHED = re.compile(r"\bPublished:[ \t]*[0-9]{4}-[0-9]{2}-[0-9]{2}\b")
 
 
 class Exclusion(NamedTuple):
@@ -183,6 +186,13 @@ def exclusion_violations(workspace: Path, exclusion: Exclusion) -> list[str]:
             found.append(
                 f"{location}: {label} comment records no owner approval (`Approved: <name>, <YYYY-MM-DD>`)"
             )
+    if exclusion.setting == TRUST_EXCLUSIONS:
+        if not PUBLISHER.search(exclusion.annotation):
+            found.append(f"{location}: {label} comment names no publisher (`Publisher: <npm user>`)")
+        if not RELEASE_LINE.search(exclusion.annotation):
+            found.append(f"{location}: {label} comment names no legacy release line (`Line: <major>.x`)")
+        if not PUBLISHED.search(exclusion.annotation):
+            found.append(f"{location}: {label} comment gives no publication date (`Published: <YYYY-MM-DD>`)")
     if not REMOVAL.search(exclusion.annotation):
         found.append(f"{location}: {label} comment states no removal condition (`Remove ...`)")
     return found
