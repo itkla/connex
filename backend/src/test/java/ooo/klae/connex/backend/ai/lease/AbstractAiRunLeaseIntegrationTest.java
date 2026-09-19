@@ -109,7 +109,10 @@ abstract class AbstractAiRunLeaseIntegrationTest {
 
     void expire(AiRunLeaseKey key) {
         jdbcTemplate.update(
-                "UPDATE ai_run_lease SET expires_at = DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 MINUTE)"
+                "UPDATE ai_run_lease"
+                        + " SET acquired_at = DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 2 MINUTE),"
+                        + " heartbeat_at = DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 2 MINUTE),"
+                        + " expires_at = DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 MINUTE)"
                         + " WHERE workspace_id = ? AND subject_kind = ? AND subject_id = ?",
                 key.workspaceId(), key.subject().wireKey(), key.subjectId());
     }
