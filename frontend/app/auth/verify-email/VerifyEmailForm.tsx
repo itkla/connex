@@ -42,24 +42,24 @@ export function VerifyEmailForm() {
 
     useEffect(() => {
         let active = true;
-        const token = takeOneTimeLinkToken();
-        const establishFlow = token
-            ? exchangeEmailChangeToken(token).then(() => {
+        const establish = async () => {
+            const token = takeOneTimeLinkToken();
+            if (token) {
+                await exchangeEmailChangeToken(token);
                 window.location.replace("/auth/verify-email");
-                return { valid: true };
-            })
-            : validateEmailChangeToken();
-        establishFlow
-            .then((result) => {
-                if (active) {
-                    setStatus(result.valid ? "ready" : "invalid");
-                }
-            })
-            .catch(() => {
-                if (active) {
-                    setStatus("invalid");
-                }
-            });
+                return;
+            }
+            const result = await validateEmailChangeToken();
+            if (active) {
+                setStatus(result.valid ? "ready" : "invalid");
+            }
+        };
+
+        establish().catch(() => {
+            if (active) {
+                setStatus("invalid");
+            }
+        });
         return () => {
             active = false;
         };

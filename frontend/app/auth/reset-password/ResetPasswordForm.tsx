@@ -52,24 +52,24 @@ export function ResetPasswordForm() {
 
     useEffect(() => {
         let active = true;
-        const token = takeOneTimeLinkToken();
-        const establishFlow = token
-            ? exchangePasswordResetToken(token).then(() => {
+        const establish = async () => {
+            const token = takeOneTimeLinkToken();
+            if (token) {
+                await exchangePasswordResetToken(token);
                 window.location.replace("/auth/reset-password");
-                return { valid: true };
-            })
-            : validateResetToken();
-        establishFlow
-            .then((result) => {
-                if (active) {
-                    setStatus(result.valid ? "ready" : "invalid");
-                }
-            })
-            .catch(() => {
-                if (active) {
-                    setStatus("invalid");
-                }
-            });
+                return;
+            }
+            const result = await validateResetToken();
+            if (active) {
+                setStatus(result.valid ? "ready" : "invalid");
+            }
+        };
+
+        establish().catch(() => {
+            if (active) {
+                setStatus("invalid");
+            }
+        });
 
         return () => {
             active = false;
