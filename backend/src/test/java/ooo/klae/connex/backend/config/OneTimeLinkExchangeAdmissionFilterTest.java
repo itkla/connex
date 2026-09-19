@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -157,9 +158,11 @@ class OneTimeLinkExchangeAdmissionFilterTest {
     }
 
     /**
-     * The refusal must be written with {@code setStatus}: {@code sendError} records an error
-     * message and makes a real container ERROR-dispatch to {@code /error}, which an anonymous
-     * caller cannot reach and which the entry point therefore rewrites to 401.
+     * The refusal must be written with {@code setStatus}: {@code sendError} makes a real container
+     * ERROR-dispatch to {@code /error}, which an anonymous caller cannot reach and which the entry
+     * point therefore rewrites to 401. The mock records an error message only for the two-argument
+     * form, while both forms commit the response, so the uncommitted response is the guard that
+     * catches either.
      */
     @Test
     void throttledExchangeWritesTheRateLimitBodyWithoutAnErrorDispatch() throws Exception {
@@ -176,6 +179,7 @@ class OneTimeLinkExchangeAdmissionFilterTest {
         MockHttpServletResponse response = invoke(filter, "/api/document-acceptance/exchange");
 
         assertEquals(429, response.getStatus());
+        assertFalse(response.isCommitted());
         assertNull(response.getErrorMessage());
         assertTrue(response.getContentType().startsWith(MediaType.APPLICATION_JSON_VALUE));
         assertEquals(
