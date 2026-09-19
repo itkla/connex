@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.AttachmentScanMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
@@ -53,7 +54,9 @@ class AttachmentServiceUserTargetTest {
             referenceService,
             managedObjectService,
             org.mockito.Mockito.mock(UploadContentInspector.class),
-            org.mockito.Mockito.mock(UploadMalwareScanner.class));
+            org.mockito.Mockito.mock(UploadMalwareScanner.class),
+            org.mockito.Mockito.mock(AttachmentScanMapper.class),
+            org.mockito.Mockito.mock(AttachmentQuarantineService.class));
     }
 
     @Test
