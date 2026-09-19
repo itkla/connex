@@ -1509,6 +1509,62 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
     }
 
     @Test
+    void theRecoverySweepNeverCompletesASendWhileAnotherDeliveryIsStillPending() {
+        Person abandonedRecipient = recipient();
+        Person waitingRecipient = recipient();
+        assertEquals(1, jdbcTemplate.update("UPDATE person SET name = ? WHERE workspace_id = ? AND id = ?",
+                abandonedRecipient.getName() + " peer", workspace.getId(), waitingRecipient.getId()));
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        CampaignSendDto send = readySend(abandonedRecipient, DeliveryChannel.EMAIL);
+        int abandonedId = deliveryMapper.getBySendAndPerson(
+                workspace.getId(), send.id(), abandonedRecipient.getId()).getId();
+        int waitingId = deliveryMapper.getBySendAndPerson(
+                workspace.getId(), send.id(), waitingRecipient.getId()).getId();
+        sendService.queueSend(send.campaignId(), send.id());
+        assertEquals(1, deliveryMapper.claim(workspace.getId(), abandonedId));
+        assertEquals(CampaignFrequencyAdmissionService.Admission.RESERVED, frequencyAdmissionService.reserve(
+                workspace.getId(), abandonedId, abandonedRecipient.getId(), "email", null, 24));
+        assertEquals(1, campaignSendMapper.markRunning(workspace.getId(), send.id()));
+        expireReservation(abandonedId, reservationGraceSeconds() + 60);
+        DeliveryProviderConfigRequest disabled = providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL));
+        disabled.setEnabled(false);
+        configService.save(disabled);
+
+        assertEquals(1, dispatchService.processWorkspace(workspace.getId()));
+
+        CampaignDelivery swept = deliveryMapper.getDelivery(workspace.getId(), abandonedId);
+        assertEquals("failed", swept.getStatus());
+        assertNotNull(swept.getReconciliationRequiredAt());
+        var stillRunning = campaignSendMapper.getSend(workspace.getId(), send.id());
+        assertEquals("running", stillRunning.getStatus());
+        assertNull(stillRunning.getCompletedAt());
+        assertEquals(1, stillRunning.getFailedCount());
+        assertEquals(0, stillRunning.getDispatchedCount());
+        CampaignDelivery waiting = deliveryMapper.getDelivery(workspace.getId(), waitingId);
+        assertEquals("pending", waiting.getStatus());
+        assertEquals(0, waiting.getAttemptCount());
+        assertNull(waiting.getFrequencyReservedAt());
+        assertFalse(campaignSendMapper.audienceSendsAwaitingRecoverySettlement(workspace.getId(), 10)
+                .contains(send.id()));
+        assertTrue(campaignSendMapper.workspaceIdsWithQueuedSends(false, reservationGraceMicros())
+                .contains(workspace.getId()));
+        assertEquals(0, submissions.size());
+
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+
+        assertEquals("dispatched", deliveryMapper.getDelivery(workspace.getId(), waitingId).getStatus());
+        var settled = campaignSendMapper.getSend(workspace.getId(), send.id());
+        assertEquals("completed", settled.getStatus());
+        assertNotNull(settled.getCompletedAt());
+        assertEquals(1, settled.getDispatchedCount());
+        assertEquals(1, settled.getFailedCount());
+        assertFalse(campaignSendMapper.workspaceIdsWithQueuedSends(false, reservationGraceMicros())
+                .contains(workspace.getId()));
+        assertEquals(1, submissions.size());
+    }
+
+    @Test
     void aSubmissionThatLosesToTheSweepKeepsItsCorrelationSoAHardBounceStillSuppresses() throws Exception {
         Person person = recipient();
         configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
