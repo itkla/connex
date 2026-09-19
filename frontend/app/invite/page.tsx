@@ -16,6 +16,7 @@ import {
     me,
 } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
+import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
 import type { InvitePreview, User, WorkspaceRole } from "@/app/lib/types";
 
 type InvitePageState =
@@ -33,6 +34,8 @@ export default function InvitePage() {
     const t = useTranslations("InviteAccept");
     const tUnavailable = useTranslations("WorkspaceUnavailable");
     const [state, setState] = useState<InvitePageState>({ status: "loading" });
+
+    useReloadOnFragmentNavigation();
 
     useEffect(() => {
         let active = true;

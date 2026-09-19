@@ -10,6 +10,7 @@ import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
 import { ApiError, exchangeInviteLinkToken, getInviteLinkPreview, me } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
+import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
 import type { InviteLinkPreview, WorkspaceRole } from "@/app/lib/types";
 
 type InviteLinkPageState =
@@ -27,6 +28,8 @@ export default function InviteLinkPage() {
     const t = useTranslations("InviteLinkAccept");
     const tUnavailable = useTranslations("WorkspaceUnavailable");
     const [state, setState] = useState<InviteLinkPageState>({ status: "loading" });
+
+    useReloadOnFragmentNavigation();
 
     useEffect(() => {
         let active = true;
