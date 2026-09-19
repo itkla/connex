@@ -278,6 +278,16 @@ case_redactor_fixtures() (
     done
     # A numeric row id after a token-bearing parent stays legible.
     assert_equals redact_numeric_child '/api/companies/12/logo/34' "$(support_bundle_redact_path '/api/companies/12/logo/34')" || return 1
+    # Ask Connex journals its Spring mapping templates, which carry regex-constrained path
+    # variables: braces, a colon, a backslash and a plus. Tightening either the credential-shape
+    # rule or the token-bearing-parent rule against those characters would silently drop every
+    # assistant record. The path reaches awk through `awk -v raw="$path"`, and awk processes escape
+    # sequences in a -v assignment: mawk (the default /etc/alternatives/awk on this host and in CI,
+    # 1.3.4 20250131) preserves the \d, while gawk is documented to drop the backslash from an
+    # undefined escape. These vectors assert the measured mawk output.
+    assert_equals redact_assistant_sessions '/api/ai/assistant/sessions' "$(support_bundle_redact_path '/api/ai/assistant/sessions')" || return 1
+    assert_equals redact_assistant_turn '/api/ai/assistant/sessions/{sessionId:\d+}/turns/{turnId:\d+}' "$(support_bundle_redact_path '/api/ai/assistant/sessions/{sessionId:\d+}/turns/{turnId:\d+}')" || return 1
+    assert_equals redact_assistant_presence '/api/ai/assistant/sessions/{id:\d+}/presence' "$(support_bundle_redact_path '/api/ai/assistant/sessions/{id:\d+}/presence')" || return 1
 )
 
 case_verify_valid_bundle() (
@@ -1172,14 +1182,21 @@ case_journal_projection_filters_organization_before_projection() (
         jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:10Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":3,"connexOrganizationId":3,"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requestMethod":"GET","requestPath":"/api/notes/{id}","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
         jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:11Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":3,"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requestMethod":"GET","requestPath":"/api/search?email=SENTINEL_QUERY_SECRET","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
         jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:12Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":3,"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requestMethod":"GET","requestPath":"/api/search#SENTINEL_FRAGMENT_SECRET","responseStatus":200,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
+        # A failing Ask Connex client-scheduled read: the one assistant record this projection is
+        # expected to carry. Its Spring mapping template holds regex-constrained path variables, so
+        # it exercises safe_path and support_bundle_redact_path against braces and a backslash.
+        jq -cn --arg message '{"@timestamp":"2026-07-31T04:05:13Z","log":{"level":"INFO","logger":"ooo.klae.connex.backend.tenant.TenantResolutionInterceptor"},"connexOrganizationId":3,"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","requestMethod":"GET","requestPath":"/api/ai/assistant/sessions/{sessionId:\\d+}/turns/{turnId:\\d+}","responseStatus":500,"eventClass":"http.request.completed"}' '{MESSAGE: $message}'
     }
     local output="$WORK_DIR/journal-slice.jsonl"
     local status=0
     support_bundle_journal_projection \
         2026-07-31T04:00:00Z 2026-07-31T05:00:00Z 3 "$correlation_hmac" "$output" || status=$?
     assert_status journal_projection_status 0 "$status" || return 1
-    assert_equals journal_projection_count 1 "$(wc -l < "$output")" || return 1
+    assert_equals journal_projection_count 2 "$(wc -l < "$output")" || return 1
     assert_contains journal_target_path '"path":"/api/persons/{id}"' "$output" || return 1
+    assert_contains journal_assistant_path \
+        '"path":"/api/ai/assistant/sessions/{sessionId:\\d+}/turns/{turnId:\\d+}"' \
+        "$output" || return 1
     assert_contains journal_shared_correlation \
         '"untrustedClientAssertedCorrelationHmac":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' \
         "$output" || return 1

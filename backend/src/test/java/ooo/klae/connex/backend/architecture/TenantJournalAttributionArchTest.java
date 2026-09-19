@@ -19,8 +19,10 @@ import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 
 import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
+import ooo.klae.connex.backend.tenant.TenantJournalClientDriven;
 
 /**
  * Keeps support-journal attribution on the reviewed current-tenant controller surface.
@@ -29,6 +31,9 @@ class TenantJournalAttributionArchTest {
     private static final String BACKEND_PACKAGE = "ooo.klae.connex.backend";
     private static final List<String> ATTRIBUTABLE_CONTROLLERS = List.of(
         "ooo.klae.connex.backend.controllers.ActivityController",
+        "ooo.klae.connex.backend.controllers.AiAssistantController",
+        "ooo.klae.connex.backend.controllers.AiAssistantProactiveController",
+        "ooo.klae.connex.backend.controllers.AiAssistantSkillController",
         "ooo.klae.connex.backend.controllers.CompanyController",
         "ooo.klae.connex.backend.controllers.DealController",
         "ooo.klae.connex.backend.controllers.LegacyRecordCreationController",
@@ -41,6 +46,28 @@ class TenantJournalAttributionArchTest {
     private static final Pattern EXPLICIT_TENANT_TARGET = Pattern.compile(
         "(?:^|/)(?:org|orgs|organization|organizations|workspace|workspaces)/\\{[^/]+}",
         Pattern.CASE_INSENSITIVE);
+    private static final List<Class<?>> ASSISTANT_CONTROLLERS = List.of(
+        ooo.klae.connex.backend.controllers.AiAssistantController.class,
+        ooo.klae.connex.backend.controllers.AiAssistantProactiveController.class,
+        ooo.klae.connex.backend.controllers.AiAssistantSkillController.class);
+    private static final List<String> CLIENT_DRIVEN_HANDLERS = List.of(
+        "ooo.klae.connex.backend.controllers.AiAssistantController#get",
+        "ooo.klae.connex.backend.controllers.AiAssistantController#getToolCall",
+        "ooo.klae.connex.backend.controllers.AiAssistantController#getTurn",
+        "ooo.klae.connex.backend.controllers.AiAssistantController#invitations",
+        "ooo.klae.connex.backend.controllers.AiAssistantController#listAttachments",
+        "ooo.klae.connex.backend.controllers.AiAssistantController#listToolCalls",
+        "ooo.klae.connex.backend.controllers.AiAssistantController#page",
+        "ooo.klae.connex.backend.controllers.AiAssistantController#participants",
+        "ooo.klae.connex.backend.controllers.AiAssistantController#presence",
+        "ooo.klae.connex.backend.controllers.AiAssistantController#previewScope",
+        "ooo.klae.connex.backend.controllers.AiAssistantController#touchPresence",
+        "ooo.klae.connex.backend.controllers.AiAssistantProactiveController#briefSchedule",
+        "ooo.klae.connex.backend.controllers.AiAssistantProactiveController#commandCenter",
+        "ooo.klae.connex.backend.controllers.AiAssistantProactiveController#watches",
+        "ooo.klae.connex.backend.controllers.AiAssistantSkillController#list");
+    private static final String FULLY_SILENT_HANDLER =
+        "ooo.klae.connex.backend.controllers.AiAssistantController#touchPresence";
 
     @Test
     void onlyReviewedCurrentTenantHandlersAreJournalAttributable() {
@@ -51,6 +78,65 @@ class TenantJournalAttributionArchTest {
         assertTrue(AnnotatedElementUtils.hasAnnotation(
             ooo.klae.connex.backend.controllers.SequenceController.class,
             TenantJournalAttributable.class));
+    }
+
+    @Test
+    void onlyReviewedHandlersAreClientDriven() {
+        List<String> actual = new ArrayList<>();
+        List<String> fullySilent = new ArrayList<>();
+        List<String> unjournaled = new ArrayList<>();
+        for (Class<?> controller : scanControllers(BACKEND_PACKAGE)) {
+            boolean classAttributable =
+                AnnotatedElementUtils.hasAnnotation(controller, TenantJournalAttributable.class);
+            for (Method method : controller.getDeclaredMethods()) {
+                TenantJournalClientDriven marker =
+                    AnnotatedElementUtils.findMergedAnnotation(method, TenantJournalClientDriven.class);
+                if (marker == null) {
+                    continue;
+                }
+                String handler = controller.getName() + "#" + method.getName();
+                actual.add(handler);
+                if (!marker.retainFailures()) {
+                    fullySilent.add(handler);
+                }
+                if (!classAttributable
+                        && !AnnotatedElementUtils.hasAnnotation(method, TenantJournalAttributable.class)) {
+                    unjournaled.add(handler);
+                }
+            }
+        }
+
+        actual.sort(String::compareTo);
+        assertEquals(CLIENT_DRIVEN_HANDLERS.stream().sorted().toList(), actual,
+            "Client-driven journal omission changed without review of its operator-visibility contract");
+        assertEquals(List.of(FULLY_SILENT_HANDLER), fullySilent,
+            "Only a handler whose client retries indefinitely may omit its failures");
+        assertTrue(unjournaled.isEmpty(),
+            "A client-driven marker on a handler that is not journal-attributable is dead code: "
+                + unjournaled);
+    }
+
+    @Test
+    void assistantReadsAreClientDriven() {
+        List<String> unmarkedReads = new ArrayList<>();
+        for (Class<?> controller : ASSISTANT_CONTROLLERS) {
+            for (Method method : controller.getDeclaredMethods()) {
+                RequestMapping mapping =
+                    AnnotatedElementUtils.findMergedAnnotation(method, RequestMapping.class);
+                if (mapping == null
+                        || !Set.of(mapping.method()).equals(Set.of(RequestMethod.GET))) {
+                    continue;
+                }
+                if (AnnotatedElementUtils.findMergedAnnotation(
+                        method, TenantJournalClientDriven.class) == null) {
+                    unmarkedReads.add(controller.getName() + "#" + method.getName());
+                }
+            }
+        }
+
+        assertTrue(unmarkedReads.isEmpty(),
+            "Every assistant GET is folded into the client's realtime refresh fan-out and needs a "
+                + "journaling decision: " + unmarkedReads);
     }
 
     @Test

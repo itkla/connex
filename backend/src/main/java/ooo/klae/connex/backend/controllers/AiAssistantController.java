@@ -48,11 +48,14 @@ import ooo.klae.connex.backend.dto.AiChatTurnDto;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.services.AiAssistantService;
 import ooo.klae.connex.backend.storage.UploadSource;
+import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
+import ooo.klae.connex.backend.tenant.TenantJournalClientDriven;
 
 /** Authenticated active-workspace endpoints for durable assistant chat sessions. */
 @RestController
 @RequestMapping("/api/ai/assistant/sessions")
 @RequiredArgsConstructor
+@TenantJournalAttributable
 public class AiAssistantController {
     private final AiAssistantService assistantService;
     private final AiAssistantTurnService turnService;
@@ -60,7 +63,14 @@ public class AiAssistantController {
     private final AiAssistantWriteToolService writeToolService;
     private final AiChatAttachmentService attachmentService;
 
-    /** Returns a bounded page of caller-owned and shared-participant sessions. */
+    /**
+     * Returns a bounded page of caller-owned and shared-participant sessions.
+     *
+     * <p>Called on the client's own schedule: {@code refreshSessions} in
+     * {@code AskConnexProvider.tsx} runs inside the un-coalesced {@code enqueueRealtimeRefresh}
+     * fan-out that every non-delta realtime frame triggers, so its volume tracks agent steps.
+     */
+    @TenantJournalClientDriven
     @GetMapping
     public PageResponse<AiChatSessionDto> page(
             @RequestParam(defaultValue = "1") int page,
@@ -79,7 +89,13 @@ public class AiAssistantController {
         return assistantService.pageRetained(page, size);
     }
 
-    /** Returns pending shared-session invitations addressed to the caller. */
+    /**
+     * Returns pending shared-session invitations addressed to the caller.
+     *
+     * <p>Called on the client's own schedule: the second half of {@code refreshSessions} in the
+     * {@code enqueueRealtimeRefresh} fan-out in {@code AskConnexProvider.tsx}.
+     */
+    @TenantJournalClientDriven
     @GetMapping("/invitations")
     public PageResponse<AiChatSessionDto> invitations(
             @RequestParam(defaultValue = "1") int page,
@@ -96,7 +112,13 @@ public class AiAssistantController {
         return ResponseEntity.created(location).body(created);
     }
 
-    /** Returns one accessible session and an ordered page of its messages. */
+    /**
+     * Returns one accessible session and an ordered page of its messages.
+     *
+     * <p>Called on the client's own schedule: {@code refreshTranscript} in
+     * {@code AskConnexProvider.tsx} reruns in full for every queued realtime refresh.
+     */
+    @TenantJournalClientDriven
     @GetMapping("/{id:\\d+}")
     public AiChatSessionDetailDto get(
             @PathVariable int id,
@@ -155,7 +177,13 @@ public class AiAssistantController {
         assistantService.leave(id);
     }
 
-    /** Lists the owner and participant states visible to the caller. */
+    /**
+     * Lists the owner and participant states visible to the caller.
+     *
+     * <p>Called on the client's own schedule: {@code refreshCollaboration} in
+     * {@code AskConnexProvider.tsx} runs per queued realtime refresh on a shared session.
+     */
+    @TenantJournalClientDriven
     @GetMapping("/{id:\\d+}/participants")
     public List<AiChatParticipantDto> participants(@PathVariable int id) {
         return assistantService.participants(id);
@@ -170,13 +198,28 @@ public class AiAssistantController {
         assistantService.removeParticipant(id, userId);
     }
 
-    /** Returns the caller-authorized live presence snapshot. */
+    /**
+     * Returns the caller-authorized live presence snapshot.
+     *
+     * <p>Called on the client's own schedule: the second half of {@code refreshCollaboration} in
+     * {@code AskConnexProvider.tsx}, per queued realtime refresh on a shared session.
+     */
+    @TenantJournalClientDriven
     @GetMapping("/{id:\\d+}/presence")
     public AiChatPresenceDto presence(@PathVariable int id) {
         return assistantService.presence(id);
     }
 
-    /** Records a live presence and typing heartbeat. */
+    /**
+     * Records a live presence and typing heartbeat.
+     *
+     * <p>Called on the client's own schedule: a self-rescheduling four-second timer in
+     * {@code AskConnexProvider.tsx} whose {@code catch} swallows failures and reschedules
+     * indefinitely, so retaining its failures would be unbounded in time rather than bounded by
+     * member actions. A liveness ping's failure also tells an operator nothing a failing transcript
+     * read does not.
+     */
+    @TenantJournalClientDriven(retainFailures = false)
     @PutMapping("/{id:\\d+}/presence")
     public AiChatPresenceDto touchPresence(
             @PathVariable int id,
@@ -198,7 +241,13 @@ public class AiAssistantController {
         assistantService.archive(id);
     }
 
-    /** Returns private context files attached to one accessible active session. */
+    /**
+     * Returns private context files attached to one accessible active session.
+     *
+     * <p>Called on the client's own schedule: part of {@code refreshTranscript} in
+     * {@code AskConnexProvider.tsx}, per queued realtime refresh.
+     */
+    @TenantJournalClientDriven
     @GetMapping("/{id:\\d+}/attachments")
     public List<AiChatAttachmentDto> listAttachments(@PathVariable int id) {
         return attachmentService.list(id);
@@ -246,14 +295,25 @@ public class AiAssistantController {
      *
      * <p>Deliberately not bound to a session: the preview evaluates the caller's own declared
      * filters against the workspace and reads nothing from any transcript.
+     *
+     * <p>Called on the client's own schedule: a 400 ms composer debounce in
+     * {@code AskConnexProvider.tsx} keyed on {@code ASK_CONNEX_SCOPE_PREVIEW_DEBOUNCE_MS}, so it
+     * fires while the member types rather than when they act.
      */
+    @TenantJournalClientDriven
     @PostMapping("/scope-preview")
     public AiChatScopePreviewDto previewScope(
             @Valid @RequestBody AiChatScopePreviewRequest request) {
         return turnService.previewScope(request);
     }
 
-    /** Returns one durable turn state after current authorization and lazy expiry. */
+    /**
+     * Returns one durable turn state after current authorization and lazy expiry.
+     *
+     * <p>Called on the client's own schedule: {@code pollDurableTurn} in
+     * {@code AskConnexProvider.tsx} loops at 1 Hz for the whole life of an active turn.
+     */
+    @TenantJournalClientDriven
     @GetMapping("/{sessionId:\\d+}/turns/{turnId:\\d+}")
     public AiChatTurnDto getTurn(
             @PathVariable int sessionId,
@@ -270,7 +330,14 @@ public class AiAssistantController {
         turnService.cancel(sessionId, turnId);
     }
 
-    /** Returns a bounded set of viewer-safe write-tool calls in the authorized session. */
+    /**
+     * Returns a bounded set of viewer-safe write-tool calls in the authorized session.
+     *
+     * <p>Called on the client's own schedule: {@code refreshTranscript} in
+     * {@code AskConnexProvider.tsx} issues it twice — once plain and once with
+     * {@code pendingOnly} — per queued realtime refresh.
+     */
+    @TenantJournalClientDriven
     @GetMapping("/{sessionId:\\d+}/tool-calls")
     public List<AiAssistantToolCallReadDto> listToolCalls(
             @PathVariable int sessionId,
@@ -289,7 +356,13 @@ public class AiAssistantController {
         return toolCallReadService.listRetained(sessionId, pendingOnly);
     }
 
-    /** Returns one viewer-safe write-tool call in the authorized session. */
+    /**
+     * Returns one viewer-safe write-tool call in the authorized session.
+     *
+     * <p>Called on the client's own schedule: the single-call read behind the same realtime
+     * refresh fan-out in {@code AskConnexProvider.tsx}.
+     */
+    @TenantJournalClientDriven
     @GetMapping("/{sessionId:\\d+}/tool-calls/{toolCallId:\\d+}")
     public AiAssistantToolCallReadDto getToolCall(
             @PathVariable int sessionId,
