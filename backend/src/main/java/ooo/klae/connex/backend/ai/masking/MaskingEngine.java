@@ -14,6 +14,8 @@ import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import ooo.klae.connex.backend.ai.AiCancellation;
+
 /**
  * Boundary for converting raw identifiers into request-local tokens. Structured identifiers are
  * tokenized through {@link #maskField(EntityKind, String, MaskingContext)}, and free text always
@@ -893,6 +895,7 @@ public final class MaskingEngine {
         CanonicalText.Projection projection = input.literal();
         CanonicalText.Projection labels = input.labels();
         for (MaskingContext.IdentifierEntry entry : ctx.identifierEntries()) {
+            AiCancellation.throwIfInterrupted();
             if (!entry.replacementEligible()
                     || preserveTrustedCollisions && ctx.isTrustedTextCollision(entry.rawValue())) {
                 continue;
