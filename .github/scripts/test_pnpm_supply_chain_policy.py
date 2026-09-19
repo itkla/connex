@@ -1,8 +1,10 @@
 """Regression tests for the pnpm supply-chain policy guard (#835)."""
 
+import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -44,13 +46,18 @@ READ_PACKAGE_PNPMFILE = (
     "\n"
     "module.exports = { hooks: { readPackage } };\n"
 )
+LOCKFILE = "lockfileVersion: '9.0'\n"
+REVIEWED_PNPMFILE = REPOSITORY.joinpath("frontend", ".pnpmfile.cjs").read_bytes()
+MANIFEST = {"name": "project", "version": "0.0.0", "private": True, "packageManager": "pnpm@11.9.0"}
 RESOLVED_POLICY = {
+    "@jsr:registry": "https://npm.jsr.io/",
     "json": True,
     "minimumReleaseAge": 1440,
     "minimumReleaseAgeIgnoreMissingTime": False,
     "minimumReleaseAgeStrict": True,
     "registry": "https://registry.npmjs.org/",
     "trustPolicy": "no-downgrade",
+    "userAgent": "pnpm/11.9.0 npm/? node/v22.20.0 linux x64",
 }
 PNPM_STUB = """#!{python}
 import json
@@ -66,11 +73,23 @@ sys.exit(response["exit"])
 """
 
 
+def track(root: Path) -> None:
+    for command in (["git", "init", "--quiet"], ["git", "add", "--all"]):
+        subprocess.run(command, cwd=root, check=True, capture_output=True)
+
+
+def write_manifest(root: Path, directory: Path, manifest: dict[str, object]) -> None:
+    root.joinpath(directory).mkdir(parents=True, exist_ok=True)
+    root.joinpath(directory, "package.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+
 def write_workspaces(root: Path, texts: dict[Path, str] | None = None) -> None:
     for workspace in GUARD.WORKSPACE_FILES:
         path = root / workspace
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text((texts or {}).get(workspace, POLICY), encoding="utf-8")
+        write_manifest(root, workspace.parent, MANIFEST)
+    track(root)
 
 
 def write_pnpm_stub(root: Path, reports: dict[Path, tuple[int, str]]) -> Path:
@@ -289,61 +308,126 @@ class PnpmSupplyChainPolicyGuardTest(unittest.TestCase):
             self.violations(POLICY + "minimumReleaseAgeExclude: [next@16.3.5]\n"),
         )
 
-    def test_a_pnpmfile_limited_to_read_package_passes(self) -> None:
+    def test_the_reviewed_pnpmfile_matching_its_pinned_digest_passes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             write_workspaces(root)
-            root.joinpath("frontend", ".pnpmfile.cjs").write_text(READ_PACKAGE_PNPMFILE, encoding="utf-8")
+            root.joinpath("frontend", ".pnpmfile.cjs").write_bytes(REVIEWED_PNPMFILE)
             self.assertEqual([], GUARD.policy_violations(root))
 
-    def test_a_pnpmfile_hook_that_can_override_the_policy_fails(self) -> None:
+    def test_an_edit_to_the_reviewed_pnpmfile_fails_even_without_a_suspicious_word(self) -> None:
+        edited = REVIEWED_PNPMFILE.replace(b"'^8.5.10'", b"'^8.5.11'")
+        self.assertNotEqual(REVIEWED_PNPMFILE, edited)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             write_workspaces(root)
-            root.joinpath("frontend", ".pnpmfile.cjs").write_text(
-                READ_PACKAGE_PNPMFILE.replace(
-                    "{ readPackage }",
-                    "{ readPackage, updateConfig: (config) => ({ ...config, minimumReleaseAge: 0 }) }",
-                ),
-                encoding="utf-8",
-            )
-            root.joinpath("landing", ".pnpmfile.mjs").write_text(
-                "export const resolvers = [];\nexport const hooks = { afterAllResolved: (lockfile) => lockfile };\n",
-                encoding="utf-8",
-            )
+            root.joinpath("frontend", ".pnpmfile.cjs").write_bytes(edited)
             self.assertEqual(
                 [
-                    "frontend/.pnpmfile.cjs:5: names `updateConfig`; a pnpmfile beside a policy workspace may "
-                    "define only the `readPackage` hook, because `updateConfig` and the resolution hooks can "
-                    "override the policy after the workspace file is read",
-                    "landing/.pnpmfile.mjs:1: names `resolvers`; a pnpmfile beside a policy workspace may "
-                    "define only the `readPackage` hook, because `updateConfig` and the resolution hooks can "
-                    "override the policy after the workspace file is read",
-                    "landing/.pnpmfile.mjs:2: names `afterAllResolved`; a pnpmfile beside a policy workspace may "
-                    "define only the `readPackage` hook, because `updateConfig` and the resolution hooks can "
-                    "override the policy after the workspace file is read",
+                    f"frontend/.pnpmfile.cjs: SHA-256 {hashlib.sha256(edited).hexdigest()} is not the reviewed "
+                    f"{GUARD.PINNED_PNPMFILES[Path('frontend/.pnpmfile.cjs')]}; its hooks can rewrite the policy "
+                    "after the workspace file is read, so every edit needs a reviewed change to the digest in "
+                    "this guard",
                 ],
                 GUARD.policy_violations(root),
             )
 
-    def test_a_pnpmfile_that_loads_another_module_or_is_not_a_file_fails(self) -> None:
+    def test_a_pnpmfile_outside_the_pin_fails_and_names_what_the_lexical_scan_saw(self) -> None:
+        unpinned = (
+            "pnpm loads this pnpmfile, whose hooks can rewrite the policy after the workspace file is read; "
+            "only the reviewed frontend/.pnpmfile.cjs is allowed, so adding another needs a reviewed change "
+            "to this guard"
+        )
+        hooked = REVIEWED_PNPMFILE.replace(
+            b"{ readPackage }", b"{ readPackage, updateConfig: (config) => ({ ...config, minimumReleaseAge: 0 }) }"
+        )
+        self.assertNotEqual(REVIEWED_PNPMFILE, hooked)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             write_workspaces(root)
-            root.joinpath("frontend", ".pnpmfile.cjs").write_text(
-                "module.exports = require('./tools/hooks.cjs');\n", encoding="utf-8"
-            )
+            root.joinpath("frontend", ".pnpmfile.cjs").write_bytes(hooked)
             root.joinpath("frontend", "emails", ".pnpmfile.mjs").write_text(
                 "export const hooks = await import('./tools/hooks.mjs');\n", encoding="utf-8"
             )
-            root.joinpath("landing", ".pnpmfile.cjs").mkdir()
+            root.joinpath("landing", ".pnpmfile.cjs").write_text(READ_PACKAGE_PNPMFILE, encoding="utf-8")
+            root.joinpath("landing", ".pnpmfile.mjs").mkdir()
             self.assertEqual(
                 [
-                    "frontend/.pnpmfile.cjs:1: loads another module with `require`; keep the pnpmfile "
-                    "self-contained so this guard sees every hook it exports",
-                    "frontend/emails/.pnpmfile.mjs:1: loads another module with `import`; keep the pnpmfile "
-                    "self-contained so this guard sees every hook it exports",
-                    "landing/.pnpmfile.cjs: is not a regular file, so this guard cannot read the hooks pnpm loads",
+                    f"frontend/.pnpmfile.cjs: SHA-256 {hashlib.sha256(hooked).hexdigest()} is not the reviewed "
+                    f"{GUARD.PINNED_PNPMFILES[Path('frontend/.pnpmfile.cjs')]}; its hooks can rewrite the policy "
+                    "after the workspace file is read, so every edit needs a reviewed change to the digest in "
+                    "this guard (lexical hint: line 13 names `updateConfig`)",
+                    f"frontend/emails/.pnpmfile.mjs: {unpinned} (lexical hint: line 1 loads another module with "
+                    "`import`)",
+                    f"landing/.pnpmfile.cjs: {unpinned}",
+                    "landing/.pnpmfile.mjs: is not a regular file, so this guard cannot pin the hooks pnpm loads",
+                ],
+                GUARD.policy_violations(root),
+            )
+
+    def test_a_pnpmfile_in_an_uncovered_tracked_project_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_workspaces(root)
+            root.joinpath("tools", "codegen").mkdir(parents=True)
+            root.joinpath("tools", "codegen", "pnpm-lock.yaml").write_text(LOCKFILE, encoding="utf-8")
+            root.joinpath("tools", "codegen", ".pnpmfile.cjs").write_text(READ_PACKAGE_PNPMFILE, encoding="utf-8")
+            track(root)
+            violations = GUARD.policy_violations(root)
+            self.assertEqual(2, len(violations), violations)
+            self.assertTrue(violations[1].startswith("tools/codegen/.pnpmfile.cjs: pnpm loads this pnpmfile"))
+
+    def test_a_tracked_pnpm_project_the_guard_does_not_cover_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_workspaces(root)
+            root.joinpath("tools", "codegen").mkdir(parents=True)
+            root.joinpath("tools", "codegen", "pnpm-lock.yaml").write_text(LOCKFILE, encoding="utf-8")
+            root.joinpath("pnpm-workspace.yaml").write_text("packages: []\n", encoding="utf-8")
+            write_manifest(root, Path("scripts/release"), {**MANIFEST, "packageManager": "pnpm@10.0.0"})
+            write_manifest(root, Path("scripts/npm-only"), {**MANIFEST, "packageManager": "npm@10.9.0"})
+            root.joinpath("frontend", "pnpm-lock.yaml").write_text(LOCKFILE, encoding="utf-8")
+            track(root)
+            uncovered = (
+                "is a tracked pnpm project this guard does not cover; add it to PROJECT_DIRECTORIES in a "
+                "reviewed change so the policy applies to it"
+            )
+            self.assertEqual(
+                [f".: {uncovered}", f"scripts/release: {uncovered}", f"tools/codegen: {uncovered}"],
+                GUARD.policy_violations(root),
+            )
+
+    def test_projects_that_git_cannot_list_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_workspaces(root)
+            shutil.rmtree(root / ".git")
+            violations = GUARD.policy_violations(root)
+            self.assertEqual(1, len(violations), violations)
+            self.assertTrue(
+                violations[0].startswith("cannot discover the pnpm projects: `git ls-files` exited "), violations[0]
+            )
+
+    def test_every_project_must_pin_the_reviewed_pnpm_without_a_dev_engines_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_workspaces(root)
+            downloaded = {"name": "pnpm", "version": "11.1.2", "onFail": "download"}
+            write_manifest(root, Path("frontend"), {**MANIFEST, "devEngines": {"packageManager": downloaded}})
+            unpinned = {key: value for key, value in MANIFEST.items() if key != "packageManager"}
+            write_manifest(root, Path("frontend/emails"), unpinned)
+            write_manifest(root, Path("landing"), {**MANIFEST, "packageManager": "pnpm@11.1.2"})
+            track(root)
+            reason = (
+                'the policy requires "pnpm@11.9.0", because pnpm before 11.1.3 skips the lockfile re-check on a '
+                "frozen install, so changing the version needs a reviewed change to this guard"
+            )
+            self.assertEqual(
+                [
+                    "frontend/package.json: devEngines.packageManager can make pnpm run another version; pin "
+                    "pnpm@11.9.0 through packageManager alone",
+                    f"frontend/emails/package.json: packageManager is null; {reason}",
+                    f'landing/package.json: packageManager is "pnpm@11.1.2"; {reason}',
                 ],
                 GUARD.policy_violations(root),
             )
@@ -406,6 +490,92 @@ class PnpmSupplyChainPolicyGuardTest(unittest.TestCase):
                 GUARD.effective_violations(root, pnpm=str(stub)),
             )
 
+    def effective(self, reports: dict[Path, dict[str, object]]) -> list[str]:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_workspaces(root)
+            stub = write_pnpm_stub(root, {workspace: (0, json.dumps(report)) for workspace, report in reports.items()})
+            return GUARD.effective_violations(root, pnpm=str(stub))
+
+    def test_a_pnpm_other_than_the_pinned_version_fails(self) -> None:
+        without_agent = {key: value for key, value in RESOLVED_POLICY.items() if key != "userAgent"}
+        self.assertEqual(
+            [
+                'frontend/pnpm-workspace.yaml: pnpm reports userAgent "pnpm/11.1.2 npm/? node/v22.20.0 linux x64"; '
+                "the policy requires pnpm 11.9.0 (`pnpm/11.9.0 ...`)",
+                "frontend/emails/pnpm-workspace.yaml: pnpm reports userAgent null; the policy requires pnpm 11.9.0 "
+                "(`pnpm/11.9.0 ...`)",
+                'landing/pnpm-workspace.yaml: pnpm reports userAgent "pnpm/11.9.0-rc.1 npm/? node/v22.20.0 linux x64"; '
+                "the policy requires pnpm 11.9.0 (`pnpm/11.9.0 ...`)",
+            ],
+            self.effective(
+                {
+                    WORKSPACE: {**RESOLVED_POLICY, "userAgent": "pnpm/11.1.2 npm/? node/v22.20.0 linux x64"},
+                    Path("frontend/emails/pnpm-workspace.yaml"): without_agent,
+                    Path("landing/pnpm-workspace.yaml"): {
+                        **RESOLVED_POLICY,
+                        "userAgent": "pnpm/11.9.0-rc.1 npm/? node/v22.20.0 linux x64",
+                    },
+                }
+            ),
+        )
+
+    def test_a_scoped_registry_other_than_the_built_in_jsr_registry_fails(self) -> None:
+        self.assertEqual(
+            [
+                'frontend/pnpm-workspace.yaml: pnpm resolves @acme:registry to "https://registry.example.invalid/"; '
+                "only the built-in @jsr:registry https://npm.jsr.io/ may send a scope to another registry",
+                'landing/pnpm-workspace.yaml: pnpm resolves @jsr:registry to "https://jsr.example.invalid/"; '
+                "only the built-in @jsr:registry https://npm.jsr.io/ may send a scope to another registry",
+            ],
+            self.effective(
+                {
+                    WORKSPACE: {**RESOLVED_POLICY, "@acme:registry": "https://registry.example.invalid/"},
+                    Path("landing/pnpm-workspace.yaml"): {
+                        **RESOLVED_POLICY,
+                        "@jsr:registry": "https://jsr.example.invalid/",
+                    },
+                }
+            ),
+        )
+
+    def test_disabled_registry_certificate_verification_fails(self) -> None:
+        self.assertEqual(
+            [
+                "frontend/pnpm-workspace.yaml: pnpm resolves strictSsl to false; the policy requires registry TLS "
+                "certificates to be verified",
+                "landing/pnpm-workspace.yaml: pnpm resolves strict-ssl to false; the policy requires registry TLS "
+                "certificates to be verified",
+            ],
+            self.effective(
+                {
+                    WORKSPACE: {**RESOLVED_POLICY, "strictSsl": False},
+                    Path("frontend/emails/pnpm-workspace.yaml"): {**RESOLVED_POLICY, "strictSsl": True},
+                    Path("landing/pnpm-workspace.yaml"): {**RESOLVED_POLICY, "strict-ssl": False},
+                }
+            ),
+        )
+
+    def test_a_proxy_between_pnpm_and_the_registry_fails(self) -> None:
+        proxy = "http://proxy.example.invalid:3128/"
+        self.assertEqual(
+            [
+                f'frontend/pnpm-workspace.yaml: pnpm resolves proxy to "{proxy}"; the policy requires no proxy '
+                "between pnpm and the registry",
+                f'frontend/emails/pnpm-workspace.yaml: pnpm resolves httpsProxy to "{proxy}"; the policy requires '
+                "no proxy between pnpm and the registry",
+                f'landing/pnpm-workspace.yaml: pnpm resolves https-proxy to "{proxy}"; the policy requires no proxy '
+                "between pnpm and the registry",
+            ],
+            self.effective(
+                {
+                    WORKSPACE: {**RESOLVED_POLICY, "proxy": proxy},
+                    Path("frontend/emails/pnpm-workspace.yaml"): {**RESOLVED_POLICY, "httpsProxy": proxy},
+                    Path("landing/pnpm-workspace.yaml"): {**RESOLVED_POLICY, "https-proxy": proxy},
+                }
+            ),
+        )
+
     def test_unreadable_pnpm_output_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -465,16 +635,17 @@ class PnpmSupplyChainPolicyGuardTest(unittest.TestCase):
     def test_cli_fails_on_a_missing_workspace_and_passes_once_all_hold(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            for workspace in GUARD.WORKSPACE_FILES:
+                write_manifest(root, workspace.parent, MANIFEST)
             for workspace in GUARD.WORKSPACE_FILES[:2]:
-                root.joinpath(workspace).parent.mkdir(parents=True, exist_ok=True)
                 root.joinpath(workspace).write_text(POLICY, encoding="utf-8")
+            track(root)
             red = subprocess.run(
                 [sys.executable, str(SCRIPT)], cwd=root, check=False, capture_output=True, text=True
             )
             self.assertEqual(1, red.returncode, red.stdout)
             self.assertIn("::error::landing/pnpm-workspace.yaml: pnpm workspace file is missing", red.stderr)
 
-            root.joinpath("landing").mkdir()
             root.joinpath("landing", "pnpm-workspace.yaml").write_text(POLICY, encoding="utf-8")
             green = subprocess.run(
                 [sys.executable, str(SCRIPT)], cwd=root, check=False, capture_output=True, text=True

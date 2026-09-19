@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hold every pnpm workspace to the #835 supply-chain resolution policy.
+"""Hold every pnpm project to the #835 supply-chain resolution policy.
 
 The owner decided on 2026-09-19 that `frontend/`, `frontend/emails/`, and `landing/` refuse versions
 younger than one day, refuse versions without a registry publish time, and refuse trust downgrades,
@@ -18,19 +18,30 @@ evidence being checked. The reader accepts a narrow subset of YAML: allowlisted 
 one-line values, and block content indented under a key with nothing after its colon. Anything else,
 including a plain-scalar continuation line and a control or line-separator character, fails closed.
 
+pnpm before 11.1.3 reads the same settings but skips the lockfile re-check on a frozen install, so
+every project must pin the reviewed pnpm through `packageManager` and must not name another version
+through `devEngines.packageManager`. The covered projects are a fixed list, and `git ls-files` finds
+every tracked pnpm project so that one outside the list fails instead of escaping the policy.
+
 The workspace file is not pnpm's only configuration source. A `.pnpmfile.cjs` or `.pnpmfile.mjs` beside
-it runs its `updateConfig` hook after the file is read and can rewrite every setting, so the check
-also fails on a pnpmfile that names any hook or export other than `readPackage`, or that loads another
-module where such a hook could hide. That scan is lexical. `--effective` adds a behavioural check: it
-asks pnpm itself what it resolves in each workspace (`pnpm config list --json` reports every explicitly
-configured setting after the pnpmfile hooks have run) and compares that with the policy and with the
-exclusions the reader found.
+it runs its `updateConfig` hook after the file is read and can rewrite every setting, so the only
+pnpmfile allowed is the reviewed `frontend/.pnpmfile.cjs`, pinned by its SHA-256 digest; editing it or
+adding another fails until this guard is changed in review. A lexical scan only explains a failure.
+`--effective` adds a behavioural check: it asks pnpm itself what it resolves in each workspace
+(`pnpm config list --json` reports every explicitly configured setting after the pnpmfile hooks have
+run) and compares that with the policy, the pinned pnpm version, the registry and transport settings,
+and the exclusions the reader found.
+
+This is a tripwire against an accidental or overt weakening in a reviewed pull request. It is not a
+defence against a hostile committer, who can edit this guard in the same pull request.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -39,11 +50,15 @@ from pathlib import Path
 from typing import NamedTuple
 
 
-WORKSPACE_FILES = (
-    Path("frontend/pnpm-workspace.yaml"),
-    Path("frontend/emails/pnpm-workspace.yaml"),
-    Path("landing/pnpm-workspace.yaml"),
-)
+PNPM_VERSION = "11.9.0"
+PACKAGE_MANAGER = f"pnpm@{PNPM_VERSION}"
+PNPM_USER_AGENT = f"pnpm/{PNPM_VERSION}"
+PROJECT_DIRECTORIES = (Path("frontend"), Path("frontend/emails"), Path("landing"))
+WORKSPACE_NAME = "pnpm-workspace.yaml"
+MANIFEST_NAME = "package.json"
+PROJECT_MARKERS = ("pnpm-lock.yaml", WORKSPACE_NAME)
+WORKSPACE_FILES = tuple(directory / WORKSPACE_NAME for directory in PROJECT_DIRECTORIES)
+GIT_TIMEOUT_SECONDS = 60
 REQUIRED_SETTINGS = {
     "minimumReleaseAge": "1440",
     "minimumReleaseAgeStrict": "true",
@@ -63,6 +78,10 @@ EFFECTIVE_SETTINGS: dict[str, object] = {
     "trustPolicy": "no-downgrade",
     "registry": "https://registry.npmjs.org/",
 }
+BUILT_IN_SCOPED_REGISTRIES = {"@jsr:registry": "https://npm.jsr.io/"}
+SCOPED_REGISTRY_SUFFIX = ":registry"
+STRICT_SSL_SETTINGS = ("strictSsl", "strict-ssl")
+PROXY_SETTINGS = ("proxy", "httpProxy", "http-proxy", "httpsProxy", "https-proxy")
 EFFECTIVELY_UNSET_SETTINGS = (
     "trustLockfile",
     "trustPolicyIgnoreAfter",
@@ -73,6 +92,9 @@ EFFECTIVELY_UNSET_SETTINGS = (
 PNPM_CONFIG_TIMEOUT_SECONDS = 120
 
 PNPMFILES = (".pnpmfile.cjs", ".pnpmfile.mjs")
+PINNED_PNPMFILES = {
+    Path("frontend/.pnpmfile.cjs"): "64fc286ec386be3a87d3d3d2b429ae648e43c1d61a09a0073b27d7be4c7635c5",
+}
 PNPMFILE_OTHER_HOOK = re.compile(
     r"\b(?:updateConfig|afterAllResolved|preResolution|importPackage|beforePacking|filterLog"
     r"|finders|resolvers|fetchers)\b"
@@ -108,6 +130,17 @@ class WorkspaceReading(NamedTuple):
 
     violations: list[str]
     exclusions: list[Exclusion]
+
+
+class ProjectDiscovery(NamedTuple):
+    """The tracked pnpm project directories and the files that could not be classified."""
+
+    directories: set[Path]
+    violations: list[str]
+
+
+class ProjectDiscoveryError(Exception):
+    """git could not list the tracked files in which the guard looks for pnpm projects."""
 
 
 class PnpmConfigurationError(Exception):
@@ -244,40 +277,142 @@ def workspace_violations(workspace: Path, text: str) -> list[str]:
     return read_workspace(workspace, text).violations
 
 
-def pnpmfile_violations(root: Path, workspace: Path) -> list[str]:
+def tracked_files(root: Path) -> list[Path]:
+    try:
+        completed = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ProjectDiscoveryError(f"`git ls-files` could not run: {error}") from error
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise ProjectDiscoveryError(f"`git ls-files` exited {completed.returncode}: {detail}")
+    return [Path(os.fsdecode(entry)) for entry in completed.stdout.split(b"\0") if entry]
+
+
+def declares_pnpm(root: Path, manifest: Path) -> tuple[bool, str | None]:
+    path = root / manifest
+    if not path.is_file():
+        return False, None
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        return False, f"{manifest}: is not readable JSON, so this guard cannot tell whether pnpm manages it: {error}"
+    package_manager = document.get("packageManager") if isinstance(document, dict) else None
+    return isinstance(package_manager, str) and package_manager.startswith("pnpm@"), None
+
+
+def discover_projects(root: Path) -> ProjectDiscovery:
+    directories: set[Path] = set()
+    found: list[str] = []
+    try:
+        files = tracked_files(root)
+    except ProjectDiscoveryError as error:
+        return ProjectDiscovery(directories, [f"cannot discover the pnpm projects: {error}"])
+    for tracked in files:
+        if tracked.name in PROJECT_MARKERS:
+            directories.add(tracked.parent)
+        elif tracked.name == MANIFEST_NAME:
+            is_pnpm, problem = declares_pnpm(root, tracked)
+            if problem is not None:
+                found.append(problem)
+            if is_pnpm:
+                directories.add(tracked.parent)
+    return ProjectDiscovery(directories, found)
+
+
+def manifest_violations(root: Path, directory: Path) -> list[str]:
+    manifest = directory / MANIFEST_NAME
+    path = root / manifest
+    if not path.is_file():
+        return [f"{manifest}: is missing, so nothing pins pnpm to {PACKAGE_MANAGER}"]
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        return [f"{manifest}: is not readable JSON: {error}"]
+    if not isinstance(document, dict):
+        return [f"{manifest}: is not a JSON object"]
+    found: list[str] = []
+    package_manager = document.get("packageManager")
+    if package_manager != PACKAGE_MANAGER:
+        found.append(
+            f"{manifest}: packageManager is {json.dumps(package_manager)}; the policy requires "
+            f"{json.dumps(PACKAGE_MANAGER)}, because pnpm before 11.1.3 skips the lockfile re-check on a "
+            "frozen install, so changing the version needs a reviewed change to this guard"
+        )
+    dev_engines = document.get("devEngines")
+    if dev_engines is not None and (not isinstance(dev_engines, dict) or "packageManager" in dev_engines):
+        found.append(
+            f"{manifest}: devEngines.packageManager can make pnpm run another version; pin "
+            f"{PACKAGE_MANAGER} through packageManager alone"
+        )
+    return found
+
+
+def pnpmfile_hint(content: bytes) -> str:
+    hints: list[str] = []
+    for line_number, line in enumerate(content.decode("utf-8", errors="replace").split("\n"), 1):
+        hints.extend(f"line {line_number} names `{match.group(0)}`" for match in PNPMFILE_OTHER_HOOK.finditer(line))
+        hints.extend(
+            f"line {line_number} loads another module with `{match.group(0)}`"
+            for match in PNPMFILE_MODULE_LOAD.finditer(line)
+        )
+    return f" (lexical hint: {'; '.join(hints)})" if hints else ""
+
+
+def pnpmfile_violations(root: Path, directory: Path) -> list[str]:
     found: list[str] = []
     for name in PNPMFILES:
-        pnpmfile = workspace.parent / name
+        pnpmfile = directory / name
         path = root / pnpmfile
         if not (path.exists() or path.is_symlink()):
             continue
         if path.is_symlink() or not path.is_file():
-            found.append(f"{pnpmfile}: is not a regular file, so this guard cannot read the hooks pnpm loads")
+            found.append(f"{pnpmfile}: is not a regular file, so this guard cannot pin the hooks pnpm loads")
             continue
-        for line_number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1):
-            for match in PNPMFILE_OTHER_HOOK.finditer(line):
-                found.append(
-                    f"{pnpmfile}:{line_number}: names `{match.group(0)}`; a pnpmfile beside a policy workspace "
-                    "may define only the `readPackage` hook, because `updateConfig` and the resolution hooks "
-                    "can override the policy after the workspace file is read"
-                )
-            for match in PNPMFILE_MODULE_LOAD.finditer(line):
-                found.append(
-                    f"{pnpmfile}:{line_number}: loads another module with `{match.group(0)}`; keep the "
-                    "pnpmfile self-contained so this guard sees every hook it exports"
-                )
+        content = path.read_bytes()
+        digest = hashlib.sha256(content).hexdigest()
+        reviewed = PINNED_PNPMFILES.get(pnpmfile)
+        if reviewed is None:
+            problem = (
+                f"{pnpmfile}: pnpm loads this pnpmfile, whose hooks can rewrite the policy after the workspace "
+                f"file is read; only the reviewed {', '.join(str(pinned) for pinned in PINNED_PNPMFILES)} is "
+                "allowed, so adding another needs a reviewed change to this guard"
+            )
+        elif digest != reviewed:
+            problem = (
+                f"{pnpmfile}: SHA-256 {digest} is not the reviewed {reviewed}; its hooks can rewrite the "
+                "policy after the workspace file is read, so every edit needs a reviewed change to the digest "
+                "in this guard"
+            )
+        else:
+            continue
+        found.append(problem + pnpmfile_hint(content))
     return found
 
 
-def policy_violations(root: Path, workspaces: tuple[Path, ...] = WORKSPACE_FILES) -> list[str]:
-    found: list[str] = []
-    for workspace in workspaces:
+def policy_violations(root: Path) -> list[str]:
+    discovery = discover_projects(root)
+    found = list(discovery.violations)
+    for directory in sorted(discovery.directories - set(PROJECT_DIRECTORIES)):
+        found.append(
+            f"{directory}: is a tracked pnpm project this guard does not cover; add it to PROJECT_DIRECTORIES "
+            "in a reviewed change so the policy applies to it"
+        )
+    for directory in PROJECT_DIRECTORIES:
+        workspace = directory / WORKSPACE_NAME
         path = root / workspace
-        if not path.is_file():
+        if path.is_file():
+            found.extend(workspace_violations(workspace, path.read_text(encoding="utf-8")))
+        else:
             found.append(f"{workspace}: pnpm workspace file is missing")
-            continue
-        found.extend(workspace_violations(workspace, path.read_text(encoding="utf-8")))
-        found.extend(pnpmfile_violations(root, workspace))
+        found.extend(manifest_violations(root, directory))
+    for directory in sorted(discovery.directories | set(PROJECT_DIRECTORIES)):
+        found.extend(pnpmfile_violations(root, directory))
     return found
 
 
@@ -311,6 +446,35 @@ def same_value(reported: object, expected: object) -> bool:
     return type(reported) is type(expected) and reported == expected
 
 
+def reports_pinned_pnpm(user_agent: object) -> bool:
+    return isinstance(user_agent, str) and (
+        user_agent == PNPM_USER_AGENT or user_agent.startswith(f"{PNPM_USER_AGENT} ")
+    )
+
+
+def transport_violations(workspace: Path, configuration: dict[str, object]) -> list[str]:
+    found: list[str] = []
+    for key, reported in configuration.items():
+        if key.endswith(SCOPED_REGISTRY_SUFFIX) and not same_value(reported, BUILT_IN_SCOPED_REGISTRIES.get(key)):
+            found.append(
+                f"{workspace}: pnpm resolves {key} to {json.dumps(reported)}; only the built-in @jsr:registry "
+                f"{BUILT_IN_SCOPED_REGISTRIES['@jsr:registry']} may send a scope to another registry"
+            )
+    for key in STRICT_SSL_SETTINGS:
+        if key in configuration and configuration[key] is not True:
+            found.append(
+                f"{workspace}: pnpm resolves {key} to {json.dumps(configuration[key])}; the policy requires "
+                "registry TLS certificates to be verified"
+            )
+    for key in PROXY_SETTINGS:
+        if key in configuration:
+            found.append(
+                f"{workspace}: pnpm resolves {key} to {json.dumps(configuration[key])}; the policy requires "
+                "no proxy between pnpm and the registry"
+            )
+    return found
+
+
 def effective_violations(
     root: Path, workspaces: tuple[Path, ...] = WORKSPACE_FILES, pnpm: str = "pnpm"
 ) -> list[str]:
@@ -333,12 +497,19 @@ def effective_violations(
                     f"{workspace}: pnpm resolves {key} to {json.dumps(reported)}; "
                     f"the policy requires {json.dumps(expected)}"
                 )
+        user_agent = configuration.get("userAgent")
+        if not reports_pinned_pnpm(user_agent):
+            found.append(
+                f"{workspace}: pnpm reports userAgent {json.dumps(user_agent)}; the policy requires pnpm "
+                f"{PNPM_VERSION} (`{PNPM_USER_AGENT} ...`)"
+            )
         for key in EFFECTIVELY_UNSET_SETTINGS:
             if key in configuration:
                 found.append(
                     f"{workspace}: pnpm resolves {key} to {json.dumps(configuration[key])}; "
                     "the policy requires it unset"
                 )
+        found.extend(transport_violations(workspace, configuration))
         for key in EXCLUSION_LISTS:
             declared = [exclusion.value for exclusion in reading.exclusions if exclusion.setting == key]
             reported = configuration.get(key)
