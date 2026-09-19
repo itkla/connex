@@ -254,6 +254,14 @@ async function routeGrantExchange(
 }
 
 /**
+ * Matches the address bar once the bearer is stripped: exactly the entry path, with no query and
+ * no fragment. A predicate rather than a pattern built from the path, so nothing needs escaping.
+ */
+function canonicalUrl(path: string): (url: URL) => boolean {
+    return (url) => url.pathname === path && url.search === "" && url.hash === "";
+}
+
+/**
  * Opens the first emailed link, then lands a second link in the same tab as a fragment-only
  * navigation, and proves the page re-reads and strips the second bearer and renders its state.
  */
@@ -263,7 +271,7 @@ async function openSecondLinkInSameTab(
     headings: { first: string; second: string },
     requestedUrls: string[],
 ) {
-    const canonical = new RegExp(`${path.replace(/\//g, "\\/")}$`);
+    const canonical = canonicalUrl(path);
 
     await page.goto(`${path}#token=${FIRST_LINK}`);
     await expect(page).toHaveURL(canonical);
@@ -288,7 +296,7 @@ async function retryRefusedExchange(
     heading: string,
     requestedUrls: string[],
 ) {
-    const canonical = new RegExp(`${path.replace(/\//g, "\\/")}$`);
+    const canonical = canonicalUrl(path);
 
     await page.goto(`${path}#token=${FIRST_LINK}`);
     await expect(page.getByRole("heading", { name: UNAVAILABLE_HEADING })).toBeVisible();
