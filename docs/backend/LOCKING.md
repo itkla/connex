@@ -775,6 +775,22 @@ account root.
   `PasswordResetService` and `WebAuthnService.finishRegistration` do, and evaluates the gate again
   against committed state. A refusal that appears only under the root is not audited (see below).
 
+Operator break-glass recovery (`MfaRecoveryService.recover`) spends its token in the same
+hierarchy (#1532). Its order is:
+
+1. `app_user` exclusive (`lockById`).
+2. `privileged_mfa_recovery_redemption`: an `INSERT IGNORE` of the token's ledger row. Zero rows
+   inserted means the token is already spent, and the ceremony is refused before anything is
+   removed.
+3. The account's `webauthn_user_entity` / `webauthn_credential` rows, through
+   `WebAuthnService.recover`. That call re-takes the `app_user` lock it already holds.
+4. The audit integrity head.
+
+The token digest is bound to one account id, so only that account's root can reach a given ledger
+row. The account root therefore already serializes concurrent redemptions, and the primary key is
+the backstop. The ledger row belongs to the recovery transaction, so any later failure rolls it back
+with the credential removal and leaves the token unspent.
+
 The audit head sits below `app_user` in this order, and an independent audit append re-acquires the
 actor's `app_user` row shared. `AuthService.requireCurrentPassword` therefore writes no audit of its
 own: `MfaRecoveryService.recover` calls it while holding that row exclusively, so an append there

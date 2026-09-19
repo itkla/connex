@@ -217,26 +217,62 @@ user recovering their own account with both:
 
 1. the account's current password, or a freshly established same-account federated session for a
    passwordless account; and
-2. a random, out-of-band token issued by an operator and configured only as a SHA-256 digest.
+2. a random, out-of-band token that an operator issues for that one account and configures only
+   as a SHA-256 digest.
 
-The operator must set all three values and restart the backend:
+### Issuing a recovery token
 
-```dotenv
-CONNEX_PRIVILEGED_MFA_RECOVERY_TOKEN_SHA256=REPLACE_WITH_64_HEX_SHA256
-CONNEX_PRIVILEGED_MFA_RECOVERY_EXPIRES_AT=2026-08-13T12:30:00Z
-CONNEX_PRIVILEGED_MFA_RECOVERY_ACTOR=incident-1234/operator-name
-```
+A token is bound to one account and works exactly once.
+
+1. **One token per account.** Look up the recovering account's numeric user id, then generate a
+   fresh random token for it. Never reuse a token across accounts or incidents. The backend holds
+   one recovery digest at a time, so recovering two accounts takes two issue-and-restart cycles.
+2. **Compute the subject-bound digest.** The digest covers a purpose prefix, the user id, and the
+   token. A plain SHA-256 of the token alone is refused.
+
+   ```bash
+   USER_ID=1234
+   TOKEN="$(openssl rand -hex 32)"
+   printf 'connex-privileged-mfa-recovery:v1:%s:%s' "$USER_ID" "$TOKEN" | sha256sum | cut -d ' ' -f 1
+   ```
+
+3. **Configure and restart.** Set all three values from the digest above and restart the backend:
+
+   ```dotenv
+   CONNEX_PRIVILEGED_MFA_RECOVERY_TOKEN_SHA256=REPLACE_WITH_64_HEX_SHA256
+   CONNEX_PRIVILEGED_MFA_RECOVERY_EXPIRES_AT=2026-08-13T12:30:00Z
+   CONNEX_PRIVILEGED_MFA_RECOVERY_ACTOR=incident-1234/operator-name
+   ```
+
+4. **Hand the raw token to the account holder out of band.** It is accepted only for the account
+   whose id is in the digest.
+5. **Clean up.** After the ceremony completes, clear the three variables and the shell's `USER_ID`
+   and `TOKEN` variables, then restart the backend.
 
 The expiry must be in the future and no more than one hour from backend startup. An incomplete,
 malformed, expired, or longer-lived configuration fails startup. At runtime the recovery request
 is rejected after expiry. The raw token is submitted to `POST /api/auth/webauthn/recover`; it is
 never configured, persisted, logged, audited, or included in an error. Token comparison uses the
-configured SHA-256 digest and constant-time comparison.
+configured digest and constant-time comparison.
+
+These cases are all refused with the same message and remove nothing:
+
+- a wrong or blank token;
+- an expired token;
+- a token issued for a different account; and
+- a token that has already been redeemed.
+
+The first successful ceremony records the token in the control-plane
+`privileged_mfa_recovery_redemption` ledger. The ledger stores a SHA-256 of the configured digest,
+never the token or the digest itself. From then on the token is spent, including after a restart and
+on every other backend replica. The ledger row is written in the recovery transaction, so a ceremony
+that fails part-way leaves the token usable for a retry. To recover the same account again, issue a
+new token.
 
 Successful recovery locks the account and all credential rows, removes all passkeys, clears the
 session's recent-MFA stamp, and writes `auth.mfa.recovery.used` with the recovering user, operator,
-and credential count in the same transaction. An audit write failure rolls the removal back. A
-failed account or operator proof writes a sanitized `auth.mfa.recovery.denied` event after the
-recovery transaction rolls back. A privileged user is immediately confined to enrollment after
-recovery. Clear the three recovery variables and restart after the incident. Normal passkey removal
-requires recent WebAuthn proof and refuses removal of a privileged account's last credential.
+and credential count in the same transaction. An audit write failure rolls the removal and the
+redemption back. A failed account or operator proof writes a sanitized `auth.mfa.recovery.denied`
+event after the recovery transaction rolls back. A privileged user is immediately confined to
+enrollment after recovery. Normal passkey removal requires recent WebAuthn proof and refuses removal
+of a privileged account's last credential.

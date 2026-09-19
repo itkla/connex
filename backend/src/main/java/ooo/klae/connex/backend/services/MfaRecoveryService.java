@@ -12,8 +12,10 @@ import jakarta.servlet.http.HttpSession;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
+import ooo.klae.connex.backend.config.PrivilegedMfaRecoveryAuthorization;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.mappers.PrivilegedMfaRecoveryRedemptionMapper;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.webauthn.WebAuthnService;
@@ -32,6 +34,7 @@ public class MfaRecoveryService {
     private final PrivilegedMfaProperties privilegedMfaProperties;
     private final AuditService auditService;
     private final AccountSessionRevocationService accountSessionRevocationService;
+    private final PrivilegedMfaRecoveryRedemptionMapper recoveryRedemptionMapper;
     private final Clock clock;
 
     /**
@@ -45,6 +48,12 @@ public class MfaRecoveryService {
      * cached value. Resolving the row identity under the lock instead means a rotation that has
      * already committed is detected and refused before any credential is deleted, and one that has
      * not yet committed still resolves to the same physical row the rotation will keep.
+     *
+     * <p>The operator token is bound to this account and spent on first use (#1532): its
+     * redemption row is inserted after the token check and before any credential is removed,
+     * still under the account lock and inside this transaction. A token already spent is refused
+     * with the same message as an invalid one and removes nothing; a ceremony that fails after the
+     * insert rolls it back, so a failed attempt does not burn the token.
      *
      * @param request submitted recovery proofs
      * @param httpRequest authenticated servlet request
@@ -67,8 +76,12 @@ public class MfaRecoveryService {
         }
         authService.requireFirstPasskeyBootstrapAuthentication(
                 user.getId(), request.getCurrentPassword(), httpRequest);
-        String operator = privilegedMfaProperties.requireValidRecoveryToken(
-                request.getRecoveryToken(), clock);
+        PrivilegedMfaRecoveryAuthorization authorization = privilegedMfaProperties.requireValidRecoveryToken(
+                user.getId(), request.getRecoveryToken(), clock);
+        if (recoveryRedemptionMapper.insertIfAbsent(
+                authorization.redemptionKey(), user.getId(), authorization.operator()) != 1) {
+            throw new ForbiddenException(PrivilegedMfaProperties.INVALID_RECOVERY_AUTHORIZATION);
+        }
         int removed = webAuthnService.recover(user.getId());
         auditService.recordStrictScoped(
                 "auth.mfa.recovery.used",
@@ -78,7 +91,7 @@ public class MfaRecoveryService {
                 null,
                 user.getDisplayName(),
                 "Operator-authorized passkey recovery used",
-                Map.of("operator", operator, "credentialsRemoved", removed));
+                Map.of("operator", authorization.operator(), "credentialsRemoved", removed));
         if (userMapper.bumpSessionEpoch(user.getId()) != 1) {
             throw new IllegalStateException("Session epoch advance failed");
         }
