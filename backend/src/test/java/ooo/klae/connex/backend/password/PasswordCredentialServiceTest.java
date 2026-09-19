@@ -13,17 +13,20 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import ooo.klae.connex.backend.exceptions.BreachedPasswordCheckUnavailableException;
 import ooo.klae.connex.backend.exceptions.BreachedPasswordException;
+import ooo.klae.connex.backend.exceptions.PasswordTooLongException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.services.AuditService;
 
@@ -43,29 +46,63 @@ class PasswordCredentialServiceTest {
     }
 
     @Test
-    void overlongCandidateIsScreenedByTheBytesBcryptActuallyConsumes() {
-        String breachedPrefix = "A".repeat(72);
+    void candidateOfExactlySeventyTwoBytesIsScreenedWholeAndEncoded() {
+        String candidate = "Aa1!" + "a".repeat(68);
         ArgumentCaptor<String> digest = ArgumentCaptor.forClass(String.class);
         when(lookup.isBreached(anyString())).thenReturn(false);
-        when(passwordEncoder.encode(anyString())).thenReturn(ENCODED);
+        when(passwordEncoder.encode(candidate)).thenReturn(ENCODED);
 
-        service.encode(breachedPrefix + "unique-suffix",
-                PasswordScreeningFlow.SELF_REGISTRATION, null);
+        assertEquals(ENCODED, service.encode(candidate, PasswordScreeningFlow.SELF_REGISTRATION, null));
 
         verify(lookup).isBreached(digest.capture());
-        assertEquals(sha1UpperHex(breachedPrefix), digest.getValue());
+        assertEquals(sha1UpperHex(candidate), digest.getValue());
     }
 
     @Test
-    void suffixCannotCarryABreachedSeventyTwoBytePrefixPastScreening() {
-        String breachedPrefix = "A".repeat(72);
-        when(lookup.isBreached(sha1UpperHex(breachedPrefix))).thenReturn(true);
+    void multiByteCandidateOfExactlySeventyTwoBytesIsEncoded() {
+        String candidate = "\u3042".repeat(24);
+        when(lookup.isBreached(anyString())).thenReturn(false);
+        when(passwordEncoder.encode(candidate)).thenReturn(ENCODED);
 
-        assertThrows(BreachedPasswordException.class,
-                () -> service.encode(breachedPrefix + "unique-suffix",
-                        PasswordScreeningFlow.SELF_REGISTRATION, null));
+        assertEquals(ENCODED, service.encode(candidate, PasswordScreeningFlow.BOOTSTRAP_OWNER, null));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ascii", "multibyte-final", "multibyte-short"})
+    void candidateOverSeventyTwoBytesIsRejectedBeforeAnyBreachLookup(String shape) {
+        String candidate = switch (shape) {
+            case "ascii" -> "Aa1!" + "a".repeat(69);
+            case "multibyte-final" -> "Aa1!" + "a".repeat(67) + "\u00e9";
+            default -> "\u3042".repeat(25);
+        };
+
+        PasswordTooLongException exception = assertThrows(PasswordTooLongException.class,
+                () -> service.encode(candidate, PasswordScreeningFlow.SELF_SERVICE_RESET, 42));
+
+        assertEquals("newPassword", exception.getField());
+        assertFalse(exception.getMessage().contains(candidate));
+        verify(lookup, never()).isBreached(anyString());
+        verify(passwordEncoder, never()).encode(anyString());
+        verifyNoInteractions(auditService, userMapper);
+    }
+
+    @Test
+    void screeningRejectsAnOverlongCandidateForTheFlowField() {
+        PasswordTooLongException exception = assertThrows(PasswordTooLongException.class,
+                () -> service.screen("A".repeat(73), PasswordScreeningFlow.SELF_REGISTRATION));
+
+        assertEquals("password", exception.getField());
+        verify(lookup, never()).isBreached(anyString());
+    }
+
+    @Test
+    void encodeScreenedRefusesAnOverlongCandidateEvenAfterACleanScreening() {
+        assertThrows(PasswordTooLongException.class,
+                () -> service.encodeScreened(PasswordScreening.clean(), "A".repeat(73),
+                        PasswordScreeningFlow.SELF_SERVICE_RESET, 42));
 
         verify(passwordEncoder, never()).encode(anyString());
+        verifyNoInteractions(auditService, userMapper);
     }
 
     @Test

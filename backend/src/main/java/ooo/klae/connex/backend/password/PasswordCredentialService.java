@@ -3,7 +3,6 @@ package ooo.klae.connex.backend.password;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Map;
@@ -14,16 +13,22 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.BreachedPasswordCheckUnavailableException;
 import ooo.klae.connex.backend.exceptions.BreachedPasswordException;
+import ooo.klae.connex.backend.exceptions.PasswordTooLongException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.services.AuditService;
 
 /**
  * Single boundary for screening and encoding every newly written password credential.
+ *
+ * <p>BCrypt's key schedule reads at most 72 bytes and the encoder refuses longer input, so a longer
+ * candidate is rejected with {@link PasswordTooLongException} before it is screened. The bytes
+ * screened against the breach corpus are therefore exactly the bytes the stored credential
+ * authenticates by: a breached 72-byte password cannot carry a unique suffix past the corpus.
  */
 @Service
 @RequiredArgsConstructor
 public class PasswordCredentialService {
-    private static final int BCRYPT_EFFECTIVE_INPUT_BYTES = 72;
+    private static final int MAX_CREDENTIAL_BYTES = 72;
 
     private final BreachedPasswordLookup breachedPasswordLookup;
     private final PasswordEncoder passwordEncoder;
@@ -37,6 +42,7 @@ public class PasswordCredentialService {
      * @param flow the credential-write context whose availability policy applies
      * @param userId the account the credential is written for, or null when there is none yet
      * @return the encoded credential
+     * @throws PasswordTooLongException when the candidate exceeds what the encoder can store
      */
     public String encode(String candidate, PasswordScreeningFlow flow, Integer userId) {
         return encodeScreened(screen(candidate, flow), candidate, flow, userId);
@@ -52,10 +58,13 @@ public class PasswordCredentialService {
      * @param candidate the proposed password
      * @param flow the credential-write context, used to name the rejected field
      * @return the screening result to hand to {@link #encodeScreened}
+     * @throws PasswordTooLongException when the candidate exceeds what the encoder can store, before
+     *         any corpus lookup
      * @throws BreachedPasswordException when the candidate appears in the corpus
      */
     public PasswordScreening screen(String candidate, PasswordScreeningFlow flow) {
-        String sha1Hex = sha1(effectiveCredential(candidate));
+        requireEncodable(candidate, flow);
+        String sha1Hex = sha1(candidate.getBytes(StandardCharsets.UTF_8));
         try {
             if (breachedPasswordLookup.isBreached(sha1Hex)) {
                 throw new BreachedPasswordException(flow.field());
@@ -77,10 +86,12 @@ public class PasswordCredentialService {
      * @param flow the credential-write context whose availability policy applies
      * @param userId the account the credential is written for, or null when there is none yet
      * @return the encoded credential
+     * @throws PasswordTooLongException when the candidate exceeds what the encoder can store
      * @throws BreachedPasswordCheckUnavailableException when the flow must fail closed
      */
     public String encodeScreened(PasswordScreening screening, String candidate,
             PasswordScreeningFlow flow, Integer userId) {
+        requireEncodable(candidate, flow);
         if (!screening.answered()) {
             String decision = mayFailOpen(flow, userId, screening.unavailableReason())
                     ? "fail_open"
@@ -131,21 +142,16 @@ public class PasswordCredentialService {
     }
 
     /**
-     * The candidate bytes the encoder will actually consume.
-     *
-     * <p>BCrypt's key schedule reads at most 72 bytes, so a longer candidate authenticates by its
-     * first 72 bytes alone. Screening the whole candidate would let a breached 72-byte password
-     * carrying any unique suffix past the corpus while still storing the breached credential, so the
-     * screened bytes are the stored credential's bytes rather than the submitted string's.
+     * Refuses a candidate the encoder cannot store whole, so the screened bytes and the encoded bytes
+     * are always the same bytes.
      */
-    private static byte[] effectiveCredential(String candidate) {
+    private static void requireEncodable(String candidate, PasswordScreeningFlow flow) {
         if (candidate == null) {
             throw new IllegalArgumentException("Password candidate is required");
         }
-        byte[] bytes = candidate.getBytes(StandardCharsets.UTF_8);
-        return bytes.length <= BCRYPT_EFFECTIVE_INPUT_BYTES
-                ? bytes
-                : Arrays.copyOf(bytes, BCRYPT_EFFECTIVE_INPUT_BYTES);
+        if (candidate.getBytes(StandardCharsets.UTF_8).length > MAX_CREDENTIAL_BYTES) {
+            throw new PasswordTooLongException(flow.field());
+        }
     }
 
     private static String sha1(byte[] candidate) {
