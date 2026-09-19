@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { act, type AnchorHTMLAttributes, type ComponentType, type PropsWithChildren } from "react";
+import { act, useEffect, type AnchorHTMLAttributes, type ComponentType, type PropsWithChildren } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -71,6 +71,7 @@ function stubReload(): ReturnType<typeof vi.fn> {
             get pathname() { return real.pathname; },
             get search() { return real.search; },
             get hash() { return real.hash; },
+            set hash(value: string) { real.hash = value; },
             replace: vi.fn(),
             reload,
         },
@@ -110,6 +111,25 @@ function FragmentProbe() {
     return null;
 }
 
+/** Mirrors an entry page: listens for fragment navigation, then reads and strips the bearer on mount. */
+function StrippingEntryProbe({ take, onToken }: {
+    take: () => string | null;
+    onToken: (token: string | null) => void;
+}) {
+    useReloadOnFragmentNavigation();
+    useEffect(() => {
+        onToken(take());
+    }, [take, onToken]);
+    return null;
+}
+
+async function settleQueuedEvents() {
+    await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+}
+
 describe("useReloadOnFragmentNavigation", () => {
     it("reloads once per fragment navigation and stops listening after unmount", async () => {
         const reload = stubReload();
@@ -124,16 +144,28 @@ describe("useReloadOnFragmentNavigation", () => {
         expect(reload).toHaveBeenCalledTimes(1);
     });
 
-    it("does not reload when the fragment is stripped with replaceState", async () => {
+    it("does not reload when the real one-time-link reader strips the fragment", async () => {
+        const { takeOneTimeLinkToken } = await vi.importActual<typeof import("@/app/lib/oneTimeLink")>(
+            "@/app/lib/oneTimeLink",
+        );
+        window.history.replaceState({}, "", "/auth/reset-password#token=first-link");
         const reload = stubReload();
-        const root = await mount(FragmentProbe);
+        const hashChanges = vi.fn();
+        window.addEventListener("hashchange", hashChanges);
+        const onToken = vi.fn();
+        function ResetPasswordEntry() {
+            return <StrippingEntryProbe take={takeOneTimeLinkToken} onToken={onToken} />;
+        }
 
-        await act(async () => {
-            window.history.replaceState({}, "", "/auth/reset-password");
-            await Promise.resolve();
-        });
+        const root = await mount(ResetPasswordEntry);
+        await settleQueuedEvents();
+
+        expect(onToken).toHaveBeenCalledWith("first-link");
+        expect(hashChanges).not.toHaveBeenCalled();
         expect(reload).not.toHaveBeenCalled();
+        expect(window.location.href).toBe(`${window.location.origin}/auth/reset-password`);
 
+        window.removeEventListener("hashchange", hashChanges);
         await act(async () => root.unmount());
     });
 });
