@@ -211,6 +211,63 @@ describe("auth form field errors", () => {
     });
 });
 
+describe("new password length", () => {
+    function inputById(elements: readonly InteractiveElement[], id: string): InteractiveElement | undefined {
+        return elements.find((element) => element.tagName === "INPUT" && element.attributes.get("id") === id);
+    }
+
+    it("caps a new password at the 72 characters the credential store keeps and says so", async () => {
+        const rendered = await renderAuthForm("register");
+
+        const passwordInput = inputById(rendered.elements, "register-password");
+        expect(passwordInput?.attributes.get("maxLength")).toBe("72");
+        expect(passwordInput?.attributes.get("aria-describedby")).toBe("register-password-hint");
+        const hint = rendered.elements.find((element) => element.attributes.get("id") === "register-password-hint");
+        expect(hint?.textContent).toBe("AuthForm.passwordLengthHint");
+        await rendered.unmount();
+    });
+
+    it("leaves sign-in able to accept any stored password length", async () => {
+        const rendered = await renderAuthForm("login");
+
+        const passwordInput = inputById(rendered.elements, "login-password");
+        expect(passwordInput?.attributes.has("maxLength")).toBe(false);
+        expect(rendered.elements.some((element) => element.attributes.get("id") === "login-password-hint"))
+            .toBe(false);
+        await rendered.unmount();
+    });
+
+    it("announces an over-long password as the password field's own error", async () => {
+        const { ApiError } = await import("@/app/lib/api");
+        registerMock.mockRejectedValueOnce(new ApiError(RAW_BACKEND_TEXT, 400, "PASSWORD_TOO_LONG"));
+
+        const rendered = await renderAuthForm("register");
+
+        const fieldError = rendered.elements.find(
+            (element) => element.attributes.get("id") === "register-password-error",
+        );
+        expect(fieldError?.textContent).toBe("AuthForm.passwordTooLong");
+        expect(inputById(rendered.elements, "register-password")?.attributes.get("aria-describedby"))
+            .toBe("register-password-error");
+        expect(rendered.elements.some((element) =>
+            element.attributes.get("id") === "register-password-hint" && element.parentNode !== null,
+        )).toBe(false);
+        expect(toastErrorMock).not.toHaveBeenCalled();
+        await rendered.unmount();
+    });
+
+    it("keeps the length hint and error translated in both locales", () => {
+        const en = catalog("en");
+        const ja = catalog("ja");
+
+        for (const key of ["passwordLengthHint", "passwordTooLong"]) {
+            expect(en.AuthForm[key]).toContain("72");
+            expect(ja.AuthForm[key]).toContain("72");
+            expect(ja.AuthForm[key]).not.toBe(en.AuthForm[key]);
+        }
+    });
+});
+
 describe("registration next step", () => {
     it("points the new account at the inbox any confirmation link reaches", async () => {
         const rendered = await renderAuthForm("register");
