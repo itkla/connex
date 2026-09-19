@@ -10,6 +10,7 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiCancellation;
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiGenerationProfile;
@@ -67,10 +68,15 @@ public class DealRiskRationaleService {
     }
 
     /**
-     * Generates or reuses a rationale for a workspace-scoped at-risk deal.
+     * Generates or reuses a rationale for a workspace-scoped at-risk deal. The deterministic risk
+     * assessment runs first, because it decides whether there is anything to explain, and the
+     * admission precheck runs after it but before the rationale context is assembled and masked.
+     * An interrupted worker stops after the assessment instead of loading context for a discarded
+     * generation.
      * @param dealId deal whose deterministic risk signals should be explained
      * @param refresh when true, bypass any stored output and force a fresh generation
      * @return available rationale or a graceful unavailability response
+     * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public DealRationaleDto generate(int dealId, boolean refresh) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -81,6 +87,7 @@ public class DealRiskRationaleService {
         }
 
         DealRiskDto risk = dealRiskService.assessDeal(workspaceId, dealId);
+        AiCancellation.throwIfInterrupted();
         if (risk == null || "none".equals(risk.getLevel())
                 || risk.getFactors() == null || risk.getFactors().isEmpty()) {
             return DealRationaleDto.unavailable(dealId, NOT_AT_RISK);

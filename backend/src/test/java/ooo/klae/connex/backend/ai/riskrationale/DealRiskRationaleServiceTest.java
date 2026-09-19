@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -23,6 +24,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -383,6 +385,25 @@ class DealRiskRationaleServiceTest {
         arrangeInvocationFailure(new ForbiddenException("AI features are not available"));
 
         assertUnavailable(service.generate(DEAL_ID), "not_configured");
+    }
+
+    @Test
+    void generate_interruptDuringRiskAssessmentStopsBeforeTheCacheProbeAndAssembly() {
+        DealRiskDto risk = atRisk();
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenAnswer(invocation -> {
+            Thread.currentThread().interrupt();
+            return risk;
+        });
+
+        try {
+            assertThrows(CancellationException.class, () -> service.generate(DEAL_ID));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+        verify(aiOutputCacheStore, never()).find(anyInt(), anyString(), anyInt(), anyInt());
+        verify(aiInvocationAdmissionService, never()).precheck(any(), anyBoolean());
+        verify(dealRiskRationaleAssembler, never()).assemble(anyInt(), anyInt(), any());
     }
 
     @Test

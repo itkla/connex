@@ -61,10 +61,14 @@ public class DealRiskRationaleAssembler {
 
     /**
      * Builds a masked rationale prompt from deterministic risk and the active workspace's deal view.
+     * An interrupted worker stops after the deal loads, after warmth scoring, before each
+     * stakeholder enrichment, and before returning, instead of finishing an assembly whose result
+     * has been discarded.
      * @param workspaceId active workspace id
      * @param dealId deal whose risk should be explained
      * @param risk deterministic risk assessment
      * @return masked prompt and its request-local masking context
+     * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public RationaleAssembly assemble(int workspaceId, int dealId, DealRiskDto risk) {
         Objects.requireNonNull(risk, "risk");
@@ -123,9 +127,7 @@ public class DealRiskRationaleAssembler {
         appendFactors(prompt, factors, context);
         appendStakeholders(prompt, stakeholderTokens, warmth, context);
         appendDealContext(prompt, summary, risk, companyToken, ownerToken, context);
-        AiCancellation.throwIfInterrupted();
         aiRelationshipContext.appendAccountHistory(prompt, companyId, deal == null ? 0 : deal.getId(), context);
-        AiCancellation.throwIfInterrupted();
         appendStakeholderBackground(prompt, stakeholderTokens, context, connectionPersonIds);
         return prompt.append("CRM_CONTEXT_END").toString();
     }

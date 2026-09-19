@@ -6,8 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.stubbing.Answer;
 import org.springframework.context.i18n.LocaleContextHolder;
 
 import ooo.klae.connex.backend.ai.AiRelationshipContext;
@@ -119,34 +122,74 @@ class DealRiskRationaleAssemblerTest {
         verify(dealService).getPeopleByDealId(DEAL_ID);
     }
 
+    @Test
+    void interruptDuringStakeholderLoadStopsAssemblyBeforeWarmthIsScored() {
+        when(dealService.getPeopleByDealId(DEAL_ID))
+                .thenAnswer(interruptingWith(List.of(new DealPerson(person(PERSON_ID, "Mina Patel"), null))));
+
+        assertAssemblyCancelled();
+        verify(scoringService, never()).scoreContacts(anyInt(), anySet());
+    }
+
+    /**
+     * No identifier is registered, so the masking engine's own per-identifier checkpoint never
+     * runs while the risk factors and deal context are formatted, and only the checkpoint after
+     * warmth scoring can stop the account-history load.
+     */
+    @Test
+    void interruptDuringWarmthScoringStopsAssemblyBeforeAccountHistory() {
+        when(scoringService.scoreContacts(eq(WORKSPACE_ID), anySet())).thenAnswer(interruptingWith(List.of()));
+
+        assertAssemblyCancelled();
+        verify(aiRelationshipContext, never()).appendAccountHistory(
+                any(StringBuilder.class), anyInt(), anyInt(), any());
+    }
+
     /**
      * The account-history helper swallows failures and reports degraded context; an interrupt it
      * absorbed must still stop assembly before any stakeholder background is loaded.
      */
     @Test
     void interruptAbsorbedByAccountHistoryCancelsAssemblyBeforeStakeholderBackground() {
-        Person person = new Person();
-        person.setId(PERSON_ID);
-        person.setName("Mina Patel");
-        DealRiskDto risk = new DealRiskDto(
-                DEAL_ID, new BigDecimal("125000.00"), "USD", "high", 80,
-                List.of(new DealRiskFactor("close_overdue", "high", Map.of("daysOverdue", 5))),
-                "2026-07-09 18:30:00");
-        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(new DealPerson(person, null)));
+        when(dealService.getPeopleByDealId(DEAL_ID))
+                .thenReturn(List.of(new DealPerson(person(PERSON_ID, "Mina Patel"), null)));
         when(aiRelationshipContext.appendAccountHistory(any(StringBuilder.class), anyInt(), anyInt(), any()))
-                .thenAnswer(invocation -> {
-                    Thread.currentThread().interrupt();
-                    return true;
-                });
+                .thenAnswer(interruptingWith(true));
 
-        try {
-            assertThrows(CancellationException.class, () -> assembler.assemble(WORKSPACE_ID, DEAL_ID, risk));
-            assertTrue(Thread.currentThread().isInterrupted());
-        } finally {
-            Thread.interrupted();
-        }
+        assertAssemblyCancelled();
         verify(aiRelationshipContext, never()).appendStakeholderBackground(
                 any(StringBuilder.class), anyInt(), any(), any());
+    }
+
+    /**
+     * The enrichment helper absorbs failures, so the per-stakeholder checkpoint is what stops the
+     * loop from loading background for every remaining stakeholder.
+     */
+    @Test
+    void interruptAbsorbedByOneStakeholderEnrichmentStopsBeforeTheNextStakeholder() {
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(
+                new DealPerson(person(PERSON_ID, "Mina Patel"), null),
+                new DealPerson(person(PERSON_ID + 1, "Ken Ito"), null)));
+        when(aiRelationshipContext.appendStakeholderBackground(
+                any(StringBuilder.class), anyInt(), any(), any()))
+                .thenAnswer(interruptingWith(List.<Integer>of()));
+
+        assertAssemblyCancelled();
+        verify(aiRelationshipContext, times(1)).appendStakeholderBackground(
+                any(StringBuilder.class), anyInt(), any(), any());
+    }
+
+    @Test
+    void interruptAbsorbedByTheLastStakeholderEnrichmentStillCancelsInsteadOfReturningTheAssembly() {
+        when(dealService.getPeopleByDealId(DEAL_ID))
+                .thenReturn(List.of(new DealPerson(person(PERSON_ID, "Mina Patel"), null)));
+        when(aiRelationshipContext.appendStakeholderBackground(
+                any(StringBuilder.class), eq(PERSON_ID), any(), any()))
+                .thenAnswer(interruptingWith(List.<Integer>of()));
+
+        assertAssemblyCancelled();
+        verify(aiRelationshipContext).appendStakeholderBackground(
+                any(StringBuilder.class), eq(PERSON_ID), any(), any());
     }
 
     @Test
@@ -227,6 +270,33 @@ class DealRiskRationaleAssemblerTest {
         } finally {
             LocaleContextHolder.resetLocaleContext();
         }
+    }
+
+    private void assertAssemblyCancelled() {
+        DealRiskDto risk = new DealRiskDto(
+                DEAL_ID, new BigDecimal("125000.00"), "USD", "high", 80,
+                List.of(new DealRiskFactor("close_overdue", "high", Map.of("daysOverdue", 5))),
+                "2026-07-09 18:30:00");
+        try {
+            assertThrows(CancellationException.class, () -> assembler.assemble(WORKSPACE_ID, DEAL_ID, risk));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    private static <T> Answer<T> interruptingWith(T result) {
+        return invocation -> {
+            Thread.currentThread().interrupt();
+            return result;
+        };
+    }
+
+    private static Person person(int id, String name) {
+        Person person = new Person();
+        person.setId(id);
+        person.setName(name);
+        return person;
     }
 
     private static String serialized(MaskedPrompt prompt) {
