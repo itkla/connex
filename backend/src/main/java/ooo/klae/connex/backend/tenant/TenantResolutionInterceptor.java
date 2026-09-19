@@ -100,6 +100,13 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  *       gets no teardown callback at all on the streaming endpoints and hands the
  *       thread back to the pool with the scope still installed.</li>
  * </ul>
+ *
+ * <p>A handler carrying {@link TenantJournalClientDriven} is journaled only when it failed, and a
+ * handler carrying {@code @TenantJournalClientDriven(retainFailures = false)} — the assistant
+ * presence heartbeat — is never journaled at all. Those handlers are called on the client's own
+ * schedule, so their successful completions would drown the journal without answering any operator
+ * question. An absent successful record on such a route is therefore a declared omission and is not
+ * evidence that the request never arrived (#1439).
  */
 @Component
 @RequiredArgsConstructor
@@ -303,7 +310,8 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
                 || path.length() > 512
                 || !JOURNAL_METHODS.contains(request.getMethod())
                 || response.getStatus() < 100
-                || response.getStatus() > 599) {
+                || response.getStatus() > 599
+                || clientDrivenOmission(handlerMethod, response.getStatus())) {
             return;
         }
         String correlationId = MDC.get(CorrelationIds.MDC_KEY);
@@ -330,6 +338,12 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
     private static boolean journalAttributable(HandlerMethod handler) {
         return handler.hasMethodAnnotation(TenantJournalAttributable.class)
             || AnnotatedElementUtils.hasAnnotation(handler.getBeanType(), TenantJournalAttributable.class);
+    }
+
+    private static boolean clientDrivenOmission(HandlerMethod handler, int status) {
+        TenantJournalClientDriven marker =
+            handler.getMethodAnnotation(TenantJournalClientDriven.class);
+        return marker != null && (!marker.retainFailures() || status < 400);
     }
 
 }

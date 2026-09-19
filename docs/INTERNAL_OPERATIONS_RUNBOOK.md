@@ -762,7 +762,15 @@ secondary correlation filter, and constructs a fresh eight-field record. It neve
 `MESSAGE`, messages, stacks, headers, hosts, query strings, or unknown fields. Missing, malformed,
 ambiguous, other-tenant, background, pre-auth, and non-allowlisted records are omitted. Exit `68`
 means the journal step failed and no output archive was published. Async request completions are
-also omitted because tenant resolution can change before redispatch.
+also omitted because tenant resolution can change before redispatch. On the Ask Connex surface a
+**successful client-scheduled read is omitted by design** — the transcript, tool-call, presence,
+participant, attachment, skill, watch, and scope-preview reads the client issues on its own poll,
+heartbeat, debounce, and realtime-refresh schedules — while **their failures are retained**; the
+four-second presence heartbeat is omitted at every status because its client retries forever. A
+missing `200` on those routes is a declared omission, not evidence that the member's request never
+arrived. Every member action — starting or cancelling a turn, creating or sharing a session,
+appending a message, uploading an attachment, approving or rejecting a tool call — is journaled on
+success.
 
 **The two audit identifiers have different trust.** `audit-slice.csv` carries
 `serverMintedRequestId`, the non-spoofable within-audit pivot, and
