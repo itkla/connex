@@ -27,7 +27,8 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * per-cache-identity-and-content-hash single-flight execution. All quotas and flights are local to
  * one JVM replica; cluster-wide enforcement requires a shared coordinator. Each admission scans
  * the bounded organization-quota and refresh-identity registries for stale entries while holding
- * the state lock, so operators should size those capacities with that linear scan cost in mind.
+ * the state lock, and each precheck also scans the bounded active-flight registry, so operators
+ * should size those capacities with that linear scan cost in mind.
  */
 @Component
 @Slf4j
@@ -104,17 +105,11 @@ public class AiInvocationAdmissionService {
             if (current != null) {
                 return Admission.follower(this, flightIdentity, current);
             }
-            Rejection capacity = capacityRejection(key, orgId, refresh);
-            if (capacity != Rejection.NONE) {
-                return rejected(orgId, capacity);
-            }
-            if (refresh && refreshIsThrottled(key, now)) {
-                return rejected(orgId, Rejection.REFRESH_THROTTLE);
+            Rejection rejection = leaderRejection(key, orgId, refresh, now);
+            if (rejection != Rejection.NONE) {
+                return rejected(orgId, rejection);
             }
             QuotaState quota = quotaWindows.get(orgId);
-            if (quota != null && quota.size() >= quotaAttemptsPerOrg) {
-                return rejected(orgId, Rejection.ORGANIZATION_QUOTA);
-            }
             if (quota == null) {
                 quota = new QuotaState();
                 quotaWindows.put(orgId, quota);
@@ -126,6 +121,37 @@ public class AiInvocationAdmissionService {
             FlightState flight = new FlightState(orgId);
             activeFlights.put(flightIdentity, flight);
             return Admission.leader(this, flightIdentity, flight);
+        }
+    }
+
+    /**
+     * Reports, without reserving quota, recording a refresh, or registering a flight, the rejection
+     * {@link #acquire} would return now to a caller that cannot join an active flight. Features call
+     * it before assembling and masking their context, so a quota-exhausted or throttled request is
+     * refused before that work instead of after it; {@link #acquire} still makes and reserves the
+     * binding decision. A caller whose identity already has an active flight is never refused here,
+     * because its assembled content hash may join that flight as a follower that consumes no quota.
+     * @param identity persistent cache identity
+     * @param refresh whether the caller is forcing a cache refresh
+     * @return the rejection a new leader would currently receive, or {@link Rejection#NONE}
+     */
+    public Rejection precheck(CacheIdentity identity, boolean refresh) {
+        CacheIdentity key = Objects.requireNonNull(identity, "identity");
+        int orgId = workspaceService.getCurrentOrgId();
+        if (orgId <= 0) {
+            throw new IllegalStateException("AI invocation organization is unavailable");
+        }
+        Instant now = clock.instant();
+        synchronized (stateLock) {
+            purgeStale(now);
+            if (hasActiveFlight(key)) {
+                return Rejection.NONE;
+            }
+            Rejection rejection = leaderRejection(key, orgId, refresh, now);
+            if (rejection != Rejection.NONE) {
+                logRejection(orgId, rejection);
+            }
+            return rejection;
         }
     }
 
@@ -162,8 +188,36 @@ public class AiInvocationAdmissionService {
     }
 
     private Admission rejected(int orgId, Rejection rejection) {
-        log.warn("AI invocation rejected: organizationId={}, reason={}", orgId, rejection);
+        logRejection(orgId, rejection);
         return Admission.rejected(rejection);
+    }
+
+    private static void logRejection(int orgId, Rejection rejection) {
+        log.warn("AI invocation rejected: organizationId={}, reason={}", orgId, rejection);
+    }
+
+    private boolean hasActiveFlight(CacheIdentity identity) {
+        for (FlightIdentity flight : activeFlights.keySet()) {
+            if (flight.cacheIdentity().equals(identity)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Rejection leaderRejection(CacheIdentity identity, int orgId, boolean refresh, Instant now) {
+        Rejection capacity = capacityRejection(identity, orgId, refresh);
+        if (capacity != Rejection.NONE) {
+            return capacity;
+        }
+        if (refresh && refreshIsThrottled(identity, now)) {
+            return Rejection.REFRESH_THROTTLE;
+        }
+        QuotaState quota = quotaWindows.get(orgId);
+        if (quota != null && quota.size() >= quotaAttemptsPerOrg) {
+            return Rejection.ORGANIZATION_QUOTA;
+        }
+        return Rejection.NONE;
     }
 
     private Rejection capacityRejection(CacheIdentity identity, int orgId, boolean refresh) {
