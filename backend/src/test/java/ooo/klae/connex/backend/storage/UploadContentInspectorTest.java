@@ -15,8 +15,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -722,7 +724,11 @@ class UploadContentInspectorTest {
 
     /**
      * Verifies that a real LibreOffice Calc workbook, which always writes the inert
-     * {@code sheetView@showFormulas} view flag, uploads as XLSX.
+     * {@code sheetView@showFormulas} view flag, uploads as XLSX, in both the transitional and the
+     * strict SpreadsheetML namespaces.
+     *
+     * <p>The fixture was converted from the committed {@code libreoffice-calc-source.csv} and
+     * can be rebuilt with {@code soffice --headless --convert-to xlsx libreoffice-calc-source.csv}.
      */
     @Test
     void acceptsRealLibreOfficeCalcWorkbook() throws Exception {
@@ -746,6 +752,13 @@ class UploadContentInspectorTest {
                 "</sheetViews><customSheetViews><customSheetView "
                     + "guid=\"{00000000-0000-0000-0000-000000000001}\" "
                     + "showFormulas=\" true \"/></customSheetViews>"))).format());
+        assertEquals(UploadFormat.XLSX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("calc-strict.xlsx", xlsxContentType(), calcSheetVariant(Map.of(
+                "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"",
+                "<worksheet xmlns=\"http://purl.oclc.org/ooxml/spreadsheetml/main\"",
+                "<sheetView showFormulas=\"false\"",
+                "<sheetView showFormulas=\"1\"")))).format());
     }
 
     /**
@@ -785,19 +798,20 @@ class UploadContentInspectorTest {
             UploadPurpose.ATTACHMENT,
             UploadSource.from(
                 "foreign-control.xlsx", xlsxContentType(), foreignNamespaceControl)).format());
-        for (byte[] refused : List.of(
-                nonBooleanValue,
-                wrongCaseBoolean,
-                nonViewElement,
-                foreignNamespaceElement,
-                namespacedAttribute,
-                otherFormulaAttribute,
-                extraFormulaAttribute,
-                realFormulaCell)) {
-            assertThrows(UnsupportedUploadMediaTypeException.class,
-                () -> inspector.inspect(UploadPurpose.ATTACHMENT,
-                    UploadSource.from("refused.xlsx", xlsxContentType(), refused)));
-        }
+        Map<String, byte[]> refused = new LinkedHashMap<>();
+        refused.put("nonBooleanValue", nonBooleanValue);
+        refused.put("wrongCaseBoolean", wrongCaseBoolean);
+        refused.put("nonViewElement", nonViewElement);
+        refused.put("foreignNamespaceElement", foreignNamespaceElement);
+        refused.put("namespacedAttribute", namespacedAttribute);
+        refused.put("otherFormulaAttribute", otherFormulaAttribute);
+        refused.put("extraFormulaAttribute", extraFormulaAttribute);
+        refused.put("realFormulaCell", realFormulaCell);
+        refused.forEach((name, content) -> assertThrows(
+            UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(UploadPurpose.ATTACHMENT,
+                UploadSource.from(name + ".xlsx", xlsxContentType(), content)),
+            name));
     }
 
     @Test
@@ -1196,12 +1210,22 @@ class UploadContentInspectorTest {
 
     private static byte[] calcSheetVariant(String target, String replacement)
             throws IOException {
+        return calcSheetVariant(Map.of(target, replacement));
+    }
+
+    private static byte[] calcSheetVariant(Map<String, String> replacements)
+            throws IOException {
         byte[] source = fixture("libreoffice-calc-source.xlsx");
         String sheetName = "xl/worksheets/sheet1.xml";
-        String sheet = new String(zipEntry(source, sheetName), StandardCharsets.UTF_8);
-        if (!sheet.contains(target)) {
-            throw new IOException("Missing fixture text: " + target);
+        String original = new String(zipEntry(source, sheetName), StandardCharsets.UTF_8);
+        String sheet = original;
+        for (Map.Entry<String, String> replacement : replacements.entrySet()) {
+            if (!original.contains(replacement.getKey())) {
+                throw new IOException("Missing fixture text: " + replacement.getKey());
+            }
+            sheet = sheet.replace(replacement.getKey(), replacement.getValue());
         }
+        String rewritten = sheet;
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (ZipInputStream input = new ZipInputStream(
                     new ByteArrayInputStream(source), StandardCharsets.UTF_8);
@@ -1209,7 +1233,7 @@ class UploadContentInspectorTest {
             ZipEntry entry;
             while ((entry = input.getNextEntry()) != null) {
                 byte[] content = sheetName.equals(entry.getName())
-                    ? sheet.replace(target, replacement).getBytes(StandardCharsets.UTF_8)
+                    ? rewritten.getBytes(StandardCharsets.UTF_8)
                     : input.readAllBytes();
                 put(zip, entry.getName(), content);
             }
