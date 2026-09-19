@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -23,6 +24,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,8 +40,10 @@ import ooo.klae.connex.backend.ai.AiGenerationProfile;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Admission;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.CacheIdentity;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.LeaderOutcome;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Rejection;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
@@ -98,6 +102,7 @@ class DealRiskRationaleServiceTest {
                 DealRiskRationaleService.MAX_TOKENS,
                 DealRiskRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         lenient().when(aiInvocationAdmissionService.acquire(any(), anyString(), anyBoolean())).thenReturn(admission);
+        lenient().when(aiInvocationAdmissionService.precheck(any(), anyBoolean())).thenReturn(Rejection.NONE);
         lenient().when(admission.decision()).thenReturn(Decision.LEADER);
         lenient().when(aiOutputCacheStore.saveForPersons(
                 anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
@@ -244,7 +249,10 @@ class DealRiskRationaleServiceTest {
         when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
-                .thenReturn(Optional.empty(), Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
+                .thenReturn(
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
         when(aiOutputCacheStore.read("payload", DealRiskRationaleContent.class))
                 .thenReturn(Optional.of(content(
                         "Leader narrative.", List.of("Leader action."))));
@@ -377,6 +385,81 @@ class DealRiskRationaleServiceTest {
         arrangeInvocationFailure(new ForbiddenException("AI features are not available"));
 
         assertUnavailable(service.generate(DEAL_ID), "not_configured");
+    }
+
+    @Test
+    void generate_interruptDuringRiskAssessmentStopsBeforeTheCacheProbeAndAssembly() {
+        DealRiskDto risk = atRisk();
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenAnswer(invocation -> {
+            Thread.currentThread().interrupt();
+            return risk;
+        });
+
+        try {
+            assertThrows(CancellationException.class, () -> service.generate(DEAL_ID));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+        verify(aiOutputCacheStore, never()).find(anyInt(), anyString(), anyInt(), anyInt());
+        verify(aiInvocationAdmissionService, never()).precheck(any(), anyBoolean());
+        verify(dealRiskRationaleAssembler, never()).assemble(anyInt(), anyInt(), any());
+    }
+
+    @Test
+    void generate_rateLimitedForcedRefreshIsRefusedBeforeTheDealIsAssembled() {
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(atRisk());
+        when(aiInvocationAdmissionService.precheck(any(), eq(true)))
+                .thenReturn(Rejection.REFRESH_THROTTLE);
+
+        DealRationaleDto result = service.generate(DEAL_ID, true);
+
+        assertUnavailable(result, "rate_limited");
+        verify(aiInvocationAdmissionService).precheck(
+                CacheIdentity.forSubject(
+                        WORKSPACE_ID, AiFeature.DEAL_RISK_RATIONALE, DEAL_ID, Locale.ENGLISH),
+                true);
+        verify(dealRiskRationaleAssembler, never()).assemble(anyInt(), anyInt(), any());
+        verify(aiOutputCacheStore, never()).find(anyInt(), anyString(), anyInt(), anyInt());
+        verify(aiInvocationAdmissionService, never()).acquire(any(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void generate_quotaExhaustedWithoutStoredRationaleIsRefusedBeforeTheDealIsAssembled() {
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(atRisk());
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+                .thenReturn(Optional.empty());
+        when(aiInvocationAdmissionService.precheck(any(), eq(false)))
+                .thenReturn(Rejection.ORGANIZATION_QUOTA);
+
+        DealRationaleDto result = service.generate(DEAL_ID);
+
+        assertUnavailable(result, "rate_limited");
+        verify(dealRiskRationaleAssembler, never()).assemble(anyInt(), anyInt(), any());
+        verify(aiInvocationAdmissionService, never()).acquire(any(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void generate_quotaExhaustedStillServesAValidStoredRationale() {
+        RationaleAssembly assembly = assembly();
+        DealRiskDto risk = atRisk();
+        lenient().when(aiInvocationAdmissionService.precheck(any(), anyBoolean()))
+                .thenReturn(Rejection.ORGANIZATION_QUOTA);
+        lenient().when(admission.decision()).thenReturn(Decision.RATE_LIMITED);
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenReturn(risk);
+        when(dealRiskRationaleAssembler.assemble(WORKSPACE_ID, DEAL_ID, risk)).thenReturn(assembly);
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+                .thenReturn(Optional.of(row(HASH, 0, "2026-07-01T09:00:00Z")));
+        when(aiOutputCacheStore.read("payload", DealRiskRationaleContent.class))
+                .thenReturn(Optional.of(content("Stored under quota.", List.of("Stored action."))));
+
+        DealRationaleDto result = service.generate(DEAL_ID);
+
+        assertTrue(result.isAvailable());
+        assertEquals("Stored under quota.", result.getNarrative());
+        verify(aiInvocationAdmissionService, never()).precheck(any(), anyBoolean());
+        verify(aiInvocationAdmissionService, never()).acquire(any(), anyString(), anyBoolean());
     }
 
     private void arrangeMiss(RationaleAssembly assembly) {

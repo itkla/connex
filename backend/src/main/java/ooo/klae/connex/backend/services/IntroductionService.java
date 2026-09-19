@@ -23,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.ai.AiCancellation;
 import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.IntroCandidatePerson;
 import ooo.klae.connex.backend.beans.IntroEmploymentRow;
@@ -199,6 +200,9 @@ public class IntroductionService {
      * As {@link #computeSuggestions(int, int)}, but reuses an already-computed warmth map when the
      * caller has one (the scheduled sweep scores the workspace once for relationship nudges and
      * shares it here, avoiding a second full rescore). A {@code null} map is scored on demand.
+     * Introduction rationales run this ranking on a fixed-size AI generation worker, so an
+     * interrupted thread stops between the workspace loads, the rescore, and the ranking.
+     * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public List<IntroSuggestionDto> computeSuggestions(
             int workspaceId, int limit, Map<Integer, RelationshipTemperatureDto> temperatures) {
@@ -209,17 +213,21 @@ public class IntroductionService {
         if (candidates.size() < 2) {
             return List.of();
         }
+        AiCancellation.throwIfInterrupted();
         Set<Integer> excludedPersonIds =
             new HashSet<>(introductionMapper.findIntroExcludedPersonIds(workspaceId));
         List<PersonEdge> edges = eligibleEdges(edgeReader.getAllEdges(workspaceId), excludedPersonIds);
+        AiCancellation.throwIfInterrupted();
         List<IntroEmploymentRow> employment = introductionMapper.findWorkspaceEmployment(workspaceId);
         Set<Long> existing = existingPairKeys(introductionMapper.findExistingPairs(workspaceId));
+        AiCancellation.throwIfInterrupted();
         Map<Integer, RelationshipTemperatureDto> warmth = temperatures;
         if (warmth == null) {
             warmth = new HashMap<>();
             for (RelationshipTemperatureDto temperature : scoringService.scoreContacts(workspaceId)) {
                 warmth.put(temperature.getId(), temperature);
             }
+            AiCancellation.throwIfInterrupted();
         }
         List<IntroSuggestionDto> suggestions =
             rankSuggestions(candidates, edges, employment, existing, warmth, limit);

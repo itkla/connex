@@ -18,6 +18,7 @@ import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Admission;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.CacheIdentity;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.LeaderOutcome;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Rejection;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
@@ -73,6 +74,16 @@ public class IntroRationaleService {
         if (profile.isEmpty()) {
             return IntroRationaleDto.unavailable(lo, hi, NOT_CONFIGURED);
         }
+        if (lo <= 0) {
+            return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);
+        }
+
+        String cacheFeature = cacheFeature();
+        CacheIdentity identity = CacheIdentity.forPair(
+                workspaceId, AiFeature.INTRO_RATIONALE, lo, hi, LocaleContextHolder.getLocale());
+        if (refusedBeforeSuggestionRanking(workspaceId, cacheFeature, lo, hi, identity)) {
+            return IntroRationaleDto.unavailable(lo, hi, RATE_LIMITED);
+        }
 
         IntroSuggestionDto suggestion = introductionService.computeSuggestions(workspaceId, RESOLVE_LIMIT).stream()
                 .filter(candidate -> candidate.getPersonAId() == lo && candidate.getPersonBId() == hi)
@@ -87,7 +98,6 @@ public class IntroRationaleService {
         }
 
         IntroRationaleAssembly assembly = introRationaleAssembler.assemble(workspaceId, suggestion);
-        String cacheFeature = cacheFeature();
         String contentHash = aiOutputCacheStore.contentHash(
                 profile.get(), assembly.prompt(), assembly.context());
         IntroRationaleDto cached = cached(
@@ -96,8 +106,6 @@ public class IntroRationaleService {
             return cached;
         }
 
-        CacheIdentity identity = CacheIdentity.forPair(
-                workspaceId, AiFeature.INTRO_RATIONALE, lo, hi, LocaleContextHolder.getLocale());
         boolean admissionRefresh = false;
         while (true) {
             try (Admission admission = aiInvocationAdmissionService.acquire(
@@ -168,6 +176,26 @@ public class IntroRationaleService {
                 }
             }
         }
+    }
+
+    /**
+     * Refuses, before the workspace-wide suggestion ranking and the context assembly, a request
+     * that admission would currently reject. A stored rationale can only be validated against a
+     * fresh ranking and assembly, so a request with a stored row always proceeds and a valid cache
+     * hit is never refused for quota. A request with no stored row can only end in a new provider
+     * attempt or in a refusal, so under an exhausted quota it reports rate limiting even for a pair
+     * that the ranking would have refused as no longer suggested.
+     */
+    private boolean refusedBeforeSuggestionRanking(
+            int workspaceId,
+            String cacheFeature,
+            int lo,
+            int hi,
+            CacheIdentity identity) {
+        if (aiOutputCacheStore.find(workspaceId, cacheFeature, lo, hi).isPresent()) {
+            return false;
+        }
+        return aiInvocationAdmissionService.precheck(identity, false) != Rejection.NONE;
     }
 
     private IntroRationaleDto cached(
