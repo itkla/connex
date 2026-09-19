@@ -254,11 +254,13 @@ A token is bound to one account and works exactly once.
 5. **Clean up.** After the ceremony completes, clear the three variables and the shell's `USER_ID`
    and `TOKEN` variables, then restart the backend.
 
-The expiry must be in the future and no more than one hour from backend startup. An incomplete,
-malformed, expired, or longer-lived configuration fails startup. At runtime the recovery request
-is rejected after expiry. The raw token is submitted to `POST /api/auth/webauthn/recover`; it is
-never configured, persisted, logged, audited, or included in an error. Token comparison uses the
-configured digest and constant-time comparison.
+The expiry must be in the future and no more than one hour from backend startup. The actor must be
+at most 255 characters, the size of the operator column in the redemption ledger described below,
+so the ledger records the same actor as the audit event. An incomplete, malformed, expired, or
+longer-lived configuration fails startup, and so does a longer actor. At runtime the recovery
+request is rejected after expiry. The raw token is submitted to
+`POST /api/auth/webauthn/recover`; it is never configured, persisted, logged, audited, or included
+in an error. Token comparison uses the configured digest and constant-time comparison.
 
 These cases are all refused with the same message and remove nothing:
 

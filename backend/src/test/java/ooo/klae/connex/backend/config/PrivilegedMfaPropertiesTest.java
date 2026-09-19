@@ -172,6 +172,31 @@ class PrivilegedMfaPropertiesTest {
         assertFalse(authorization.redemptionKey().contains("recovery-proof"));
     }
 
+    /**
+     * The actor is recorded in the redemption ledger's {@code VARCHAR(255)} utf8mb4 column, which
+     * counts characters rather than bytes or UTF-16 units. A 255-character actor, even one made of
+     * four-byte characters, is accepted; one character more is refused at startup and at redemption
+     * instead of being silently truncated by the ledger's {@code INSERT IGNORE}.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"a", "\uD83D\uDD10"})
+    void theRecoveryActorIsLimitedToTheLedgerColumnLengthInCharacters(String character) {
+        PrivilegedMfaProperties properties = configured(ACCOUNT_A, "recovery-proof", NOW.plusSeconds(1800));
+        String longestActor = character.repeat(255);
+        properties.setRecoveryActor(longestActor);
+
+        assertDoesNotThrow(() -> properties.validate(CLOCK));
+        assertEquals(longestActor,
+                properties.requireValidRecoveryToken(ACCOUNT_A, "recovery-proof", CLOCK).operator());
+
+        properties.setRecoveryActor(longestActor + character);
+
+        IllegalStateException refusal =
+                assertThrows(IllegalStateException.class, () -> properties.validate(CLOCK));
+        assertEquals("Privileged MFA recovery actor must be at most 255 characters", refusal.getMessage());
+        assertRefused(() -> properties.requireValidRecoveryToken(ACCOUNT_A, "recovery-proof", CLOCK));
+    }
+
     private static void assertRefused(Executable executable) {
         ForbiddenException refusal = assertThrows(ForbiddenException.class, executable);
         assertEquals(PrivilegedMfaProperties.INVALID_RECOVERY_AUTHORIZATION, refusal.getMessage());

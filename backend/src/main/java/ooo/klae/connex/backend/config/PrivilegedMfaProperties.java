@@ -26,6 +26,7 @@ public class PrivilegedMfaProperties {
     private static final String DEFAULT_ACTOR = "configuration-default";
     private static final String RECOVERY_TOKEN_PURPOSE = "connex-privileged-mfa-recovery:v1:";
     private static final int SHA_256_HEX_LENGTH = 64;
+    private static final int MAX_RECOVERY_ACTOR_CHARACTERS = 255;
     private static final Duration MAX_RECOVERY_WINDOW = Duration.ofHours(1);
 
     private String enforced = "true";
@@ -121,6 +122,11 @@ public class PrivilegedMfaProperties {
         if (normalize(recoveryTokenSha256).length() != SHA_256_HEX_LENGTH
                 || !normalize(recoveryTokenSha256).matches("[0-9a-fA-F]+")) {
             throw new IllegalStateException("Privileged MFA recovery token hash must be 64 hexadecimal characters");
+        }
+        String actor = normalize(recoveryActor);
+        if (actor.codePointCount(0, actor.length()) > MAX_RECOVERY_ACTOR_CHARACTERS) {
+            throw new IllegalStateException(
+                    "Privileged MFA recovery actor must be at most 255 characters");
         }
         recoveryExpiry();
     }
