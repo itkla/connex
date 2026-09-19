@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.dto;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
@@ -29,7 +30,8 @@ public record CampaignRequest(
         @NotBlank @Size(max = 32) @Pattern(regexp = "[A-Za-z0-9][A-Za-z0-9_-]{0,31}") String type,
         @Pattern(regexp = "draft|scheduled|active|paused|completed|archived") String status,
         @Positive Integer ownerUserId,
-        @DecimalMin("0.00") @Digits(integer = 13, fraction = 2) BigDecimal budgetAmount,
+        @DecimalMin("0.00") @Digits(integer = 13, fraction = 2) @DecimalMax("9999999999999.99")
+        BigDecimal budgetAmount,
         @Pattern(regexp = "[A-Za-z]{3}") String budgetCurrency,
         LocalDateTime startAt,
         LocalDateTime endAt,
