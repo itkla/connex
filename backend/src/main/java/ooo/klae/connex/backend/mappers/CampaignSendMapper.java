@@ -46,6 +46,14 @@ public interface CampaignSendMapper {
             @Param("workspaceId") int workspaceId,
             @Param("triggeredSendEnabled") boolean triggeredSendEnabled);
 
+    /**
+     * Enumerates the pinned catalog's workspaces with dispatch or recovery work: queued or running
+     * sends, triggered work, and abandoned audience attempts whose reservation expired past the grace.
+     * @param triggeredSendEnabled whether pending triggered deliveries count as work
+     * @param audienceReservationGraceMicros how long past its reservation an audience attempt is abandoned
+     * @return the workspace ids
+     */
     List<Integer> workspaceIdsWithQueuedSends(
-            @Param("triggeredSendEnabled") boolean triggeredSendEnabled);
+            @Param("triggeredSendEnabled") boolean triggeredSendEnabled,
+            @Param("audienceReservationGraceMicros") long audienceReservationGraceMicros);
 }

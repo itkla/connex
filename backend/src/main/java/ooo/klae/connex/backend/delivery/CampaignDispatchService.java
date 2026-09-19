@@ -4,6 +4,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.LongSupplier;
 
@@ -58,6 +60,8 @@ public class CampaignDispatchService {
             "AMBIGUOUS: Worker claim expired after the delivery target changed";
     private static final String RECOVERED_CHANGED_TARGET_CLAIM =
             "AMBIGUOUS: Delivery target changed before a recovered attempt could resume";
+    private static final String EXPIRED_AUDIENCE_RESERVATION =
+            "AMBIGUOUS: Audience dispatch did not finish before its reservation expired";
     private static final String NOT_DISPATCHABLE_SKIP_REASON = "not_dispatchable";
 
     private final CampaignSendMapper campaignSendMapper;
@@ -81,6 +85,7 @@ public class CampaignDispatchService {
             return 0;
         }
         recoverExpiredTriggeredClaims(workspaceId);
+        recoverExpiredAudienceReservations(workspaceId);
         int failed = 0;
         for (int sendId : campaignSendMapper.queuedSendIds(
                 workspaceId, triggeredSendGate.enabled())) {
@@ -114,6 +119,7 @@ public class CampaignDispatchService {
             return true;
         }
         recoverExpiredTriggeredClaims(workspaceId);
+        recoverExpiredAudienceReservations(workspaceId);
         return processSendReady(workspaceId, sendId);
     }
 
@@ -539,6 +545,43 @@ public class CampaignDispatchService {
                 }
             }
         }
+    }
+
+    /**
+     * Turns abandoned audience attempts into terminal ambiguous rows that require reconciliation.
+     * An audience claim carries no owner fence or target fingerprint, and {@code submitted_at} is
+     * written only after the provider returns, so an abandoned attempt may already have been
+     * submitted and is never replayed. Its frequency reservation is kept until an operator resolves
+     * it. Each row is one auto-commit compare-and-set, so a late worker loses its terminal write.
+     */
+    private void recoverExpiredAudienceReservations(int workspaceId) {
+        long graceMicros = audienceReservationGraceMicros();
+        Set<Integer> affectedSends = new TreeSet<>();
+        for (CampaignDelivery abandoned : campaignDeliveryMapper.expiredAudienceReservationsPage(
+                workspaceId, graceMicros, triggeredSendGate.dispatchPageSize())) {
+            if (campaignDeliveryMapper.markExpiredAudienceReservationAmbiguous(
+                    workspaceId,
+                    abandoned.getId(),
+                    graceMicros,
+                    EXPIRED_AUDIENCE_RESERVATION,
+                    CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) != 1) {
+                continue;
+            }
+            affectedSends.add(abandoned.getSendId());
+            try {
+                appendEvent(workspaceId, abandoned.getId(), "failed", EXPIRED_AUDIENCE_RESERVATION);
+            } catch (RuntimeException exception) {
+                log.warn("Campaign delivery {} reservation-expiry event could not be appended",
+                        abandoned.getId());
+            }
+        }
+        for (int sendId : affectedSends) {
+            campaignSendMapper.refreshCounters(workspaceId, sendId);
+        }
+    }
+
+    private long audienceReservationGraceMicros() {
+        return deliveryProperties.providerCallReservationGrace().toNanos() / 1_000L;
     }
 
     private long dispatchLeaseMicros() {

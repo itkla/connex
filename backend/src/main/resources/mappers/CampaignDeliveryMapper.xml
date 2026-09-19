@@ -231,6 +231,39 @@
       AND s.origin = 'triggered' AND s.status = 'triggered'
   </update>
 
+  <!-- An unleased audience attempt carries no owner fence or target fingerprint, so an abandoned one
+       is never replayed. Its reservation already ends at the hard provider deadline; the grace
+       covers the post-return terminal write. Send status is deliberately not filtered: completed and
+       cancelled sends can own a stranded row. -->
+  <select id="expiredAudienceReservationsPage" resultType="CampaignDelivery">
+    SELECT d.id, d.send_id
+    FROM campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    WHERE d.workspace_id = #{workspaceId} AND d.status = 'dispatching'
+      AND d.dispatch_lease_owner IS NULL AND d.submitted_at IS NULL
+      AND d.frequency_reserved_at IS NOT NULL
+      AND d.frequency_reserved_at &lt; DATE_SUB(UTC_TIMESTAMP(6), INTERVAL #{graceMicros} MICROSECOND)
+      AND s.origin = 'audience'
+    ORDER BY d.id
+    LIMIT #{limit}
+  </select>
+
+  <!-- Keeps frequency_reserved_at so the contact stays capped until an operator resolves the row;
+       operator_not_delivered is the only release. -->
+  <update id="markExpiredAudienceReservationAmbiguous">
+    UPDATE campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    SET d.status = 'failed', d.skip_reason = NULL, d.last_error = #{lastError},
+        d.last_error_code = #{lastErrorCode},
+        d.reconciliation_required_at = UTC_TIMESTAMP(6),
+        d.reconciliation_outcome = NULL
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'dispatching'
+      AND d.dispatch_lease_owner IS NULL AND d.submitted_at IS NULL
+      AND d.frequency_reserved_at IS NOT NULL
+      AND d.frequency_reserved_at &lt; DATE_SUB(UTC_TIMESTAMP(6), INTERVAL #{graceMicros} MICROSECOND)
+      AND s.origin = 'audience'
+  </update>
+
   <update id="markDispatched">
     UPDATE campaign_delivery
     SET status = 'dispatched', skip_reason = NULL, provider_id = #{providerId},

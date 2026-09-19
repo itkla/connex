@@ -104,6 +104,15 @@
           AND ((#{triggeredSendEnabled} AND d.status = 'pending')
             OR (d.status = 'dispatching'
               AND d.dispatch_lease_until &lt; UTC_TIMESTAMP(6)))))
+      OR (origin = 'audience' AND EXISTS (
+        SELECT 1 FROM campaign_delivery d
+        WHERE d.workspace_id = campaign_send.workspace_id
+          AND d.send_id = campaign_send.id
+          AND d.status = 'dispatching'
+          AND d.dispatch_lease_owner IS NULL
+          AND d.submitted_at IS NULL
+          AND d.frequency_reserved_at &lt; DATE_SUB(UTC_TIMESTAMP(6),
+            INTERVAL #{audienceReservationGraceMicros} MICROSECOND)))
   </select>
 
 </mapper>

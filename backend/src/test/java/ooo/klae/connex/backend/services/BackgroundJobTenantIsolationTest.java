@@ -18,6 +18,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import ooo.klae.connex.backend.delivery.CampaignDispatchService;
 import ooo.klae.connex.backend.delivery.CampaignSendWorker;
+import ooo.klae.connex.backend.delivery.DeliveryProperties;
 import ooo.klae.connex.backend.mappers.CampaignSendMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
@@ -94,11 +95,12 @@ class BackgroundJobTenantIsolationTest {
                 mapper,
                 dispatchService,
                 jobRunRecorder,
-                triggeredSendGate);
+                triggeredSendGate,
+                new DeliveryProperties());
         ReflectionTestUtils.setField(worker, "dispatchEnabled", true);
         when(placementRegistry.activeCatalogs())
                 .thenReturn(Arrays.asList(null, FOREIGN_CATALOG));
-        when(mapper.workspaceIdsWithQueuedSends(false))
+        when(mapper.workspaceIdsWithQueuedSends(false, 30_000_000L))
                 .thenReturn(List.of(SIBLING_WORKSPACE_ID))
                 .thenReturn(List.of(FOREIGN_ORGANIZATION_WORKSPACE_ID));
 
