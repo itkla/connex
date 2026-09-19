@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.SpentRecoveryTokenException;
 import ooo.klae.connex.backend.mappers.PrivilegedMfaRecoveryRedemptionMapper;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -195,6 +196,7 @@ class MfaRecoveryServiceTest {
                 () -> boundToAccount8.recover(request("operator-proof"), httpRequest));
 
         assertEquals(PrivilegedMfaProperties.INVALID_RECOVERY_AUTHORIZATION, refusal.getMessage());
+        assertEquals(ForbiddenException.class, refusal.getClass());
         verify(redemptionMapper, never()).insertIfAbsent(any(), anyInt(), any());
         verify(webAuthnService, never()).recover(anyInt());
         verify(userMapper, never()).bumpSessionEpoch(anyInt());
@@ -215,16 +217,20 @@ class MfaRecoveryServiceTest {
         verify(webAuthnService).recover(8);
     }
 
-    /** A spent token is refused with the invalid-token message and removes nothing. */
+    /**
+     * A spent token is refused with the invalid-token message and code and removes nothing. The
+     * refusal is the spent-token subtype so the controller can audit the replay distinctly.
+     */
     @Test
     void anAlreadyRedeemedTokenIsRefusedBeforeCredentialRemoval() {
         MockHttpServletRequest httpRequest = preparedRecoveryRequest();
         when(redemptionMapper.insertIfAbsent(REDEMPTION_KEY, 7, "security-operator")).thenReturn(0);
 
-        ForbiddenException refusal = assertThrows(ForbiddenException.class,
+        SpentRecoveryTokenException refusal = assertThrows(SpentRecoveryTokenException.class,
                 () -> service.recover(request("operator-proof"), httpRequest));
 
         assertEquals(PrivilegedMfaProperties.INVALID_RECOVERY_AUTHORIZATION, refusal.getMessage());
+        assertEquals(ForbiddenException.CODE, refusal.getCode());
         verify(webAuthnService, never()).recover(anyInt());
         verify(auditService, never()).recordStrictScoped(any(), any(), any(), any(), any(), any(), any(), any());
         verify(userMapper, never()).bumpSessionEpoch(anyInt());

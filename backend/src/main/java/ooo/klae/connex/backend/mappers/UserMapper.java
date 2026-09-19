@@ -45,6 +45,15 @@ public interface UserMapper {
     User getUserByIdForShare(int id);
     Integer lockById(int id);
     Integer lockByIdForShare(int id);
+    /**
+     * Locks the custom roles assigned to the account {@code FOR SHARE}, so a concurrent permission
+     * edit on them waits for the caller's transaction. The statement also clears the transaction's
+     * MyBatis session cache, so privilege and passkey reads made after it query committed state
+     * instead of returning answers cached earlier in the same transaction.
+     *
+     * @param id the account whose assigned custom roles are locked
+     * @return the locked role ids in ascending order
+     */
     List<Integer> lockAssignedCustomRoleIds(int id);
     boolean isAccountDeletionReserved(int id);
     /** IDs with live deletion reservations; callers supply a nonempty candidate set. */

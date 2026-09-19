@@ -168,6 +168,9 @@ class EmailChangePrivilegedStepUpTest {
     /**
      * A promotion that commits while the request waits for the account lock is observed there and
      * refused without an audit append, which would otherwise wait on this transaction's own lock.
+     * The mocked answers change between the two reads; against the database that holds only
+     * because the role lock clears the session cache, which
+     * {@code PrivilegedEmailChangeStepUpIntegrationTest} proves end to end.
      */
     @ParameterizedTest
     @ValueSource(strings = {"true", "false"})

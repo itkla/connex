@@ -773,7 +773,10 @@ account root.
   audits a refusal there. Under the root, after the `session_epoch` check, it locks the account's
   assigned custom roles `FOR SHARE` through `lockAssignedCustomRoleIds`, as
   `PasswordResetService` and `WebAuthnService.finishRegistration` do, and evaluates the gate again
-  against committed state. A refusal that appears only under the root is not audited (see below).
+  against committed state. That statement is mapped with `flushCache="true"`: the request is one
+  MyBatis session, so without the flush the re-check would return the privilege and passkey answers
+  cached by the pre-lock evaluation. A refusal that appears only under the root is not audited (see
+  below).
 
 Operator break-glass recovery (`MfaRecoveryService.recover`) spends its token in the same
 hierarchy (#1532). Its order is:

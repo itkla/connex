@@ -9,6 +9,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.reset;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.nio.charset.StandardCharsets;
@@ -17,6 +18,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.UUID;
 
 import jakarta.servlet.Filter;
@@ -115,7 +117,8 @@ class PrivilegedMfaRecoveryTokenBindingIntegrationTest {
 
     /**
      * A token that already completed a ceremony is spent: replaying it later, from a new session,
-     * is refused and leaves the replacement passkey, the epoch and the ledger untouched.
+     * is refused and leaves the replacement passkey, the epoch and the ledger untouched. The client
+     * gets the invalid-token response, while the audit names the replay.
      */
     @Test
     void replayingARedeemedTokenInANewSessionIsRefusedAndRemovesNothing() throws Exception {
@@ -128,8 +131,9 @@ class PrivilegedMfaRecoveryTokenBindingIntegrationTest {
         User current = userMapper.getUserById(account.getId());
         assertNotNull(current);
 
-        recover(authenticatedSession(current), token).andExpect(status().isForbidden());
+        expectInvalidAuthorization(recover(authenticatedSession(current), token));
 
+        assertEquals(List.of("token_already_redeemed"), recoveryDenialReasons(account));
         assertTrue(credentialMapper.existsByUserId(account.getId()));
         assertEquals(epochAfterRecovery, userMapper.currentSessionEpoch(account.getId()));
         assertEquals(1, redemptionsFor(account));
@@ -153,8 +157,9 @@ class PrivilegedMfaRecoveryTokenBindingIntegrationTest {
         MockHttpSession attackerSession = authenticatedSession(attacker);
         int attackerEpoch = attacker.getSessionEpoch();
 
-        recover(attackerSession, token).andExpect(status().isForbidden());
+        expectInvalidAuthorization(recover(attackerSession, token));
 
+        assertEquals(List.of("proof_rejected"), recoveryDenialReasons(attacker));
         assertNull(userMapper.epochRestampGrant(attacker.getId()));
         assertEquals(attackerEpoch, userMapper.currentSessionEpoch(attacker.getId()));
         assertEquals(0, redemptionsFor(attacker));
@@ -197,6 +202,20 @@ class PrivilegedMfaRecoveryTokenBindingIntegrationTest {
                 .with(csrf().asHeader())
                 .contentType("application/json")
                 .content("{\"currentPassword\":\"" + PASSWORD + "\",\"recoveryToken\":\"" + token + "\"}"));
+    }
+
+    private static void expectInvalidAuthorization(ResultActions result) throws Exception {
+        result.andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.message").value(PrivilegedMfaProperties.INVALID_RECOVERY_AUTHORIZATION));
+    }
+
+    private List<String> recoveryDenialReasons(User account) {
+        return jdbcTemplate.queryForList(
+                "SELECT JSON_UNQUOTE(JSON_EXTRACT(context, '$.error')) FROM audit_log"
+                        + " WHERE action = 'auth.mfa.recovery.denied' AND entity_type = 'user' AND entity_id = ?"
+                        + " ORDER BY id",
+                String.class, account.getId());
     }
 
     /**

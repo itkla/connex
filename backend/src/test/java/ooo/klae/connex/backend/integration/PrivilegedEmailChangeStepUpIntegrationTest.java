@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doAnswer;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -12,12 +14,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.time.Duration;
 import java.util.Collections;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import jakarta.servlet.Filter;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -33,9 +37,13 @@ import org.springframework.security.web.context.HttpSessionSecurityContextReposi
 import org.springframework.session.Session;
 import org.springframework.session.SessionRepository;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 
 import ooo.klae.connex.backend.beans.User;
@@ -68,11 +76,13 @@ class PrivilegedEmailChangeStepUpIntegrationTest {
     @Autowired private AuthService authService;
     @Autowired private WebAuthnService webAuthnService;
     @Autowired private PrivilegedMfaProperties privilegedMfaProperties;
-    @Autowired private UserMapper userMapper;
+    @MockitoSpyBean private UserMapper userMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private SessionRepository<? extends Session> sessionRepository;
+    @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private SqlSessionTemplate sqlSessionTemplate;
 
     private MockMvc mockMvc;
 
@@ -116,6 +126,48 @@ class PrivilegedEmailChangeStepUpIntegrationTest {
 
         requestEmailChange(session, workspaceId, suffix).andExpect(status().isOk());
         assertEquals(1, count("SELECT COUNT(*) FROM email_change_token WHERE user_id = ?", admin.getId()));
+    }
+
+    /**
+     * A promotion that commits after the password-only request passed the pre-lock gate, but
+     * before it takes the account lock, is refused by the re-check under that lock. The request is
+     * one MyBatis session, so the re-check must not be answered from the pre-lock reads. It writes
+     * no audit, because the request then holds its own account row exclusively.
+     */
+    @Test
+    void aPromotionCommittedBeforeTheAccountLockIsRefusedUnderItWithoutAnAudit() throws Exception {
+        assertFalse(privilegedMfaProperties.isEnforced());
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        int workspaceId = freshWorkspace(suffix);
+        User member = passwordAccount(suffix);
+        workspaceMapper.addMember(workspaceId, member.getId(), "member");
+        assertFalse(userMapper.isPrivilegedAccount(member.getId()));
+        MockHttpSession session = authenticatedSession(member);
+        AtomicBoolean promoted = new AtomicBoolean();
+        UserMapper realUserMapper = sqlSessionTemplate.getMapper(UserMapper.class);
+        doAnswer(invocation -> {
+            if (promoted.compareAndSet(false, true)) {
+                promoteInIndependentTransaction(workspaceId, member.getId());
+            }
+            return realUserMapper.lockById(member.getId());
+        }).when(userMapper).lockById(member.getId());
+
+        assertTimeoutPreemptively(NO_SELF_LOCK, () -> requestEmailChange(session, workspaceId, suffix)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PASSKEY_ENROLLMENT_REQUIRED")));
+
+        assertTrue(promoted.get());
+        assertEquals(0, count("SELECT COUNT(*) FROM email_change_token WHERE user_id = ?", member.getId()));
+        assertEquals(0, count("SELECT COUNT(*) FROM audit_log WHERE action = 'auth.email_change.refused'"
+                + " AND entity_id = ?", member.getId()));
+    }
+
+    private void promoteInIndependentTransaction(int workspaceId, int userId) {
+        TransactionTemplate promotion = new TransactionTemplate(transactionManager);
+        promotion.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        promotion.executeWithoutResult(transaction -> jdbcTemplate.update(
+                "UPDATE workspace_member SET role = 'admin' WHERE workspace_id = ? AND user_id = ?",
+                workspaceId, userId));
     }
 
     private ResultActions requestEmailChange(MockHttpSession session, int workspaceId, String suffix)

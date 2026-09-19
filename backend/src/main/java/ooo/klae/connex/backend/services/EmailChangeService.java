@@ -97,7 +97,9 @@ public class EmailChangeService {
      * second factor (#1506). A privileged account must therefore hold a passkey and present a fresh
      * WebAuthn step-up, whether or not {@code privileged-mfa.enforced} confines it. The gate is
      * evaluated after the password proof and again under the account lock, after the assigned
-     * custom roles are locked, so a promotion committed while this request waited is observed.
+     * custom roles are locked. That role lock also clears this transaction's mapper read cache, so
+     * the second evaluation re-reads privilege and passkey state instead of reusing the pre-lock
+     * answers, and a promotion committed while this request waited is observed.
      * The refusal audit is an independent append that takes the actor's {@code app_user} row
      * shared, so it is written only on the pre-lock refusal; a refusal that first appears under the
      * lock is not audited, because appending there would wait on this transaction's own exclusive

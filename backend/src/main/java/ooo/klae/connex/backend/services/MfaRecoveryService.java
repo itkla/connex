@@ -15,6 +15,7 @@ import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.config.PrivilegedMfaRecoveryAuthorization;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.SpentRecoveryTokenException;
 import ooo.klae.connex.backend.mappers.PrivilegedMfaRecoveryRedemptionMapper;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -52,8 +53,9 @@ public class MfaRecoveryService {
      * <p>The operator token is bound to this account and spent on first use (#1532): its
      * redemption row is inserted after the token check and before any credential is removed,
      * still under the account lock and inside this transaction. A token already spent is refused
-     * with the same message as an invalid one and removes nothing; a ceremony that fails after the
-     * insert rolls it back, so a failed attempt does not burn the token.
+     * with the same response as an invalid one and removes nothing; the refusal is a
+     * {@link SpentRecoveryTokenException} only so the caller can audit the replay distinctly. A
+     * ceremony that fails after the insert rolls it back, so a failed attempt does not burn the token.
      *
      * @param request submitted recovery proofs
      * @param httpRequest authenticated servlet request
@@ -80,7 +82,7 @@ public class MfaRecoveryService {
                 user.getId(), request.getRecoveryToken(), clock);
         if (recoveryRedemptionMapper.insertIfAbsent(
                 authorization.redemptionKey(), user.getId(), authorization.operator()) != 1) {
-            throw new ForbiddenException(PrivilegedMfaProperties.INVALID_RECOVERY_AUTHORIZATION);
+            throw new SpentRecoveryTokenException();
         }
         int removed = webAuthnService.recover(user.getId());
         auditService.recordStrictScoped(

@@ -202,11 +202,16 @@ administrator removes its privilege, as described in
 account holds a passkey, or no longer holds privilege, it can change its email.
 
 **Remaining residual.** This gate covers accounts that are privileged when the change is requested.
-It does not close two routes, which stay open under #1506 (Part B) and #1534:
+It does not close three routes, which stay open under #1506 (Part B) and #1534:
 
-- privilege can still be granted to an account that has never enrolled; and
+- privilege can still be granted to an account that has never enrolled;
 - a passkey enrolled before a promotion still counts after it, even if a stolen password enrolled
-  that passkey while the account was unprivileged.
+  that passkey while the account was unprivileged; and
+- an email-change link requested while the account was unprivileged can still be confirmed after a
+  promotion. Confirmation re-checks the session epoch and address uniqueness but not privilege, so
+  a stolen password can request the link to an address it controls, and the change applies if the
+  account is promoted within the link's lifetime (`CONNEX_EMAIL_CHANGE_TOKEN_EXPIRY_MINUTES`, 30
+  minutes by default).
 
 ## Break-glass recovery
 
@@ -273,6 +278,10 @@ Successful recovery locks the account and all credential rows, removes all passk
 session's recent-MFA stamp, and writes `auth.mfa.recovery.used` with the recovering user, operator,
 and credential count in the same transaction. An audit write failure rolls the removal and the
 redemption back. A failed account or operator proof writes a sanitized `auth.mfa.recovery.denied`
-event after the recovery transaction rolls back. A privileged user is immediately confined to
+event after the recovery transaction rolls back. Its reason is `token_already_redeemed` when the
+password (or fresh federated session) and the token were both valid for the account but the token
+was already spent, and `proof_rejected` for every other refusal. Only someone holding both factors
+can produce a `token_already_redeemed` event, so investigate one unless the account holder simply
+retried a completed ceremony. The client response is the same in both cases. A privileged user is immediately confined to
 enrollment after recovery. Normal passkey removal requires recent WebAuthn proof and refuses removal
 of a privileged account's last credential.

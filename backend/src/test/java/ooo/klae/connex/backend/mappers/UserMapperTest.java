@@ -28,6 +28,7 @@ class UserMapperTest extends AbstractMapperTest {
     @Autowired private RoleMapper roleMapper;
     @Autowired private OrgMemberMapper orgMemberMapper;
     @Autowired private SqlSessionTemplate sqlSession;
+    @Autowired private WebauthnCredentialMapper webauthnCredentialMapper;
 
     /**
      * Inserts a new user and checks if the generated ID is not zero.
@@ -480,6 +481,29 @@ class UserMapperTest extends AbstractMapperTest {
         assertTrue(capped.get(0).id() < capped.get(1).id());
     }
 
+    /**
+     * The assigned-role lock is where under-lock privilege re-checks start reading committed
+     * state. A promotion and an enrollment written outside MyBatis after the first reads stay
+     * invisible to this session until that lock clears its cache.
+     */
+    @Test
+    void lockingAssignedCustomRolesDiscardsPrivilegeAndPasskeyAnswersCachedBeforeIt() {
+        Workspace fresh = freshWorkspace();
+        User user = inventoryUser("hash_" + unique(), unique() + "@inventory.example.com");
+        workspaceMapper.addMember(fresh.getId(), user.getId(), "member");
+        assertFalse(userMapper.isPrivilegedAccount(user.getId()));
+        assertFalse(webauthnCredentialMapper.existsByUserId(user.getId()));
+        jdbcTemplate.update("UPDATE workspace_member SET role = 'admin' WHERE workspace_id = ? AND user_id = ?",
+                fresh.getId(), user.getId());
+        insertPasskeyRows(user);
+        assertFalse(userMapper.isPrivilegedAccount(user.getId()));
+
+        userMapper.lockAssignedCustomRoleIds(user.getId());
+
+        assertTrue(userMapper.isPrivilegedAccount(user.getId()));
+        assertTrue(webauthnCredentialMapper.existsByUserId(user.getId()));
+    }
+
     private UnenrolledPrivilegedAccount unenrolledEntry(int userId) {
         return userMapper.listUnenrolledPrivilegedAccounts(Integer.MAX_VALUE).stream()
                 .filter(account -> account.id() == userId)
@@ -515,6 +539,11 @@ class UserMapperTest extends AbstractMapperTest {
     }
 
     private void enrollPasskey(User user) {
+        insertPasskeyRows(user);
+        sqlSession.clearCache();
+    }
+
+    private void insertPasskeyRows(User user) {
         String handle = "inventory-handle-" + unique();
         jdbcTemplate.update(
                 "INSERT INTO webauthn_user_entity (id, user_id, name, display_name) VALUES (?, ?, ?, ?)",
@@ -523,7 +552,6 @@ class UserMapperTest extends AbstractMapperTest {
                 "INSERT INTO webauthn_credential (credential_id, user_entity_user_id, public_key) VALUES (?, ?, ?)",
                 ("inventory-credential-" + unique()).getBytes(StandardCharsets.UTF_8),
                 handle, new byte[] {9, 9, 9});
-        sqlSession.clearCache();
     }
 
     private User newUnassignedUser() {
