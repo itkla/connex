@@ -1056,6 +1056,72 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertIn("${GITHUB_RUN_ATTEMPT}", candidate_check["run"])
         self.assertIn("Re-run all jobs", candidate_check["run"])
 
+    def test_corrective_expiry_during_publication_preparation_denies(self) -> None:
+        import json
+        import shutil
+        from datetime import datetime, timedelta, timezone
+        import test_vulnerability_sla as fixture
+
+        case = fixture.Behavior()
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        root = case.state.parent
+        scripts = root / '.github' / 'scripts'
+        scripts.mkdir(parents=True)
+        shutil.copy(fixture.SCRIPT, scripts / fixture.SCRIPT.name)
+        (scripts / 'verify-release-preconditions.sh').write_text('exit 0\n')
+        case.env.update(CONNEX_SLA_RELEASE_TAG='v9.9.9', CONNEX_SLA_RELEASE_SHA='a'*40,
+                        GITHUB_REF_NAME='v9.9.9', GITHUB_SHA='a'*40, RELEASE_MODE='publish',
+                        VERSION='9.9.9', PUBLISH_MARKER=str(root / 'published'))
+        auth = case.corrective()
+        payload = json.loads(auth['body'][len(fixture.sla.COMMAND):])
+        expires = datetime.now(timezone.utc) + timedelta(seconds=5)
+        payload['expires_at'] = fixture.sla.iso(expires)
+        auth['body'] = fixture.sla.COMMAND + json.dumps(payload)
+        case.env['TEST_EXPIRY'] = payload['expires_at']
+        case.save(alerts=[], issues=[case.tracker()], comments=[fixture.acknowledgement(), auth],
+                  calls=[], closed_alert=dict(fixture.ALERT, state='fixed', fixed_at='2026-09-07T00:00:00Z'))
+        initial = case.execute('preflight')
+        self.assertEqual(initial.returncode, 0, initial.stdout + initial.stderr)
+        self.assertIn('ALLOWED corrective', initial.stdout)
+        publish = self.named_step('release', 'Publish the complete verified release atomically')
+        script = publish['run'].replace('/tmp/', str(root) + '/')
+        assets = ('release-manifest.json', 'release-manifest.bundle.json',
+                  'sbom-backend.spdx.json', 'sbom-frontend.spdx.json', 'sbom-ocr.spdx.json',
+                  'sbom-clamav.spdx.json', 'business-card-benchmark.json',
+                  'business-card-benchmark-fixtures.tar', 'connex-9.9.9-deploy.tar')
+        for asset in assets:
+            (root / asset).write_text('verified fixture ' + asset)
+        stubs = r'''gh() {
+          case "$1 $2" in
+            "release view")
+              if [[ "$*" == *isDraft* ]]; then
+                printf '{"isDraft":true,"isPrerelease":false}\n'
+              else
+                printf '%s\n' "${assets[@]}"
+              fi ;;
+            "release upload")
+              python3 -c 'import os,time; from datetime import datetime,timezone; time.sleep(max(0, (datetime.fromisoformat(os.environ["TEST_EXPIRY"].replace("Z", "+00:00"))-datetime.now(timezone.utc)).total_seconds())+0.1)'
+              echo 'ASSET PREPARATION CROSSED EXPIRY' ;;
+            "release download") cp "${assets[@]}" "$5/" ;;
+            "release edit") touch "$PUBLISH_MARKER" ;;
+            "release verify") return 0 ;;
+            *) return 99 ;;
+          esac
+        }
+'''
+        result = subprocess.run(['bash', '-euo', 'pipefail', '-c', stubs + script],
+                                cwd=root, env=case.env, text=True, capture_output=True)
+        print(f'PUBLICATION initial_exit={initial.returncode} final_exit={result.returncode} '
+              f'published={(root / "published").exists()}\n' + result.stdout + result.stderr)
+        self.assertIn('ASSET PREPARATION CROSSED EXPIRY', result.stdout)
+        self.assertFalse((root / 'published').exists(), result.stdout + result.stderr)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('DENIED release preflight', result.stdout)
+        for name in ('CONNEX_SLA_READ_TOKEN', 'CONNEX_SLA_RELEASE_TAG', 'CONNEX_SLA_RELEASE_SHA'):
+            gate = self.named_step('release', 'Enforce vulnerability custody and remediation SLA')
+            self.assertEqual(publish['env'][name], gate['env'][name])
+
     def test_promotion_reresolves_transaction_for_failed_job_retries(self) -> None:
         resolver = self.named_step("promote", "Resolve the committed release transaction")
         promote_download = next(

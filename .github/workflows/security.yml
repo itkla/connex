@@ -70,6 +70,8 @@ jobs:
         run: python .github/scripts/test_action_pins.py
       - name: Regression-test CI change classification
         run: python .github/scripts/test_ci_change_classification.py
+      - name: Regression-test vulnerability SLA enforcement
+        run: python3 .github/scripts/test_vulnerability_sla.py
       - name: Regression-test CodeQL alert gate
         run: python .github/scripts/test_codeql_alerts.py
       - name: Regression-test CodeQL dismissal replay
