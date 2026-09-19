@@ -13,6 +13,15 @@ import UnsubscribeEntry from "@/app/components/marketing/campaigns/UnsubscribeEn
 import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
 import InviteLinkPage from "@/app/invite-link/page";
 import InvitePage from "@/app/invite/page";
+import {
+    exchangeEmailChangeToken,
+    exchangeEmailVerificationToken,
+    exchangePasswordResetToken,
+    validateEmailChangeToken,
+    validateEmailVerificationToken,
+    validateResetToken,
+} from "@/app/lib/api";
+import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
 import enAuth from "@/messages/en/auth.json";
 import enErrors from "@/messages/en/errors.json";
 import enUnsubscribe from "@/messages/en/unsubscribe.json";
@@ -42,7 +51,7 @@ vi.mock("@/app/lib/api", async (importOriginal) => {
 });
 
 vi.mock("@/app/lib/oneTimeLink", () => ({
-    takeOneTimeLinkToken: () => null,
+    takeOneTimeLinkToken: vi.fn(() => null),
 }));
 
 vi.mock("@/app/components/auth/AuthBrandPanel", () => ({
@@ -60,9 +69,10 @@ afterEach(() => {
     vi.clearAllMocks();
 });
 
-function stubReload(): ReturnType<typeof vi.fn> {
+function stubLocation(): { reload: ReturnType<typeof vi.fn>; replace: ReturnType<typeof vi.fn> } {
     const real = window.location;
     const reload = vi.fn();
+    const replace = vi.fn();
     Object.defineProperty(window, "location", {
         configurable: true,
         value: {
@@ -72,7 +82,7 @@ function stubReload(): ReturnType<typeof vi.fn> {
             get search() { return real.search; },
             get hash() { return real.hash; },
             set hash(value: string) { real.hash = value; },
-            replace: vi.fn(),
+            replace,
             reload,
         },
     });
@@ -80,7 +90,7 @@ function stubReload(): ReturnType<typeof vi.fn> {
         configurable: true,
         value: real,
     });
-    return reload;
+    return { reload, replace };
 }
 
 async function mount(Entry: ComponentType): Promise<Root> {
@@ -132,7 +142,7 @@ async function settleQueuedEvents() {
 
 describe("useReloadOnFragmentNavigation", () => {
     it("reloads once per fragment navigation and stops listening after unmount", async () => {
-        const reload = stubReload();
+        const { reload } = stubLocation();
         const root = await mount(FragmentProbe);
         expect(reload).not.toHaveBeenCalled();
 
@@ -149,7 +159,7 @@ describe("useReloadOnFragmentNavigation", () => {
             "@/app/lib/oneTimeLink",
         );
         window.history.replaceState({}, "", "/auth/reset-password#token=first-link");
-        const reload = stubReload();
+        const { reload } = stubLocation();
         const hashChanges = vi.fn();
         window.addEventListener("hashchange", hashChanges);
         const onToken = vi.fn();
@@ -182,12 +192,50 @@ describe.each([
 ])("one-time-link entry at $path", ({ path, Entry }) => {
     it("re-opens a second emailed link that lands in the same tab", async () => {
         window.history.replaceState({}, "", path);
-        const reload = stubReload();
+        const { reload } = stubLocation();
         const root = await mount(Entry);
         expect(reload).not.toHaveBeenCalled();
 
         await navigateFragment(path, "second-link");
         expect(reload).toHaveBeenCalledTimes(1);
+
+        await act(async () => root.unmount());
+    });
+});
+
+describe.each([
+    {
+        path: "/auth/reset-password",
+        Entry: ResetPasswordForm,
+        exchange: exchangePasswordResetToken,
+        validate: validateResetToken,
+    },
+    {
+        path: "/auth/verify-email",
+        Entry: VerifyEmailForm,
+        exchange: exchangeEmailChangeToken,
+        validate: validateEmailChangeToken,
+    },
+    {
+        path: "/auth/confirm-email",
+        Entry: ConfirmEmailForm,
+        exchange: exchangeEmailVerificationToken,
+        validate: validateEmailVerificationToken,
+    },
+])("auth entry at $path after a successful exchange", ({ path, Entry, exchange, validate }) => {
+    it("stays on its validating state while the replacing navigation loads", async () => {
+        window.history.replaceState({}, "", path);
+        const { replace } = stubLocation();
+        vi.mocked(takeOneTimeLinkToken).mockReturnValueOnce("first-link");
+        vi.mocked(exchange).mockResolvedValueOnce(undefined);
+
+        const root = await mount(Entry);
+        await settleQueuedEvents();
+
+        expect(exchange).toHaveBeenCalledWith("first-link");
+        expect(replace).toHaveBeenCalledWith(path);
+        expect(validate).not.toHaveBeenCalled();
+        expect(document.body.querySelector("h1")).toBeNull();
 
         await act(async () => root.unmount());
     });

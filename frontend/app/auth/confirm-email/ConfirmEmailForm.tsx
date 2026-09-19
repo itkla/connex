@@ -40,24 +40,24 @@ export function ConfirmEmailForm() {
 
     useEffect(() => {
         let active = true;
-        const token = takeOneTimeLinkToken();
-        const establishFlow = token
-            ? exchangeEmailVerificationToken(token).then(() => {
+        const establish = async () => {
+            const token = takeOneTimeLinkToken();
+            if (token) {
+                await exchangeEmailVerificationToken(token);
                 window.location.replace("/auth/confirm-email");
-                return { valid: true };
-            })
-            : validateEmailVerificationToken();
-        establishFlow
-            .then((result) => {
-                if (active) {
-                    setStatus(result.valid ? "ready" : "invalid");
-                }
-            })
-            .catch(() => {
-                if (active) {
-                    setStatus("invalid");
-                }
-            });
+                return;
+            }
+            const result = await validateEmailVerificationToken();
+            if (active) {
+                setStatus(result.valid ? "ready" : "invalid");
+            }
+        };
+
+        establish().catch(() => {
+            if (active) {
+                setStatus("invalid");
+            }
+        });
         return () => {
             active = false;
         };
