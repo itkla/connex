@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -158,6 +159,39 @@ public class AiProperties {
 
     /** Recommended client poll cadence and abandoned-handle cleanup cadence. */
     private Duration generationPollInterval = Duration.ofSeconds(2);
+
+    /** Lifetime of one run lease, applied by the database on every acquire and renewal. */
+    private Duration runLeaseTtl = Duration.ofSeconds(45);
+
+    /** Interval between run-lease renewals; three beats per lifetime tolerates two misses. */
+    private Duration runLeaseHeartbeatInterval = Duration.ofSeconds(15);
+
+    /** Fixed heartbeat thread count; must cover the generation worker count. */
+    private int runLeaseHeartbeatThreads = 4;
+
+    /** Whether this instance sweeps expired run leases. */
+    private boolean runLeaseSweepEnabled = true;
+
+    /** Delay between run-lease sweep passes. */
+    private Duration runLeaseSweepDelay = Duration.ofSeconds(30);
+
+    /** Delay before this instance's first run-lease sweep pass. */
+    private Duration runLeaseSweepInitialDelay = Duration.ofSeconds(60);
+
+    /** Maximum workspaces one run-lease sweep pass visits per catalog. */
+    private int runLeaseSweepMaxWorkspaces = 50;
+
+    /** Maximum expired leases one run-lease sweep pass reads per workspace. */
+    private int runLeaseSweepBatch = 50;
+
+    /** Maximum orphan settlements one run-lease sweep pass performs. */
+    private int runLeaseSweepMaxSettlements = 200;
+
+    /** Lifetime of the lease a settler takes an orphaned run over with. */
+    private Duration runLeaseSettlementTtl = Duration.ofSeconds(30);
+
+    /** How long a released run lease is retained before the reap pass deletes it. */
+    private Duration runLeaseTombstoneRetention = Duration.ofHours(1);
 
     /**
      * Deployment patches applied over {@link ooo.klae.connex.backend.ai.provider.AiModelCatalog}
@@ -320,5 +354,36 @@ public class AiProperties {
     public boolean isFeatureEnabled(AiFeature feature) {
         return enabled && feature != null
                 && (features == null || !Boolean.FALSE.equals(features.get(feature)));
+    }
+
+    /**
+     * Refuses a run-lease configuration in which the mechanism could not hold its own guarantees.
+     *
+     * <p>Each rule closes a concrete failure rather than expressing a preference. A heartbeat
+     * interval above half the lease lifetime means one missed beat expires a live lease. Fewer
+     * heartbeat threads than generation workers means one slow renewal head-of-line-blocks another
+     * run's tick until its lease expires under it. A lease lifetime at or above the generation
+     * lifetime means a dead owner is never detected before the generation gives up anyway. A
+     * tombstone retention at or below the generation lifetime means a released lease can be deleted
+     * while its former owner could still be acting, which would restart the fencing epoch at 1.
+     */
+    @PostConstruct
+    void validateRunLeaseTimings() {
+        if (runLeaseHeartbeatInterval.multipliedBy(2).compareTo(runLeaseTtl) > 0) {
+            throw new IllegalArgumentException(
+                    "connex.ai.run-lease-heartbeat-interval must not exceed half of run-lease-ttl");
+        }
+        if (runLeaseHeartbeatThreads < generationWorkerThreads) {
+            throw new IllegalArgumentException(
+                    "connex.ai.run-lease-heartbeat-threads must cover generation-worker-threads");
+        }
+        if (runLeaseTtl.compareTo(generationMaxLifetime) >= 0) {
+            throw new IllegalArgumentException(
+                    "connex.ai.run-lease-ttl must be shorter than generation-max-lifetime");
+        }
+        if (runLeaseTombstoneRetention.compareTo(generationMaxLifetime) <= 0) {
+            throw new IllegalArgumentException(
+                    "connex.ai.run-lease-tombstone-retention must exceed generation-max-lifetime");
+        }
     }
 }
