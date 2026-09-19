@@ -3,9 +3,15 @@ package ooo.klae.connex.backend.integration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.net.CookieManager;
@@ -15,6 +21,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -27,6 +34,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpSession;
@@ -36,21 +44,27 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.context.transaction.TestTransaction;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
+import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.CsrfBootstrapDto;
+import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.AttachmentScanMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.ObjectMapper;
 
@@ -62,6 +76,9 @@ import tools.jackson.databind.ObjectMapper;
 class AttachmentQuarantineIntegrationTest {
     private static final String PASSWORD = "Quarantine-Fixture-Pw1!";
     private static final List<String> ACTIONS = List.of("quarantine", "rescan", "release", "delete");
+    private static final List<String> DENIED_STATES = List.of("quarantined", "infected", "unscannable");
+    private static final String QUARANTINE_REQUIRED =
+        "Requires the ATTACHMENT_QUARANTINE_MANAGE permission in this workspace";
 
     @Autowired private WebApplicationContext context;
     @Autowired @Qualifier("springSecurityFilterChain") private Filter securityFilter;
@@ -70,6 +87,9 @@ class AttachmentQuarantineIntegrationTest {
     @Autowired private OrganizationMapper organizationMapper;
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private UserMapper userMapper;
+    @Autowired private RoleMapper roleMapper;
+    @Autowired private AiChatMapper chatMapper;
+    @MockitoSpyBean private AuditService auditService;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private TenantContext tenantContext;
@@ -283,6 +303,169 @@ class AttachmentQuarantineIntegrationTest {
         }
     }
 
+    @Test
+    void ordinaryDeletionOfDeniedAttachmentRequiresQuarantineAuthority() throws Exception {
+        Workspace workspace = workspace(organization());
+        MockHttpSession memberSession = login(member(workspace, "member"));
+
+        for (String state : DENIED_STATES) {
+            Attachment attachment = attachment(workspace);
+            scanState(attachment, state);
+            mockMvc.perform(deleteAttachment(attachment, memberSession, attachment.getWorkspaceId()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value(QUARANTINE_REQUIRED));
+            assertEquals(state, scanMapper.getById(workspace.getId(), attachment.getId()).getScanState());
+            assertEquals(0, attachmentAuditCount(attachment, "%"));
+        }
+        assertEquals(0, deletionQueueCount(workspace));
+    }
+
+    @Test
+    void assistantDeletionOfDeniedAttachmentRequiresQuarantineAuthority() throws Exception {
+        Workspace workspace = workspace(organization());
+        User assistantUser = customRoleMember(workspace, List.of("AI_USE", "ATTACHMENT_DELETE"));
+        AiChatSession chat = chatSession(workspace, assistantUser);
+        MockHttpSession memberSession = login(assistantUser);
+        Attachment pending = assistantAttachment(workspace, chat);
+        mockMvc.perform(deleteAssistantAttachment(chat, pending, memberSession, pending.getWorkspaceId()))
+            .andExpect(status().isNoContent());
+        assertNull(scanMapper.getById(workspace.getId(), pending.getId()));
+        assertEquals(1, attachmentAuditCount(pending, "attachment.delete"));
+        assertEquals(0, attachmentAuditCount(pending, "malware.%"));
+        int queuedBeforeRefusals = deletionQueueCount(workspace);
+
+        for (String state : DENIED_STATES) {
+            Attachment attachment = assistantAttachment(workspace, chat);
+            scanState(attachment, state);
+            mockMvc.perform(deleteAssistantAttachment(
+                    chat, attachment, memberSession, attachment.getWorkspaceId()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value(QUARANTINE_REQUIRED));
+            assertEquals(state, scanMapper.getById(workspace.getId(), attachment.getId()).getScanState());
+            assertEquals(0, attachmentAuditCount(attachment, "%"));
+        }
+        assertEquals(queuedBeforeRefusals, deletionQueueCount(workspace));
+    }
+
+    @Test
+    void preVerdictManagedAndExternalAttachmentsRemainDeletableByMembers() throws Exception {
+        Workspace workspace = workspace(organization());
+        MockHttpSession memberSession = login(member(workspace, "member"));
+        Attachment external = attachment(workspace);
+        jdbc.update("UPDATE attachment SET url = ? WHERE id = ?",
+            "https://external.example/" + UUID.randomUUID() + ".txt", external.getId());
+        List<Attachment> deletable = new ArrayList<>(List.of(external));
+        for (String state : List.of("pending", "scanning", "error", "clean")) {
+            Attachment attachment = attachment(workspace);
+            scanState(attachment, state);
+            deletable.add(attachment);
+        }
+
+        for (Attachment attachment : deletable) {
+            mockMvc.perform(deleteAttachment(attachment, memberSession, attachment.getWorkspaceId()))
+                .andExpect(status().isOk());
+            assertNull(scanMapper.getById(workspace.getId(), attachment.getId()));
+            assertEquals(1, attachmentAuditCount(attachment, "attachment.delete"));
+            assertEquals(0, attachmentAuditCount(attachment, "malware.%"));
+        }
+    }
+
+    @Test
+    void administratorDeletesDeniedAttachmentsOnBothRoutesThroughStrictQuarantineAudit() throws Exception {
+        Workspace workspace = workspace(organization());
+        User admin = member(workspace, "admin");
+        AiChatSession chat = chatSession(workspace, admin);
+        Attachment generic = attachment(workspace);
+        scanState(generic, "infected");
+        Attachment assistant = assistantAttachment(workspace, chat);
+        scanState(assistant, "unscannable");
+        MockHttpSession session = login(admin);
+
+        mockMvc.perform(deleteAttachment(generic, session, generic.getWorkspaceId()))
+            .andExpect(status().isOk());
+        mockMvc.perform(deleteAssistantAttachment(chat, assistant, session, assistant.getWorkspaceId()))
+            .andExpect(status().isNoContent());
+
+        for (Attachment attachment : List.of(generic, assistant)) {
+            assertNull(scanMapper.getById(workspace.getId(), attachment.getId()));
+            assertEquals(1, attachmentAuditCount(attachment, "malware.quarantine_deleted"));
+            assertEquals(0, attachmentAuditCount(attachment, "attachment.delete"));
+            verify(auditService).recordStrict(eq("malware.quarantine_deleted"), eq("attachment"),
+                eq(attachment.getId()), any(), any(), any());
+        }
+        assertEquals(2, deletionQueueCount(workspace));
+    }
+
+    @Test
+    void foreignWorkspaceCallersCannotDeleteDeniedAttachmentsOnEitherRoute() throws Exception {
+        Organization organization = organization();
+        Workspace owning = workspace(organization);
+        AiChatSession chat = chatSession(owning, member(owning, "admin"));
+        Attachment generic = attachment(owning);
+        scanState(generic, "quarantined");
+        Attachment assistant = assistantAttachment(owning, chat);
+        scanState(assistant, "quarantined");
+
+        for (Workspace callerWorkspace : List.of(workspace(organization), workspace(organization()))) {
+            MockHttpSession session = login(member(callerWorkspace, "admin"));
+            mockMvc.perform(deleteAttachment(generic, session, callerWorkspace.getId()))
+                .andExpect(status().isNotFound());
+            mockMvc.perform(deleteAssistantAttachment(chat, assistant, session, callerWorkspace.getId()))
+                .andExpect(status().isNotFound());
+            mockMvc.perform(deleteAttachment(generic, session, owning.getId()))
+                .andExpect(status().isForbidden());
+            mockMvc.perform(deleteAssistantAttachment(chat, assistant, session, owning.getId()))
+                .andExpect(status().isForbidden());
+        }
+
+        for (Attachment attachment : List.of(generic, assistant)) {
+            assertEquals("quarantined", scanMapper.getById(owning.getId(), attachment.getId()).getScanState());
+            assertEquals(0, attachmentAuditCount(attachment, "%"));
+        }
+        assertEquals(0, deletionQueueCount(owning));
+    }
+
+    @Test
+    void failedStrictAuditRollsBackDeniedDeletionAndQueuedBytesOnBothRoutes() throws Exception {
+        Organization organization = organization();
+        Workspace workspace = workspace(organization);
+        User admin = member(workspace, "admin");
+        AiChatSession chat = chatSession(workspace, admin);
+        Attachment generic = attachment(workspace);
+        scanState(generic, "quarantined");
+        Attachment assistant = assistantAttachment(workspace, chat);
+        scanState(assistant, "infected");
+        TestTransaction.flagForCommit();
+        TestTransaction.end();
+        doThrow(new DataAccessResourceFailureException("audit append failed")).when(auditService)
+            .recordStrict(eq("malware.quarantine_deleted"), any(), any(), any(), any(), any());
+
+        try {
+            MockHttpSession session = login(admin);
+            mockMvc.perform(deleteAttachment(generic, session, generic.getWorkspaceId()))
+                .andExpect(status().isInternalServerError());
+            mockMvc.perform(deleteAssistantAttachment(chat, assistant, session, assistant.getWorkspaceId()))
+                .andExpect(status().isInternalServerError());
+
+            verify(auditService, times(2)).recordStrict(eq("malware.quarantine_deleted"),
+                any(), any(), any(), any(), any());
+            assertEquals("quarantined", scanMapper.getById(workspace.getId(), generic.getId()).getScanState());
+            assertEquals("infected", scanMapper.getById(workspace.getId(), assistant.getId()).getScanState());
+            assertEquals(0, attachmentAuditCount(generic, "%"));
+            assertEquals(0, attachmentAuditCount(assistant, "%"));
+            assertEquals(0, deletionQueueCount(workspace));
+        } finally {
+            clearContext();
+            jdbc.update("DELETE FROM object_deletion_queue WHERE workspace_id = ?", workspace.getId());
+            jdbc.update("DELETE FROM attachment WHERE workspace_id = ?", workspace.getId());
+            jdbc.update("DELETE FROM ai_chat_session WHERE workspace_id = ?", workspace.getId());
+            jdbc.update("DELETE FROM workspace_member WHERE workspace_id = ?", workspace.getId());
+            jdbc.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
+            jdbc.update("DELETE FROM app_user WHERE id = ?", admin.getId());
+            jdbc.update("DELETE FROM organization WHERE id = ?", organization.getId());
+        }
+    }
+
     private HttpClient httpClient() {
         return HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5))
             .cookieHandler(new CookieManager(null, CookiePolicy.ACCEPT_ALL)).build();
@@ -321,6 +504,76 @@ class AttachmentQuarantineIntegrationTest {
         return "delete".equals(action)
             ? delete("/api/attachments/{id}/quarantine", id)
             : post("/api/attachments/{id}/{action}", id, action);
+    }
+
+    private MockHttpServletRequestBuilder deleteAttachment(
+            Attachment attachment, MockHttpSession session, int workspaceId) {
+        return delete("/api/attachments/{id}", attachment.getId())
+            .session(session).with(csrf().asHeader()).header("X-Workspace-Id", workspaceId);
+    }
+
+    private MockHttpServletRequestBuilder deleteAssistantAttachment(
+            AiChatSession chat, Attachment attachment, MockHttpSession session, int workspaceId) {
+        return delete("/api/ai/assistant/sessions/{sessionId}/attachments/{attachmentId}",
+                chat.getId(), attachment.getId())
+            .session(session).with(csrf().asHeader()).header("X-Workspace-Id", workspaceId);
+    }
+
+    private void scanState(Attachment attachment, String state) {
+        assertEquals(1, jdbc.update("UPDATE attachment SET scan_state = ? WHERE id = ?",
+            state, attachment.getId()));
+    }
+
+    private int attachmentAuditCount(Attachment attachment, String actionPattern) {
+        Integer count = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND entity_type = 'attachment'"
+                + " AND entity_id = ? AND action LIKE ?",
+            Integer.class, attachment.getWorkspaceId(), attachment.getId(), actionPattern);
+        assertNotNull(count);
+        return count;
+    }
+
+    private int deletionQueueCount(Workspace workspace) {
+        Integer count = jdbc.queryForObject(
+            "SELECT COUNT(*) FROM object_deletion_queue WHERE workspace_id = ?",
+            Integer.class, workspace.getId());
+        assertNotNull(count);
+        return count;
+    }
+
+    private User customRoleMember(Workspace workspace, List<String> permissions) {
+        User user = member(workspace, "member");
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(workspace.getId());
+        role.setName("Quarantine assistant " + unique());
+        roleMapper.insertRole(role);
+        roleMapper.insertPermissions(workspace.getId(), role.getId(), permissions);
+        workspaceMapper.setMemberCustomRole(workspace.getId(), user.getId(), role.getId());
+        return user;
+    }
+
+    private AiChatSession chatSession(Workspace workspace, User owner) {
+        AiChatSession chat = new AiChatSession();
+        chat.setWorkspaceId(workspace.getId());
+        chat.setCreatedByUserId(owner.getId());
+        chat.setTitle("Quarantine assistant");
+        chat.setVisibility("private");
+        chat.setStatus("active");
+        chatMapper.insertSession(chat);
+        return chat;
+    }
+
+    private Attachment assistantAttachment(Workspace workspace, AiChatSession chat) {
+        Attachment attachment = new Attachment();
+        attachment.setWorkspaceId(workspace.getId());
+        attachment.setEntityType("ai_chat_session");
+        attachment.setEntityId(chat.getId());
+        attachment.setFileName("assistant.txt");
+        attachment.setUrl("/api/attachments/content/" + UUID.randomUUID() + ".txt");
+        attachment.setContentType("text/plain");
+        attachment.setSize(3L);
+        attachmentMapper.insert(attachment);
+        return attachment;
     }
 
     private int eventCount(Attachment attachment) {
