@@ -170,25 +170,43 @@ replacement enrollment after recovery is never blocked on email. This holds whet
 account had a credential to recover: removing nothing is a legitimate outcome of the ceremony, so it
 also bootstraps an account that has never enrolled.
 
-### Known residual
-
-**This control depends on `CONNEX_PRIVILEGED_MFA_ENFORCED=true` to hold.**
+### Email change on a privileged account
 
 The confirmation is delivered to the account's own email address, so the control is only as strong
-as that address. `POST /api/users/me/email-change` re-points the address behind the current
-password alone — no step-up, no notice to the old address — and sends its verification link to the
-*new* address. Confinement is what makes that endpoint unreachable for an unenrolled privileged
-account.
+as that address. `POST /api/users/me/email-change` therefore requires more than the current
+password when the account is privileged. The request is refused unless the account holds a passkey
+and the session carries a fresh WebAuthn step-up:
 
-With `CONNEX_PRIVILEGED_MFA_ENFORCED=false` the confinement filter short-circuits, so an attacker
-holding a stolen password can change the account email to one they control, request the enrollment
-confirmation, redeem it in their own session, and enrol their own passkey. In that configuration
-issue #1506 is **not** mitigated. Under the default enforced posture the pivot is closed.
+- **No passkey:** the request fails with `400 PASSKEY_ENROLLMENT_REQUIRED`.
+- **Passkey but no fresh step-up:** the request fails with `403 RECENT_AUTHENTICATION_REQUIRED`.
+  The web client runs the passkey step-up and retries automatically.
 
-Fixing this properly means requiring a stronger proof for an email change on a privileged account,
-which is deliberately out of scope for this mitigation because it changes an unrelated user-facing
-flow. It is subsumed by the durable fix that makes privilege unobtainable until enrollment
-completes.
+Both refusals are audited as `auth.email_change.refused`, with the reason
+`privileged_mfa_enrollment_required` or `recent_authentication_required`. Unprivileged accounts
+change their email with the current password alone, as before.
+
+The gate is independent of `CONNEX_PRIVILEGED_MFA_ENFORCED`. With enforcement on, confinement
+already refuses the endpoint for an unenrolled privileged account. With enforcement off, this gate
+is what stops an attacker who holds a stolen password from re-pointing the address. Without it, the
+attacker could receive the enrollment confirmation and enroll their own passkey. Only a WebAuthn
+ceremony writes the step-up stamp, so a password, OIDC, SAML, or social sign-in never satisfies it.
+Privilege is read again under the account lock, after the account's assigned custom roles are
+locked, so a promotion that commits while the request waits is also refused.
+
+**Lockout path.** A privileged account that has never enrolled cannot change its email until it
+holds a passkey. This applies even when `CONNEX_PRIVILEGED_MFA_ENFORCED=false`. The account first
+enrolls through the emailed confirmation sent to its current address. When that address is
+unreachable, the account uses [break-glass recovery](#break-glass-recovery) instead, or another
+administrator removes its privilege, as described in
+[If the confirmation cannot be completed](#if-the-confirmation-cannot-be-completed). Once the
+account holds a passkey, or no longer holds privilege, it can change its email.
+
+**Remaining residual.** This gate covers accounts that are privileged when the change is requested.
+It does not close two routes, which stay open under #1506 (Part B) and #1534:
+
+- privilege can still be granted to an account that has never enrolled; and
+- a passkey enrolled before a promotion still counts after it, even if a stolen password enrolled
+  that passkey while the account was unprivileged.
 
 ## Break-glass recovery
 

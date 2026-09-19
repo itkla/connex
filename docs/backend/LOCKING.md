@@ -768,6 +768,12 @@ account root.
 - `EmailChangeService.requestChange` proves the current password through the shared throttled
   confirmation, then re-reads the account under the exclusive root and refuses when the password
   hash or `session_epoch` moved since the proof.
+- `EmailChangeService.requestChange` also gates privileged accounts on an enrolled passkey and a
+  fresh WebAuthn step-up (#1506). It evaluates the gate first before taking the account root and
+  audits a refusal there. Under the root, after the `session_epoch` check, it locks the account's
+  assigned custom roles `FOR SHARE` through `lockAssignedCustomRoleIds`, as
+  `PasswordResetService` and `WebAuthnService.finishRegistration` do, and evaluates the gate again
+  against committed state. A refusal that appears only under the root is not audited (see below).
 
 The audit head sits below `app_user` in this order, and an independent audit append re-acquires the
 actor's `app_user` row shared. `AuthService.requireCurrentPassword` therefore writes no audit of its
@@ -775,6 +781,9 @@ own: `MfaRecoveryService.recover` calls it while holding that row exclusively, s
 would wait on the caller's own lock until the InnoDB timeout, lose the event, and pin a second
 pooled connection. Callers that are not already holding the account root —
 `EmailChangeService.requestChange` — record the confirmation outcome themselves, before acquiring it.
+The same rule places the `auth.email_change.refused` audit ahead of `lockById`. The under-lock
+re-check of the privileged gate throws without auditing, because any append there would block on
+the request's own exclusive lock.
 
 ## Connected-provider credentials
 
