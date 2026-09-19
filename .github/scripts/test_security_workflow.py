@@ -125,10 +125,18 @@ class SecurityWorkflowTest(unittest.TestCase):
         runs = [step.get("run", "") for step in self.steps("action-pins")]
         self.assertIn("python .github/scripts/check-doc-placeholders.py", runs)
         self.assertIn("python .github/scripts/test_doc_placeholders.py", runs)
+
     def test_the_pnpm_supply_chain_policy_is_checked_before_any_frontend_install(self) -> None:
-        runs = [step.get("run", "") for step in self.steps("frontend-audit")]
+        steps = self.steps("frontend-audit")
+        runs = [step.get("run", "") for step in steps]
+        uses = [str(step.get("uses", "")) for step in steps]
         guard = runs.index("python3 .github/scripts/check-pnpm-supply-chain-policy.py")
-        self.assertLess(guard, runs.index("pnpm install --frozen-lockfile --ignore-scripts"))
+        resolved = runs.index("python3 .github/scripts/check-pnpm-supply-chain-policy.py --effective")
+        install = runs.index("pnpm install --frozen-lockfile --ignore-scripts")
+        pnpm_setup = next(index for index, action in enumerate(uses) if action.startswith("pnpm/action-setup@"))
+        self.assertLess(guard, install)
+        self.assertLess(pnpm_setup, resolved)
+        self.assertLess(resolved, install)
         pin_runs = [step.get("run", "") for step in self.steps("action-pins")]
         self.assertIn("python .github/scripts/test_pnpm_supply_chain_policy.py", pin_runs)
 

@@ -77,11 +77,19 @@ class CiChangeClassificationTest(unittest.TestCase):
         self.assertTrue(categories["frontend_audit"])
         self.assertFalse(categories["backend"])
 
-    def test_every_pnpm_workspace_policy_file_adds_the_audit(self) -> None:
+    def test_every_file_that_configures_a_pnpm_workspace_adds_the_audit(self) -> None:
         for path in (
             "frontend/pnpm-workspace.yaml",
+            "frontend/.pnpmfile.cjs",
+            "frontend/.pnpmfile.mjs",
             "frontend/emails/pnpm-workspace.yaml",
+            "frontend/emails/.pnpmfile.cjs",
+            "frontend/emails/.pnpmfile.mjs",
+            "frontend/emails/.npmrc",
+            "frontend/emails/package.json",
             "landing/pnpm-workspace.yaml",
+            "landing/.pnpmfile.cjs",
+            "landing/.pnpmfile.mjs",
         ):
             with self.subTest(path=path):
                 self.assertTrue(self.classify(path)["frontend_audit"])

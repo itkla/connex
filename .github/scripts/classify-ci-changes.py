@@ -48,8 +48,14 @@ DOCUMENTATION_BASENAMES = {
 
 FRONTEND_DEPENDENCY_FILES = {
     "frontend/.npmrc",
+    "frontend/.pnpmfile.cjs",
+    "frontend/.pnpmfile.mjs",
     "frontend/bun.lock",
     "frontend/bun.lockb",
+    "frontend/emails/.npmrc",
+    "frontend/emails/.pnpmfile.cjs",
+    "frontend/emails/.pnpmfile.mjs",
+    "frontend/emails/package.json",
     "frontend/emails/pnpm-workspace.yaml",
     "frontend/npm-shrinkwrap.json",
     "frontend/package-lock.json",

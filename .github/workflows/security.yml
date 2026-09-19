@@ -158,6 +158,10 @@ jobs:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
+      # A pnpmfile updateConfig hook or a YAML construct the line reader misreads changes what pnpm
+      # resolves without changing what the guard reads, so ask pnpm itself before installing.
+      - name: Require pnpm's resolved configuration to hold the policy
+        run: python3 .github/scripts/check-pnpm-supply-chain-policy.py --effective
       - name: Install
         working-directory: frontend
         run: pnpm install --frozen-lockfile --ignore-scripts
