@@ -662,8 +662,12 @@ the triggered expired-claim sweep. It never runs inside the reservation transact
 workspace root, and adds no lock edge. Send status is not filtered, because a completed, paused, or
 cancelled send can own the stranded row; scheduler discovery includes workspaces whose only work is
 such a row. A slow but live worker that writes after the sweep loses its `status = 'dispatching'`
-compare-and-set and leaves the row reconcilable. Audience rows stranded before any reservation, and
-rows without a person (which are never reserved), have no age anchor and are not swept.
+compare-and-set and leaves the row reconcilable. That refused write is the only one that stores
+`provider_message_id`, and neither reconciliation outcome stores it, so provider bounce and complaint
+webhooks for the message match no row and record no suppression or consent revocation; operators
+apply those by hand (`docs/DELIVERABILITY.md` §3.1). An expired triggered claim marked ambiguous has
+the same gap. Audience rows stranded before any reservation, and rows without a person (which are
+never reserved), have no age anchor and are not swept.
 
 Operator reconciliation takes locked membership permission roots first and requires both
 `CAMPAIGN_MANAGE` and `CONSENT_MANAGE`, then locks campaign, send, and delivery in that

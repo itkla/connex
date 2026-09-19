@@ -325,6 +325,13 @@ worker that died mid-send — surfaces as a `deadline_ambiguous` reconciliation 
 deadline and the delivery lease safety margin (30 seconds by default) have both elapsed since the
 attempt reserved the window. Until then, and afterwards unless an operator confirms
 `not_delivered`, the contact stays frequency-capped on that channel for the rest of the window.
+A worker that is only slow can lose the same race: if the provider accepts the message but the
+worker has not recorded the result by the time the same deadline and margin have elapsed, its late
+write is refused. The row then keeps no provider message ID, and neither reconciliation outcome adds
+one, so the provider's bounce and complaint webhooks for that message match no delivery and record no
+suppression and no consent revocation. Before resolving such an item, check the provider's bounce
+and complaint records for that recipient and add any suppression by hand (`POST /api/suppressions`).
+An expired triggered claim marked for reconciliation has the same gap.
 Generic HTTP ESP/SMS connectors default
 `idempotentSubmission` to false. A workspace administrator may enable it only after verifying that
 the configured endpoint guarantees repeated requests carrying the same `Idempotency-Key` deliver no
