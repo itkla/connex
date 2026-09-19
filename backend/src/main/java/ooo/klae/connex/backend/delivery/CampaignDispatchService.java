@@ -210,21 +210,22 @@ public class CampaignDispatchService {
     }
 
     /**
-     * Refreshes the counters of a send found by the recovery sweep and completes it only when it is a
-     * running audience send with no pending or dispatching delivery left. The sweep can run beside a
-     * live worker whose unleased attempt is still in flight; that worker's own {@link #settle} completes
-     * the send after its terminal write, an attempt it abandons after reserving is marked and settled
-     * by a later sweep, and one abandoned before reserving is left to the dispatch loop's
-     * {@link #settle}. No pending delivery is ever added to a running audience send, so the count cannot
-     * go stale before the completion compare-and-set. It needs no provider, so a send whose remaining
-     * work was recovered settles even while its provider is unusable.
+     * Settles a send found by the recovery sweep: it completes a running audience send with no pending
+     * or dispatching delivery left, then refreshes that send's counters. One compare-and-set proves the
+     * absence of outstanding work and completes the send, so a live worker's terminal write cannot land
+     * between the proof and the completion, and the refresh that follows a completion reads every
+     * delivery in its final state. The sweep can run beside a live worker whose unleased attempt is
+     * still in flight: the completion then does nothing, the counters are refreshed anyway, and that
+     * worker's own {@link #settle} completes the send after its terminal write. An attempt the worker
+     * abandons after reserving is marked and settled by a later sweep, one abandoned before reserving
+     * is left to the dispatch loop's {@link #settle}, and a send left running by a worker that died
+     * between its terminal write and its settlement is found again by the durable selector. Settling
+     * needs no provider, so a send whose remaining work was recovered settles even while its provider
+     * is unusable.
      */
     private void settleRecovered(int workspaceId, int sendId) {
+        campaignSendMapper.markSettledAudienceSendCompleted(workspaceId, sendId);
         campaignSendMapper.refreshCounters(workspaceId, sendId);
-        if (runningAudienceSend(workspaceId, sendId)
-                && campaignDeliveryMapper.countOutstanding(workspaceId, sendId) == 0) {
-            campaignSendMapper.markCompleted(workspaceId, sendId);
-        }
     }
 
     private boolean runningAudienceSend(int workspaceId, int sendId) {
@@ -648,8 +649,10 @@ public class CampaignDispatchService {
     /**
      * Records the provider correlation of an audience submission whose terminal write lost to the
      * reservation sweep, so the provider's bounce and complaint webhooks still resolve to the row and
-     * record suppression and consent revocation. The swept row stays failed and reconcilable; a
-     * persistence fault is logged because the row is already reconcilable without it.
+     * record suppression and consent revocation. The swept row keeps its status, its reconciliation
+     * state, and its reservation, whether it is still awaiting reconciliation or an operator has
+     * already resolved it; a persistence fault is logged because the row is already reconcilable
+     * without it.
      */
     private void attachLateAudienceProviderCorrelation(
             int workspaceId, int deliveryId, String providerId, String providerMessageId) {
@@ -662,7 +665,7 @@ public class CampaignDispatchService {
                     EXPIRED_AUDIENCE_RESERVATION,
                     CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) == 1) {
                 log.warn("Campaign delivery {} was accepted after its reservation expired;"
-                        + " it keeps awaiting reconciliation", deliveryId);
+                        + " its reconciliation state is unchanged", deliveryId);
             }
         } catch (RuntimeException exception) {
             log.warn("Campaign delivery {} late provider correlation could not be recorded", deliveryId);

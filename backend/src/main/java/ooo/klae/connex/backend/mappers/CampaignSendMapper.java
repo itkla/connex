@@ -40,6 +40,18 @@ public interface CampaignSendMapper {
 
     int markCompleted(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
+    /**
+     * Completes a running audience send only while the same statement proves that none of its
+     * deliveries is pending or dispatching, so a live worker's terminal write cannot land between the
+     * outstanding-work check and the completion.
+     * @param workspaceId the owning workspace
+     * @param id the send
+     * @return one if the send was completed
+     */
+    int markSettledAudienceSendCompleted(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id);
+
     int refreshCounters(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     List<Integer> queuedSendIds(
@@ -47,11 +59,13 @@ public interface CampaignSendMapper {
             @Param("triggeredSendEnabled") boolean triggeredSendEnabled);
 
     /**
-     * Returns one bounded page of audience sends that own an unresolved reconciliation row and are not
-     * yet settled: their failed counter disagrees with their failed deliveries, or they are still
-     * running with no pending or dispatching delivery. A dispatching delivery may belong to a live
-     * worker, whose own settlement completes the send. The predicate is durable, so a settlement that
-     * fails after a recovery sweep is found again on a later pass.
+     * Returns one bounded page of audience sends that are not yet settled: they are still running
+     * with no pending or dispatching delivery, or their failed counter disagrees with their failed
+     * deliveries while they still own an unresolved reconciliation row. A dispatching delivery may
+     * belong to a live worker, whose own settlement completes the send. The running branch depends
+     * only on the send and its deliveries, so a provider webhook or an operator resolution that
+     * clears the reconciliation marker cannot strand the send, and a settlement that fails after a
+     * recovery sweep is found again on a later pass.
      * @param workspaceId the owning workspace
      * @param limit the page size
      * @return the send ids, ordered by id

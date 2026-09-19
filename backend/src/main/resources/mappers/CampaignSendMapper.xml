@@ -65,6 +65,21 @@
     WHERE workspace_id = #{workspaceId} AND id = #{id} AND status = 'running'
   </update>
 
+  <!-- One statement proves that nothing is left pending or dispatching and completes the send, so a
+       live worker's terminal write cannot land between the proof and the completion. The counter
+       refresh that follows a completion therefore reads every delivery in its final state: no row
+       can return to pending or dispatching once the send is completed. -->
+  <update id="markSettledAudienceSendCompleted">
+    UPDATE campaign_send s
+    SET s.status = 'completed', s.completed_at = CURRENT_TIMESTAMP
+    WHERE s.workspace_id = #{workspaceId} AND s.id = #{id}
+      AND s.status = 'running' AND s.origin = 'audience'
+      AND NOT EXISTS (
+        SELECT 1 FROM campaign_delivery d
+        WHERE d.workspace_id = s.workspace_id AND d.send_id = s.id
+          AND d.status IN ('pending', 'dispatching'))
+  </update>
+
   <update id="refreshCounters">
     UPDATE campaign_send s
     SET s.total_recipients = (
@@ -94,24 +109,29 @@
     ORDER BY id
   </select>
 
-  <!-- A recovery sweep leaves an unresolved reconciliation row behind it, so an audience send that
-       owns one and whose failed counter disagrees with its failed rows, or that is still running with
-       nothing pending or dispatching, has not been settled yet. A dispatching row may belong to a live
-       worker, whose own settlement completes the send. Settling it needs no provider. -->
+  <!-- An audience send left running with nothing pending or dispatching has not been settled, whoever
+       left it that way: that evidence lives in the send and its own deliveries, so it survives a
+       provider webhook or an operator resolution clearing the reconciliation marker the sweep wrote
+       (applyProviderStatus and resolveReconciliation both clear reconciliation_required_at, and the
+       webhook also moves the row out of failed). A send that is no longer running is only revisited
+       for a failed counter that disagrees with its failed rows while it still owns an unresolved
+       reconciliation row, which keeps that branch tied to sweep work. A dispatching row may belong to
+       a live worker, whose own settlement completes the send. Settling it needs no provider. Both
+       branches stay inside one workspace's sends (idx_campaign_send_status). -->
   <select id="audienceSendsAwaitingRecoverySettlement" resultType="int">
     SELECT s.id FROM campaign_send s
     WHERE s.workspace_id = #{workspaceId} AND s.origin = 'audience'
-      AND (s.failed_count &lt;&gt; (
-            SELECT COUNT(*) FROM campaign_delivery f
-            WHERE f.workspace_id = s.workspace_id AND f.send_id = s.id AND f.status = 'failed')
-        OR (s.status = 'running' AND NOT EXISTS (
+      AND ((s.status = 'running' AND NOT EXISTS (
             SELECT 1 FROM campaign_delivery p
             WHERE p.workspace_id = s.workspace_id AND p.send_id = s.id
-              AND p.status IN ('pending', 'dispatching'))))
-      AND EXISTS (
-        SELECT 1 FROM campaign_delivery r
-        WHERE r.workspace_id = s.workspace_id AND r.send_id = s.id AND r.status = 'failed'
-          AND r.reconciliation_required_at IS NOT NULL)
+              AND p.status IN ('pending', 'dispatching')))
+        OR (s.failed_count &lt;&gt; (
+            SELECT COUNT(*) FROM campaign_delivery f
+            WHERE f.workspace_id = s.workspace_id AND f.send_id = s.id AND f.status = 'failed')
+          AND EXISTS (
+            SELECT 1 FROM campaign_delivery r
+            WHERE r.workspace_id = s.workspace_id AND r.send_id = s.id AND r.status = 'failed'
+              AND r.reconciliation_required_at IS NOT NULL)))
     ORDER BY s.id
     LIMIT #{limit}
   </select>

@@ -135,12 +135,6 @@
     WHERE workspace_id = #{workspaceId} AND send_id = #{sendId} AND status = 'pending'
   </select>
 
-  <select id="countOutstanding" resultType="int">
-    SELECT COUNT(*) FROM campaign_delivery
-    WHERE workspace_id = #{workspaceId} AND send_id = #{sendId}
-      AND status IN ('pending', 'dispatching')
-  </select>
-
   <update id="claim">
     UPDATE campaign_delivery
     SET status = 'dispatching', attempt_count = attempt_count + 1
@@ -272,17 +266,24 @@
 
   <!-- A slow live worker whose terminal write lost to the reservation sweep after the provider
        accepted the message records only the provider correlation, so bounce and complaint webhooks
-       still resolve to the row. Status, reconciliation state, and the reservation stay unchanged. -->
+       still resolve to the row. Status, reconciliation state, and the reservation stay unchanged,
+       including on a row an operator has already resolved: the decision it carries is evidence the
+       operator recorded, while the message the ESP accepted still has to be suppressible. A resolved
+       row keeps neither the sweep's last_error nor its reconciliation marker, so that branch is
+       anchored on the operator outcome instead; an audience row is never returned to pending, so no
+       later attempt can own the correlation this one would write. -->
   <update id="attachLateAudienceProviderCorrelation">
     UPDATE campaign_delivery d
     JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
     SET d.provider_id = #{providerId}, d.provider_message_id = #{providerMessageId}
-    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'failed'
-      AND d.reconciliation_required_at IS NOT NULL AND d.reconciliation_outcome IS NULL
-      AND d.last_error = #{lastError} AND d.last_error_code = #{lastErrorCode}
-      AND d.dispatch_lease_owner IS NULL AND d.submitted_at IS NULL
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id}
+      AND d.dispatch_lease_owner IS NULL
       AND d.provider_id IS NULL AND d.provider_message_id IS NULL
       AND s.origin = 'audience'
+      AND ((d.status = 'failed' AND d.submitted_at IS NULL
+          AND d.reconciliation_required_at IS NOT NULL AND d.reconciliation_outcome IS NULL
+          AND d.last_error = #{lastError} AND d.last_error_code = #{lastErrorCode})
+        OR d.reconciliation_outcome IS NOT NULL)
   </update>
 
   <update id="markDispatched">

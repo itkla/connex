@@ -113,15 +113,6 @@ public interface CampaignDeliveryMapper {
 
     int countPending(@Param("workspaceId") int workspaceId, @Param("sendId") int sendId);
 
-    /**
-     * Counts the send's deliveries that are still pending or dispatching, so a recovery settlement
-     * never completes a send while a live worker's attempt is in flight.
-     * @param workspaceId the owning workspace
-     * @param sendId the send
-     * @return the number of pending or dispatching deliveries
-     */
-    int countOutstanding(@Param("workspaceId") int workspaceId, @Param("sendId") int sendId);
-
     int claim(@Param("workspaceId") int workspaceId, @Param("id") int id);
 
     /** Claims one triggered delivery under an owner-fenced database-clock lease. */
