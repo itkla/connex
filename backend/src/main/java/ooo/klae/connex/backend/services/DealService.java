@@ -73,6 +73,7 @@ import ooo.klae.connex.backend.dto.FacetCount;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -141,6 +142,7 @@ public class DealService {
     private final DuplicatePreflightService duplicatePreflightService;
     private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final RecordCreationAugmentationService recordCreationAugmentationService;
+    private final DealCollaboratorControlAccess collaboratorControlAccess;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -1883,17 +1885,32 @@ public class DealService {
         return hydrateReferences(workspaceId, dealMapper.getDealById(workspaceId, dealId));
     }
 
-    public List<User> getCollaborators(int dealId) {
+    /**
+     * Lists a deal's collaborators. The collaborator ids come from tenant data and the profiles
+     * from the control plane; collaborators who are no longer active workspace members are omitted.
+     *
+     * @param dealId the deal in the current workspace
+     * @return display-safe collaborator profiles ordered by display name, then id
+     */
+    public List<UserDto> getCollaborators(int dealId) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         if (dealMapper.getDealById(workspaceId, dealId) == null) {
             throw new ResourceNotFoundException("Deal not found");
         }
-        return dealMapper.getCollaborators(workspaceId, dealId);
+        return collaboratorControlAccess.getProfiles(workspaceId, dealMapper.getCollaboratorIds(workspaceId, dealId));
     }
 
+    /**
+     * Replaces a deal's collaborators with the given workspace members, excluding the owner. The
+     * audit entry records the raw collaborator ids before and after the change.
+     *
+     * @param dealId the deal in the current workspace
+     * @param userIds the requested collaborator ids
+     * @return display-safe profiles of the resulting collaborators ordered by display name, then id
+     */
     @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
-    public List<User> replaceCollaborators(int dealId, List<Integer> userIds) {
+    public List<UserDto> replaceCollaborators(int dealId, List<Integer> userIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
@@ -1905,18 +1922,16 @@ public class DealService {
         normalized = normalized.stream()
             .filter(userId -> !userId.equals(deal.getOwnerId()))
             .toList();
-        List<Integer> before = dealMapper.getCollaborators(workspaceId, dealId).stream()
-            .map(User::getId)
-            .toList();
+        List<Integer> before = dealMapper.getCollaboratorIds(workspaceId, dealId);
         dealMapper.clearCollaborators(workspaceId, dealId);
         if (!normalized.isEmpty()) {
             dealMapper.insertCollaborators(workspaceId, dealId, normalized);
         }
-        List<User> after = dealMapper.getCollaborators(workspaceId, dealId);
+        List<Integer> after = dealMapper.getCollaboratorIds(workspaceId, dealId);
         auditService.record("deal.updateCollaborators", "deal", dealId, deal.getName(),
             "Updated collaborators on " + deal.getName(),
-            auditService.singleChange("collaboratorIds", before, after.stream().map(User::getId).toList()));
+            auditService.singleChange("collaboratorIds", before, after));
         notificationChanges.publish(workspaceId, "deal", dealId);
-        return after;
+        return collaboratorControlAccess.getProfiles(workspaceId, after);
     }
 }
