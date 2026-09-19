@@ -205,6 +205,26 @@ public interface CampaignDeliveryMapper {
             @Param("lastError") String lastError,
             @Param("lastErrorCode") String lastErrorCode);
 
+    /**
+     * Records the provider correlation of a submission whose terminal write lost to the audience
+     * reservation sweep, on the still-unresolved swept row that carries no provider id yet. It never
+     * changes the row's status, reconciliation requirement, or frequency reservation.
+     * @param workspaceId the owning workspace
+     * @param id the delivery
+     * @param providerId the provider that accepted the message
+     * @param providerMessageId the provider's message id
+     * @param lastError the failure detail the sweep wrote
+     * @param lastErrorCode the reason code the sweep wrote
+     * @return one if the swept row now carries the correlation
+     */
+    int attachLateAudienceProviderCorrelation(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("providerId") String providerId,
+            @Param("providerMessageId") String providerMessageId,
+            @Param("lastError") String lastError,
+            @Param("lastErrorCode") String lastErrorCode);
+
     int markDispatched(
             @Param("workspaceId") int workspaceId,
             @Param("id") int id,

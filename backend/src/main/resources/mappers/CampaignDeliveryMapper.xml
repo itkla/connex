@@ -264,6 +264,21 @@
       AND s.origin = 'audience'
   </update>
 
+  <!-- A slow live worker whose terminal write lost to the reservation sweep after the provider
+       accepted the message records only the provider correlation, so bounce and complaint webhooks
+       still resolve to the row. Status, reconciliation state, and the reservation stay unchanged. -->
+  <update id="attachLateAudienceProviderCorrelation">
+    UPDATE campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    SET d.provider_id = #{providerId}, d.provider_message_id = #{providerMessageId}
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id} AND d.status = 'failed'
+      AND d.reconciliation_required_at IS NOT NULL AND d.reconciliation_outcome IS NULL
+      AND d.last_error = #{lastError} AND d.last_error_code = #{lastErrorCode}
+      AND d.dispatch_lease_owner IS NULL AND d.submitted_at IS NULL
+      AND d.provider_id IS NULL AND d.provider_message_id IS NULL
+      AND s.origin = 'audience'
+  </update>
+
   <update id="markDispatched">
     UPDATE campaign_delivery
     SET status = 'dispatched', skip_reason = NULL, provider_id = #{providerId},

@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -29,6 +30,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -633,16 +635,20 @@ class CampaignDispatchServiceTest {
                 .thenReturn(List.of(abandonedAudienceAttempt(13, 11), abandonedAudienceAttempt(14, 11)));
         when(deliveryMapper.markExpiredAudienceReservationAmbiguous(
                 eq(7), anyInt(), eq(RESERVATION_GRACE_MICROS), anyString(), anyString())).thenReturn(1);
+        when(sendMapper.audienceSendsAwaitingRecoverySettlement(7, 200)).thenReturn(List.of(11));
         CampaignDispatchService service = service(
                 sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
 
         assertEquals(0, service.processWorkspace(7));
 
+        InOrder recovery = inOrder(deliveryMapper, sendMapper);
         for (int deliveryId : List.of(13, 14)) {
-            verify(deliveryMapper).markExpiredAudienceReservationAmbiguous(
+            recovery.verify(deliveryMapper).markExpiredAudienceReservationAmbiguous(
                     7, deliveryId, RESERVATION_GRACE_MICROS, EXPIRED_AUDIENCE_RESERVATION,
                     CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token());
         }
+        recovery.verify(sendMapper).audienceSendsAwaitingRecoverySettlement(7, 200);
+        recovery.verify(sendMapper).refreshCounters(7, 11);
         ArgumentCaptor<CampaignDeliveryEvent> events = ArgumentCaptor.forClass(CampaignDeliveryEvent.class);
         verify(deliveryMapper, times(2)).insertEvent(events.capture());
         assertEquals(List.of(13, 14), events.getAllValues().stream()
@@ -690,6 +696,7 @@ class CampaignDispatchServiceTest {
                 eq(7), anyInt(), eq(RESERVATION_GRACE_MICROS), anyString(), anyString())).thenReturn(1);
         doThrow(new IllegalStateException("event store unavailable"))
                 .when(deliveryMapper).insertEvent(any());
+        when(sendMapper.audienceSendsAwaitingRecoverySettlement(7, 200)).thenReturn(List.of(11, 12));
         CampaignDispatchService service = service(
                 sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
 
@@ -729,7 +736,7 @@ class CampaignDispatchServiceTest {
     }
 
     @Test
-    void aFailedAudienceCompareAndSetStillRefreshesTheCountersOfRowsAlreadyMarked() {
+    void aFailedAudienceCompareAndSetStillSettlesTheSendsAwaitingSettlement() {
         CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
         CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
         WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
@@ -742,15 +749,52 @@ class CampaignDispatchServiceTest {
         when(deliveryMapper.markExpiredAudienceReservationAmbiguous(
                 eq(7), eq(14), eq(RESERVATION_GRACE_MICROS), anyString(), anyString()))
                 .thenThrow(new IllegalStateException("Deadlock found when trying to get lock"));
+        when(sendMapper.audienceSendsAwaitingRecoverySettlement(7, 200)).thenReturn(List.of(21));
         CampaignDispatchService service = service(
                 sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
 
         assertEquals(1, service.processWorkspace(7));
 
         verify(deliveryMapper, times(1)).insertEvent(any());
+        verify(sendMapper).audienceSendsAwaitingRecoverySettlement(7, 200);
         verify(sendMapper).refreshCounters(7, 21);
-        verify(sendMapper, never()).refreshCounters(7, 22);
         verify(sendMapper).getSend(7, 11);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"running, 0, true", "running, 2, false", "completed, 0, false"})
+    void aSendAwaitingRecoverySettlementSettlesWithoutResolvingItsProvider(
+            String status, int pending, boolean completes) {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        DeliveryProviderConfigService providerConfigService = mock(DeliveryProviderConfigService.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(sendMapper.audienceSendsAwaitingRecoverySettlement(7, 200)).thenReturn(List.of(11));
+        when(sendMapper.getSend(7, 11)).thenReturn(audienceSend(status));
+        when(deliveryMapper.countPending(7, 11)).thenReturn(pending);
+        CampaignDispatchService service = service(sendMapper, deliveryMapper, providerConfigService, gate);
+
+        assertEquals(0, service.processWorkspace(7));
+
+        InOrder settlement = inOrder(sendMapper);
+        settlement.verify(sendMapper).refreshCounters(7, 11);
+        if (completes) {
+            settlement.verify(sendMapper).markCompleted(7, 11);
+        } else {
+            verify(sendMapper, never()).markCompleted(anyInt(), anyInt());
+        }
+        verifyNoInteractions(providerConfigService);
+    }
+
+    private static CampaignSend audienceSend(String status) {
+        CampaignSend send = new CampaignSend();
+        send.setId(11);
+        send.setWorkspaceId(7);
+        send.setOrigin("audience");
+        send.setStatus(status);
+        send.setChannel("email");
+        return send;
     }
 
     private static CampaignDelivery abandonedAudienceAttempt(int deliveryId, int sendId) {

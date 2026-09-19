@@ -4,8 +4,6 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.LongSupplier;
 
@@ -195,6 +193,16 @@ public class CampaignDispatchService {
             }
             dispatchOne(workspaceId, send, channel, target, dispatcher, revision, deliveryId);
         }
+        settle(workspaceId, sendId);
+        return true;
+    }
+
+    /**
+     * Refreshes a send's counters and completes a running audience send with no pending delivery
+     * left. It needs no provider, so a send whose remaining work was recovered settles even while its
+     * provider is unusable.
+     */
+    private void settle(int workspaceId, int sendId) {
         campaignSendMapper.refreshCounters(workspaceId, sendId);
         CampaignSend settled = campaignSendMapper.getSend(workspaceId, sendId);
         if (settled != null && "running".equals(settled.getStatus())
@@ -202,7 +210,6 @@ public class CampaignDispatchService {
                 && campaignDeliveryMapper.countPending(workspaceId, sendId) == 0) {
             campaignSendMapper.markCompleted(workspaceId, sendId);
         }
-        return true;
     }
 
     private void dispatchOne(int workspaceId, CampaignSend send, DeliveryChannel channel,
@@ -384,6 +391,9 @@ public class CampaignDispatchService {
             }
             if (updated == 1) {
                 appendEvent(workspaceId, deliveryId, "dispatched", receipt.detail());
+            } else if (leaseOwner == null) {
+                attachLateAudienceProviderCorrelation(
+                        workspaceId, deliveryId, target.providerId(), receipt.providerMessageId());
             }
         } else {
             String failure = receipt.status() == DispatchStatus.AMBIGUOUS
@@ -583,12 +593,12 @@ public class CampaignDispatchService {
      * written only after the provider returns, so an abandoned attempt may already have been
      * submitted and is never replayed. Its frequency reservation is kept until an operator resolves
      * it. Each row is one auto-commit compare-and-set, so a late worker loses its terminal write.
-     * The counters of every send whose row was already marked are refreshed even when a later row
-     * fails, because a marked row no longer matches the sweep that would otherwise refresh them.
+     * The owning sends are settled afterwards, even when a later row fails, through a durable query
+     * rather than an in-memory list: a marked row no longer matches this sweep, so a settlement that
+     * fails is found again on a later pass instead of leaving stale counters or a running send.
      */
     private void recoverExpiredAudienceReservations(int workspaceId) {
         long graceMicros = audienceReservationGraceMicros();
-        Set<Integer> affectedSends = new TreeSet<>();
         try {
             for (CampaignDelivery abandoned : campaignDeliveryMapper.expiredAudienceReservationsPage(
                     workspaceId, graceMicros, triggeredSendGate.dispatchPageSize())) {
@@ -600,7 +610,6 @@ public class CampaignDispatchService {
                         CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) != 1) {
                     continue;
                 }
-                affectedSends.add(abandoned.getSendId());
                 try {
                     appendEvent(workspaceId, abandoned.getId(), "failed", EXPIRED_AUDIENCE_RESERVATION);
                 } catch (RuntimeException exception) {
@@ -609,9 +618,34 @@ public class CampaignDispatchService {
                 }
             }
         } finally {
-            for (int sendId : affectedSends) {
-                campaignSendMapper.refreshCounters(workspaceId, sendId);
+            for (int sendId : campaignSendMapper.audienceSendsAwaitingRecoverySettlement(
+                    workspaceId, triggeredSendGate.dispatchPageSize())) {
+                settle(workspaceId, sendId);
             }
+        }
+    }
+
+    /**
+     * Records the provider correlation of an audience submission whose terminal write lost to the
+     * reservation sweep, so the provider's bounce and complaint webhooks still resolve to the row and
+     * record suppression and consent revocation. The swept row stays failed and reconcilable; a
+     * persistence fault is logged because the row is already reconcilable without it.
+     */
+    private void attachLateAudienceProviderCorrelation(
+            int workspaceId, int deliveryId, String providerId, String providerMessageId) {
+        try {
+            if (campaignDeliveryMapper.attachLateAudienceProviderCorrelation(
+                    workspaceId,
+                    deliveryId,
+                    providerId,
+                    providerMessageId,
+                    EXPIRED_AUDIENCE_RESERVATION,
+                    CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) == 1) {
+                log.warn("Campaign delivery {} was accepted after its reservation expired;"
+                        + " it keeps awaiting reconciliation", deliveryId);
+            }
+        } catch (RuntimeException exception) {
+            log.warn("Campaign delivery {} late provider correlation could not be recorded", deliveryId);
         }
     }
 

@@ -34,6 +34,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -76,6 +77,7 @@ import ooo.klae.connex.backend.delivery.CampaignFrequencyAdmissionService;
 import ooo.klae.connex.backend.delivery.DeliveryChannel;
 import ooo.klae.connex.backend.delivery.DeliveryProperties;
 import ooo.klae.connex.backend.delivery.DeliveryProviderConfigService;
+import ooo.klae.connex.backend.delivery.DeliveryProviderException;
 import ooo.klae.connex.backend.delivery.DeliveryProviderRouter;
 import ooo.klae.connex.backend.delivery.DeliveryRequest;
 import ooo.klae.connex.backend.delivery.DispatchStatus;
@@ -137,7 +139,8 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private SqlSessionTemplate sqlSession;
     @Autowired private CampaignFrequencyAdmissionService frequencyAdmissionService;
-    @Autowired private CampaignSendMapper campaignSendMapper;
+    @MockitoSpyBean private CampaignSendMapper campaignSendMapper;
+    @Autowired private AudienceEligibilityService audienceEligibilityService;
     @Autowired private DeliveryProperties deliveryProperties;
     @MockitoSpyBean private WorkspaceMapper workspaceMapperSpy;
     @MockitoSpyBean private CampaignDispatchClaimBoundary claimBoundary;
@@ -1347,6 +1350,185 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         assertEquals(0, submissions.size());
     }
 
+    @Test
+    void aCounterRefreshThatFailsAfterTheSweepIsRetriedByTheNextTick() {
+        Person person = recipient();
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        CampaignSendDto send = readySend(person, DeliveryChannel.EMAIL);
+        int deliveryId = strandedAudienceAttempt(person, send);
+        assertEquals(1, jdbcTemplate.update("UPDATE campaign_send SET status = 'completed'"
+                + " WHERE workspace_id = ? AND id = ?", workspace.getId(), send.id()));
+        sqlSession.clearCache();
+        expireReservation(deliveryId, reservationGraceSeconds() + 60);
+        long graceMicros = reservationGraceMicros();
+        CampaignSendMapper realSendMapper = sqlSession.getMapper(CampaignSendMapper.class);
+        AtomicBoolean refreshFailed = new AtomicBoolean();
+        doAnswer(invocation -> {
+            if (refreshFailed.compareAndSet(false, true)) {
+                throw new IllegalStateException("Simulated counter refresh failure");
+            }
+            return realSendMapper.refreshCounters(workspace.getId(), send.id());
+        }).when(campaignSendMapper).refreshCounters(workspace.getId(), send.id());
+
+        assertEquals(1, dispatchService.processWorkspace(workspace.getId()));
+
+        assertTrue(refreshFailed.get());
+        assertEquals("failed", deliveryMapper.getDelivery(workspace.getId(), deliveryId).getStatus());
+        assertEquals(0, campaignSendMapper.getSend(workspace.getId(), send.id()).getFailedCount());
+        assertTrue(campaignSendMapper.workspaceIdsWithQueuedSends(false, graceMicros).contains(workspace.getId()));
+
+        assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+
+        var settled = campaignSendMapper.getSend(workspace.getId(), send.id());
+        assertEquals("completed", settled.getStatus());
+        assertEquals(1, settled.getFailedCount());
+        assertFalse(campaignSendMapper.workspaceIdsWithQueuedSends(false, graceMicros).contains(workspace.getId()));
+        assertEquals(1, deliveryEvents(deliveryId, "failed"));
+        assertEquals(0, submissions.size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void aRunningSendWhoseLastAttemptIsSweptSettlesWhileItsProviderIsDisabled(boolean completionFailsOnce) {
+        Person person = recipient();
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        CampaignSendDto send = readySend(person, DeliveryChannel.EMAIL);
+        int deliveryId = strandedAudienceAttempt(person, send);
+        assertEquals(1, campaignSendMapper.markRunning(workspace.getId(), send.id()));
+        expireReservation(deliveryId, reservationGraceSeconds() + 60);
+        DeliveryProviderConfigRequest disabled = providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL));
+        disabled.setEnabled(false);
+        configService.save(disabled);
+        assertThrows(DeliveryProviderException.class,
+                () -> configService.resolveForWorkspace(workspace.getId(), DeliveryChannel.EMAIL));
+        CampaignSendMapper realSendMapper = sqlSession.getMapper(CampaignSendMapper.class);
+        AtomicBoolean completionFailed = new AtomicBoolean(!completionFailsOnce);
+        doAnswer(invocation -> {
+            if (completionFailed.compareAndSet(false, true)) {
+                throw new IllegalStateException("Simulated send completion failure");
+            }
+            return realSendMapper.markCompleted(workspace.getId(), send.id());
+        }).when(campaignSendMapper).markCompleted(workspace.getId(), send.id());
+
+        if (completionFailsOnce) {
+            assertEquals(2, dispatchService.processWorkspace(workspace.getId()));
+            var stillRunning = campaignSendMapper.getSend(workspace.getId(), send.id());
+            assertEquals("running", stillRunning.getStatus());
+            assertEquals(1, stillRunning.getFailedCount());
+        }
+        assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+
+        CampaignDelivery swept = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals("failed", swept.getStatus());
+        assertNotNull(swept.getReconciliationRequiredAt());
+        var settled = campaignSendMapper.getSend(workspace.getId(), send.id());
+        assertEquals("completed", settled.getStatus());
+        assertNotNull(settled.getCompletedAt());
+        assertEquals(1, settled.getFailedCount());
+        assertFalse(campaignSendMapper.workspaceIdsWithQueuedSends(false, reservationGraceMicros())
+                .contains(workspace.getId()));
+        assertEquals(0, submissions.size());
+    }
+
+    @Test
+    void aSubmissionThatLosesToTheSweepKeepsItsCorrelationSoAHardBounceStillSuppresses() throws Exception {
+        Person person = recipient();
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        CampaignSendDto send = readySend(person, DeliveryChannel.EMAIL);
+        int deliveryId = pendingDelivery(send);
+        AtomicReference<LocalDateTime> reservation = new AtomicReference<>();
+        submissionObserver = () -> {
+            reservation.set(expireReservation(deliveryId, reservationGraceSeconds() + 60));
+            assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+            CampaignDelivery overtaken = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+            assertEquals("failed", overtaken.getStatus());
+            assertNull(overtaken.getProviderMessageId());
+        };
+
+        dispatch(send);
+
+        assertEquals(1, submissions.size());
+        CampaignDelivery late = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals("failed", late.getStatus());
+        assertEquals(EXPIRED_AUDIENCE_RESERVATION, late.getLastError());
+        assertEquals("deadline_ambiguous", late.getLastErrorCode());
+        assertNotNull(late.getReconciliationRequiredAt());
+        assertNull(late.getReconciliationOutcome());
+        assertEquals(HttpEspDeliveryProvider.PROVIDER_ID, late.getProviderId());
+        assertEquals("message-1", late.getProviderMessageId());
+        assertNull(late.getSubmittedAt());
+        assertEquals(reservation.get(), late.getFrequencyReservedAt());
+        assertEquals(1, deliveryEvents(deliveryId, "failed"));
+        assertEquals(0, deliveryEvents(deliveryId, "dispatched"));
+        assertEquals("completed", campaignSendMapper.getSend(workspace.getId(), send.id()).getStatus());
+        assertFalse(suppressedOrRevoked(person));
+
+        assertEquals(1, ingest("{\"event\":\"bounce\",\"bounceType\":\"hard\",\"eventId\":\"bounce-"
+                + unique() + "\",\"messageId\":\"message-1\"}"));
+
+        CampaignDelivery bounced = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals("bounced", bounced.getStatus());
+        assertNull(bounced.getReconciliationRequiredAt());
+        assertEquals(1, deliveryEvents(deliveryId, "bounced"));
+        assertTrue(audienceEligibilityService.suppressedIds(
+                workspace.getId(), List.of(person.getId()), "email").contains(person.getId()));
+        assertTrue(audienceEligibilityService.revokedConsentIds(
+                workspace.getId(), List.of(person.getId()), "email", "marketing").contains(person.getId()));
+    }
+
+    @Test
+    void theLateCorrelationCompareAndSetOnlyTouchesAnUnresolvedSweptRowWithoutAProviderId() {
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        Person person = recipient();
+        int sweptId = strandedAudienceAttempt(person, readySend(person, DeliveryChannel.EMAIL));
+        Person resolvedPerson = recipient();
+        CampaignSendDto resolvedSend = readySend(resolvedPerson, DeliveryChannel.EMAIL);
+        int resolvedId = strandedAudienceAttempt(resolvedPerson, resolvedSend);
+        Person ambiguousPerson = recipient();
+        int ambiguousId = strandedAudienceAttempt(ambiguousPerson, readySend(ambiguousPerson, DeliveryChannel.EMAIL));
+        assertEquals(1, deliveryMapper.markAmbiguous(workspace.getId(), ambiguousId,
+                "AMBIGUOUS: Provider outcome could not be persisted definitively", "relay_error"));
+        assertEquals(0, lateCorrelation(sweptId, "early-message"));
+        for (int id : List.of(sweptId, resolvedId)) {
+            expireReservation(id, reservationGraceSeconds() + 60);
+        }
+        assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+        triggeredSendService.reconcile(resolvedSend.campaignId(), resolvedId,
+                new CampaignDeliveryReconciliationRequest("not_delivered"));
+
+        assertEquals(1, lateCorrelation(sweptId, "late-message"));
+        assertEquals(0, lateCorrelation(sweptId, "second-message"));
+        assertEquals(0, lateCorrelation(resolvedId, "resolved-message"));
+        assertEquals(0, lateCorrelation(ambiguousId, "ambiguous-message"));
+
+        CampaignDelivery correlated = deliveryMapper.getDelivery(workspace.getId(), sweptId);
+        assertEquals("failed", correlated.getStatus());
+        assertNotNull(correlated.getReconciliationRequiredAt());
+        assertEquals(EXPIRED_AUDIENCE_RESERVATION, correlated.getLastError());
+        assertEquals("late-message", correlated.getProviderMessageId());
+        for (int id : List.of(resolvedId, ambiguousId)) {
+            CampaignDelivery untouched = deliveryMapper.getDelivery(workspace.getId(), id);
+            assertNull(untouched.getProviderId());
+            assertNull(untouched.getProviderMessageId());
+        }
+        assertEquals(0, submissions.size());
+    }
+
+    private int lateCorrelation(int deliveryId, String providerMessageId) {
+        int updated = deliveryMapper.attachLateAudienceProviderCorrelation(workspace.getId(), deliveryId,
+                HttpEspDeliveryProvider.PROVIDER_ID, providerMessageId, EXPIRED_AUDIENCE_RESERVATION,
+                "deadline_ambiguous");
+        sqlSession.clearCache();
+        return updated;
+    }
+
+    private boolean suppressedOrRevoked(Person person) {
+        return audienceEligibilityService.suppressedIds(
+                        workspace.getId(), List.of(person.getId()), "email").contains(person.getId())
+                || audienceEligibilityService.revokedConsentIds(
+                        workspace.getId(), List.of(person.getId()), "email", "marketing").contains(person.getId());
+    }
+
     private int lateAudienceSweep(int deliveryId, long graceMicros) {
         int updated = deliveryMapper.markExpiredAudienceReservationAmbiguous(workspace.getId(), deliveryId,
                 graceMicros, "AMBIGUOUS: Late overlapping sweep", "relay_error");
@@ -1418,15 +1600,18 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
     }
 
     private void ingestDelivered(CampaignDelivery delivery) throws Exception {
+        assertEquals(1, ingest("{\"event\":\"delivered\",\"eventId\":\"receipt-" + unique()
+                + "\",\"messageId\":\"" + delivery.getProviderMessageId() + "\"}"));
+    }
+
+    private int ingest(String payload) throws Exception {
         DeliveryWebhookTokenDto webhook = configService.issueWebhookToken("email");
-        byte[] body = ("{\"event\":\"delivered\",\"eventId\":\"receipt-" + unique()
-                + "\",\"messageId\":\"" + delivery.getProviderMessageId() + "\"}")
-                .getBytes(StandardCharsets.UTF_8);
+        byte[] body = payload.getBytes(StandardCharsets.UTF_8);
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(webhook.secret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
         String signature = HexFormat.of().formatHex(mac.doFinal(body));
-        assertEquals(1, webhookService.ingest(HttpEspDeliveryProvider.PROVIDER_ID, webhook.token(), body,
-                Map.of(HttpEspDeliveryProvider.SIGNATURE_HEADER, signature)));
+        return webhookService.ingest(HttpEspDeliveryProvider.PROVIDER_ID, webhook.token(), body,
+                Map.of(HttpEspDeliveryProvider.SIGNATURE_HEADER, signature));
     }
 
     private void dispatch(CampaignSendDto send) {
