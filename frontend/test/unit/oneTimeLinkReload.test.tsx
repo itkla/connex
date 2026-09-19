@@ -209,20 +209,23 @@ describe.each([
         Entry: ResetPasswordForm,
         exchange: exchangePasswordResetToken,
         validate: validateResetToken,
+        validating: enAuth.AuthResetPassword.validatingLabel,
     },
     {
         path: "/auth/verify-email",
         Entry: VerifyEmailForm,
         exchange: exchangeEmailChangeToken,
         validate: validateEmailChangeToken,
+        validating: enAuth.AuthVerifyEmail.validatingLabel,
     },
     {
         path: "/auth/confirm-email",
         Entry: ConfirmEmailForm,
         exchange: exchangeEmailVerificationToken,
         validate: validateEmailVerificationToken,
+        validating: enAuth.AuthConfirmEmail.validatingLabel,
     },
-])("auth entry at $path after a successful exchange", ({ path, Entry, exchange, validate }) => {
+])("auth entry at $path after a successful exchange", ({ path, Entry, exchange, validate, validating }) => {
     it("stays on its validating state while the replacing navigation loads", async () => {
         window.history.replaceState({}, "", path);
         const { replace } = stubLocation();
@@ -236,6 +239,7 @@ describe.each([
         expect(replace).toHaveBeenCalledWith(path);
         expect(validate).not.toHaveBeenCalled();
         expect(document.body.querySelector("h1")).toBeNull();
+        expect(document.body.textContent).toContain(validating);
 
         await act(async () => root.unmount());
     });
