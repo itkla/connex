@@ -319,7 +319,13 @@ built-in `smtp` provider therefore declares no idempotent-submission capability.
 expires after the relay outcome becomes unknown, Connex marks the delivery failed with a
 reconciliation requirement instead of replaying it. An operator must check the relay, then confirm
 `delivered` or `not_delivered` through the campaign recipient reconciliation endpoint. That endpoint
-records evidence only; it never sends. Generic HTTP ESP/SMS connectors default
+records evidence only; it never sends. Audience (bulk) sends are never replayed on any provider: an
+attempt that reserved the contact's frequency window but never recorded an outcome — typically a
+worker that died mid-send — surfaces as a `deadline_ambiguous` reconciliation item once the provider
+deadline and the delivery lease safety margin (30 seconds by default) have both elapsed since the
+attempt reserved the window. Until then, and afterwards unless an operator confirms
+`not_delivered`, the contact stays frequency-capped on that channel for the rest of the window.
+Generic HTTP ESP/SMS connectors default
 `idempotentSubmission` to false. A workspace administrator may enable it only after verifying that
 the configured endpoint guarantees repeated requests carrying the same `Idempotency-Key` deliver no
 more than once; enabling it incorrectly can cause duplicate delivery. Connex returns an expired claim to the queue only if
@@ -654,7 +660,7 @@ The two are asymmetric, and the asymmetry is easy to misread as a product-wide c
 | Unsubscribe | Yes — body link, per recipient | **None** |
 | `List-Unsubscribe` header | **No** | **No** |
 | Per-message outcome | Recorded against the delivery row | Swallowed ([§3.1](#31-failure-semantics-most-send-failures-are-invisible)) |
-| Worker-loss replay | HTTP ESP/SMS only when that connector explicitly declares idempotent submission; SMTP requires reconciliation | None |
+| Worker-loss replay | Triggered sends: HTTP ESP/SMS only when that connector explicitly declares idempotent submission; SMTP requires reconciliation. Audience sends: never; requires reconciliation | None |
 
 **Bounce and complaint telemetry requires an ESP provider with webhooks.** A hard bounce or a
 complaint arriving on the webhook endpoint records a suppression entry and revokes consent
