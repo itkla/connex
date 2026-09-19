@@ -702,6 +702,57 @@ class CampaignDispatchServiceTest {
         verify(sendMapper).refreshCounters(7, 12);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void aFailedRecoverySweepIsCountedButNeverStarvesTheOtherSweepOrQueuedDispatch(boolean audienceFails) {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(sendMapper.queuedSendIds(7, false)).thenReturn(List.of(11));
+        if (audienceFails) {
+            when(deliveryMapper.expiredAudienceReservationsPage(7, RESERVATION_GRACE_MICROS, 200))
+                    .thenThrow(new IllegalStateException("Deadlock found when trying to get lock"));
+        } else {
+            when(deliveryMapper.expiredTriggeredClaimsPage(7, 200))
+                    .thenThrow(new IllegalStateException("Deadlock found when trying to get lock"));
+        }
+        CampaignDispatchService service = service(
+                sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
+
+        assertEquals(1, service.processWorkspace(7));
+        assertTrue(service.processSend(7, 11));
+
+        verify(deliveryMapper, times(2)).expiredTriggeredClaimsPage(7, 200);
+        verify(deliveryMapper, times(2)).expiredAudienceReservationsPage(7, RESERVATION_GRACE_MICROS, 200);
+        verify(sendMapper, times(2)).getSend(7, 11);
+    }
+
+    @Test
+    void aFailedAudienceCompareAndSetStillRefreshesTheCountersOfRowsAlreadyMarked() {
+        CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
+        CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
+        WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
+        when(gate.dispatchPageSize()).thenReturn(200);
+        when(sendMapper.queuedSendIds(7, false)).thenReturn(List.of(11));
+        when(deliveryMapper.expiredAudienceReservationsPage(7, RESERVATION_GRACE_MICROS, 200))
+                .thenReturn(List.of(abandonedAudienceAttempt(13, 21), abandonedAudienceAttempt(14, 22)));
+        when(deliveryMapper.markExpiredAudienceReservationAmbiguous(
+                eq(7), eq(13), eq(RESERVATION_GRACE_MICROS), anyString(), anyString())).thenReturn(1);
+        when(deliveryMapper.markExpiredAudienceReservationAmbiguous(
+                eq(7), eq(14), eq(RESERVATION_GRACE_MICROS), anyString(), anyString()))
+                .thenThrow(new IllegalStateException("Deadlock found when trying to get lock"));
+        CampaignDispatchService service = service(
+                sendMapper, deliveryMapper, mock(DeliveryProviderConfigService.class), gate);
+
+        assertEquals(1, service.processWorkspace(7));
+
+        verify(deliveryMapper, times(1)).insertEvent(any());
+        verify(sendMapper).refreshCounters(7, 21);
+        verify(sendMapper, never()).refreshCounters(7, 22);
+        verify(sendMapper).getSend(7, 11);
+    }
+
     private static CampaignDelivery abandonedAudienceAttempt(int deliveryId, int sendId) {
         CampaignDelivery abandoned = new CampaignDelivery();
         abandoned.setId(deliveryId);

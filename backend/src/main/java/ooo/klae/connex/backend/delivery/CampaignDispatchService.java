@@ -78,15 +78,19 @@ public class CampaignDispatchService {
     private final CampaignFrequencyAdmissionService frequencyAdmissionService;
     private LongSupplier nanoTimeSource = System::nanoTime;
 
-    /** Processes every queued send in the workspace. Never throws. */
+    /**
+     * Runs the workspace's recovery sweeps, then processes every queued send in it. Never throws: a
+     * failed recovery sweep is counted and logged but never starves the queued sends that follow it.
+     *
+     * @param workspaceId owning workspace
+     * @return the number of queued sends and recovery sweeps that failed
+     */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public int processWorkspace(int workspaceId) {
         if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
             return 0;
         }
-        recoverExpiredTriggeredClaims(workspaceId);
-        recoverExpiredAudienceReservations(workspaceId);
-        int failed = 0;
+        int failed = recoverAbandonedAttempts(workspaceId);
         for (int sendId : campaignSendMapper.queuedSendIds(
                 workspaceId, triggeredSendGate.enabled())) {
             try {
@@ -103,7 +107,8 @@ public class CampaignDispatchService {
     }
 
     /**
-     * Dispatches the pending deliveries of one send, claim-first. Never throws.
+     * Dispatches the pending deliveries of one send, claim-first, after the workspace's recovery
+     * sweeps. Never throws; a failed recovery sweep is logged and does not block the dispatch.
      *
      * @param workspaceId owning workspace
      * @param sendId send to dispatch
@@ -118,9 +123,34 @@ public class CampaignDispatchService {
         if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
             return true;
         }
-        recoverExpiredTriggeredClaims(workspaceId);
-        recoverExpiredAudienceReservations(workspaceId);
+        recoverAbandonedAttempts(workspaceId);
         return processSendReady(workspaceId, sendId);
+    }
+
+    /**
+     * Runs the expired triggered-claim and audience-reservation sweeps, isolating each one so a
+     * recovery fault is retried on the next pass instead of aborting the dispatch that follows.
+     *
+     * @param workspaceId owning workspace
+     * @return the number of sweeps that failed
+     */
+    private int recoverAbandonedAttempts(int workspaceId) {
+        int failed = 0;
+        try {
+            recoverExpiredTriggeredClaims(workspaceId);
+        } catch (RuntimeException exception) {
+            failed++;
+            log.warn("Expired triggered claim recovery failed in workspace {}: {}",
+                    workspaceId, exception.getClass().getSimpleName());
+        }
+        try {
+            recoverExpiredAudienceReservations(workspaceId);
+        } catch (RuntimeException exception) {
+            failed++;
+            log.warn("Expired audience reservation recovery failed in workspace {}: {}",
+                    workspaceId, exception.getClass().getSimpleName());
+        }
+        return failed;
     }
 
     private boolean processSendReady(int workspaceId, int sendId) {
@@ -553,30 +583,35 @@ public class CampaignDispatchService {
      * written only after the provider returns, so an abandoned attempt may already have been
      * submitted and is never replayed. Its frequency reservation is kept until an operator resolves
      * it. Each row is one auto-commit compare-and-set, so a late worker loses its terminal write.
+     * The counters of every send whose row was already marked are refreshed even when a later row
+     * fails, because a marked row no longer matches the sweep that would otherwise refresh them.
      */
     private void recoverExpiredAudienceReservations(int workspaceId) {
         long graceMicros = audienceReservationGraceMicros();
         Set<Integer> affectedSends = new TreeSet<>();
-        for (CampaignDelivery abandoned : campaignDeliveryMapper.expiredAudienceReservationsPage(
-                workspaceId, graceMicros, triggeredSendGate.dispatchPageSize())) {
-            if (campaignDeliveryMapper.markExpiredAudienceReservationAmbiguous(
-                    workspaceId,
-                    abandoned.getId(),
-                    graceMicros,
-                    EXPIRED_AUDIENCE_RESERVATION,
-                    CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) != 1) {
-                continue;
+        try {
+            for (CampaignDelivery abandoned : campaignDeliveryMapper.expiredAudienceReservationsPage(
+                    workspaceId, graceMicros, triggeredSendGate.dispatchPageSize())) {
+                if (campaignDeliveryMapper.markExpiredAudienceReservationAmbiguous(
+                        workspaceId,
+                        abandoned.getId(),
+                        graceMicros,
+                        EXPIRED_AUDIENCE_RESERVATION,
+                        CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) != 1) {
+                    continue;
+                }
+                affectedSends.add(abandoned.getSendId());
+                try {
+                    appendEvent(workspaceId, abandoned.getId(), "failed", EXPIRED_AUDIENCE_RESERVATION);
+                } catch (RuntimeException exception) {
+                    log.warn("Campaign delivery {} reservation-expiry event could not be appended",
+                            abandoned.getId());
+                }
             }
-            affectedSends.add(abandoned.getSendId());
-            try {
-                appendEvent(workspaceId, abandoned.getId(), "failed", EXPIRED_AUDIENCE_RESERVATION);
-            } catch (RuntimeException exception) {
-                log.warn("Campaign delivery {} reservation-expiry event could not be appended",
-                        abandoned.getId());
+        } finally {
+            for (int sendId : affectedSends) {
+                campaignSendMapper.refreshCounters(workspaceId, sendId);
             }
-        }
-        for (int sendId : affectedSends) {
-            campaignSendMapper.refreshCounters(workspaceId, sendId);
         }
     }
 
