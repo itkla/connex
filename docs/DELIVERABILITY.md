@@ -325,13 +325,17 @@ worker that died mid-send — surfaces as a `deadline_ambiguous` reconciliation 
 deadline and the delivery lease safety margin (30 seconds by default) have both elapsed since the
 attempt reserved the window. Until then, and afterwards unless an operator confirms
 `not_delivered`, the contact stays frequency-capped on that channel for the rest of the window.
+The send that owned the attempt still settles: its counters are refreshed and, once nothing is
+pending, it completes even if its provider has since been disabled.
 A worker that is only slow can lose the same race: if the provider accepts the message but the
 worker has not recorded the result by the time the same deadline and margin have elapsed, its late
-write is refused. The row then keeps no provider message ID, and neither reconciliation outcome adds
-one, so the provider's bounce and complaint webhooks for that message match no delivery and record no
-suppression and no consent revocation. Before resolving such an item, check the provider's bounce
-and complaint records for that recipient and add any suppression by hand (`POST /api/suppressions`).
-An expired triggered claim marked for reconciliation has the same gap.
+write cannot mark the delivery sent. It still attaches the provider message ID to the reconciliation
+item without resolving it, so the provider's receipt, bounce, and complaint webhooks for that message
+match the delivery, and a bounce or complaint records the suppression and consent revocation as usual.
+An expired triggered claim marked for reconciliation keeps no provider message ID: its webhooks match
+no delivery and record no suppression and no consent revocation. Before resolving such an item, check
+the provider's bounce and complaint records for that recipient and add any suppression by hand
+(`POST /api/suppressions`).
 Generic HTTP ESP/SMS connectors default
 `idempotentSubmission` to false. A workspace administrator may enable it only after verifying that
 the configured endpoint guarantees repeated requests carrying the same `Idempotency-Key` deliver no

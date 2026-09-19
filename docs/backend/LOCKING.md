@@ -661,13 +661,23 @@ row on the delivery joined to its send for `origin` — the same statement shape
 the triggered expired-claim sweep. It never runs inside the reservation transaction, holds no
 workspace root, and adds no lock edge. Send status is not filtered, because a completed, paused, or
 cancelled send can own the stranded row; scheduler discovery includes workspaces whose only work is
-such a row. A slow but live worker that writes after the sweep loses its `status = 'dispatching'`
-compare-and-set and leaves the row reconcilable. That refused write is the only one that stores
-`provider_message_id`, and neither reconciliation outcome stores it, so provider bounce and complaint
-webhooks for the message match no row and record no suppression or consent revocation; operators
-apply those by hand (`docs/DELIVERABILITY.md` §3.1). An expired triggered claim marked ambiguous has
-the same gap. Audience rows stranded before any reservation, and rows without a person (which are
-never reserved), have no age anchor and are not swept.
+such a row. The same pass then settles every audience send that owns an unresolved reconciliation
+row and either has a `failed_count` that disagrees with its failed rows or is still `running` with
+nothing pending: it refreshes the counters and completes such a running send without resolving a
+provider, so a connector disabled after the worker died cannot keep the send running. Those sends
+are selected by that durable predicate, not remembered from the sweep, because a marked row no
+longer matches the sweep: a settlement that fails is found again on a later pass, and scheduler
+discovery includes workspaces whose only work is such a stale counter. Settlement reuses the
+auto-commit counter refresh and `running` → `completed` compare-and-set the dispatch loop already
+runs, so it adds no lock edge. A slow but live worker that writes after the sweep loses its
+`status = 'dispatching'` compare-and-set and leaves the row reconcilable. It then attaches its
+provider id and message id to that swept row through a second single-row compare-and-set that
+accepts only a still-unresolved swept row with no provider id, and changes neither status,
+reconciliation state, nor the reservation, so provider bounce and complaint webhooks still resolve to
+the row and record suppression and consent revocation. An expired triggered claim marked ambiguous
+stores no message id, so its webhooks match no row; operators apply those by hand
+(`docs/DELIVERABILITY.md` §3.1). Audience rows stranded before any reservation, and rows without a
+person (which are never reserved), have no age anchor and are not swept.
 
 Operator reconciliation takes locked membership permission roots first and requires both
 `CAMPAIGN_MANAGE` and `CONSENT_MANAGE`, then locks campaign, send, and delivery in that
