@@ -96,6 +96,58 @@ class TenantResolutionInterceptorTest {
     }
 
     @Test
+    void lifecycleEndpointsBypassOrdinaryResolutionUnderADeploymentContextPath() {
+        when(requestResolver.resolve(any(), eq(7))).thenReturn(null);
+
+        assertTrue(preHandleInContext("GET", "/connex/api/orgs/3/workspaces/5/export", "/connex"));
+        assertTrue(preHandleInContext("DELETE", "/connex/api/orgs/3/workspaces/5", "/connex"));
+        assertTrue(preHandleInContext("DELETE", "/connex/api/orgs/3", "/connex"));
+
+        verifyNoInteractions(requestResolver, workspaceService, catalogResolver, workspaceCookie);
+        verify(tenantContext, times(3)).clear();
+        verifyNoMoreInteractions(tenantContext);
+    }
+
+    @Test
+    void lifecycleEndpointsBypassOrdinaryResolutionWhenARouteLetterIsPercentEncoded() {
+        when(requestResolver.resolve(any(), eq(7))).thenReturn(null);
+
+        assertTrue(preHandle("GET", "/api/orgs/3/workspaces/5/%65xport"));
+
+        verifyNoInteractions(requestResolver, workspaceService, catalogResolver, workspaceCookie);
+        verify(tenantContext).clear();
+        verifyNoMoreInteractions(tenantContext);
+    }
+
+    /**
+     * A context-prefix lookalike or a path the normalizer rejects must earn no lifecycle exemption.
+     * It takes ordinary resolution, with the real public-namespace classifier, and neither step may
+     * turn the rejection into a server error.
+     */
+    @ParameterizedTest
+    @CsvSource({
+        "DELETE, /connexx/api/orgs/3, /connex",
+        "DELETE, /api/orgs/3%01, ''",
+        "GET, /api/orgs/3/workspaces/5/%01export, ''",
+        "DELETE, /api/orgs/3/workspaces/5%2F, ''"
+    })
+    void lookalikeContextsAndRejectedPathsTakeOrdinaryResolution(
+            String method, String uri, String contextPath) {
+        liveContext.set(11, 3, 7, "member", null);
+        when(workspaceService.rememberedWorkspaceIdFor(7)).thenReturn(null);
+        when(workspaceService.firstMembershipWorkspaceIdFor(7)).thenReturn(null);
+        MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
+        request.setContextPath(contextPath);
+
+        assertTrue(interceptorWithRealResolver().preHandle(request, response, handler));
+
+        assertFalse(liveContext.isResolved());
+        verify(workspaceService).rememberedWorkspaceIdFor(7);
+        verify(workspaceService).firstMembershipWorkspaceIdFor(7);
+        verifyNoInteractions(workspaceCookie, catalogResolver);
+    }
+
+    @Test
     void otherOrganizationRequestsStillUseOrdinaryResolution() {
         when(requestResolver.resolve(any(), eq(7)))
             .thenReturn(null);
@@ -464,6 +516,32 @@ class TenantResolutionInterceptorTest {
         verifyNoInteractions(workspaceCookie, catalogResolver);
     }
 
+    /**
+     * A selection route whose path the normalizer rejects is no longer recognised as a selection
+     * route, so a stale selection refuses it with the ordinary 403 instead of a server error.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "/api/invites%2Fexchange",
+        "/api/workspaces/11/switch%01",
+        "/api/workspaces/11/%2e%2e/switch"
+    })
+    void rejectedSelectionPathsAreRefusedLikeAnyOtherStaleWrite(String path) {
+        liveContext.set(11, 3, 7, "member", null);
+        when(requestResolver.resolve(any(), eq(7))).thenReturn(11);
+        when(requestResolver.isStaleWorkspacePin(any(), eq(11))).thenReturn(true);
+        when(workspaceService.getRole(11, 7)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(7)).thenReturn(19);
+
+        ForbiddenException exception = assertThrows(ForbiddenException.class,
+            () -> preHandle(liveInterceptor, "POST", path));
+
+        assertEquals("Not a member of workspace 11", exception.getMessage());
+        assertFalse(liveContext.isResolved());
+        verify(workspaceService, never()).rememberActive(anyInt(), anyInt());
+        verifyNoInteractions(workspaceCookie, catalogResolver);
+    }
+
     @Test
     void explicitForeignWorkspacePinStillReturnsForbidden() {
         when(requestResolver.resolve(any(), eq(7))).thenReturn(99);
@@ -521,6 +599,12 @@ class TenantResolutionInterceptorTest {
         Authentication authentication = mock(Authentication.class);
         when(authentication.getPrincipal()).thenReturn(principal);
         SecurityContextHolder.getContext().setAuthentication(authentication);
+    }
+
+    private boolean preHandleInContext(String method, String uri, String contextPath) {
+        MockHttpServletRequest request = new MockHttpServletRequest(method, uri);
+        request.setContextPath(contextPath);
+        return interceptor.preHandle(request, response, handler);
     }
 
     private boolean preHandle(String method, String path) {
