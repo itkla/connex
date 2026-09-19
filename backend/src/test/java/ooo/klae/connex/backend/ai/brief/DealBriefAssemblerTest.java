@@ -182,6 +182,32 @@ class DealBriefAssemblerTest {
     }
 
     @Test
+    void interruptDuringDealLoadStopsAssemblyBeforeTheSummaryIsLoaded() {
+        when(dealService.getDealById(DEAL_ID)).thenAnswer(interruptingWith(deal()));
+
+        assertAssemblyCancelled();
+        verify(dealService, never()).getDealSummary(anyInt());
+    }
+
+    @Test
+    void interruptDuringSummaryLoadStopsAssemblyBeforeStageHistoryIsLoaded() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getDealSummary(DEAL_ID)).thenAnswer(interruptingWith(null));
+
+        assertAssemblyCancelled();
+        verify(dealService, never()).getStageHistory(anyInt());
+    }
+
+    @Test
+    void interruptDuringStageHistoryLoadStopsAssemblyBeforeStakeholdersAreLoaded() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getStageHistory(DEAL_ID)).thenAnswer(interruptingWith(List.of()));
+
+        assertAssemblyCancelled();
+        verify(dealService, never()).getPeopleByDealId(anyInt());
+    }
+
+    @Test
     void interruptDuringStakeholderLoadStopsAssemblyBeforeActivitiesAreLoaded() {
         when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
         when(dealService.getPeopleByDealId(DEAL_ID)).thenAnswer(interruptingWith(List.of()));

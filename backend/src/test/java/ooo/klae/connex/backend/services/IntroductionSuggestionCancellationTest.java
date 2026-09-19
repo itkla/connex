@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 
@@ -30,8 +31,8 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
  * Verifies that suggestion ranking, which introduction rationales run on a fixed-size AI
- * generation worker, stops between its workspace-wide loads, rescore, and ranking once the
- * worker has been interrupted.
+ * generation worker, stops immediately after each workspace-wide load and after the rescore once
+ * the worker has been interrupted, while request and scheduled callers are never cancelled.
  */
 @ExtendWith(MockitoExtension.class)
 class IntroductionSuggestionCancellationTest {
@@ -87,6 +88,17 @@ class IntroductionSuggestionCancellationTest {
     }
 
     @Test
+    void interruptDuringExclusionLoadStopsBeforeTheEdgeGraphIsLoaded() {
+        when(introductionMapper.findCandidatePersons(WORKSPACE_ID))
+            .thenReturn(List.of(candidate(1), candidate(2)));
+        when(introductionMapper.findIntroExcludedPersonIds(WORKSPACE_ID))
+            .thenAnswer(interruptingWith(List.of()));
+
+        assertRankingCancelled();
+        verify(edgeReader, never()).getAllEdges(anyInt());
+    }
+
+    @Test
     void interruptDuringEdgeLoadStopsBeforeEmploymentIsLoaded() {
         when(introductionMapper.findCandidatePersons(WORKSPACE_ID))
             .thenReturn(List.of(candidate(1), candidate(2)));
@@ -94,6 +106,17 @@ class IntroductionSuggestionCancellationTest {
 
         assertRankingCancelled();
         verify(introductionMapper, never()).findWorkspaceEmployment(anyInt());
+    }
+
+    @Test
+    void interruptDuringEmploymentLoadStopsBeforeExistingPairsAreLoaded() {
+        when(introductionMapper.findCandidatePersons(WORKSPACE_ID))
+            .thenReturn(List.of(candidate(1), candidate(2)));
+        when(introductionMapper.findWorkspaceEmployment(WORKSPACE_ID))
+            .thenAnswer(interruptingWith(List.of()));
+
+        assertRankingCancelled();
+        verify(introductionMapper, never()).findExistingPairs(anyInt());
     }
 
     @Test
@@ -116,9 +139,27 @@ class IntroductionSuggestionCancellationTest {
         verify(clock, never()).instant();
     }
 
+    @Test
+    void requestAndScheduledRankingIgnoresAnInterruptedThread() {
+        when(introductionMapper.findCandidatePersons(WORKSPACE_ID))
+            .thenReturn(List.of(candidate(1), candidate(2)));
+        when(clock.instant()).thenReturn(Instant.parse("2026-09-19T00:00:00Z"));
+
+        Thread.currentThread().interrupt();
+        try {
+            service.computeSuggestions(WORKSPACE_ID, LIMIT);
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+        verify(introductionMapper).findExistingPairs(WORKSPACE_ID);
+        verify(scoringService).scoreContacts(WORKSPACE_ID);
+    }
+
     private void assertRankingCancelled() {
         try {
-            assertThrows(CancellationException.class, () -> service.computeSuggestions(WORKSPACE_ID, LIMIT));
+            assertThrows(CancellationException.class,
+                () -> service.computeCancellableSuggestions(WORKSPACE_ID, LIMIT));
             assertTrue(Thread.currentThread().isInterrupted());
         } finally {
             Thread.interrupted();

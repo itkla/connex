@@ -9,6 +9,7 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiCancellation;
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiGenerationProfile;
@@ -61,9 +62,12 @@ public class IntroRationaleService {
     /**
      * Generates or reuses a fresh rationale for a workspace-scoped introduction suggestion.
      * The admitted contributors are exactly the two endpoint people whose data reaches the prompt.
+     * An interrupted worker stops immediately after the suggestion ranking and after each endpoint
+     * lookup instead of loading context for a discarded generation.
      * @param personAId first requested person id
      * @param personBId second requested person id
      * @return available rationale or a graceful unavailability response
+     * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public IntroRationaleDto generate(int personAId, int personBId) {
         int lo = Math.min(personAId, personBId);
@@ -85,15 +89,24 @@ public class IntroRationaleService {
             return IntroRationaleDto.unavailable(lo, hi, RATE_LIMITED);
         }
 
-        IntroSuggestionDto suggestion = introductionService.computeSuggestions(workspaceId, RESOLVE_LIMIT).stream()
+        List<IntroSuggestionDto> suggestions =
+                introductionService.computeCancellableSuggestions(workspaceId, RESOLVE_LIMIT);
+        AiCancellation.throwIfInterrupted();
+        IntroSuggestionDto suggestion = suggestions.stream()
                 .filter(candidate -> candidate.getPersonAId() == lo && candidate.getPersonBId() == hi)
                 .findFirst()
                 .orElse(null);
         if (suggestion == null) {
             return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);
         }
-        if (isAiRestricted(personMapper.getPersonById(workspaceId, lo))
-                || isAiRestricted(personMapper.getPersonById(workspaceId, hi))) {
+        Person personA = personMapper.getPersonById(workspaceId, lo);
+        AiCancellation.throwIfInterrupted();
+        if (isAiRestricted(personA)) {
+            return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);
+        }
+        Person personB = personMapper.getPersonById(workspaceId, hi);
+        AiCancellation.throwIfInterrupted();
+        if (isAiRestricted(personB)) {
             return IntroRationaleDto.unavailable(lo, hi, NOT_A_SUGGESTION);
         }
 

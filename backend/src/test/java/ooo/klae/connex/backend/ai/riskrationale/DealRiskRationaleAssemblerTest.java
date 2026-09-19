@@ -123,6 +123,22 @@ class DealRiskRationaleAssemblerTest {
     }
 
     @Test
+    void interruptDuringDealLoadStopsAssemblyBeforeTheSummaryIsLoaded() {
+        when(dealService.getDealById(DEAL_ID)).thenAnswer(interruptingWith(null));
+
+        assertAssemblyCancelled();
+        verify(dealService, never()).getDealSummary(anyInt());
+    }
+
+    @Test
+    void interruptDuringSummaryLoadStopsAssemblyBeforeStakeholdersAreLoaded() {
+        when(dealService.getDealSummary(DEAL_ID)).thenAnswer(interruptingWith(null));
+
+        assertAssemblyCancelled();
+        verify(dealService, never()).getPeopleByDealId(anyInt());
+    }
+
+    @Test
     void interruptDuringStakeholderLoadStopsAssemblyBeforeWarmthIsScored() {
         when(dealService.getPeopleByDealId(DEAL_ID))
                 .thenAnswer(interruptingWith(List.of(new DealPerson(person(PERSON_ID, "Mina Patel"), null))));

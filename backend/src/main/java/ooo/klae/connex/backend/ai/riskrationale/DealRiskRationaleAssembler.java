@@ -61,9 +61,9 @@ public class DealRiskRationaleAssembler {
 
     /**
      * Builds a masked rationale prompt from deterministic risk and the active workspace's deal view.
-     * An interrupted worker stops after the deal loads, after warmth scoring, before each
-     * stakeholder enrichment, and before returning, instead of finishing an assembly whose result
-     * has been discarded.
+     * An interrupted worker stops immediately after each deal load, warmth scoring, the account
+     * history load, and each stakeholder enrichment, and before returning, instead of finishing an
+     * assembly whose result has been discarded.
      * @param workspaceId active workspace id
      * @param dealId deal whose risk should be explained
      * @param risk deterministic risk assessment
@@ -73,7 +73,9 @@ public class DealRiskRationaleAssembler {
     public RationaleAssembly assemble(int workspaceId, int dealId, DealRiskDto risk) {
         Objects.requireNonNull(risk, "risk");
         Deal deal = dealService.getDealById(dealId);
+        AiCancellation.throwIfInterrupted();
         DealSummaryDto summary = dealService.getDealSummary(dealId);
+        AiCancellation.throwIfInterrupted();
         List<DealPerson> people = safeList(dealService.getPeopleByDealId(dealId));
         AiCancellation.throwIfInterrupted();
 
@@ -128,6 +130,7 @@ public class DealRiskRationaleAssembler {
         appendStakeholders(prompt, stakeholderTokens, warmth, context);
         appendDealContext(prompt, summary, risk, companyToken, ownerToken, context);
         aiRelationshipContext.appendAccountHistory(prompt, companyId, deal == null ? 0 : deal.getId(), context);
+        AiCancellation.throwIfInterrupted();
         appendStakeholderBackground(prompt, stakeholderTokens, context, connectionPersonIds);
         return prompt.append("CRM_CONTEXT_END").toString();
     }
@@ -169,12 +172,12 @@ public class DealRiskRationaleAssembler {
         StringBuilder block = new StringBuilder();
         int enriched = 0;
         for (Map.Entry<Integer, String> stakeholder : stakeholderTokens.entrySet()) {
-            AiCancellation.throwIfInterrupted();
             if (stakeholder.getKey() <= 0) {
                 continue;
             }
             List<Integer> appended = aiRelationshipContext.appendStakeholderBackground(
                     block, stakeholder.getKey(), stakeholder.getValue(), context);
+            AiCancellation.throwIfInterrupted();
             if (appended != null) {
                 connectionPersonIds.addAll(appended);
             }

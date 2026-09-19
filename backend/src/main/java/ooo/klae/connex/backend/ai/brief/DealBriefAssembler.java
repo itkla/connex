@@ -64,8 +64,9 @@ public class DealBriefAssembler {
 
     /**
      * Builds a masked brief prompt from the active workspace's view of a deal. An interrupted
-     * worker stops before the next CRM load, person lookup batch, stakeholder enrichment, or
-     * free-text digest instead of finishing an assembly whose result has been discarded.
+     * worker stops immediately after the CRM load, person lookup batch, or stakeholder enrichment
+     * that was running, and before the next free-text digest, instead of finishing an assembly
+     * whose result has been discarded.
      * @param workspaceId active workspace id
      * @param dealId deal to summarize
      * @return masked prompt and its request-local masking context
@@ -73,11 +74,14 @@ public class DealBriefAssembler {
      */
     public BriefAssembly assemble(int workspaceId, int dealId) {
         Deal deal = dealService.getDealById(dealId);
+        AiCancellation.throwIfInterrupted();
         if (deal == null) {
             throw new ResourceNotFoundException("Deal not found");
         }
         DealSummaryDto summary = dealService.getDealSummary(dealId);
+        AiCancellation.throwIfInterrupted();
         List<DealStageHistory> stageHistory = safeList(dealService.getStageHistory(dealId));
+        AiCancellation.throwIfInterrupted();
         List<DealPerson> people = safeList(dealService.getPeopleByDealId(dealId));
         AiCancellation.throwIfInterrupted();
         List<Activity> activities = safeList(dealService.getActivitiesByDealId(dealId));
@@ -85,6 +89,7 @@ public class DealBriefAssembler {
         List<Note> notes = safeList(dealService.getNotesByDealId(dealId));
         AiCancellation.throwIfInterrupted();
         List<Task> tasks = safeList(dealService.getTasksByDealId(dealId));
+        AiCancellation.throwIfInterrupted();
         Set<Integer> allowedPersonIds = allowedPersonIds(workspaceId, people, activities, notes, tasks);
 
         MaskingContext context = new MaskingContext();
@@ -159,11 +164,11 @@ public class DealBriefAssembler {
         appendValue(prompt, "Expected close", expectedClose);
         appendValue(prompt, "Value", value);
         boolean degraded = aiRelationshipContext.appendCompanyProfile(prompt, companyId, context);
+        AiCancellation.throwIfInterrupted();
 
         appendStageHistory(prompt, stageHistory, context, dealSourceId);
         appendStakeholders(prompt, stakeholders, warmth, context, sourceRegistry);
         degraded |= appendStakeholderBackground(prompt, stakeholders, context, sourceRegistry);
-        AiCancellation.throwIfInterrupted();
         appendRisk(prompt, risk, stakeholders, context, dealSourceId);
         degraded |= aiRelationshipContext.appendAccountHistory(
                 prompt, companyId, deal.getId(), context, sourceRegistry::register);
@@ -183,7 +188,6 @@ public class DealBriefAssembler {
         int enriched = 0;
         boolean degraded = false;
         for (MaskedStakeholder stakeholder : stakeholders) {
-            AiCancellation.throwIfInterrupted();
             if (stakeholder.personId() <= 0) {
                 continue;
             }
@@ -193,6 +197,7 @@ public class DealBriefAssembler {
                     stakeholder.personToken(),
                     context,
                     sourceRegistry::register);
+            AiCancellation.throwIfInterrupted();
             if (++enriched == MAX_ENRICHED_STAKEHOLDERS) {
                 break;
             }
@@ -251,9 +256,10 @@ public class DealBriefAssembler {
         List<Integer> ids = List.copyOf(requested);
         Set<Integer> allowed = new LinkedHashSet<>();
         for (int from = 0; from < ids.size(); from += MAX_PERSON_LOOKUP_BATCH) {
-            AiCancellation.throwIfInterrupted();
             int to = Math.min(ids.size(), from + MAX_PERSON_LOOKUP_BATCH);
-            for (Person person : personMapper.getByIds(workspaceId, ids.subList(from, to))) {
+            List<Person> batch = personMapper.getByIds(workspaceId, ids.subList(from, to));
+            AiCancellation.throwIfInterrupted();
+            for (Person person : batch) {
                 if (person != null && person.getSuspendedAt() == null && person.getProvisionCeasedAt() == null) {
                     allowed.add(person.getId());
                 }
