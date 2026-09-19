@@ -295,6 +295,27 @@ class WorkflowRuntimeClaimServiceTest {
     }
 
     @Test
+    void intactDefinitionReturnsTheCanonicalDefinitionOnlyWhileTheStoredHashMatches() {
+        byte[] storedHash = new byte[32];
+        byte[] tamperedHash = new byte[32];
+        tamperedHash[0] = 1;
+        when(canonicalizer.canonicalizeDraftJson(
+            "Workflow", null, "company", "user", "{}", "{}"))
+            .thenReturn(new CanonicalDraft(
+                "Workflow", null, "company", "user", "{}", "{}", storedHash));
+        WorkflowDefinition definition = new WorkflowDefinition(1, "trigger", List.of(), List.of());
+        when(canonicalizer.parseDefinition("{}")).thenReturn(definition);
+
+        assertSame(definition, service.intactDefinition(version).orElseThrow());
+        version.setDefinitionHash(tamperedHash);
+        assertTrue(service.intactDefinition(version).isEmpty());
+        version.setDefinitionHash(null);
+        assertTrue(service.intactDefinition(version).isEmpty());
+
+        verify(canonicalizer, times(1)).parseDefinition("{}");
+    }
+
+    @Test
     void durableScheduleClaimChecksThePreUpgradePlaintextLedgerKey() {
         RuleTrigger trigger = new RuleTrigger();
         trigger.setType("schedule");

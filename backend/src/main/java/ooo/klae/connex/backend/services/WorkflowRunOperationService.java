@@ -12,12 +12,15 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Workflow;
 import ooo.klae.connex.backend.beans.WorkflowRun;
 import ooo.klae.connex.backend.beans.WorkflowStepRun;
+import ooo.klae.connex.backend.beans.WorkflowVersion;
+import ooo.klae.connex.backend.dto.WorkflowDefinition;
 import ooo.klae.connex.backend.dto.WorkflowRunOperationDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
 import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
 import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
+import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
@@ -32,6 +35,9 @@ public class WorkflowRunOperationService {
     private final WorkflowMapper workflowMapper;
     private final WorkflowOperationsMapper workflowOperationsMapper;
     private final WorkflowRunMapper runMapper;
+    private final WorkflowVersionMapper workflowVersionMapper;
+    private final WorkflowRuntimeClaimService claimService;
+    private final WorkflowDefinitionValidator definitionValidator;
     private final WorkflowRuntimeProperties properties;
     private final WorkspaceService workspaceService;
     private final AuditService auditService;
@@ -83,14 +89,26 @@ public class WorkflowRunOperationService {
         return new WorkflowRunOperationDto(runKeyValue, priorStatus, requested);
     }
 
+    /**
+     * Re-drives a failed retry-safe action as the run's pinned actor. Because the retry fires that
+     * action again, the caller must currently hold the same authority a manual dispatch of the
+     * pinned version requires. The caller's authorization rows are locked before the run and step
+     * rows, per the workflow lock order, and only those locked snapshots decide.
+     */
     @Transactional
     @RequirePermission(Permission.RULE_MANAGE)
     public WorkflowRunOperationDto retry(int workflowId, String runKeyValue) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int requesterId = workspaceService.getCurrentUserId();
         Workflow workflow = requireWorkflow(workspaceId, workflowId);
         WorkflowRunKey runKey = requireCanonical(runKeyValue);
+        boolean lockedBuiltInAdministrator = workspaceService.isLockedBuiltInAdministrator(
+            workspaceId, requesterId);
+        Set<Permission> lockedPermissions = workspaceService.lockedMemberPermissionsFor(
+            workspaceId, requesterId);
         WorkflowRun run = requireRunForUpdate(
             workspaceId, workflowId, runKey.id());
+        requireRetryAuthority(workspaceId, run, lockedBuiltInAdministrator, lockedPermissions);
         if (!"intervention_required".equals(run.getStatus())) {
             throw new ConflictException("Workflow run is not awaiting intervention");
         }
@@ -125,6 +143,27 @@ public class WorkflowRunOperationService {
             "Workflow run retry scheduled",
             Map.of("runKey", runKeyValue, "nodeId", run.getCurrentNodeId()));
         return new WorkflowRunOperationDto(runKeyValue, "waiting", false);
+    }
+
+    private void requireRetryAuthority(
+            int workspaceId,
+            WorkflowRun run,
+            boolean lockedBuiltInAdministrator,
+            Set<Permission> lockedPermissions) {
+        WorkflowVersion version = workflowVersionMapper.getById(
+            workspaceId, run.getWorkflowId(), run.getWorkflowVersionId());
+        if (version == null) {
+            throw new ConflictException("Workflow run version is unavailable");
+        }
+        WorkflowDefinition definition = claimService.intactDefinition(version)
+            .orElseThrow(() -> new ConflictException(
+                "Workflow run version failed its integrity check"));
+        definitionValidator.validateForManualDispatch(
+            version.getRecordType(),
+            version.getExecutionMode(),
+            definition,
+            lockedBuiltInAdministrator,
+            lockedPermissions);
     }
 
     private void cancelCurrentStep(WorkflowRun run, LocalDateTime finishedAt) {

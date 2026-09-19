@@ -4,6 +4,7 @@ import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 import org.springframework.dao.DuplicateKeyException;
@@ -467,7 +468,12 @@ public class WorkflowRuntimeClaimService {
             version.getRecordType(), version.getExecutionMode(), verifiedDefinition(version));
     }
 
-    private WorkflowDefinition verifiedDefinition(WorkflowVersion version) {
+    /**
+     * Returns an immutable version's canonical definition only while its stored hash still matches
+     * that canonical form, so operator paths verify a pinned version exactly as runtime claims do.
+     * Each caller maps an empty result to the failure its own contract requires.
+     */
+    Optional<WorkflowDefinition> intactDefinition(WorkflowVersion version) {
         CanonicalDraft canonical = canonicalizer.canonicalizeDraftJson(
             version.getName(),
             version.getDescription(),
@@ -478,12 +484,16 @@ public class WorkflowRuntimeClaimService {
         if (version.getDefinitionHash() == null
                 || !MessageDigest.isEqual(
                     version.getDefinitionHash(), canonical.definitionHash())) {
-            throw new WorkflowExecutionException(
-                "definition_corrupt",
-                "The active workflow definition failed its integrity check.",
-                true);
+            return Optional.empty();
         }
-        return canonicalizer.parseDefinition(canonical.definitionJson());
+        return Optional.of(canonicalizer.parseDefinition(canonical.definitionJson()));
+    }
+
+    private WorkflowDefinition verifiedDefinition(WorkflowVersion version) {
+        return intactDefinition(version).orElseThrow(() -> new WorkflowExecutionException(
+            "definition_corrupt",
+            "The active workflow definition failed its integrity check.",
+            true));
     }
 
     private boolean entityTriggerMatches(
