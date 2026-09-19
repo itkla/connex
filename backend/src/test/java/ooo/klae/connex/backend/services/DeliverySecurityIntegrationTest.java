@@ -1407,14 +1407,14 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
             if (completionFailed.compareAndSet(false, true)) {
                 throw new IllegalStateException("Simulated send completion failure");
             }
-            return realSendMapper.markCompleted(workspace.getId(), send.id());
-        }).when(campaignSendMapper).markCompleted(workspace.getId(), send.id());
+            return realSendMapper.markSettledAudienceSendCompleted(workspace.getId(), send.id());
+        }).when(campaignSendMapper).markSettledAudienceSendCompleted(workspace.getId(), send.id());
 
         if (completionFailsOnce) {
             assertEquals(2, dispatchService.processWorkspace(workspace.getId()));
             var stillRunning = campaignSendMapper.getSend(workspace.getId(), send.id());
             assertEquals("running", stillRunning.getStatus());
-            assertEquals(1, stillRunning.getFailedCount());
+            assertEquals(0, stillRunning.getFailedCount());
         }
         assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
 
@@ -1611,7 +1611,7 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
     }
 
     @Test
-    void theLateCorrelationCompareAndSetOnlyTouchesAnUnresolvedSweptRowWithoutAProviderId() {
+    void theLateCorrelationCompareAndSetOnlyTouchesASweptRowWithoutAProviderId() {
         configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
         Person person = recipient();
         int sweptId = strandedAudienceAttempt(person, readySend(person, DeliveryChannel.EMAIL));
@@ -1632,7 +1632,7 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
 
         assertEquals(1, lateCorrelation(sweptId, "late-message"));
         assertEquals(0, lateCorrelation(sweptId, "second-message"));
-        assertEquals(0, lateCorrelation(resolvedId, "resolved-message"));
+        assertEquals(1, lateCorrelation(resolvedId, "resolved-message"));
         assertEquals(0, lateCorrelation(ambiguousId, "ambiguous-message"));
 
         CampaignDelivery correlated = deliveryMapper.getDelivery(workspace.getId(), sweptId);
@@ -1640,12 +1640,189 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         assertNotNull(correlated.getReconciliationRequiredAt());
         assertEquals(EXPIRED_AUDIENCE_RESERVATION, correlated.getLastError());
         assertEquals("late-message", correlated.getProviderMessageId());
-        for (int id : List.of(resolvedId, ambiguousId)) {
-            CampaignDelivery untouched = deliveryMapper.getDelivery(workspace.getId(), id);
-            assertNull(untouched.getProviderId());
-            assertNull(untouched.getProviderMessageId());
-        }
+        CampaignDelivery resolved = deliveryMapper.getDelivery(workspace.getId(), resolvedId);
+        assertEquals("failed", resolved.getStatus());
+        assertEquals("operator_not_delivered", resolved.getReconciliationOutcome());
+        assertNull(resolved.getReconciliationRequiredAt());
+        assertNull(resolved.getFrequencyReservedAt());
+        assertEquals("resolved-message", resolved.getProviderMessageId());
+        CampaignDelivery untouched = deliveryMapper.getDelivery(workspace.getId(), ambiguousId);
+        assertNull(untouched.getProviderId());
+        assertNull(untouched.getProviderMessageId());
         assertEquals(0, submissions.size());
+    }
+
+    @Test
+    void aTerminalWriteThatLandsWhileASweptSendSettlesIsNeverLostFromItsCounters() {
+        Person abandonedRecipient = recipient();
+        Person inFlightRecipient = peerOf(abandonedRecipient);
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        CampaignSendDto send = readySend(abandonedRecipient, DeliveryChannel.EMAIL);
+        sendService.queueSend(send.campaignId(), send.id());
+        int abandonedId = claimedAudienceAttempt(send, abandonedRecipient);
+        int inFlightId = claimedAudienceAttempt(send, inFlightRecipient);
+        assertEquals(1, campaignSendMapper.markRunning(workspace.getId(), send.id()));
+        expireReservation(abandonedId, reservationGraceSeconds() + 60);
+        disableEmailProvider();
+        CampaignSendMapper realSendMapper = sqlSession.getMapper(CampaignSendMapper.class);
+        AtomicBoolean terminalWriteLanded = new AtomicBoolean();
+        doAnswer(invocation -> {
+            int refreshed = realSendMapper.refreshCounters(workspace.getId(), send.id());
+            if (terminalWriteLanded.compareAndSet(false, true)) {
+                completeInFlightAttempt(inFlightId, "late-message");
+            }
+            return refreshed;
+        }).when(campaignSendMapper).refreshCounters(workspace.getId(), send.id());
+
+        int sweptPass = dispatchService.processWorkspace(workspace.getId());
+
+        assertTrue(terminalWriteLanded.get());
+        var stillRunning = campaignSendMapper.getSend(workspace.getId(), send.id());
+        assertEquals("running", stillRunning.getStatus());
+        assertNull(stillRunning.getCompletedAt());
+        assertEquals("dispatched", deliveryMapper.getDelivery(workspace.getId(), inFlightId).getStatus());
+        assertEquals(1, sweptPass);
+
+        assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+
+        var settled = campaignSendMapper.getSend(workspace.getId(), send.id());
+        assertEquals("completed", settled.getStatus());
+        assertNotNull(settled.getCompletedAt());
+        assertEquals(1, settled.getDispatchedCount());
+        assertEquals(1, settled.getFailedCount());
+        CampaignDelivery swept = deliveryMapper.getDelivery(workspace.getId(), abandonedId);
+        assertEquals("failed", swept.getStatus());
+        assertNotNull(swept.getReconciliationRequiredAt());
+        assertEquals(0, submissions.size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"delivered", "not_delivered"})
+    void aSubmissionThatLosesToTheSweepStillCorrelatesAfterAnOperatorResolvedIt(String resolution)
+            throws Exception {
+        Person person = recipient();
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        CampaignSendDto send = readySend(person, DeliveryChannel.EMAIL);
+        int deliveryId = pendingDelivery(send);
+        submissionObserver = () -> {
+            expireReservation(deliveryId, reservationGraceSeconds() + 60);
+            assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+            CampaignDelivery swept = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+            assertEquals("failed", swept.getStatus());
+            assertNotNull(swept.getReconciliationRequiredAt());
+            triggeredSendService.reconcile(send.campaignId(), deliveryId,
+                    new CampaignDeliveryReconciliationRequest(resolution));
+            sqlSession.clearCache();
+            CampaignDelivery resolved = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+            assertEquals("operator_" + resolution, resolved.getReconciliationOutcome());
+            assertNull(resolved.getProviderMessageId());
+        };
+
+        dispatch(send);
+        sqlSession.clearCache();
+
+        boolean delivered = "delivered".equals(resolution);
+        assertEquals(1, submissions.size());
+        CampaignDelivery late = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals(delivered ? "dispatched" : "failed", late.getStatus());
+        assertEquals("operator_" + resolution, late.getReconciliationOutcome());
+        assertNull(late.getReconciliationRequiredAt());
+        assertEquals(delivered, late.getFrequencyReservedAt() != null);
+        assertEquals(HttpEspDeliveryProvider.PROVIDER_ID, late.getProviderId());
+        assertEquals("message-1", late.getProviderMessageId());
+        assertEquals(1, deliveryEvents(deliveryId, "failed"));
+        assertEquals(0, deliveryEvents(deliveryId, "dispatched"));
+        assertFalse(suppressedOrRevoked(person));
+
+        assertEquals(1, ingest("{\"event\":\"bounce\",\"bounceType\":\"hard\",\"eventId\":\"bounce-"
+                + unique() + "\",\"messageId\":\"message-1\"}"));
+
+        CampaignDelivery bounced = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals(delivered ? "bounced" : "failed", bounced.getStatus());
+        assertEquals("operator_" + resolution, bounced.getReconciliationOutcome());
+        assertNull(bounced.getReconciliationRequiredAt());
+        assertEquals(1, deliveryEvents(deliveryId, "bounced"));
+        assertTrue(audienceEligibilityService.suppressedIds(
+                workspace.getId(), List.of(person.getId()), "email").contains(person.getId()));
+        assertTrue(audienceEligibilityService.revokedConsentIds(
+                workspace.getId(), List.of(person.getId()), "email", "marketing").contains(person.getId()));
+    }
+
+    @Test
+    void aWebhookThatClearsTheReconciliationMarkerCannotStrandARunningSend() throws Exception {
+        Person abandonedRecipient = recipient();
+        Person inFlightRecipient = peerOf(abandonedRecipient);
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        CampaignSendDto send = readySend(abandonedRecipient, DeliveryChannel.EMAIL);
+        sendService.queueSend(send.campaignId(), send.id());
+        int abandonedId = claimedAudienceAttempt(send, abandonedRecipient);
+        int inFlightId = claimedAudienceAttempt(send, inFlightRecipient);
+        assertEquals(1, campaignSendMapper.markRunning(workspace.getId(), send.id()));
+        expireReservation(abandonedId, reservationGraceSeconds() + 60);
+        disableEmailProvider();
+
+        assertEquals(1, dispatchService.processWorkspace(workspace.getId()));
+
+        CampaignDelivery swept = deliveryMapper.getDelivery(workspace.getId(), abandonedId);
+        assertEquals("failed", swept.getStatus());
+        assertNotNull(swept.getReconciliationRequiredAt());
+        assertEquals("running", campaignSendMapper.getSend(workspace.getId(), send.id()).getStatus());
+        assertEquals(1, lateCorrelation(abandonedId, "message-1"));
+
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        assertEquals(1, ingest("{\"event\":\"delivered\",\"eventId\":\"receipt-" + unique()
+                + "\",\"messageId\":\"message-1\"}"));
+        disableEmailProvider();
+
+        CampaignDelivery receipted = deliveryMapper.getDelivery(workspace.getId(), abandonedId);
+        assertEquals("delivered", receipted.getStatus());
+        assertNull(receipted.getReconciliationRequiredAt());
+        completeInFlightAttempt(inFlightId, "peer-message");
+        assertTrue(campaignSendMapper.audienceSendsAwaitingRecoverySettlement(workspace.getId(), 10)
+                .contains(send.id()));
+
+        assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+
+        var settled = campaignSendMapper.getSend(workspace.getId(), send.id());
+        assertEquals("completed", settled.getStatus());
+        assertNotNull(settled.getCompletedAt());
+        assertEquals(1, settled.getDispatchedCount());
+        assertEquals(0, settled.getFailedCount());
+        assertFalse(campaignSendMapper.audienceSendsAwaitingRecoverySettlement(workspace.getId(), 10)
+                .contains(send.id()));
+        assertEquals(0, submissions.size());
+    }
+
+    private Person peerOf(Person recipient) {
+        Person peer = recipient();
+        assertEquals(1, jdbcTemplate.update("UPDATE person SET name = ? WHERE workspace_id = ? AND id = ?",
+                recipient.getName() + " peer", workspace.getId(), peer.getId()));
+        return peer;
+    }
+
+    private int claimedAudienceAttempt(CampaignSendDto send, Person person) {
+        int deliveryId = deliveryMapper.getBySendAndPerson(
+                workspace.getId(), send.id(), person.getId()).getId();
+        assertEquals(1, deliveryMapper.claim(workspace.getId(), deliveryId));
+        assertEquals(CampaignFrequencyAdmissionService.Admission.RESERVED, frequencyAdmissionService.reserve(
+                workspace.getId(), deliveryId, person.getId(), "email", null, 24));
+        return deliveryId;
+    }
+
+    private void completeInFlightAttempt(int deliveryId, String providerMessageId) {
+        assertEquals(1, jdbcTemplate.update("UPDATE campaign_delivery"
+                        + " SET status = 'dispatched', provider_id = ?, provider_message_id = ?,"
+                        + " submitted_at = UTC_TIMESTAMP(6)"
+                        + " WHERE workspace_id = ? AND id = ? AND status = 'dispatching'",
+                HttpEspDeliveryProvider.PROVIDER_ID, providerMessageId, workspace.getId(), deliveryId));
+        sqlSession.clearCache();
+    }
+
+    private void disableEmailProvider() {
+        DeliveryProviderConfigRequest disabled =
+                providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL));
+        disabled.setEnabled(false);
+        configService.save(disabled);
     }
 
     private int lateCorrelation(int deliveryId, String providerMessageId) {

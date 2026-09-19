@@ -761,42 +761,25 @@ class CampaignDispatchServiceTest {
         verify(sendMapper).getSend(7, 11);
     }
 
-    @ParameterizedTest
-    @CsvSource({"running, 0, true", "running, 2, false", "completed, 0, false"})
-    void aSendAwaitingRecoverySettlementSettlesWithoutResolvingItsProvider(
-            String status, int outstanding, boolean completes) {
+    @Test
+    void aSendAwaitingRecoverySettlementIsCompletedBeforeItsCountersAreRefreshed() {
         CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
         CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
         DeliveryProviderConfigService providerConfigService = mock(DeliveryProviderConfigService.class);
         WorkflowTriggeredSendGate gate = mock(WorkflowTriggeredSendGate.class);
         when(gate.dispatchPageSize()).thenReturn(200);
         when(sendMapper.audienceSendsAwaitingRecoverySettlement(7, 200)).thenReturn(List.of(11));
-        when(sendMapper.getSend(7, 11)).thenReturn(audienceSend(status));
-        when(deliveryMapper.countPending(7, 11)).thenReturn(0);
-        when(deliveryMapper.countOutstanding(7, 11)).thenReturn(outstanding);
         CampaignDispatchService service = service(sendMapper, deliveryMapper, providerConfigService, gate);
 
         assertEquals(0, service.processWorkspace(7));
 
         InOrder settlement = inOrder(sendMapper);
+        settlement.verify(sendMapper).markSettledAudienceSendCompleted(7, 11);
         settlement.verify(sendMapper).refreshCounters(7, 11);
-        if (completes) {
-            settlement.verify(sendMapper).markCompleted(7, 11);
-        } else {
-            verify(sendMapper, never()).markCompleted(anyInt(), anyInt());
-        }
+        verify(sendMapper, never()).markCompleted(anyInt(), anyInt());
+        verify(sendMapper, never()).getSend(7, 11);
         verify(deliveryMapper, never()).countPending(anyInt(), anyInt());
         verifyNoInteractions(providerConfigService);
-    }
-
-    private static CampaignSend audienceSend(String status) {
-        CampaignSend send = new CampaignSend();
-        send.setId(11);
-        send.setWorkspaceId(7);
-        send.setOrigin("audience");
-        send.setStatus(status);
-        send.setChannel("email");
-        return send;
     }
 
     private static CampaignDelivery abandonedAudienceAttempt(int deliveryId, int sendId) {
