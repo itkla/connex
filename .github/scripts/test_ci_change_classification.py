@@ -94,6 +94,18 @@ class CiChangeClassificationTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(self.classify(path)["frontend_audit"])
 
+    def test_a_pnpm_project_file_anywhere_adds_the_audit_that_discovers_it(self) -> None:
+        for path in (
+            "pnpm-workspace.yaml",
+            "frontend/tools/pnpm-lock.yaml",
+            "frontend/tools/package.json",
+            "frontend/tools/.pnpmfile.mjs",
+            "backend/src/test/resources/fixture/pnpm-lock.yaml",
+            "tools/codegen/package.json",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(self.classify(path)["frontend_audit"])
+
     def test_ocr_dependencies_add_the_ocr_audit_only(self) -> None:
         categories = self.classify("ocr/requirements.lock")
         self.assertTrue(categories["ocr"])
