@@ -322,16 +322,35 @@ is never referenced, is not component-scanned, is excluded from the WAR, and sit
 architecture tests' walk of `backend/src/main/java`. Both are analysed by CodeQL, and neither ever
 reaches `main` — the proof asserts that both paths return 404 on `?ref=main`.
 
+Before it re-runs anything, the proof binds the run to the canary: it reads the pull request's head
+commit, selects the `pull_request` Security run of `canary/sast-gate-proof` at that commit, and
+refuses the run unless its event, branch, head commit and `pull_requests` list all name the canary.
+It records the UTC instant before the re-run request and pins every later fetch to the new attempt
+(`actions/runs/<id>/attempts/<attempt>` and its `/jobs`), re-derives the analysed merge commit from
+the re-run's analyses, and fetches each SAST job's check-run annotations. Evidence from an earlier
+attempt matches the reused merge commit exactly, so only these attempt-scoped records separate a
+fresh rejection from a stale one (#1603).
+
 `.github/scripts/verify-sast-canary.py` fails the proof unless **all** of the following hold:
 
+- the run is the re-run attempt: its id, `run_attempt`, `pull_request` event, association with the
+  canary and start time (not before the re-run request) match, every job carries the same run,
+  attempt and head commit, that head is still the pull request's head, and the analysed merge
+  commit's second parent is that head;
 - both SAST jobs concluded `failure` **at** `Block Critical, High, or error-severity alerts`, with
   `Analyze … with CodeQL` green — a tool failure is reported as a tool failure, never as a proof;
+- each SAST job carries a `Blocking CodeQL alert #<n>` annotation naming its fixture's alert, and
+  no `CodeQL analysis cannot be gated`, `CodeQL alert response was invalid`, `Unsupported CodeQL
+  gate event` or fork diagnostic — a failed gate step alone does not distinguish a blocking verdict
+  from a failed `gh api` fetch, a blind analysis or an invalid alert response;
 - `Security — required` concluded `failure` and `Classify security impact` concluded `success`;
 - both fixtures have an open Critical alert on `refs/pull/<n>/merge` under the expected rule id,
-  path and analysis category;
+  path and analysis category, most recently seen at the analysed merge commit on that ref;
 - the same two alert numbers appear under `alerts?pr=<n>` — attribution only works while result
   paths are repository-relative, so this re-proves the incident above stays closed;
-- each category's analysis of the merge commit carries exactly one result more than `main`'s
+- each category's newest error-free analysis of the merge commit was created inside its SAST job of
+  the re-run attempt (never an earlier attempt's analysis of the same commit), and carries exactly
+  one result more than `main`'s
   analysis of that merge commit's first parent — the invariant that nothing is being pruned. The
   workflow walks `main`'s analysis list newest-first, up to 20 pages of 100, until it finds that
   parent; a parent it cannot find is reported as an aged canary with the rebase remedy, never as a
