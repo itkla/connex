@@ -30,12 +30,28 @@ Availability behavior is fixed in code and has no disable setting.
 |---|---|---|
 | Registration, administrative account creation, bootstrap owner | Fail closed | Fail closed |
 | Forgot-password reset for an account that is privileged anywhere | Fail closed | Fail closed |
-| Forgot-password reset for a non-privileged account | Fail open after a durable sanitized audit | Fail closed |
+| Forgot-password reset for a non-privileged account | Fail open, with a sanitized audit that commits atomically with the new password | Fail closed |
 
 Remote availability events record only the flow, fixed reason classification, and decision. A
 known breach is always rejected. Offline corruption or runtime replacement never fails open,
 because it represents loss of the operator-controlled security source rather than a transient
 third-party outage.
+
+A fail-open decision is appended in the reset's own transaction just before it commits, so the new
+password is never stored without it; a fail-closed refusal is appended independently after the
+refused transaction rolls back. Neither is appended independently while the reset holds the account
+row, which would wait on that lock when the redeemer is signed in as the account owner (see
+[`backend/LOCKING.md`](backend/LOCKING.md#account-recovery-and-emailed-credential-tokens)).
+
+## Length limit
+
+The password encoder is BCrypt, which reads at most 72 bytes of input. New passwords are therefore
+limited to 8–72 characters at the API boundary (the complexity pattern is ASCII-only, so characters
+and bytes coincide), and `PasswordCredentialService` rejects any candidate over 72 UTF-8 bytes with
+a `PASSWORD_TOO_LONG` field error before screening, so the screened bytes are always the stored
+bytes. Sign-in keeps accepting up to 255 characters so credentials stored before the limit keep
+working. The bootstrap owner path skips request validation; an over-long
+`connex.bootstrap.password` is logged with the limit, never the value, and provisioning is skipped.
 
 ## Offline source for restricted egress
 
