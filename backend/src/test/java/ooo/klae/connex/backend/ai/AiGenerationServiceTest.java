@@ -601,6 +601,7 @@ class AiGenerationServiceTest {
         service.shutdown();
         AiProperties singleWorker = properties(Duration.ofSeconds(2));
         singleWorker.setGenerationWorkerThreads(1);
+        singleWorker.setGenerationPollWindow(Duration.ofSeconds(30));
         service = new AiGenerationService(
                 singleWorker,
                 workspaceService,
