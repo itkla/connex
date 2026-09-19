@@ -134,6 +134,8 @@ Workspace governance and organization budgets are independent gates.
 - The database ledger is the cluster coordinator; do not replace it with JVM-local counters.
 - Zero retains its documented meaning as unlimited rather than disabled.
 - Cache-miss generation uses `AiInvocationAdmissionService`; single-flight losers wait for the leader and re-read persistent cache rather than becoming artificial rate-limit failures.
+- Deal briefs and deal-risk rationales call `AiInvocationAdmissionService.precheck` before loading and masking context whenever the request can only end in a provider attempt: a forced refresh, or a request with no stored output row. The precheck applies `acquire`'s leader rejection rules without reserving quota, recording a refresh, or registering a flight, and never refuses an identity that has an active flight it may join. A request with a stored row always assembles, because only a fresh assembly can validate the row's content hash, so a valid cache hit is never refused for quota. `acquire` remains the binding, reserving decision.
+- A generation timeout interrupts its worker. Context assembly and masking call `AiCancellation.throwIfInterrupted()` between assembler phases, per digest item and stakeholder, and per dictionary identifier while screening free text, so a timed-out generation releases its fixed-pool worker. The interrupt status stays set, so a best-effort helper that swallows the exception and reports degraded context is still stopped at the next checkpoint. Raw text is never truncated before masking to save time; the replacer must keep parity with the outbound leak scan.
 
 ## Failure behavior
 
