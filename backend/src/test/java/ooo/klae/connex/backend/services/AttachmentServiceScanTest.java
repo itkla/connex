@@ -148,7 +148,7 @@ class AttachmentServiceScanTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"quarantined", "infected", "unscannable"})
+    @ValueSource(strings = {"quarantined", "infected", "unscannable", "suspicious"})
     void deniedManagedAttachmentDelegatesToQuarantineAuthorityBeforeAnyAttachmentLock(String state) {
         when(attachmentMapper.getMetadataById(7, 19)).thenReturn(attachment(MANAGED_URL, state));
 
@@ -170,7 +170,8 @@ class AttachmentServiceScanTest {
         "error, true",
         "clean, true",
         "pending, false",
-        "unscannable, false"
+        "unscannable, false",
+        "suspicious, false"
     })
     void preVerdictManagedAndUnmanagedReferencesKeepOrdinaryDeletion(String state, boolean managed) {
         String url = managed ? MANAGED_URL : "https://external.example/file.txt";

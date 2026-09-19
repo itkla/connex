@@ -214,7 +214,7 @@ class AiChatAttachmentServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"quarantined", "infected", "unscannable"})
+    @ValueSource(strings = {"quarantined", "infected", "unscannable", "suspicious"})
     void deniedAttachmentWithoutQuarantineAuthorityIsRefusedBeforeMutation(String state) {
         stubDeletableSession(state, state);
         doThrow(new ForbiddenException("Requires the ATTACHMENT_QUARANTINE_MANAGE permission"))

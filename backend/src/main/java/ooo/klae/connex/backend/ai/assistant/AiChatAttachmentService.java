@@ -130,10 +130,12 @@ public class AiChatAttachmentService {
     /**
      * Deletes one managed attachment after exact session and tenant authorization.
      *
-     * <p>The exact row is re-read under lock after its URL references. A managed object in a denied
-     * scan state additionally requires {@code ATTACHMENT_QUARANTINE_MANAGE}, checked against the
-     * membership already locked by this transaction, and is audited strictly so a failed append
-     * rolls back the deletion and its queued byte removal.
+     * <p>The exact row is re-read under lock after its URL references. A managed object whose scan
+     * state is not ordinary, as decided by
+     * {@link AttachmentQuarantineService#requiresQuarantineAuthority}, additionally requires
+     * {@code ATTACHMENT_QUARANTINE_MANAGE}, checked against the membership already locked by this
+     * transaction, and is audited strictly so a failed append rolls back the deletion and its queued
+     * byte removal.
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_USE)

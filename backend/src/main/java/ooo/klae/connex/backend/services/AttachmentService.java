@@ -329,12 +329,14 @@ public class AttachmentService {
     /**
      * Deletes an attachment by ID.
      *
-     * <p>A managed object in a denied scan state is quarantine administration: it is delegated,
-     * before any attachment row lock, to {@link AttachmentQuarantineService#delete(int)}, which
-     * requires {@code ATTACHMENT_QUARANTINE_MANAGE} and a strict audit. Ordinary deletion re-reads
-     * the exact row under lock and refuses with a conflict when its security state changed after
-     * discovery, because delegating while holding attachment rows would invert the quarantine
-     * path's membership-before-attachment lock order.
+     * <p>A managed object whose scan state is not ordinary, as decided by
+     * {@link AttachmentQuarantineService#requiresQuarantineAuthority}, is quarantine administration:
+     * it is delegated, before any attachment row lock, to
+     * {@link AttachmentQuarantineService#delete(int)}, which requires
+     * {@code ATTACHMENT_QUARANTINE_MANAGE} and a strict audit. Ordinary deletion re-reads the exact
+     * row under lock and refuses with a conflict when its security state changed after discovery,
+     * because delegating while holding attachment rows would invert the quarantine path's
+     * membership-before-attachment lock order.
      * @param id
      */
     @RequirePermission(Permission.ATTACHMENT_DELETE)

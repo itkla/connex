@@ -76,7 +76,9 @@ import tools.jackson.databind.ObjectMapper;
 class AttachmentQuarantineIntegrationTest {
     private static final String PASSWORD = "Quarantine-Fixture-Pw1!";
     private static final List<String> ACTIONS = List.of("quarantine", "rescan", "release", "delete");
-    private static final List<String> DENIED_STATES = List.of("quarantined", "infected", "unscannable");
+    private static final String UNRECOGNISED_STATE = "suspicious";
+    private static final List<String> DENIED_STATES =
+        List.of("quarantined", "infected", "unscannable", UNRECOGNISED_STATE);
     private static final String QUARANTINE_REQUIRED =
         "Requires the ATTACHMENT_QUARANTINE_MANAGE permission in this workspace";
 
@@ -377,23 +379,27 @@ class AttachmentQuarantineIntegrationTest {
         AiChatSession chat = chatSession(workspace, admin);
         Attachment generic = attachment(workspace);
         scanState(generic, "infected");
+        Attachment unrecognised = attachment(workspace);
+        scanState(unrecognised, UNRECOGNISED_STATE);
         Attachment assistant = assistantAttachment(workspace, chat);
         scanState(assistant, "unscannable");
         MockHttpSession session = login(admin);
 
         mockMvc.perform(deleteAttachment(generic, session, generic.getWorkspaceId()))
             .andExpect(status().isOk());
+        mockMvc.perform(deleteAttachment(unrecognised, session, unrecognised.getWorkspaceId()))
+            .andExpect(status().isOk());
         mockMvc.perform(deleteAssistantAttachment(chat, assistant, session, assistant.getWorkspaceId()))
             .andExpect(status().isNoContent());
 
-        for (Attachment attachment : List.of(generic, assistant)) {
+        for (Attachment attachment : List.of(generic, unrecognised, assistant)) {
             assertNull(scanMapper.getById(workspace.getId(), attachment.getId()));
             assertEquals(1, attachmentAuditCount(attachment, "malware.quarantine_deleted"));
             assertEquals(0, attachmentAuditCount(attachment, "attachment.delete"));
             verify(auditService).recordStrict(eq("malware.quarantine_deleted"), eq("attachment"),
                 eq(attachment.getId()), any(), any(), any());
         }
-        assertEquals(2, deletionQueueCount(workspace));
+        assertEquals(3, deletionQueueCount(workspace));
     }
 
     @Test
