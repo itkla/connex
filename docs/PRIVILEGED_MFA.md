@@ -65,6 +65,31 @@ first-passkey confirmation values and the actor to the integrity-chained system 
 Disabling this flag is a staged-rollout exception, not an MFA recovery mechanism. It does not make
 password proof satisfy the existing high-risk service gates.
 
+### Unenrolled privileged inventory
+
+Every backend start also counts the accounts that are privileged under the definition above and
+hold no passkey. These are the accounts confinement holds at enrollment. The same
+`auth.mfa.policy.configured` event records two counts:
+
+- `unenrolledPrivilegedCount` — every such account.
+- `unenrolledWithoutSelfServiceCount` — the accounts among them that cannot enroll on their own.
+  These are password-backed accounts that need the
+  [emailed first-passkey confirmation](#first-passkey-enrollment-confirmation) but cannot receive
+  it: the account has no email address, or this instance cannot deliver the confirmation. The count
+  is zero when the confirmation is disabled, because the password alone then suffices. Passwordless
+  accounts are never counted here, because they enroll after a fresh federated sign-in.
+
+When the first count is above zero, the backend also logs one `WARN` line that names at most 50
+account ids, lowest id first. The line carries no email addresses or credential material. The
+inventory is read-only rollout guidance. A non-empty population never blocks startup. If the
+inventory query fails, the event records `unenrolledPrivilegedInventory: unavailable` instead of the
+counts, and startup continues.
+
+To drain the list before it becomes support tickets, have each account enroll a passkey. Accounts
+that can self-serve enroll from their security settings. Accounts counted as unable to self-serve
+need one of the routes in [If the confirmation cannot be completed](#if-the-confirmation-cannot-be-completed):
+restore mail delivery, remove their privilege, or use [break-glass recovery](#break-glass-recovery).
+
 ## First-passkey enrollment confirmation
 
 Confinement makes enrollment the only door an unenrolled privileged account can walk through, so

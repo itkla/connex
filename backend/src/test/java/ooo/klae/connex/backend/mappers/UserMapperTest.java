@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -10,10 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import org.junit.jupiter.api.Test;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccount;
+import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccountCounts;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
@@ -23,6 +27,7 @@ class UserMapperTest extends AbstractMapperTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private RoleMapper roleMapper;
     @Autowired private OrgMemberMapper orgMemberMapper;
+    @Autowired private SqlSessionTemplate sqlSession;
 
     /**
      * Inserts a new user and checks if the generated ID is not zero.
@@ -347,6 +352,178 @@ class UserMapperTest extends AbstractMapperTest {
             workspace.getId(), role.getId(), List.of("API_CREDENTIAL_MANAGE"));
 
         assertTrue(userMapper.isPrivilegedAccount(user.getId()));
+    }
+
+    @Test
+    void inventoryListsAnOrganizationMemberWithoutAPasskey() {
+        Workspace fresh = freshWorkspace();
+        User user = inventoryUser("hash_" + unique(), unique() + "@inventory.example.com");
+        orgMemberMapper.addMember(fresh.getOrgId(), user.getId(), "admin");
+
+        assertTrue(userMapper.isPrivilegedAccount(user.getId()));
+        assertEquals(new UnenrolledPrivilegedAccount(user.getId(), true, true),
+                unenrolledEntry(user.getId()));
+    }
+
+    @Test
+    void inventoryOmitsAWorkspaceAdministratorWhoHoldsAPasskey() {
+        Workspace fresh = freshWorkspace();
+        User user = inventoryUser("hash_" + unique(), unique() + "@inventory.example.com");
+        workspaceMapper.addMember(fresh.getId(), user.getId(), "admin");
+        assertNotNull(unenrolledEntry(user.getId()));
+
+        enrollPasskey(user);
+
+        assertTrue(userMapper.isPrivilegedAccount(user.getId()));
+        assertNull(unenrolledEntry(user.getId()));
+    }
+
+    @Test
+    void inventoryListsACustomRoleHolderWithAdministrativePermissions() {
+        Workspace fresh = freshWorkspace();
+        User user = inventoryUser("hash_" + unique(), unique() + "@inventory.example.com");
+        workspaceMapper.addMember(fresh.getId(), user.getId(), "member");
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(fresh.getId());
+        role.setName("inventory-member-manager-" + unique());
+        roleMapper.insertRole(role);
+        workspaceMapper.setMemberCustomRole(fresh.getId(), user.getId(), role.getId());
+        roleMapper.insertPermissions(fresh.getId(), role.getId(), List.of("REPORT_READ"));
+        assertNull(unenrolledEntry(user.getId()));
+
+        roleMapper.insertPermissions(fresh.getId(), role.getId(), List.of("MEMBER_MANAGE"));
+
+        assertTrue(userMapper.isPrivilegedAccount(user.getId()));
+        assertNotNull(unenrolledEntry(user.getId()));
+    }
+
+    @Test
+    void inventoryOmitsAPlainMember() {
+        Workspace fresh = freshWorkspace();
+        User user = inventoryUser("hash_" + unique(), unique() + "@inventory.example.com");
+        workspaceMapper.addMember(fresh.getId(), user.getId(), "member");
+
+        assertFalse(userMapper.isPrivilegedAccount(user.getId()));
+        assertNull(unenrolledEntry(user.getId()));
+    }
+
+    @Test
+    void inventoryOmitsPrivilegeHeldOnlyInTenantsBeingTornDown() {
+        Workspace orgTornDown = freshWorkspace();
+        User orgAdmin = inventoryUser("hash_" + unique(), unique() + "@inventory.example.com");
+        orgMemberMapper.addMember(orgTornDown.getOrgId(), orgAdmin.getId(), "owner");
+        Workspace workspaceTornDown = freshWorkspace();
+        User workspaceAdmin = inventoryUser("hash_" + unique(), unique() + "@inventory.example.com");
+        workspaceMapper.addMember(workspaceTornDown.getId(), workspaceAdmin.getId(), "owner");
+        assertNotNull(unenrolledEntry(orgAdmin.getId()));
+        assertNotNull(unenrolledEntry(workspaceAdmin.getId()));
+
+        jdbcTemplate.update("UPDATE organization SET lifecycle_state = 'tearing_down' WHERE id = ?",
+                orgTornDown.getOrgId());
+        jdbcTemplate.update("UPDATE workspace SET lifecycle_state = 'tearing_down' WHERE id = ?",
+                workspaceTornDown.getId());
+        sqlSession.clearCache();
+
+        assertFalse(userMapper.isPrivilegedAccount(orgAdmin.getId()));
+        assertFalse(userMapper.isPrivilegedAccount(workspaceAdmin.getId()));
+        assertNull(unenrolledEntry(orgAdmin.getId()));
+        assertNull(unenrolledEntry(workspaceAdmin.getId()));
+    }
+
+    @Test
+    void inventoryExcludesTheSystemActor() {
+        User system = userMapper.getUserByUsername("__connex_system__");
+        assertNotNull(system);
+        Workspace fresh = freshWorkspace();
+        orgMemberMapper.addMember(fresh.getOrgId(), system.getId(), "admin");
+
+        assertTrue(userMapper.isPrivilegedAccount(system.getId()));
+        assertNull(unenrolledEntry(system.getId()));
+    }
+
+    @Test
+    void inventoryFlagsSelfServicePrerequisitesAndCountsTheWholePopulation() {
+        UnenrolledPrivilegedAccountCounts before = userMapper.countUnenrolledPrivilegedAccounts();
+        assertNotNull(before);
+        Workspace fresh = freshWorkspace();
+        User passwordAndEmail = inventoryUser("hash_" + unique(), unique() + "@inventory.example.com");
+        User passwordOnly = inventoryUser("hash_" + unique(), "");
+        User passwordless = inventoryUser(null, unique() + "@inventory.example.com");
+        for (User user : List.of(passwordAndEmail, passwordOnly, passwordless)) {
+            orgMemberMapper.addMember(fresh.getOrgId(), user.getId(), "admin");
+        }
+
+        assertEquals(new UnenrolledPrivilegedAccount(passwordAndEmail.getId(), true, true),
+                unenrolledEntry(passwordAndEmail.getId()));
+        assertEquals(new UnenrolledPrivilegedAccount(passwordOnly.getId(), true, false),
+                unenrolledEntry(passwordOnly.getId()));
+        assertEquals(new UnenrolledPrivilegedAccount(passwordless.getId(), false, true),
+                unenrolledEntry(passwordless.getId()));
+        UnenrolledPrivilegedAccountCounts after = userMapper.countUnenrolledPrivilegedAccounts();
+        assertNotNull(after);
+        assertEquals(before.total() + 3, after.total());
+        assertEquals(before.passwordBacked() + 2, after.passwordBacked());
+        assertEquals(before.passwordBackedWithoutEmail() + 1, after.passwordBackedWithoutEmail());
+    }
+
+    @Test
+    void inventoryListIsCappedInAscendingIdOrder() {
+        Workspace fresh = freshWorkspace();
+        for (int i = 0; i < 3; i++) {
+            User user = inventoryUser("hash_" + unique(), unique() + "@inventory.example.com");
+            orgMemberMapper.addMember(fresh.getOrgId(), user.getId(), "admin");
+        }
+
+        List<UnenrolledPrivilegedAccount> capped = userMapper.listUnenrolledPrivilegedAccounts(2);
+
+        assertEquals(2, capped.size());
+        assertTrue(capped.get(0).id() < capped.get(1).id());
+    }
+
+    private UnenrolledPrivilegedAccount unenrolledEntry(int userId) {
+        return userMapper.listUnenrolledPrivilegedAccounts(Integer.MAX_VALUE).stream()
+                .filter(account -> account.id() == userId)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private Workspace freshWorkspace() {
+        String suffix = unique();
+        jdbcTemplate.update("INSERT INTO organization (name, slug) VALUES (?, ?)",
+                "Inventory " + suffix, "inventory-" + suffix);
+        Integer orgId = jdbcTemplate.queryForObject(
+                "SELECT id FROM organization WHERE slug = ?", Integer.class, "inventory-" + suffix);
+        assertNotNull(orgId);
+        Workspace fresh = new Workspace();
+        fresh.setOrgId(orgId);
+        fresh.setName("Inventory " + suffix);
+        fresh.setSlug("inventory-" + suffix);
+        workspaceMapper.insert(fresh);
+        return fresh;
+    }
+
+    private User inventoryUser(String passwordHash, String email) {
+        String suffix = unique();
+        User user = new User();
+        user.setUsername("inventory_" + suffix);
+        user.setDisplayName("Inventory " + suffix);
+        user.setEmail(email);
+        user.setPasswordHash(passwordHash);
+        user.setTimezone("UTC");
+        userMapper.insert(user);
+        return user;
+    }
+
+    private void enrollPasskey(User user) {
+        String handle = "inventory-handle-" + unique();
+        jdbcTemplate.update(
+                "INSERT INTO webauthn_user_entity (id, user_id, name, display_name) VALUES (?, ?, ?, ?)",
+                handle, user.getId(), user.getUsername(), user.getDisplayName());
+        jdbcTemplate.update(
+                "INSERT INTO webauthn_credential (credential_id, user_entity_user_id, public_key) VALUES (?, ?, ?)",
+                ("inventory-credential-" + unique()).getBytes(StandardCharsets.UTF_8),
+                handle, new byte[] {9, 9, 9});
+        sqlSession.clearCache();
     }
 
     private User newUnassignedUser() {

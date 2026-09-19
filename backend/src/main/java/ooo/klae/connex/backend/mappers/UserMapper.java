@@ -4,6 +4,8 @@ import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccount;
+import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccountCounts;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiChatRealtimeRecipientDto;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
@@ -61,6 +63,13 @@ public interface UserMapper {
     User getUserByEmail(String email);
     /** Current account-wide administrative privilege from active control-plane memberships. */
     boolean isPrivilegedAccount(int id);
+    /**
+     * Privileged accounts with no enrolled passkey, in ascending id, capped at {@code limit}. Uses
+     * the same privilege predicate as {@link #isPrivilegedAccount(int)}.
+     */
+    List<UnenrolledPrivilegedAccount> listUnenrolledPrivilegedAccounts(@Param("limit") int limit);
+    /** Uncapped counts over the population {@link #listUnenrolledPrivilegedAccounts(int)} samples. */
+    UnenrolledPrivilegedAccountCounts countUnenrolledPrivilegedAccounts();
     /** Count of real accounts, excluding the reserved {@code __connex_system__} actor; gates bootstrap provisioning. */
     int countUsers();
     List<User> search(@Param("workspaceId") int workspaceId, @Param("query") String query);

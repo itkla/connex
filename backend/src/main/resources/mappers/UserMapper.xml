@@ -188,18 +188,18 @@
     FROM app_user WHERE email = #{email}
   </select>
 
-  <select id="isPrivilegedAccount" resultType="boolean">
-    SELECT EXISTS (
+  <sql id="privilegedAccountPredicate">
+    EXISTS (
       SELECT 1
       FROM org_member om
       JOIN organization o ON o.id = om.org_id AND o.lifecycle_state = 'active'
-      WHERE om.user_id = #{id}
+      WHERE om.user_id = ${privilegedUserId}
       UNION ALL
       SELECT 1
       FROM workspace_member wm
       JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
       JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
-      WHERE wm.user_id = #{id}
+      WHERE wm.user_id = ${privilegedUserId}
         AND wm.status = 'active'
         AND wm.role_id IS NULL
         AND wm.role IN ('admin', 'owner')
@@ -209,7 +209,7 @@
       JOIN workspace w ON w.id = wm.workspace_id AND w.lifecycle_state = 'active'
       JOIN organization o ON o.id = w.org_id AND o.lifecycle_state = 'active'
       JOIN workspace_role_permission wrp ON wrp.workspace_role_id = wm.role_id
-      WHERE wm.user_id = #{id}
+      WHERE wm.user_id = ${privilegedUserId}
         AND wm.status = 'active'
         AND wrp.permission IN (
           'API_CREDENTIAL_MANAGE', 'AUDIT_READ', 'CAMPAIGN_MANAGE', 'CAMPAIGN_SEND', 'CONSENT_MANAGE',
@@ -218,6 +218,42 @@
           'SHARE_MANAGE', 'TAG_MANAGE', 'TEAM_MANAGE', 'WORKSPACE_SETTINGS'
         )
     )
+  </sql>
+
+  <sql id="unenrolledPrivilegedAccount">
+    u.username != '__connex_system__'
+      AND <include refid="privilegedAccountPredicate"><property name="privilegedUserId" value="u.id"/></include>
+      AND NOT EXISTS (
+        SELECT 1
+        FROM webauthn_user_entity e
+        JOIN webauthn_credential c ON c.user_entity_user_id = e.id
+        WHERE e.user_id = u.id
+      )
+  </sql>
+
+  <select id="isPrivilegedAccount" resultType="boolean">
+    SELECT <include refid="privilegedAccountPredicate"><property name="privilegedUserId" value="#{id}"/></include>
+  </select>
+
+  <select id="listUnenrolledPrivilegedAccounts"
+      resultType="ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccount">
+    SELECT u.id,
+           u.password_hash IS NOT NULL AS hasPassword,
+           (u.email IS NOT NULL AND TRIM(u.email) &lt;&gt; '') AS hasEmail
+    FROM app_user u
+    WHERE <include refid="unenrolledPrivilegedAccount"/>
+    ORDER BY u.id
+    LIMIT #{limit}
+  </select>
+
+  <select id="countUnenrolledPrivilegedAccounts"
+      resultType="ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccountCounts">
+    SELECT COUNT(*) AS total,
+           COALESCE(SUM(u.password_hash IS NOT NULL), 0) AS passwordBacked,
+           COALESCE(SUM(u.password_hash IS NOT NULL
+             AND (u.email IS NULL OR TRIM(u.email) = '')), 0) AS passwordBackedWithoutEmail
+    FROM app_user u
+    WHERE <include refid="unenrolledPrivilegedAccount"/>
   </select>
 
   <select id="countUsers" resultType="int">
