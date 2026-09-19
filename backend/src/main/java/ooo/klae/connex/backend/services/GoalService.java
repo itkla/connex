@@ -135,7 +135,8 @@ public class GoalService {
             throw new BadRequestException("Goal currency must contain 3 to 8 letters");
         }
         if (request.targetValue() == null || request.targetValue().signum() < 0
-                || request.targetValue().scale() > 2 || (long) request.targetValue().precision() - request.targetValue().scale() > 13) {
+                || request.targetValue().scale() > 2
+                || (long) request.targetValue().precision() - request.targetValue().scale() > 13) {
             throw new BadRequestException("Goal target must be a non-negative DECIMAL(15,2) value");
         }
         LocalDate periodStart = request.periodStart();
