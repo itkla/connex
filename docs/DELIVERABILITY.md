@@ -332,6 +332,10 @@ worker has not recorded the result by the time the same deadline and margin have
 write cannot mark the delivery sent. It still attaches the provider message ID to the reconciliation
 item without resolving it, so the provider's receipt, bounce, and complaint webhooks for that message
 match the delivery, and a bounce or complaint records the suppression and consent revocation as usual.
+It attaches that message ID even when an operator has already resolved the item, and changes nothing
+else: the recorded `delivered` or `not_delivered` decision, the delivery's status, and its frequency
+reservation all stay exactly as the operator left them, while a later bounce or complaint for the
+message the provider accepted still suppresses the address and revokes consent.
 An expired triggered claim marked for reconciliation keeps no provider message ID: its webhooks match
 no delivery and record no suppression and no consent revocation. Before resolving such an item, check
 the provider's bounce and complaint records for that recipient and add any suppression by hand

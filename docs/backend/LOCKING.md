@@ -661,27 +661,38 @@ row on the delivery joined to its send for `origin` — the same statement shape
 the triggered expired-claim sweep. It never runs inside the reservation transaction, holds no
 workspace root, and adds no lock edge. Send status is not filtered, because a completed, paused, or
 cancelled send can own the stranded row; scheduler discovery includes workspaces whose only work is
-such a row. The same pass then settles every audience send that owns an unresolved reconciliation
-row and either has a `failed_count` that disagrees with its failed rows or is still `running` with
-nothing `pending` or `dispatching`: it refreshes the counters and completes such a running send
-without resolving a provider, so a connector disabled after the worker died cannot keep the send
-running. A `dispatching` row may belong to a live worker, so that send stays `running`: the worker's
-own settlement completes it after its terminal write, an attempt it abandons after reserving is swept
-and settled by a later pass, and one abandoned before reserving is left to the dispatch loop's own
-settlement. Those sends
-are selected by that durable predicate, not remembered from the sweep, because a marked row no
-longer matches the sweep: a settlement that fails is found again on a later pass, and scheduler
-discovery includes workspaces whose only work is such a stale counter. Settlement reuses the
-auto-commit counter refresh and `running` → `completed` compare-and-set the dispatch loop already
-runs, so it adds no lock edge. A slow but live worker that writes after the sweep loses its
-`status = 'dispatching'` compare-and-set and leaves the row reconcilable. It then attaches its
-provider id and message id to that swept row through a second single-row compare-and-set that
-accepts only a still-unresolved swept row with no provider id, and changes neither status,
-reconciliation state, nor the reservation, so provider bounce and complaint webhooks still resolve to
-the row and record suppression and consent revocation. An expired triggered claim marked ambiguous
-stores no message id, so its webhooks match no row; operators apply those by hand
-(`docs/DELIVERABILITY.md` §3.1). Audience rows stranded before any reservation, and rows without a
-person (which are never reserved), have no age anchor and are not swept.
+such a row. The same pass then settles every audience send that is still `running` with nothing
+`pending` or `dispatching`, and every audience send whose `failed_count` disagrees with its failed
+rows while it still owns an unresolved reconciliation row: it completes such a running send and
+refreshes the counters, without resolving a provider, so a connector disabled after the worker died
+cannot keep the send running. The completion is a single compare-and-set that proves the absence of
+`pending` and `dispatching` rows in the same statement that writes `completed`, so a live worker's
+terminal write cannot land between the proof and the completion; because no delivery can return to
+`pending` or `dispatching` afterwards, the counter refresh that follows a completion reads every
+delivery in its final state. A `dispatching` row may belong to a live worker, so that send stays
+`running`: the worker's own settlement completes it after its terminal write, an attempt it abandons
+after reserving is swept and settled by a later pass, and one abandoned before reserving is left to
+the dispatch loop's own settlement. Those sends are selected by that durable predicate, not
+remembered from the sweep, because a marked row no longer matches the sweep: a settlement that fails
+is found again on a later pass — whole, since a failed completion also defers that pass's counter
+refresh — and scheduler discovery includes workspaces whose only work is such a stale counter. The
+`running` branch of the predicate deliberately carries no reconciliation-row condition, because a
+provider webhook (`applyProviderStatus`) and an operator resolution (`resolveReconciliation`) both
+clear `reconciliation_required_at`, and the webhook also moves the row out of `failed`; a send whose
+worker has died must not depend on a marker another actor may clear. Both branches stay inside one
+workspace's sends. Settlement takes the same single-row auto-commit writes on `campaign_send` the
+dispatch loop already runs, so it adds no lock edge. A slow but live worker that writes after the
+sweep loses its `status = 'dispatching'` compare-and-set and leaves the row reconcilable. It then
+attaches its provider id and message id to that swept row through a second single-row
+compare-and-set, and changes neither status, reconciliation state, nor the reservation, so provider
+bounce and complaint webhooks still resolve to the row and record suppression and consent revocation.
+That statement accepts a swept row with no provider id whether it is still awaiting reconciliation or
+an operator has already resolved it — a resolved row keeps neither the sweep's `last_error` nor its
+reconciliation marker, so that branch is anchored on the operator outcome, and an audience row is
+never returned to `pending`, so no later attempt can own the correlation it writes. An expired
+triggered claim marked ambiguous stores no message id, so its webhooks match no row; operators apply
+those by hand (`docs/DELIVERABILITY.md` §3.1). Audience rows stranded before any reservation, and
+rows without a person (which are never reserved), have no age anchor and are not swept.
 
 Operator reconciliation takes locked membership permission roots first and requires both
 `CAMPAIGN_MANAGE` and `CONSENT_MANAGE`, then locks campaign, send, and delivery in that
