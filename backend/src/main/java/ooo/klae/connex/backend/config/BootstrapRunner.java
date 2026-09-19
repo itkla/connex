@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.RegisterDto;
+import ooo.klae.connex.backend.exceptions.PasswordTooLongException;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.services.AuthService;
 
@@ -20,7 +21,9 @@ import ooo.klae.connex.backend.services.AuthService;
  * instance starts with zero login-capable users (a fresh self-host/on-prem deploy). Runs once —
  * it is a no-op as soon as any real user exists — and never aborts startup: misconfiguration is
  * logged and skipped rather than crashing the boot. The bootstrap password is read from the
- * environment and is never logged.
+ * environment and is never logged. Bean validation does not run on this path, so a password longer
+ * than the credential encoder accepts is reported by the fixed {@link PasswordTooLongException}
+ * message, which names the limit but never the password.
  */
 @Component
 @ConditionalOnProperty(
@@ -72,6 +75,10 @@ public class BootstrapRunner implements ApplicationListener<ApplicationReadyEven
             request.setTimezone(timezone);
             User owner = authService.provisionBootstrapOwner(request);
             log.info("Bootstrap owner userId {} provisioned with an initial workspace.", owner.getId());
+        } catch (PasswordTooLongException tooLong) {
+            log.error("Bootstrap owner provisioning failed; the instance still has no owner. "
+                    + "connex.bootstrap.password is too long: {} Fix it and restart.",
+                    PasswordTooLongException.MESSAGE);
         } catch (Exception e) {
             log.error("Bootstrap owner provisioning failed; the instance still has no owner. "
                     + "Fix the connex.bootstrap.* configuration and restart. exception={}",

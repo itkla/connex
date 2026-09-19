@@ -41,6 +41,8 @@ import { type RegisterPayload } from "@/app/lib/types";
 const EMPTY: RegisterPayload = { displayName: "", username: "", email: "", password: "" };
 const BREACHED_PASSWORD_CODE = "BREACHED_PASSWORD";
 const BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE = "BREACHED_PASSWORD_CHECK_UNAVAILABLE";
+const PASSWORD_TOO_LONG_CODE = "PASSWORD_TOO_LONG";
+const MAX_NEW_PASSWORD_LENGTH = 72;
 
 type FieldIcon = ComponentType<SVGProps<SVGSVGElement>>;
 
@@ -54,6 +56,7 @@ function Field({
     error,
     autoFocus,
     icon,
+    maxLength,
 }: {
     id: string;
     label: string;
@@ -64,6 +67,7 @@ function Field({
     error?: string;
     autoFocus?: boolean;
     icon?: FieldIcon;
+    maxLength?: number;
 }) {
     const LeadIcon = icon ?? null;
     const errorId = `${id}-error`;
@@ -80,6 +84,7 @@ function Field({
                     className={cn(fieldInputClass, "pl-9 pr-3", error && fieldErrorClass)}
                     placeholder={placeholder}
                     autoFocus={autoFocus}
+                    maxLength={maxLength}
                     aria-invalid={error ? true : undefined}
                     aria-describedby={error ? errorId : undefined}
                 />
@@ -144,12 +149,15 @@ export default function NewUserDialog() {
                     err.fieldErrors
                     || err.code === BREACHED_PASSWORD_CODE
                     || err.code === BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE
+                    || err.code === PASSWORD_TOO_LONG_CODE
                 )) {
                 const fieldErrors = err.code === BREACHED_PASSWORD_CODE
                     ? { password: t("breachedPassword") }
                     : err.code === BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE
                         ? { password: t("passwordScreeningUnavailable") }
-                        : err.fieldErrors ?? {};
+                        : err.code === PASSWORD_TOO_LONG_CODE
+                            ? { password: t("passwordTooLong") }
+                            : err.fieldErrors ?? {};
                 setErrors(fieldErrors);
                 const k = Object.keys(fieldErrors)[0];
                 if (k) requestAnimationFrame(() => document.getElementById(k)?.focus());
@@ -241,6 +249,7 @@ export default function NewUserDialog() {
                                 placeholder={t("passwordPlaceholder")}
                                 error={errors.password}
                                 icon={LockClosedIcon}
+                                maxLength={MAX_NEW_PASSWORD_LENGTH}
                             />
                         </div>
 

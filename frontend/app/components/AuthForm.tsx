@@ -40,6 +40,8 @@ const FIELD_KEYS = ["username", "email", "displayName", "password"] as const;
 const SSO_ENFORCED_CODE = "SSO_ENFORCED";
 const BREACHED_PASSWORD_CODE = "BREACHED_PASSWORD";
 const BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE = "BREACHED_PASSWORD_CHECK_UNAVAILABLE";
+const PASSWORD_TOO_LONG_CODE = "PASSWORD_TOO_LONG";
+const MAX_NEW_PASSWORD_LENGTH = 72;
 
 const FORM_FIELDS: Record<AuthMode, FieldKey[]> = {
     login: ["username", "password"],
@@ -276,9 +278,11 @@ export function AuthForm({
                 ? { password: tForm("breachedPassword") }
                 : err instanceof ApiError && err.code === BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE
                     ? { password: tForm("passwordScreeningUnavailable") }
-                    : err instanceof ApiError
-                        ? pickFieldErrors(err.fieldErrors)
-                        : {};
+                    : err instanceof ApiError && err.code === PASSWORD_TOO_LONG_CODE
+                        ? { password: tForm("passwordTooLong") }
+                        : err instanceof ApiError
+                            ? pickFieldErrors(err.fieldErrors)
+                            : {};
             const hasFieldErrors = Object.keys(nextFieldErrors).length > 0;
             const message =
                 err instanceof ApiError
@@ -334,6 +338,8 @@ export function AuthForm({
                                 const fieldError = fieldErrors[key];
                                 const fieldId = `${mode}-${key}`;
                                 const errorId = `${fieldId}-error`;
+                                const isNewPassword = isPassword && mode === "register";
+                                const hintId = isNewPassword && !fieldError ? `${fieldId}-hint` : undefined;
 
                                 return (
                                     <div
@@ -349,9 +355,10 @@ export function AuthForm({
                                                 onChange={(e) => setField(key, e.target.value)}
                                                 placeholder=" "
                                                 autoComplete={autoComplete}
+                                                maxLength={isNewPassword ? MAX_NEW_PASSWORD_LENGTH : undefined}
                                                 required
                                                 aria-invalid={Boolean(fieldError)}
-                                                aria-describedby={fieldError ? errorId : undefined}
+                                                aria-describedby={fieldError ? errorId : hintId}
                                                 className={`peer h-14 w-full rounded-xl border bg-input px-4 pt-5 pb-1.5 text-base text-foreground outline-none transition-[border-color,box-shadow,background-color] duration-150 ease-out placeholder:text-transparent focus:bg-background focus:ring-4 ${
                                                     isPassword ? "pr-12" : ""
                                                 } ${
@@ -394,6 +401,11 @@ export function AuthForm({
                                         {fieldError && (
                                             <p id={errorId} role="alert" className="mt-1.5 px-1 text-sm text-destructive">
                                                 {fieldError}
+                                            </p>
+                                        )}
+                                        {hintId && (
+                                            <p id={hintId} className="mt-1.5 px-1 text-sm text-muted-foreground">
+                                                {tForm("passwordLengthHint")}
                                             </p>
                                         )}
                                     </div>
