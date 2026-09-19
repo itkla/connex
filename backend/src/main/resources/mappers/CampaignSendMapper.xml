@@ -96,7 +96,8 @@
 
   <!-- A recovery sweep leaves an unresolved reconciliation row behind it, so an audience send that
        owns one and whose failed counter disagrees with its failed rows, or that is still running with
-       nothing pending, has not been settled yet. Settling it needs no provider. -->
+       nothing pending or dispatching, has not been settled yet. A dispatching row may belong to a live
+       worker, whose own settlement completes the send. Settling it needs no provider. -->
   <select id="audienceSendsAwaitingRecoverySettlement" resultType="int">
     SELECT s.id FROM campaign_send s
     WHERE s.workspace_id = #{workspaceId} AND s.origin = 'audience'
@@ -105,7 +106,8 @@
             WHERE f.workspace_id = s.workspace_id AND f.send_id = s.id AND f.status = 'failed')
         OR (s.status = 'running' AND NOT EXISTS (
             SELECT 1 FROM campaign_delivery p
-            WHERE p.workspace_id = s.workspace_id AND p.send_id = s.id AND p.status = 'pending')))
+            WHERE p.workspace_id = s.workspace_id AND p.send_id = s.id
+              AND p.status IN ('pending', 'dispatching'))))
       AND EXISTS (
         SELECT 1 FROM campaign_delivery r
         WHERE r.workspace_id = s.workspace_id AND r.send_id = s.id AND r.status = 'failed'

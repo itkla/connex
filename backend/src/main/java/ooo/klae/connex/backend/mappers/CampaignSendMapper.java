@@ -49,8 +49,9 @@ public interface CampaignSendMapper {
     /**
      * Returns one bounded page of audience sends that own an unresolved reconciliation row and are not
      * yet settled: their failed counter disagrees with their failed deliveries, or they are still
-     * running with no pending delivery. The predicate is durable, so a settlement that fails after a
-     * recovery sweep is found again on a later pass.
+     * running with no pending or dispatching delivery. A dispatching delivery may belong to a live
+     * worker, whose own settlement completes the send. The predicate is durable, so a settlement that
+     * fails after a recovery sweep is found again on a later pass.
      * @param workspaceId the owning workspace
      * @param limit the page size
      * @return the send ids, ordered by id

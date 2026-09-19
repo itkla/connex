@@ -135,6 +135,12 @@
     WHERE workspace_id = #{workspaceId} AND send_id = #{sendId} AND status = 'pending'
   </select>
 
+  <select id="countOutstanding" resultType="int">
+    SELECT COUNT(*) FROM campaign_delivery
+    WHERE workspace_id = #{workspaceId} AND send_id = #{sendId}
+      AND status IN ('pending', 'dispatching')
+  </select>
+
   <update id="claim">
     UPDATE campaign_delivery
     SET status = 'dispatching', attempt_count = attempt_count + 1

@@ -199,17 +199,37 @@ public class CampaignDispatchService {
 
     /**
      * Refreshes a send's counters and completes a running audience send with no pending delivery
-     * left. It needs no provider, so a send whose remaining work was recovered settles even while its
-     * provider is unusable.
+     * left.
      */
     private void settle(int workspaceId, int sendId) {
         campaignSendMapper.refreshCounters(workspaceId, sendId);
-        CampaignSend settled = campaignSendMapper.getSend(workspaceId, sendId);
-        if (settled != null && "running".equals(settled.getStatus())
-                && "audience".equals(settled.getOrigin())
+        if (runningAudienceSend(workspaceId, sendId)
                 && campaignDeliveryMapper.countPending(workspaceId, sendId) == 0) {
             campaignSendMapper.markCompleted(workspaceId, sendId);
         }
+    }
+
+    /**
+     * Refreshes the counters of a send found by the recovery sweep and completes it only when it is a
+     * running audience send with no pending or dispatching delivery left. The sweep can run beside a
+     * live worker whose unleased attempt is still in flight; that worker's own {@link #settle} completes
+     * the send after its terminal write, an attempt it abandons after reserving is marked and settled
+     * by a later sweep, and one abandoned before reserving is left to the dispatch loop's
+     * {@link #settle}. No pending delivery is ever added to a running audience send, so the count cannot
+     * go stale before the completion compare-and-set. It needs no provider, so a send whose remaining
+     * work was recovered settles even while its provider is unusable.
+     */
+    private void settleRecovered(int workspaceId, int sendId) {
+        campaignSendMapper.refreshCounters(workspaceId, sendId);
+        if (runningAudienceSend(workspaceId, sendId)
+                && campaignDeliveryMapper.countOutstanding(workspaceId, sendId) == 0) {
+            campaignSendMapper.markCompleted(workspaceId, sendId);
+        }
+    }
+
+    private boolean runningAudienceSend(int workspaceId, int sendId) {
+        CampaignSend send = campaignSendMapper.getSend(workspaceId, sendId);
+        return send != null && "running".equals(send.getStatus()) && "audience".equals(send.getOrigin());
     }
 
     private void dispatchOne(int workspaceId, CampaignSend send, DeliveryChannel channel,
@@ -620,7 +640,7 @@ public class CampaignDispatchService {
         } finally {
             for (int sendId : campaignSendMapper.audienceSendsAwaitingRecoverySettlement(
                     workspaceId, triggeredSendGate.dispatchPageSize())) {
-                settle(workspaceId, sendId);
+                settleRecovered(workspaceId, sendId);
             }
         }
     }
