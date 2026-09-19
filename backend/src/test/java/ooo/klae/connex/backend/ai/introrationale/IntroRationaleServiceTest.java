@@ -37,8 +37,10 @@ import ooo.klae.connex.backend.ai.AiGenerationProfile;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Admission;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.CacheIdentity;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.LeaderOutcome;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Rejection;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
@@ -101,6 +103,7 @@ class IntroRationaleServiceTest {
                 IntroRationaleService.MAX_TOKENS,
                 IntroRationaleService.TEMPERATURE)).thenReturn(Optional.of(PROFILE));
         lenient().when(aiInvocationAdmissionService.acquire(any(), anyString(), anyBoolean())).thenReturn(admission);
+        lenient().when(aiInvocationAdmissionService.precheck(any(), anyBoolean())).thenReturn(Rejection.NONE);
         lenient().when(admission.decision()).thenReturn(Decision.LEADER);
         lenient().when(personMapper.getPersonById(eq(WORKSPACE_ID), anyInt())).thenReturn(new Person());
         lenient().when(aiOutputCacheStore.saveForPersons(
@@ -136,6 +139,67 @@ class IntroRationaleServiceTest {
         assertUnavailable(result, "not_a_suggestion");
         verify(introRationaleAssembler, never()).assemble(anyInt(), any());
         verify(aiInvocationService, never()).completeStructured(any(AiInvocation.class), eq(IntroRationaleContent.class), eq(admission));
+    }
+
+    @Test
+    void generate_quotaExhaustedWithoutStoredRationaleIsRefusedBeforeSuggestionsAreRanked() {
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, PERSON_A_ID, PERSON_B_ID))
+                .thenReturn(Optional.empty());
+        when(aiInvocationAdmissionService.precheck(any(), eq(false)))
+                .thenReturn(Rejection.ORGANIZATION_QUOTA);
+
+        IntroRationaleDto result = service.generate(PERSON_B_ID, PERSON_A_ID);
+
+        assertUnavailable(result, "rate_limited");
+        ArgumentCaptor<CacheIdentity> identity = ArgumentCaptor.forClass(CacheIdentity.class);
+        verify(aiInvocationAdmissionService).precheck(identity.capture(), eq(false));
+        assertEquals(
+                CacheIdentity.forPair(
+                        WORKSPACE_ID, AiFeature.INTRO_RATIONALE, PERSON_A_ID, PERSON_B_ID, Locale.ENGLISH),
+                identity.getValue());
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt());
+        verify(introRationaleAssembler, never()).assemble(anyInt(), any());
+        verify(aiInvocationAdmissionService, never()).acquire(any(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void generate_quotaExhaustedStillServesAValidStoredRationale() {
+        IntroSuggestionDto suggestion = suggestion(PERSON_A_ID, PERSON_B_ID);
+        IntroRationaleAssembly assembly = assembly();
+        lenient().when(aiInvocationAdmissionService.precheck(any(), anyBoolean()))
+                .thenReturn(Rejection.ORGANIZATION_QUOTA);
+        lenient().when(admission.decision()).thenReturn(Decision.RATE_LIMITED);
+        when(introductionService.computeSuggestions(WORKSPACE_ID, IntroRationaleService.RESOLVE_LIMIT))
+                .thenReturn(List.of(suggestion));
+        when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly);
+        when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, PERSON_A_ID, PERSON_B_ID))
+                .thenReturn(Optional.of(row(HASH, 0, "2026-07-01T09:00:00Z")));
+        when(aiOutputCacheStore.read("payload", IntroRationaleContent.class))
+                .thenReturn(Optional.of(content("Stored under quota.")));
+
+        IntroRationaleDto result = service.generate(PERSON_A_ID, PERSON_B_ID);
+
+        assertTrue(result.isAvailable());
+        assertEquals("Stored under quota.", result.getRationale());
+        assertEquals("2026-07-01T09:00:00Z", result.getGeneratedAt());
+        verify(aiInvocationAdmissionService, never()).precheck(any(), anyBoolean());
+        verify(aiInvocationAdmissionService, never()).acquire(any(), anyString(), anyBoolean());
+        verify(aiInvocationService, never()).completeStructured(
+                any(AiInvocation.class), eq(IntroRationaleContent.class), any(Admission.class));
+    }
+
+    @Test
+    void generate_nonPositivePersonIdIsNotASuggestionWithoutAnAdmissionProbe() {
+        IntroRationaleDto result = service.generate(0, PERSON_A_ID);
+
+        assertFalse(result.isAvailable());
+        assertEquals("not_a_suggestion", result.getReason());
+        assertEquals(0, result.getPersonAId());
+        assertEquals(PERSON_A_ID, result.getPersonBId());
+        verify(aiOutputCacheStore, never()).find(anyInt(), anyString(), anyInt(), anyInt());
+        verify(aiInvocationAdmissionService, never()).precheck(any(), anyBoolean());
+        verify(introductionService, never()).computeSuggestions(anyInt(), anyInt());
     }
 
     @Test
@@ -234,7 +298,10 @@ class IntroRationaleServiceTest {
         when(introRationaleAssembler.assemble(WORKSPACE_ID, suggestion)).thenReturn(assembly);
         when(aiOutputCacheStore.contentHash(PROFILE, assembly.prompt(), assembly.context())).thenReturn(HASH);
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, PERSON_A_ID, PERSON_B_ID))
-                .thenReturn(Optional.empty(), Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
+                .thenReturn(
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
         when(aiOutputCacheStore.read("payload", IntroRationaleContent.class))
                 .thenReturn(Optional.of(content("Leader rationale.")));
         when(admission.decision()).thenReturn(Decision.FOLLOWER);
