@@ -812,3 +812,13 @@ writes take the same reference locks and require the exact still-live owner; sta
 release successor state. Administrative quarantine uses permission roots before the same attachment
 reference locks and revalidates held permission authority after the target lock. Never acquire
 membership roots after claiming an object. See `docs/MALWARE_SCANNING.md` for expiry/recovery limits.
+
+Ordinary attachment deletion never removes a reference on the strength of its unlocked discovery
+read. The generic route takes no membership root. When the discovery row already needs quarantine
+authority, the route delegates to the quarantine service before taking any attachment lock; that
+service keeps its permission-roots-first order and re-reads the row under lock. Otherwise the route
+locks the URL references, re-reads the exact row with a locking read, and refuses with 409 when the
+row now needs quarantine authority. It does not delegate at that point, because delegating while it
+holds attachment rows would take membership roots after them. The assistant route already holds the
+caller's membership and session roots, so it re-reads the exact row the same way and checks
+quarantine authority in place.
