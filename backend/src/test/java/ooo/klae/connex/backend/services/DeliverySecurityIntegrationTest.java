@@ -1293,6 +1293,75 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         assertEquals(0, submissions.size());
     }
 
+    @Test
+    void theAudienceReservationCompareAndSetOnlyMarksAnAttemptThatIsStillAbandoned() {
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        long graceMicros = reservationGraceMicros();
+        Person person = recipient();
+        CampaignSendDto send = readySend(person, DeliveryChannel.EMAIL);
+        int sweptId = strandedAudienceAttempt(person, send);
+        expireReservation(sweptId, 5);
+        assertEquals(0, lateAudienceSweep(sweptId, graceMicros));
+        LocalDateTime reservation = expireReservation(sweptId, reservationGraceSeconds() + 60);
+        markSubmitted(sweptId, true);
+        assertEquals(0, lateAudienceSweep(sweptId, graceMicros));
+        assertEquals("dispatching", deliveryMapper.getDelivery(workspace.getId(), sweptId).getStatus());
+        markSubmitted(sweptId, false);
+
+        assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+
+        CampaignDelivery swept = deliveryMapper.getDelivery(workspace.getId(), sweptId);
+        assertEquals("failed", swept.getStatus());
+        assertNotNull(swept.getReconciliationRequiredAt());
+        assertEquals(0, lateAudienceSweep(sweptId, graceMicros));
+        CampaignDelivery unchanged = deliveryMapper.getDelivery(workspace.getId(), sweptId);
+        assertEquals("failed", unchanged.getStatus());
+        assertEquals(EXPIRED_AUDIENCE_RESERVATION, unchanged.getLastError());
+        assertEquals("deadline_ambiguous", unchanged.getLastErrorCode());
+        assertEquals(swept.getReconciliationRequiredAt(), unchanged.getReconciliationRequiredAt());
+        assertEquals(reservation, unchanged.getFrequencyReservedAt());
+        assertEquals(1, deliveryEvents(sweptId, "failed"));
+
+        Person rejected = recipient();
+        int failedId = strandedAudienceAttempt(rejected, readySend(rejected, DeliveryChannel.EMAIL));
+        assertEquals(1, deliveryMapper.markFailed(
+                workspace.getId(), failedId, "Provider rejected the message", "provider_rejected"));
+        Person capped = recipient();
+        int skippedId = strandedAudienceAttempt(capped, readySend(capped, DeliveryChannel.EMAIL));
+        assertEquals(1, deliveryMapper.markSkipped(workspace.getId(), skippedId, "frequency_capped"));
+        for (int id : List.of(failedId, skippedId)) {
+            expireReservation(id, reservationGraceSeconds() + 60);
+            assertEquals(0, lateAudienceSweep(id, graceMicros));
+            assertNull(deliveryMapper.getDelivery(workspace.getId(), id).getReconciliationRequiredAt());
+            assertEquals(0, deliveryEvents(id, "failed"));
+        }
+        CampaignDelivery definitiveFailure = deliveryMapper.getDelivery(workspace.getId(), failedId);
+        assertEquals("failed", definitiveFailure.getStatus());
+        assertEquals("Provider rejected the message", definitiveFailure.getLastError());
+        assertEquals("provider_rejected", definitiveFailure.getLastErrorCode());
+        CampaignDelivery skip = deliveryMapper.getDelivery(workspace.getId(), skippedId);
+        assertEquals("skipped", skip.getStatus());
+        assertEquals("frequency_capped", skip.getSkipReason());
+        assertNull(skip.getLastError());
+        assertNull(skip.getLastErrorCode());
+        assertEquals(0, submissions.size());
+    }
+
+    private int lateAudienceSweep(int deliveryId, long graceMicros) {
+        int updated = deliveryMapper.markExpiredAudienceReservationAmbiguous(workspace.getId(), deliveryId,
+                graceMicros, "AMBIGUOUS: Late overlapping sweep", "relay_error");
+        sqlSession.clearCache();
+        return updated;
+    }
+
+    private void markSubmitted(int deliveryId, boolean submitted) {
+        assertEquals(1, jdbcTemplate.update("UPDATE campaign_delivery"
+                        + " SET submitted_at = IF(?, UTC_TIMESTAMP(6), NULL)"
+                        + " WHERE workspace_id = ? AND id = ?",
+                submitted, workspace.getId(), deliveryId));
+        sqlSession.clearCache();
+    }
+
     private int strandedAudienceAttempt(Person person, CampaignSendDto send) {
         int deliveryId = pendingDelivery(send);
         sendService.queueSend(send.campaignId(), send.id());
