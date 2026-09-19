@@ -14,6 +14,7 @@ import {
     getDocumentAcceptancePreview,
 } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
+import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
 import type {
     DocumentAcceptanceFailureKind,
     DocumentAcceptancePreview,
@@ -128,11 +129,7 @@ export default function DocumentAcceptanceEntry() {
         };
     }, [keepAliveOpen]);
 
-    useEffect(() => {
-        const reopen = () => window.location.reload();
-        window.addEventListener("hashchange", reopen);
-        return () => window.removeEventListener("hashchange", reopen);
-    }, []);
+    useReloadOnFragmentNavigation();
 
     if (state.status === "loading") {
         return (
