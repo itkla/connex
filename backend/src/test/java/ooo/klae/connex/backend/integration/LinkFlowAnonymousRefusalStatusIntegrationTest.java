@@ -18,6 +18,8 @@ import java.net.http.HttpResponse;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -107,6 +109,44 @@ class LinkFlowAnonymousRefusalStatusIntegrationTest {
             HttpResponse.BodyHandlers.ofString());
 
         assertEquals(403, response.statusCode());
+    }
+
+    /**
+     * The invite exchanges are anonymous {@code permitAll} routes with no admission filter ahead of
+     * CSRF, so a bootstrapped browser that omits the header is refused by CSRF itself.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/invites/exchange", "/api/invite-links/exchange"})
+    void inviteExchangeWithoutCsrfHeaderIsForbidden(String path) throws Exception {
+        HttpClient client = newClient();
+        bootstrap(client);
+
+        HttpResponse<String> response = client.send(
+            post(path, EXCHANGE_BODY).build(),
+            HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(403, response.statusCode(), path);
+    }
+
+    /**
+     * A stale or foreign token is the refusal the client's one-shot CSRF refresh keys on, so it
+     * must reach an anonymous invite recipient as 403 rather than the entry point's 401.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/invites/exchange", "/api/invite-links/exchange"})
+    void inviteExchangeWithAForeignCsrfTokenIsForbidden(String path) throws Exception {
+        HttpClient client = newClient();
+        CsrfBootstrapDto own = bootstrap(client);
+        CsrfBootstrapDto foreign = bootstrap(newClient());
+        assertNotEquals(own.token(), foreign.token());
+
+        HttpResponse<String> response = client.send(
+            post(path, EXCHANGE_BODY)
+                .header(foreign.headerName(), foreign.token())
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(403, response.statusCode(), path);
     }
 
     /**
