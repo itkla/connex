@@ -6,7 +6,7 @@ type Puff = readonly [cx: number, r: number];
 type CloudPlacement = { puffs: readonly Puff[]; x: number; y: number; scale: number };
 
 const CLOUD_SHADE_BAND = 9;
-const ASCENT_START = { x: 826.375, y: 565.25 };
+const ASCENT_START = { x: 774.244140625, y: 602.86328125 };
 
 /** Returns a deterministic pseudo-random sequence so the sky renders identically everywhere. */
 function seededRandom(seed: number) {
@@ -111,9 +111,9 @@ function ShootingStar({ x, y, className }: { x: number; y: number; className: st
 
 /** A fine Fuji skyline before a daytime sun or a starry night sky, with bubbly clouds drifting behind and in front of it. */
 export function FujiBackdrop({ pauseLabel, resumeLabel }: { pauseLabel: string; resumeLabel: string }) {
-    // Split the existing left ridge at its midpoint so the ascent follows the exact silhouette.
-    const ascentCurve = "C895.75 513.5 965 455.5 1039 393";
-    const leftSlope = `M160 846 C342 816 481 767 613 700 C687.5 662.5 757 617 ${ASCENT_START.x} ${ASCENT_START.y} ${ascentCurve}`;
+    // Split the existing left ridge below its midpoint so the ascent starts lower on the slope and still follows the exact silhouette.
+    const ascentCurve = "C861.421875 542.21875 946.5 471.125 1039 393";
+    const leftSlope = `M160 846 C342 816 481 767 613 700 C668.875 671.875 721.9375 639.25 ${ASCENT_START.x} ${ASCENT_START.y} ${ascentCurve}`;
     const skyline = `${leftSlope} L1094 352 L1107 350 L1112 346 L1121 348 L1134 344 L1149 347 L1161 345 L1173 348 L1184 342 L1194 344 L1202 350 C1289 418 1368 485 1462 547 C1607 643 1747 718 1940 777`;
     const silhouette = `${skyline} L1940 930 H160 Z`;
     return (
