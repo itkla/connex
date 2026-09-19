@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -24,6 +25,8 @@ import ooo.klae.connex.backend.mappers.GoalMapper;
 /** Unit coverage for report-goal target validation. */
 class GoalServiceTest {
 
+    private static final String TARGET_REFUSAL = "Goal target must be a non-negative DECIMAL(15,2) value";
+
     private final GoalMapper goalMapper = mock(GoalMapper.class);
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
     private final AuthService authService = mock(AuthService.class);
@@ -41,7 +44,9 @@ class GoalServiceTest {
     @ParameterizedTest
     @ValueSource(strings = {"1E2147483647", "1E-2147483647", "1E+13"})
     void createRejectsTargetsOutsideDecimalFifteenTwo(String target) {
-        assertThrows(BadRequestException.class, () -> goalService.create(request(target)));
+        BadRequestException refusal =
+                assertThrows(BadRequestException.class, () -> goalService.create(request(target)));
+        assertEquals(TARGET_REFUSAL, refusal.getMessage());
         verify(goalMapper, never()).insert(any(ReportGoal.class));
     }
 
@@ -52,7 +57,9 @@ class GoalServiceTest {
         existing.setWorkspaceId(7);
         when(goalMapper.getGoal(7, 3)).thenReturn(existing);
 
-        assertThrows(BadRequestException.class, () -> goalService.update(3, request("1E2147483647")));
+        BadRequestException refusal = assertThrows(
+                BadRequestException.class, () -> goalService.update(3, request("1E2147483647")));
+        assertEquals(TARGET_REFUSAL, refusal.getMessage());
         verify(goalMapper, never()).update(any(ReportGoal.class));
     }
 
