@@ -19,6 +19,7 @@ import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Admission;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.CacheIdentity;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.LeaderOutcome;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Rejection;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
@@ -85,11 +86,16 @@ public class DealRiskRationaleService {
             return DealRationaleDto.unavailable(dealId, NOT_AT_RISK);
         }
 
+        String cacheFeature = cacheFeature();
+        CacheIdentity identity = CacheIdentity.forSubject(
+                workspaceId, AiFeature.DEAL_RISK_RATIONALE, dealId, LocaleContextHolder.getLocale());
+        if (refusedBeforeAssembly(workspaceId, cacheFeature, dealId, identity, refresh)) {
+            return DealRationaleDto.unavailable(dealId, RATE_LIMITED);
+        }
         RationaleAssembly assembly = dealRiskRationaleAssembler.assemble(workspaceId, dealId, risk);
         if (!assembly.atRisk()) {
             return DealRationaleDto.unavailable(dealId, NOT_AT_RISK);
         }
-        String cacheFeature = cacheFeature();
         String contentHash = aiOutputCacheStore.contentHash(
                 profile.get(), assembly.prompt(), assembly.context());
         if (!refresh) {
@@ -100,8 +106,6 @@ public class DealRiskRationaleService {
             }
         }
 
-        CacheIdentity identity = CacheIdentity.forSubject(
-                workspaceId, AiFeature.DEAL_RISK_RATIONALE, dealId, LocaleContextHolder.getLocale());
         boolean admissionRefresh = refresh;
         while (true) {
             try (Admission admission = aiInvocationAdmissionService.acquire(
@@ -165,6 +169,26 @@ public class DealRiskRationaleService {
                 }
             }
         }
+    }
+
+    /**
+     * Refuses a request that admission would certainly reject before the deal context is loaded
+     * and masked. A stored rationale can only be validated against a fresh assembly, so a
+     * non-forced request with a stored row always proceeds and a valid cache hit is never refused
+     * for quota; a forced refresh, or a request with no stored row, can only end in a new provider
+     * attempt.
+     */
+    private boolean refusedBeforeAssembly(
+            int workspaceId,
+            String cacheFeature,
+            int dealId,
+            CacheIdentity identity,
+            boolean refresh) {
+        if (!refresh && aiOutputCacheStore.find(
+                workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT).isPresent()) {
+            return false;
+        }
+        return aiInvocationAdmissionService.precheck(identity, refresh) != Rejection.NONE;
     }
 
     private DealRationaleDto cached(
