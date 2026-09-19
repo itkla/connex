@@ -212,6 +212,20 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void passwordTooLong_mapsStable400FieldErrorWithoutCandidate() {
+        String candidate = "Aa1!" + "a".repeat(69);
+
+        ResponseEntity<Map<String, String>> response = handler.passwordTooLong(
+                new PasswordTooLongException("newPassword"));
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(PasswordTooLongException.CODE, response.getBody().get("code"));
+        assertEquals(PasswordTooLongException.MESSAGE, response.getBody().get("newPassword"));
+        assertFalse(response.getBody().toString().contains(candidate));
+    }
+
+    @Test
     void unavailablePasswordCheck_mapsStable503FieldError() {
         ResponseEntity<Map<String, String>> response = handler.breachedPasswordCheckUnavailable(
                 new BreachedPasswordCheckUnavailableException("password"));

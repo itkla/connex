@@ -220,6 +220,13 @@ public class SecurityConfig {
      * to a login page, and a server-rendered caller discards the {@code Set-Cookie}. Left enabled,
      * every anonymous read of an authenticated endpoint would persist a session row nobody can use.
      *
+     * <p>Refusals issued inside this chain — the entry point, the access-denied handler and every
+     * admission filter — must write their status with {@code setStatus}, never {@code sendError}.
+     * On a real servlet container {@code sendError} performs an ERROR dispatch to {@code /error},
+     * which has no rule here and so falls to {@code anyRequest().authenticated()}; an anonymous
+     * caller would receive the entry point's 401 instead of the intended status. MockMvc never
+     * performs that dispatch, so only a real-container test observes the difference.
+     *
      * @return the configured filter chain
      */
     @Bean

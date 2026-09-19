@@ -1,2 +1,14 @@
 allowBuilds:
   esbuild: true
+# Supply-chain resolution policy (#835). Owner decision 2026-09-19: versions younger
+# than one day and versions without registry publish time are refused, and a
+# package whose trust evidence (staged publish, trusted publisher, provenance)
+# drops versus an earlier release fails resolution. Emergency admissions are
+# exact-version entries in minimumReleaseAgeExclude, each owner-approved and
+# commented with the advisory, the approver, and the removal condition; see
+# "Package manager supply-chain policy" in frontend/AGENTS.md for the procedure.
+# .github/scripts/check-pnpm-supply-chain-policy.py enforces this block in CI.
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+minimumReleaseAgeIgnoreMissingTime: false
+trustPolicy: no-downgrade

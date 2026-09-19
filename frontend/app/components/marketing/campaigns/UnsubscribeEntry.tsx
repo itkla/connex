@@ -11,6 +11,7 @@ import {
     getUnsubscribeInfo,
 } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
+import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
 import type { DeliveryUnsubscribeInfo } from "@/app/lib/types";
 
 type EntryState =
@@ -64,11 +65,7 @@ export default function UnsubscribeEntry() {
         };
     }, []);
 
-    useEffect(() => {
-        const reopen = () => window.location.reload();
-        window.addEventListener("hashchange", reopen);
-        return () => window.removeEventListener("hashchange", reopen);
-    }, []);
+    useReloadOnFragmentNavigation();
 
     return (
         <main className="grid min-h-dvh place-items-center bg-background px-6 py-12">

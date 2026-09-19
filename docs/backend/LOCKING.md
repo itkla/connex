@@ -804,6 +804,21 @@ The same rule places the `auth.email_change.refused` audit ahead of `lockById`. 
 re-check of the privileged gate throws without auditing, because any append there would block on
 the request's own exclusive lock.
 
+The breached-password decision in `PasswordResetService.resetPasswordByHash` follows the same rule.
+The corpus lookup runs before any lock, but the fail-open decision reads account privilege under
+the exclusive account root so a promotion that commits while the reset waits is observed; do not
+hoist that read above `lockById`. Only the decision's audit moves.
+`PasswordCredentialService.encodeScreened` never appends it independently while a transaction is
+open:
+
+- `fail_open` is appended in the caller's transaction from a `beforeCommit` synchronization, so it
+  takes the audit head after `markConsumed` and both `invalidateForUser` calls (class 3 after class
+  2), and a failed append aborts the credential write with it.
+- `fail_closed` is appended independently from an `afterCompletion` synchronization, after the
+  rollback its own exception causes has released the account root. A failure there is logged, not
+  thrown, because the refusal already stands.
+- Outside a transaction, either decision is appended independently at once.
+
 ## Connected-provider credentials
 
 Provider credential transitions lock the owning `app_user` shared before the exact
@@ -840,3 +855,13 @@ writes take the same reference locks and require the exact still-live owner; sta
 release successor state. Administrative quarantine uses permission roots before the same attachment
 reference locks and revalidates held permission authority after the target lock. Never acquire
 membership roots after claiming an object. See `docs/MALWARE_SCANNING.md` for expiry/recovery limits.
+
+Ordinary attachment deletion never removes a reference on the strength of its unlocked discovery
+read. The generic route takes no membership root. When the discovery row already needs quarantine
+authority, the route delegates to the quarantine service before taking any attachment lock; that
+service keeps its permission-roots-first order and re-reads the row under lock. Otherwise the route
+locks the URL references, re-reads the exact row with a locking read, and refuses with 409 when the
+row now needs quarantine authority. It does not delegate at that point, because delegating while it
+holds attachment rows would take membership roots after them. The assistant route already holds the
+caller's membership and session roots, so it re-reads the exact row the same way and checks
+quarantine authority in place.

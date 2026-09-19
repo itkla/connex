@@ -1,7 +1,9 @@
 package ooo.klae.connex.backend.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -9,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -152,6 +155,36 @@ class OneTimeLinkExchangeAdmissionFilterTest {
 
         assertEquals(200, firstResponse.getStatus());
         assertEquals(429, secondResponse.getStatus());
+    }
+
+    /**
+     * The refusal must be written with {@code setStatus}: {@code sendError} makes a real container
+     * ERROR-dispatch to {@code /error}, which an anonymous caller cannot reach and which the entry
+     * point therefore rewrites to 401. The mock records an error message only for the two-argument
+     * form, while both forms commit the response, so the uncommitted response is the guard that
+     * catches either.
+     */
+    @Test
+    void throttledExchangeWritesTheRateLimitBodyWithoutAnErrorDispatch() throws Exception {
+        LoginRateLimiter rateLimiter = mock(LoginRateLimiter.class);
+        ClientIpResolver clientIpResolver = mock(ClientIpResolver.class);
+        OneTimeLinkExchangeAdmissionFilter filter =
+            new OneTimeLinkExchangeAdmissionFilter(rateLimiter, clientIpResolver);
+        when(clientIpResolver.resolveWithProvenance(org.mockito.ArgumentMatchers.any()))
+            .thenReturn(new ResolvedClientIp("203.0.113.15", false));
+        when(rateLimiter.tryAcquireOneTimeLinkExchange(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyLong()))
+            .thenReturn(false);
+
+        MockHttpServletResponse response = invoke(filter, "/api/document-acceptance/exchange");
+
+        assertEquals(429, response.getStatus());
+        assertFalse(response.isCommitted());
+        assertNull(response.getErrorMessage());
+        assertTrue(response.getContentType().startsWith(MediaType.APPLICATION_JSON_VALUE));
+        assertEquals(
+            "{\"code\":\"TOO_MANY_REQUESTS\",\"message\":\"Too many attempts. Please try again later.\"}",
+            response.getContentAsString());
     }
 
     @Test

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
 
@@ -8,6 +9,7 @@ import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.Product;
+import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ProductMapper;
 import ooo.klae.connex.backend.tenant.Permission;
@@ -49,6 +51,7 @@ public class ProductService {
     /** Creates a product in the active workspace. */
     @RequirePermission(Permission.PRODUCT_MANAGE)
     public Product create(Product product) {
+        validateAmounts(product);
         product.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
         product.setSku(canonicalSku(product.getSku()));
         productMapper.insert(product);
@@ -62,6 +65,7 @@ public class ProductService {
     /** Updates a product in the active workspace. */
     @RequirePermission(Permission.PRODUCT_MANAGE)
     public Product update(int id, Product product) {
+        validateAmounts(product);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         Product before = requireProduct(workspaceId, id);
         product.setId(id);
@@ -84,6 +88,34 @@ public class ProductService {
         auditService.record("product.delete", "product", id, before.getName(),
             "Deleted product " + before.getName(),
             auditService.diff(before, null, AUDIT_FIELDS));
+    }
+
+    /**
+     * Refuses a unit price or tax rate that its {@code DECIMAL(15,2)} or {@code DECIMAL(6,3)}
+     * column cannot hold. The request body declares the same bounds, but they apply only where the
+     * controller validates the body; refusing here keeps an unbounded exponent such as
+     * {@code 1E300000000} from reaching the JDBC bind, which renders the value as a plain string
+     * and would exhaust the heap on the request thread.
+     *
+     * @throws BadRequestException when either amount is negative or outside its column's range
+     */
+    private static void validateAmounts(Product product) {
+        if (!fitsColumn(product.getUnitPrice(), 13, 2)) {
+            throw new BadRequestException("unitPrice must be a non-negative DECIMAL(15,2) value");
+        }
+        if (!fitsColumn(product.getTaxRate(), 3, 3)) {
+            throw new BadRequestException("taxRate must be a non-negative DECIMAL(6,3) value");
+        }
+    }
+
+    /**
+     * Whether an optional non-negative amount fits a column with the given integer and fractional
+     * digits. Bounds are read off the parsed value rather than a rescaled one, and the integer-digit
+     * count widens to {@code long} so an extreme exponent cannot wrap it into a passing value.
+     */
+    private static boolean fitsColumn(BigDecimal value, int integerDigits, int scale) {
+        return value == null || value.signum() >= 0 && value.scale() <= scale
+            && (long) value.precision() - value.scale() <= integerDigits;
     }
 
     /** Trims the catalog conflict key and treats a blank SKU as absent. */

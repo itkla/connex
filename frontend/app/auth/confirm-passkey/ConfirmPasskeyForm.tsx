@@ -15,6 +15,7 @@ import { LoaderCircle } from "lucide-react";
 import { ApiError, exchangePasskeyBootstrapConfirmation } from "@/app/lib/api";
 import { settingsDestination } from "@/app/lib/settingsEntryPoints";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
+import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 import { Button } from "@/components/ui/button";
 
@@ -31,6 +32,8 @@ export function ConfirmPasskeyForm() {
     const t = useTranslations("AuthConfirmPasskey");
 
     const [status, setStatus] = useState<Status>("validating");
+
+    useReloadOnFragmentNavigation();
 
     useEffect(() => {
         let active = true;

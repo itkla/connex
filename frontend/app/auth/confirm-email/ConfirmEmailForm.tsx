@@ -18,6 +18,7 @@ import {
     validateEmailVerificationToken,
 } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
+import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
 import { toastError } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 
@@ -34,6 +35,8 @@ export function ConfirmEmailForm() {
 
     const [status, setStatus] = useState<Status>("validating");
     const [submitting, setSubmitting] = useState(false);
+
+    useReloadOnFragmentNavigation();
 
     useEffect(() => {
         let active = true;

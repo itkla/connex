@@ -78,6 +78,8 @@ jobs:
         run: python .github/scripts/check-doc-placeholders.py
       - name: Regression-test the placeholder guard
         run: python .github/scripts/test_doc_placeholders.py
+      - name: Regression-test the pnpm supply-chain policy guard
+        run: python .github/scripts/test_pnpm_supply_chain_policy.py
       - name: Regression-test candidate soak evidence
         run: python .github/scripts/test_candidate_soak.py
       - name: Regression-test security workflow gates
@@ -145,6 +147,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # pnpm's approval prompt and `pnpm audit --fix` write uncommented release-age exclusions (#835).
+      - name: Require the pnpm supply-chain policy and annotated exclusions
+        run: python3 .github/scripts/check-pnpm-supply-chain-policy.py
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           package_json_file: frontend/package.json
@@ -153,11 +158,24 @@ jobs:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
+      # A pnpmfile updateConfig hook or a YAML construct the line reader misreads changes what pnpm
+      # resolves without changing what the guard reads, so ask pnpm itself before installing.
+      - name: Require pnpm's resolved configuration to hold the policy
+        run: python3 .github/scripts/check-pnpm-supply-chain-policy.py --effective
       - name: Install
         working-directory: frontend
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Audit (fail on high+)
         working-directory: frontend
+        run: pnpm audit --audit-level=high
+      # frontend/emails/ is a separate pnpm project with its own lockfile, not a workspace package of
+      # frontend/. Only a frozen install makes pnpm re-check a lockfile against the release-age and
+      # trust policy, so every covered project needs one.
+      - name: Install emails
+        working-directory: frontend/emails
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Audit emails (fail on high+)
+        working-directory: frontend/emails
         run: pnpm audit --audit-level=high
       # landing/ is a separate pnpm project with its own lockfile, deployed to Cloudflare Workers.
       - name: Install landing

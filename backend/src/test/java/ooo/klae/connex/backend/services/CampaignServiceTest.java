@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -314,6 +315,24 @@ class CampaignServiceTest extends CampaignRealDbTestSupport {
         authenticateAs(currentUser, workspace.getId());
         assertNull(campaignService.getAudience(campaign.id()));
         assertTrue(campaignService.listSnapshots(campaign.id()).isEmpty());
+    }
+
+    @Test
+    void budgetWhoseExponentOverflowsIntegerDigitCountIsRejected() {
+        assertThrows(BadRequestException.class,
+                () -> campaignService.create(budgetRequest(new BigDecimal("1E2147483647"))));
+        assertThrows(BadRequestException.class,
+                () -> campaignService.create(budgetRequest(new BigDecimal("1E-2147483647"))));
+        CampaignDto created = campaignService.create(campaignRequest("Budget " + unique(), null));
+        assertThrows(BadRequestException.class,
+                () -> campaignService.update(created.id(), budgetRequest(new BigDecimal("1E2147483647"))));
+        assertNull(campaignService.get(created.id()).budgetAmount());
+    }
+
+    private CampaignRequest budgetRequest(BigDecimal budgetAmount) {
+        return new CampaignRequest(
+                "Budget " + unique(), null, "email", null, currentUser.getId(), budgetAmount, "USD",
+                null, null, null);
     }
 
     private CampaignRequest campaignRequest(String name, String status) {

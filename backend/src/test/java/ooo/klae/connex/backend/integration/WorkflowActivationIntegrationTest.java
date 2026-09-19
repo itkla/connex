@@ -18,6 +18,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -66,18 +67,24 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.RequestContextHolder;
 
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.beans.AuditLog;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.WorkflowRun;
+import ooo.klae.connex.backend.beans.WorkflowStepRun;
 import ooo.klae.connex.backend.beans.WorkflowTriggerOutbox;
+import ooo.klae.connex.backend.beans.WorkflowVersion;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.CsrfBootstrapDto;
 import ooo.klae.connex.backend.dto.WorkflowRecipeInstallDto;
 import ooo.klae.connex.backend.dto.WorkflowRecipePreviewDto;
+import ooo.klae.connex.backend.mappers.AuditLogMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -87,18 +94,23 @@ import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
 import ooo.klae.connex.backend.mappers.TenantLifecycleMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.mappers.WorkflowOperationsMapper;
+import ooo.klae.connex.backend.mappers.WorkflowRunMapper;
 import ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper;
+import ooo.klae.connex.backend.mappers.WorkflowVersionMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.notifications.NotificationPushListener;
 import ooo.klae.connex.backend.notifications.NotificationSourceChangedListener;
 import ooo.klae.connex.backend.services.RuleTriggerListener;
+import ooo.klae.connex.backend.services.WorkflowInterventionRecorder;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.NullifyReference;
 import ooo.klae.connex.backend.tenant.TenantLifecycleRegistry.TableLifecycle;
 
 /**
- * Exercises activation authorization, atomic trigger admission, and the lock order that keeps
- * automation authoring clear of audited CRM writes, all through committed HTTP requests.
+ * Exercises activation and operator-retry authorization, atomic trigger admission, and the lock
+ * order that keeps automation authoring clear of audited CRM writes, all through committed HTTP
+ * requests.
  */
 @SpringBootTest(properties = {
     "connex.workflows.runtime.max-trigger-fanout=2",
@@ -122,6 +134,11 @@ class WorkflowActivationIntegrationTest {
     @MockitoSpyBean private WorkflowMapper workflowMapper;
     @Autowired private PersonMapper personMapper;
     @Autowired private NoteMapper noteMapper;
+    @Autowired private WorkflowVersionMapper workflowVersionMapper;
+    @Autowired private WorkflowRunMapper workflowRunMapper;
+    @Autowired private WorkflowOperationsMapper workflowOperationsMapper;
+    @Autowired private WorkflowInterventionRecorder interventionRecorder;
+    @Autowired private AuditLogMapper auditLogMapper;
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private SqlSessionTemplate sqlSessionTemplate;
@@ -400,6 +417,38 @@ class WorkflowActivationIntegrationTest {
         assertTrue(noteMapper.getNotesByPersonId(workspace.getId(), person.getId()).isEmpty());
         assertTrue(outboxMapper.findEntityTargets(
             workspace.getId(), "person", "person.owner_changed", 3).isEmpty());
+    }
+
+    @Test
+    void managerWithoutNoteCreateCannotRetryAPrivilegedRunThatAPermittedMemberCan() throws Exception {
+        int ruleId = createRule(author, ruleBody(false, "person.owner_changed", "create_note"));
+        Workflow workflow = workflowMapper.getByLegacyRuleId(workspace.getId(), ruleId);
+        assertNotNull(workflow);
+        WorkflowRun run = interventionRun(workflow, person(author.user().getId()));
+        String runKey = "canonical-" + run.getId();
+
+        perform(manager, post("/api/workflows/{id}/runs/{runKey}/retry", workflow.getId(), runKey))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.message")
+                .value("Requires the NOTE_CREATE permission in this workspace"));
+
+        assertEquals("intervention_required",
+            workflowRunMapper.getByIdInWorkspace(workspace.getId(), run.getId()).getStatus());
+        assertEquals(1, workflowOperationsMapper.getOpenInterventionsByWorkflow(
+            workspace.getId(), workflow.getId(), 10).size());
+        assertTrue(retryAudits(workflow).isEmpty());
+
+        perform(author, post("/api/workflows/{id}/runs/{runKey}/retry", workflow.getId(), runKey))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.runKey").value(runKey))
+            .andExpect(jsonPath("$.status").value("waiting"));
+
+        WorkflowRun retried = workflowRunMapper.getByIdInWorkspace(workspace.getId(), run.getId());
+        assertEquals("waiting", retried.getStatus());
+        assertEquals("retry", retried.getWaitKind());
+        assertTrue(workflowOperationsMapper.getOpenInterventionsByWorkflow(
+            workspace.getId(), workflow.getId(), 10).isEmpty());
+        assertEquals(1, retryAudits(workflow).size());
     }
 
     @Test
@@ -914,6 +963,69 @@ class WorkflowActivationIntegrationTest {
             "condition", Map.of("match", "all", "conditions",
                 List.of(Map.of("type", "field", "field", "name", "op", "contains", "value", "Test"))),
             "actions", List.of(Map.of("type", "notify", "title", "Schedule"))));
+    }
+
+    /**
+     * Commits a canonical run of the workflow's active user-mode version that stopped for
+     * intervention on its failed, retry-safe action, as the durable runtime leaves it.
+     */
+    private WorkflowRun interventionRun(Workflow workflow, Person person) throws Exception {
+        WorkflowVersion version = workflowVersionMapper.getById(
+            workspace.getId(), workflow.getId(), workflow.getActiveVersionId());
+        assertNotNull(version);
+        assertEquals("user", version.getExecutionMode());
+        String actionNodeId = null;
+        for (JsonNode node : objectMapper.readTree(version.getDefinitionJson()).get("nodes")) {
+            if ("ACTION".equals(node.get("type").asString())) {
+                actionNodeId = node.get("id").asString();
+            }
+        }
+        assertNotNull(actionNodeId);
+        LocalDateTime startedAt = LocalDateTime.now().withNano(0).minusMinutes(1);
+        WorkflowRun run = new WorkflowRun();
+        run.setWorkspaceId(workspace.getId());
+        run.setWorkflowId(workflow.getId());
+        run.setWorkflowVersionId(version.getId());
+        run.setStatus("queued");
+        run.setTriggerType("entity_change");
+        run.setTriggerEvent("person.owner_changed");
+        run.setTriggerKey("retry-" + unique());
+        run.setRecordType("person");
+        run.setRecordId(person.getId());
+        run.setDedupeKey("retry-" + unique());
+        run.setExecutionMode("user");
+        run.setActorUserId(author.user().getId());
+        run.setAttributionUserId(author.user().getId());
+        run.setCurrentNodeId(actionNodeId);
+        run.setStartedAt(startedAt);
+        workflowRunMapper.insertRun(run);
+        WorkflowStepRun step = new WorkflowStepRun();
+        step.setWorkspaceId(workspace.getId());
+        step.setWorkflowRunId(run.getId());
+        step.setSequenceNumber(1);
+        step.setNodeId(actionNodeId);
+        step.setNodeType("action");
+        step.setStatus("failed");
+        step.setAttemptCount(1);
+        step.setRetrySafety("transactional");
+        step.setFailureCode("transient_database_failure");
+        step.setFailureMessage("The action failed transiently.");
+        step.setStartedAt(startedAt);
+        step.setFinishedAt(startedAt.plusSeconds(1));
+        workflowRunMapper.insertStep(step);
+        assertEquals(1, workflowRunMapper.failRun(
+            workspace.getId(), run.getId(), actionNodeId, "intervention_required",
+            "transient_database_failure", "The action failed transiently.",
+            startedAt.plusSeconds(2)));
+        interventionRecorder.record(run, "transient_database_failure");
+        return run;
+    }
+
+    private List<AuditLog> retryAudits(Workflow workflow) {
+        return auditLogMapper.findByEntity(workspace.getId(), "workflow", workflow.getId(), 100, 0)
+            .stream()
+            .filter(entry -> "workflow.run.retry".equals(entry.getAction()))
+            .toList();
     }
 
     private Person person(int ownerId) {

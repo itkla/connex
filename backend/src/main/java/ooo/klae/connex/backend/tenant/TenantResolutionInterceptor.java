@@ -13,6 +13,7 @@ import org.slf4j.MDC;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.firewall.RequestRejectedException;
 import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.AsyncHandlerInterceptor;
@@ -68,6 +69,12 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * Each authorizes its own path or bearer target independently of {@link TenantContext}; token
  * exchange must remain reachable before the client's first healing read. No fallback scope is
  * installed, and the endpoint's token, CSRF and admission checks still apply. Nothing else is exempt.
+ *
+ * <p>The selection routes and the organization and workspace lifecycle routes are matched on
+ * {@link RequestPathNormalizer#apiPath}, the context-relative, once-decoded path the dispatcher
+ * routes on, so a deployment context path or a percent-encoded route letter reaches the same
+ * exemption as the canonical path (#1701). A path the normalizer rejects as ambiguous matches no
+ * exempt route and takes ordinary workspace resolution, which fails closed.
  *
  * <p>The write protection is scoped to the first request that observes the revocation. A safe
  * read heals the selection to a workspace the caller still belongs to, and subsequent writes go
@@ -188,8 +195,11 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
      * so clients can exchange a bearer before their first healing read.
      */
     private static boolean isSelectionRequest(HttpServletRequest request) {
-        return "POST".equals(request.getMethod())
-            && SELECTION_PATH.matcher(RequestPathNormalizer.apiPath(request)).matches();
+        if (!"POST".equals(request.getMethod())) {
+            return false;
+        }
+        String path = normalizedPathOrNull(request);
+        return path != null && SELECTION_PATH.matcher(path).matches();
     }
 
     private void forgetStaleSelection(int userId, HttpServletResponse response) {
@@ -228,7 +238,10 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
 
     private boolean isLifecycleRequest(HttpServletRequest request) {
         String method = request.getMethod();
-        String path = request.getRequestURI();
+        String path = normalizedPathOrNull(request);
+        if (path == null) {
+            return false;
+        }
         return ("GET".equals(method)
                 && path.endsWith("/export")
                 && WORKSPACE_LIFECYCLE_PATH.matcher(
@@ -236,6 +249,19 @@ public class TenantResolutionInterceptor implements AsyncHandlerInterceptor {
             || ("DELETE".equals(method)
                 && (WORKSPACE_LIFECYCLE_PATH.matcher(path).matches()
                     || ORGANIZATION_LIFECYCLE_PATH.matcher(path).matches()));
+    }
+
+    /**
+     * Returns the normalized application path the dispatcher routes on, or {@code null} when the
+     * normalizer rejects the path as ambiguous. A rejected path earns no route exemption and takes
+     * ordinary workspace resolution instead of surfacing the rejection as a server error.
+     */
+    private static String normalizedPathOrNull(HttpServletRequest request) {
+        try {
+            return RequestPathNormalizer.apiPath(request);
+        } catch (RequestRejectedException exception) {
+            return null;
+        }
     }
 
     @Override

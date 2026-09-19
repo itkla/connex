@@ -6,3 +6,23 @@ allowBuilds:
 overrides:
   # shadcn > cosmiconfig pulls js-yaml 4.3.1 (GHSA-2883-xcg3-v3hh, high).
   js-yaml: '>=4.3.2'
+# Supply-chain resolution policy (#835). Owner decision 2026-09-19: versions younger
+# than one day and versions without registry publish time are refused, and a
+# package whose trust evidence (staged publish, trusted publisher, provenance)
+# drops versus an earlier release fails resolution. Emergency admissions are
+# exact-version entries in minimumReleaseAgeExclude, each owner-approved and
+# commented with the advisory, the approver, and the removal condition; see
+# "Package manager supply-chain policy" in frontend/AGENTS.md for the procedure.
+# .github/scripts/check-pnpm-supply-chain-policy.py enforces this block in CI.
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+minimumReleaseAgeIgnoreMissingTime: false
+trustPolicy: no-downgrade
+# Exact versions exempt from no-downgrade, each a verified legacy-line backport.
+trustPolicyExclude:
+  # The npm team's legacy-line backport of the CVE-2022-25883 ReDoS fix, published
+  # without provenance after the 7.5.x line gained it; the backport, not a takeover,
+  # trips no-downgrade.
+  # Publisher: lukekarrys. Line: 6.x. Published: 2023-07-10.
+  # Remove once nothing in the lockfile resolves semver@6.
+  - semver@6.3.1
