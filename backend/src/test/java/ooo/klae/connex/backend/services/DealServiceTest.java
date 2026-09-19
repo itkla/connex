@@ -2,12 +2,14 @@ package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -71,6 +73,7 @@ import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -99,6 +102,93 @@ class DealServiceTest extends AbstractServiceTest {
     @MockitoSpyBean RecordCommentMapper recordCommentMapperSpy;
     @MockitoSpyBean NotificationChangePublisher notificationChanges;
     @MockitoSpyBean RuleTriggerPublisher ruleTriggers;
+    @MockitoSpyBean DealCollaboratorControlAccess collaboratorControlAccess;
+
+    @Test
+    void collaboratorsHydrateActiveProfilesInDisplayOrderAndAuditRawTenantIds() throws Exception {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        String suffix = unique();
+        User zulu = renamed(newUser(), "Zulu " + suffix);
+        User lowerAlpha = renamed(newUser(), "alpha " + suffix);
+        User upperAlpha = renamed(newUser(), "Alpha " + suffix);
+        User japanese = renamed(newUser(), "\u5c71\u7530 " + suffix);
+        String profilePictureUrl = "/api/users/" + upperAlpha.getId() + "/profile-picture";
+        assertEquals(1, userMapper.updateProfilePictureUrlIfCurrent(
+            upperAlpha.getId(), null, profilePictureUrl));
+        List<Integer> activeIds = List.of(
+            zulu.getId(), lowerAlpha.getId(), upperAlpha.getId(), japanese.getId());
+        List<Integer> displayOrder = jdbcTemplate.queryForList(
+            "SELECT id FROM app_user WHERE id IN (?, ?, ?, ?) ORDER BY display_name, id",
+            Integer.class, activeIds.toArray());
+
+        List<UserDto> replaced = dealService.replaceCollaborators(deal.getId(), List.of(
+            japanese.getId(), zulu.getId(), upperAlpha.getId(), lowerAlpha.getId(),
+            lowerAlpha.getId(), currentUser.getId()));
+
+        assertEquals(List.of(lowerAlpha.getId(), upperAlpha.getId(), zulu.getId(), japanese.getId()),
+            displayOrder);
+        assertEquals(displayOrder, replaced.stream().map(UserDto::getId).toList());
+        UserDto alphaProfile = replaced.get(1);
+        assertEquals(upperAlpha.getUsername(), alphaProfile.getUsername());
+        assertEquals(upperAlpha.getDisplayName(), alphaProfile.getDisplayName());
+        assertEquals(upperAlpha.getEmail(), alphaProfile.getEmail());
+        assertEquals(profilePictureUrl, alphaProfile.getProfilePictureUrl());
+        assertEquals("UTC", alphaProfile.getTimezone());
+        assertEquals("en", alphaProfile.getLocale());
+        assertNotNull(alphaProfile.getCreatedAt());
+        List<Integer> sortedActiveIds = activeIds.stream().sorted().toList();
+        verify(collaboratorControlAccess).getProfiles(workspace.getId(), sortedActiveIds);
+        JsonNode firstChange = auditChanges(deal.getId(), "deal.updateCollaborators").path("collaboratorIds");
+        assertEquals(List.of(), auditedIds(firstChange.path("old")));
+        assertEquals(sortedActiveIds, auditedIds(firstChange.path("new")));
+
+        User pending = newPendingMember();
+        int missingUserId = Integer.MAX_VALUE;
+        jdbcTemplate.update(
+            "INSERT INTO deal_collaborator (workspace_id, deal_id, user_id) VALUES (?, ?, ?), (?, ?, ?)",
+            workspace.getId(), deal.getId(), pending.getId(),
+            workspace.getId(), deal.getId(), missingUserId);
+        List<Integer> rawIds = Stream.concat(
+                sortedActiveIds.stream(), Stream.of(pending.getId(), missingUserId))
+            .sorted()
+            .toList();
+        clearInvocations(collaboratorControlAccess);
+
+        List<UserDto> loaded = dealService.getCollaborators(deal.getId());
+
+        assertEquals(displayOrder, loaded.stream().map(UserDto::getId).toList());
+        verify(collaboratorControlAccess).getProfiles(workspace.getId(), rawIds);
+
+        List<UserDto> narrowed = dealService.replaceCollaborators(deal.getId(), List.of(zulu.getId()));
+
+        assertEquals(List.of(zulu.getId()), narrowed.stream().map(UserDto::getId).toList());
+        JsonNode secondChange = auditChanges(deal.getId(), "deal.updateCollaborators").path("collaboratorIds");
+        assertEquals(rawIds, auditedIds(secondChange.path("old")));
+        assertEquals(List.of(zulu.getId()), auditedIds(secondChange.path("new")));
+    }
+
+    @Test
+    void collaboratorReplacementKeepsOwnerFilterMissingDealAndNullIdRejection() {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        User member = newUser();
+
+        List<UserDto> replaced = dealService.replaceCollaborators(
+            deal.getId(), List.of(currentUser.getId(), member.getId()));
+
+        assertEquals(List.of(member.getId()), replaced.stream().map(UserDto::getId).toList());
+        assertEquals(List.of(member.getId()), dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()));
+        assertEquals(List.of(), dealService.replaceCollaborators(deal.getId(), List.of()));
+        assertEquals(List.of(), dealService.getCollaborators(deal.getId()));
+        dealService.replaceCollaborators(deal.getId(), List.of(member.getId()));
+        assertThrows(ResourceNotFoundException.class, () -> dealService.getCollaborators(Integer.MAX_VALUE));
+        assertThrows(BadRequestException.class, () -> dealService.replaceCollaborators(
+            deal.getId(), Arrays.asList(member.getId(), null)));
+        assertThrows(ResourceNotFoundException.class,
+            () -> dealService.replaceCollaborators(Integer.MAX_VALUE, List.of(member.getId())));
+        assertEquals(List.of(member.getId()), dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()));
+    }
 
     @Test
     void removeTagIsIdempotentWhenTagNoLongerExists() {
@@ -2150,6 +2240,16 @@ class DealServiceTest extends AbstractServiceTest {
 
     private Map<String, Long> facetCounts(List<FacetCount> facets) {
         return facets.stream().collect(Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
+    }
+
+    private User renamed(User user, String displayName) {
+        user.setDisplayName(displayName);
+        userMapper.update(user);
+        return user;
+    }
+
+    private static List<Integer> auditedIds(JsonNode ids) {
+        return IntStream.range(0, ids.size()).mapToObj(index -> ids.get(index).asInt()).toList();
     }
 
     private JsonNode auditChanges(int dealId, String action) throws Exception {
