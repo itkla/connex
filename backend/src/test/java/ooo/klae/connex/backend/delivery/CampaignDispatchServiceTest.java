@@ -764,7 +764,7 @@ class CampaignDispatchServiceTest {
     @ParameterizedTest
     @CsvSource({"running, 0, true", "running, 2, false", "completed, 0, false"})
     void aSendAwaitingRecoverySettlementSettlesWithoutResolvingItsProvider(
-            String status, int pending, boolean completes) {
+            String status, int outstanding, boolean completes) {
         CampaignSendMapper sendMapper = mock(CampaignSendMapper.class);
         CampaignDeliveryMapper deliveryMapper = mock(CampaignDeliveryMapper.class);
         DeliveryProviderConfigService providerConfigService = mock(DeliveryProviderConfigService.class);
@@ -772,7 +772,8 @@ class CampaignDispatchServiceTest {
         when(gate.dispatchPageSize()).thenReturn(200);
         when(sendMapper.audienceSendsAwaitingRecoverySettlement(7, 200)).thenReturn(List.of(11));
         when(sendMapper.getSend(7, 11)).thenReturn(audienceSend(status));
-        when(deliveryMapper.countPending(7, 11)).thenReturn(pending);
+        when(deliveryMapper.countPending(7, 11)).thenReturn(0);
+        when(deliveryMapper.countOutstanding(7, 11)).thenReturn(outstanding);
         CampaignDispatchService service = service(sendMapper, deliveryMapper, providerConfigService, gate);
 
         assertEquals(0, service.processWorkspace(7));
@@ -784,6 +785,7 @@ class CampaignDispatchServiceTest {
         } else {
             verify(sendMapper, never()).markCompleted(anyInt(), anyInt());
         }
+        verify(deliveryMapper, never()).countPending(anyInt(), anyInt());
         verifyNoInteractions(providerConfigService);
     }
 
