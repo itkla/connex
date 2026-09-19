@@ -663,8 +663,12 @@ workspace root, and adds no lock edge. Send status is not filtered, because a co
 cancelled send can own the stranded row; scheduler discovery includes workspaces whose only work is
 such a row. The same pass then settles every audience send that owns an unresolved reconciliation
 row and either has a `failed_count` that disagrees with its failed rows or is still `running` with
-nothing pending: it refreshes the counters and completes such a running send without resolving a
-provider, so a connector disabled after the worker died cannot keep the send running. Those sends
+nothing `pending` or `dispatching`: it refreshes the counters and completes such a running send
+without resolving a provider, so a connector disabled after the worker died cannot keep the send
+running. A `dispatching` row may belong to a live worker, so that send stays `running`: the worker's
+own settlement completes it after its terminal write, an attempt it abandons after reserving is swept
+and settled by a later pass, and one abandoned before reserving is left to the dispatch loop's own
+settlement. Those sends
 are selected by that durable predicate, not remembered from the sweep, because a marked row no
 longer matches the sweep: a settlement that fails is found again on a later pass, and scheduler
 discovery includes workspaces whose only work is such a stale counter. Settlement reuses the

@@ -325,8 +325,8 @@ worker that died mid-send — surfaces as a `deadline_ambiguous` reconciliation 
 deadline and the delivery lease safety margin (30 seconds by default) have both elapsed since the
 attempt reserved the window. Until then, and afterwards unless an operator confirms
 `not_delivered`, the contact stays frequency-capped on that channel for the rest of the window.
-The send that owned the attempt still settles: its counters are refreshed and, once nothing is
-pending, it completes even if its provider has since been disabled.
+The send that owned the attempt still settles: its counters are refreshed and, once none of its
+deliveries is pending or still being sent, it completes even if its provider has since been disabled.
 A worker that is only slow can lose the same race: if the provider accepts the message but the
 worker has not recorded the result by the time the same deadline and margin have elapsed, its late
 write cannot mark the delivery sent. It still attaches the provider message ID to the reconciliation
