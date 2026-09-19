@@ -89,8 +89,9 @@ class PrivilegedMfaStartupConfigurationTest {
 
                     when(context.getBean(PrivilegedAccountService.class).unenrolledPrivilegedAccountCounts())
                             .thenReturn(new UnenrolledPrivilegedAccountCounts(0, 0, 0));
-                    context.getBean(PrivilegedMfaStartupAudit.class)
-                            .run(new DefaultApplicationArguments(new String[0]));
+                    PrivilegedMfaStartupAudit startupAudit = context.getBean(PrivilegedMfaStartupAudit.class);
+                    startupAudit.run(new DefaultApplicationArguments(new String[0]));
+                    startupAudit.recordPosture();
 
                     verify(context.getBean(AuditService.class)).recordStrictIndependentScoped(
                             eq("auth.mfa.policy.configured"), eq("security_policy"),

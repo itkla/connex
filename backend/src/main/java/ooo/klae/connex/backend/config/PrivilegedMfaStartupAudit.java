@@ -9,6 +9,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -27,12 +30,26 @@ import ooo.klae.connex.backend.services.PrivilegedAccountService;
  * those cannot enroll on their own, before they surface as support tickets. The inventory is
  * rollout guidance, not a control: a non-empty population, or an inventory query that fails, never
  * prevents startup. The policy audit itself remains strict.
+ *
+ * <p>The work is split across two startup phases. Configuration is validated with the other
+ * startup runners, so a misconfiguration still aborts startup before the application reports
+ * ready. The posture is recorded once the application is ready, after {@link BootstrapRunner} has
+ * provisioned any founding owner: on a fresh install that owner is privileged and holds no
+ * passkey, so an inventory taken during the runner phase would report zero exactly when there is
+ * one such account. Recording the whole posture there keeps it a single
+ * {@code auth.mfa.policy.configured} event per start.
  */
 @Component
 @RequiredArgsConstructor
 public class PrivilegedMfaStartupAudit implements ApplicationRunner {
     /** Most account ids the startup warning names; the audit carries only counts. */
     static final int INVENTORY_LOG_LIMIT = 50;
+
+    /**
+     * Ready-listener order of the posture record: after bootstrap owner provisioning, and ahead of
+     * the lowest-precedence listeners that publish the readiness marker or close a seeder context.
+     */
+    static final int POSTURE_ORDER = BootstrapRunner.ORDER + 1;
 
     private static final Logger log = LoggerFactory.getLogger(PrivilegedMfaStartupAudit.class);
 
@@ -43,11 +60,29 @@ public class PrivilegedMfaStartupAudit implements ApplicationRunner {
     private final AuditService auditService;
     private final Clock clock;
 
+    /**
+     * Refuses to start with an invalid enforcement, recovery, or first-passkey confirmation
+     * configuration.
+     *
+     * @param args the application arguments, unused
+     */
     @Override
     public void run(ApplicationArguments args) {
         properties.validate(clock);
+        properties.validateBootstrapConfirmation(bootstrapConfirmationPolicy.isConfirmationEnabled());
+    }
+
+    /**
+     * Records the posture validated by {@link #run}, with the unenrolled-privileged inventory, as
+     * one strict audit event.
+     *
+     * <p>A failure to persist the event propagates. Spring Boot then closes the context and fails
+     * startup, as it does for a failing startup runner.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    @Order(POSTURE_ORDER)
+    public void recordPosture() {
         boolean bootstrapConfirmationEnabled = bootstrapConfirmationPolicy.isConfirmationEnabled();
-        properties.validateBootstrapConfirmation(bootstrapConfirmationEnabled);
         Map<String, Object> posture = new LinkedHashMap<>();
         posture.put("actor", properties.getChangeActor());
         posture.put("configuredValue", properties.configuredEnforcedValue());

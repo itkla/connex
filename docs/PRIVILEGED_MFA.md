@@ -79,6 +79,12 @@ hold no passkey. These are the accounts confinement holds at enrollment. The sam
   is zero when the confirmation is disabled, because the password alone then suffices. Passwordless
   accounts are never counted here, because they enroll after a fresh federated sign-in.
 
+The inventory is taken once the backend is ready, after bootstrap owner provisioning
+(`CONNEX_BOOTSTRAP_ENABLED`) has run. On a fresh install the founding owner is privileged and has no
+passkey yet, so it is counted on the boot that creates it. The event is recorded at the same point.
+Configuration is still validated earlier in startup, and a failure to record the event still fails
+startup.
+
 When the first count is above zero, the backend also logs one `WARN` line that names at most 50
 account ids, lowest id first. The line carries no email addresses or credential material. The
 inventory is read-only rollout guidance. A non-empty population never blocks startup. If the

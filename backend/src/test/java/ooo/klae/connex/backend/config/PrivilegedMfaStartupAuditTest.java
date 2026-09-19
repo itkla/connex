@@ -11,6 +11,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -36,6 +37,8 @@ import ooo.klae.connex.backend.services.PrivilegedAccountService;
 class PrivilegedMfaStartupAuditTest {
     private static final Clock CLOCK = Clock.fixed(
             Instant.parse("2026-08-13T12:00:00Z"), ZoneOffset.UTC);
+    private static final DefaultApplicationArguments NO_ARGUMENTS =
+            new DefaultApplicationArguments(new String[0]);
 
     @Test
     void startupAuditNamesActorAndEffectiveFailClosedValue() {
@@ -51,7 +54,7 @@ class PrivilegedMfaStartupAuditTest {
                 auditService,
                 CLOCK);
 
-        runner.run(new DefaultApplicationArguments(new String[0]));
+        start(runner);
 
         verify(auditService).recordStrictIndependentScoped(
                 eq("auth.mfa.policy.configured"),
@@ -77,7 +80,7 @@ class PrivilegedMfaStartupAuditTest {
                 properties, confirmationPolicy(false), deliverable(false),
                 inventory(new UnenrolledPrivilegedAccountCounts(0, 0, 0)), auditService, CLOCK);
 
-        runner.run(new DefaultApplicationArguments(new String[0]));
+        start(runner);
 
         verify(auditService).recordStrictIndependentScoped(
                 eq("auth.mfa.policy.configured"),
@@ -99,10 +102,27 @@ class PrivilegedMfaStartupAuditTest {
                 new PrivilegedMfaProperties(), confirmationPolicy(false), deliverable(false),
                 inventory(new UnenrolledPrivilegedAccountCounts(0, 0, 0)), auditService, CLOCK);
 
-        assertThrows(IllegalStateException.class,
-                () -> runner.run(new DefaultApplicationArguments(new String[0])));
+        assertThrows(IllegalStateException.class, () -> runner.run(NO_ARGUMENTS));
 
         verifyNoInteractions(auditService);
+    }
+
+    /**
+     * The runner phase precedes bootstrap owner provisioning, so it only validates: it neither
+     * takes the inventory nor records the posture.
+     */
+    @Test
+    void theRunnerPhaseValidatesWithoutTakingTheInventoryOrRecordingThePosture() {
+        AuditService auditService = mock(AuditService.class);
+        PrivilegedAccountService privilegedAccounts = inventory(new UnenrolledPrivilegedAccountCounts(1, 1, 0));
+        PrivilegedMfaStartupAudit runner = new PrivilegedMfaStartupAudit(
+                new PrivilegedMfaProperties(), confirmationPolicy(true), deliverable(true),
+                privilegedAccounts, auditService, CLOCK);
+
+        runner.run(NO_ARGUMENTS);
+
+        verifyNoInteractions(auditService);
+        verify(privilegedAccounts, never()).unenrolledPrivilegedAccountCounts();
     }
 
     @Test
@@ -116,8 +136,9 @@ class PrivilegedMfaStartupAuditTest {
                 new PrivilegedMfaProperties(), confirmationPolicy(true), deliverable(true),
                 inventory(new UnenrolledPrivilegedAccountCounts(0, 0, 0)), auditService, CLOCK);
 
-        assertSame(persistenceFailure, assertThrows(IllegalStateException.class,
-                () -> runner.run(new DefaultApplicationArguments(new String[0]))));
+        runner.run(NO_ARGUMENTS);
+
+        assertSame(persistenceFailure, assertThrows(IllegalStateException.class, runner::recordPosture));
     }
 
     /**
@@ -137,7 +158,7 @@ class PrivilegedMfaStartupAuditTest {
                 new PrivilegedMfaProperties(), confirmationPolicy(true), deliverable(true),
                 privilegedAccounts, auditService, CLOCK);
 
-        assertDoesNotThrow(() -> runner.run(new DefaultApplicationArguments(new String[0])));
+        assertDoesNotThrow(() -> start(runner));
 
         verify(auditService).recordStrictIndependentScoped(
                 eq("auth.mfa.policy.configured"), eq("security_policy"),
@@ -183,7 +204,7 @@ class PrivilegedMfaStartupAuditTest {
                 new PrivilegedMfaProperties(), confirmationPolicy(true), deliverable(true),
                 privilegedAccounts, auditService, CLOCK);
 
-        assertDoesNotThrow(() -> runner.run(new DefaultApplicationArguments(new String[0])));
+        assertDoesNotThrow(() -> start(runner));
 
         verify(auditService).recordStrictIndependentScoped(
                 eq("auth.mfa.policy.configured"), eq("security_policy"),
@@ -201,14 +222,19 @@ class PrivilegedMfaStartupAuditTest {
     private static Map<?, ?> recordedPosture(PrivilegedMfaProperties properties,
             boolean confirmationEnabled, boolean canDeliver, UnenrolledPrivilegedAccountCounts counts) {
         AuditService auditService = mock(AuditService.class);
-        new PrivilegedMfaStartupAudit(properties, confirmationPolicy(confirmationEnabled),
-                deliverable(canDeliver), inventory(counts), auditService, CLOCK)
-                .run(new DefaultApplicationArguments(new String[0]));
+        start(new PrivilegedMfaStartupAudit(properties, confirmationPolicy(confirmationEnabled),
+                deliverable(canDeliver), inventory(counts), auditService, CLOCK));
         ArgumentCaptor<Object> posture = ArgumentCaptor.forClass(Object.class);
         verify(auditService).recordStrictIndependentScoped(
                 eq("auth.mfa.policy.configured"), eq("security_policy"),
                 isNull(), isNull(), isNull(), eq("privileged-mfa"), any(), posture.capture());
         return assertInstanceOf(Map.class, posture.getValue());
+    }
+
+    /** Drives both startup phases in Spring Boot's order: runners first, then the ready listeners. */
+    private static void start(PrivilegedMfaStartupAudit audit) {
+        audit.run(NO_ARGUMENTS);
+        audit.recordPosture();
     }
 
     private static PasskeyBootstrapConfirmationPolicy confirmationPolicy(boolean enabled) {
