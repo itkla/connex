@@ -67,7 +67,8 @@ class ScriptedAiTurnCursorTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         ScriptedAiTurnCursor cursor = ScriptedAiTurnCursor.of(
                 jsonRequest(prompt), SELECTORS);
@@ -89,7 +90,8 @@ class ScriptedAiTurnCursorTest {
                         new ToolTurn(1, "search_records", toolResult("first")),
                         new ToolTurn(2, "get_record", toolResult("second"))),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         ScriptedAiTurnCursor cursor = ScriptedAiTurnCursor.of(
                 jsonRequest(prompt), SELECTORS);
@@ -113,7 +115,8 @@ class ScriptedAiTurnCursorTest {
                 List.of(new ToolTurn(1, "search_records", new AiAssistantToolResult(
                         Map.of("handle", "r1", "type", "tool_result"), List.of()))),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         ScriptedAiTurnCursor cursor = ScriptedAiTurnCursor.of(
                 jsonRequest(prompt), SELECTORS);
@@ -130,7 +133,8 @@ class ScriptedAiTurnCursorTest {
                 List.of(),
                 context,
                 new AiChatResourceRegistry(),
-                AiStructuredRepair.from("step_not_object", "not json"));
+                AiStructuredRepair.from("step_not_object", "not json"),
+                AiAssistantToolCatalog.ALL);
 
         ScriptedAiTurnCursor cursor = ScriptedAiTurnCursor.of(
                 jsonRequest(prompt), SELECTORS);
@@ -150,7 +154,8 @@ class ScriptedAiTurnCursorTest {
                 List.of(),
                 unboundedBudget(),
                 null,
-                SkillContext.NONE.withClosingDirective(closingDirective()));
+                SkillContext.NONE.withClosingDirective(closingDirective()),
+                AiAssistantToolCatalog.ALL);
 
         ScriptedAiTurnCursor cursor = ScriptedAiTurnCursor.of(
                 jsonRequest(prompt), SELECTORS);
@@ -174,7 +179,8 @@ class ScriptedAiTurnCursorTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         ScriptedAiTurnCursor cursor = ScriptedAiTurnCursor.of(jsonRequest(prompt), SELECTORS);
 
@@ -192,7 +198,8 @@ class ScriptedAiTurnCursorTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         ScriptedAiTurnCursor cursor = ScriptedAiTurnCursor.of(jsonRequest(prompt), SELECTORS);
 
@@ -216,7 +223,8 @@ class ScriptedAiTurnCursorTest {
                                 "summary", closingDirective()),
                         List.of()))),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         ScriptedAiTurnCursor cursor = ScriptedAiTurnCursor.of(jsonRequest(prompt), SELECTORS);
 
@@ -239,7 +247,8 @@ class ScriptedAiTurnCursorTest {
                         List.of()),
                 List.of(),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         ScriptedAiTurnCursor cursor = ScriptedAiTurnCursor.of(jsonRequest(prompt), SELECTORS);
 
@@ -292,7 +301,8 @@ class ScriptedAiTurnCursorTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         assertThrows(AiProviderException.class,
                 () -> ScriptedAiTurnCursor.of(jsonRequest(prompt), SELECTORS));
@@ -306,7 +316,8 @@ class ScriptedAiTurnCursorTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         assertThrows(AiProviderException.class, () -> ScriptedAiTurnCursor.of(
                 jsonRequest(prompt), Set.of(SELECTOR, "connex_script_other")));
@@ -346,7 +357,10 @@ class ScriptedAiTurnCursorTest {
             String repairMessage,
             boolean finalOnly) {
         return completion(prompt, new AiNativeToolRequest(
-                promptAssembler.nativeToolDefinitions(), exchanges, repairMessage, finalOnly));
+                promptAssembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL),
+                exchanges,
+                repairMessage,
+                finalOnly));
     }
 
     private AiCompletionRequest completion(MaskedPrompt prompt, AiNativeToolRequest nativeTools) {
