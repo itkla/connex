@@ -114,6 +114,24 @@ jobs:
             and (.services.backend.environment.CONNEX_DEPLOYMENT_PROFILE // "") == ""
           ' /tmp/eval.env.example.json >/dev/null
 
+          # No shipped template may carry the AI scripting test seam, which replaces the real
+          # OpenAI-compatible adapter with fixture scripts the image does not contain. The eval
+          # template is the reason this gate exists: it is the one bundle that runs
+          # SPRING_PROFILES_ACTIVE=dev with no declared edition, which is the only profile shape
+          # the backend would accept the seam under. Comment lines are excluded on purpose — the
+          # templates are required to WARN operators about the seam by name.
+          for TEMPLATE in eval.env.example silo.env.example onprem.env.example; do
+            SETTINGS="$(grep -v '^[[:space:]]*#' "$TEMPLATE" || true)"
+            if printf '%s\n' "$SETTINGS" | grep -qE '^SPRING_PROFILES_ACTIVE=.*ai-scripted-provider'; then
+              echo "::error::${TEMPLATE} activates the scripted AI provider Spring profile"
+              exit 1
+            fi
+            if printf '%s\n' "$SETTINGS" | grep -qE '^CONNEX_AI_SCRIPTED_PROVIDER_'; then
+              echo "::error::${TEMPLATE} sets a scripted AI provider variable"
+              exit 1
+            fi
+          done
+
           # A real edition must refuse a published-image install that has not pinned the
           # sidecar's digest, exactly as it already does for the backend and frontend.
           for TEMPLATE in silo.env.example onprem.env.example; do

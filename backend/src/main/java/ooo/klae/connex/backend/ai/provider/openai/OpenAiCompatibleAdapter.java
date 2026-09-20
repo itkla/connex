@@ -42,12 +42,12 @@ import tools.jackson.databind.node.ObjectNode;
  * revalidates the configured base URI, preserves its authority and path, translates Connex's
  * narrow provider request, and normalizes the response.
  *
- * <p>The profile negation is what lets the fixture-driven
- * {@link ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiProvider} answer under the same
- * {@code openai_compatible} id without weakening either closed provider-id set.
- * {@code AiProviderRouter} refuses duplicate adapter ids, so exactly one of the two may exist at a
- * time. Deleting this annotation does not enable a bypass — the scripted profile is unbootable
- * outside dev and test — it makes that profile fail with an obscure duplicate-id error instead.
+ * <p>The profile negation is what lets the fixture-driven scripted adapter, described in
+ * {@code backend/AGENTS.md}, answer under the same {@code openai_compatible} id without weakening
+ * either closed provider-id set. {@code AiProviderRouter} refuses duplicate adapter ids, so exactly
+ * one of the two may exist at a time. Deleting this annotation does not enable a bypass — the
+ * scripted profile is unbootable outside dev and test — it makes that profile fail with an obscure
+ * duplicate-id error instead.
  */
 @Service
 @Profile("!" + ScriptedAiProviderProfile.NAME)
