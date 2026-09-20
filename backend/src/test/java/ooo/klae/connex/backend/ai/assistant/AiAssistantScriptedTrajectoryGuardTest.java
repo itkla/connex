@@ -111,8 +111,33 @@ class AiAssistantScriptedTrajectoryGuardTest extends AbstractScriptedTrajectoryT
                         + trajectory.answer());
     }
 
+    /**
+     * The escape the no-progress guard exists for: a model that keeps repeating one call is handed
+     * a closing step, and a model that honours it still turns the evidence it gathered into an
+     * answer instead of losing the turn.
+     */
     @Test
-    void repeatingOneToolCallEndsTheTurnOnTheNoProgressGuard() {
+    void aModelThatStopsMakingProgressStillAnswersThroughTheClosingStep() {
+        person("Silas Thornbury", "silas.thornbury@example.invalid", null);
+
+        Trajectory trajectory = run(
+                "connex_script_closing_answer", "look this contact up");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("search_records"), trajectory.toolNames(),
+                "a replayed call is answered from the turn's own cache, so it never becomes a "
+                        + "second durable tool call: " + trajectory.toolNames());
+        assertTrue(trajectory.answer().contains("repeating the same search gave me nothing new"),
+                "the closing step's answer is what the member receives: " + trajectory.answer());
+    }
+
+    /**
+     * The fallback behind that escape: a model that ignores the closing directive and asks for the
+     * same tool again has produced nothing to deliver, so the turn fails on the guard's own reason
+     * rather than running the call or inventing an answer.
+     */
+    @Test
+    void aModelThatIgnoresTheClosingDirectiveFailsOnTheNoProgressGuard() {
         person("Silas Thornbury", "silas.thornbury@example.invalid", null);
 
         Trajectory trajectory = run(
@@ -124,7 +149,7 @@ class AiAssistantScriptedTrajectoryGuardTest extends AbstractScriptedTrajectoryT
                 "a replayed call is answered from the turn's own cache, so it never becomes a "
                         + "second durable tool call: " + trajectory.toolNames());
         assertEquals(List.of(), trajectory.answers(),
-                "a turn that made no progress must not deliver an answer anyway");
+                "a closing step that still asks for a tool has produced no answer to deliver");
     }
 
     /**
