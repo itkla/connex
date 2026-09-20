@@ -102,6 +102,7 @@ class AiChatTurnTerminalCoordinatorTest {
                 "step_cap_exceeded",
                 "workspace_disabled",
                 AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
+                AiAssistantTerminalReasons.OWNER_LOST,
                 "internal_error")) {
             coordinator.listener(TURN).onTerminal(
                     AiGenerationTaskResult.Outcome.FAILED, reason);

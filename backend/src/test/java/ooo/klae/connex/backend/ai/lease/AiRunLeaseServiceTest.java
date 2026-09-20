@@ -19,6 +19,7 @@ import static org.mockito.Mockito.when;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -84,7 +85,7 @@ class AiRunLeaseServiceTest {
         when(leaseMapper.lockForUpdate(7, CHAT_TURN, 42L)).thenReturn(null);
         when(leaseMapper.insert(7, CHAT_TURN, 42L, identity.owner(), 45)).thenReturn(1);
 
-        AiRunLease lease = service.acquireInCurrentTransaction(KEY);
+        AiRunLease lease = service.acquireInCurrentTransaction(KEY, guard());
 
         assertEquals(1L, lease.epoch());
         assertEquals(identity.owner(), lease.owner());
@@ -98,7 +99,7 @@ class AiRunLeaseServiceTest {
         when(leaseMapper.lockForUpdate(7, CHAT_TURN, 42L)).thenReturn(row(4L));
         when(leaseMapper.takeOver(7, CHAT_TURN, 42L, identity.owner(), 45)).thenReturn(1);
 
-        AiRunLease lease = service.acquireInCurrentTransaction(KEY);
+        AiRunLease lease = service.acquireInCurrentTransaction(KEY, guard());
 
         assertEquals(5L, lease.epoch());
         verify(leaseMapper, never()).insert(anyInt(), anyString(), anyLong(), anyString(), anyInt());
@@ -109,7 +110,9 @@ class AiRunLeaseServiceTest {
         when(leaseMapper.lockForUpdate(7, CHAT_TURN, 42L)).thenReturn(row(2L));
         when(leaseMapper.takeOver(7, CHAT_TURN, 42L, identity.owner(), 45)).thenReturn(0);
 
-        assertThrows(ConflictException.class, () -> service.acquireInCurrentTransaction(KEY));
+        assertThrows(
+                ConflictException.class,
+                () -> service.acquireInCurrentTransaction(KEY, guard()));
 
         assertTrue(registry.find(KEY).isEmpty());
     }
@@ -138,7 +141,7 @@ class AiRunLeaseServiceTest {
     void releaseTombstonesWithTheRegisteredTokenAndThenForgetsIt() {
         when(leaseMapper.lockForUpdate(7, CHAT_TURN, 42L)).thenReturn(null);
         when(leaseMapper.insert(7, CHAT_TURN, 42L, identity.owner(), 45)).thenReturn(1);
-        service.acquireInCurrentTransaction(KEY);
+        service.acquireInCurrentTransaction(KEY, guard());
         commit();
         when(leaseMapper.tombstone(7, CHAT_TURN, 42L, identity.owner(), 1L)).thenReturn(1);
 
@@ -147,6 +150,57 @@ class AiRunLeaseServiceTest {
 
         assertTrue(registry.find(KEY).isEmpty());
         verify(leaseMapper).tombstone(7, CHAT_TURN, 42L, identity.owner(), 1L);
+        verify(leaseMapper, never()).retire(anyInt(), anyString(), anyLong());
+    }
+
+    /**
+     * The token is JVM-local, so a terminal write that lands anywhere but the claiming instance
+     * has none to fence with. Skipping the release there would leave the row held and unreleased
+     * for good: the reap deletes tombstones only, so nothing in this design would ever retire it.
+     */
+    @Test
+    void releasingASubjectThisInstanceHoldsNoTokenForRetiresTheRowByKey() {
+        when(leaseMapper.retire(7, CHAT_TURN, 42L)).thenReturn(1);
+
+        assertTrue(service.releaseHeldInCurrentTransaction(KEY));
+
+        verify(leaseMapper).retire(7, CHAT_TURN, 42L);
+        verify(leaseMapper, never())
+                .tombstone(anyInt(), anyString(), anyLong(), anyString(), anyLong());
+    }
+
+    @Test
+    void retiringARowThatWasAlreadyReleasedReportsNoRelease() {
+        when(leaseMapper.retire(7, CHAT_TURN, 42L)).thenReturn(0);
+
+        assertFalse(service.releaseHeldInCurrentTransaction(KEY));
+    }
+
+    /**
+     * A worker drops its token when it stops working, so a run whose terminal write never lands
+     * cannot leave the token behind for the life of the process. Dropping it must never touch the
+     * lease row: the run's lease has to stay held and expiring for a settler to find.
+     */
+    @Test
+    void forgettingALocalTokenReleasesNothingAndEmptiesTheRegistry() {
+        when(leaseMapper.lockForUpdate(7, CHAT_TURN, 42L)).thenReturn(null);
+        when(leaseMapper.insert(7, CHAT_TURN, 42L, identity.owner(), 45)).thenReturn(1);
+        AiRunLease claimed = service.acquireInCurrentTransaction(KEY, guard());
+        commit();
+
+        service.forgetLocalToken(claimed);
+
+        assertTrue(registry.find(KEY).isEmpty());
+        verify(leaseMapper, never())
+                .tombstone(anyInt(), anyString(), anyLong(), anyString(), anyLong());
+        verify(leaseMapper, never()).retire(anyInt(), anyString(), anyLong());
+    }
+
+    @Test
+    void forgettingNoTokenAtAllIsAcceptedSoARefusedClaimNeedsNoBranch() {
+        service.forgetLocalToken(null);
+
+        verifyNoMoreInteractions(leaseMapper);
     }
 
     /**
@@ -159,7 +213,7 @@ class AiRunLeaseServiceTest {
         when(leaseMapper.lockForUpdate(7, CHAT_TURN, 42L)).thenReturn(null);
         when(leaseMapper.insert(7, CHAT_TURN, 42L, identity.owner(), 45)).thenReturn(1);
 
-        AiRunLease lease = service.acquireInCurrentTransaction(KEY);
+        AiRunLease lease = service.acquireInCurrentTransaction(KEY, guard());
         assertEquals(Optional.of(lease), registry.find(KEY));
         rollBack();
 
@@ -175,7 +229,7 @@ class AiRunLeaseServiceTest {
     void aReleaseThatRollsBackKeepsTheTokenForTheRetry() {
         when(leaseMapper.lockForUpdate(7, CHAT_TURN, 42L)).thenReturn(null);
         when(leaseMapper.insert(7, CHAT_TURN, 42L, identity.owner(), 45)).thenReturn(1);
-        AiRunLease lease = service.acquireInCurrentTransaction(KEY);
+        AiRunLease lease = service.acquireInCurrentTransaction(KEY, guard());
         commit();
         when(leaseMapper.tombstone(7, CHAT_TURN, 42L, identity.owner(), 1L)).thenReturn(1);
 
@@ -197,8 +251,12 @@ class AiRunLeaseServiceTest {
                 .thenThrow(new DuplicateKeyException("Duplicate entry for key ai_run_lease.PRIMARY"))
                 .thenThrow(new DeadlockLoserDataAccessException("Deadlock found", null));
 
-        assertThrows(ConflictException.class, () -> service.acquireInCurrentTransaction(KEY));
-        assertThrows(ConflictException.class, () -> service.acquireInCurrentTransaction(KEY));
+        assertThrows(
+                ConflictException.class,
+                () -> service.acquireInCurrentTransaction(KEY, guard()));
+        assertThrows(
+                ConflictException.class,
+                () -> service.acquireInCurrentTransaction(KEY, guard()));
 
         assertTrue(registry.find(KEY).isEmpty());
     }
@@ -213,24 +271,17 @@ class AiRunLeaseServiceTest {
         properties.setRunLeaseTtl(Duration.ofMillis(900));
 
         assertThrows(
-                IllegalArgumentException.class, () -> service.acquireInCurrentTransaction(KEY));
+                IllegalArgumentException.class,
+                () -> service.acquireInCurrentTransaction(KEY, guard()));
 
         verify(leaseMapper, never()).insert(anyInt(), anyString(), anyLong(), anyString(), anyInt());
-    }
-
-    @Test
-    void releasingAKeyThisInstanceHoldsNoTokenForTouchesNothing() {
-        assertFalse(service.releaseHeldInCurrentTransaction(KEY));
-
-        verify(leaseMapper, never()).tombstone(anyInt(), anyString(), anyLong(), anyString(), anyLong());
-        verifyNoMoreInteractions(leaseMapper);
     }
 
     @Test
     void releaseReportsFalseWhenTheHeldTokenNoLongerMatchesTheRow() {
         when(leaseMapper.lockForUpdate(7, CHAT_TURN, 42L)).thenReturn(null);
         when(leaseMapper.insert(7, CHAT_TURN, 42L, identity.owner(), 45)).thenReturn(1);
-        service.acquireInCurrentTransaction(KEY);
+        service.acquireInCurrentTransaction(KEY, guard());
         commit();
         when(leaseMapper.tombstone(7, CHAT_TURN, 42L, identity.owner(), 1L)).thenReturn(0);
 
@@ -294,6 +345,56 @@ class AiRunLeaseServiceTest {
 
         verify(leaseMapper).deleteTombstones(eq(7), eq(reapable), eq(3600), eq(50));
         assertFalse(AiRunLeaseSubject.AGENT_RUN.isTombstoneReapable());
+    }
+
+    /**
+     * A claim serializes behind the membership and subject row locks and then behind this key's own
+     * row lock, and MySQL only begins counting the lifetime when the acquiring statement runs. A
+     * self-fence anchored before those waits spends them out of a lifetime that has not started,
+     * and can stop a healthy run before its heartbeat has ticked once — for a lease whose database
+     * deadline is a full lifetime away.
+     */
+    @Test
+    void theSelfFenceIsAnchoredAfterTheClaimsLockWaitsRatherThanBeforeThem() {
+        AtomicLong nanos = new AtomicLong();
+        AiRunLeaseGuard guard = new AiRunLeaseGuard(properties.getRunLeaseTtl(), nanos::get);
+        when(leaseMapper.lockForUpdate(7, CHAT_TURN, 42L)).thenAnswer(invocation -> {
+            nanos.set(properties.getRunLeaseTtl().toNanos() * 2L);
+            return null;
+        });
+        when(leaseMapper.insert(7, CHAT_TURN, 42L, identity.owner(), 45)).thenReturn(1);
+
+        service.acquireInCurrentTransaction(KEY, guard);
+
+        assertFalse(
+                guard.isStopped(),
+                "A claim slower than the lease lifetime must not stop the run it just leased");
+    }
+
+    /**
+     * The anchor is read immediately before the acquiring statement and never after it, so the
+     * local deadline lands at or before the one MySQL stamps. A claimant descheduled after that
+     * write therefore carries a fence that expires no later than the lease a settler is watching.
+     */
+    @Test
+    void theSelfFenceNeverOutlivesTheLeaseTheClaimJustWrote() {
+        AtomicLong nanos = new AtomicLong();
+        AiRunLeaseGuard guard = new AiRunLeaseGuard(properties.getRunLeaseTtl(), nanos::get);
+        when(leaseMapper.lockForUpdate(7, CHAT_TURN, 42L)).thenReturn(null);
+        when(leaseMapper.insert(7, CHAT_TURN, 42L, identity.owner(), 45)).thenAnswer(invocation -> {
+            nanos.addAndGet(Duration.ofSeconds(5).toNanos());
+            return 1;
+        });
+
+        service.acquireInCurrentTransaction(KEY, guard);
+        nanos.set(properties.getRunLeaseTtl().toNanos() + 1L);
+
+        assertTrue(guard.isStopped());
+        assertEquals(Optional.of(AiRunLeaseGuard.RENEW_GAP), guard.reason());
+    }
+
+    private AiRunLeaseGuard guard() {
+        return new AiRunLeaseGuard(properties.getRunLeaseTtl());
     }
 
     private static AiRunLeaseRow row(long epoch) {

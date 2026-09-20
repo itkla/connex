@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
@@ -40,6 +41,7 @@ abstract class AbstractAiRunLeaseIntegrationTest {
 
     static final String CHAT_TURN = "chat_turn";
 
+    @Autowired AiProperties aiProperties;
     @Autowired AiRunLeaseService leaseService;
     @Autowired AiRunLeaseRegistry leaseRegistry;
     @Autowired AiRunLeaseIdentity leaseIdentity;
@@ -128,7 +130,21 @@ abstract class AbstractAiRunLeaseIntegrationTest {
     }
 
     AiRunLease acquire(AiRunLeaseKey key) {
-        return transactions.execute(status -> leaseService.acquireInCurrentTransaction(key));
+        return acquire(key, freshGuard());
+    }
+
+    AiRunLease acquire(AiRunLeaseKey key, AiRunLeaseGuard guard) {
+        return transactions.execute(
+                status -> leaseService.acquireInCurrentTransaction(key, guard));
+    }
+
+    /**
+     * Builds the ownership flag a claim anchors, for the drills that only care about the row.
+     *
+     * @return a guard whose lifetime matches the configured lease lifetime
+     */
+    AiRunLeaseGuard freshGuard() {
+        return new AiRunLeaseGuard(aiProperties.getRunLeaseTtl());
     }
 
     boolean release(AiRunLeaseKey key) {

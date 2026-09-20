@@ -16,13 +16,18 @@ import java.util.function.LongSupplier;
  * so this instance can no longer prove it still owns the run.
  *
  * <p>The self-fence reads {@link System#nanoTime()} rather than a wall clock, and it is anchored on
- * the instant a renewal was <em>issued</em>, not the instant it returned: the database writes its
- * deadline part-way through that round trip, so anchoring on completion would put the local
+ * the instant a lease write was <em>issued</em>, not the instant it returned: the database writes
+ * its deadline part-way through that round trip, so anchoring on completion would put the local
  * deadline after the database's and leave a window in which a settler could take the run over while
  * this guard still reported the owner healthy. Anchoring on issue makes the local deadline at or
  * before the database's, which is the direction the fence must err. It exists so that a heartbeat
  * blocked behind a slow query stops its own run instead of letting a settler take over a run that
  * is still writing.
+ *
+ * <p>The same rule governs both writes that extend a lease: the claim anchors this guard just
+ * before it issues the acquiring statement, and every renewal re-anchors it just before its own.
+ * Nothing else may move the anchor — in particular not the moment a worker gets round to starting
+ * its heartbeat, which can be arbitrarily later than the write it is starting a heartbeat for.
  */
 public final class AiRunLeaseGuard {
 
@@ -60,7 +65,7 @@ public final class AiRunLeaseGuard {
     }
 
     /**
-     * Reads this guard's monotonic clock so a renewal can be stamped before it is issued.
+     * Reads this guard's monotonic clock so a lease write can be stamped before it is issued.
      *
      * @return the current monotonic reading
      */
@@ -69,10 +74,10 @@ public final class AiRunLeaseGuard {
     }
 
     /**
-     * Records that a renewal issued at {@code issuedAtNanos} reached the database and matched this
-     * owner's token.
+     * Records that a lease write issued at {@code issuedAtNanos} — the claim's or a renewal's —
+     * reached the database and gave this owner a fresh lifetime.
      *
-     * @param issuedAtNanos the {@link #clockNanos()} reading taken before the renewal was issued
+     * @param issuedAtNanos the {@link #clockNanos()} reading taken before the write was issued
      */
     public void recordRenewal(long issuedAtNanos) {
         lastRenewNanos.accumulateAndGet(issuedAtNanos, Math::max);

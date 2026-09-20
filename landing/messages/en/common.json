@@ -734,6 +734,7 @@
     "turnInternalError": "Something went wrong on our side while writing this answer. Ask again, and tell an administrator if it keeps happening.",
     "turnUnreadableAnswer": "The answer came back in a shape Connex couldn't read, so none of it was kept. Ask again, or reword the question.",
     "turnStalled": "The assistant kept re-reading the same records without getting any further. Ask again, or reword the question.",
+    "turnOwnerLost": "Connex stopped writing this answer partway through. Anything it already saved is kept — check what it saved before you ask again.",
     "turnRanOutOfTime": "This answer ran out of time before it finished. Ask again — or ask for a smaller slice if it keeps happening.",
     "turnImageUnsupported": "This assistant model can’t read images. Remove the image from the context above, or choose an image-capable model.",
     "budgetExhausted": "Your organization's daily AI limit has been reached. Ask the same question again later.",
