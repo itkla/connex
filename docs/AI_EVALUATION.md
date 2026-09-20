@@ -3,7 +3,7 @@
 Two things live here, and keeping them apart is the point of the document.
 
 1. **The map of the evaluation machinery that exists today** — the scripted provider, the trajectory harness, and the twenty goldens that run in CI on every backend change. This half is verified against the code and is safe to act on.
-2. **The design of a live-evaluation runner that does not exist** — an operator-invoked process that replays the same requests against a *real* model provider on staging, with synthetic data only. Nothing in that half is built, and building it is decision-gated: see [Decision gate](#decision-gate).
+2. **The design of a live-evaluation runner that does not exist** — an operator-invoked process that runs an authored corpus against a *real* model provider on staging, over data it seeds and disposes of itself. Nothing in that half is built, and building it is decision-gated: see [Decision gate](#decision-gate).
 
 The provider-egress contract itself is not restated here. It lives in [`backend/AI_SECURITY.md`](backend/AI_SECURITY.md), which is authoritative for gates, masking, adapters, budgets, and the scripted seam's five activation layers.
 
@@ -17,7 +17,7 @@ The provider-egress contract itself is not restated here. It lives in [`backend/
 | Where it runs | a Gradle test fork, and CI | one operator-launched process against staging |
 | Spring profile | `ai-scripted-provider` | `ai-eval` (proposed) |
 | Deployment edition | refuses to boot under any | runs under the edition staging already declares |
-| Data it reads | fixtures it seeded and deletes | a workspace marked synthetic |
+| Data it reads | fixtures it seeded and deletes | records it seeded, in a marked organization |
 | What it proves | the server's own controls fire | a real model's behaviour against those controls |
 
 **The two are mutually unbootable, by construction rather than by convention.** `DeploymentProfileValidator` refuses the `ai-scripted-provider` Spring profile whenever `connex.deployment.profile` is non-blank, and refuses it again outside `dev`/`test`; the flag `connex.ai.scripted-provider.enabled` is additionally on the forbidden-key list of all three editions. Staging declares `CONNEX_DEPLOYMENT_PROFILE=silo` (see [`STAGING_DEPLOY.md`](STAGING_DEPLOY.md)), so a scripted provider cannot start there at all — with either the profile or the flag present the process refuses before the application context exists. The live runner is designed to run under that same declared edition, so it can never be the scripted one in disguise.
@@ -84,10 +84,20 @@ The harness answers "does the server do the right thing with this model output?"
 
 **An operator launches it, by hand, and nothing else can.** Concretely:
 
-- A one-shot non-web process — `spring.main.web-application-type=none` — launched from the staging checkout by hand. A dedicated `ai-eval` Spring profile gates the runner bean, and a `connex.ai.eval.enabled=true` flag gates it a second time, exactly as the scripted seam pairs a profile with a flag.
+- A one-shot non-web process — `spring.main.web-application-type=none` — launched by hand, from the release staging is running. A dedicated `ai-eval` Spring profile gates the runner bean, and a `connex.ai.eval.enabled=true` flag gates it a second time, exactly as the scripted seam pairs a profile with a flag.
 - **No controller, no endpoint, no job queue, no `@Scheduled` trigger, and no automation-rule action.** There must be no tenant-reachable path to it and no unattended path to it. A scheduled evaluator is a standing authorization to spend an organization's budget and egress to a provider with nobody watching, and that is not a thing the product should be able to do by accident.
 - It runs under the **same** `CONNEX_DEPLOYMENT_PROFILE` the staging instance declares, so it inherits the edition's posture rather than escaping it.
 - It refuses to start if `ai-scripted-provider` is active or its flag is set. Under a declared edition that combination already refuses; the runner's own refusal is the message an operator reads when they have mixed the two up.
+
+#### No scheduled work, and no startup work
+
+**The evaluation process runs no scheduled and no startup work, and a process that would start the normal workers must refuse to start.** Not serving HTTP has nothing to do with this: `BackgroundExecutionConfiguration` carries the application's `@EnableScheduling` and `@EnableAsync`, and its only gate is `connex.maintenance.mode=off` with `matchIfMissing = true` — as do the mutating `ApplicationRunner`s, `IdentityBackfillRunner` and `LegacyWorkflowBackfillRunner`. Launched with staging's ordinary configuration, this second process would run every default-on worker across every routed workspace while the evaluation is being scored: `AiBriefScheduler` and `NotificationScheduler` sweep them all, `WorkflowRuntimeScheduler` carries no property gate at all, and `AiRunLeaseSweeper` exists precisely to settle AI runs *another instance* owns.
+
+The lever is therefore the maintenance mode, not the web type, because it is the one switch all of those gates read. `connex.maintenance.mode` is a closed set — `MaintenanceModeStartupValidator` throws `Unknown maintenance mode` on anything but `off`, `seeder` and `legacy-upload-migration` — so an `ai-eval` mode is added there with the eval profile, the eval flag and `web-application-type=none` as its conditions, exactly as the `seeder` branch already does. And the complement is a refusal: **the `ai-eval` profile active while the maintenance mode is `off` refuses to start**, because that is the configuration in which the workers would run.
+
+#### The deployed release, and no migration
+
+**The runner is launched from the release staging is actually running, with Flyway disabled, and refuses a schema that does not already match.** `spring.flyway.enabled` is `true` in `application.yml`, and [`STAGING_DEPLOY.md`](STAGING_DEPLOY.md) states that migrations run automatically on backend startup. The checkout at `/opt/connex-staging` is hard-reset to `origin/main` while the live release is whatever `.staging/deployed-sha` names, and an application rollback moves the running backend without moving the checkout, by design, because schema migrations are forward-only. A launch from the checkout is therefore routinely a launch from a *later* commit than the running backend, which would apply that commit's migrations to the live catalog before the deployment transaction that ships the matching code. Measuring a model must not be able to migrate a live catalog as a side effect.
 
 #### The activation refusals belong in the validator, not in the runner
 
@@ -96,20 +106,24 @@ A refusal written into the runner bean is unenforceable, because `@Profile("ai-e
 - the `ai-eval` profile active while `spring.main.web-application-type` is anything but `none` → refuse. This is the load-bearing one. Without it, appending `ai-eval` to `SPRING_PROFILES_ACTIVE` in `/etc/connex-staging/backend.env` — the same file [`STAGING_DEPLOY.md`](STAGING_DEPLOY.md) already tells an operator to edit for `CONNEX_DEPLOYMENT_PROFILE` and `CONNEX_WORKSPACES_ALLOW_CREATION` — boots the serving, tenant-facing instance with an evaluation runner live in-process;
 - the profile active without `connex.ai.eval.enabled=true` → refuse;
 - the flag true without the profile → refuse (no dormant flag);
-- `connex.ai.eval.enabled` joins `POSTURE_KEYS`, so the startup posture line names it, and joins `SAAS_FORBIDDEN_KEYS`, so a multi-tenant SaaS instance refuses it outright. It deliberately does **not** join the silo or on-prem forbidden lists: staging declares `silo`, and forbidding the flag there would make the runner unrunnable on the only instance it is for. The non-web refusal, not the forbidden-key scan, is what keeps it out of the serving process under those editions. That asymmetry is a decision the gate below must confirm, not a detail to discover during implementation.
+- the profile active while `connex.maintenance.mode` is `off` → refuse, per [No scheduled work, and no startup work](#no-scheduled-work-and-no-startup-work);
+- `connex.ai.eval.enabled` joins `POSTURE_KEYS`, so the startup posture line names it, and joins `SAAS_FORBIDDEN_KEYS`, so a multi-tenant SaaS instance refuses it outright. It deliberately does **not** join the silo or on-prem forbidden lists: staging declares `silo`, and forbidding the flag there would make the runner unrunnable on the only instance it is for. The maintenance-mode and non-web refusals, not the forbidden-key scan, are what keep it out of a serving process under those editions — and in a customer deployment the flag switches on nothing at all, because the runner is not in the artifact. That asymmetry is a decision the gate below must confirm, not a detail to discover during implementation.
 
-So the design does require a validator change and one new posture/forbidden key, and the tracked issue owns both.
+So the design does require a validator change, one new maintenance mode, and one new posture/forbidden key, and the tracked issue owns all three.
 
-#### It is not a `seedData` variant, and it cannot use `seedData`'s classpath
+#### It is not a `seedData` variant, and it cannot use the test classpath either
 
 The runner copies the volume seeder's *posture* — operator-launched, one-shot, non-web, profile plus flag (see [`VOLUME_SEEDER.md`](VOLUME_SEEDER.md)) — and nothing else. Every further condition `SeederStartupConfigurationValidator.validateActivated` enforces is one this runner cannot meet: `seeder` must be the **only** active profile, `connex.maintenance.mode` must be `seeder`, `connex.deployment.profile` must be **unset**, and `SeederGuard` refuses a protected Connex catalog outright. The eval runner runs beside staging's declared edition against staging's own catalog. Reusing the seeder's launcher would mean weakening those checks, which is not on offer.
 
-The classpath follows from where the corpus lives. `backend/src/test/resources/ai/assistant-evaluation.json` and the category scorers are on the **test** source set, while `seedData` runs on `sourceSets.main.output + configurations.productionRuntimeClasspath` — so a `seedData`-shaped launcher reads a null stream and has no corpus. Either:
+The classpath question follows from where the corpus lives, and it has exactly one answer. `seedData` runs on `sourceSets.main.output + configurations.productionRuntimeClasspath`, which carries no corpus at all, because the corpus and the category scorers are on the test source set. But `sourceSets.test.runtimeClasspath` is not available to a process deployed beside staging either: it carries `src/test/resources/application.properties`, which declares `spring.profiles.active=test` and hard-codes a test SSO key, mail key, secret-store master key and audit-integrity secret beside a set of operational overrides. A staging process holding those no longer inherits staging's posture — it answers with a test default where it should have refused for a missing staging setting, and it does so silently.
 
-- the runner is a dedicated Gradle task over `sourceSets.test.runtimeClasspath`, the way `scriptedTrajectoryTest` already is (staging builds from source, so the test sources are present there); **or**
-- the corpus and the scoring helpers move out of `src/test` into the main source set first.
+**So the runner, its corpus and its scorers live in a source set of their own**: one that compiles against `main`, takes neither `test`'s classpath nor `test`'s resources, and is not assembled into `bootWar`. That is a constraint on the build before it is a constraint on the runner, and the tracked issue owns it.
 
-Pick one in the tracked issue. Neither is free, and the design is not buildable without saying which.
+#### That source set, and not an edition check, is what makes this staging-only
+
+**Edition selection does not identify staging.** [`DEPLOYMENT.md`](DEPLOYMENT.md) is explicit that one bundle serves a Connex-operated `silo` and a customer-operated `on-prem` install: those two *are* the customer-facing profiles. Any rule phrased as "permitted under `silo` and `on-prem`" is therefore a rule a customer operator can satisfy in full — the non-web launch, the profile, the flag, and a marker row they can insert with access to their own database. A design that leant on the edition would ship this runner, and its egress, into customer deployments.
+
+The admission is physical instead: **a customer deployment receives the shipped artifact, and the shipped artifact does not contain the runner.** No source set, no runner class, no corpus — nothing for a profile or a flag to switch on. Staging is the only place the runner can exist, because staging is the only place built from source. Everything in the validator section above is therefore **defence in depth on the one instance that does have the source set**; it is not the admission, and no part of this design may be read as if it were.
 
 ### The synthetic-workspace refusal
 
@@ -129,7 +143,15 @@ The marker must be:
 
 A second, independent condition should sit beside it rather than replacing it: the operator supplies the workspace id explicitly on the command line, so a marked workspace is necessary but not sufficient. Neither condition alone is allowed to start a run.
 
-**The runner never sends real tenant data to a provider** is the invariant this buys. It is not achieved by filtering or redacting what the runner reads — that would be a second masking implementation, and a second implementation of a control is a second thing to get wrong. It is achieved by refusing to read anything that is not already synthetic, and by refusing an organization that holds anything else.
+#### A marker is a label, not provenance
+
+**The runner owns the data lifecycle of the organization it runs against.** A marker row records that an operator designated this organization once. It says nothing about what has been written to it since, and the organization the marker names persists between runs: self-service workspace creation is on at staging, an import or a connected capture writes records through ordinary tenant paths, and any member of the organization can create one by hand. A later run then passes the marker check and the all-workspaces-marked check unchanged and sends whatever has accumulated to the real provider.
+
+So the seeding is the runner's job, not an operator's. It **refuses unless every record the marked organization holds was seeded by an evaluation run**, seeds what its cases need at the start of the run, and tears that data down at the end. How seed provenance is carried is not settled here — see [Open problems](#open-problems) — but no run may start without it, because it is the only thing that separates a synthetic organization from an organization somebody has since put real data in.
+
+**An organization whose attestation resolves `UNMASKED` deserves its own sentence.** `privacyModeForOrg` yields `UNMASKED` only while a current attestation names the destination, and in that mode the values in the prompt are the record's own rather than placeholders. There the marker is the only thing between a real record and the provider: a run against an `UNMASKED` organization that holds anything unseeded is not a degraded run, it is a disclosure.
+
+**The runner never sends real tenant data to a provider** is the invariant all of this buys. It is not achieved by filtering or redacting what the runner reads — that would be a second masking implementation, and a second implementation of a control is a second thing to get wrong. It is achieved by refusing to read anything that is not already synthetic, by refusing an organization that holds anything else, and by owning what "synthetic" means rather than trusting a label.
 
 ### Through the pipeline, never around it
 
@@ -143,19 +165,21 @@ That is not a stylistic preference. Entering at the turn service is what makes e
 - the `ai.llm.call` audit row on every model call, and the write-tool audit row on every write;
 - the citation registry, skill authority, the context floor, the special-care screen, and the no-progress guard.
 
-A runner that reached under the turn service to "save a step" would be measuring a pipeline nobody ships. If a control refuses the run, that refusal **is** the result: the report records it and the run continues to the next case rather than the runner disabling anything to get a score.
+A runner that reached under the turn service to "save a step" would be measuring a pipeline nobody ships. And the runner never disables a control to get a score: a control refusal is recorded as what it is — see [Scoring](#scoring) for why it is recorded *unscored* rather than as a failing case, and when it stops the run instead.
 
 ### Scoring
 
-Score with the tolerant category assertions `AiAssistantEvaluationRegressionTest` already defines — `FACTUALITY`, `CITATION_CORRECTNESS`, `TOOL_SELECTION`, `REFUSAL`, `INJECTION_RESISTANCE`, `SKILL_ROUTING` — reading the same case set from `backend/src/test/resources/ai/assistant-evaluation.json`. **Do not score exact step equality against a scripted golden.** A real model legitimately takes a different, correct route to the same answer; an exact-match score would report a green model as a regression and would push a future author toward fixtures that describe one model's habits.
+**The live corpus has to be written, and `assistant-evaluation.json` is not it.** Of its twenty-eight cases, the ten `FACTUALITY` / `CITATION_CORRECTNESS` / `TOOL_SELECTION` / `REFUSAL` / `INJECTION_RESISTANCE` cases carry a prewritten `candidate` object and **no** `request` — there is nothing in them to send a model. The eighteen that do carry a `request` are all `SKILL_ROUTING`, and `AiAssistantEvaluationRegressionTest.evaluate` hands those straight to `skillRouter.route(...)`, the deterministic server-side router, before any candidate is read. A runner that reused the file as it stands would either be unable to start its model-facing cases or would report fixture text and server routing as a live-model score. So the live corpus is authored: an executable request per case, a binding to the records that run seeded, and scoring over the turn's actual terminal output. It is an acceptance criterion, not a reuse.
 
-The same file's `loadedToolsets` convention already encodes the core-toolset rule: a case whose candidate names a non-core tool without declaring the toolsets the turn would have had to load fails the guard, exactly as a live turn would. A live runner reusing this set inherits that for free.
+What *is* reused is the scoring vocabulary. Keep the tolerant category assertions — `FACTUALITY`, `CITATION_CORRECTNESS`, `TOOL_SELECTION`, `REFUSAL`, `INJECTION_RESISTANCE`, `SKILL_ROUTING` — and **do not score exact step equality against a scripted golden**: a real model legitimately takes a different, correct route to the same answer, and an exact-match score would report a green model as a regression while pushing a future author toward cases that describe one model's habits. Keep the `loadedToolsets` convention too — a case naming a non-core tool without declaring the toolsets the turn would have had to load fails the guard exactly as a live turn would.
 
-Two figures belong in the report beside the score, because they change what the score means: the resolved provider and model id, and the resolved disclosure mode for the organization (`MASKED` unless a current attestation for the exact destination says otherwise). A demasking assertion means something different in each.
+**A case is scored only with evidence that something reached the provider.** The controls in front of egress all run inside `ProviderAttemptTracker.execute` *before* the deferred supplier — the restriction-epoch fence, `AiFeatureGate.requireAiUsable`, the provider guard, the admission commitment — and a refusal there writes an `ai.llm.call` row with outcome `blocked`. No model behaviour was observed, so there is nothing to score: the case is recorded **unscored**, naming the control that refused it. (The `attempt` row is written before that seam and is not evidence of dispatch; a `success` row is.) Scoring a refusal as a failure is not the conservative choice but the misleading one: the budget is organization-scoped and cumulative, so exhausting it partway through a corpus would turn every remaining case into a control refusal and make the aggregate a function of case order rather than a measurement of the model. **Losing a run-wide prerequisite stops the run** — budget exhaustion, a provider that no longer resolves or is no longer ready — instead of producing a tail of zeroes.
+
+**Each score is bound to the provider snapshot its own calls used.** `resolveForOrg` runs per invocation, and the only fence is `requireCurrentProviderSnapshot`, which compares one invocation's snapshot at egress against the snapshot resolved for that same invocation. Nothing holds a snapshot across steps, let alone across cases, so an administrator changing the provider row mid-run legitimately gives one run two models, two destinations or two disclosure modes, and a single run-level provider/model/disclosure line would misattribute part of the score. The report therefore carries the snapshot **per case**, read from the calls that case actually made; a case whose calls did not all share one snapshot is **invalid** rather than averaged. The disclosure mode follows the same rule: what the turn ran under is what the report states, not what the organization resolves to when the report is written.
 
 ### Report
 
-A single JSON document written to a path the operator names, containing: the run's start and end, the operator's identity, the target workspace and the marker row that admitted it, the resolved provider/model/disclosure, and one entry per case with its category, its terminal reason, its score, the durable tool sequence, the turn id, and — for a refusal — the control that refused. Turn ids matter more than prose: they let an operator open `ai_chat_turn`, `ai_chat_tool_call` and `audit_log` for a disputed case instead of arguing with a summary.
+A single JSON document written to a path the operator names, containing: the run's start and end, its run id, the operator's identity, the target workspace and the marker row that admitted it, and one entry per case with its category, its terminal reason, its score or its unscored/invalid status, the provider snapshot its own calls used, the durable tool sequence, the turn id, and — for a refusal — the control that refused. Turn ids matter more than prose: they let an operator open `ai_chat_turn`, `ai_chat_tool_call` and `audit_log` for a disputed case instead of arguing with a summary.
 
 The report carries **no model text and no record values**, only ids, tool names, terminal reasons and scores. A report file is the thing that gets pasted into an issue.
 
@@ -163,19 +187,23 @@ The report carries **no model text and no record values**, only ids, tool names,
 
 **Every AUTO write the runner causes is undone**, through `AiAssistantWriteToolService.undo` on the same tool-call row, under the synthetic member's own identity. Four constraints on that, all in the service:
 
-- `undo` accepts **AUTO** tier only. CONFIRM tools (`change_deal_stage`, `assign_owner`) are proposals that execute nothing unless approved, so the rule is simpler: **the runner never approves a proposal.** A proposal left in `proposed` has changed nothing.
+- `undo` accepts **AUTO** tier only. CONFIRM tools (`change_deal_stage`, `assign_owner`) execute nothing unless approved, but declining to approve is not a terminal state — see the next commitment.
 - The undo window is **ten minutes** from the write. The runner must undo each case as it settles, not in a sweep at the end of a long run — a batch cleanup after a thirty-case run would find its first writes expired.
 - The inverse is fingerprint-guarded: `undo` deletes the created activity, task or note only while it still matches the state the write recorded. A record edited in between refuses, which is correct and must be reported rather than forced.
 - **`add_tag` has no inverse.** `undo` refuses it outright. The runner must report an un-reverted `add_tag` as a residue on the run rather than claiming a clean exit, and a case whose expected path adds a tag should not be in the live corpus in the first place.
 
+**Every CONFIRM proposal is rejected as its case settles.** "The runner never approves a proposal" is not enough, because a CONFIRM tool has already written a durable `proposed` tool-call row by the time the model's turn ends, and the only decision that makes that row terminal without executing it is `AiAssistantWriteToolService.reject`. The session stays active and the synthetic member keeps exactly the authority `lockAuthorizedToolCall` checks — their own session, their own tool call — so an un-rejected proposal is a mutation that can still be applied by hand long after the report called the case clean. A proposal left `proposed` is a delayed mutation, not a clean exit, and reconciliation must clear the ones an interrupted run left behind just as deliberately as it undoes AUTO writes.
+
+**Every tool call and proposal a run causes carries that run's provenance, and reconciliation touches nothing else.** A scan for "EXECUTED AUTO writes in this organization whose `undo.status` is still `available`" cannot tell crash residue from a write that another evaluation run — or an ordinary session in the same synthetic organization — made in the last ten minutes, and it would reverse that write whenever the evaluator identity can reach the session. Rows belonging to a different member's private session fail `lockAuthorizedToolCall` instead and would be reported as unrecoverable residue when they are simply somebody else's row. So each run stamps the tool calls it causes with its own run id, and reconciliation reverses and rejects rows carrying evaluation provenance from a prior run of this runner, and nothing else. Where that stamp lives is [an open problem](#open-problems), not a detail.
+
 **A run that dies between a write and its undo leaves that write durable, and nothing reverses it unless the next launch does.** A killed JVM — a deploy, an operator interrupt, the host's own memory killer — is the ordinary case, not the exotic one. What a crash actually costs is time: `undo` refuses once the ten-minute window has passed. The other two checks it makes still pass after a crash — nothing archives a chat session automatically, so the session stays `active`, and the runner authenticates again as the same synthetic member, so the locked-membership `AI_USE` check is satisfied. A write is therefore recoverable only by a run that starts inside the window. So the design needs a startup step, not a hope:
 
-- **Reconcile before scoring anything.** On launch, before the first case, the runner scans the marked organization's `ai_chat_tool_call` rows for EXECUTED AUTO writes whose `undo.status` is still `available`, and reverses each one through the same service under the same identity. What it reverses and what it could not, it reports.
+- **Reconcile before scoring anything.** On launch, before the first case, the runner reverses every EXECUTED AUTO write **carrying a prior evaluation run's provenance** whose `undo.status` is still `available`, and rejects every `proposed` tool call carrying the same provenance, through the same service under the same identity. What it settled and what it could not, it reports.
 - **State what happens past the window.** A row outside the ten-minute window is not undoable by any code path the product owns; the runner does not reach around the service to delete it. It is listed in the report as residue, with its tool-call id and workspace, for an operator to clear by hand.
 
-The honest statement of the cleanup guarantee is therefore: *the runner reverses every AUTO write it can, immediately; reconciles what a previous run left behind; and names every one it could not reverse.*
+The honest statement of the cleanup guarantee is therefore: *the runner reverses every AUTO write it can and rejects every proposal it made, immediately; reconciles what a previous run of its own left behind; and names every row it could not settle.*
 
-**Nothing in this design disposes of the synthetic workspace.** The marker names persistent workspace ids and there is no teardown, reset or re-seed step here, so residue persists until an operator clears it. If the answer is meant to be a disposable environment — reset and re-seed the synthetic organization between runs — that is a runbook step with an owner and a trigger, and the tracked issue has to specify it. It is not something the runner does today, and no claim in this document should rest on it.
+**Teardown is the runner's, not a runbook's.** Because the runner seeds the organization's data itself (see [A marker is a label, not provenance](#a-marker-is-a-label-not-provenance)), it disposes of it too: the run ends by removing what it seeded, and the next run starts from an organization holding nothing else or refuses. Residue the service cannot reverse is reported and blocks the next run until an operator clears it — a stale write is not a thing to seed on top of.
 
 ### What it must refuse
 
@@ -185,19 +213,37 @@ Fail closed and stop, rather than adapting:
 - a target organization with no enabled provider row, or one whose adapter cannot completely resolve its configuration;
 - the `ai-scripted-provider` profile or flag being present;
 - a target organization holding any workspace that is not itself marked — the second read that catches a marker pointed at a workspace inside a real tenant;
+- a target organization holding any record an evaluation run did not seed, and any residue a previous run could not settle;
+- a database schema that does not match the release the runner was launched from;
 - any attempt to write the report anywhere a tenant request can serve it.
 
 **Why that second read is an organization scan and not an ownership check.** An earlier sketch refused "a target workspace holding any record whose owner is not the synthetic member". That is not expressible against the schema: `owner_id` exists only on `deal`, `company` and `person` and is nullable on all three, while activities, tasks, notes and tags — everything the AUTO write tools create — carry no owner column at all. Read literally, the check refuses every candidate and the runner never starts; relaxed to "null or the synthetic member", it admits a bulk-imported customer workspace, which is exactly the case it was written to catch.
 
-The pre-context startup refusals — the `ai-eval` profile in a web application, the profile without the flag, the flag without the profile, and the flag under SaaS — are deliberately absent from this list, because they are not the runner's to make; see [the validator section](#the-activation-refusals-belong-in-the-validator-not-in-the-runner). By the time the runner has a bean, they have already passed.
+The pre-context startup refusals — the `ai-eval` profile in a web application, the profile with the maintenance mode `off`, the profile without the flag, the flag without the profile, and the flag under SaaS — are deliberately absent from this list, because they are not the runner's to make; see [the validator section](#the-activation-refusals-belong-in-the-validator-not-in-the-runner). By the time the runner has a bean, they have already passed.
+
+### Open problems
+
+Two things this design cannot settle on its own. Each needs a ruling before the runner is built, and neither may be answered by an implementer discovering it mid-change.
+
+- **Nothing freezes the marked organization for the duration of a run.** The runner can refuse an organization that already holds something it did not seed, but the product has no per-organization write freeze to switch on, so a member, an import or a connected capture can write to it while cases are executing — after the admission check has passed. Either the runbook owns it (nobody else holds credentials into that organization, and connected capture is never enabled there), or the tracked issue specifies a mechanism. Writing "the marked organization receives no other ingress" without one of those two is a wish.
+- **Nothing in the schema records who created a record or a tool call.** Both the seed-provenance refusal and provenance-scoped reconciliation depend on it, and the AUTO write tools create activities, tasks, notes and tags that carry no evaluation marking at all. Whether that becomes a column, a control-plane side table, or a convention over ids the runner allocates is a product decision with a migration attached — and, given that the marker table is already one migration, the two should be decided together.
 
 ### Decision gate
 
-**Building this means real provider egress from staging, each time an operator chooses to run it and never on a timer, spending an organization's budget.** The design above is inside today's product posture — synthetic data only, a marker no tenant can set, nothing bypassed, every AUTO write reversed — which is why it can be written down without a ruling. Building it is a different decision.
+**Building this means real provider egress from staging, each time an operator chooses to run it and never on a timer, spending an organization's budget.** The design above is inside today's product posture — data the runner seeded and disposes of, a marker no tenant can set, nothing bypassed, every AUTO write reversed and every proposal rejected — which is why it can be written down without a ruling. Building it is a different decision.
 
 Before any code:
 
-- it needs **its own tracked issue**, with these as acceptance criteria: the marker table's shape and its plane/lifecycle registrations; the validator refusals and the one new posture key, including the deliberate asymmetry that forbids the flag under SaaS but not under the edition staging declares; which classpath the corpus is read from; the corpus itself; the crash reconciliation pass; and the staging runbook entry, including who resets the synthetic organization and when;
+- it needs **its own tracked issue**, owning the [open problems](#open-problems) above and carrying these as acceptance criteria:
+  - the marker table's shape and its plane/lifecycle registrations;
+  - the validator refusals, the new `ai-eval` maintenance mode, and the one new posture key — including the deliberate asymmetry that forbids the flag under SaaS but not under the edition staging declares;
+  - the isolated source set, and evidence that the shipped artifact contains neither the runner nor its corpus;
+  - launching from `.staging/deployed-sha` with Flyway disabled, and the schema check that refuses a mismatch;
+  - the live corpus: executable requests, bindings to the records the run seeds, and scoring over the turn's own terminal output;
+  - seed provenance, run provenance, and the seed/teardown steps that make the synthetic-organization refusal enforceable;
+  - unscored pre-egress refusals, the run-wide prerequisites that stop a run, and the per-case provider snapshot;
+  - reconciliation of both AUTO writes and pending proposals from an interrupted run, scoped by provenance;
+  - the staging runbook entry: who launches it, against which organization, and what they do with reported residue;
 - it needs **founder approval** for the egress itself;
 - it needs the review a Tier 3 change gets: a security review for the egress and the marker, and a second reviewer for correctness and cleanup.
 
