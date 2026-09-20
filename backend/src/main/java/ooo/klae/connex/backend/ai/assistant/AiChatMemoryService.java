@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 import org.springframework.stereotype.Service;
@@ -71,11 +72,26 @@ public class AiChatMemoryService {
      * already admitted and executed writes against. Reserving a bounded worst case that a turn may
      * never reach is what keeps the derived budgets monotone, and the reservation is proved to
      * dominate every reachable loaded set by {@code AiAssistantPromptEnvelopeTest}.
+     *
+     * <p>Compaction is a loop of provider calls — one per window of history it folds away — so the
+     * caller's ownership check runs alongside the deadline and turn-status checks that already
+     * guard each round and each repair attempt inside one. Checking only on entry would let a
+     * worker that stopped owning the turn part-way through compaction keep summarizing, and keep
+     * charging the organization, until the whole preparation returned.
+     *
+     * @param turn the committed durable turn
+     * @param context the turn's masking context
+     * @param deadline the turn's absolute deadline
+     * @param ownershipGuard revalidation run before each compaction round and each provider
+     *     attempt within one; it throws when the caller may no longer act on the turn
+     * @return the provider-sized history this turn is built from
      */
     public AiChatMemory prepare(
             AiChatQueuedTurn turn,
             MaskingContext context,
-            Instant deadline) {
+            Instant deadline,
+            Runnable ownershipGuard) {
+        Objects.requireNonNull(ownershipGuard, "ownershipGuard");
         requireBeforeDeadline(deadline);
         var capabilities = invocationService.currentProviderCapabilities(
                 AiFeature.ASSISTANT_CHAT);
@@ -126,6 +142,7 @@ public class AiChatMemoryService {
         int outputTokens = 0;
         if (shouldCompact(summary, dialogue, budget)) {
             while (true) {
+                ownershipGuard.run();
                 requireBeforeDeadline(deadline);
                 int verbatimBudget = summary == null
                         ? budget.historyBytes() * VERBATIM_BUDGET_PERCENT / 100
@@ -174,6 +191,7 @@ public class AiChatMemoryService {
                             admission,
                             () -> {
                                 requireBeforeDeadline(deadline);
+                                ownershipGuard.run();
                                 if (!governanceService.isEnabled(turn.workspaceId())) {
                                     throw new AiAssistantLoopException(
                                             "workspace_disabled", "workspace_disabled");

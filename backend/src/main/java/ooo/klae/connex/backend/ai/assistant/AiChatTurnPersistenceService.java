@@ -16,6 +16,11 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
+import ooo.klae.connex.backend.ai.lease.AiRunLease;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -69,6 +74,7 @@ public class AiChatTurnPersistenceService {
     private final Clock clock;
     private final AiChatRealtimeDispatcher realtimeDispatcher;
     private final ObjectMapper objectMapper;
+    private final AiRunLeaseService runLeaseService;
 
     /** Commits the user message and queued turn under the session sequence mutex. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -260,13 +266,39 @@ public class AiChatTurnPersistenceService {
         }
     }
 
-    /** Marks a queued turn running after re-locking membership and session authorization. */
+    /**
+     * Marks a queued turn running after re-locking membership and session authorization, and
+     * claims its run lease in the same transaction.
+     *
+     * <p>The claim and the lease share one transaction so that a claim which rolls back leaves no
+     * lease row, and a committed claim always leaves one. That is the half of the coverage
+     * invariant this method owns: from here until a durable terminal write tombstones it, the turn
+     * has a lease row whose expiry bounds how long an abandoned turn can sit running.
+     *
+     * <p>The compare-and-set cannot lose: {@code lockAuthorizedTurn} holds the turn's row lock and
+     * already refuses a turn whose stored status is not queued, so a second claimant serializes
+     * behind it and throws before reaching the update. A zero row count is therefore an invariant
+     * violation rather than a contended claim, and it fails loudly.
+     *
+     * <p>The caller's ownership flag travels in because the lease claim is where its self-fence
+     * has to be anchored: this method waits behind the membership and turn row locks before the
+     * lease row is written at all, so the fence must start when MySQL starts counting the
+     * lifetime — not before that wait, and not whenever the worker next gets scheduled after it.
+     *
+     * @param turn the committed queued turn
+     * @param ownership the caller's ownership flag, anchored on the instant the lease is written
+     * @return the fencing token this instance now holds for the turn
+     */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
-    public boolean markRunning(AiChatQueuedTurn turn) {
+    public AiRunLease markRunning(AiChatQueuedTurn turn, AiRunLeaseGuard ownership) {
         requireCurrentActor(turn);
         lockAuthorizedTurn(turn, QUEUED);
-        return chatMapper.markTurnRunning(
-                turn.workspaceId(), turn.sessionId(), turn.turnId()) == 1;
+        if (chatMapper.markTurnRunning(
+                turn.workspaceId(), turn.sessionId(), turn.turnId()) != 1) {
+            throw new IllegalStateException("Assistant turn claim lost its durable state");
+        }
+        return runLeaseService.acquireInCurrentTransaction(
+                leaseKey(turn.workspaceId(), turn.turnId()), ownership);
     }
 
     /** Loads the bounded most-recent transcript after current access revalidation. */
@@ -628,6 +660,7 @@ public class AiChatTurnPersistenceService {
         if (chatMapper.cancelTurn(workspaceId, sessionId, turnId) != 1) {
             throw new ConflictException("Assistant turn is already terminal");
         }
+        releaseRunLease(workspaceId, turnId);
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
@@ -724,6 +757,7 @@ public class AiChatTurnPersistenceService {
                 RUNNING, null) != 1) {
             throw new IllegalStateException("Assistant turn resolution lost its durable state");
         }
+        releaseRunLease(turn.workspaceId(), turn.turnId());
         chatMapper.updateLastMessageAt(turn.workspaceId(), turn.sessionId());
         return true;
     }
@@ -781,9 +815,13 @@ public class AiChatTurnPersistenceService {
                         stored.getPartialContentUtf16Offset()) != 1) {
             throw new IllegalStateException("Assistant terminal stream reset lost its durable state");
         }
-        return chatMapper.updateTurnTerminal(
+        if (chatMapper.updateTurnTerminal(
                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
-                status, reason, null, null) == 1;
+                status, reason, null, null) != 1) {
+            return false;
+        }
+        releaseRunLease(turn.workspaceId(), turn.turnId());
+        return true;
     }
 
     /** Returns the durable terminal projection after a generation callback settles. */
@@ -917,12 +955,42 @@ public class AiChatTurnPersistenceService {
         if (changed == 0) {
             return turn;
         }
+        releaseRunLease(turn.getWorkspaceId(), turn.getId());
         AiChatTurn expired = chatMapper.getTurnByIdForUpdate(
                 turn.getWorkspaceId(), turn.getSessionId(), turn.getId());
         if (expired == null) {
             throw new IllegalStateException("Expired assistant turn is unavailable");
         }
         return expired;
+    }
+
+    /**
+     * Releases the turn's run lease inside the terminal transaction that just changed its row.
+     *
+     * <p>Releasing here rather than where the generation loop ends is what keeps the coverage
+     * invariant true: a process killed between the loop returning and this write leaves a held,
+     * expiring lease that a settler can find, not an unleased running turn nobody is bounded to.
+     *
+     * <p>Every caller has already changed the turn's terminal row under a predicate that only a
+     * non-terminal turn matches, so reaching here is proof that no owner may act on the turn any
+     * further — including when the write landed on an instance that never held the lease, which a
+     * cancel or a turn poll behind a load balancer routinely does. The release therefore retires
+     * the row whether or not this instance holds a token; only when it does is the release also
+     * fenced on {@code (owner, epoch)}.
+     *
+     * <p>The fence this leaves is the turn's status, and it closes when a settler commits the
+     * turn's terminal state — not when it takes the lease over. A settler that bumps the epoch in
+     * one transaction and writes the turn's terminal status in a later one leaves a window in
+     * which a revived owner still reads {@code running} and can settle the turn itself, retiring
+     * the settler's lease. Orphan settlement must therefore take the lease over and write the
+     * terminal status in a single transaction.
+     */
+    private void releaseRunLease(int workspaceId, int turnId) {
+        runLeaseService.releaseHeldInCurrentTransaction(leaseKey(workspaceId, turnId));
+    }
+
+    private static AiRunLeaseKey leaseKey(int workspaceId, int turnId) {
+        return new AiRunLeaseKey(workspaceId, AiRunLeaseSubject.CHAT_TURN, turnId);
     }
 
     private LocalDateTime expiryCutoff() {

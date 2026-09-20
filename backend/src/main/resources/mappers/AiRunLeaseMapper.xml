@@ -72,6 +72,11 @@
           AND expires_at &lt; CURRENT_TIMESTAMP(6)
     </update>
 
+    <!-- The deadline predicate is what keeps "expired" meaning what the settlement takeover below
+         assumes it means. Once a row is past expires_at another instance may claim it, so an owner
+         that comes back late must learn it lost rather than push the deadline out and race the
+         settler. Matching no row here is an authoritative loss, not an unknown: a renewal that
+         cannot reach MySQL throws instead, and the heartbeat retries that. -->
     <update id="renew">
         UPDATE ai_run_lease
         SET heartbeat_at = CURRENT_TIMESTAMP(6),
@@ -82,6 +87,7 @@
           AND subject_id = #{subjectId}
           AND owner = #{owner}
           AND epoch = #{epoch}
+          AND expires_at >= CURRENT_TIMESTAMP(6)
     </update>
 
     <!-- GREATEST, not a bare CURRENT_TIMESTAMP(6): the release still reads the database clock, but
@@ -99,6 +105,24 @@
           AND subject_id = #{subjectId}
           AND owner = #{owner}
           AND epoch = #{epoch}
+    </update>
+
+    <!-- Deliberately unfenced, and deliberately reachable only from a transaction that has already
+         written the subject's terminal state. The owner token lives in one JVM's memory, so a
+         terminal write that lands on any other instance - a cancel behind a load balancer, a lazy
+         expiry on a turn poll - has no token to fence with. Without this the row would stay
+         owner IS NOT NULL / released_at IS NULL forever: the reap deletes tombstones only, so
+         nothing would ever retire it. epoch is retained exactly as the fenced tombstone retains
+         it, so the key's fencing epoch stays strictly increasing. -->
+    <update id="retire">
+        UPDATE ai_run_lease
+        SET owner = NULL,
+            released_at = CURRENT_TIMESTAMP(6),
+            expires_at = GREATEST(CURRENT_TIMESTAMP(6), acquired_at)
+        WHERE workspace_id = #{workspaceId}
+          AND subject_kind = #{subjectKind}
+          AND subject_id = #{subjectId}
+          AND owner IS NOT NULL
     </update>
 
     <select id="findExpiredLeases" resultMap="leaseMap">

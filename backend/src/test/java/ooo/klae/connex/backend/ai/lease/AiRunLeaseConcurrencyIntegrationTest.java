@@ -54,14 +54,15 @@ class AiRunLeaseConcurrencyIntegrationTest extends AbstractAiRunLeaseIntegration
         try {
             Future<AiRunLease> winner = claimants.submit(() -> inTenant(() ->
                     transactions.execute(status -> {
-                        AiRunLease claimed = leaseService.acquireInCurrentTransaction(key);
+                        AiRunLease claimed = leaseService.acquireInCurrentTransaction(key, freshGuard());
                         locked.countDown();
                         awaitQuietly(commit);
                         return claimed;
                     })));
             assertTrue(locked.await(30, TimeUnit.SECONDS), "The winner never took the row lock");
             Future<AiRunLease> loser = claimants.submit(() -> inTenant(() ->
-                    transactions.execute(status -> leaseService.acquireInCurrentTransaction(key))));
+                    transactions.execute(status ->
+                            leaseService.acquireInCurrentTransaction(key, freshGuard()))));
             Thread.sleep(500L);
             commit.countDown();
 
@@ -101,7 +102,7 @@ class AiRunLeaseConcurrencyIntegrationTest extends AbstractAiRunLeaseIntegration
         try {
             Future<?> competitor = claimants.submit(() -> inTenant(() ->
                     transactions.execute(status -> {
-                        leaseService.acquireInCurrentTransaction(key);
+                        leaseService.acquireInCurrentTransaction(key, freshGuard());
                         leaseService.releaseHeldInCurrentTransaction(key);
                         cycled.countDown();
                         awaitQuietly(commit);
@@ -109,7 +110,8 @@ class AiRunLeaseConcurrencyIntegrationTest extends AbstractAiRunLeaseIntegration
                     })));
             assertTrue(cycled.await(30, TimeUnit.SECONDS), "The competitor never claimed the row");
             Future<AiRunLease> late = claimants.submit(() -> inTenant(() ->
-                    transactions.execute(status -> leaseService.acquireInCurrentTransaction(key))));
+                    transactions.execute(status ->
+                            leaseService.acquireInCurrentTransaction(key, freshGuard()))));
             Thread.sleep(500L);
             commit.countDown();
             competitor.get(60, TimeUnit.SECONDS);
@@ -150,7 +152,7 @@ class AiRunLeaseConcurrencyIntegrationTest extends AbstractAiRunLeaseIntegration
                     attempts.add(claimants.submit(() -> inTenant(() -> {
                         awaitQuietly(start);
                         return transactions.execute(
-                                status -> leaseService.acquireInCurrentTransaction(key));
+                                status -> leaseService.acquireInCurrentTransaction(key, freshGuard()));
                     })));
                 }
                 start.countDown();

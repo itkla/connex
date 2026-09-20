@@ -44,14 +44,33 @@ public class AiChatAttachmentContextService {
     private final AiInvocationService invocationService;
     private final Clock clock;
 
-    /** Prepares every currently authorized session attachment for one generation turn. */
-    public AiChatAttachmentContext prepare(AiChatQueuedTurn turn, Instant deadline) {
-        return prepare(turn, deadline, new MaskingContext(turn.privacyMode()));
+    /**
+     * Prepares every currently authorized session attachment for one generation turn.
+     *
+     * <p>Each image attachment costs its own provider call, so a session carrying several of them
+     * is a multi-step phase of the turn rather than one step. The caller's ownership check
+     * therefore runs alongside the deadline check that already guards every file and the
+     * turn-status check that already guards every provider send: a worker that stopped owning the
+     * turn while describing the first image must not go on to describe the second.
+     *
+     * @param turn the committed durable turn
+     * @param deadline the turn's absolute deadline
+     * @param ownershipGuard revalidation run before each attachment and each provider attempt; it
+     *     throws when the caller may no longer act on the turn
+     * @return the bounded untrusted attachment context for this turn
+     */
+    public AiChatAttachmentContext prepare(
+            AiChatQueuedTurn turn, Instant deadline, Runnable ownershipGuard) {
+        return prepare(turn, deadline, new MaskingContext(turn.privacyMode()), ownershipGuard);
     }
 
     AiChatAttachmentContext prepare(
-            AiChatQueuedTurn turn, Instant deadline, MaskingContext maskingContext) {
+            AiChatQueuedTurn turn,
+            Instant deadline,
+            MaskingContext maskingContext,
+            Runnable ownershipGuard) {
         java.util.Objects.requireNonNull(maskingContext, "maskingContext");
+        java.util.Objects.requireNonNull(ownershipGuard, "ownershipGuard");
         requireBeforeDeadline(deadline);
         List<Attachment> attachments = persistenceService.loadAttachments(turn);
         if (attachments.isEmpty()) {
@@ -62,6 +81,7 @@ public class AiChatAttachmentContextService {
         int outputTokens = 0;
         int remainingContextCharacters = AiChatAttachmentPolicy.MAX_TOTAL_PROMPT_CHARS;
         for (Attachment attachment : attachments) {
+            ownershipGuard.run();
             requireBeforeDeadline(deadline);
             if (remainingContextCharacters == 0) {
                 data.add(attachmentData(
@@ -72,7 +92,8 @@ public class AiChatAttachmentContextService {
                 continue;
             }
             if ("image/jpeg".equals(attachment.getContentType())) {
-                ImageDescription described = describeImage(turn, attachment, deadline);
+                ImageDescription described = describeImage(
+                        turn, attachment, deadline, ownershipGuard);
                 requireBeforeDeadline(deadline);
                 BoundedContent bounded = boundContent(
                         described.description(), remainingContextCharacters, maskingContext);
@@ -102,7 +123,11 @@ public class AiChatAttachmentContextService {
     }
 
     private ImageDescription describeImage(
-            AiChatQueuedTurn turn, Attachment attachment, Instant deadline) {
+            AiChatQueuedTurn turn,
+            Attachment attachment,
+            Instant deadline,
+            Runnable ownershipGuard) {
+        ownershipGuard.run();
         persistenceService.requireRunning(turn);
         AiInputImage image;
         try (ManagedContent managed = managedObjectService.openAttachment(
@@ -131,7 +156,10 @@ public class AiChatAttachmentContextService {
                     invocation,
                     admission,
                     turn.restrictionEpoch(),
-                    () -> persistenceService.requireRunning(turn));
+                    () -> {
+                        ownershipGuard.run();
+                        persistenceService.requireRunning(turn);
+                    });
             if (outcome.demaskWarnings() != 0
                     || outcome.text().isBlank()
                     || outcome.text().length() > MAX_IMAGE_DESCRIPTION_CHARS) {
