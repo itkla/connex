@@ -2,12 +2,22 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.EnumMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolSpec;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import tools.jackson.databind.json.JsonMapper;
 
 class AiAssistantToolCatalogTest {
@@ -23,8 +33,8 @@ class AiAssistantToolCatalogTest {
                         "aggregate_metric", "find_schedule_conflicts", "get_deal_brief",
                         "create_activity", "create_task", "create_note", "add_tag",
                         "change_deal_stage", "assign_owner"),
-                catalog.tools().stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
-        assertEquals(15, catalog.tools().stream()
+                catalog.tools(AiAssistantToolCatalog.ALL).stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
+        assertEquals(15, catalog.tools(AiAssistantToolCatalog.ALL).stream()
                 .filter(AiAssistantToolCatalog.ToolSpec::executable)
                 .count());
         assertTrue(catalog.isExecutable("find_schedule_conflicts"));
@@ -86,11 +96,11 @@ class AiAssistantToolCatalogTest {
 
     @Test
     void nativeDefinitionsMirrorExecutableCatalogSchemasWithoutReservedTools() {
-        var definitions = catalog.nativeDefinitions(objectMapper);
+        var definitions = catalog.nativeDefinitions(objectMapper, AiAssistantToolCatalog.ALL);
 
         assertEquals(15, definitions.size());
         assertEquals(
-                catalog.tools().stream()
+                catalog.tools(AiAssistantToolCatalog.ALL).stream()
                         .filter(AiAssistantToolCatalog.ToolSpec::executable)
                         .map(AiAssistantToolCatalog.ToolSpec::name)
                         .toList(),
@@ -107,5 +117,132 @@ class AiAssistantToolCatalogTest {
         assertEquals("null", search.parametersSchema()
                 .path("properties").path("kinds").path("anyOf").path(1).path("type")
                 .asString());
+    }
+
+    /**
+     * The taxonomy is a partition: every declared tool names exactly one toolset, and the core
+     * toolset is pinned by name because it is the vocabulary a turn can never be without.
+     */
+    @Test
+    void everyDeclaredToolBelongsToExactlyOneToolsetAndCoreIsPinned() {
+        Map<Toolset, List<String>> byToolset = new EnumMap<>(Toolset.class);
+        for (ToolSpec spec : catalog.tools(AiAssistantToolCatalog.ALL)) {
+            byToolset.computeIfAbsent(spec.toolset(), key -> new ArrayList<>())
+                    .add(spec.name());
+        }
+
+        assertEquals(
+                List.of(
+                        "search_records", "get_record", "get_records", "set_todos",
+                        "list_activities", "list_tasks", "list_scope_activities"),
+                byToolset.get(Toolset.CORE));
+        assertEquals(List.of("aggregate_metric", "get_deal_brief"),
+                byToolset.get(Toolset.ANALYTICS));
+        assertEquals(List.of("find_schedule_conflicts"), byToolset.get(Toolset.SCHEDULE));
+        assertEquals(List.of("create_activity", "create_task"),
+                byToolset.get(Toolset.WRITE_ACTIVITY));
+        assertEquals(List.of("create_note", "add_tag"), byToolset.get(Toolset.WRITE_CONTENT));
+        assertEquals(List.of("change_deal_stage", "assign_owner"),
+                byToolset.get(Toolset.WRITE_PIPELINE));
+        assertEquals(
+                catalog.tools(AiAssistantToolCatalog.ALL).size(),
+                byToolset.values().stream().mapToInt(List::size).sum());
+        assertEquals(Toolset.CORE, catalog.toolsetOf("list_tasks"));
+        assertNull(catalog.toolsetOf("delete_record"));
+    }
+
+    /**
+     * A declaration without a toolset has to fail where it is written, not where it is filtered.
+     *
+     * <p>Every catalog view filters on the toolset, so a null one would drop the tool out of the
+     * vocabulary, the native definitions and {@code isLoaded} for {@code ALL} while
+     * {@code isKnown} still passed — the step guard would then reject it as {@code tool_name} — and
+     * would throw from {@code CORE}, an immutable set whose {@code contains} dereferences its
+     * argument, turning prompt assembly into an unhandled failure. No assertion over the built
+     * catalog can observe either case, because the offending spec is already filtered away.
+     */
+    @Test
+    void aToolDeclaredWithoutAToolsetIsRefusedAtDeclaration() {
+        NullPointerException refused = assertThrows(NullPointerException.class,
+                () -> new ToolSpec(
+                        "orphan_tool",
+                        null,
+                        AiAssistantToolCatalog.ToolTier.READ,
+                        true,
+                        null,
+                        List.of()));
+
+        assertTrue(refused.getMessage().contains("orphan_tool"));
+    }
+
+    /**
+     * The declared keys are the stable wire vocabulary a loaded set is named by, and {@code core}
+     * is never one of them because it is always held.
+     */
+    @Test
+    void toolsetKeysAreStableAndTheDirectoryCoversEveryLoadableSet() {
+        assertEquals(
+                List.of("core", "analytics", "schedule",
+                        "write_activity", "write_content", "write_pipeline"),
+                Arrays.stream(Toolset.values()).map(Toolset::key).toList());
+        assertEquals(
+                List.of("analytics", "schedule", "write_activity", "write_content",
+                        "write_pipeline"),
+                AiAssistantToolCatalog.LOADABLE.stream().map(Toolset::key).toList());
+        assertEquals(AiAssistantToolCatalog.LOADABLE.size(), catalog.directory().size());
+        for (Map.Entry<Toolset, String> entry : catalog.directory()) {
+            assertFalse(entry.getKey() == Toolset.CORE,
+                    "the directory lists loadable sets only");
+            assertFalse(entry.getValue().isBlank(),
+                    entry.getKey().key() + " needs a server-authored summary");
+        }
+        assertEquals(Set.of(Toolset.CORE), AiAssistantToolCatalog.CORE);
+        assertEquals(6, AiAssistantToolCatalog.ALL.size());
+    }
+
+    /** Both prompt-facing views narrow to the loaded set and keep stable catalog order. */
+    @Test
+    void bothCatalogViewsReturnOnlyTheLoadedToolsInCatalogOrder() {
+        assertEquals(
+                List.of("search_records", "get_record", "get_records", "set_todos",
+                        "list_activities", "list_tasks", "list_scope_activities"),
+                catalog.tools(AiAssistantToolCatalog.CORE).stream().map(ToolSpec::name).toList());
+        Set<Toolset> coreAndAnalytics = new LinkedHashSet<>(AiAssistantToolCatalog.CORE);
+        coreAndAnalytics.add(Toolset.ANALYTICS);
+        assertEquals(
+                List.of("search_records", "get_record", "get_records", "set_todos",
+                        "list_activities", "list_tasks", "list_scope_activities",
+                        "aggregate_metric", "get_deal_brief"),
+                catalog.tools(coreAndAnalytics).stream().map(ToolSpec::name).toList());
+        assertEquals(
+                List.of("search_records", "get_record", "get_records", "set_todos",
+                        "list_activities", "list_tasks", "list_scope_activities",
+                        "aggregate_metric"),
+                catalog.nativeDefinitions(objectMapper, coreAndAnalytics).stream()
+                        .map(definition -> definition.name())
+                        .toList());
+        assertTrue(catalog.isLoaded("aggregate_metric", coreAndAnalytics));
+        assertFalse(catalog.isLoaded("aggregate_metric", AiAssistantToolCatalog.CORE));
+        assertFalse(catalog.isLoaded("delete_record", AiAssistantToolCatalog.ALL));
+        assertTrue(catalog.isLoaded("list_tasks", AiAssistantToolCatalog.CORE));
+    }
+
+    /**
+     * The reservation is what one turn's whole prompt budget is sized against, so it must be the
+     * same set on every call and must never exceed core plus the declared per-turn cap.
+     */
+    @Test
+    void theReservationIsDeterministicAndBoundedByThePerTurnCap() {
+        Set<Toolset> first = catalog.reservationToolsets();
+
+        assertEquals(first, catalog.reservationToolsets());
+        assertTrue(first.contains(Toolset.CORE));
+        assertEquals(
+                AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN
+                        + AiAssistantToolCatalog.RESERVATION_HEADROOM_TOOLSETS,
+                first.stream().filter(toolset -> toolset != Toolset.CORE).count());
+        assertTrue(AiAssistantToolCatalog.ALL.containsAll(first));
+        assertFalse(first.containsAll(AiAssistantToolCatalog.LOADABLE),
+                "reserving for the whole catalog would defeat the point of toolsets");
     }
 }

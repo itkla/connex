@@ -80,10 +80,11 @@ public class AiChatMemoryService {
                         stepSchema.finalResponseSchema(),
                         reasoningMode,
                         new AiNativeToolRequest(
-                                promptAssembler.nativeToolDefinitions(), List.of()))
+                                promptAssembler.nativeToolDefinitions(
+                                        AiAssistantToolCatalog.ALL), List.of()))
                 : invocationService.serializedPromptBytes(
-                        promptAssembler.fixedPrompt(),
-                        stepSchema.responseSchema(),
+                        promptAssembler.fixedPrompt(AiAssistantToolCatalog.ALL),
+                        stepSchema.responseSchema(AiAssistantToolCatalog.ALL),
                         reasoningMode);
         AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
                 capabilities,

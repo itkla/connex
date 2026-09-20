@@ -302,7 +302,8 @@ class AiChatAgentLoopServiceTest {
                         List.of(new AiAssistantPromptAssembler.ToolTurn(
                                 1, "search_records", readResult)),
                         new ooo.klae.connex.backend.ai.masking.MaskingContext(),
-                        new AiChatResourceRegistry())
+                        new AiChatResourceRegistry(),
+                        AiAssistantToolCatalog.ALL)
                 .getMessages().getFirst().getContent().getBytes(StandardCharsets.UTF_8).length;
         int bothResultsBytes = sizingAssembler.assemble(
                         List.of(),
@@ -313,7 +314,8 @@ class AiChatAgentLoopServiceTest {
                                 new AiAssistantPromptAssembler.ToolTurn(
                                         2, "create_note", expectedWriteResult)),
                         new ooo.klae.connex.backend.ai.masking.MaskingContext(),
-                        new AiChatResourceRegistry())
+                        new AiChatResourceRegistry(),
+                        AiAssistantToolCatalog.ALL)
                 .getMessages().stream()
                 .mapToInt(message -> message.getContent()
                         .getBytes(StandardCharsets.UTF_8).length)
@@ -1470,7 +1472,8 @@ class AiChatAgentLoopServiceTest {
                 List.of(),
                 new AiAssistantPromptBudget(
                         64, 64_000, 16_000, 16_000, 16_000, 112_000),
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         assertEquals(expected.getSystemPrompt(),
                 invocation.getValue().prompt().getSystemPrompt());
         assertEquals(

@@ -4,14 +4,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.AiFeature;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import ooo.klae.connex.backend.ai.assistant.AiSkillCatalog.Availability;
 import ooo.klae.connex.backend.ai.assistant.AiSkillCatalog.PlanStep;
 import ooo.klae.connex.backend.ai.assistant.AiSkillCatalog.SkillSpec;
@@ -50,6 +54,7 @@ class AiSkillCatalogTest {
             "daily_work_brief_v1");
 
     private final AiSkillCatalog catalog = new AiSkillCatalog();
+    private final AiAssistantToolCatalog toolCatalog = new AiAssistantToolCatalog();
 
     @Test
     void everyFirstContractKeyIsDeclaredAndKeysStayAdditive() {
@@ -133,6 +138,84 @@ class AiSkillCatalogTest {
                                 + " without declaring it");
             }
         }
+    }
+
+    /**
+     * A routed turn starts with core plus whatever its skill seeded, and that seed is spent from
+     * the same per-turn budget an on-demand load spends from. A skill whose declared tools are not
+     * reachable from that starting set would spend a synthesis step discovering it cannot read
+     * what it declared, so the catalog is the place that has to agree.
+     */
+    @Test
+    void everySkillDeclaresReachableToolsetsWithinThePerTurnCap() {
+        for (SkillSpec spec : catalog.skills()) {
+            assertTrue(
+                    spec.toolsets().size()
+                            <= AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN,
+                    () -> spec.key() + " declares more toolsets than one turn may hold");
+            Set<Toolset> reachable = new LinkedHashSet<>(AiAssistantToolCatalog.CORE);
+            for (String declared : spec.toolsets()) {
+                Toolset toolset = AiAssistantToolCatalog.LOADABLE.stream()
+                        .filter(loadable -> loadable.key().equals(declared))
+                        .findFirst()
+                        .orElse(null);
+                assertNotNull(toolset,
+                        () -> spec.key() + " declares unknown toolset " + declared);
+                reachable.add(toolset);
+            }
+            for (String tool : spec.allowedTools()) {
+                if (toolCatalog.toolsetOf(tool) == null) {
+                    continue;
+                }
+                assertTrue(toolCatalog.isLoaded(tool, reachable),
+                        () -> spec.key() + " allows " + tool
+                                + " but never reaches the toolset that declares it");
+            }
+        }
+    }
+
+    /** The cap and the key vocabulary are enforced where a skill is declared, not at use. */
+    @Test
+    void theSkillRecordRefusesAnUndeclarableToolsetDeclaration() {
+        assertThrows(IllegalArgumentException.class,
+                () -> specWithToolsets(Set.of("analytics", "schedule", "write_content")));
+        assertThrows(IllegalArgumentException.class,
+                () -> specWithToolsets(Set.of("core")));
+        assertThrows(IllegalArgumentException.class,
+                () -> specWithToolsets(Set.of("nonexistent_toolset")));
+        assertNotNull(specWithToolsets(Set.of("analytics", "write_pipeline")));
+    }
+
+    private static SkillSpec specWithToolsets(Set<String> toolsets) {
+        return new SkillSpec(
+                "declaration_probe_v1",
+                "1.0.0",
+                Availability.DECLARED,
+                "skill_not_yet_implemented",
+                "askConnex.skills.declarationProbe.name",
+                "askConnex.skills.declarationProbe.description",
+                Set.of(),
+                false,
+                Set.of(),
+                Set.of(),
+                List.of(),
+                Set.of(),
+                toolsets,
+                Set.of(),
+                Set.of(),
+                Set.of(),
+                true,
+                Set.of(Permission.AI_USE),
+                AiFeature.ASSISTANT_CHAT,
+                32_768,
+                AiSkillCatalog.Authority.READ,
+                new AiSkillCatalog.Bounds(0, 0, 0, 0),
+                new AiSkillCatalog.Budgets(0, 0L, 0),
+                Integer.MAX_VALUE,
+                AiSkillCatalog.PartialBehavior.FAIL_CLOSED,
+                new AiSkillCatalog.Evaluation("declaration_probe_v1", 0, Set.of()),
+                List.of(),
+                "");
     }
 
     @Test

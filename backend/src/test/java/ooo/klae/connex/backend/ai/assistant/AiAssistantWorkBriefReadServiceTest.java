@@ -100,7 +100,8 @@ class AiAssistantWorkBriefReadServiceTest {
                 mapper, new AiAssistantToolCatalog()).assemble(
                         List.of(), new AiAssistantToolResult(Map.of(), List.of()),
                         List.of(new AiAssistantPromptAssembler.ToolTurn(1, "work_brief", result)),
-                        context, resources).getMessages());
+                        context, resources,
+                        AiAssistantToolCatalog.ALL).getMessages());
         assertFalse(providerInput.contains("Johnathan"));
         assertFalse(providerInput.contains("Renewal Agre"));
         assertTrue(providerInput.contains("{{P"));

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -38,6 +39,7 @@ import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
+import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
@@ -121,7 +123,7 @@ class AiChatMemoryServiceTest {
                         200_000,
                         50_000));
         when(invocationService.serializedPromptBytes(
-                any(MaskedPrompt.class), same(stepSchema.responseSchema()),
+                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isFullCatalogStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(8_192);
         when(persistenceService.loadHistory(turn, 100))
@@ -206,7 +208,8 @@ class AiChatMemoryServiceTest {
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 memory.budget(),
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         assertFalse(promptText(replay).contains("quarterly planning"));
         assertTrue(promptText(replay).contains("{{P1}}"));
     }
@@ -268,7 +271,7 @@ class AiChatMemoryServiceTest {
                 nativeTools.capture());
         assertEquals(15, nativeTools.getValue().definitions().size());
         verify(invocationService, never()).serializedPromptBytes(
-                any(MaskedPrompt.class), same(stepSchema.responseSchema()),
+                any(MaskedPrompt.class), any(AiResponseSchema.class),
                 eq(AiReasoningMode.TAGGED));
     }
 
@@ -380,7 +383,7 @@ class AiChatMemoryServiceTest {
                         1_000_000,
                         128_000));
         when(invocationService.serializedPromptBytes(
-                any(MaskedPrompt.class), same(stepSchema.responseSchema()),
+                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isFullCatalogStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(16_962);
         when(persistenceService.loadHistory(turn, 100)).thenReturn(List.of(initiating));
@@ -442,7 +445,7 @@ class AiChatMemoryServiceTest {
                         AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         8_192));
         when(invocationService.serializedPromptBytes(
-                any(MaskedPrompt.class), same(stepSchema.responseSchema()),
+                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isFullCatalogStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(8_192);
         when(persistenceService.loadHistory(turn, 100)).thenReturn(List.of(initiating));
@@ -467,7 +470,8 @@ class AiChatMemoryServiceTest {
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 memory.budget(),
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         assertFalse(promptText(providerPrompt).contains("界"));
         assertTrue(promptText(providerPrompt).contains("Current request omitted"));
         verify(invocationService, never()).completeStructuredRepairable(
@@ -525,7 +529,7 @@ class AiChatMemoryServiceTest {
                         200_000,
                         50_000));
         when(invocationService.serializedPromptBytes(
-                any(MaskedPrompt.class), same(stepSchema.responseSchema()),
+                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isFullCatalogStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(8_192);
         when(persistenceService.loadHistory(turn, 100))
@@ -609,7 +613,7 @@ class AiChatMemoryServiceTest {
                         AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         8_192));
         when(invocationService.serializedPromptBytes(
-                any(MaskedPrompt.class), same(stepSchema.responseSchema()),
+                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isFullCatalogStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(0);
         when(persistenceService.loadHistory(turn, 100))
@@ -689,6 +693,22 @@ class AiChatMemoryServiceTest {
         when(executor.pageContext(any(), any()))
                 .thenReturn(new AiAssistantToolResult(Map.of(), List.of()));
         return executor;
+    }
+
+    /**
+     * Matches the step schema built from the whole declared catalog.
+     *
+     * <p>The schema is now built per loaded toolset rather than held as one instance, so identity
+     * matching would silently stop constraining what the memory service asks the provider for.
+     * Matching on the name and the tool branches the schema actually carries keeps that assertion.
+     */
+    private static boolean isFullCatalogStepSchema(AiResponseSchema schema) {
+        if (schema == null || !"ask_connex_step".equals(schema.name())) {
+            return false;
+        }
+        String branches = schema.schema().path("properties").path("tool").toString();
+        return new AiAssistantToolCatalog().tools(AiAssistantToolCatalog.ALL).stream()
+                .allMatch(spec -> branches.contains("\"" + spec.name() + "\""));
     }
 
     private static String promptText(MaskedPrompt prompt) {

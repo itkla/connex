@@ -319,7 +319,31 @@ built-in `smtp` provider therefore declares no idempotent-submission capability.
 expires after the relay outcome becomes unknown, Connex marks the delivery failed with a
 reconciliation requirement instead of replaying it. An operator must check the relay, then confirm
 `delivered` or `not_delivered` through the campaign recipient reconciliation endpoint. That endpoint
-records evidence only; it never sends. Generic HTTP ESP/SMS connectors default
+records evidence only; it never sends. Audience (bulk) sends are never replayed on any provider: an
+attempt that reserved the contact's frequency window but never recorded an outcome — typically a
+worker that died mid-send — surfaces as a `deadline_ambiguous` reconciliation item once the provider
+deadline and the delivery lease safety margin (30 seconds by default) have both elapsed since the
+attempt reserved the window. Until then, and afterwards unless an operator confirms
+`not_delivered`, the contact stays frequency-capped on that channel for the rest of the window.
+The send that owned the attempt still settles: its counters are refreshed and, once none of its
+deliveries is pending or still being sent, it completes even if its provider has since been disabled.
+If the sweep itself is interrupted between marking the attempt and refreshing those counters, an
+already completed send keeps reporting the old `failed` count until the reconciliation item is
+resolved, which refreshes it; the reconciliation item itself is unaffected and stays in the queue.
+A worker that is only slow can lose the same race: if the provider accepts the message but the
+worker has not recorded the result by the time the same deadline and margin have elapsed, its late
+write cannot mark the delivery sent. It still attaches the provider message ID to the reconciliation
+item without resolving it, so the provider's receipt, bounce, and complaint webhooks for that message
+match the delivery, and a bounce or complaint records the suppression and consent revocation as usual.
+It attaches that message ID even when an operator has already resolved the item, and changes nothing
+else: the recorded `delivered` or `not_delivered` decision, the delivery's status, and its frequency
+reservation all stay exactly as the operator left them, while a later bounce or complaint for the
+message the provider accepted still suppresses the address and revokes consent.
+An expired triggered claim marked for reconciliation keeps no provider message ID: its webhooks match
+no delivery and record no suppression and no consent revocation. Before resolving such an item, check
+the provider's bounce and complaint records for that recipient and add any suppression by hand
+(`POST /api/suppressions`).
+Generic HTTP ESP/SMS connectors default
 `idempotentSubmission` to false. A workspace administrator may enable it only after verifying that
 the configured endpoint guarantees repeated requests carrying the same `Idempotency-Key` deliver no
 more than once; enabling it incorrectly can cause duplicate delivery. Connex returns an expired claim to the queue only if
@@ -654,7 +678,7 @@ The two are asymmetric, and the asymmetry is easy to misread as a product-wide c
 | Unsubscribe | Yes — body link, per recipient | **None** |
 | `List-Unsubscribe` header | **No** | **No** |
 | Per-message outcome | Recorded against the delivery row | Swallowed ([§3.1](#31-failure-semantics-most-send-failures-are-invisible)) |
-| Worker-loss replay | HTTP ESP/SMS only when that connector explicitly declares idempotent submission; SMTP requires reconciliation | None |
+| Worker-loss replay | Triggered sends: HTTP ESP/SMS only when that connector explicitly declares idempotent submission; SMTP requires reconciliation. Audience sends: never; requires reconciliation | None |
 
 **Bounce and complaint telemetry requires an ESP provider with webhooks.** A hard bounce or a
 complaint arriving on the webhook endpoint records a suppression entry and revokes consent
