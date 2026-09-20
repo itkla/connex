@@ -2,11 +2,14 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -56,10 +59,12 @@ import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.DealService;
 import ooo.klae.connex.backend.services.RuleTriggerPublisher;
+import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import tools.jackson.databind.ObjectMapper;
 
@@ -84,6 +89,7 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private DealService dealService;
+    @MockitoSpyBean private AiChatMapper chatMapperSpy;
     @MockitoSpyBean private DealMapper dealMapperSpy;
     @MockitoSpyBean private PersonMapper personMapperSpy;
     @MockitoBean private AuditService auditService;
@@ -145,6 +151,12 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
             jdbcTemplate.update("DELETE FROM person WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM tag WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace_member WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update(
+                    "DELETE wrp FROM workspace_role_permission wrp"
+                            + " JOIN workspace_role wr ON wr.id = wrp.workspace_role_id"
+                            + " WHERE wr.workspace_id = ?",
+                    workspace.getId());
+            jdbcTemplate.update("DELETE FROM workspace_role WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", workspace.getId());
         }
         if (firstActor != null) {
@@ -291,6 +303,85 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                 .toList());
     }
 
+    /**
+     * A permission revoked while an approval is in flight must stop that approval's write.
+     *
+     * <p>The latch is keyed on {@code getAccessibleSessionById}, which the approval really does call
+     * between entering its transaction and taking any lock, so the revocation commits inside the
+     * window the defect lived in. Resolving the authority from unlocked rows lets the write through:
+     * the pre-lock permission read populates the MyBatis session cache, and the post-lock
+     * re-assertion re-issues identical statements that the cache answers with the pre-lock result.
+     */
+    @Test
+    void approvalRefusesWhenTheActorsRolePermissionWasRevokedAfterTheProposal() throws Exception {
+        Company company = company("Revoked role company");
+        Pipeline pipeline = pipeline("Revoked role pipeline");
+        Stage source = stage(pipeline, "Source", 0);
+        Stage target = stage(pipeline, "Target", 1);
+        Deal deal = deal(pipeline, source, company);
+        jdbcTemplate.update(
+                "UPDATE deal SET updated_at = updated_at - INTERVAL 5 SECOND WHERE id = ?",
+                deal.getId());
+        int roleId = customRole(firstActor);
+        authenticate(firstActor);
+        ToolFixture proposal = stageProposal(firstActor, deal.getId(), target.getName());
+        clearAuthentication();
+        CountDownLatch approvalStarted = new CountDownLatch(1);
+        CountDownLatch revoked = new CountDownLatch(1);
+        AtomicBoolean interceptSessionRead = new AtomicBoolean(true);
+        AiChatMapper realChatMapper = sqlSessionTemplate.getMapper(AiChatMapper.class);
+        doAnswer(invocation -> {
+            if (interceptSessionRead.compareAndSet(true, false)) {
+                approvalStarted.countDown();
+                assertTrue(revoked.await(10, TimeUnit.SECONDS));
+            }
+            return realChatMapper.getAccessibleSessionById(
+                    workspace.getId(), firstActor.getId(), proposal.sessionId());
+        }).when(chatMapperSpy).getAccessibleSessionById(
+                workspace.getId(), firstActor.getId(), proposal.sessionId());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+
+        try {
+            Future<?> approval = executor.submit(() -> {
+                authenticate(firstActor);
+                try {
+                    writeToolService.approve(proposal.sessionId(), proposal.toolCallId());
+                } finally {
+                    clearAuthentication();
+                }
+            });
+            assertTrue(approvalStarted.await(10, TimeUnit.SECONDS));
+            assertEquals(1, jdbcTemplate.update(
+                    "DELETE FROM workspace_role_permission"
+                            + " WHERE workspace_role_id = ? AND permission = 'DEAL_UPDATE'",
+                    roleId));
+            revoked.countDown();
+
+            ExecutionException refused = assertThrows(
+                    ExecutionException.class, () -> approval.get(20, TimeUnit.SECONDS));
+            Throwable forbidden = causeOfType(refused, ForbiddenException.class);
+            assertNotNull(forbidden);
+            assertEquals(
+                    "Requires the DEAL_UPDATE permission in this workspace",
+                    forbidden.getMessage());
+        } finally {
+            revoked.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertEquals(
+                source.getId(),
+                dealMapper.getDealById(workspace.getId(), deal.getId()).getStageId());
+        assertEquals(
+                "proposed",
+                jdbcTemplate.queryForObject(
+                        "SELECT status FROM ai_chat_tool_call WHERE id = ?",
+                        String.class,
+                        proposal.toolCallId()));
+        verifyNoInteractions(auditService);
+    }
+
     @Test
     void stageChangePrelockRejectsAStaleSourceSnapshotBeforeASecondLockPass()
             throws Exception {
@@ -367,6 +458,46 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
                 workspace.getId(), actor.getId(), session.getId(), turn.getId(),
                 message.getId(), message.getSeq(), expectedEpoch, true, List.of(), List.of());
         return new ToolFixture(session.getId(), toolCall.getId(), queued);
+    }
+
+    private ToolFixture stageProposal(User actor, int dealId, String stage) throws Exception {
+        AiChatResourceRegistry resources = new AiChatResourceRegistry();
+        resources.register("deal", dealId);
+        AiAssistantPreparedWrite write = writeToolService.prepare(
+                "change_deal_stage",
+                objectMapper.readTree(
+                        "{\"handle\":\"r1\",\"stage\":\"" + stage + "\"}"),
+                resources,
+                restrictionEpoch.current(workspace.getId()));
+        AiChatSession session = session(actor);
+        AiChatMessage message = message(session, actor);
+        AiChatToolCall toolCall = toolCall(message, write);
+        return new ToolFixture(session.getId(), toolCall.getId(), null);
+    }
+
+    /** Replaces a member's built-in authority with a custom role granting every permission. */
+    private int customRole(User member) {
+        jdbcTemplate.update(
+                "INSERT INTO workspace_role (workspace_id, name) VALUES (?, ?)",
+                workspace.getId(),
+                "Assistant role " + UUID.randomUUID().toString().substring(0, 8));
+        Integer roleId = jdbcTemplate.queryForObject(
+                "SELECT id FROM workspace_role WHERE workspace_id = ? ORDER BY id DESC LIMIT 1",
+                Integer.class,
+                workspace.getId());
+        assertNotNull(roleId);
+        jdbcTemplate.batchUpdate(
+                "INSERT INTO workspace_role_permission (workspace_role_id, permission)"
+                        + " VALUES (?, ?)",
+                Arrays.stream(Permission.values())
+                        .map(permission -> new Object[] {roleId, permission.name()})
+                        .toList());
+        assertEquals(1, jdbcTemplate.update(
+                "UPDATE workspace_member SET role_id = ? WHERE workspace_id = ? AND user_id = ?",
+                roleId,
+                workspace.getId(),
+                member.getId()));
+        return roleId;
     }
 
     private ToolFixture ownerProposal(User actor, int companyId, String owner) throws Exception {
@@ -554,14 +685,18 @@ class AiAssistantWriteToolConcurrencyIntegrationTest {
     }
 
     private static boolean hasCause(Throwable error, Class<? extends Throwable> type) {
+        return causeOfType(error, type) != null;
+    }
+
+    private static Throwable causeOfType(Throwable error, Class<? extends Throwable> type) {
         Throwable current = error;
         while (current != null) {
             if (type.isInstance(current)) {
-                return true;
+                return current;
             }
             current = current.getCause();
         }
-        return false;
+        return null;
     }
 
     private record ToolFixture(

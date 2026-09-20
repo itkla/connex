@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
@@ -18,8 +19,10 @@ import static org.mockito.Mockito.inOrder;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
@@ -89,6 +92,7 @@ class AiAssistantWriteToolServiceTest {
     private PipelineService pipelineService;
     private AiRestrictionEpoch restrictionEpoch;
     private AiWorkspaceGovernanceService governanceService;
+    private WorkspaceService.LockedPermissionSnapshot authority;
     private AiAssistantWriteToolService service;
     private AiChatToolCall storedToolCall;
 
@@ -119,6 +123,10 @@ class AiAssistantWriteToolServiceTest {
         when(workspaceService.getCurrentWorkspaceId()).thenReturn(TURN.workspaceId());
         when(workspaceService.getCurrentUserId()).thenReturn(TURN.userId());
         when(workspaceService.isMember(TURN.workspaceId(), TURN.userId())).thenReturn(true);
+        authority = mock(WorkspaceService.LockedPermissionSnapshot.class);
+        grantAllExcept();
+        when(workspaceService.lockAndRequirePermissionsSnapshot(anyInt(), any()))
+                .thenReturn(authority);
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
         when(restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
@@ -460,13 +468,84 @@ class AiAssistantWriteToolServiceTest {
                 "deal",
                 44);
         stored(write, 29);
-        doThrow(new ForbiddenException("revoked")).when(workspaceService)
-                .requirePermission(TURN.workspaceId(), TURN.userId(), Permission.DEAL_UPDATE);
+        grantAllExcept(Permission.DEAL_UPDATE);
 
-        assertThrows(ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
+        ForbiddenException refused = assertThrows(
+                ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
 
+        assertEquals(
+                "Requires the DEAL_UPDATE permission in this workspace", refused.getMessage());
         verify(dealService, never()).changeStage(
                 any(DealService.LockedStageChange.class));
+        verify(workspaceService, never()).requirePermission(
+                TURN.workspaceId(), TURN.userId(), Permission.DEAL_UPDATE);
+    }
+
+    @Test
+    void autoWriteRefusesWhenTheLockedAuthorityLacksTheToolPermission() throws Exception {
+        AiAssistantPreparedWrite write = prepared(
+                "create_task",
+                "{\"handle\":\"r1\",\"description\":\"Send the renewal deck\"}",
+                "person",
+                31);
+        stored(write, 29);
+        grantAllExcept(Permission.TASK_DELETE);
+
+        ForbiddenException refused = assertThrows(
+                ForbiddenException.class,
+                () -> service.executeAuto(TURN, 29, result -> { }));
+
+        assertEquals(
+                "Requires the TASK_DELETE permission in this workspace", refused.getMessage());
+        verify(taskService, never()).create(any(Task.class));
+    }
+
+    @Test
+    void undoRefusesWhenTheLockedAuthorityLacksTheToolPermission() throws Exception {
+        doAnswer(invocation -> {
+            Task created = invocation.getArgument(0);
+            created.setId(74);
+            return created;
+        }).when(taskService).create(any(Task.class));
+        AiAssistantPreparedWrite write = prepared(
+                "create_task",
+                "{\"handle\":\"r1\",\"description\":\"Send the renewal deck\"}",
+                "person",
+                31);
+        stored(write, 29);
+        service.executeAuto(TURN, 29, result -> { });
+        storedToolCall.setResultJson(capturedResultJson());
+        grantAllExcept(Permission.TASK_DELETE);
+
+        ForbiddenException refused = assertThrows(
+                ForbiddenException.class, () -> service.undo(TURN.sessionId(), 29));
+
+        assertEquals(
+                "Requires the TASK_DELETE permission in this workspace", refused.getMessage());
+        verify(taskService, never()).deleteIf(eq(74), any());
+    }
+
+    @Test
+    void everyToolDecisionReadsItsAuthorityFromLockedRows() throws Exception {
+        AiAssistantPreparedWrite write = prepared(
+                "change_deal_stage",
+                "{\"handle\":\"r1\",\"stage\":\"Proposal\"}",
+                "deal",
+                44);
+        stored(write, 29);
+        doThrow(new ForbiddenException("Requires the AI_USE permission in this workspace"))
+                .when(workspaceService)
+                .lockAndRequirePermissionsSnapshot(eq(TURN.workspaceId()), any());
+
+        assertThrows(
+                ForbiddenException.class,
+                () -> service.executeAuto(TURN, 29, result -> { }));
+        assertThrows(ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
+        assertThrows(ForbiddenException.class, () -> service.reject(TURN.sessionId(), 29));
+        assertThrows(ForbiddenException.class, () -> service.undo(TURN.sessionId(), 29));
+
+        verify(chatMapper, never()).getToolCallBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), 29);
     }
 
     @Test
@@ -644,12 +723,19 @@ class AiAssistantWriteToolServiceTest {
         verify(personService, never()).updateOwner(52, 21);
         verify(dealService, never()).updateOwner(52, 21);
 
-        InOrder lockOrder = inOrder(workspaceService, chatMapper);
-        lockOrder.verify(workspaceService)
-                .lockAndRequireMember(TURN.workspaceId(), TURN.userId());
-        lockOrder.verify(workspaceService).lockAndRequireMember(TURN.workspaceId(), 21);
+        InOrder lockOrder = inOrder(workspaceService, chatMapper, companyService);
+        lockOrder.verify(workspaceService).lockAndRequirePermissionsSnapshot(
+                TURN.workspaceId(),
+                Map.of(
+                        TURN.userId(), Set.of(Permission.AI_USE),
+                        21, Set.of()));
         lockOrder.verify(chatMapper).getSessionByIdForUpdate(
                 TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+        lockOrder.verify(chatMapper).getToolCallBySessionForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), 29);
+        lockOrder.verify(companyService).lockOwnedCompanyForUpdate(52);
+        verify(workspaceService, never()).lockAndRequireMember(
+                eq(TURN.workspaceId()), anyInt());
     }
 
     @Test
@@ -808,7 +894,7 @@ class AiAssistantWriteToolServiceTest {
                 () -> service.approve(TURN.sessionId(), 29));
 
         doThrow(new ForbiddenException("revoked")).when(workspaceService)
-                .lockAndRequireMember(99, 77);
+                .lockAndRequirePermissionsSnapshot(eq(99), any());
         assertThrows(ResourceNotFoundException.class, () -> service.reject(TURN.sessionId(), 29));
         verify(dealService, never()).changeStage(
                 any(DealService.LockedStageChange.class));
@@ -840,6 +926,12 @@ class AiAssistantWriteToolServiceTest {
 
         verify(chatMapper, never()).getToolCallBySessionForUpdate(
                 TURN.workspaceId(), TURN.sessionId(), 29);
+    }
+
+    private void grantAllExcept(Permission... revoked) {
+        EnumSet<Permission> granted = EnumSet.allOf(Permission.class);
+        granted.removeAll(List.of(revoked));
+        when(authority.effectiveFor(TURN.userId())).thenReturn(granted);
     }
 
     private AiAssistantPreparedWrite prepared(
