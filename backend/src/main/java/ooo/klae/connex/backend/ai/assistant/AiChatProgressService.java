@@ -48,7 +48,13 @@ public class AiChatProgressService {
         return project(turn.getWorkspaceId(), turn.getSessionId(), turn.getId(), turn.getStatus());
     }
 
-    /** Returns a safe milestone snapshot with an explicit terminal status for final persistence. */
+    /**
+     * Returns a safe milestone snapshot with an explicit terminal status for final persistence.
+     *
+     * <p>A {@code find_tools} row is skipped rather than mapped: the loop publishes no step frame
+     * for it, so projecting one would raise an {@code other} milestone that appeared live and
+     * vanished on reload. It reads nothing, so there is no coverage for it to claim.
+     */
     public List<AiChatProgressItemDto> project(
             int workspaceId, int sessionId, int turnId, String turnStatus) {
         Map<String, ProgressAccumulator> milestones = new LinkedHashMap<>();
@@ -57,6 +63,9 @@ public class AiChatProgressService {
         String prefix = "turn-" + turnId + "-step-";
         for (AiChatToolCall toolCall : chatMapper.listToolCallsByTurn(
                 workspaceId, sessionId, prefix, AiChatAgentLoopService.HARD_MAX_STEPS)) {
+            if (AiAssistantToolCatalog.FIND_TOOLS.equals(toolCall.getToolName())) {
+                continue;
+            }
             String source = sourceForTool(toolCall.getToolName());
             int seq = step(toolCall.getIdempotencyKey(), turnId);
             ProgressAccumulator current = milestones.get(source);

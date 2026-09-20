@@ -707,4 +707,26 @@ class AiAssistantToolExecutorTest {
                 LocalDateTime.parse("2026-08-23T06:59:59.999999999"),
                 5);
     }
+
+    /**
+     * {@code find_tools} is declared executable so it reaches the native definitions and the step
+     * schema, but the agent loop handles it and never calls here: it mutates per-turn state this
+     * stateless tenant-read component deliberately does not hold.
+     *
+     * <p>Falling through to the closed switch's generic {@code unknown_tool} default would report
+     * a declared tool as undeclared, so the arm names the reason instead.
+     */
+    @Test
+    void findToolsNamesWhyItCannotExecuteHereRatherThanLookingUndeclared() throws Exception {
+        AiAssistantLoopException refused = assertThrows(
+                AiAssistantLoopException.class,
+                () -> executor.execute(
+                        AiAssistantToolCatalog.FIND_TOOLS,
+                        objectMapper.readTree("{\"toolset\":\"analytics\"}"),
+                        new AiChatResourceRegistry(), true));
+
+        assertEquals("find_tools_requires_turn_state", refused.detailReason());
+        assertEquals("malformed_output", refused.terminalReason());
+        assertFalse(refused.recoverable());
+    }
 }

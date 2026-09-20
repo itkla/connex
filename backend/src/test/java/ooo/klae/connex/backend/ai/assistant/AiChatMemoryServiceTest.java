@@ -24,6 +24,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -35,6 +36,7 @@ import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.AiStructuredRepairAttempt;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
@@ -71,6 +73,7 @@ class AiChatMemoryServiceTest {
                 admissionService,
                 properties,
                 assembler,
+                new AiAssistantToolCatalog(),
                 emptyToolExecutor(),
                 summaryGuard,
                 summarySchema,
@@ -123,7 +126,7 @@ class AiChatMemoryServiceTest {
                         200_000,
                         50_000));
         when(invocationService.serializedPromptBytes(
-                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isFullCatalogStepSchema),
+                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(8_192);
         when(persistenceService.loadHistory(turn, 100))
@@ -230,6 +233,7 @@ class AiChatMemoryServiceTest {
                 mock(AiInvocationAdmissionService.class),
                 properties,
                 assembler,
+                new AiAssistantToolCatalog(),
                 emptyToolExecutor(),
                 new AiAssistantSummaryGuard(),
                 new AiAssistantSummarySchema(objectMapper),
@@ -269,7 +273,17 @@ class AiChatMemoryServiceTest {
                 same(stepSchema.finalResponseSchema()),
                 eq(AiReasoningMode.NATIVE),
                 nativeTools.capture());
-        assertEquals(15, nativeTools.getValue().definitions().size());
+        assertEquals(
+                new AiAssistantToolCatalog().nativeDefinitions(
+                                objectMapper, new AiAssistantToolCatalog().reservationToolsets())
+                        .stream()
+                        .map(definition -> definition.name())
+                        .toList(),
+                nativeTools.getValue().definitions().stream()
+                        .map(definition -> definition.name())
+                        .toList(),
+                "the one per-turn envelope is measured from the reservation, not the whole"
+                        + " catalog and not the core-only set the first step sends");
         verify(invocationService, never()).serializedPromptBytes(
                 any(MaskedPrompt.class), any(AiResponseSchema.class),
                 eq(AiReasoningMode.TAGGED));
@@ -299,6 +313,7 @@ class AiChatMemoryServiceTest {
                 mock(AiInvocationAdmissionService.class),
                 properties,
                 assembler,
+                new AiAssistantToolCatalog(),
                 emptyToolExecutor(),
                 new AiAssistantSummaryGuard(),
                 new AiAssistantSummarySchema(objectMapper),
@@ -364,6 +379,7 @@ class AiChatMemoryServiceTest {
                 mock(AiInvocationAdmissionService.class),
                 properties,
                 assembler,
+                new AiAssistantToolCatalog(),
                 emptyToolExecutor(),
                 new AiAssistantSummaryGuard(),
                 new AiAssistantSummarySchema(objectMapper),
@@ -383,7 +399,7 @@ class AiChatMemoryServiceTest {
                         1_000_000,
                         128_000));
         when(invocationService.serializedPromptBytes(
-                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isFullCatalogStepSchema),
+                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(16_962);
         when(persistenceService.loadHistory(turn, 100)).thenReturn(List.of(initiating));
@@ -426,6 +442,7 @@ class AiChatMemoryServiceTest {
                 mock(AiInvocationAdmissionService.class),
                 properties,
                 assembler,
+                new AiAssistantToolCatalog(),
                 emptyToolExecutor(),
                 new AiAssistantSummaryGuard(),
                 new AiAssistantSummarySchema(objectMapper),
@@ -445,7 +462,7 @@ class AiChatMemoryServiceTest {
                         AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         8_192));
         when(invocationService.serializedPromptBytes(
-                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isFullCatalogStepSchema),
+                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(8_192);
         when(persistenceService.loadHistory(turn, 100)).thenReturn(List.of(initiating));
@@ -510,6 +527,7 @@ class AiChatMemoryServiceTest {
                 admissionService,
                 properties,
                 assembler,
+                new AiAssistantToolCatalog(),
                 toolExecutor,
                 summaryGuard,
                 summarySchema,
@@ -529,7 +547,7 @@ class AiChatMemoryServiceTest {
                         200_000,
                         50_000));
         when(invocationService.serializedPromptBytes(
-                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isFullCatalogStepSchema),
+                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(8_192);
         when(persistenceService.loadHistory(turn, 100))
@@ -588,6 +606,7 @@ class AiChatMemoryServiceTest {
                 admissionService,
                 properties,
                 assembler,
+                new AiAssistantToolCatalog(),
                 toolExecutor,
                 summaryGuard,
                 summarySchema,
@@ -613,7 +632,7 @@ class AiChatMemoryServiceTest {
                         AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         8_192));
         when(invocationService.serializedPromptBytes(
-                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isFullCatalogStepSchema),
+                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
                 eq(AiReasoningMode.TAGGED)))
                 .thenReturn(0);
         when(persistenceService.loadHistory(turn, 100))
@@ -702,13 +721,25 @@ class AiChatMemoryServiceTest {
      * matching would silently stop constraining what the memory service asks the provider for.
      * Matching on the name and the tool branches the schema actually carries keeps that assertion.
      */
-    private static boolean isFullCatalogStepSchema(AiResponseSchema schema) {
+    /**
+     * Matches the one step schema the turn's budget is now measured from: the reservation
+     * vocabulary exactly, neither the whole catalog nor the core-only set the first step sends.
+     *
+     * <p>Reference identity cannot be matched any more, because the schema is built per loaded set
+     * rather than once. Matching on contents is what makes that a guard rather than a loosening:
+     * a wiring that reverted to {@code ALL}, or that measured the set the first step happens to
+     * send, fails here on names.
+     */
+    private static boolean isReservationStepSchema(AiResponseSchema schema) {
         if (schema == null || !"ask_connex_step".equals(schema.name())) {
             return false;
         }
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        Set<Toolset> reservation = catalog.reservationToolsets();
         String branches = schema.schema().path("properties").path("tool").toString();
-        return new AiAssistantToolCatalog().tools(AiAssistantToolCatalog.ALL).stream()
-                .allMatch(spec -> branches.contains("\"" + spec.name() + "\""));
+        return catalog.tools(AiAssistantToolCatalog.ALL).stream()
+                .allMatch(spec -> branches.contains("\"" + spec.name() + "\"")
+                        == reservation.contains(spec.toolset()));
     }
 
     private static String promptText(MaskedPrompt prompt) {

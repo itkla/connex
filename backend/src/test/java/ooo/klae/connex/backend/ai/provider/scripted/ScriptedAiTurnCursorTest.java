@@ -270,7 +270,8 @@ class ScriptedAiTurnCursorTest {
                 context,
                 new AiChatResourceRegistry(),
                 List.of(),
-                unboundedBudget());
+                unboundedBudget(),
+                AiAssistantToolCatalog.ALL);
         AiAssistantPromptAssembler.NativeReplay replay = promptAssembler.nativeReplay(
                 toolTurns,
                 Map.of(1, new AiToolCall("call-1", "search_records", "{\"query\":\"renewal\"}")),

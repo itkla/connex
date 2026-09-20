@@ -38,6 +38,32 @@ class AiChatProgressServiceTest {
                 service.project(3, 5, 7, "running"));
     }
 
+    /**
+     * A {@code find_tools} row raises no milestone, because the loop publishes no step frame for
+     * it. Projecting one would show its unmapped {@code other} category on reload that no live
+     * frame ever raised, so the coverage strip and the reloaded transcript would disagree over a
+     * step that read nothing.
+     */
+    @Test
+    void aFindToolsRowRaisesNoMilestoneSoLiveAndSettledCoverageAgree() {
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", 64))
+                .thenReturn(List.of(
+                        toolCall(1, AiAssistantToolCatalog.FIND_TOOLS, "executed",
+                                "{\"loaded\":\"analytics\",\"active\":[\"core\",\"analytics\"]}"),
+                        toolCall(2, "aggregate_metric", "executed", "{\"metrics\":[{}]}")));
+
+        assertEquals(
+                List.of(
+                        new AiChatProgressItemDto(0, "scope", "complete", null, false),
+                        new AiChatProgressItemDto(2, "metrics", "complete", null, false),
+                        new AiChatProgressItemDto(65, "answer", "complete", null, false)),
+                service.project(3, 5, 7, "resolved"));
+        assertEquals(
+                "other",
+                AiChatProgressService.sourceForTool(AiAssistantToolCatalog.FIND_TOOLS),
+                "sourceForTool stays untouched; the row is skipped, never categorized");
+    }
+
     @Test
     void realtimeProjectionRemovesInternalToolAndFailureDetails() {
         AiChatStepFrameDto projected = AiChatProgressService.viewerFrame(
