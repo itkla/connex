@@ -202,7 +202,7 @@ test.describe("Ask Connex scripted trajectory", () => {
                 && response.url().includes(`/api/ai/assistant/sessions/${sessionId}/turns`));
             await composer.click();
             await page.keyboard.type(`${SELECTOR} check ${CONTACT_QUERY} before I call them`);
-            await page.keyboard.press("Enter");
+            await page.getByRole("button", { name: copy("send") }).click();
             const { turnId } = (await (await accepted).json()) as { turnId: number };
             expect(turnId).toBeGreaterThan(0);
 
