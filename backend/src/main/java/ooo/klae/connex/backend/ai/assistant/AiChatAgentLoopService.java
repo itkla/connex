@@ -186,7 +186,7 @@ public class AiChatAgentLoopService {
             Map<Integer, AiToolCall> nativeCalls = new HashMap<>();
             boolean nativeTools = memory.nativeTools();
             List<AiToolDefinition> nativeDefinitions = nativeTools
-                    ? promptAssembler.nativeToolDefinitions()
+                    ? promptAssembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL)
                     : List.of();
             Map<String, AiAssistantToolResult> toolResultCache = new HashMap<>();
             Set<String> seenToolResults = new HashSet<>();
@@ -309,7 +309,8 @@ public class AiChatAgentLoopService {
                                     attachmentContext.data(),
                                     memory.budget(),
                                     stepRepair,
-                                    stepContext);
+                                    stepContext,
+                                    AiAssistantToolCatalog.ALL);
                     AiAssistantPromptAssembler.NativeReplay nativeReplay = nativeTools
                             ? promptAssembler.nativeReplay(
                                     toolTurns,
@@ -340,7 +341,8 @@ public class AiChatAgentLoopService {
                         streamingObserver = streamingProgress.observer(nativeTools);
                         invocation = invocation.withStreamObserver(streamingObserver);
                     }
-                    AiRawOutputGuard outputGuard = stepGuard.forIssuedPlaceholders(
+                    AiRawOutputGuard outputGuard = stepGuard.forStep(
+                            AiAssistantToolCatalog.ALL,
                             maskingContext.tokenBindings().stream()
                                     .map(Map.Entry::getKey)
                                     .collect(Collectors.toUnmodifiableSet()));
@@ -387,7 +389,8 @@ public class AiChatAgentLoopService {
                                     outputGuard,
                                     closing
                                             ? stepSchema.closingResponseSchema()
-                                            : stepSchema.responseSchema(),
+                                            : stepSchema.responseSchema(
+                                                    AiAssistantToolCatalog.ALL),
                                     admission,
                                     providerGuard);
                         }

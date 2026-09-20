@@ -5,12 +5,14 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiStructuredRepair;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolResult.Identifier;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
@@ -222,9 +224,11 @@ public class AiAssistantPromptAssembler {
             AiAssistantToolResult pageContext,
             List<ToolTurn> toolTurns,
             MaskingContext context,
-            AiChatResourceRegistry resources) {
+            AiChatResourceRegistry resources,
+            Set<Toolset> loadedToolsets) {
         return assemble(
-                history, pageContext, toolTurns, context, resources, List.of(), null);
+                history, pageContext, toolTurns, context, resources,
+                List.of(), null, loadedToolsets);
     }
 
     /** Assembles one step with an optional bounded schema-repair request. */
@@ -234,10 +238,11 @@ public class AiAssistantPromptAssembler {
             List<ToolTurn> toolTurns,
             MaskingContext context,
             AiChatResourceRegistry resources,
-            AiStructuredRepair repair) {
+            AiStructuredRepair repair,
+            Set<Toolset> loadedToolsets) {
         return assemble(
                 history, pageContext, toolTurns, context, resources,
-                List.of(), UNBOUNDED_BUDGET, repair);
+                List.of(), UNBOUNDED_BUDGET, repair, loadedToolsets);
     }
 
     /** Assembles one step with independent provider-aware input budgets. */
@@ -248,10 +253,11 @@ public class AiAssistantPromptAssembler {
             MaskingContext context,
             AiChatResourceRegistry resources,
             AiAssistantPromptBudget budget,
-            AiStructuredRepair repair) {
+            AiStructuredRepair repair,
+            Set<Toolset> loadedToolsets) {
         return assemble(
                 history, pageContext, toolTurns, context, resources,
-                List.of(), budget, repair);
+                List.of(), budget, repair, loadedToolsets);
     }
 
     /** Assembles one step with bounded untrusted attachment data and optional schema repair. */
@@ -262,10 +268,11 @@ public class AiAssistantPromptAssembler {
             MaskingContext context,
             AiChatResourceRegistry resources,
             List<Map<String, Object>> attachmentData,
-            AiStructuredRepair repair) {
+            AiStructuredRepair repair,
+            Set<Toolset> loadedToolsets) {
         return assemble(
                 history, pageContext, toolTurns, context, resources,
-                attachmentData, UNBOUNDED_BUDGET, repair);
+                attachmentData, UNBOUNDED_BUDGET, repair, loadedToolsets);
     }
 
     /** Assembles one step with independently bounded history, attachments, context, and tools. */
@@ -277,10 +284,11 @@ public class AiAssistantPromptAssembler {
             AiChatResourceRegistry resources,
             List<Map<String, Object>> attachmentData,
             AiAssistantPromptBudget budget,
-            AiStructuredRepair repair) {
+            AiStructuredRepair repair,
+            Set<Toolset> loadedToolsets) {
         return assemble(
                 history, pageContext, toolTurns, context, resources,
-                attachmentData, budget, repair, SkillContext.NONE);
+                attachmentData, budget, repair, SkillContext.NONE, loadedToolsets);
     }
 
     /** Assembles one step that also carries a selected skill's contract and plan evidence. */
@@ -293,12 +301,13 @@ public class AiAssistantPromptAssembler {
             List<Map<String, Object>> attachmentData,
             AiAssistantPromptBudget budget,
             AiStructuredRepair repair,
-            SkillContext skill) {
+            SkillContext skill,
+            Set<Toolset> loadedToolsets) {
         seedIdentifiers(pageContext.identifiers(), context);
         for (ToolTurn turn : toolTurns) {
             seedIdentifiers(turn.result().identifiers(), context);
         }
-        String system = systemPrompt();
+        String system = systemPrompt(loadedToolsets);
         PromptAssembly.Builder prompt = PromptAssembly.builder(context).system(system);
         for (AiChatMessage message : history) {
             appendHistory(prompt, message, context, resources);
@@ -513,9 +522,12 @@ public class AiAssistantPromptAssembler {
         return new NativeReplay(exchanges, repairContent, bounded.audit());
     }
 
-    /** @return static executable native function definitions in stable catalog order */
-    public List<AiToolDefinition> nativeToolDefinitions() {
-        return toolCatalog.nativeDefinitions(objectMapper);
+    /**
+     * @param loadedToolsets the toolsets the turn currently holds
+     * @return executable native function definitions for those toolsets in stable catalog order
+     */
+    public List<AiToolDefinition> nativeToolDefinitions(Set<Toolset> loadedToolsets) {
+        return toolCatalog.nativeDefinitions(objectMapper, loadedToolsets);
     }
 
     /** Verifies that one prospective result can be replayed before its tool mutates tenant data. */
@@ -630,8 +642,10 @@ public class AiAssistantPromptAssembler {
     }
 
     /** Returns the fixed assistant system prompt for exact serialized-envelope budgeting. */
-    public MaskedPrompt fixedPrompt() {
-        return PromptAssembly.builder(new MaskingContext()).system(systemPrompt()).build();
+    public MaskedPrompt fixedPrompt(Set<Toolset> loadedToolsets) {
+        return PromptAssembly.builder(new MaskingContext())
+                .system(systemPrompt(loadedToolsets))
+                .build();
     }
 
     /** Returns the fixed native-tool prompt for exact serialized-envelope budgeting. */
@@ -1244,9 +1258,9 @@ public class AiAssistantPromptAssembler {
         return prompt.build();
     }
 
-    private List<Map<String, Object>> declaredToolCatalog() {
+    private List<Map<String, Object>> declaredToolCatalog(Set<Toolset> loadedToolsets) {
         List<Map<String, Object>> declared = new ArrayList<>();
-        for (AiAssistantToolCatalog.ToolSpec spec : toolCatalog.tools()) {
+        for (AiAssistantToolCatalog.ToolSpec spec : toolCatalog.tools(loadedToolsets)) {
             Map<String, Object> tool = new LinkedHashMap<>();
             tool.put("name", spec.name());
             tool.put("tier", spec.tier().name());
@@ -1282,9 +1296,9 @@ public class AiAssistantPromptAssembler {
         return declared.toString();
     }
 
-    private String systemPrompt() {
+    private String systemPrompt(Set<Toolset> loadedToolsets) {
         Map<String, Object> catalog = new LinkedHashMap<>();
-        catalog.put("tools", declaredToolCatalog());
+        catalog.put("tools", declaredToolCatalog(loadedToolsets));
         String serialized;
         try {
             serialized = objectMapper.writeValueAsString(catalog);

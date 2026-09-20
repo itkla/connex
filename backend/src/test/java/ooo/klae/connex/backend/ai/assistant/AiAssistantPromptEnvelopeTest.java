@@ -194,9 +194,9 @@ class AiAssistantPromptEnvelopeTest {
     private int reactEnvelopeBytes() {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("system", taggedSystemPrompt(
-                promptAssembler.fixedPrompt().getSystemPrompt()));
+                promptAssembler.fixedPrompt(AiAssistantToolCatalog.ALL).getSystemPrompt()));
         payload.put("messages", List.of());
-        payload.put("responseSchema", stepSchema.responseSchema().schema());
+        payload.put("responseSchema", stepSchema.responseSchema(AiAssistantToolCatalog.ALL).schema());
         return serializedBytes(payload);
     }
 
@@ -206,7 +206,7 @@ class AiAssistantPromptEnvelopeTest {
                 promptAssembler.fixedNativePrompt().getSystemPrompt()));
         payload.put("messages", List.of());
         payload.put("responseSchema", stepSchema.finalResponseSchema().schema());
-        payload.put("tools", promptAssembler.nativeToolDefinitions().stream()
+        payload.put("tools", promptAssembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL).stream()
                 .map(definition -> {
                     Map<String, Object> tool = new LinkedHashMap<>();
                     tool.put("name", definition.name());

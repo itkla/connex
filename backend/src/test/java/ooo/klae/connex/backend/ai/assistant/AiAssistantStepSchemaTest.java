@@ -39,8 +39,8 @@ class AiAssistantStepSchemaTest {
         AiAssistantStepSchema schema = new AiAssistantStepSchema(
                 objectMapper, new AiAssistantToolCatalog());
 
-        JsonNode root = schema.responseSchema().schema();
-        assertEquals("ask_connex_step", schema.responseSchema().name());
+        JsonNode root = schema.responseSchema(AiAssistantToolCatalog.ALL).schema();
+        assertEquals("ask_connex_step", schema.responseSchema(AiAssistantToolCatalog.ALL).name());
         assertEquals("object", root.path("type").asString());
         assertEquals(2, root.path("required").size());
         assertFalse(root.path("additionalProperties").asBoolean());

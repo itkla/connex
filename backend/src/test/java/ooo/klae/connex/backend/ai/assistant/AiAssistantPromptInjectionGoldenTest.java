@@ -94,7 +94,8 @@ class AiAssistantPromptInjectionGoldenTest {
 
         for (MaskedPrompt prompt : List.of(
                 assembler.assemble(List.of(user, assistant, summary), new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(), context, resources),
+                        List.of(), context, resources,
+                        AiAssistantToolCatalog.ALL),
                 assembler.assembleSummary(summary, List.of(user, assistant), context, resources))) {
             String input = mapper.writeValueAsString(prompt.getMessages());
             assertFalse(input.contains("John"));
@@ -125,7 +126,8 @@ class AiAssistantPromptInjectionGoldenTest {
         MaskingEngine.maskField(EntityKind.COMPANY, "r1 Logistics", context);
 
         MaskedPrompt prompt = assembler.assemble(List.of(assistant), new AiAssistantToolResult(Map.of(), List.of()),
-                List.of(), context, resources);
+                List.of(), context, resources,
+                AiAssistantToolCatalog.ALL);
         JsonNode content = mapper.readTree(prompt.getMessages().getFirst().getContent());
 
         assertEquals("{{C1}} says r2 needs follow-up; r3 is next.", content.get("content").asString());
@@ -159,7 +161,8 @@ class AiAssistantPromptInjectionGoldenTest {
         MaskingEngine.maskField(EntityKind.PERSON, "Johnathan Smith", context);
 
         MaskedPrompt replay = assembler.assemble(List.of(assistant), new AiAssistantToolResult(Map.of(), List.of()),
-                List.of(), context, resources);
+                List.of(), context, resources,
+                AiAssistantToolCatalog.ALL);
         JsonNode content = mapper.readTree(replay.getMessages().getFirst().getContent());
         String expected = "{{P1}} says {{C1}} needs follow-up; r2 is next.";
         assertEquals(expected, content.get("content").asString());
@@ -209,7 +212,8 @@ class AiAssistantPromptInjectionGoldenTest {
                                 new AiAssistantToolResult(Map.of(), List.of()),
                                 List.of(),
                                 context,
-                                new AiChatResourceRegistry())
+                                new AiChatResourceRegistry(),
+                                AiAssistantToolCatalog.ALL)
                         .getMessages());
 
         assertFalse(serialized.contains("Kenji Sato"));
@@ -288,7 +292,8 @@ class AiAssistantPromptInjectionGoldenTest {
                         new AiAssistantToolResult(Map.of(), List.of()),
                         List.of(new ToolTurn(1, "get_record", untrustedCrm)),
                         context,
-                        resources),
+                        resources,
+                        AiAssistantToolCatalog.ALL),
                 256,
                 0.1);
         var guard = new AiAssistantStepGuard(catalog);
@@ -371,7 +376,8 @@ class AiAssistantPromptInjectionGoldenTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(new ToolTurn(1, "get_record", injectedRecord)),
                 new MaskingContext(),
-                resources);
+                resources,
+                AiAssistantToolCatalog.ALL);
         String prompt = objectMapper.writeValueAsString(assembly.getMessages());
         JsonNode attempted = objectMapper.readTree(
                 "{\"tool\":{\"name\":\"assign_owner\",\"args\":{"

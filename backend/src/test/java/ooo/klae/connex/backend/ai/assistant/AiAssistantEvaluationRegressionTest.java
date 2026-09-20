@@ -204,7 +204,8 @@ class AiAssistantEvaluationRegressionTest {
                 untrustedData,
                 List.of(),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
         assertFalse(prompt.getSystemPrompt().contains(payload),
                 () -> "Injection reached system instructions in " + id);
         assertTrue(prompt.getMessages().stream().anyMatch(message -> message.getContent().contains(payload)),

@@ -23,8 +23,8 @@ class AiAssistantToolCatalogTest {
                         "aggregate_metric", "find_schedule_conflicts", "get_deal_brief",
                         "create_activity", "create_task", "create_note", "add_tag",
                         "change_deal_stage", "assign_owner"),
-                catalog.tools().stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
-        assertEquals(15, catalog.tools().stream()
+                catalog.tools(AiAssistantToolCatalog.ALL).stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
+        assertEquals(15, catalog.tools(AiAssistantToolCatalog.ALL).stream()
                 .filter(AiAssistantToolCatalog.ToolSpec::executable)
                 .count());
         assertTrue(catalog.isExecutable("find_schedule_conflicts"));
@@ -86,11 +86,11 @@ class AiAssistantToolCatalogTest {
 
     @Test
     void nativeDefinitionsMirrorExecutableCatalogSchemasWithoutReservedTools() {
-        var definitions = catalog.nativeDefinitions(objectMapper);
+        var definitions = catalog.nativeDefinitions(objectMapper, AiAssistantToolCatalog.ALL);
 
         assertEquals(15, definitions.size());
         assertEquals(
-                catalog.tools().stream()
+                catalog.tools(AiAssistantToolCatalog.ALL).stream()
                         .filter(AiAssistantToolCatalog.ToolSpec::executable)
                         .map(AiAssistantToolCatalog.ToolSpec::name)
                         .toList(),

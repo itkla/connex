@@ -383,7 +383,7 @@ class AiInvocationServiceTest {
         AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
         AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
         AiNativeToolRequest nativeTools = new AiNativeToolRequest(
-                catalog.nativeDefinitions(new ObjectMapper()), List.of());
+                catalog.nativeDefinitions(new ObjectMapper(), AiAssistantToolCatalog.ALL), List.of());
         providerReturns(new AiCompletionResult(
                 "",
                 12,
@@ -522,7 +522,7 @@ class AiInvocationServiceTest {
                         guard.finalAnswerForIssuedPlaceholders(Set.of("{{P1}}")),
                         schema.finalResponseSchema(),
                         new AiNativeToolRequest(
-                                catalog.nativeDefinitions(new ObjectMapper()), List.of()),
+                                catalog.nativeDefinitions(new ObjectMapper(), AiAssistantToolCatalog.ALL), List.of()),
                         directAdmission,
                         providerAttemptGuard);
 
@@ -701,8 +701,8 @@ class AiInvocationServiceTest {
         var promptAssembler = new AiAssistantPromptAssembler(new ObjectMapper(), catalog);
         var stepSchema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
         int fixedEnvelopeBytes = service.serializedPromptBytes(
-                promptAssembler.fixedPrompt(),
-                stepSchema.responseSchema(),
+                promptAssembler.fixedPrompt(AiAssistantToolCatalog.ALL),
+                stepSchema.responseSchema(AiAssistantToolCatalog.ALL),
                 AiReasoningMode.TAGGED);
 
         AiAssistantLoopException refused = assertThrows(
@@ -744,8 +744,8 @@ class AiInvocationServiceTest {
         var promptAssembler = new AiAssistantPromptAssembler(new ObjectMapper(), catalog);
         var stepSchema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
         int fixedEnvelopeBytes = service.serializedPromptBytes(
-                promptAssembler.fixedPrompt(),
-                stepSchema.responseSchema(),
+                promptAssembler.fixedPrompt(AiAssistantToolCatalog.ALL),
+                stepSchema.responseSchema(AiAssistantToolCatalog.ALL),
                 AiReasoningMode.TAGGED);
         AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
                 new AiProviderCapabilities(
@@ -774,7 +774,8 @@ class AiInvocationServiceTest {
                 context,
                 new AiChatResourceRegistry(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         providerReturns(new AiCompletionResult(
                 "{\"tool\":null,\"final\":{\"text\":\"One relationship is cooling.\","
                         + "\"citations\":[],\"suggestions\":[],\"title\":null}}",
@@ -797,12 +798,12 @@ class AiInvocationServiceTest {
                         invocation,
                         AiAssistantStep.class,
                         new AiAssistantStepGuard(catalog),
-                        stepSchema.responseSchema(),
+                        stepSchema.responseSchema(AiAssistantToolCatalog.ALL),
                         directAdmission);
 
         assertInstanceOf(AiStructuredOutcome.Parsed.class, attempt.outcome());
         assertTrue(service.serializedPromptBytes(
-                prompt, stepSchema.responseSchema(), AiReasoningMode.TAGGED)
+                prompt, stepSchema.responseSchema(AiAssistantToolCatalog.ALL), AiReasoningMode.TAGGED)
                 <= AiProviderCapabilities.conservativeInputByteCeiling(
                         ASSISTANT_FLOOR, budget.maxOutputTokens()),
                 "The floor must admit the real first-tool-result prompt with dense-input room,"
@@ -825,7 +826,7 @@ class AiInvocationServiceTest {
                 AiToolCallingMode.NATIVE_FUNCTIONS,
                 AiReasoningMode.NATIVE);
         AiNativeToolRequest fixedTools = new AiNativeToolRequest(
-                promptAssembler.nativeToolDefinitions(), List.of());
+                promptAssembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL), List.of());
         int fixedEnvelopeBytes = service.serializedPromptBytes(
                 promptAssembler.fixedNativePrompt(),
                 stepSchema.finalResponseSchema(),
@@ -862,7 +863,7 @@ class AiInvocationServiceTest {
                         + "\"kinds\":[\"person\"]}",
                 "opaque-signature /+==");
         AiNativeToolRequest request = new AiNativeToolRequest(
-                promptAssembler.nativeToolDefinitions(),
+                promptAssembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL),
                 promptAssembler.nativeReplay(
                         turns,
                         Map.of(1, call),
@@ -913,7 +914,7 @@ class AiInvocationServiceTest {
         AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
         AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
         AiNativeToolRequest nativeTools = new AiNativeToolRequest(
-                catalog.nativeDefinitions(new ObjectMapper()),
+                catalog.nativeDefinitions(new ObjectMapper(), AiAssistantToolCatalog.ALL),
                 List.of(new AiToolExchange(
                         new AiToolCall(
                                 "call_1", "search_records",
@@ -2029,7 +2030,7 @@ class AiInvocationServiceTest {
         AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
         AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
         AiNativeToolRequest nativeTools = new AiNativeToolRequest(
-                catalog.nativeDefinitions(new ObjectMapper()), List.of());
+                catalog.nativeDefinitions(new ObjectMapper(), AiAssistantToolCatalog.ALL), List.of());
         providerReturns(new AiCompletionResult(
                 "", 12, 7, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA, "",
                 AiReasoningMode.NONE,
@@ -2072,7 +2073,7 @@ class AiInvocationServiceTest {
         AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
         AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
         AiNativeToolRequest nativeTools = new AiNativeToolRequest(
-                catalog.nativeDefinitions(new ObjectMapper()),
+                catalog.nativeDefinitions(new ObjectMapper(), AiAssistantToolCatalog.ALL),
                 List.of(new AiToolExchange(
                         new AiToolCall(
                                 "call_1", "search_records",

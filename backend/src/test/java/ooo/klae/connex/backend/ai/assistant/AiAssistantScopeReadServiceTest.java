@@ -178,7 +178,8 @@ class AiAssistantScopeReadServiceTest {
                 mapper, new AiAssistantToolCatalog()).assemble(
                         List.of(), new AiAssistantToolResult(Map.of(), List.of()),
                         List.of(new AiAssistantPromptAssembler.ToolTurn(1, "scope_activities", result)),
-                        context, resources).getMessages());
+                        context, resources,
+                        AiAssistantToolCatalog.ALL).getMessages());
 
         assertFalse(providerInput.contains("Johnathan Smith"));
         assertFalse(providerInput.contains("Johnathan Smit"));
