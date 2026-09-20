@@ -21,7 +21,7 @@ import {
     validateResetToken,
 } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
-import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
+import { useOneTimeLinkEntry } from "@/app/hooks/useOneTimeLinkEntry";
 import { toastSuccess } from "@/app/lib/toast";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
@@ -48,7 +48,7 @@ export function ResetPasswordForm() {
     const [mismatch, setMismatch] = useState(false);
     const { fieldErrors, setFieldErrors, reset, clearError, captureFieldErrors } = useFieldErrors();
 
-    useReloadOnFragmentNavigation();
+    useOneTimeLinkEntry();
 
     useEffect(() => {
         let active = true;

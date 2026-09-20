@@ -10,7 +10,7 @@ import PermissionsUnavailable from "@/app/components/PermissionsUnavailable";
 import WorkspaceUnavailableRetry from "@/app/components/WorkspaceUnavailableRetry";
 import { ApiError, exchangeInviteLinkToken, getInviteLinkPreview, me } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
-import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
+import { useOneTimeLinkEntry } from "@/app/hooks/useOneTimeLinkEntry";
 import type { InviteLinkPreview, WorkspaceRole } from "@/app/lib/types";
 
 type InviteLinkPageState =
@@ -35,7 +35,7 @@ export default function InviteLinkPage() {
     const [attempt, setAttempt] = useState(0);
     const retainedBearer = useRef<string | null>(null);
 
-    useReloadOnFragmentNavigation();
+    useOneTimeLinkEntry();
 
     useEffect(() => {
         let active = true;
