@@ -124,6 +124,7 @@ public final class TablePlaneRegistry {
         "ai_chat_tool_call",
         "ai_chat_turn",
         "ai_output_cache",
+        "ai_run_lease",
         "ai_watch",
         "ai_workspace_governance",
         "approval_policy",
