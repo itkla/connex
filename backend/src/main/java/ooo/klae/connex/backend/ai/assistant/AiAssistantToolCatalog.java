@@ -99,6 +99,21 @@ public class AiAssistantToolCatalog {
      */
     public static final int MAX_ACTIVE_TOOLSETS_PER_TURN = 2;
 
+    /**
+     * Extra loadable toolsets the reservation carries beyond {@link #MAX_ACTIVE_TOOLSETS_PER_TURN}.
+     *
+     * <p>The weight proxy below is not a byte count, and it cannot be: the two protocols serialize
+     * different things. A reserved, non-executable tool costs the JSON-ReAct vocabulary but never
+     * reaches the native definitions, and a closed enum costs the proxy one unit per value while
+     * costing a prompt only a short string. Measured on the current catalog the two protocols rank
+     * the families differently — JSON-ReAct is heaviest on {@code analytics} with
+     * {@code write_activity}, native on {@code write_activity} with {@code write_content} — so no
+     * single choice of {@link #MAX_ACTIVE_TOOLSETS_PER_TURN} toolsets dominates both. One toolset
+     * of headroom does, and {@code AiAssistantPromptEnvelopeTest} measures every reachable
+     * combination on both protocols to prove it rather than assume it.
+     */
+    public static final int RESERVATION_HEADROOM_TOOLSETS = 1;
+
     /** One stable tool key, its toolset, and its execution availability. */
     public record ToolSpec(
             String name,
@@ -160,10 +175,16 @@ public class AiAssistantToolCatalog {
      * The worst-case loaded set a turn can reach, used to size the one prompt budget a turn gets.
      *
      * <p>It is {@link #CORE} plus the {@link #MAX_ACTIVE_TOOLSETS_PER_TURN} weightiest loadable
-     * toolsets. Weight is a pure-catalog proxy — per tool, one for the declaration plus one per
-     * argument plus one per closed enum value — because the catalog cannot serialize a prompt.
+     * toolsets and {@link #RESERVATION_HEADROOM_TOOLSETS} more. Weight is a pure-catalog proxy —
+     * per tool, one for the declaration plus one per argument plus one per closed enum value —
+     * because the catalog cannot serialize a prompt, which is why the headroom exists.
      * {@code AiAssistantPromptEnvelopeTest} measures the true envelope for every reachable
-     * combination and fails loudly if the proxy ever stops picking the real maximum.
+     * combination on both protocols and fails loudly, with the numbers printed, if this ever stops
+     * dominating them.
+     *
+     * <p>It still grows with the largest declared families rather than with the catalog, which is
+     * the point: reserving for every tool would fail the context floor as soon as the write
+     * vocabulary grows, even though no turn would ever send those bytes.
      *
      * @return the toolsets the fixed envelope must be measured against
      */
@@ -172,7 +193,7 @@ public class AiAssistantToolCatalog {
         LOADABLE.stream()
                 .sorted(Comparator.comparingInt(this::toolsetWeight).reversed()
                         .thenComparing(Comparator.comparingInt(Toolset::ordinal)))
-                .limit(MAX_ACTIVE_TOOLSETS_PER_TURN)
+                .limit(MAX_ACTIVE_TOOLSETS_PER_TURN + RESERVATION_HEADROOM_TOOLSETS)
                 .forEach(reservation::add);
         return Collections.unmodifiableSet(reservation);
     }

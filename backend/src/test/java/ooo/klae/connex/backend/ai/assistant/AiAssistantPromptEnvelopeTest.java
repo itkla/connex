@@ -1,17 +1,21 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.ai.AiInvocationService;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
@@ -50,6 +54,15 @@ class AiAssistantPromptEnvelopeTest {
      * margin of 350 — the same figure that was a 32k model's entire answer budget.
      */
     private static final int MINIMUM_FLOOR_OUTPUT_TOKENS = 2 * CONFIGURED_MAX_OUTPUT_TOKENS;
+
+    /**
+     * The most one loadable toolset may add to either serialized envelope.
+     *
+     * <p>Sized above today's widest family with room for it to grow, and well under the margin the
+     * reservation leaves at the floor, so a family that outgrows it is split rather than quietly
+     * eating the answer budget.
+     */
+    private static final int MAX_TOOLSET_ENVELOPE_BYTES = 4_096;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AiAssistantToolCatalog toolCatalog = new AiAssistantToolCatalog();
@@ -165,6 +178,125 @@ class AiAssistantPromptEnvelopeTest {
                         + atMillion.pageContextBytes() + atMillion.toolResultBytes());
     }
 
+    /**
+     * Pins the two ends of the loaded-set range by the names they actually carry.
+     *
+     * <p>A byte threshold alone would not notice a wiring that quietly reverted to the whole
+     * catalog while still fitting the floor. Asserting the definition names, and that a core-only
+     * ReAct prompt never mentions a non-core tool, fails on the defect rather than on its size.
+     */
+    @Test
+    void theCoreAndReservationEnvelopesCarryExactlyTheToolsTheyDeclare() {
+        assertEquals(
+                List.of("search_records", "get_record", "get_records", "set_todos",
+                        "list_activities", "list_tasks", "list_scope_activities"),
+                promptAssembler.nativeToolDefinitions(AiAssistantToolCatalog.CORE).stream()
+                        .map(definition -> definition.name())
+                        .toList());
+        assertEquals(
+                toolCatalog.nativeDefinitions(objectMapper, toolCatalog.reservationToolsets())
+                        .stream()
+                        .map(definition -> definition.name())
+                        .toList(),
+                promptAssembler.nativeToolDefinitions(toolCatalog.reservationToolsets()).stream()
+                        .map(definition -> definition.name())
+                        .toList());
+
+        String coreReactPrompt =
+                promptAssembler.fixedPrompt(AiAssistantToolCatalog.CORE).getSystemPrompt();
+        for (var spec : toolCatalog.tools(AiAssistantToolCatalog.ALL)) {
+            if (AiAssistantToolCatalog.CORE.contains(spec.toolset())) {
+                assertTrue(coreReactPrompt.contains(spec.name()),
+                        spec.name() + " is core and must stay in the core vocabulary");
+                continue;
+            }
+            assertFalse(coreReactPrompt.contains(spec.name()),
+                    spec.name() + " leaked into the core-only prompt vocabulary");
+        }
+    }
+
+    /**
+     * The turn gets one budget, measured once from {@code reservationToolsets()}, so that
+     * measurement has to dominate every loaded set a turn can actually reach.
+     *
+     * <p>{@code reservationToolsets()} picks its two toolsets by a pure-catalog weight proxy,
+     * because the catalog cannot serialize a prompt. This measures the real envelope for every
+     * reachable pair on both protocols instead of trusting the proxy: if a future toolset makes
+     * the proxy pick the wrong pair, the budget would silently under-reserve, and this fails with
+     * the numbers printed rather than starving a turn.
+     */
+    @Test
+    void theReservationEnvelopeDominatesEveryReachableLoadedSet() {
+        int reservationReact = reactEnvelopeBytes(toolCatalog.reservationToolsets());
+        int reservationNative = nativeEnvelopeBytes(toolCatalog.reservationToolsets());
+        List<Toolset> loadable = AiAssistantToolCatalog.LOADABLE;
+
+        for (int first = 0; first < loadable.size(); first++) {
+            for (int second = first + 1; second < loadable.size(); second++) {
+                Set<Toolset> pair = loaded(loadable.get(first), loadable.get(second));
+                int react = reactEnvelopeBytes(pair);
+                int nativeBytes = nativeEnvelopeBytes(pair);
+                System.out.println("[envelope] pair=" + pair
+                        + " react=" + react + " native=" + nativeBytes);
+                assertTrue(react <= reservationReact,
+                        () -> "loaded set " + pair + " serializes " + react
+                                + " JSON-ReAct bytes, more than the reserved "
+                                + reservationReact);
+                assertTrue(nativeBytes <= reservationNative,
+                        () -> "loaded set " + pair + " serializes " + nativeBytes
+                                + " native bytes, more than the reserved " + reservationNative);
+            }
+        }
+
+        System.out.println("[envelope] reservation=" + toolCatalog.reservationToolsets()
+                + " react=" + reservationReact + " native=" + reservationNative
+                + " fullCatalogReact=" + reactEnvelopeBytes()
+                + " fullCatalogNative=" + nativeEnvelopeBytes());
+        assertTrue(reservationReact < reactEnvelopeBytes(),
+                "the reservation must cost less than today's whole-catalog envelope");
+        assertTrue(reservationNative < nativeEnvelopeBytes(),
+                "the reservation must cost less than today's whole-catalog envelope");
+        assertTrue(unclampedFloorOutputTokens(reservationReact) >= MINIMUM_FLOOR_OUTPUT_TOKENS,
+                "the reserved JSON-ReAct envelope of " + reservationReact
+                        + " bytes starves the answer budget at the "
+                        + FLOOR_CONTEXT_TOKENS + "-token floor");
+        assertTrue(unclampedFloorOutputTokens(reservationNative) >= MINIMUM_FLOOR_OUTPUT_TOKENS,
+                "the reserved native envelope of " + reservationNative
+                        + " bytes starves the answer budget at the "
+                        + FLOOR_CONTEXT_TOKENS + "-token floor");
+    }
+
+    /**
+     * Bounds what one toolset may cost the envelope when it is loaded.
+     *
+     * <p>The reservation grows with the biggest declared family rather than with the catalog, so a
+     * family that grows past this ceiling has to be split rather than silently pushing the
+     * reservation back toward the floor.
+     */
+    @Test
+    void noSingleToolsetCostsMoreThanItsDeclaredEnvelopeCeiling() {
+        int coreReact = reactEnvelopeBytes(AiAssistantToolCatalog.CORE);
+        int coreNative = nativeEnvelopeBytes(AiAssistantToolCatalog.CORE);
+        System.out.println("[envelope] core react=" + coreReact + " native=" + coreNative);
+
+        for (Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+            int reactDelta = reactEnvelopeBytes(loaded(toolset)) - coreReact;
+            int nativeDelta = nativeEnvelopeBytes(loaded(toolset)) - coreNative;
+            System.out.println("[envelope] " + toolset.key()
+                    + " reactDelta=" + reactDelta + " nativeDelta=" + nativeDelta);
+            assertTrue(reactDelta > 0,
+                    () -> toolset.key() + " adds no tools to the JSON-ReAct vocabulary");
+            assertTrue(reactDelta <= MAX_TOOLSET_ENVELOPE_BYTES,
+                    () -> toolset.key() + " costs " + reactDelta
+                            + " JSON-ReAct bytes, past the "
+                            + MAX_TOOLSET_ENVELOPE_BYTES + "-byte per-toolset ceiling");
+            assertTrue(nativeDelta <= MAX_TOOLSET_ENVELOPE_BYTES,
+                    () -> toolset.key() + " costs " + nativeDelta
+                            + " native bytes, past the "
+                            + MAX_TOOLSET_ENVELOPE_BYTES + "-byte per-toolset ceiling");
+        }
+    }
+
     private static AiAssistantPromptBudget budget(int fixedEnvelopeBytes) {
         return AiAssistantPromptBudget.from(
                 capabilities(PROVIDER_MAX_OUTPUT_TOKENS),
@@ -192,21 +324,29 @@ class AiAssistantPromptEnvelopeTest {
     }
 
     private int reactEnvelopeBytes() {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("system", taggedSystemPrompt(
-                promptAssembler.fixedPrompt(AiAssistantToolCatalog.ALL).getSystemPrompt()));
-        payload.put("messages", List.of());
-        payload.put("responseSchema", stepSchema.responseSchema(AiAssistantToolCatalog.ALL).schema());
-        return serializedBytes(payload);
+        return reactEnvelopeBytes(AiAssistantToolCatalog.ALL);
     }
 
     private int nativeEnvelopeBytes() {
+        return nativeEnvelopeBytes(AiAssistantToolCatalog.ALL);
+    }
+
+    private int reactEnvelopeBytes(Set<Toolset> loadedToolsets) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("system", taggedSystemPrompt(
+                promptAssembler.fixedPrompt(loadedToolsets).getSystemPrompt()));
+        payload.put("messages", List.of());
+        payload.put("responseSchema", stepSchema.responseSchema(loadedToolsets).schema());
+        return serializedBytes(payload);
+    }
+
+    private int nativeEnvelopeBytes(Set<Toolset> loadedToolsets) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("system", taggedSystemPrompt(
                 promptAssembler.fixedNativePrompt().getSystemPrompt()));
         payload.put("messages", List.of());
         payload.put("responseSchema", stepSchema.finalResponseSchema().schema());
-        payload.put("tools", promptAssembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL).stream()
+        payload.put("tools", promptAssembler.nativeToolDefinitions(loadedToolsets).stream()
                 .map(definition -> {
                     Map<String, Object> tool = new LinkedHashMap<>();
                     tool.put("name", definition.name());
@@ -217,6 +357,12 @@ class AiAssistantPromptEnvelopeTest {
                 .toList());
         payload.put("toolExchanges", List.of());
         return serializedBytes(payload);
+    }
+
+    private static Set<Toolset> loaded(Toolset... loadable) {
+        Set<Toolset> toolsets = new LinkedHashSet<>(AiAssistantToolCatalog.CORE);
+        toolsets.addAll(List.of(loadable));
+        return toolsets;
     }
 
     private static String taggedSystemPrompt(String systemPrompt) {

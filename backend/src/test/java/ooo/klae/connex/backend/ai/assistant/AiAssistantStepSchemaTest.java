@@ -4,8 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.LinkedHashSet;
+import java.util.Set;
+
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -60,5 +64,46 @@ class AiAssistantStepSchemaTest {
         assertEquals(2, finalShape.path("properties").path("title").path("anyOf").size());
         assertFalse(finalShape.path("properties").has("blocks"));
         assertFalse(finalShape.path("properties").has("coverage"));
+    }
+
+    /**
+     * The strict step schema is a function of the turn's loaded toolsets: a core-only step cannot
+     * even express a tool the turn has not loaded, and loading one widens the branches by exactly
+     * that toolset's declared tools.
+     */
+    @Test
+    void theToolBranchesTrackTheLoadedToolsets() {
+        AiAssistantStepSchema schema = new AiAssistantStepSchema(
+                objectMapper, new AiAssistantToolCatalog());
+
+        String core = schema.responseSchema(AiAssistantToolCatalog.CORE)
+                .schema().path("properties").path("tool").toString();
+        assertTrue(core.contains("search_records"));
+        assertTrue(core.contains("list_tasks"));
+        assertFalse(core.contains("aggregate_metric"));
+        assertFalse(core.contains("get_deal_brief"));
+        assertFalse(core.contains("create_note"));
+
+        Set<Toolset> withAnalytics = new LinkedHashSet<>(AiAssistantToolCatalog.CORE);
+        withAnalytics.add(Toolset.ANALYTICS);
+        String widened = schema.responseSchema(withAnalytics)
+                .schema().path("properties").path("tool").toString();
+        assertTrue(widened.contains("aggregate_metric"));
+        assertTrue(widened.contains("get_deal_brief"));
+        assertFalse(widened.contains("create_note"));
+        assertEquals(
+                coreBranches(schema) + 2,
+                schema.responseSchema(withAnalytics).schema()
+                        .path("properties").path("tool").path("anyOf").path(1).path("anyOf")
+                        .size());
+
+        String closing = schema.closingResponseSchema().schema()
+                .path("properties").path("tool").toString();
+        assertFalse(closing.contains("search_records"));
+    }
+
+    private static int coreBranches(AiAssistantStepSchema schema) {
+        return schema.responseSchema(AiAssistantToolCatalog.CORE).schema()
+                .path("properties").path("tool").path("anyOf").path(1).path("anyOf").size();
     }
 }

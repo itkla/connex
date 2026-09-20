@@ -4,9 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.LinkedHashSet;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 
 import tools.jackson.databind.json.JsonMapper;
 
@@ -100,5 +103,49 @@ class AiAssistantStepGuardTest {
                 + "\",\"citations\":" + citations
                 + ",\"suggestions\":" + suggestions
                 + ",\"title\":" + title + "}}";
+    }
+
+    /**
+     * The raw guard is the first rejection of a tool the turn has not loaded, and it reuses
+     * {@code tool_name} deliberately: that verdict already drives a schema repair on the ReAct
+     * protocol and {@code native_unknown_tool} on the native one, which are the right recoveries.
+     */
+    @Test
+    void theStepGuardRejectsADeclaredToolOutsideTheLoadedToolsets() throws Exception {
+        var analyticsStep = objectMapper.readTree(
+                "{\"tool\":{\"name\":\"aggregate_metric\",\"args\":"
+                        + "{\"metric\":\"deal_metrics\"}},\"final\":null}");
+        Set<Toolset> withAnalytics = new LinkedHashSet<>(AiAssistantToolCatalog.CORE);
+        withAnalytics.add(Toolset.ANALYTICS);
+
+        assertEquals("tool_name", guard.forStep(AiAssistantToolCatalog.CORE, Set.of())
+                .rejectionReason(analyticsStep));
+        assertTrue(guard.forStep(withAnalytics, Set.of()).permits(analyticsStep));
+        assertTrue(guard.forStep(AiAssistantToolCatalog.CORE, Set.of()).permits(
+                objectMapper.readTree(
+                        "{\"tool\":{\"name\":\"list_tasks\",\"args\":"
+                                + "{\"handle\":\"r1\"}},\"final\":null}")));
+    }
+
+    /** Narrowing the vocabulary must not change any verdict the loaded set has no say over. */
+    @Test
+    void theStepGuardKeepsEveryVerdictTheLoadedSetDoesNotOwn() throws Exception {
+        var unknown = objectMapper.readTree(
+                "{\"tool\":{\"name\":\"delete_record\",\"args\":{}},\"final\":null}");
+        var badArguments = objectMapper.readTree(
+                "{\"tool\":{\"name\":\"get_record\",\"args\":{\"handle\":\"raw-id\"}},"
+                        + "\"final\":null}");
+
+        assertEquals("tool_name", guard.forStep(AiAssistantToolCatalog.ALL, Set.of())
+                .rejectionReason(unknown));
+        assertEquals("tool_arguments", guard.forStep(AiAssistantToolCatalog.CORE, Set.of())
+                .rejectionReason(badArguments));
+        assertEquals("bare_placeholder",
+                guard.forStep(AiAssistantToolCatalog.CORE, Set.of("{{P1}}"))
+                        .rejectionReason(objectMapper.readTree(
+                                finalStep("Ask P1", "[]", "[]", "null"))));
+        assertTrue(guard.forStep(AiAssistantToolCatalog.CORE, Set.of("{{P1}}"))
+                .permits(objectMapper.readTree(
+                        finalStep("Ask {{ P1 }}", "[]", "[]", "null"))));
     }
 }
