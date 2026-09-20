@@ -63,19 +63,34 @@ public class AiRunLeaseService {
      * as the same {@link ConflictException} a live lease produces, rather than as a raw data-access
      * failure no caller's contract describes.
      *
+     * <p>This method also anchors the caller's self-fence, and the instant it anchors on is the
+     * whole point: the guard's clock is read after the row lock has been granted and immediately
+     * before the write that makes MySQL stamp {@code expires_at}. Anchoring earlier — when the
+     * guard was constructed, or at the start of a claim that then waits behind the membership and
+     * subject row locks — would spend that wait out of a lifetime the database has not started
+     * counting yet, and could stop a healthy run before its first heartbeat. Anchoring later —
+     * after the write, or when the heartbeat schedule starts — would put the local deadline after
+     * the database's, so a worker paused between the two would answer healthy while a settler was
+     * already entitled to take the run over. Only the instant just before the write is at or
+     * before every deadline the database can assign.
+     *
      * @param key the lease key
+     * @param guard the claimant's ownership flag, anchored here on the instant the lease write is
+     *     issued
      * @return the fencing token this instance now holds
      * @throws ConflictException when a live lease already holds the subject, or when a concurrent
      *     first claimant won the race to insert it
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    public AiRunLease acquireInCurrentTransaction(AiRunLeaseKey key) {
+    public AiRunLease acquireInCurrentTransaction(AiRunLeaseKey key, AiRunLeaseGuard guard) {
         Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(guard, "guard");
         String owner = identity.owner();
         int ttlSeconds = seconds(properties.getRunLeaseTtl());
         AiRunLeaseRow existing = leaseMapper.lockForUpdate(
                 key.workspaceId(), key.subject().wireKey(), key.subjectId());
         long epoch;
+        guard.recordRenewal(guard.clockNanos());
         if (existing == null) {
             insertFirstClaim(key, owner, ttlSeconds);
             epoch = 1L;
@@ -118,6 +133,22 @@ public class AiRunLeaseService {
 
     /**
      * Extends one lease in its own short transaction.
+     *
+     * <p>A renewal whose row has already passed its deadline is refused rather than resurrected,
+     * and that refusal is in SQL because the database is the only clock every instance shares. An
+     * expired row is one a settler is already entitled to take over, so letting a returning owner
+     * push the deadline out would make "expired" mean nothing for as long as the owner kept
+     * missing beats and winning the race to renew. With the claim's conservative anchor a
+     * well-behaved owner has self-fenced long before this predicate can fire; it exists for the
+     * one case the local anchor cannot cover, a monotonic clock that did not advance across a
+     * suspended host.
+     *
+     * <p>It does not weaken the failure discipline this heartbeat rests on. A renewal that
+     * <em>throws</em> is still unknown and still retried; only a renewal that ran and matched no
+     * row is reported {@link AiRunLeaseOutcome#LOST}, and an expired row is exactly that — a row
+     * this owner may no longer act on. The structural guard in {@code AiRunLeaseIntegrationTest}
+     * is unaffected: the predicate reads {@code expires_at}, it does not assign it, and the
+     * deadline this statement writes is still {@code GREATEST(DATE_ADD(CURRENT_TIMESTAMP(6), …))}.
      *
      * @param lease the fencing token to extend
      * @return {@link AiRunLeaseOutcome#HELD} when the renewal matched, {@link

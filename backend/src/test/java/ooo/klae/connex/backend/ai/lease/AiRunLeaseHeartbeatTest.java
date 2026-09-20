@@ -218,23 +218,26 @@ class AiRunLeaseHeartbeatTest {
     }
 
     /**
-     * A caller builds its guard before the claim, because the claim can refuse and the failure
-     * path reads the guard. The claim itself waits behind the membership and subject row locks, so
-     * a guard left anchored at construction spends that wait out of the lease lifetime and can
-     * stop a freshly leased run before its heartbeat has ticked once — for a lease whose database
-     * deadline is a full lifetime away.
+     * Starting a heartbeat may never move the anchor the claim set. The claim reads the guard's
+     * clock immediately before it writes the lease, so that anchor is at or before the deadline
+     * MySQL assigned; a worker descheduled between the claim's commit and this call would
+     * otherwise re-anchor on a later reading and report itself healthy over a lease a settler is
+     * already entitled to take over.
      */
     @Test
-    void startingAHeartbeatReanchorsTheSelfFenceOnTheFreshlyClaimedLease() throws Exception {
+    void startingAHeartbeatNeverMovesTheAnchorTheClaimSet() throws Exception {
         AtomicLong nanos = new AtomicLong();
         AiRunLeaseGuard guard = new AiRunLeaseGuard(properties.getRunLeaseTtl(), nanos::get);
-        nanos.set(properties.getRunLeaseTtl().toNanos() * 2L);
+        guard.recordRenewal(guard.clockNanos());
+        nanos.set(properties.getRunLeaseTtl().toNanos() + 1L);
 
         AutoCloseable handle = newHeartbeat().start(LEASE, guard);
 
-        assertFalse(
+        assertTrue(
                 guard.isStopped(),
-                "A claim slower than the lease lifetime must not stop the run it just leased");
+                "A worker paused past the lease lifetime must not be re-anchored by starting"
+                        + " its heartbeat");
+        assertEquals(Optional.of(AiRunLeaseGuard.RENEW_GAP), guard.reason());
         handle.close();
     }
 

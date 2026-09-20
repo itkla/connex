@@ -14,8 +14,10 @@ import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -31,6 +33,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.lease.AiRunLease;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
@@ -818,24 +821,29 @@ class AiChatTurnPersistenceServiceTest {
         when(chatMapper.markTurnRunning(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(1);
         AiRunLease claimed = lease(3L);
-        when(runLeaseService.acquireInCurrentTransaction(LEASE_KEY)).thenReturn(claimed);
+        when(runLeaseService.acquireInCurrentTransaction(eq(LEASE_KEY), any(AiRunLeaseGuard.class)))
+                .thenReturn(claimed);
 
-        assertEquals(claimed, service.markRunning(TURN));
+        AiRunLeaseGuard ownership = new AiRunLeaseGuard(Duration.ofSeconds(45));
+
+        assertEquals(claimed, service.markRunning(TURN, ownership));
 
         InOrder order = inOrder(chatMapper, runLeaseService);
         order.verify(chatMapper).markTurnRunning(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
-        order.verify(runLeaseService).acquireInCurrentTransaction(LEASE_KEY);
+        order.verify(runLeaseService).acquireInCurrentTransaction(LEASE_KEY, ownership);
     }
 
     @Test
     void aClaimRefusedBeforeItsDurableWriteTakesNoRunLease() {
         storedTurn.setStatus("running");
 
-        assertThrows(ConflictException.class, () -> service.markRunning(TURN));
+        assertThrows(
+                ConflictException.class,
+                () -> service.markRunning(TURN, new AiRunLeaseGuard(Duration.ofSeconds(45))));
 
         verify(chatMapper, never()).markTurnRunning(anyInt(), anyInt(), anyInt());
-        verify(runLeaseService, never()).acquireInCurrentTransaction(any());
+        verify(runLeaseService, never()).acquireInCurrentTransaction(any(), any());
     }
 
     @Test
@@ -844,9 +852,11 @@ class AiChatTurnPersistenceServiceTest {
         when(chatMapper.markTurnRunning(
                 TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(0);
 
-        assertThrows(IllegalStateException.class, () -> service.markRunning(TURN));
+        assertThrows(
+                IllegalStateException.class,
+                () -> service.markRunning(TURN, new AiRunLeaseGuard(Duration.ofSeconds(45))));
 
-        verify(runLeaseService, never()).acquireInCurrentTransaction(any());
+        verify(runLeaseService, never()).acquireInCurrentTransaction(any(), any());
     }
 
     @Test

@@ -169,8 +169,16 @@ public class AiChatAgentLoopService {
      * own, and a routed skill plan runs its own durable reads, all before the first model step.
      * Polling only in the step loop would leave the stated reaction bound — one heartbeat interval
      * plus the in-flight provider call's remaining deadline — true of the loop and false of the
-     * preparation, where a stopped owner could still charge the organization for two further
-     * provider calls.
+     * preparation, where a stopped owner could still charge the organization for further provider
+     * calls.
+     *
+     * <p>Those preparation phases are multi-step in their own right — memory compaction summarizes
+     * one window of history per round, the attachment context describes one image per file, and a
+     * routed plan runs one declared step at a time — so the poll is threaded into the per-substep
+     * guard each of them already runs rather than bolted on at their boundaries. The honest bound
+     * this buys is therefore the same one the step loop states: a stopped owner stops at the next
+     * substep, which is at most one heartbeat interval after the stop plus whatever remains of the
+     * provider call already in flight.
      */
     public AiGenerationTaskResult<AiChatTurnGenerationResult> run(AiChatQueuedTurn turn) {
         AiRunLeaseGuard ownership = new AiRunLeaseGuard(aiProperties.getRunLeaseTtl());
@@ -179,7 +187,7 @@ public class AiChatAgentLoopService {
         try {
             requireWorkspaceEnabled(turn);
             try {
-                lease = persistenceService.markRunning(turn);
+                lease = persistenceService.markRunning(turn, ownership);
             } catch (ForbiddenException exception) {
                 return AiGenerationTaskResult.failed("access_revoked");
             }
@@ -193,7 +201,9 @@ public class AiChatAgentLoopService {
             AiChatStreamingProgress streamingProgress = turn.streamed()
                     ? new AiChatStreamingProgress(turn, persistenceService, maskingContext)
                     : null;
-            AiChatMemory memory = memoryService.prepare(turn, maskingContext, deadline);
+            Runnable ownershipGuard = () -> requireOwnership(ownership);
+            AiChatMemory memory = memoryService.prepare(
+                    turn, maskingContext, deadline, ownershipGuard);
             List<AiChatMessage> history = memory.history();
             AiChatMessage initiatingMessage = history.stream()
                     .filter(message -> message.getId() == turn.userMessageId())
@@ -209,8 +219,8 @@ public class AiChatAgentLoopService {
             if (ownership.isStopped()) {
                 return AiGenerationTaskResult.failed(AiAssistantTerminalReasons.OWNER_LOST);
             }
-            AiChatAttachmentContext attachmentContext =
-                    attachmentContextService.prepare(turn, deadline, maskingContext);
+            AiChatAttachmentContext attachmentContext = attachmentContextService.prepare(
+                    turn, deadline, maskingContext, ownershipGuard);
             List<ToolTurn> toolTurns = new ArrayList<>();
             Map<Integer, AiToolCall> nativeCalls = new HashMap<>();
             boolean nativeTools = memory.nativeTools();
@@ -256,7 +266,10 @@ public class AiChatAgentLoopService {
                         turn.scope(),
                         resources,
                         memory.budget().toolResultBytes(),
-                        () -> requireCurrentToolExecution(turn));
+                        () -> {
+                            requireOwnership(ownership);
+                            requireCurrentToolExecution(turn);
+                        });
                 // Every step the plan consumed already owns a durable idempotency key, so the
                 // model loop resumes after them even when the plan produced nothing usable.
                 stepOffset = execution.lastStepNumber();
@@ -1230,6 +1243,13 @@ public class AiChatAgentLoopService {
     private void requireCurrentToolExecution(AiChatQueuedTurn turn) {
         requireCurrentAccess(turn);
         persistenceService.requireRunning(turn);
+    }
+
+    private static void requireOwnership(AiRunLeaseGuard ownership) {
+        if (ownership.isStopped()) {
+            throw new AiAssistantLoopException(
+                    AiAssistantTerminalReasons.OWNER_LOST, AiAssistantTerminalReasons.OWNER_LOST);
+        }
     }
 
     private String serialize(Object value) {

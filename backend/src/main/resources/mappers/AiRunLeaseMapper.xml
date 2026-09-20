@@ -72,6 +72,11 @@
           AND expires_at &lt; CURRENT_TIMESTAMP(6)
     </update>
 
+    <!-- The deadline predicate is what keeps "expired" meaning what the settlement takeover below
+         assumes it means. Once a row is past expires_at another instance may claim it, so an owner
+         that comes back late must learn it lost rather than push the deadline out and race the
+         settler. Matching no row here is an authoritative loss, not an unknown: a renewal that
+         cannot reach MySQL throws instead, and the heartbeat retries that. -->
     <update id="renew">
         UPDATE ai_run_lease
         SET heartbeat_at = CURRENT_TIMESTAMP(6),
@@ -82,6 +87,7 @@
           AND subject_id = #{subjectId}
           AND owner = #{owner}
           AND epoch = #{epoch}
+          AND expires_at >= CURRENT_TIMESTAMP(6)
     </update>
 
     <!-- GREATEST, not a bare CURRENT_TIMESTAMP(6): the release still reads the database clock, but

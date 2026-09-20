@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -50,6 +51,120 @@ import ooo.klae.connex.backend.services.AiWorkspaceGovernanceService;
 import tools.jackson.databind.json.JsonMapper;
 
 class AiChatMemoryServiceTest {
+
+    /** The ownership check for the cases whose subject is compaction rather than ownership. */
+    private static final Runnable NO_STOP = () -> { };
+
+    /**
+     * Compaction folds one window of history away per round, each round paying for its own model
+     * call, so a caller that stopped owning the turn has to be refused at the next round rather
+     * than after the whole preparation returns. Checked only on entry, a turn whose owner lost the
+     * run during the first summary would keep summarizing — and keep charging the organization —
+     * for every remaining window.
+     */
+    @Test
+    void ownershipIsRecheckedBeforeEveryCompactionRoundRatherThanOnlyOnEntry() {
+        AiInvocationService invocationService = mock(AiInvocationService.class);
+        AiInvocationAdmissionService admissionService = mock(AiInvocationAdmissionService.class);
+        AiInvocationAdmissionService.DirectAdmission admission =
+                mock(AiInvocationAdmissionService.DirectAdmission.class);
+        AiChatTurnPersistenceService persistenceService = mock(AiChatTurnPersistenceService.class);
+        AiProperties properties = new AiProperties();
+        properties.setAssistantMaxOutputTokens(1_024);
+        var objectMapper = JsonMapper.builder().build();
+        var assembler = new AiAssistantPromptAssembler(
+                objectMapper, new AiAssistantToolCatalog());
+        var summaryGuard = new AiAssistantSummaryGuard();
+        var summarySchema = new AiAssistantSummarySchema(objectMapper);
+        var stepSchema = new AiAssistantStepSchema(
+                objectMapper, new AiAssistantToolCatalog());
+        Instant now = Instant.parse("2026-08-12T00:00:00Z");
+        AiChatMemoryService service = new AiChatMemoryService(
+                invocationService,
+                admissionService,
+                properties,
+                assembler,
+                new AiAssistantToolCatalog(),
+                emptyToolExecutor(),
+                summaryGuard,
+                summarySchema,
+                stepSchema,
+                persistenceService,
+                mock(AiWorkspaceGovernanceService.class),
+                objectMapper,
+                Clock.fixed(now, ZoneOffset.UTC));
+        AiChatQueuedTurn turn = new AiChatQueuedTurn(
+                3, 12, 5, 7, 104, 4, 9L, false, List.of(), List.of());
+        AiChatMessage early = message(
+                101, 1, "user", "EARLY " + "quarterly planning preference ".repeat(200));
+        AiChatMessage middle = message(
+                102, 2, "user", "MIDDLE " + "second batch continuity ".repeat(200));
+        AiChatMessage recent = message(
+                103, 3, "assistant",
+                "RECENT " + "grounded relationship update ".repeat(1_100));
+        AiChatMessage initiating = message(
+                104, 4, "user", "What did I prefer at the start?");
+        String firstSummaryContent =
+                "The user prefers quarterly planning. " + "Retained context ".repeat(200);
+        AiChatMessage firstStoredSummary = message(105, 5, "system", firstSummaryContent);
+        firstStoredSummary.setStructuredJson(
+                "{\"kind\":\"history_summary\",\"sourceFromSeq\":1,"
+                        + "\"throughSeq\":1,\"resources\":[],\"identifiers\":[]}");
+        when(invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT))
+                .thenReturn(new AiProviderCapabilities(
+                        AiStructuredOutputEnforcement.JSON_SCHEMA,
+                        AiReasoningMode.TAGGED,
+                        200_000,
+                        50_000));
+        when(invocationService.serializedPromptBytes(
+                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isReservationStepSchema),
+                eq(AiReasoningMode.TAGGED)))
+                .thenReturn(8_192);
+        when(persistenceService.loadHistory(turn, 100))
+                .thenReturn(List.of(early, middle, recent, initiating));
+        when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
+        when(persistenceService.loadCompactionCandidates(turn, 0, 4, 500))
+                .thenReturn(List.of(early));
+        when(admissionService.acquireDirect()).thenReturn(admission);
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class),
+                eq(AiAssistantSummary.class),
+                same(summaryGuard),
+                same(summarySchema.responseSchema()),
+                same(admission), any(Runnable.class)))
+                .thenReturn(new AiStructuredRepairAttempt<>(
+                        new AiStructuredOutcome.Parsed<>(
+                                new AiAssistantSummary(firstSummaryContent),
+                                0, 19, 7, "end_turn"),
+                        Optional.empty()));
+        when(persistenceService.upsertHistorySummary(
+                same(turn), isNull(), eq(0), anyString(), anyString(), eq(19), eq(7)))
+                .thenReturn(firstStoredSummary);
+        AtomicInteger ownershipChecks = new AtomicInteger();
+        Runnable stopsAfterTheFirstRound = () -> {
+            if (ownershipChecks.incrementAndGet() > 1) {
+                throw new AiAssistantLoopException(
+                        AiAssistantTerminalReasons.OWNER_LOST,
+                        AiAssistantTerminalReasons.OWNER_LOST);
+            }
+        };
+
+        AiAssistantLoopException stopped = assertThrows(
+                AiAssistantLoopException.class,
+                () -> service.prepare(
+                        turn, new MaskingContext(), now.plusSeconds(70),
+                        stopsAfterTheFirstRound));
+
+        assertEquals(AiAssistantTerminalReasons.OWNER_LOST, stopped.terminalReason());
+        verify(invocationService, times(1)).completeStructuredRepairable(
+                any(AiInvocation.class),
+                eq(AiAssistantSummary.class),
+                same(summaryGuard),
+                same(summarySchema.responseSchema()),
+                same(admission),
+                any(Runnable.class));
+        verify(persistenceService, never()).loadCompactionCandidates(turn, 1, 4, 500);
+    }
 
     @Test
     void compactsWholeEarlyMessagesAndReplaysDurableSummaryForContinuity() {
@@ -164,7 +279,7 @@ class AiChatMemoryServiceTest {
                 .thenReturn(storedSummary);
 
         AiChatMemory memory = service.prepare(
-                turn, new MaskingContext(), now.plusSeconds(70));
+                turn, new MaskingContext(), now.plusSeconds(70), NO_STOP);
 
         ArgumentCaptor<AiInvocation> summaryInvocation =
                 ArgumentCaptor.forClass(AiInvocation.class);
@@ -263,7 +378,7 @@ class AiChatMemoryServiceTest {
         when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
 
         AiChatMemory memory = service.prepare(
-                turn, new MaskingContext(), now.plusSeconds(70));
+                turn, new MaskingContext(), now.plusSeconds(70), NO_STOP);
 
         assertTrue(memory.nativeTools());
         ArgumentCaptor<AiNativeToolRequest> nativeTools =
@@ -333,7 +448,7 @@ class AiChatMemoryServiceTest {
 
         AiAssistantLoopException refused = assertThrows(
                 AiAssistantLoopException.class,
-                () -> service.prepare(turn, new MaskingContext(), now.plusSeconds(70)));
+                () -> service.prepare(turn, new MaskingContext(), now.plusSeconds(70), NO_STOP));
 
         assertEquals(AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
                 refused.terminalReason());
@@ -406,7 +521,7 @@ class AiChatMemoryServiceTest {
         when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
 
         AiChatMemory memory = service.prepare(
-                turn, new MaskingContext(), now.plusSeconds(70));
+                turn, new MaskingContext(), now.plusSeconds(70), NO_STOP);
 
         assertEquals(1, memory.history().size());
         assertEquals(content, memory.history().getFirst().getContent());
@@ -469,7 +584,7 @@ class AiChatMemoryServiceTest {
         when(persistenceService.loadHistorySummary(turn)).thenReturn(null);
 
         AiChatMemory memory = service.prepare(
-                turn, new MaskingContext(), now.plusSeconds(70));
+                turn, new MaskingContext(), now.plusSeconds(70), NO_STOP);
 
         assertEquals(1, memory.history().size());
         assertEquals(initiating.getId(), memory.history().getFirst().getId());
@@ -576,7 +691,7 @@ class AiChatMemoryServiceTest {
 
         AiAssistantLoopException exception = assertThrows(
                 AiAssistantLoopException.class,
-                () -> service.prepare(turn, new MaskingContext(), deadline));
+                () -> service.prepare(turn, new MaskingContext(), deadline, NO_STOP));
 
         assertEquals("turn_deadline_exceeded", exception.terminalReason());
         verify(persistenceService, never()).upsertHistorySummary(
@@ -669,13 +784,13 @@ class AiChatMemoryServiceTest {
         AiAssistantLoopException firstAttempt = assertThrows(
                 AiAssistantLoopException.class,
                 () -> service.prepare(
-                        turn, new MaskingContext(), now.plusSeconds(70)));
+                        turn, new MaskingContext(), now.plusSeconds(70), NO_STOP));
         assertEquals("summary_compaction_failed", firstAttempt.terminalReason());
         verify(persistenceService, never()).upsertHistorySummary(
                 any(), any(), anyInt(), anyString(), anyString(), anyInt(), anyInt());
 
         AiChatMemory memory = service.prepare(
-                turn, new MaskingContext(), now.plusSeconds(70));
+                turn, new MaskingContext(), now.plusSeconds(70), NO_STOP);
 
         ArgumentCaptor<AiInvocation> invocation = ArgumentCaptor.forClass(AiInvocation.class);
         verify(invocationService, times(2)).completeStructuredRepairable(

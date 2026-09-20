@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
 import ooo.klae.connex.backend.ai.lease.AiRunLease;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
@@ -279,11 +280,17 @@ public class AiChatTurnPersistenceService {
      * behind it and throws before reaching the update. A zero row count is therefore an invariant
      * violation rather than a contended claim, and it fails loudly.
      *
+     * <p>The caller's ownership flag travels in because the lease claim is where its self-fence
+     * has to be anchored: this method waits behind the membership and turn row locks before the
+     * lease row is written at all, so the fence must start when MySQL starts counting the
+     * lifetime — not before that wait, and not whenever the worker next gets scheduled after it.
+     *
      * @param turn the committed queued turn
+     * @param ownership the caller's ownership flag, anchored on the instant the lease is written
      * @return the fencing token this instance now holds for the turn
      */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
-    public AiRunLease markRunning(AiChatQueuedTurn turn) {
+    public AiRunLease markRunning(AiChatQueuedTurn turn, AiRunLeaseGuard ownership) {
         requireCurrentActor(turn);
         lockAuthorizedTurn(turn, QUEUED);
         if (chatMapper.markTurnRunning(
@@ -291,7 +298,7 @@ public class AiChatTurnPersistenceService {
             throw new IllegalStateException("Assistant turn claim lost its durable state");
         }
         return runLeaseService.acquireInCurrentTransaction(
-                leaseKey(turn.workspaceId(), turn.turnId()));
+                leaseKey(turn.workspaceId(), turn.turnId()), ownership);
     }
 
     /** Loads the bounded most-recent transcript after current access revalidation. */

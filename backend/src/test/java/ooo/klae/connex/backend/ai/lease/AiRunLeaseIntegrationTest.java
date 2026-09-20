@@ -263,6 +263,32 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
     }
 
     /**
+     * Once a lease is past its deadline a settler is entitled to take it over, so a returning owner
+     * has to learn it lost rather than push the deadline out and race that settler. The refusal is
+     * in SQL because the database clock is the only one every instance shares: an owner whose
+     * monotonic clock did not advance across a suspended host is exactly the case its own
+     * self-fence cannot see.
+     */
+    @Test
+    void aRenewalIsRefusedOnceTheLeaseHasAlreadyExpired() {
+        AiRunLeaseKey key = key(AiRunLeaseSubject.CHAT_TURN, 3014L);
+        AiRunLease held = acquire(key);
+        expire(key);
+        Object expiredDeadline = leaseRow(key).get("expires_at");
+
+        assertEquals(AiRunLeaseOutcome.LOST, leaseService.renew(held));
+
+        assertEquals(1, leaseMapper.findExpiredLeases(workspace.getId(), 10).size());
+        assertEquals(
+                expiredDeadline,
+                leaseRow(key).get("expires_at"),
+                "A refused renewal must leave the expired deadline exactly where it was");
+        assertTrue(
+                leaseService.takeOverForSettlement(key, held.epoch()).isPresent(),
+                "A settler must still be able to claim the lease the renewal was refused for");
+    }
+
+    /**
      * A renewal computes its deadline from the database clock, so a clock that stepped backwards by
      * more than the lifetime would place the new deadline before {@code acquired_at} and the expiry
      * CHECK would reject every renewal, stopping a healthy owner through its own self-fence.
@@ -323,7 +349,7 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
         AiRunLeaseKey key = key(AiRunLeaseSubject.CHAT_TURN, 3012L);
 
         transactions.execute(status -> {
-            AiRunLease claimed = leaseService.acquireInCurrentTransaction(key);
+            AiRunLease claimed = leaseService.acquireInCurrentTransaction(key, freshGuard());
             status.setRollbackOnly();
             return claimed;
         });

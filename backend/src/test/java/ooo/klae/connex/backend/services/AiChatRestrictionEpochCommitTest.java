@@ -14,10 +14,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantLoopException;
 import ooo.klae.connex.backend.ai.assistant.AiChatQueuedTurn;
 import ooo.klae.connex.backend.ai.assistant.AiChatTurnPersistenceService;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -30,6 +32,7 @@ import ooo.klae.connex.backend.mappers.AiChatMapper;
 class AiChatRestrictionEpochCommitTest extends AbstractServiceTest {
     @Autowired private AiChatTurnPersistenceService persistenceService;
     @Autowired private AiRestrictionEpoch restrictionEpoch;
+    @Autowired private AiProperties aiProperties;
     @Autowired private AiChatMapper chatMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
 
@@ -50,7 +53,8 @@ class AiChatRestrictionEpochCommitTest extends AbstractServiceTest {
     void epochBumpBeforeFinalCommitRejectsTheAnswerWithoutTerminalizingTheTurn() {
         AiChatSession session = session("Final restriction fence");
         AiChatQueuedTurn turn = queuedTurn(session, "Summarize my pipeline");
-        assertNotNull(persistenceService.markRunning(turn));
+        assertNotNull(persistenceService.markRunning(
+                turn, new AiRunLeaseGuard(aiProperties.getRunLeaseTtl())));
         restrictionEpoch.bump(workspace.getId());
 
         AiAssistantLoopException failure = assertThrows(
@@ -77,7 +81,8 @@ class AiChatRestrictionEpochCommitTest extends AbstractServiceTest {
     void epochBumpBeforeFinishToolRejectsAndRetainsTheProposedToolState() {
         AiChatSession session = session("Tool restriction fence");
         AiChatQueuedTurn turn = queuedTurn(session, "Read restricted content");
-        assertNotNull(persistenceService.markRunning(turn));
+        assertNotNull(persistenceService.markRunning(
+                turn, new AiRunLeaseGuard(aiProperties.getRunLeaseTtl())));
         int toolCallId = persistenceService.proposeTool(
                 turn, 1, "get_record", "{\"handle\":\"r1\"}");
         restrictionEpoch.bump(workspace.getId());

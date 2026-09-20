@@ -3,6 +3,7 @@ package ooo.klae.connex.backend.ai.assistant;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -188,19 +189,19 @@ class AiChatAgentLoopServiceTest {
         userMessage.setId(TURN.userMessageId());
         userMessage.setAuthorKind("user");
         userMessage.setContent("Summarize my pipeline");
-        when(persistenceService.markRunning(TURN)).thenReturn(LEASE);
+        when(persistenceService.markRunning(eq(TURN), any(AiRunLeaseGuard.class))).thenReturn(LEASE);
         when(runLeaseHeartbeat.start(any(), any())).thenReturn(leaseHeartbeat);
         when(progressService.project(anyInt(), anyInt(), anyInt(), any()))
                 .thenReturn(List.of());
         when(workspaceService.isMember(TURN.workspaceId(), TURN.userId())).thenReturn(true);
         doReturn(directAdmission).when(invocationAdmissionService).acquireDirect();
-        when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(new AiChatMemory(
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenReturn(new AiChatMemory(
                 List.of(userMessage),
                 new AiAssistantPromptBudget(
                         64, 64_000, 16_000, 16_000, 16_000, 112_000),
                 0,
                 0));
-        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any())).thenReturn(
+        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any(), any())).thenReturn(
                 AiChatAttachmentContext.empty());
         when(toolExecutor.pageContext(any(), any())).thenReturn(
                 new AiAssistantToolResult(Map.of(), List.of()));
@@ -353,7 +354,7 @@ class AiChatAgentLoopServiceTest {
                 .sum();
         assertTrue(firstResultBytes < bothResultsBytes);
         AiChatMessage userMessage = message(TURN.userMessageId(), "Read then write");
-        when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenReturn(
                 new AiChatMemory(
                         List.of(userMessage),
                         new AiAssistantPromptBudget(
@@ -418,7 +419,7 @@ class AiChatAgentLoopServiceTest {
     void executedAutoReplayUnderSmallerBudgetReportsTruncatedExecutedOutcome()
             throws Exception {
         AiChatMessage userMessage = message(TURN.userMessageId(), "Create the follow-up note");
-        when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenReturn(
                 new AiChatMemory(
                         List.of(userMessage),
                         new AiAssistantPromptBudget(
@@ -559,7 +560,7 @@ class AiChatAgentLoopServiceTest {
 
     @Test
     void confirmTierToolPersistsApprovalCardWithoutAutoExecution() throws Exception {
-        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any())).thenReturn(
+        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any(), any())).thenReturn(
                 new AiChatAttachmentContext(
                         List.of(Map.of(
                                 "fileName", "instructions.txt",
@@ -621,7 +622,7 @@ class AiChatAgentLoopServiceTest {
 
     @Test
     void maliciousAttachmentCannotCauseAnAutoWriteWithoutApproval() throws Exception {
-        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any())).thenReturn(
+        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any(), any())).thenReturn(
                 new AiChatAttachmentContext(
                         List.of(Map.of(
                                 "fileName", "instructions.txt",
@@ -657,7 +658,7 @@ class AiChatAgentLoopServiceTest {
 
     @Test
     void imageCapabilityFailureReturnsExplicitUnsupportedTerminal() {
-        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any())).thenThrow(
+        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any(), any())).thenThrow(
                 new AiImageInputUnsupportedException());
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
@@ -1776,15 +1777,15 @@ class AiChatAgentLoopServiceTest {
         userMessage.setId(streamedTurn.userMessageId());
         userMessage.setAuthorKind("user");
         userMessage.setContent("Summarize my pipeline");
-        when(persistenceService.markRunning(streamedTurn)).thenReturn(LEASE);
-        when(memoryService.prepare(eq(streamedTurn), any(), any(Instant.class)))
+        when(persistenceService.markRunning(eq(streamedTurn), any(AiRunLeaseGuard.class))).thenReturn(LEASE);
+        when(memoryService.prepare(eq(streamedTurn), any(), any(Instant.class), any()))
                 .thenReturn(new AiChatMemory(
                         List.of(userMessage),
                         new AiAssistantPromptBudget(
                                 64, 64_000, 16_000, 16_000, 16_000, 112_000),
                         0,
                         0));
-        when(attachmentContextService.prepare(eq(streamedTurn), any(Instant.class), any()))
+        when(attachmentContextService.prepare(eq(streamedTurn), any(Instant.class), any(), any()))
                 .thenReturn(AiChatAttachmentContext.empty());
         when(persistenceService.appendPartialBatch(
                 eq(streamedTurn), eq(0), any()))
@@ -2003,7 +2004,7 @@ class AiChatAgentLoopServiceTest {
                 new AiAssistantToolResult(
                         Map.of(),
                         List.of(new Identifier("person", "Ada Lovelace"))));
-        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any()))
+        when(attachmentContextService.prepare(eq(TURN), any(Instant.class), any(), any()))
                 .thenAnswer(invocation -> {
                     MaskingContext context = invocation.getArgument(2);
                     assertTrue(context.identifierDictionary().contains("Ada Lovelace"));
@@ -2022,14 +2023,14 @@ class AiChatAgentLoopServiceTest {
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
-        verify(attachmentContextService).prepare(eq(TURN), any(Instant.class), any());
+        verify(attachmentContextService).prepare(eq(TURN), any(Instant.class), any(), any());
     }
 
     @Test
     void configuredOutputTokenLimitReachesEveryProviderInvocation() {
         aiProperties.setAssistantMaxOutputTokens(7777);
         AiChatMessage userMessage = message(TURN.userMessageId(), "Summarize my pipeline");
-        when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(new AiChatMemory(
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenReturn(new AiChatMemory(
                 List.of(userMessage),
                 new AiAssistantPromptBudget(
                         7777, 64_000, 16_000, 16_000, 16_000, 112_000, true),
@@ -2585,7 +2586,7 @@ class AiChatAgentLoopServiceTest {
         doThrow(new AiAssistantLoopException(
                 AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
                 AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL))
-                .when(memoryService).prepare(eq(TURN), any(), any(Instant.class));
+                .when(memoryService).prepare(eq(TURN), any(), any(Instant.class), any());
 
         assertTerminal(AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL);
 
@@ -2599,7 +2600,7 @@ class AiChatAgentLoopServiceTest {
     void aProviderSwitchedToASmallerModelMidTurnRefusesBeforeTheNextStepEgresses() {
         AiChatMessage userMessage = message(
                 TURN.userMessageId(), "Which relationships are cooling?");
-        when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenReturn(
                 new AiChatMemory(
                         List.of(userMessage),
                         new AiAssistantPromptBudget(
@@ -2632,7 +2633,7 @@ class AiChatAgentLoopServiceTest {
                 8_192);
         AiChatMessage userMessage = message(
                 TURN.userMessageId(), "Which relationships are cooling?");
-        when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenReturn(
                 new AiChatMemory(List.of(userMessage), budget, 0, 0));
         when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any())).thenReturn(
                 new AiAssistantToolResult(
@@ -2672,7 +2673,7 @@ class AiChatAgentLoopServiceTest {
     @Test
     void exhaustedToolResultBudgetPersistsItsUserVisibleTerminalReason() throws Exception {
         AiChatMessage userMessage = message(TURN.userMessageId(), "Summarize the records");
-        when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenReturn(
                 new AiChatMemory(
                         List.of(userMessage),
                         new AiAssistantPromptBudget(
@@ -2927,7 +2928,7 @@ class AiChatAgentLoopServiceTest {
     }
 
     private void useNativeMemory(AiAssistantPromptBudget budget) {
-        when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenReturn(
                 new AiChatMemory(
                         List.of(message(TURN.userMessageId(), "Summarize my pipeline")),
                         budget,
@@ -3684,7 +3685,7 @@ class AiChatAgentLoopServiceTest {
      */
     @Test
     void aFindToolsStepRefusedAfterExecutionLeavesTheLoadedSetUnchanged() throws Exception {
-        when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenReturn(
                 new AiChatMemory(
                         List.of(message(TURN.userMessageId(), "Summarize my pipeline")),
                         new AiAssistantPromptBudget(64, 4_096, 256, 256, 100, 4_808),
@@ -3796,9 +3797,15 @@ class AiChatAgentLoopServiceTest {
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
 
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
+        ArgumentCaptor<AiRunLeaseGuard> claimed = ArgumentCaptor.forClass(AiRunLeaseGuard.class);
+        ArgumentCaptor<AiRunLeaseGuard> beating = ArgumentCaptor.forClass(AiRunLeaseGuard.class);
         InOrder order = inOrder(persistenceService, runLeaseHeartbeat);
-        order.verify(persistenceService).markRunning(TURN);
-        order.verify(runLeaseHeartbeat).start(eq(LEASE), any(AiRunLeaseGuard.class));
+        order.verify(persistenceService).markRunning(eq(TURN), claimed.capture());
+        order.verify(runLeaseHeartbeat).start(eq(LEASE), beating.capture());
+        assertSame(
+                claimed.getValue(),
+                beating.getValue(),
+                "The claim anchors the self-fence, so the heartbeat must be fed that same guard");
         assertEquals(1, heartbeatStops.get());
         verify(runLeaseService, never()).releaseHeldInCurrentTransaction(any());
         verify(runLeaseService).forgetLocalToken(LEASE);
@@ -3812,7 +3819,7 @@ class AiChatAgentLoopServiceTest {
      */
     @Test
     void aTurnThatEndsExceptionallyDropsItsTokenWithoutReleasingItsLease() {
-        when(memoryService.prepare(eq(TURN), any(), any(Instant.class)))
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any()))
                 .thenThrow(new IllegalStateException("prepare failed"));
 
         service.run(TURN);
@@ -3823,7 +3830,7 @@ class AiChatAgentLoopServiceTest {
 
     @Test
     void aRefusedClaimDropsNoTokenBecauseItTookNone() {
-        when(persistenceService.markRunning(TURN))
+        when(persistenceService.markRunning(eq(TURN), any(AiRunLeaseGuard.class)))
                 .thenThrow(new ForbiddenException("Workspace membership is no longer active"));
 
         service.run(TURN);
@@ -3845,7 +3852,7 @@ class AiChatAgentLoopServiceTest {
                     started[0] = invocation.getArgument(1);
                     return leaseHeartbeat;
                 });
-        when(memoryService.prepare(eq(TURN), any(), any(Instant.class)))
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any()))
                 .thenAnswer(invocation -> {
                     started[0].stop(AiRunLeaseGuard.SUBJECT_STOPPED);
                     return new AiChatMemory(
@@ -3860,7 +3867,51 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         assertEquals("owner_lost", result.reason());
-        verify(attachmentContextService, never()).prepare(any(), any(Instant.class), any());
+        verify(attachmentContextService, never()).prepare(any(), any(Instant.class), any(), any());
+        verify(invocationService, never()).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals(1, heartbeatStops.get());
+    }
+
+    /**
+     * The preparation phases run several steps each, so the poll has to reach the per-substep
+     * guard rather than sit at their boundaries. Memory compaction and the attachment context get
+     * the check as their own parameter; a routed plan gets it through the revalidation callback it
+     * already runs before every declared step, which otherwise checks only access and turn status
+     * and would let a stopped owner run the rest of the plan's reads and writes.
+     */
+    @Test
+    void ownershipReachesTheRoutedPlansOwnPerStepGuard() {
+        AiSkillCatalog.SkillSpec digest =
+                new AiSkillCatalog().find("activity_digest_v1").orElseThrow();
+        AiRunLeaseGuard[] started = new AiRunLeaseGuard[1];
+        when(runLeaseHeartbeat.start(eq(LEASE), any(AiRunLeaseGuard.class)))
+                .thenAnswer(invocation -> {
+                    started[0] = invocation.getArgument(1);
+                    return leaseHeartbeat;
+                });
+        when(skillRouter.route(anyInt(), anyInt(), any(), any(), any()))
+                .thenReturn(new AiSkillRouter.Routing(
+                        digest, AiSkillRouter.MATCHED, null, false));
+        AtomicInteger planSteps = new AtomicInteger();
+        when(skillPlanRunner.run(eq(TURN), any(), any(), any(), anyInt(), any()))
+                .thenAnswer(invocation -> {
+                    Runnable perStepGuard = invocation.getArgument(5, Runnable.class);
+                    perStepGuard.run();
+                    planSteps.incrementAndGet();
+                    started[0].stop(AiRunLeaseGuard.LEASE_LOST);
+                    perStepGuard.run();
+                    planSteps.incrementAndGet();
+                    return AiSkillPlanRunner.Execution.none();
+                });
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("owner_lost", result.reason());
+        assertEquals(1, planSteps.get(), "The plan's second step ran under a lost lease");
         verify(invocationService, never()).completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
@@ -3870,7 +3921,7 @@ class AiChatAgentLoopServiceTest {
 
     @Test
     void anExceptionalExitStillStopsTheHeartbeat() {
-        when(memoryService.prepare(eq(TURN), any(), any(Instant.class)))
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any()))
                 .thenThrow(new IllegalStateException("prepare failed"));
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
@@ -3882,7 +3933,7 @@ class AiChatAgentLoopServiceTest {
 
     @Test
     void aRefusedClaimStartsNoHeartbeatAtAll() {
-        when(persistenceService.markRunning(TURN))
+        when(persistenceService.markRunning(eq(TURN), any(AiRunLeaseGuard.class)))
                 .thenThrow(new ForbiddenException("Workspace membership is no longer active"));
 
         AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
