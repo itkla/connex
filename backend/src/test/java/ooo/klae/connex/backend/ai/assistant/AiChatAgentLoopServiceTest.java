@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -3862,15 +3863,20 @@ class AiChatAgentLoopServiceTest {
     /**
      * A declaration seeded to the cap has no load left to spend, exactly as a turn that loaded its
      * way there has none.
+     *
+     * <p>Both seeded families are read families on purpose: a READ-authority declaration that
+     * seeded a write family would be refused by {@code SkillSpec} itself, because offering a write
+     * tool the skill cannot call settles the turn as a non-closable
+     * {@code tool_outside_skill_authority}.
      */
     @Test
     void aSkillSeededToTheCapIsRefusedItsFirstLoad() throws Exception {
-        routedSeedingSkill(Set.of("analytics", "write_content"));
+        routedSeedingSkill(Set.of("analytics", "schedule"));
         when(invocationService.completeStructuredRepairable(
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class)))
-                .thenReturn(parsed(loadStep("schedule")))
+                .thenReturn(parsed(loadStep("write_content")))
                 .thenReturn(parsed(new AiAssistantStep(
                         null,
                         new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()))));
@@ -3891,7 +3897,7 @@ class AiChatAgentLoopServiceTest {
                 eq(directAdmission), any(Runnable.class));
         assertFalse(
                 invocations.getAllValues().getLast().prompt().getSystemPrompt()
-                        .contains("find_schedule_conflicts"),
+                        .contains("create_note"),
                 "a refused load must not widen the vocabulary it was refused for");
     }
 
@@ -3948,6 +3954,11 @@ class AiChatAgentLoopServiceTest {
      * The seeded half of the reconstruction contract: the durable skill attribution plus the
      * declaration it names rebuilds exactly the vocabulary the turn's provider call carried, with
      * no find_tools row and therefore no migration needed to record it.
+     *
+     * <p>The attribution is read as key <strong>and</strong> version, because a declaration's
+     * toolsets are mutable across releases while its key is stable and additive. A reader keyed on
+     * the key alone would rebuild a later release's set for an older turn; the lookup here fails
+     * closed on a version it does not hold, which is the rule P0.4's reader has to inherit.
      */
     @Test
     void theDurableSkillAttributionReconstructsASeededTurnsVocabulary() throws Exception {
@@ -3970,13 +3981,22 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
         ArgumentCaptor<String> appliedKey = ArgumentCaptor.forClass(String.class);
-        verify(persistenceService).applySkill(eq(TURN), appliedKey.capture(), eq(seeded.version()));
+        ArgumentCaptor<String> appliedVersion = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).applySkill(
+                eq(TURN), appliedKey.capture(), appliedVersion.capture());
         verify(persistenceService, never()).proposeTool(
                 eq(TURN), anyInt(), eq(AiAssistantToolCatalog.FIND_TOOLS), any());
-        Map<String, AiSkillCatalog.SkillSpec> declarations = Map.of(seeded.key(), seeded);
+        Map<String, AiSkillCatalog.SkillSpec> declarations =
+                Map.of(seeded.key() + "@" + seeded.version(), seeded);
+        AiSkillCatalog.SkillSpec recorded = declarations.get(
+                appliedKey.getValue() + "@" + appliedVersion.getValue());
+        assertNotNull(recorded, "the turn must be attributable to the declaration that ran");
+        assertNull(
+                declarations.get(appliedKey.getValue() + "@9.9.9"),
+                "a version the catalog no longer declares must fail closed, not reconstruct");
         Set<String> reconstructed = new LinkedHashSet<>(
                 List.of(AiAssistantToolCatalog.Toolset.CORE.key()));
-        reconstructed.addAll(declarations.get(appliedKey.getValue()).toolsets());
+        reconstructed.addAll(recorded.toolsets());
 
         ArgumentCaptor<AiNativeToolRequest> requests =
                 ArgumentCaptor.forClass(AiNativeToolRequest.class);

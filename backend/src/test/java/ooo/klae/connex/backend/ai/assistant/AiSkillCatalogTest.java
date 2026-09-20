@@ -171,6 +171,17 @@ class AiSkillCatalogTest {
                         () -> spec.key() + " allows " + tool
                                 + " but never reaches the toolset that declares it");
             }
+            for (String declared : spec.toolsets()) {
+                Toolset toolset = AiAssistantToolCatalog.loadableByKey(declared);
+                for (String writeTool : AiAssistantToolCatalog.writeToolsOf(toolset)) {
+                    assertTrue(
+                            spec.authority() != AiSkillCatalog.Authority.READ
+                                    && spec.allowedTools().contains(writeTool),
+                            () -> spec.key() + " seeds " + declared + " but cannot call "
+                                    + writeTool + ", so offering it would settle the turn as"
+                                    + " tool_outside_skill_authority");
+                }
+            }
         }
     }
 
@@ -183,10 +194,43 @@ class AiSkillCatalogTest {
                 () -> specWithToolsets(Set.of("core")));
         assertThrows(IllegalArgumentException.class,
                 () -> specWithToolsets(Set.of("nonexistent_toolset")));
-        assertNotNull(specWithToolsets(Set.of("analytics", "write_pipeline")));
+        assertNotNull(specWithToolsets(Set.of("analytics", "schedule")));
+    }
+
+    /**
+     * Seeding is all-or-nothing over an object family while write authority is per tool plus a
+     * tier, so a declaration that seeds a write family it cannot call would put write tools in
+     * front of the model from the synthesis step's first render and settle the turn as a
+     * non-closable {@code tool_outside_skill_authority} the moment one is chosen. That is refused
+     * where the declaration is written, not discovered at runtime.
+     */
+    @Test
+    void theSkillRecordRefusesAWriteToolsetItsOwnAuthorityCannotCall() {
+        assertThrows(IllegalArgumentException.class,
+                () -> spec(Set.of("write_pipeline"),
+                        AiSkillCatalog.Authority.READ,
+                        Set.of("change_deal_stage", "assign_owner")),
+                "a READ-authority declaration may not seed a write family");
+        assertThrows(IllegalArgumentException.class,
+                () -> spec(Set.of("write_pipeline"),
+                        AiSkillCatalog.Authority.EXECUTE_REVERSIBLE,
+                        Set.of("change_deal_stage")),
+                "seeding a family it cannot call every write of is the same trap");
+        assertNotNull(spec(Set.of("write_pipeline"),
+                AiSkillCatalog.Authority.EXECUTE_REVERSIBLE,
+                Set.of("change_deal_stage", "assign_owner")));
+        assertNotNull(spec(Set.of("analytics"),
+                AiSkillCatalog.Authority.READ,
+                Set.of("aggregate_metric")),
+                "a read-only family stays declarable on a READ-authority skill");
     }
 
     private static SkillSpec specWithToolsets(Set<String> toolsets) {
+        return spec(toolsets, AiSkillCatalog.Authority.READ, Set.of());
+    }
+
+    private static SkillSpec spec(
+            Set<String> toolsets, AiSkillCatalog.Authority authority, Set<String> allowedTools) {
         return new SkillSpec(
                 "declaration_probe_v1",
                 "1.0.0",
@@ -199,7 +243,7 @@ class AiSkillCatalogTest {
                 Set.of(),
                 Set.of(),
                 List.of(),
-                Set.of(),
+                allowedTools,
                 toolsets,
                 Set.of(),
                 Set.of(),
@@ -208,7 +252,7 @@ class AiSkillCatalogTest {
                 Set.of(Permission.AI_USE),
                 AiFeature.ASSISTANT_CHAT,
                 32_768,
-                AiSkillCatalog.Authority.READ,
+                authority,
                 new AiSkillCatalog.Bounds(0, 0, 0, 0),
                 new AiSkillCatalog.Budgets(0, 0L, 0),
                 Integer.MAX_VALUE,

@@ -200,6 +200,28 @@ public class AiAssistantToolCatalog {
     }
 
     /**
+     * Names the write-tier tools a toolset puts in front of the model the moment it is held.
+     *
+     * <p>Holding a family is all-or-nothing — the vocabulary filters on the toolset, never on one
+     * member — so a caller deciding whether a declaration may hold a family has to know which of
+     * its members are writes. {@code requireSkillAuthority} refuses a write tool a skill's
+     * authority or {@code allowedTools} does not admit, and that refusal is turn-terminal and
+     * outside every recoverable branch, so a declaration seeding a write family it cannot call
+     * would arm a hard failure on a tool the server itself offered. {@code AiSkillCatalog.SkillSpec}
+     * refuses that declaration where it is written, and this is the lookup it refuses it with.
+     *
+     * @param toolset a declared toolset
+     * @return the declared write-tier tool keys of that toolset, in stable catalog order
+     */
+    public static List<String> writeToolsOf(Toolset toolset) {
+        return TOOLS.values().stream()
+                .filter(spec -> spec.toolset() == toolset)
+                .filter(spec -> spec.tier() != ToolTier.READ)
+                .map(ToolSpec::name)
+                .toList();
+    }
+
+    /**
      * @param name declared tool key
      * @param loadedToolsets the toolsets the turn currently holds
      * @return whether the key is declared and its toolset is held
