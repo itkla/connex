@@ -388,6 +388,27 @@ Invitation/participant-removal paths lock caller/target active memberships ascen
 
 The session row is the per-session mutex. Allocate message sequence with the established `MAX(seq)+1` calculation while holding the session root, insert, and update `last_message_at`. Do not lock the message aggregate or use `MAX(seq) ... FOR UPDATE`.
 
+### AI run leases
+
+`ai_run_lease` is a leaf. The lock order is `ai_chat_session` → `ai_chat_turn` → `ai_run_lease`, and
+the lease row is always the last lock any chain takes. Two rules keep that true, and each is
+checkable by reading one file rather than by convention:
+
+1. `AiRunLeaseMapper` contains no reference to any subject table. A cross-subject question — is this
+   turn still running, settle this orphan — travels through the `AiRunLeaseSubjectHandler` SPI,
+   implemented in the subject's own package. A subquery against `ai_chat_turn` inside a lease
+   statement would invert the order and is a defect.
+2. The heartbeat's subject-liveness read is a non-locking `SELECT`. The heartbeat therefore takes
+   exactly one lock, the lease leaf, and a lone leaf lock cannot close a cycle against a chain that
+   takes that same leaf last.
+
+`AiRunLeaseService.acquireInCurrentTransaction` takes the lease row `FOR UPDATE` and reads it under
+that lock in a transaction that has not read it before, so the MyBatis first-level cache cannot
+serve a pre-lock answer. It joins the caller's claim transaction and
+`releaseHeldInCurrentTransaction` joins the caller's durable terminal transaction; neither opens its
+own. A claim that rolls back therefore leaves no lease row, and a terminal write that changed no row
+releases nothing.
+
 ## Disqualification vocabulary materialization
 
 Disqualification-reason settings mutations and lifecycle transitions into `DISQUALIFIED` share the
