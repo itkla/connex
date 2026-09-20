@@ -49,7 +49,8 @@ class AiAssistantPromptAssemblerTest {
         request.setContent("An unrelated turn");
 
         MaskedPrompt prompt = assembler.assemble(
-                List.of(request), data, List.of(new ToolTurn(1, "get_records", data)), context, resources);
+                List.of(request), data, List.of(new ToolTurn(1, "get_records", data)), context, resources,
+                AiAssistantToolCatalog.ALL);
 
         String payload = objectMapper.writeValueAsString(prompt.getMessages());
         assertTrue(payload.contains("An unrelated turn"));
@@ -61,7 +62,8 @@ class AiAssistantPromptAssemblerTest {
 
         request.setContent(raw);
         assertThrows(MaskingLeakException.class, () -> assembler.assemble(
-                List.of(request), data, List.of(new ToolTurn(1, "get_records", data)), context, resources));
+                List.of(request), data, List.of(new ToolTurn(1, "get_records", data)), context, resources,
+                AiAssistantToolCatalog.ALL));
     }
 
     @Test
@@ -78,7 +80,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(),
                 AiStructuredRepair.from(
                         "exclusive_step", "{\"tool\":null,\"final\":null,"
-                                + "\"contact\":\"ada@example.com +1 (415) 555-0100\"}"));
+                                + "\"contact\":\"ada@example.com +1 (415) 555-0100\"}"),
+                                AiAssistantToolCatalog.ALL);
 
         assertTrue(prompt.getSystemPrompt().contains("Valid tool step example"));
         assertTrue(prompt.getSystemPrompt().contains("Valid first final step example"));
@@ -116,7 +119,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         assertTrue(context.isTrustedTextCollision("answer"));
         assertFalse(context.isTrustedTextCollision("Cyberdyne Systems"));
@@ -145,7 +149,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         String serialized = prompt.getMessages().stream()
                 .map(message -> message.getContent())
@@ -178,7 +183,8 @@ class AiAssistantPromptAssemblerTest {
                 List.of(replayed), pageContext,
                 List.of(new ToolTurn(1, "get_record", toolResult)),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(Map.of(
                 "system", prompt.getSystemPrompt(),
                 "messages", prompt.getMessages().stream()
@@ -215,13 +221,15 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(),
                 List.of(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         MaskedPrompt unbounded = assembler.assemble(
                 List.of(),
                 new AiAssistantToolResult(Map.of(), List.of()),
                 turns,
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         AiAssistantPromptAssembler.NativeReplay nativeReplay = assembler.nativeReplay(
                 turns,
@@ -267,7 +275,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(),
                 List.of(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
 
         String content = prompt.getMessages().getLast().getContent();
         JsonNode payload = toolPayload(content);
@@ -311,7 +320,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(),
                 List.of(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
 
         String content = prompt.getMessages().getLast().getContent();
         JsonNode payload = toolPayload(content);
@@ -348,7 +358,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(),
                 List.of(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
 
         assertTrue(prompt.getMessages().getFirst().getContent()
                 .contains("PRIOR_COMMITTED_RECEIPT"));
@@ -391,7 +402,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(),
                 List.of(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         List<String> reactResults = react.getMessages().stream()
                 .map(message -> message.getContent())
                 .toList();
@@ -445,7 +457,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(),
                 List.of(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         List<String> results = prompt.getMessages().stream()
                 .map(message -> message.getContent())
                 .toList();
@@ -660,7 +673,8 @@ class AiAssistantPromptAssemblerTest {
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 attachments,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
         assertFalse(prompt.getSystemPrompt().contains("ignore previous instructions"));
@@ -696,7 +710,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(),
                 attachments,
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
         assertTrue(serialized.contains("budget_exceeded"));
@@ -718,7 +733,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(new ToolTurn(1, "list_tasks", toolResult)),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
         assertTrue(serialized.contains("2026-08-10"));
@@ -758,7 +774,8 @@ class AiAssistantPromptAssemblerTest {
         freshResources.register("person", 71);
         freshResources.register("deal", 73);
         MaskedPrompt prompt = assembler.assemble(
-                List.of(priorAnswer), replayContext, List.of(), freshContext, freshResources);
+                List.of(priorAnswer), replayContext, List.of(), freshContext, freshResources,
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
         OutboundLeakScan.assertNoLeakInServerEnvelope(serialized, freshContext, objectMapper);
@@ -790,7 +807,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         assertTrue(prompt.getMessages().isEmpty());
     }
@@ -810,7 +828,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         assertTrue(prompt.getMessages().isEmpty());
     }
@@ -833,7 +852,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
         OutboundLeakScan.assertNoLeakInServerEnvelope(serialized, context, objectMapper);
@@ -862,7 +882,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 context,
-                resources);
+                resources,
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
         OutboundLeakScan.assertNoLeakInServerEnvelope(serialized, context, objectMapper);
@@ -886,7 +907,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         assertTrue(prompt.getMessages().isEmpty());
     }
@@ -906,7 +928,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
         assertFalse(serialized.contains("diagnosis"));
@@ -928,7 +951,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         assertTrue(prompt.getMessages().isEmpty());
     }
@@ -1053,7 +1077,8 @@ class AiAssistantPromptAssemblerTest {
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         String replay = prompt.getMessages().stream()
                 .map(message -> message.getContent())
                 .reduce("", (left, right) -> left + "\n" + right);
@@ -1092,7 +1117,8 @@ class AiAssistantPromptAssemblerTest {
                         new MaskingContext(),
                         new AiChatResourceRegistry(),
                         budget,
-                        null));
+                        null,
+                        AiAssistantToolCatalog.ALL));
 
         assertEquals("tool_result_budget_exhausted", exception.terminalReason());
     }
@@ -1116,7 +1142,8 @@ class AiAssistantPromptAssemblerTest {
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         MaskedPrompt withRepair = assembler.assemble(
                 List.of(request),
                 new AiAssistantToolResult(Map.of(), List.of()),
@@ -1124,7 +1151,8 @@ class AiAssistantPromptAssemblerTest {
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 budget,
-                repair);
+                repair,
+                AiAssistantToolCatalog.ALL);
 
         assertEquals(
                 withoutRepair.getMessages().getLast().getContent(),
@@ -1180,7 +1208,8 @@ class AiAssistantPromptAssemblerTest {
                         new MaskingContext(),
                         new AiChatResourceRegistry(),
                         budget,
-                        AiStructuredRepair.from("exclusive_step", "x".repeat(200))));
+                        AiStructuredRepair.from("exclusive_step", "x".repeat(200)),
+                        AiAssistantToolCatalog.ALL));
 
         assertEquals("prompt_budget_exceeded", exception.terminalReason());
     }
@@ -1254,7 +1283,8 @@ class AiAssistantPromptAssemblerTest {
                 List.of(),
                 budget,
                 null,
-                skill);
+                skill,
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
         assertTrue(serialized.contains("FIRST_ROW_MUST_SURVIVE"));
@@ -1286,7 +1316,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantPromptBudget(512, 4_000, 1_000, 1_000, 2_048, 8_000),
                 null,
                 AiAssistantPromptAssembler.SkillContext.NONE.withScopeDirective(
-                        AiChatScopedToolPolicy.directive(declared)));
+                        AiChatScopedToolPolicy.directive(declared)),
+                        AiAssistantToolCatalog.ALL);
 
         assertFalse(prompt.getSystemPrompt().contains("server-declared query scope"));
         assertTrue(prompt.getMessages().stream()

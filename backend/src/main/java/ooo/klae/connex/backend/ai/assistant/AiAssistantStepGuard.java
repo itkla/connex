@@ -10,12 +10,21 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiRawOutputGuard;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import tools.jackson.databind.JsonNode;
 
-/** Raw masked-output guard for the exclusive tool-or-final assistant step schema. */
+/**
+ * Factory for the raw masked-output guards of the exclusive tool-or-final assistant step schema.
+ *
+ * <p>It is deliberately not itself an {@link AiRawOutputGuard}. Every guard it hands out is a
+ * function of one turn's loaded toolsets, so a component-wide guard would have to choose a default
+ * vocabulary, and the only default that never rejects a legitimate step — the whole catalog — is
+ * exactly the one that would admit a tool the turn never loaded. Callers name the vocabulary they
+ * mean through {@link #forStep(Set, Set)} or {@link #finalAnswerForIssuedPlaceholders(Set)}.
+ */
 @Component
 @RequiredArgsConstructor
-public class AiAssistantStepGuard implements AiRawOutputGuard {
+public class AiAssistantStepGuard {
     private static final Set<String> TOP_LEVEL_FIELDS = Set.of("tool", "final");
     private static final Set<String> TOOL_FIELDS = Set.of("name", "args");
     private static final Set<String> FINAL_FIELDS = Set.of(
@@ -46,13 +55,7 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
 
     private final AiAssistantToolCatalog toolCatalog;
 
-    @Override
-    public boolean permits(JsonNode output) {
-        return rejectionReason(output) == null;
-    }
-
-    @Override
-    public String rejectionReason(JsonNode output) {
+    private String rejectionReason(JsonNode output, Set<Toolset> loadedToolsets) {
         if (output == null || !output.isObject() || !exactFields(output, TOP_LEVEL_FIELDS)) {
             return "top_level_fields";
         }
@@ -63,20 +66,26 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
         if (hasTool == hasFinal) {
             return "exclusive_step";
         }
-        return hasTool ? toolRejection(tool) : finalRejection(finalAnswer);
+        return hasTool
+                ? toolRejection(tool, loadedToolsets)
+                : finalRejection(finalAnswer);
     }
 
     /**
-     * Creates a raw-output guard that also rejects bare bodies of placeholders issued for the
-     * current provider call while continuing to accept their braced forms for demasking.
+     * Creates the guard for one model step: the assistant schema narrowed to the turn's loaded
+     * tool vocabulary, plus the issued-placeholder rejection.
+     *
+     * <p>A declared tool outside the loaded toolsets is rejected as {@code tool_name}, the same
+     * verdict an undeclared name earns, because both recover the same way — a schema repair on the
+     * ReAct protocol and {@code native_unknown_tool} on the native one.
+     *
+     * @param loadedToolsets the toolsets the turn currently holds
      * @param issuedPlaceholders canonical issued placeholders such as {@code {{P1}}}
-     * @return assistant schema and issued-placeholder guard
+     * @return loaded-vocabulary schema and issued-placeholder guard
      */
-    public AiRawOutputGuard forIssuedPlaceholders(Set<String> issuedPlaceholders) {
+    public AiRawOutputGuard forStep(
+            Set<Toolset> loadedToolsets, Set<String> issuedPlaceholders) {
         Set<String> placeholderBodies = issuedPlaceholderBodies(issuedPlaceholders);
-        if (placeholderBodies.isEmpty()) {
-            return this;
-        }
         return new AiRawOutputGuard() {
             @Override
             public boolean permits(JsonNode output) {
@@ -85,7 +94,8 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
 
             @Override
             public String rejectionReason(JsonNode output) {
-                String schemaRejection = AiAssistantStepGuard.this.rejectionReason(output);
+                String schemaRejection = AiAssistantStepGuard.this.rejectionReason(
+                        output, loadedToolsets);
                 if (schemaRejection != null) {
                     return schemaRejection;
                 }
@@ -122,13 +132,14 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
         };
     }
 
-    private String toolRejection(JsonNode tool) {
+    private String toolRejection(JsonNode tool, Set<Toolset> loadedToolsets) {
         if (!tool.isObject() || !exactFields(tool, TOOL_FIELDS)) {
             return "tool_fields";
         }
         JsonNode name = tool.get("name");
         JsonNode args = tool.get("args");
-        if (name == null || !name.isString() || !toolCatalog.isKnown(name.asString())) {
+        if (name == null || !name.isString() || !toolCatalog.isKnown(name.asString())
+                || !toolCatalog.isLoaded(name.asString(), loadedToolsets)) {
             return "tool_name";
         }
         return toolCatalog.permitsArguments(name.asString(), args)

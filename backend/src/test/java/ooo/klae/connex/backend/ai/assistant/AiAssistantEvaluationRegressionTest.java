@@ -106,7 +106,8 @@ class AiAssistantEvaluationRegressionTest {
         }
         JsonNode candidate = evaluationCase.get("candidate");
         assertNotNull(candidate, () -> "Missing candidate for " + id);
-        assertTrue(stepGuard.permits(candidate), () -> "Candidate failed assistant schema guard: " + id);
+        assertTrue(stepGuard.forStep(AiAssistantToolCatalog.ALL, Set.of()).permits(candidate),
+                () -> "Candidate failed assistant schema guard: " + id);
         AiChatResourceRegistry resources = resources(evaluationCase.path("resources"));
 
         switch (category) {
@@ -204,7 +205,8 @@ class AiAssistantEvaluationRegressionTest {
                 untrustedData,
                 List.of(),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
         assertFalse(prompt.getSystemPrompt().contains(payload),
                 () -> "Injection reached system instructions in " + id);
         assertTrue(prompt.getMessages().stream().anyMatch(message -> message.getContent().contains(payload)),

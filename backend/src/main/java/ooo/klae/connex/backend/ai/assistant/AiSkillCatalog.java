@@ -146,6 +146,7 @@ public class AiSkillCatalog {
      * @param optionalInputs inputs that narrow the plan when present
      * @param plan deterministic server-owned retrieval plan
      * @param allowedTools every tool key the skill may cause to run, plan or fallback
+     * @param toolsets non-core toolsets a routed turn starts with, spent from the one per-turn cap
      * @param requiredMetrics server-computed figures the answer must be grounded in
      * @param resultBlockKinds answer-document block kinds the skill's result contract permits
      * @param coverageSources coverage source categories the skill may claim
@@ -175,6 +176,7 @@ public class AiSkillCatalog {
             Set<String> optionalInputs,
             List<PlanStep> plan,
             Set<String> allowedTools,
+            Set<String> toolsets,
             Set<String> requiredMetrics,
             Set<String> resultBlockKinds,
             Set<String> coverageSources,
@@ -197,6 +199,18 @@ public class AiSkillCatalog {
             optionalInputs = Set.copyOf(optionalInputs);
             plan = List.copyOf(plan);
             allowedTools = Set.copyOf(allowedTools);
+            toolsets = Set.copyOf(toolsets);
+            if (toolsets.size() > AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN) {
+                throw new IllegalArgumentException(
+                        "Skill " + key + " declares more toolsets than one turn may hold");
+            }
+            for (String toolset : toolsets) {
+                if (AiAssistantToolCatalog.LOADABLE.stream()
+                        .noneMatch(loadable -> loadable.key().equals(toolset))) {
+                    throw new IllegalArgumentException(
+                            "Skill " + key + " declares an unknown toolset " + toolset);
+                }
+            }
             requiredMetrics = Set.copyOf(requiredMetrics);
             resultBlockKinds = Set.copyOf(resultBlockKinds);
             coverageSources = Set.copyOf(coverageSources);
@@ -293,6 +307,7 @@ public class AiSkillCatalog {
                         new PlanStep(PlanStepKind.GET_RECORD, 0, 0, true),
                         new PlanStep(PlanStepKind.LIST_ACTIVITIES, 20, 0, false)),
                 Set.of("relationship_metrics", "get_record", "list_activities"),
+                Set.of(),
                 Set.of("warmth_score", "warmth_band", "warmth_trend", "days_since_touch"),
                 Set.of("answer", "fact", "metric", "inference", "recommendation", "limitation"),
                 Set.of("records", "activities", "metrics"),
@@ -352,6 +367,7 @@ public class AiSkillCatalog {
                         AiChatScopeBounds.DEFAULT_ACTIVITY_ROWS_PER_RECORD,
                         true)),
                 Set.of("list_scope_activities"),
+                Set.of(),
                 Set.of("matching_activity_count", "matched_record_count"),
                 Set.of("answer", "timeline", "list", "metric", "limitation"),
                 Set.of("records", "activities"),
@@ -408,6 +424,7 @@ public class AiSkillCatalog {
                         new PlanStep(PlanStepKind.LIST_ACTIVITIES, 10, 0, false),
                         new PlanStep(PlanStepKind.LIST_TASKS, 5, 0, false)),
                 Set.of("get_record", "relationship_metrics", "list_activities", "list_tasks"),
+                Set.of(),
                 Set.of("warmth_score", "warmth_band"),
                 Set.of("answer", "fact", "metric", "list", "recommendation", "limitation"),
                 Set.of("records", "activities", "tasks", "notes", "metrics"),
@@ -462,6 +479,7 @@ public class AiSkillCatalog {
                         PlanStepKind.DEAL_ATTENTION,
                         AiChatScopeBounds.MAX_ATTENTION_DEALS, 0, true)),
                 Set.of("deal_attention"),
+                Set.of(),
                 Set.of("risk_level", "risk_score", "risk_factors"),
                 Set.of("answer", "list", "metric", "recommendation", "limitation"),
                 Set.of("deals", "metrics"),
@@ -540,6 +558,7 @@ public class AiSkillCatalog {
                                 AiChatScopeBounds.MAX_ATTENTION_DEALS, 0, false)),
                 Set.of("work_commitments", "upcoming_meetings",
                         "warmth_movement", "deal_attention"),
+                Set.of(),
                 Set.of("overdue_commitment_count", "warmth_band", "risk_level"),
                 Set.of("answer", "fact", "metric", "list", "inference",
                         "recommendation", "limitation"),
@@ -618,6 +637,7 @@ public class AiSkillCatalog {
                 Set.of(),
                 Set.of(),
                 List.of(),
+                Set.of(),
                 Set.of(),
                 Set.of(),
                 Set.of(),
