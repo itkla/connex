@@ -158,6 +158,46 @@ class ScriptedAiProviderTest {
         assertEquals(1, executor.beforeSends);
     }
 
+    /**
+     * The loop answers a client-error rejection on a native first attempt by clearing its native
+     * state and retrying the same cursor position through the JSON protocol. The protocol is
+     * therefore part of a step's predicate: without it the retry reselects the rejecting step and
+     * the trajectory ends in a second rejection, rehearsing nothing.
+     */
+    @Test
+    void answersTheJsonRetryThatFollowsARejectedNativeFirstStep(@TempDir Path directory)
+            throws IOException {
+        ScriptedAiProvider provider = provider(directory, """
+                {
+                  "id": "unit",
+                  "selector": "connex_script_unit",
+                  "capabilityClass": "scripted-native",
+                  "expectsNativeDegradation": true,
+                  "steps": [
+                    {
+                      "afterToolCalls": 0,
+                      "protocol": "native",
+                      "emit": {"kind": "failure", "failureKind": "rejected"}
+                    },
+                    {
+                      "afterToolCalls": 0,
+                      "protocol": "json",
+                      "emit": {"kind": "final", "text": "%s"}
+                    }
+                  ]
+                }
+                """.formatted(FINAL_TEXT.replace("\"", "\\\"")));
+        RecordingExecutor executor = new RecordingExecutor();
+
+        assertThrows(AiProviderRequestRejectedException.class,
+                () -> provider.complete(nativeRequest(executor, List.of(), null)));
+        AiCompletionResult degraded = provider.complete(degradedRequest(executor));
+
+        assertEquals(FINAL_TEXT, degraded.text());
+        assertEquals(2, executor.beforeSends,
+                "both the rejected native attempt and the JSON retry mark a dispatch");
+    }
+
     @Test
     void refusesARequestCarryingNoKnownSelectorBeforeAnyDispatch(@TempDir Path directory)
             throws IOException {
@@ -222,7 +262,16 @@ class ScriptedAiProviderTest {
                   "capabilityClass": "scripted-native",
                   "expectsNativeDegradation": true,
                   "steps": [
-                    {"afterToolCalls": 0, "emit": {"kind": "failure", "failureKind": "rejected"}}
+                    {
+                      "afterToolCalls": 0,
+                      "protocol": "native",
+                      "emit": {"kind": "failure", "failureKind": "rejected"}
+                    },
+                    {
+                      "afterToolCalls": 0,
+                      "protocol": "json",
+                      "emit": {"kind": "final", "text": "answered after degrading"}
+                    }
                   ]
                 }
                 """);
@@ -570,6 +619,32 @@ class ScriptedAiProviderTest {
                 exchanges,
                 repairMessage,
                 finalOnly);
+    }
+
+    /**
+     * The request shape the loop sends after a native rejection degraded the turn.
+     *
+     * <p>The configured model id is unchanged — degradation is a runtime protocol change, not a
+     * reconfiguration — so the script's capability class still has to be the native one while the
+     * request itself carries no native tool request at all.
+     *
+     * @param executor the recording attempt executor
+     * @return a JSON-protocol request for the same turn
+     */
+    private AiCompletionRequest degradedRequest(AiProviderAttemptExecutor executor) {
+        return new AiCompletionRequest(
+                target("scripted-native"),
+                AiCredentials.of(java.util.Map.of()),
+                "system",
+                List.of(new AiMessage("user", SELECTOR)),
+                List.of(),
+                AiOutputMode.JSON,
+                new AiResponseSchema("assistant_step", objectMapper.createObjectNode()),
+                null,
+                AiReasoningMode.TAGGED,
+                executor,
+                256,
+                0.1);
     }
 
     private AiCompletionRequest request(

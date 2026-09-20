@@ -65,7 +65,7 @@ public class ScriptedAiScriptLoader {
     private static final Set<String> SCRIPT_FIELDS = Set.of(
             "id", "selector", "capabilityClass", "expectsNativeDegradation", "steps");
     private static final Set<String> STEP_FIELDS = Set.of(
-            "afterToolCalls", "closing", "onRepair", "emit");
+            "afterToolCalls", "closing", "onRepair", "protocol", "emit");
     private static final Set<String> EMISSION_FIELDS = Set.of(
             "kind", "toolName", "arguments", "text", "failureKind", "reasoning", "deltas");
 
@@ -197,10 +197,10 @@ public class ScriptedAiScriptLoader {
             throw new IllegalStateException(
                     "Scripted AI script is not valid JSON: " + file.getFileName(), exception);
         }
-        return parse(root, file);
+        return parse(root, file, objectMapper);
     }
 
-    private static ScriptedAiScript parse(JsonNode root, Path file) {
+    private static ScriptedAiScript parse(JsonNode root, Path file, ObjectMapper objectMapper) {
         requireObject(root, file);
         requireKnownFields(root, SCRIPT_FIELDS, file);
         String id = requiredText(root, "id", file);
@@ -215,7 +215,7 @@ public class ScriptedAiScriptLoader {
         }
         List<ScriptedAiStep> steps = new ArrayList<>(stepsNode.size());
         for (JsonNode stepNode : stepsNode) {
-            steps.add(parseStep(stepNode, file));
+            steps.add(parseStep(stepNode, file, objectMapper));
         }
         ScriptedAiScript script;
         try {
@@ -229,7 +229,7 @@ public class ScriptedAiScriptLoader {
         return script;
     }
 
-    private static ScriptedAiStep parseStep(JsonNode node, Path file) {
+    private static ScriptedAiStep parseStep(JsonNode node, Path file, ObjectMapper objectMapper) {
         requireObject(node, file);
         requireKnownFields(node, STEP_FIELDS, file);
         JsonNode afterToolCalls = node.path("afterToolCalls");
@@ -244,18 +244,28 @@ public class ScriptedAiScriptLoader {
             }
             closing = closingNode.booleanValue();
         }
+        JsonNode protocolNode = node.get("protocol");
+        ScriptedAiStep.Protocol protocol = protocolNode == null || protocolNode.isNull()
+                ? ScriptedAiStep.Protocol.ANY
+                : enumValue(
+                        ScriptedAiStep.Protocol.class,
+                        requiredText(node, "protocol", file),
+                        file,
+                        "protocol");
         try {
             return new ScriptedAiStep(
                     afterToolCalls.intValue(),
                     closing,
                     optionalBoolean(node, "onRepair", file),
-                    parseEmission(node.path("emit"), file));
+                    protocol,
+                    parseEmission(node.path("emit"), file, objectMapper));
         } catch (IllegalArgumentException exception) {
             throw invalid(file, exception.getMessage());
         }
     }
 
-    private static ScriptedAiStep.Emission parseEmission(JsonNode node, Path file) {
+    private static ScriptedAiStep.Emission parseEmission(
+            JsonNode node, Path file, ObjectMapper objectMapper) {
         requireObject(node, file);
         requireKnownFields(node, EMISSION_FIELDS, file);
         ScriptedAiStep.Kind kind = enumValue(
@@ -282,14 +292,47 @@ public class ScriptedAiScriptLoader {
                 deltas.add(delta.asString());
             }
         }
+        String arguments = optionalText(node, "arguments");
+        if (kind == ScriptedAiStep.Kind.TOOL_CALL) {
+            requireJsonObjectArguments(arguments, file, objectMapper);
+        }
         return new ScriptedAiStep.Emission(
                 kind,
                 optionalText(node, "toolName"),
-                optionalText(node, "arguments"),
+                arguments,
                 optionalText(node, "text"),
                 failureKind,
                 optionalText(node, "reasoning"),
                 deltas);
+    }
+
+    /**
+     * Refuses tool-call arguments that are not a JSON object.
+     *
+     * <p>The provider never re-encodes this value: on the native path it becomes the function
+     * call's arguments verbatim, and on the JSON path it is spliced into the step envelope as raw
+     * JSON. A fixture typo therefore reaches the loop as malformed model output or as a refused
+     * tool call — a runtime failure wearing the costume of a product defect — unless it is refused
+     * here, where the loader refuses rather than defaults everywhere else.
+     *
+     * @param arguments the declared arguments text
+     * @param file the fixture the arguments came from
+     * @param objectMapper shared JSON mapper
+     */
+    private static void requireJsonObjectArguments(
+            String arguments, Path file, ObjectMapper objectMapper) {
+        if (arguments == null || arguments.isBlank()) {
+            throw invalid(file, "arguments are required");
+        }
+        JsonNode parsed;
+        try {
+            parsed = objectMapper.readTree(arguments);
+        } catch (JacksonException exception) {
+            throw invalid(file, "arguments must be a JSON object");
+        }
+        if (parsed == null || !parsed.isObject()) {
+            throw invalid(file, "arguments must be a JSON object");
+        }
     }
 
     /**
@@ -311,18 +354,45 @@ public class ScriptedAiScriptLoader {
         }
     }
 
+    /**
+     * Refuses a script whose first native step rejects without a declared, answerable degradation.
+     *
+     * <p>A client-error rejection on the first native attempt does not fail the turn: the loop
+     * clears its native state and retries the same cursor position through the JSON protocol. Two
+     * silent fixtures follow from that. One declares the rejection without meaning to and produces
+     * a green golden that documents native behaviour it never exercised. The other declares the
+     * degradation but no JSON step for the retried position, so the retry reselects the rejecting
+     * step and the trajectory terminates in a second rejection having rehearsed nothing.
+     *
+     * @param script the parsed script
+     * @param file the fixture it came from
+     */
     private static void requireDeclaredDegradation(ScriptedAiScript script, Path file) {
-        if (script.expectsNativeDegradation()) {
+        boolean rejectsFirstNativeStep = script.steps().stream().anyMatch(step ->
+                step.afterToolCalls() == 0
+                        && step.protocol().admits(true)
+                        && step.emit().kind() == ScriptedAiStep.Kind.FAILURE
+                        && step.emit().failureKind() == ScriptedAiStep.FailureKind.REJECTED);
+        if (!rejectsFirstNativeStep) {
             return;
         }
-        for (ScriptedAiStep step : script.steps()) {
-            if (step.afterToolCalls() == 0
-                    && step.emit().kind() == ScriptedAiStep.Kind.FAILURE
-                    && step.emit().failureKind() == ScriptedAiStep.FailureKind.REJECTED) {
-                throw invalid(file, "a rejected failure on the first step degrades the turn to the "
-                        + "JSON protocol instead of failing it, so the script must declare "
-                        + "expectsNativeDegradation");
-            }
+        if (!script.expectsNativeDegradation()) {
+            throw invalid(file, "a rejected failure on the first step degrades the turn to the "
+                    + "JSON protocol instead of failing it, so the script must declare "
+                    + "expectsNativeDegradation");
+        }
+        boolean answersTheRetry = script.steps().stream().anyMatch(step ->
+                step.afterToolCalls() == 0
+                        && !step.onRepair()
+                        && step.protocol().admits(false)
+                        && (step.closing() == null || !step.closing())
+                        && !(step.emit().kind() == ScriptedAiStep.Kind.FAILURE
+                                && step.emit().failureKind()
+                                        == ScriptedAiStep.FailureKind.REJECTED));
+        if (!answersTheRetry) {
+            throw invalid(file, "a script that expects the native protocol to degrade must also "
+                    + "declare a JSON-protocol step for the retried first position, or the turn "
+                    + "can only end in a second rejection");
         }
     }
 

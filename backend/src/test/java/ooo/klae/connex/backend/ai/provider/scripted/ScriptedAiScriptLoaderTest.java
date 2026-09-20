@@ -118,8 +118,13 @@ class ScriptedAiScriptLoaderTest {
                 exception.getMessage());
     }
 
+    /**
+     * The degradation path is only rehearsed if both halves are declared. The loop retries the
+     * rejected cursor position through the JSON protocol, so a script carrying only the rejecting
+     * native step reselects it and terminates in a second rejection having proved nothing.
+     */
     @Test
-    void acceptsAClientErrorRejectionOnTheFirstStepWhenTheDegradationIsDeclared(
+    void refusesADeclaredDegradationThatDeclaresNoJsonStepForTheRetriedPosition(
             @TempDir Path directory) throws IOException {
         write(directory, "degradation.json", """
                 {
@@ -128,7 +133,42 @@ class ScriptedAiScriptLoaderTest {
                   "capabilityClass": "scripted-native",
                   "expectsNativeDegradation": true,
                   "steps": [
-                    {"afterToolCalls": 0, "emit": {"kind": "failure", "failureKind": "rejected"}}
+                    {
+                      "afterToolCalls": 0,
+                      "protocol": "native",
+                      "emit": {"kind": "failure", "failureKind": "rejected"}
+                    }
+                  ]
+                }
+                """);
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> new ScriptedAiScriptLoader(directory.toString(), objectMapper));
+
+        assertTrue(exception.getMessage().contains("JSON-protocol step for the retried first"),
+                exception.getMessage());
+    }
+
+    @Test
+    void acceptsADeclaredDegradationThatAlsoAnswersTheJsonRetry(@TempDir Path directory)
+            throws IOException {
+        write(directory, "degradation.json", """
+                {
+                  "id": "native_degradation",
+                  "selector": "connex_script_native_degradation",
+                  "capabilityClass": "scripted-native",
+                  "expectsNativeDegradation": true,
+                  "steps": [
+                    {
+                      "afterToolCalls": 0,
+                      "protocol": "native",
+                      "emit": {"kind": "failure", "failureKind": "rejected"}
+                    },
+                    {
+                      "afterToolCalls": 0,
+                      "protocol": "json",
+                      "emit": {"kind": "final", "text": "answered after degrading"}
+                    }
                   ]
                 }
                 """);
@@ -136,8 +176,95 @@ class ScriptedAiScriptLoaderTest {
         ScriptedAiScriptLoader loader = new ScriptedAiScriptLoader(
                 directory.toString(), objectMapper);
 
-        assertTrue(loader.bySelector("connex_script_native_degradation")
-                .expectsNativeDegradation());
+        ScriptedAiScript script = loader.bySelector("connex_script_native_degradation");
+        assertTrue(script.expectsNativeDegradation());
+        assertEquals(
+                ScriptedAiStep.Kind.FAILURE,
+                script.resolve(cursor(true)).orElseThrow().emit().kind(),
+                "the native attempt must still select the rejecting step");
+        assertEquals(
+                ScriptedAiStep.Kind.FINAL,
+                script.resolve(cursor(false)).orElseThrow().emit().kind(),
+                "the JSON retry of the same position must select the step that answers it");
+    }
+
+    @Test
+    void refusesToolArgumentsThatAreNotJson(@TempDir Path directory) throws IOException {
+        write(directory, "arguments.json", """
+                {
+                  "id": "bad_arguments",
+                  "selector": "connex_script_bad_arguments",
+                  "capabilityClass": "scripted-native",
+                  "steps": [
+                    {
+                      "afterToolCalls": 0,
+                      "emit": {
+                        "kind": "tool_call",
+                        "toolName": "search_records",
+                        "arguments": "query=renewal"
+                      }
+                    }
+                  ]
+                }
+                """);
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> new ScriptedAiScriptLoader(directory.toString(), objectMapper));
+
+        assertTrue(exception.getMessage().contains("arguments must be a JSON object"),
+                exception.getMessage());
+    }
+
+    @Test
+    void refusesToolArgumentsThatAreValidJsonButNotAnObject(@TempDir Path directory)
+            throws IOException {
+        write(directory, "arguments.json", """
+                {
+                  "id": "scalar_arguments",
+                  "selector": "connex_script_scalar_arguments",
+                  "capabilityClass": "scripted-native",
+                  "steps": [
+                    {
+                      "afterToolCalls": 0,
+                      "emit": {
+                        "kind": "tool_call",
+                        "toolName": "search_records",
+                        "arguments": "[1,2]"
+                      }
+                    }
+                  ]
+                }
+                """);
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> new ScriptedAiScriptLoader(directory.toString(), objectMapper));
+
+        assertTrue(exception.getMessage().contains("arguments must be a JSON object"),
+                exception.getMessage());
+    }
+
+    @Test
+    void refusesAnUnknownProtocol(@TempDir Path directory) throws IOException {
+        write(directory, "protocol.json", """
+                {
+                  "id": "bad_protocol",
+                  "selector": "connex_script_bad_protocol",
+                  "capabilityClass": "scripted-native",
+                  "steps": [
+                    {
+                      "afterToolCalls": 0,
+                      "protocol": "grpc",
+                      "emit": {"kind": "final", "text": "done"}
+                    }
+                  ]
+                }
+                """);
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> new ScriptedAiScriptLoader(directory.toString(), objectMapper));
+
+        assertTrue(exception.getMessage().contains("protocol is not a declared value"),
+                exception.getMessage());
     }
 
     @Test
@@ -414,6 +541,11 @@ class ScriptedAiScriptLoaderTest {
     @FunctionalInterface
     private interface SymlinkCreation {
         void create() throws IOException;
+    }
+
+    private static ScriptedAiTurnCursor cursor(boolean nativeProtocol) {
+        return new ScriptedAiTurnCursor(
+                "connex_script_native_degradation", 0, false, false, nativeProtocol);
     }
 
     private static String alphabetic(int index) {

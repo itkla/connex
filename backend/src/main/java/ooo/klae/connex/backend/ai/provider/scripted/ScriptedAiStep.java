@@ -13,18 +13,21 @@ import java.util.regex.Pattern;
  * @param afterToolCalls completed tool calls this step answers after
  * @param closing whether this step must be the loop's closing step, or {@code null} for either
  * @param onRepair whether this step answers a schema-repair request rather than a first attempt
+ * @param protocol which wire protocol this step answers under
  * @param emit what the provider returns, or the failure it raises
  */
 public record ScriptedAiStep(
         int afterToolCalls,
         Boolean closing,
         boolean onRepair,
+        Protocol protocol,
         Emission emit) {
 
     public ScriptedAiStep {
         if (afterToolCalls < 0) {
             throw new IllegalArgumentException("Scripted AI step afterToolCalls must not be negative");
         }
+        protocol = protocol == null ? Protocol.ANY : protocol;
         Objects.requireNonNull(emit, "emit");
     }
 
@@ -37,7 +40,45 @@ public record ScriptedAiStep(
         Objects.requireNonNull(cursor, "cursor");
         return afterToolCalls == cursor.completedToolCalls()
                 && onRepair == cursor.repairAttempt()
+                && protocol.admits(cursor.nativeProtocol())
                 && (closing == null || closing == cursor.closing());
+    }
+
+    /**
+     * The wire protocol a step answers under, as a closed set.
+     *
+     * <p>The protocol is part of the predicate because one turn can visit both. A client-error
+     * rejection on a native first attempt does not fail the turn: the loop clears its native state
+     * and retries the same cursor position through the JSON protocol. Without this dimension the
+     * retry reselects the rejecting step — and the uniqueness rule that forbids two steps sharing
+     * {@code (afterToolCalls, onRepair, closing)} then makes the successful follow-up
+     * inexpressible, so a degradation fixture could only ever end in a second rejection.
+     */
+    public enum Protocol {
+        /** Answers only a native-tool request. */
+        NATIVE,
+        /** Answers only a JSON-protocol request. */
+        JSON,
+        /** Answers either protocol. */
+        ANY;
+
+        /**
+         * Whether this step may answer a request on the supplied protocol.
+         * @param nativeProtocol whether the request carries a native-tool request
+         * @return whether the protocol admits it
+         */
+        public boolean admits(boolean nativeProtocol) {
+            return this == ANY || (this == NATIVE) == nativeProtocol;
+        }
+
+        /**
+         * Whether two declared protocols can both answer one request.
+         * @param other the other step's declared protocol
+         * @return whether the two overlap
+         */
+        public boolean overlaps(Protocol other) {
+            return this == ANY || other == ANY || this == other;
+        }
     }
 
     /** What the provider does when a step is selected. */

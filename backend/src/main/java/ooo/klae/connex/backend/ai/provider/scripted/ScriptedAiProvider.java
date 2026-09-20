@@ -264,8 +264,8 @@ public class ScriptedAiProvider implements AiProvider {
      * The JSON-protocol equivalent of one native function call.
      *
      * <p>The arguments are spliced in as raw JSON rather than re-serialized, because the loader has
-     * already refused a fixture whose arguments are not JSON text and re-encoding would change
-     * what a golden authored.
+     * already parsed them and refused any fixture whose arguments are not a JSON object, and
+     * re-encoding would change what a golden authored.
      */
     private static String jsonProtocolToolStep(ScriptedAiStep.Emission emission) {
         return "{\"tool\":{\"name\":\"" + emission.toolName() + "\",\"args\":"

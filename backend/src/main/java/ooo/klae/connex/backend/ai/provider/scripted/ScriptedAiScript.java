@@ -76,9 +76,21 @@ public record ScriptedAiScript(
         return steps.stream().filter(step -> step.matches(cursor)).findFirst();
     }
 
+    /**
+     * Whether two steps could both answer one request.
+     *
+     * <p>The protocol is part of the key, not a detail: a native step and a JSON step at the same
+     * cursor position answer different requests, which is exactly what a fixture rehearsing the
+     * native-to-JSON degradation needs to declare.
+     *
+     * @param first one declared step
+     * @param second another declared step
+     * @return whether their predicates can both match one cursor
+     */
     private static boolean overlaps(ScriptedAiStep first, ScriptedAiStep second) {
         return first.afterToolCalls() == second.afterToolCalls()
                 && first.onRepair() == second.onRepair()
+                && first.protocol().overlaps(second.protocol())
                 && (first.closing() == null
                     || second.closing() == null
                     || first.closing().equals(second.closing()));
