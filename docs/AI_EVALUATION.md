@@ -193,7 +193,7 @@ The pre-context startup refusals — the `ai-eval` profile in a web application,
 
 ### Decision gate
 
-**Building this means real provider egress from staging, on a schedule an operator chooses, spending an organization's budget.** The design above is inside today's product posture — synthetic data only, a marker no tenant can set, nothing bypassed, every AUTO write reversed — which is why it can be written down without a ruling. Building it is a different decision.
+**Building this means real provider egress from staging, each time an operator chooses to run it and never on a timer, spending an organization's budget.** The design above is inside today's product posture — synthetic data only, a marker no tenant can set, nothing bypassed, every AUTO write reversed — which is why it can be written down without a ruling. Building it is a different decision.
 
 Before any code:
 
