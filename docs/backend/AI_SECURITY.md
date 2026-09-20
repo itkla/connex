@@ -83,6 +83,37 @@ Provider requests are bounded, redirect-free, and destination-validated immediat
 
 Do not add remote-image fetching or place provider I/O inside a database transaction.
 
+## Scripted provider test seam
+
+`ai/provider/scripted` holds a fixture-driven `AiProvider` that **replaces** `OpenAiCompatibleAdapter`, so agent trajectories can be rehearsed end to end with no provider credential and no network. It answers under the existing `openai_compatible` provider id deliberately — that id is a closed set in both a database `CHECK` constraint and `AiProviderConfigService`, and a test seam is not a reason to weaken either — and `AiProviderRouter` refuses duplicate adapter ids, which is why the real adapter carries `@Profile("!" + ScriptedAiProviderProfile.NAME)`.
+
+### Five layers keep it out of a deployed instance
+
+Do not remove one because another looks sufficient; `ScriptedAiProviderArchTest` fails the build if any of them goes.
+
+1. The `ai-scripted-provider` Spring profile on `ScriptedAiProviderConfiguration`, negated on `OpenAiCompatibleAdapter`.
+2. `@ConditionalOnProperty` on `connex.ai.scripted-provider.enabled`.
+3. Four refusals in `DeploymentProfileValidator`, reached from `DeploymentProfileEnvironmentPostProcessor` before the application context exists: the profile beside any declared `connex.deployment.profile`; the profile outside `dev`/`test`; the profile without the flag; the flag without the profile.
+4. The flag on `POSTURE_KEYS` and on every edition's forbidden-key list.
+5. **No script ships in the artifact.** `backend/src/main/resources/ai/scripted/` does not exist and nothing is read from the classpath: `ScriptedAiScriptLoader` reads only `connex.ai.scripted-provider.fixture-dir`, which must name a readable directory holding at least one `*.json`, or the context fails to start. An instance that defeated layers 1–4 would still answer nothing.
+
+Scripts live on test trees only — `backend/src/test/resources/ai/scripted/` for backend trajectories and `frontend/test/e2e/fixtures/ai-scripted/` for the CI browser stack. Never add one under `src/main`.
+
+Activate it locally with `SPRING_PROFILES_ACTIVE=dev,ai-scripted-provider`, `CONNEX_AI_SCRIPTED_PROVIDER_ENABLED=true` and `CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR=<absolute path>`; in a test, `@ActiveProfiles({"test", ScriptedAiProviderProfile.NAME})` plus the same two properties.
+
+### Contracts to honour near this code
+
+- **Any provider adapter must call both `providerAttemptExecutor().execute(...)` (or `.executeStream(...)`) and `providerAttemptExecutor().beforeSend()`, in the real transport's order.** `execute` runs the restriction epoch, the feature gate, the provider guard and the admission commitment; `beforeSend` is the *only* route to the organization budget lease's dispatched mark. An adapter that produces its output inside `execute` without calling `beforeSend` passes every functional test while under-counting real sends. On the streamed path the order matters too: `OpenAiCompatibleClient.sendStream` opens the transport, re-checks cancellation and the caller deadline, and only *then* calls `beforeSend`, because `AiChatStreamingProgress.Observer.onTransportOpen` refuses a turn that is no longer running. `ScriptedAiProviderTest` and `AiBudgetDispatchBoundaryTest` own that boundary.
+- **`scripted-json` rehearses the JSON protocol as other provider families and the runtime native-to-JSON degradation path produce it, not as `openai_compatible` ever presents it** — the real adapter declares `JSON_SCHEMA` and `NATIVE_FUNCTIONS` unconditionally, so a real `openai_compatible` target is always native.
+- **`ScriptedAiTurnCursor` derives protocol control state from the assembler's structure, never from prompt text.** The serialized prompt carries every system, member and CRM string in the turn, so a substring search for the repair delimiter or the closing sentence would let an ordinary member sentence or a record value move the provider into a state the loop never entered. `AiAssistantPromptAssembler` emits untrusted content only inside a `CRM_DATA_BEGIN` or `USER_REQUEST_BEGIN` envelope that occupies a whole message, and its own directives as bare messages, so the segment's shape decides: a repair attempt is the last bare directive ending in the offending-output delimiter, a closing step is a bare directive opening with the closing sentence, and a completed tool call is a message-leading envelope whose top-level type is `tool_result`. The script *selector* is the deliberate exception — it rides in the member's own words on purpose and chooses which fixture answers, not which protocol state the loop is in.
+
+### Fixture authoring
+
+- **A step predicate is `(afterToolCalls, onRepair, protocol, closing)`, and two steps may not share one.** Alternative outcomes at one cursor position are therefore not expressible inside a single script: three failure kinds after the same successful read need **three fixtures with three selectors**, not three steps.
+- **`protocol` is a closed set — `native`, `json` or `any` (the default).** It exists because one turn can visit both protocols: a client-error rejection on the first native attempt does not fail the turn, it clears the native state and retries the same cursor position as JSON. A fixture that declares `expectsNativeDegradation` must declare both halves — the rejecting native step and the JSON step that answers the retry — and the loader refuses it otherwise, because a trajectory that can only end in a second rejection rehearses nothing.
+- **A tool call's `arguments` must be a JSON object, and the loader parses it.** The provider never re-encodes the value: it becomes the native function call's arguments verbatim, or is spliced into the JSON step envelope as raw JSON. An unparseable fixture value would otherwise surface as malformed model output at trajectory time rather than as a refused fixture at startup.
+- **`ScriptedAiRequestJournal` records every request the provider was handed, not only the ones that left.** The provider records before the attempt executor's egress seam, which can still refuse on the restriction epoch, the feature gate, the provider guard or the admission commitment. Assert egress with `dispatched()`; `recorded()` being empty means the refusal happened *above* the provider. Entries are redactions — credentials emptied, images dropped, the live executor replaced — so no provider credential sits in a process-lifetime buffer.
+
 ## Unmasked disclosure and streaming
 
 `UNMASKED` disclosure is durable fail-closed posture. It may resolve only when the deployment permits it and the exact resolved destination has a current organization-admin attestation. Destination changes invalidate the attestation, and the snapshot is rechecked at provider egress.

@@ -106,32 +106,7 @@ Inspect the owning package, nearest implementation, and tests in addition to the
 - `UploadContentInspector` is the sole ingress for uploaded bytes: every new upload surface must call it with a server-selected purpose and store only the resulting artifact. The contract, package member policy, and MUST/MUST NOT list for new pipelines are in `../docs/UPLOAD_CONTENT_INSPECTION.md`, pinned by `UploadContentInspectionBoundaryArchTest`.
 - Idempotency, one-use proofs, generation handles, leases, and ownership checks are data-integrity/security mechanisms. Do not simplify them without reading the owning contract and tests.
 - New tables holding workspace/org data must participate in the appropriate tenant/control lifecycle, export, teardown, and residual-verification registries. `../docs/MULTITENANCY_PLAN.md` is authoritative.
-
-### The scripted AI provider is a test seam, and it must stay unreachable
-
-`ai/provider/scripted` holds a fixture-driven `AiProvider` that **replaces** `OpenAiCompatibleAdapter`, so agent trajectories can be rehearsed end to end with no provider credential and no network. It answers under the existing `openai_compatible` provider id deliberately — that id is a closed set in both a database `CHECK` constraint and `AiProviderConfigService`, and a test seam is not a reason to weaken either — and `AiProviderRouter` refuses duplicate ids, which is why the real adapter carries `@Profile("!" + ScriptedAiProviderProfile.NAME)`.
-
-Five independent layers keep it out of a deployed instance. Do not remove one because another looks sufficient; `ScriptedAiProviderArchTest` fails the build if any of them goes.
-
-1. The `ai-scripted-provider` Spring profile on `ScriptedAiProviderConfiguration`, negated on `OpenAiCompatibleAdapter`.
-2. `@ConditionalOnProperty` on `connex.ai.scripted-provider.enabled`.
-3. Four refusals in `DeploymentProfileValidator`, reached from `DeploymentProfileEnvironmentPostProcessor` before the application context exists: the profile beside any declared `connex.deployment.profile`; the profile outside `dev`/`test`; the profile without the flag; the flag without the profile.
-4. The flag on `POSTURE_KEYS` and on every edition's forbidden-key list.
-5. **No script ships in the artifact.** `backend/src/main/resources/ai/scripted/` does not exist and nothing is read from the classpath: `ScriptedAiScriptLoader` reads only `connex.ai.scripted-provider.fixture-dir`, which must name a readable directory holding at least one `*.json`, or the context fails to start. An instance that defeated layers 1–4 would still answer nothing.
-
-Scripts live on test trees only — `backend/src/test/resources/ai/scripted/` for backend trajectories and `frontend/test/e2e/fixtures/ai-scripted/` for the CI browser stack. Never add one under `src/main`.
-
-Two contracts to honour when working near this code:
-
-- **Any provider adapter must call both `providerAttemptExecutor().execute(...)` (or `.executeStream(...)`) and `providerAttemptExecutor().beforeSend()`, in the real transport's order.** `execute` runs the restriction epoch, the feature gate, the provider guard and the admission commitment; `beforeSend` is the *only* route to the organization budget lease's dispatched mark. An adapter that produces its output inside `execute` without calling `beforeSend` passes every functional test while under-counting real sends. On the streamed path the order matters too: `OpenAiCompatibleClient.sendStream` opens the transport, re-checks cancellation and the caller deadline, and only *then* calls `beforeSend`, because `AiChatStreamingProgress.Observer.onTransportOpen` refuses a turn that is no longer running. `ScriptedAiProviderTest` and `AiBudgetDispatchBoundaryTest` own that boundary.
-- **`scripted-json` rehearses the JSON protocol as other provider families and the runtime native-to-JSON degradation path produce it, not as `openai_compatible` ever presents it** — the real adapter declares `JSON_SCHEMA` and `NATIVE_FUNCTIONS` unconditionally, so a real `openai_compatible` target is always native.
-
-Two things fixture authors hit immediately:
-
-- **A step predicate is `(afterToolCalls, onRepair, closing)`, and two steps may not share one.** Alternative outcomes at one cursor position are therefore not expressible inside a single script: three failure kinds after the same successful read need **three fixtures with three selectors**, not three steps. The planned provider-failure golden is consequently three fixtures — transport, idle timeout and deadline — rather than the one the original plan described.
-- **`ScriptedAiRequestJournal` records every request the provider was handed, not only the ones that left.** The provider records before the attempt executor's egress seam, which can still refuse on the restriction epoch, the feature gate, the provider guard or the admission commitment. Assert egress with `dispatched()`; `recorded()` being empty means the refusal happened *above* the provider. Entries are redactions — credentials emptied, images dropped, the live executor replaced — so no decrypted provider key sits in a process-lifetime buffer.
-
-Activate it locally with `SPRING_PROFILES_ACTIVE=dev,ai-scripted-provider`, `CONNEX_AI_SCRIPTED_PROVIDER_ENABLED=true` and `CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR=<absolute path>`; in a test, `@ActiveProfiles({"test", ScriptedAiProviderProfile.NAME})` plus the same two properties.
+- The fixture-driven scripted AI provider in `ai/provider/scripted` replaces the real OpenAI-compatible adapter under a profile and a flag, and must stay unbootable in any deployed edition. Its activation gates, fixture contract, and the dispatch-accounting rule every provider adapter owes are in `../docs/backend/AI_SECURITY.md`.
 
 ## Transactions and locking
 

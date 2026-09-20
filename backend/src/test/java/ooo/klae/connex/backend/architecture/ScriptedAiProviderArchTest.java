@@ -45,6 +45,21 @@ class ScriptedAiProviderArchTest {
             "backend/src/main/java/ooo/klae/connex/backend/config/DeploymentProfileValidator.java");
     private static final Path ROUTER = Path.of(
             "backend/src/main/java/ooo/klae/connex/backend/ai/provider/AiProviderRouter.java");
+    private static final Path AGENT_GUIDE = Path.of("backend/AGENTS.md");
+    private static final Path AI_SECURITY_CONTRACT = Path.of("docs/backend/AI_SECURITY.md");
+
+    /**
+     * Phrases that only a full subsystem contract carries.
+     *
+     * <p>Each names one thing the authoritative document must say and the concise agent guide must
+     * not repeat: the activation recipe, the fixture-authoring semantics, and the dispatch rule a
+     * new adapter owes. A second copy in the guide is a second source of truth, and the guide is
+     * the copy nobody updates.
+     */
+    private static final List<String> CONTRACT_PHRASES = List.of(
+            "CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR",
+            "expectsNativeDegradation",
+            "beforeSend");
 
     /**
      * Startup refusals, by the validator field that must carry each one.
@@ -274,6 +289,29 @@ class ScriptedAiProviderArchTest {
         }
         assertTrue(violations.isEmpty(),
                 "shipped operator templates must never carry the scripted seam: " + violations);
+    }
+
+    @Test
+    void theScriptedContractLivesInTheAuthoritativeDocumentNotTheAgentGuide() throws IOException {
+        String contract = read(AI_SECURITY_CONTRACT);
+        String guide = read(AGENT_GUIDE);
+        List<String> missing = CONTRACT_PHRASES.stream()
+                .filter(phrase -> !contract.contains(phrase))
+                .toList();
+        List<String> copied = CONTRACT_PHRASES.stream()
+                .filter(guide::contains)
+                .toList();
+
+        assertTrue(missing.isEmpty(),
+                "docs/backend/AI_SECURITY.md is the authoritative contract for provider egress and "
+                        + "must carry the scripted seam's own: " + missing);
+        assertTrue(copied.isEmpty(),
+                "backend/AGENTS.md routes subsystem work to its contract and tells agents not to "
+                        + "copy a protocol back into the guide; these phrases belong only in "
+                        + "docs/backend/AI_SECURITY.md: " + copied);
+        assertTrue(guide.contains("ai/provider/scripted")
+                        && guide.contains("docs/backend/AI_SECURITY.md"),
+                "backend/AGENTS.md must still route the scripted package to its contract");
     }
 
     private static List<Path> operatorTemplates() throws IOException {
