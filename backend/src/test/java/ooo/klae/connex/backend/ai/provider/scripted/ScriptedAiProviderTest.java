@@ -88,7 +88,7 @@ class ScriptedAiProviderTest {
         RecordingExecutor executor = new RecordingExecutor();
 
         AiCompletionResult result = provider.complete(
-                nativeRequest(executor, List.of(exchange("call-1", "search_records")), null));
+                nativeRequest(executor, List.of(exchange("call-1", "search_records", 1)), null));
 
         assertEquals(FINAL_TEXT, result.text());
         assertTrue(result.toolCalls().isEmpty());
@@ -224,8 +224,8 @@ class ScriptedAiProviderTest {
                 () -> provider.complete(nativeRequest(
                         executor,
                         List.of(
-                                exchange("call-1", "search_records"),
-                                exchange("call-2", "search_records")),
+                                exchange("call-1", "search_records", 1),
+                                exchange("call-2", "search_records", 2)),
                         null)));
 
         assertTrue(exception.getMessage().contains("no step for this request"),
@@ -440,8 +440,8 @@ class ScriptedAiProviderTest {
         assertThrows(AiProviderException.class, () -> provider.complete(nativeRequest(
                 executor,
                 List.of(
-                        exchange("call-1", "search_records"),
-                        exchange("call-2", "search_records")),
+                        exchange("call-1", "search_records", 1),
+                        exchange("call-2", "search_records", 2)),
                 null)));
 
         assertEquals(2, journal.recorded().size());
@@ -679,10 +679,11 @@ class ScriptedAiProviderTest {
                 0.1);
     }
 
-    private static AiToolExchange exchange(String id, String name) {
+    private static AiToolExchange exchange(String id, String name, int step) {
         return new AiToolExchange(
                 new AiToolCall(id, name, "{\"query\":\"renewal\"}"),
-                "CRM_DATA_BEGIN\n{\"type\":\"tool_result\",\"data\":{}}\nCRM_DATA_END");
+                "CRM_DATA_BEGIN\n{\"type\":\"tool_result\",\"data\":{}}\nCRM_DATA_END",
+                step, 0);
     }
 
     private static AiProviderTarget target(String modelId) {

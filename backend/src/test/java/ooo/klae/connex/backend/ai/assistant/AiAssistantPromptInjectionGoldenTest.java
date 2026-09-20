@@ -291,7 +291,7 @@ class AiAssistantPromptInjectionGoldenTest {
                 promptAssembler.assemble(
                         List.of(userRequest),
                         new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(new ToolTurn(1, "get_record", untrustedCrm)),
+                        List.of(ToolTurn.soleCall(1, "get_record", untrustedCrm)),
                         context,
                         resources,
                         AiAssistantToolCatalog.ALL),
@@ -375,7 +375,7 @@ class AiAssistantPromptInjectionGoldenTest {
         MaskedPrompt assembly = assembler.assemble(
                 List.of(request),
                 new AiAssistantToolResult(Map.of(), List.of()),
-                List.of(new ToolTurn(1, "get_record", injectedRecord)),
+                List.of(ToolTurn.soleCall(1, "get_record", injectedRecord)),
                 new MaskingContext(),
                 resources,
                 AiAssistantToolCatalog.ALL);

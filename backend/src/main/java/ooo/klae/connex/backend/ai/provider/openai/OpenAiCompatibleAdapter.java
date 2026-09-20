@@ -331,31 +331,58 @@ public class OpenAiCompatibleAdapter implements AiProvider {
         return objectMapper.writeValueAsString(root);
     }
 
+    /**
+     * Replays completed exchanges as the assistant and tool messages the endpoint expects.
+     *
+     * <p>One assistant message per run of exchanges sharing a step, carrying one {@code tool_calls}
+     * entry per exchange in that run and followed by their {@code tool} messages in the same order.
+     * A step that carried exactly one call therefore serializes to the single-call assistant message
+     * this adapter has always written, byte for byte; the request record already refused any
+     * grouping that would rebuild a message the model never sent.
+     *
+     * @param messages the request's message array, appended to in place
+     * @param nativeTools the native request whose exchanges are replayed, or null
+     */
     private static void addNativeHistory(
             ArrayNode messages,
             AiNativeToolRequest nativeTools) {
         if (nativeTools == null) {
             return;
         }
-        for (AiToolExchange exchange : nativeTools.exchanges()) {
+        List<AiToolExchange> exchanges = nativeTools.exchanges();
+        int index = 0;
+        while (index < exchanges.size()) {
+            int runEnd = index;
+            while (runEnd + 1 < exchanges.size()
+                    && exchanges.get(runEnd + 1).step() == exchanges.get(index).step()) {
+                runEnd++;
+            }
             ObjectNode assistant = messages.addObject();
             assistant.put("role", "assistant");
             assistant.putNull("content");
-            ObjectNode call = assistant.putArray("tool_calls").addObject();
-            call.put("id", exchange.call().id());
-            call.put("type", "function");
-            if (exchange.call().thoughtSignature() != null) {
-                call.putObject("extra_content")
-                        .putObject("google")
-                        .put("thought_signature", exchange.call().thoughtSignature());
+            ArrayNode toolCalls = assistant.putArray("tool_calls");
+            for (int position = index; position <= runEnd; position++) {
+                AiToolExchange exchange = exchanges.get(position);
+                ObjectNode call = toolCalls.addObject();
+                call.put("id", exchange.call().id());
+                call.put("type", "function");
+                if (exchange.call().thoughtSignature() != null) {
+                    call.putObject("extra_content")
+                            .putObject("google")
+                            .put("thought_signature", exchange.call().thoughtSignature());
+                }
+                ObjectNode function = call.putObject("function");
+                function.put("name", exchange.call().name());
+                function.put("arguments", exchange.call().arguments());
             }
-            ObjectNode function = call.putObject("function");
-            function.put("name", exchange.call().name());
-            function.put("arguments", exchange.call().arguments());
-            ObjectNode tool = messages.addObject();
-            tool.put("role", "tool");
-            tool.put("tool_call_id", exchange.call().id());
-            tool.put("content", exchange.maskedResult());
+            for (int position = index; position <= runEnd; position++) {
+                AiToolExchange exchange = exchanges.get(position);
+                ObjectNode tool = messages.addObject();
+                tool.put("role", "tool");
+                tool.put("tool_call_id", exchange.call().id());
+                tool.put("content", exchange.maskedResult());
+            }
+            index = runEnd + 1;
         }
         if (nativeTools.repairMessage() != null) {
             ObjectNode repair = messages.addObject();
