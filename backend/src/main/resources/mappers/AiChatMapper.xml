@@ -225,6 +225,24 @@
     FOR UPDATE
   </select>
 
+  <!--
+    The background settlement passes' session lock. No viewer, so no participation projection:
+    the columns a viewer-scoped lock computes are all about one member's relationship to the
+    session, and a maintenance pass has no member.
+  -->
+  <select id="getSessionByIdForMaintenanceUpdate" resultMap="sessionResult">
+    SELECT s.id, s.workspace_id, s.created_by_user_id, s.title, s.title_user_set,
+           s.visibility, s.status,
+           NULL AS participation_status,
+           FALSE AS owned_by_current_user,
+           FALSE AS history_summarized,
+           s.last_message_at, s.archived_at, s.created_at, s.updated_at
+    FROM ai_chat_session s
+    WHERE s.workspace_id = #{workspaceId}
+      AND s.id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="sessionExists" resultType="boolean">
     SELECT EXISTS(
       SELECT 1
@@ -574,6 +592,60 @@
     FROM ai_chat_turn
     WHERE workspace_id = #{workspaceId}
       AND id = #{id}
+  </select>
+
+  <!--
+    The orphan settlement's session lookup. A lease key names a workspace and a turn and no
+    session, and the session lock comes first in the documented order, so this has to be read
+    before any lock is taken. A turn never changes session, so reading it unlocked is exact.
+  -->
+  <select id="getTurnSessionId" resultType="java.lang.Integer">
+    SELECT session_id
+    FROM ai_chat_turn
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+  </select>
+
+  <!--
+    Catalog-pinned background-sweep discovery: workspace references only, no tenant content rows,
+    which is why it carries a TenantScopeArchTest exemption instead of a workspace predicate.
+  -->
+  <select id="workspaceIdsWithUnleasedStaleTurns" resultType="int">
+    SELECT DISTINCT t.workspace_id
+    FROM ai_chat_turn t
+    LEFT JOIN ai_run_lease l
+      ON l.workspace_id = t.workspace_id
+     AND l.subject_kind = 'chat_turn'
+     AND l.subject_id = t.id
+    WHERE t.workspace_id &gt; #{afterWorkspaceId}
+      AND t.status IN ('queued', 'running')
+      AND l.subject_id IS NULL
+      AND t.updated_at &lt;= #{cutoff}
+    ORDER BY t.workspace_id
+    LIMIT #{limit}
+  </select>
+
+  <!--
+    The rolling-deploy and never-claimed pass. A claimed turn always has a lease row - held or
+    tombstoned - so the absence of one is what says no instance ever fenced this turn and it must
+    settle on the absolute lifetime rather than as an ownership loss.
+  -->
+  <select id="findUnleasedStaleTurns" resultMap="turnResult">
+    SELECT t.id, t.workspace_id, t.session_id, t.requested_by_user_id, t.status,
+           t.terminal_reason, t.skill_key, t.skill_version, t.scope_json,
+           t.privacy_mode, t.streamed, t.partial_content,
+           t.partial_content_utf16_offset, t.cancel_requested_at, t.created_at, t.updated_at
+    FROM ai_chat_turn t
+    LEFT JOIN ai_run_lease l
+      ON l.workspace_id = t.workspace_id
+     AND l.subject_kind = 'chat_turn'
+     AND l.subject_id = t.id
+    WHERE t.workspace_id = #{workspaceId}
+      AND t.status IN ('queued', 'running')
+      AND l.subject_id IS NULL
+      AND t.updated_at &lt;= #{cutoff}
+    ORDER BY t.id
+    LIMIT #{limit}
   </select>
 
   <select id="getTurnById" resultMap="turnResult">

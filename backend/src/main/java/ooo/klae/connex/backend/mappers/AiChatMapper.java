@@ -65,6 +65,23 @@ public interface AiChatMapper {
         @Param("userId") int userId,
         @Param("id") int id);
 
+    /**
+     * Locks one session for background maintenance, with no viewer to project participation for.
+     *
+     * <p>The background settlement passes have no request actor, so they cannot use the
+     * viewer-projected {@link #getSessionByIdForUpdate} lock. They still take the session lock
+     * first, because that is the documented order — {@code ai_chat_session → ai_chat_turn →
+     * ai_run_lease} — and a maintenance pass that skipped it would be the one path able to
+     * deadlock against every request path.
+     *
+     * @param workspaceId active workspace
+     * @param id the session
+     * @return the locked session, or null when this workspace holds no such session
+     */
+    AiChatSession getSessionByIdForMaintenanceUpdate(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id);
+
     boolean sessionExists(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id);
@@ -251,6 +268,56 @@ public interface AiChatMapper {
     String getTurnStatus(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id);
+
+    /**
+     * Reads one turn's owning session without taking a row lock.
+     *
+     * <p>A lease subject key carries a workspace and a subject id and no session, so the orphan
+     * settlement has to learn the session before it can take the session lock the documented order
+     * puts first. Reading it unlocked is safe because a turn never changes session.
+     *
+     * @param workspaceId active workspace
+     * @param id the turn
+     * @return the owning session id, or null when this workspace holds no such turn
+     */
+    Integer getTurnSessionId(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id);
+
+    /**
+     * Enumerates the next page of workspaces holding a stale turn that no lease covers, for
+     * catalog-pinned background fan-out. Returns workspace references only, never tenant content.
+     *
+     * @param afterWorkspaceId exclusive cursor; {@code 0} starts a pass
+     * @param cutoff the absolute-lifetime boundary
+     * @param limit maximum workspace ids returned
+     * @return ascending workspace ids
+     */
+    List<Integer> workspaceIdsWithUnleasedStaleTurns(
+        @Param("afterWorkspaceId") int afterWorkspaceId,
+        @Param("cutoff") LocalDateTime cutoff,
+        @Param("limit") int limit);
+
+    /**
+     * Lists non-terminal turns in one workspace that hold no lease row and are past the absolute
+     * lifetime.
+     *
+     * <p>The absence of a lease row is what separates this pass from the lease sweeper, and it is
+     * load-bearing rather than an optimisation. A turn claimed by an instance running a binary
+     * that predates the lease — every turn in flight during a rolling deploy — has no lease and
+     * must settle as today's {@code timed_out}/{@code generation_timeout}, never as an ownership
+     * loss nobody can evidence. A claimed turn always has a lease row, held or tombstoned, so it
+     * is never returned here.
+     *
+     * @param workspaceId active workspace
+     * @param cutoff the absolute-lifetime boundary
+     * @param limit maximum turns returned
+     * @return stale unleased turns, oldest first
+     */
+    List<AiChatTurn> findUnleasedStaleTurns(
+        @Param("workspaceId") int workspaceId,
+        @Param("cutoff") LocalDateTime cutoff,
+        @Param("limit") int limit);
 
     AiChatTurn getTurnById(
         @Param("workspaceId") int workspaceId,
