@@ -1005,7 +1005,7 @@ public class AiChatAgentLoopService {
      * @param skill the routed declaration whose plan produced the evidence being synthesized
      * @return the non-core toolsets the turn starts holding
      */
-    private Set<Toolset> seededToolsets(AiSkillCatalog.SkillSpec skill) {
+    private static Set<Toolset> seededToolsets(AiSkillCatalog.SkillSpec skill) {
         Set<Toolset> seeded = new LinkedHashSet<>();
         for (String key : skill.toolsets()) {
             seeded.add(Objects.requireNonNull(
