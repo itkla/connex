@@ -23,6 +23,7 @@ import lombok.RequiredArgsConstructor;
 
 import tools.jackson.databind.ObjectMapper;
 
+import ooo.klae.connex.backend.ai.AiCancellation;
 import ooo.klae.connex.backend.beans.EntityReference;
 import ooo.klae.connex.backend.beans.IntroCandidatePerson;
 import ooo.klae.connex.backend.beans.IntroEmploymentRow;
@@ -116,6 +117,8 @@ public class IntroductionService {
     static final String EMPTY_POLICY_EXCLUSION = "policy_exclusion";
     static final String EMPTY_INSUFFICIENT_PATH_STRENGTH = "insufficient_path_strength";
 
+    private static final Runnable NO_CANCELLATION_CHECKPOINT = () -> { };
+
     private static final DateTimeFormatter MYSQL_DATETIME =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -202,24 +205,54 @@ public class IntroductionService {
      */
     public List<IntroSuggestionDto> computeSuggestions(
             int workspaceId, int limit, Map<Integer, RelationshipTemperatureDto> temperatures) {
+        return computeSuggestions(workspaceId, limit, temperatures, NO_CANCELLATION_CHECKPOINT);
+    }
+
+    /**
+     * As {@link #computeSuggestions(int, int)}, for introduction rationales, which run this ranking
+     * on a fixed-size AI generation worker: an interrupted worker stops immediately after each
+     * workspace-wide load and after the rescore instead of finishing a ranking whose result has
+     * been discarded. Request and scheduled callers use the other overloads, which never check for
+     * cancellation.
+     * @param workspaceId workspace to rank suggestions for
+     * @param limit maximum number of suggestions to return
+     * @return ranked suggestions
+     * @throws java.util.concurrent.CancellationException when the current thread is interrupted
+     */
+    public List<IntroSuggestionDto> computeCancellableSuggestions(int workspaceId, int limit) {
+        return computeSuggestions(workspaceId, limit, null, AiCancellation::throwIfInterrupted);
+    }
+
+    private List<IntroSuggestionDto> computeSuggestions(
+            int workspaceId,
+            int limit,
+            Map<Integer, RelationshipTemperatureDto> temperatures,
+            Runnable cancellationCheckpoint) {
         if (limit <= 0) {
             return List.of();
         }
         List<IntroCandidatePerson> candidates = introductionMapper.findCandidatePersons(workspaceId);
+        cancellationCheckpoint.run();
         if (candidates.size() < 2) {
             return List.of();
         }
         Set<Integer> excludedPersonIds =
             new HashSet<>(introductionMapper.findIntroExcludedPersonIds(workspaceId));
-        List<PersonEdge> edges = eligibleEdges(edgeReader.getAllEdges(workspaceId), excludedPersonIds);
+        cancellationCheckpoint.run();
+        List<PersonEdge> allEdges = edgeReader.getAllEdges(workspaceId);
+        cancellationCheckpoint.run();
+        List<PersonEdge> edges = eligibleEdges(allEdges, excludedPersonIds);
         List<IntroEmploymentRow> employment = introductionMapper.findWorkspaceEmployment(workspaceId);
+        cancellationCheckpoint.run();
         Set<Long> existing = existingPairKeys(introductionMapper.findExistingPairs(workspaceId));
+        cancellationCheckpoint.run();
         Map<Integer, RelationshipTemperatureDto> warmth = temperatures;
         if (warmth == null) {
             warmth = new HashMap<>();
             for (RelationshipTemperatureDto temperature : scoringService.scoreContacts(workspaceId)) {
                 warmth.put(temperature.getId(), temperature);
             }
+            cancellationCheckpoint.run();
         }
         List<IntroSuggestionDto> suggestions =
             rankSuggestions(candidates, edges, employment, existing, warmth, limit);

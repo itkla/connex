@@ -13,6 +13,7 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiCancellation;
 import ooo.klae.connex.backend.ai.AiRelationshipContext;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
@@ -62,22 +63,33 @@ public class DealBriefAssembler {
     private final PersonMapper personMapper;
 
     /**
-     * Builds a masked brief prompt from the active workspace's view of a deal.
+     * Builds a masked brief prompt from the active workspace's view of a deal. An interrupted
+     * worker stops immediately after the CRM load, person lookup batch, or stakeholder enrichment
+     * that was running, and before the next free-text digest, instead of finishing an assembly
+     * whose result has been discarded.
      * @param workspaceId active workspace id
      * @param dealId deal to summarize
      * @return masked prompt and its request-local masking context
+     * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public BriefAssembly assemble(int workspaceId, int dealId) {
         Deal deal = dealService.getDealById(dealId);
+        AiCancellation.throwIfInterrupted();
         if (deal == null) {
             throw new ResourceNotFoundException("Deal not found");
         }
         DealSummaryDto summary = dealService.getDealSummary(dealId);
+        AiCancellation.throwIfInterrupted();
         List<DealStageHistory> stageHistory = safeList(dealService.getStageHistory(dealId));
+        AiCancellation.throwIfInterrupted();
         List<DealPerson> people = safeList(dealService.getPeopleByDealId(dealId));
+        AiCancellation.throwIfInterrupted();
         List<Activity> activities = safeList(dealService.getActivitiesByDealId(dealId));
+        AiCancellation.throwIfInterrupted();
         List<Note> notes = safeList(dealService.getNotesByDealId(dealId));
+        AiCancellation.throwIfInterrupted();
         List<Task> tasks = safeList(dealService.getTasksByDealId(dealId));
+        AiCancellation.throwIfInterrupted();
         Set<Integer> allowedPersonIds = allowedPersonIds(workspaceId, people, activities, notes, tasks);
 
         MaskingContext context = new MaskingContext();
@@ -89,10 +101,13 @@ public class DealBriefAssembler {
                 personIds.add(stakeholder.personId());
             }
         }
+        AiCancellation.throwIfInterrupted();
 
         Map<Integer, RelationshipTemperatureDto> warmth = warmthByPerson(
                 scoringService.scoreContacts(workspaceId, personIds));
+        AiCancellation.throwIfInterrupted();
         DealRiskDto risk = dealRiskService.assessDeal(workspaceId, dealId);
+        AiCancellation.throwIfInterrupted();
         List<Activity> promptActivities = first(
                 allowedActivities(activities, allowedPersonIds), MAX_ACTIVITIES);
         List<Note> promptNotes = first(allowedNotes(notes, allowedPersonIds), MAX_NOTES);
@@ -105,6 +120,7 @@ public class DealBriefAssembler {
                 .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(promptResult.prompt())
                 .build();
+        AiCancellation.throwIfInterrupted();
         return new BriefAssembly(
                 context,
                 prompt,
@@ -148,6 +164,7 @@ public class DealBriefAssembler {
         appendValue(prompt, "Expected close", expectedClose);
         appendValue(prompt, "Value", value);
         boolean degraded = aiRelationshipContext.appendCompanyProfile(prompt, companyId, context);
+        AiCancellation.throwIfInterrupted();
 
         appendStageHistory(prompt, stageHistory, context, dealSourceId);
         appendStakeholders(prompt, stakeholders, warmth, context, sourceRegistry);
@@ -155,6 +172,7 @@ public class DealBriefAssembler {
         appendRisk(prompt, risk, stakeholders, context, dealSourceId);
         degraded |= aiRelationshipContext.appendAccountHistory(
                 prompt, companyId, deal.getId(), context, sourceRegistry::register);
+        AiCancellation.throwIfInterrupted();
         appendActivities(prompt, activities, context, sourceRegistry);
         appendNotes(prompt, notes, context, sourceRegistry);
         appendTasks(prompt, tasks, context, sourceRegistry);
@@ -179,6 +197,7 @@ public class DealBriefAssembler {
                     stakeholder.personToken(),
                     context,
                     sourceRegistry::register);
+            AiCancellation.throwIfInterrupted();
             if (++enriched == MAX_ENRICHED_STAKEHOLDERS) {
                 break;
             }
@@ -238,7 +257,9 @@ public class DealBriefAssembler {
         Set<Integer> allowed = new LinkedHashSet<>();
         for (int from = 0; from < ids.size(); from += MAX_PERSON_LOOKUP_BATCH) {
             int to = Math.min(ids.size(), from + MAX_PERSON_LOOKUP_BATCH);
-            for (Person person : personMapper.getByIds(workspaceId, ids.subList(from, to))) {
+            List<Person> batch = personMapper.getByIds(workspaceId, ids.subList(from, to));
+            AiCancellation.throwIfInterrupted();
+            for (Person person : batch) {
                 if (person != null && person.getSuspendedAt() == null && person.getProvisionCeasedAt() == null) {
                     allowed.add(person.getId());
                 }
@@ -469,6 +490,7 @@ public class DealBriefAssembler {
     }
 
     private static String digest(MaskingContext context, String... values) {
+        AiCancellation.throwIfInterrupted();
         StringBuilder digest = new StringBuilder();
         for (String value : values) {
             if (isBlank(value)) {

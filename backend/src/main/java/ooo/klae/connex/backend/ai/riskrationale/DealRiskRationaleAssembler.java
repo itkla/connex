@@ -17,6 +17,7 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiCancellation;
 import ooo.klae.connex.backend.ai.AiRelationshipContext;
 import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
@@ -60,16 +61,23 @@ public class DealRiskRationaleAssembler {
 
     /**
      * Builds a masked rationale prompt from deterministic risk and the active workspace's deal view.
+     * An interrupted worker stops immediately after each deal load, warmth scoring, the account
+     * history load, and each stakeholder enrichment, and before returning, instead of finishing an
+     * assembly whose result has been discarded.
      * @param workspaceId active workspace id
      * @param dealId deal whose risk should be explained
      * @param risk deterministic risk assessment
      * @return masked prompt and its request-local masking context
+     * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public RationaleAssembly assemble(int workspaceId, int dealId, DealRiskDto risk) {
         Objects.requireNonNull(risk, "risk");
         Deal deal = dealService.getDealById(dealId);
+        AiCancellation.throwIfInterrupted();
         DealSummaryDto summary = dealService.getDealSummary(dealId);
+        AiCancellation.throwIfInterrupted();
         List<DealPerson> people = safeList(dealService.getPeopleByDealId(dealId));
+        AiCancellation.throwIfInterrupted();
 
         MaskingContext context = new MaskingContext();
         String companyToken = identifierToken(
@@ -80,6 +88,7 @@ public class DealRiskRationaleAssembler {
         List<MaskedFactor> factors = registerFactorPeople(risk.getFactors(), stakeholderTokens);
         Map<Integer, RelationshipTemperatureDto> warmth = warmthByPerson(
                 scoringService.scoreContacts(workspaceId, stakeholderTokens.keySet()));
+        AiCancellation.throwIfInterrupted();
         Set<Integer> connectionPersonIds = new LinkedHashSet<>();
         Set<String> factorCodes = factorCodes(factors);
 
@@ -91,6 +100,7 @@ public class DealRiskRationaleAssembler {
                 .system(SYSTEM_PROMPT + languageDirective())
                 .userTurn(userPrompt)
                 .build();
+        AiCancellation.throwIfInterrupted();
         return new RationaleAssembly(
                 context,
                 prompt,
@@ -120,6 +130,7 @@ public class DealRiskRationaleAssembler {
         appendStakeholders(prompt, stakeholderTokens, warmth, context);
         appendDealContext(prompt, summary, risk, companyToken, ownerToken, context);
         aiRelationshipContext.appendAccountHistory(prompt, companyId, deal == null ? 0 : deal.getId(), context);
+        AiCancellation.throwIfInterrupted();
         appendStakeholderBackground(prompt, stakeholderTokens, context, connectionPersonIds);
         return prompt.append("CRM_CONTEXT_END").toString();
     }
@@ -166,6 +177,7 @@ public class DealRiskRationaleAssembler {
             }
             List<Integer> appended = aiRelationshipContext.appendStakeholderBackground(
                     block, stakeholder.getKey(), stakeholder.getValue(), context);
+            AiCancellation.throwIfInterrupted();
             if (appended != null) {
                 connectionPersonIds.addAll(appended);
             }

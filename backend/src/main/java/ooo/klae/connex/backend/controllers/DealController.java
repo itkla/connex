@@ -852,7 +852,7 @@ public class DealController {
 
     @GetMapping("/{id}/collaborators")
     public List<UserDto> getCollaborators(@PathVariable int id) {
-        return dealService.getCollaborators(id).stream().map(UserDto::from).toList();
+        return dealService.getCollaborators(id);
     }
 
     @PutMapping("/{id}/collaborators")
@@ -860,7 +860,7 @@ public class DealController {
         @PathVariable int id,
         @Valid @RequestBody DealCollaboratorsDto dto
     ) {
-        return dealService.replaceCollaborators(id, dto.getUserIds()).stream().map(UserDto::from).toList();
+        return dealService.replaceCollaborators(id, dto.getUserIds());
     }
 
     /**

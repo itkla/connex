@@ -110,6 +110,14 @@ public class GlobalExceptionHandler {
                 ex.getField(), BreachedPasswordException.MESSAGE));
     }
 
+    @ExceptionHandler(PasswordTooLongException.class)
+    public ResponseEntity<Map<String, String>> passwordTooLong(PasswordTooLongException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                "code", PasswordTooLongException.CODE,
+                "message", PasswordTooLongException.MESSAGE,
+                ex.getField(), PasswordTooLongException.MESSAGE));
+    }
+
     @ExceptionHandler(BreachedPasswordCheckUnavailableException.class)
     public ResponseEntity<Map<String, String>> breachedPasswordCheckUnavailable(
             BreachedPasswordCheckUnavailableException ex) {

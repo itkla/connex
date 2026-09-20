@@ -111,6 +111,43 @@ class ApprovalPolicyServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void thresholdsTheirColumnsCannotHoldAreRefusedOnEveryWritePath() {
+        ApprovalPolicy saved = policy(null, "USD", "9999999999999.99", "100");
+        assertEquals(0, new BigDecimal("9999999999999.99").compareTo(saved.getMinTotal()));
+
+        for (String minTotal : List.of("1E+13", "0.001", "-0.01", "1E-2147483647", "1E2147483647",
+                "123456789E2147483639")) {
+            assertEveryWritePathRefuses(saved, "minTotal must be a non-negative DECIMAL(15,2) value",
+                policy -> policy.setMinTotal(new BigDecimal(minTotal)));
+        }
+        for (String minDiscountPercent : List.of("100.001", "0.0001", "-0.001", "1E-2147483647",
+                "1E2147483647")) {
+            assertEveryWritePathRefuses(saved,
+                "minDiscountPercent must be between 0 and 100 with at most three decimal places",
+                policy -> policy.setMinDiscountPercent(new BigDecimal(minDiscountPercent)));
+        }
+        ApprovalPolicy unchanged = policyMapper.getWithStepsById(workspace.getId(), saved.getId());
+        assertEquals(0, saved.getMinTotal().compareTo(unchanged.getMinTotal()));
+        assertEquals(1, policyService.getAll().size());
+    }
+
+    private void assertEveryWritePathRefuses(
+            ApprovalPolicy saved, String refusal, Consumer<ApprovalPolicy> threshold) {
+        ApprovalPolicy created = copyPolicy(saved);
+        threshold.accept(created);
+        assertEquals(refusal, assertThrows(BadRequestException.class,
+            () -> policyService.create(created)).getMessage());
+        ApprovalPolicy updated = copyPolicy(saved);
+        threshold.accept(updated);
+        assertEquals(refusal, assertThrows(BadRequestException.class,
+            () -> policyService.update(saved.getId(), updated, true, null)).getMessage());
+        ApprovalPolicy previewed = copyPolicy(saved);
+        threshold.accept(previewed);
+        assertEquals(refusal, assertThrows(BadRequestException.class,
+            () -> policyService.impact(saved.getId(), previewed)).getMessage());
+    }
+
+    @Test
     void blanketPolicyMatchesEveryDocumentOfItsType() {
         policy("contract", null, null, null);
         Deal deal = jpyDeal();

@@ -20,5 +20,6 @@ Prelaunch site for `connexcrm.jp`, served by the `connex-landing` Cloudflare Wor
 ## Commands (from `landing/`)
 
 - `pnpm install` · `node_modules/.bin/tsc --noEmit` · `node_modules/.bin/opennextjs-cloudflare build`
+- `pnpm-workspace.yaml` enforces the release-age and trust-downgrade policy. For a refused install or an emergency exact-version exclusion, follow [`frontend/AGENTS.md` — Package manager supply-chain policy](../frontend/AGENTS.md#package-manager-supply-chain-policy); never relax the settings.
 - Local Workers runtime: `node_modules/.bin/wrangler dev --local`, with test secrets in an untracked `.dev.vars`.
 - After `wrangler types`, repoint `SignupLimiter` in `cloudflare-env.d.ts` to `./signup-limiter` and set `mainModule: unknown`, or `tsc` fails on the unbuilt `.open-next/worker.js`.

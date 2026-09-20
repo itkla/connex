@@ -23,9 +23,11 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
 
+import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccountCounts;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.services.AuditService;
+import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationEmailService;
 import ooo.klae.connex.backend.services.PasskeyBootstrapConfirmationPolicy;
 import ooo.klae.connex.backend.services.PrivilegedAccountService;
 
@@ -85,15 +87,20 @@ class PrivilegedMfaStartupConfigurationTest {
                     verifyNoInteractions(context.getBean(UserMapper.class),
                             context.getBean(PrivilegedAccountService.class));
 
-                    context.getBean(PrivilegedMfaStartupAudit.class)
-                            .run(new DefaultApplicationArguments(new String[0]));
+                    when(context.getBean(PrivilegedAccountService.class).unenrolledPrivilegedAccountCounts())
+                            .thenReturn(new UnenrolledPrivilegedAccountCounts(0, 0, 0));
+                    PrivilegedMfaStartupAudit startupAudit = context.getBean(PrivilegedMfaStartupAudit.class);
+                    startupAudit.run(new DefaultApplicationArguments(new String[0]));
+                    startupAudit.recordPosture();
 
                     verify(context.getBean(AuditService.class)).recordStrictIndependentScoped(
                             eq("auth.mfa.policy.configured"), eq("security_policy"),
                             isNull(), isNull(), isNull(), eq("privileged-mfa"),
                             eq("Privileged MFA policy configured by security-change-123"),
                             eq(Map.of("actor", "security-change-123", "configuredValue", "true",
-                                    "enforced", true, "bootstrapConfirmationEnabled", false)));
+                                    "enforced", true, "bootstrapConfirmationEnabled", false,
+                                    "unenrolledPrivilegedCount", 0L,
+                                    "unenrolledWithoutSelfServiceCount", 0L)));
                 });
     }
 
@@ -145,6 +152,11 @@ class PrivilegedMfaStartupConfigurationTest {
         @Bean
         UserMapper userMapper() {
             return mock(UserMapper.class);
+        }
+
+        @Bean
+        PasskeyBootstrapConfirmationEmailService passkeyBootstrapConfirmationEmailService() {
+            return mock(PasskeyBootstrapConfirmationEmailService.class);
         }
 
         @Bean

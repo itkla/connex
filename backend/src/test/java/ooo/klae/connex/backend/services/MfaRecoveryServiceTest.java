@@ -1,10 +1,12 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -33,6 +35,8 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
+import ooo.klae.connex.backend.exceptions.SpentRecoveryTokenException;
+import ooo.klae.connex.backend.mappers.PrivilegedMfaRecoveryRedemptionMapper;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.session.AccountSessionIndex;
@@ -40,6 +44,7 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 class MfaRecoveryServiceTest {
     private static final Instant NOW = Instant.parse("2026-08-13T12:00:00Z");
+    private static final String REDEMPTION_KEY = sha256Hex(HexFormat.of().parseHex(digestFor(7)));
     private final AuthService authService = mock(AuthService.class);
     private final UserMapper userMapper = mock(UserMapper.class);
     private final SpringSessionMapper springSessionMapper = mock(SpringSessionMapper.class);
@@ -50,7 +55,9 @@ class MfaRecoveryServiceTest {
     private final AccountSessionRevocationService accountSessionRevocationService =
             new AccountSessionRevocationService(sessionRegistry, springSessionMapper,
                     mock(ooo.klae.connex.backend.notifications.WebSocketSessionRegistry.class));
-    private final PrivilegedMfaProperties properties = properties();
+    private final PrivilegedMfaRecoveryRedemptionMapper redemptionMapper =
+            mock(PrivilegedMfaRecoveryRedemptionMapper.class);
+    private final PrivilegedMfaProperties properties = properties(7);
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final MfaRecoveryService service = new MfaRecoveryService(
             authService,
@@ -61,6 +68,7 @@ class MfaRecoveryServiceTest {
             properties,
             auditService,
             accountSessionRevocationService,
+            redemptionMapper,
             clock);
 
     @BeforeEach
@@ -71,6 +79,7 @@ class MfaRecoveryServiceTest {
         when(userMapper.grantEpochRestamp(eq(7), any(), eq(4))).thenReturn(1);
         when(springSessionMapper.primaryIdBySessionId(any()))
                 .thenReturn("ceremony-session-primary-id");
+        when(redemptionMapper.insertIfAbsent(REDEMPTION_KEY, 7, "security-operator")).thenReturn(1);
     }
 
     /**
@@ -127,6 +136,7 @@ class MfaRecoveryServiceTest {
                 authService,
                 userMapper,
                 springSessionMapper,
+                redemptionMapper,
                 webAuthnService,
                 auditService,
                 sessionSecurityService,
@@ -137,6 +147,7 @@ class MfaRecoveryServiceTest {
                 .primaryIdBySessionId(httpRequest.getSession(false).getId());
         proofOrder.verify(authService).requireFirstPasskeyBootstrapAuthentication(
                 7, "current-password", httpRequest);
+        proofOrder.verify(redemptionMapper).insertIfAbsent(REDEMPTION_KEY, 7, "security-operator");
         proofOrder.verify(webAuthnService).recover(7);
         proofOrder.verify(auditService).recordStrictScoped(
                 eq("auth.mfa.recovery.used"),
@@ -166,7 +177,84 @@ class MfaRecoveryServiceTest {
                 () -> service.recover(request, httpRequest));
 
         verify(webAuthnService, never()).recover(7);
+        verify(redemptionMapper, never()).insertIfAbsent(any(), anyInt(), any());
         verify(auditService, never()).recordStrictScoped(any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    /**
+     * The recovering account's id is what the token is checked against: the same token is refused
+     * for account 7 and accepted for account 8, the account it was issued to.
+     */
+    @Test
+    void aTokenIssuedForAnotherAccountIsRefusedBeforeAnythingIsSpentOrRemoved() {
+        MfaRecoveryService boundToAccount8 = new MfaRecoveryService(authService, userMapper,
+                springSessionMapper, webAuthnService, sessionSecurityService, properties(8), auditService,
+                accountSessionRevocationService, redemptionMapper, clock);
+        MockHttpServletRequest httpRequest = preparedRecoveryRequest();
+
+        ForbiddenException refusal = assertThrows(ForbiddenException.class,
+                () -> boundToAccount8.recover(request("operator-proof"), httpRequest));
+
+        assertEquals(PrivilegedMfaProperties.INVALID_RECOVERY_AUTHORIZATION, refusal.getMessage());
+        assertEquals(ForbiddenException.class, refusal.getClass());
+        verify(redemptionMapper, never()).insertIfAbsent(any(), anyInt(), any());
+        verify(webAuthnService, never()).recover(anyInt());
+        verify(userMapper, never()).bumpSessionEpoch(anyInt());
+
+        User account8 = new User();
+        account8.setId(8);
+        account8.setDisplayName("Issued");
+        when(authService.getCurrentUser()).thenReturn(account8);
+        when(userMapper.lockById(8)).thenReturn(8);
+        when(userMapper.bumpSessionEpoch(8)).thenReturn(1);
+        when(userMapper.currentSessionEpoch(8)).thenReturn(2);
+        when(userMapper.grantEpochRestamp(eq(8), any(), eq(2))).thenReturn(1);
+        String account8Key = sha256Hex(HexFormat.of().parseHex(digestFor(8)));
+        when(redemptionMapper.insertIfAbsent(account8Key, 8, "security-operator")).thenReturn(1);
+
+        assertEquals(2, boundToAccount8.recover(request("operator-proof"), httpRequest));
+        verify(redemptionMapper).insertIfAbsent(account8Key, 8, "security-operator");
+        verify(webAuthnService).recover(8);
+    }
+
+    /**
+     * A spent token is refused with the invalid-token message and code and removes nothing. The
+     * refusal is the spent-token subtype so the controller can audit the replay distinctly.
+     */
+    @Test
+    void anAlreadyRedeemedTokenIsRefusedBeforeCredentialRemoval() {
+        MockHttpServletRequest httpRequest = preparedRecoveryRequest();
+        when(redemptionMapper.insertIfAbsent(REDEMPTION_KEY, 7, "security-operator")).thenReturn(0);
+
+        SpentRecoveryTokenException refusal = assertThrows(SpentRecoveryTokenException.class,
+                () -> service.recover(request("operator-proof"), httpRequest));
+
+        assertEquals(PrivilegedMfaProperties.INVALID_RECOVERY_AUTHORIZATION, refusal.getMessage());
+        assertEquals(ForbiddenException.CODE, refusal.getCode());
+        verify(webAuthnService, never()).recover(anyInt());
+        verify(auditService, never()).recordStrictScoped(any(), any(), any(), any(), any(), any(), any(), any());
+        verify(userMapper, never()).bumpSessionEpoch(anyInt());
+        verify(userMapper, never()).grantEpochRestamp(anyInt(), any(), anyInt());
+    }
+
+    /**
+     * An audit failure after the token is spent propagates, so the surrounding transaction rolls
+     * the redemption back together with the removal.
+     */
+    @Test
+    void anAuditFailureAfterRedemptionPropagates() {
+        MockHttpServletRequest httpRequest = preparedRecoveryRequest();
+        IllegalStateException auditFailure = new IllegalStateException("audit unavailable");
+        doThrow(auditFailure).when(auditService).recordStrictScoped(
+                eq("auth.mfa.recovery.used"), any(), any(), any(), any(), any(), any(), any());
+
+        assertSame(auditFailure, assertThrows(IllegalStateException.class,
+                () -> service.recover(request("operator-proof"), httpRequest)));
+
+        InOrder order = inOrder(redemptionMapper, webAuthnService, auditService);
+        order.verify(redemptionMapper).insertIfAbsent(REDEMPTION_KEY, 7, "security-operator");
+        order.verify(webAuthnService).recover(7);
+        verify(userMapper, never()).bumpSessionEpoch(anyInt());
     }
 
     @Test
@@ -226,9 +314,9 @@ class MfaRecoveryServiceTest {
         return httpRequest;
     }
 
-    private static PrivilegedMfaProperties properties() {
+    private static PrivilegedMfaProperties properties(int userId) {
         PrivilegedMfaProperties properties = new PrivilegedMfaProperties();
-        properties.setRecoveryTokenSha256(sha256Hex("operator-proof"));
+        properties.setRecoveryTokenSha256(digestFor(userId));
         properties.setRecoveryExpiresAt(NOW.plusSeconds(1800).toString());
         properties.setRecoveryActor("security-operator");
         return properties;
@@ -248,10 +336,14 @@ class MfaRecoveryServiceTest {
         return user;
     }
 
-    private static String sha256Hex(String value) {
+    private static String digestFor(int userId) {
+        return sha256Hex(("connex-privileged-mfa-recovery:v1:" + userId + ":operator-proof")
+                .getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String sha256Hex(byte[] value) {
         try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(value.getBytes(StandardCharsets.UTF_8)));
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value));
         } catch (Exception exception) {
             throw new IllegalStateException(exception);
         }

@@ -21,6 +21,7 @@ import {
     validateResetToken,
 } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
+import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
 import { toastSuccess } from "@/app/lib/toast";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
@@ -29,6 +30,8 @@ import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 type Status = "validating" | "invalid" | "ready";
 const BREACHED_PASSWORD_CODE = "BREACHED_PASSWORD";
 const BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE = "BREACHED_PASSWORD_CHECK_UNAVAILABLE";
+const PASSWORD_TOO_LONG_CODE = "PASSWORD_TOO_LONG";
+const MAX_NEW_PASSWORD_LENGTH = 72;
 
 /** Runs the fragment exchange and renders the existing token-free password-reset form. */
 export function ResetPasswordForm() {
@@ -45,26 +48,28 @@ export function ResetPasswordForm() {
     const [mismatch, setMismatch] = useState(false);
     const { fieldErrors, setFieldErrors, reset, clearError, captureFieldErrors } = useFieldErrors();
 
+    useReloadOnFragmentNavigation();
+
     useEffect(() => {
         let active = true;
-        const token = takeOneTimeLinkToken();
-        const establishFlow = token
-            ? exchangePasswordResetToken(token).then(() => {
+        const establish = async () => {
+            const token = takeOneTimeLinkToken();
+            if (token) {
+                await exchangePasswordResetToken(token);
                 window.location.replace("/auth/reset-password");
-                return { valid: true };
-            })
-            : validateResetToken();
-        establishFlow
-            .then((result) => {
-                if (active) {
-                    setStatus(result.valid ? "ready" : "invalid");
-                }
-            })
-            .catch(() => {
-                if (active) {
-                    setStatus("invalid");
-                }
-            });
+                return;
+            }
+            const result = await validateResetToken();
+            if (active) {
+                setStatus(result.valid ? "ready" : "invalid");
+            }
+        };
+
+        establish().catch(() => {
+            if (active) {
+                setStatus("invalid");
+            }
+        });
 
         return () => {
             active = false;
@@ -93,7 +98,9 @@ export function ResetPasswordForm() {
                     ? t("breachedPassword")
                     : err.code === BREACHED_PASSWORD_CHECK_UNAVAILABLE_CODE
                         ? t("passwordScreeningUnavailable")
-                        : null;
+                        : err.code === PASSWORD_TOO_LONG_CODE
+                            ? t("passwordTooLong")
+                            : null;
                 if (passwordMessage) {
                     setFieldErrors({ newPassword: passwordMessage });
                     return;
@@ -178,9 +185,10 @@ export function ResetPasswordForm() {
                                                 }}
                                                 placeholder=" "
                                                 autoComplete="new-password"
+                                                maxLength={MAX_NEW_PASSWORD_LENGTH}
                                                 required
                                                 aria-invalid={Boolean(fieldErrors.newPassword)}
-                                                aria-describedby={fieldErrors.newPassword ? "reset-password-error" : undefined}
+                                                aria-describedby={fieldErrors.newPassword ? "reset-password-error" : "reset-password-hint"}
                                                 className={`peer h-14 w-full rounded-xl border bg-input px-4 pr-12 pt-5 pb-1.5 text-base text-foreground outline-none transition-[border-color,box-shadow,background-color] duration-150 ease-out placeholder:text-transparent focus:bg-background focus:ring-4 ${
                                                     fieldErrors.newPassword
                                                         ? "border-destructive focus:border-destructive focus:ring-destructive/15"
@@ -207,9 +215,13 @@ export function ResetPasswordForm() {
                                                 {showPassword ? <EyeSlashIcon className="size-5" /> : <EyeIcon className="size-5" />}
                                             </button>
                                         </div>
-                                        {fieldErrors.newPassword && (
+                                        {fieldErrors.newPassword ? (
                                             <p id="reset-password-error" className="mt-1.5 px-1 text-sm text-destructive">
                                                 {fieldErrors.newPassword}
+                                            </p>
+                                        ) : (
+                                            <p id="reset-password-hint" className="mt-1.5 px-1 text-sm text-muted-foreground">
+                                                {t("passwordLengthHint")}
                                             </p>
                                         )}
                                     </div>
@@ -226,6 +238,7 @@ export function ResetPasswordForm() {
                                                 }}
                                                 placeholder=" "
                                                 autoComplete="new-password"
+                                                maxLength={MAX_NEW_PASSWORD_LENGTH}
                                                 required
                                                 aria-invalid={mismatch}
                                                 aria-describedby={mismatch ? "reset-confirm-error" : undefined}

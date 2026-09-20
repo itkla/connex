@@ -34,17 +34,15 @@ class RequestPathNormalizationArchTest {
      * The classes permitted to read the raw target.
      *
      * <p>{@code RequestPathNormalizer} is the normalization choke point itself. {@code PublicApiPaths}
-     * classifies the namespace for error-shape selection and strips the context and one encoding
-     * layer of its own. {@code GlobalExceptionHandler} only reports the target back in a problem
-     * body and decides nothing. {@code TenantResolutionInterceptor} still matches policy on the raw
-     * target and is allowlisted only until issue #1701 (follow-up to #1643) moves it onto the shared
-     * normalizer.
+     * classifies the normalized path first and reads the raw target only for its lenient fallback,
+     * which keeps error-shape selection total on paths the normalizer rejects.
+     * {@code GlobalExceptionHandler} only reports the target back in a problem body and decides
+     * nothing.
      */
     private static final List<Path> ALLOWED_RAW_URI_SOURCES = List.of(
             Path.of("ooo/klae/connex/backend/config/RequestPathNormalizer.java"),
             Path.of("ooo/klae/connex/backend/exceptions/GlobalExceptionHandler.java"),
-            Path.of("ooo/klae/connex/backend/publicapi/PublicApiPaths.java"),
-            Path.of("ooo/klae/connex/backend/tenant/TenantResolutionInterceptor.java"));
+            Path.of("ooo/klae/connex/backend/publicapi/PublicApiPaths.java"));
 
     @Test
     void requestScopedPolicyClassesDoNotMatchOnTheRawTarget() throws IOException {

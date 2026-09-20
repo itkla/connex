@@ -2,12 +2,16 @@ package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,8 +23,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -31,6 +38,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
+import org.springframework.transaction.NoTransactionException;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
+import org.springframework.transaction.support.ResourceHolderSupport;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -71,6 +83,7 @@ import ooo.klae.connex.backend.dto.PageResponse;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
@@ -99,6 +112,150 @@ class DealServiceTest extends AbstractServiceTest {
     @MockitoSpyBean RecordCommentMapper recordCommentMapperSpy;
     @MockitoSpyBean NotificationChangePublisher notificationChanges;
     @MockitoSpyBean RuleTriggerPublisher ruleTriggers;
+    @MockitoSpyBean DealCollaboratorControlAccess collaboratorControlAccess;
+    @MockitoSpyBean TransactionTemplate transactionTemplate;
+
+    @Test
+    void collaboratorsHydrateActiveProfilesInDisplayOrderAndAuditRawTenantIds() throws Exception {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        String suffix = unique();
+        User zulu = renamed(newUser(), "Zulu " + suffix);
+        User lowerAlpha = renamed(newUser(), "alpha " + suffix);
+        User upperAlpha = renamed(newUser(), "Alpha " + suffix);
+        User japanese = renamed(newUser(), "\u5c71\u7530 " + suffix);
+        String profilePictureUrl = "/api/users/" + upperAlpha.getId() + "/profile-picture";
+        assertEquals(1, userMapper.updateProfilePictureUrlIfCurrent(
+            upperAlpha.getId(), null, profilePictureUrl));
+        List<Integer> activeIds = List.of(
+            zulu.getId(), lowerAlpha.getId(), upperAlpha.getId(), japanese.getId());
+        List<Integer> displayOrder = jdbcTemplate.queryForList(
+            "SELECT id FROM app_user WHERE id IN (?, ?, ?, ?) ORDER BY display_name, id",
+            Integer.class, activeIds.toArray());
+
+        List<UserDto> replaced = dealService.replaceCollaborators(deal.getId(), List.of(
+            japanese.getId(), zulu.getId(), upperAlpha.getId(), lowerAlpha.getId(),
+            lowerAlpha.getId(), currentUser.getId()));
+
+        assertEquals(List.of(lowerAlpha.getId(), upperAlpha.getId(), zulu.getId(), japanese.getId()),
+            displayOrder);
+        assertEquals(displayOrder, replaced.stream().map(UserDto::getId).toList());
+        UserDto alphaProfile = replaced.get(1);
+        assertEquals(upperAlpha.getUsername(), alphaProfile.getUsername());
+        assertEquals(upperAlpha.getDisplayName(), alphaProfile.getDisplayName());
+        assertEquals(upperAlpha.getEmail(), alphaProfile.getEmail());
+        assertEquals(profilePictureUrl, alphaProfile.getProfilePictureUrl());
+        assertEquals("UTC", alphaProfile.getTimezone());
+        assertEquals("en", alphaProfile.getLocale());
+        assertNotNull(alphaProfile.getCreatedAt());
+        List<Integer> sortedActiveIds = activeIds.stream().sorted().toList();
+        verify(collaboratorControlAccess).getProfiles(workspace.getId(), sortedActiveIds);
+        JsonNode firstChange = auditChanges(deal.getId(), "deal.updateCollaborators").path("collaboratorIds");
+        assertEquals(List.of(), auditedIds(firstChange.path("old")));
+        assertEquals(sortedActiveIds, auditedIds(firstChange.path("new")));
+
+        User pending = newPendingMember();
+        int missingUserId = Integer.MAX_VALUE;
+        jdbcTemplate.update(
+            "INSERT INTO deal_collaborator (workspace_id, deal_id, user_id) VALUES (?, ?, ?), (?, ?, ?)",
+            workspace.getId(), deal.getId(), pending.getId(),
+            workspace.getId(), deal.getId(), missingUserId);
+        List<Integer> rawIds = Stream.concat(
+                sortedActiveIds.stream(), Stream.of(pending.getId(), missingUserId))
+            .sorted()
+            .toList();
+        clearInvocations(collaboratorControlAccess);
+
+        List<UserDto> loaded = dealService.getCollaborators(deal.getId());
+
+        assertEquals(displayOrder, loaded.stream().map(UserDto::getId).toList());
+        verify(collaboratorControlAccess).getProfiles(workspace.getId(), rawIds);
+
+        List<UserDto> narrowed = dealService.replaceCollaborators(deal.getId(), List.of(zulu.getId()));
+
+        assertEquals(List.of(zulu.getId()), narrowed.stream().map(UserDto::getId).toList());
+        JsonNode secondChange = auditChanges(deal.getId(), "deal.updateCollaborators").path("collaboratorIds");
+        assertEquals(rawIds, auditedIds(secondChange.path("old")));
+        assertEquals(List.of(zulu.getId()), auditedIds(secondChange.path("new")));
+    }
+
+    @Test
+    void collaboratorReplacementKeepsOwnerFilterMissingDealAndNullIdRejection() {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        User member = newUser();
+
+        List<UserDto> replaced = dealService.replaceCollaborators(
+            deal.getId(), List.of(currentUser.getId(), member.getId()));
+
+        assertEquals(List.of(member.getId()), replaced.stream().map(UserDto::getId).toList());
+        assertEquals(List.of(member.getId()), dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()));
+        assertEquals(List.of(), dealService.replaceCollaborators(deal.getId(), List.of()));
+        assertEquals(List.of(), dealService.getCollaborators(deal.getId()));
+        dealService.replaceCollaborators(deal.getId(), List.of(member.getId()));
+        assertThrows(ResourceNotFoundException.class, () -> dealService.getCollaborators(Integer.MAX_VALUE));
+        assertThrows(BadRequestException.class, () -> dealService.replaceCollaborators(
+            deal.getId(), Arrays.asList(member.getId(), null)));
+        assertThrows(ResourceNotFoundException.class,
+            () -> dealService.replaceCollaborators(Integer.MAX_VALUE, List.of(member.getId())));
+        assertEquals(List.of(member.getId()), dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()));
+    }
+
+    @Test
+    void collaboratorProfilesHydrateOutsideTheTenantWriteTransaction() {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        User member = newUser();
+        AtomicInteger openWriteSpans = new AtomicInteger();
+        AtomicInteger enteredWriteSpans = new AtomicInteger();
+        AtomicBoolean hydratedInsideTheWrite = new AtomicBoolean(true);
+        doAnswer(invocation -> {
+            openWriteSpans.incrementAndGet();
+            enteredWriteSpans.incrementAndGet();
+            try {
+                return invocation.callRealMethod();
+            } finally {
+                openWriteSpans.decrementAndGet();
+            }
+        }).when(transactionTemplate).execute(any());
+        doAnswer(invocation -> {
+            hydratedInsideTheWrite.set(openWriteSpans.get() > 0 || declarativeTransactionActive());
+            return invocation.callRealMethod();
+        }).when(collaboratorControlAccess).getProfiles(anyInt(), anyList());
+
+        List<UserDto> replaced = dealService.replaceCollaborators(deal.getId(), List.of(member.getId()));
+
+        assertEquals(List.of(member.getId()), replaced.stream().map(UserDto::getId).toList());
+        assertEquals(1, enteredWriteSpans.get(),
+            "The tenant write must still run through the injected TransactionTemplate; a locally "
+                + "constructed template would leave this guard blind to a hydration call moved back "
+                + "inside the write span");
+        assertFalse(hydratedInsideTheWrite.get(),
+            "Collaborator profiles must hydrate after the tenant write transaction completes, so the "
+                + "control-plane read never pins a second pooled connection while the deal's "
+                + "collaborator row locks and the workspace audit-chain head lock are held");
+    }
+
+    @Test
+    void collaboratorHydrationFailureNeverRollsBackTheTenantWrite() {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        User member = newUser();
+        assertFalse(boundResourceMarkedRollbackOnly(),
+            "The surrounding test transaction must start clean for this guard to mean anything");
+        doThrow(new IllegalStateException("control catalog unavailable"))
+            .when(collaboratorControlAccess).getProfiles(anyInt(), anyList());
+
+        assertThrows(IllegalStateException.class,
+            () -> dealService.replaceCollaborators(deal.getId(), List.of(member.getId())));
+
+        assertEquals(List.of(member.getId()),
+            dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()));
+        assertFalse(boundResourceMarkedRollbackOnly(),
+            "Hydration runs after the tenant write has completed, so a control-plane failure must "
+                + "neither undo the replacement nor mark the caller's transaction rollback-only; a "
+                + "hydration call inside the write span would roll that span back instead");
+    }
 
     @Test
     void removeTagIsIdempotentWhenTagNoLongerExists() {
@@ -2150,6 +2307,30 @@ class DealServiceTest extends AbstractServiceTest {
 
     private Map<String, Long> facetCounts(List<FacetCount> facets) {
         return facets.stream().collect(Collectors.toMap(FacetCount::getKey, FacetCount::getCount));
+    }
+
+    private User renamed(User user, String displayName) {
+        user.setDisplayName(displayName);
+        userMapper.update(user);
+        return user;
+    }
+
+    private static boolean declarativeTransactionActive() {
+        try {
+            TransactionAspectSupport.currentTransactionStatus();
+            return true;
+        } catch (NoTransactionException exception) {
+            return false;
+        }
+    }
+
+    private static boolean boundResourceMarkedRollbackOnly() {
+        return TransactionSynchronizationManager.getResourceMap().values().stream()
+            .anyMatch(resource -> resource instanceof ResourceHolderSupport holder && holder.isRollbackOnly());
+    }
+
+    private static List<Integer> auditedIds(JsonNode ids) {
+        return IntStream.range(0, ids.size()).mapToObj(index -> ids.get(index).asInt()).toList();
     }
 
     private JsonNode auditChanges(int dealId, String action) throws Exception {

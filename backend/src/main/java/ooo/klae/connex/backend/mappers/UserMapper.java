@@ -4,9 +4,12 @@ import java.util.List;
 
 import org.apache.ibatis.annotations.Param;
 
+import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccount;
+import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccountCounts;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiChatRealtimeRecipientDto;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
+import ooo.klae.connex.backend.dto.UserProfileHydrationRow;
 import ooo.klae.connex.backend.dto.UserReferenceDto;
 import ooo.klae.connex.backend.session.SessionEpochRestampGrant;
 
@@ -32,6 +35,17 @@ public interface UserMapper {
     List<UserReferenceDto> getActiveWorkspaceMemberReferencesByIds(
         @Param("workspaceId") int workspaceId,
         @Param("ids") List<Integer> ids);
+    /**
+     * Display-safe profiles for requested active members of one workspace, each paired with the
+     * collation key of its display name. Never selects credentials.
+     *
+     * @param workspaceId workspace whose active members may be returned
+     * @param ids nonempty candidate user ids
+     * @return matching profiles ordered by display name, then id
+     */
+    List<UserProfileHydrationRow> getActiveWorkspaceMemberProfilesByIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids);
     List<Integer> findMatchingWorkspaceMemberIds(
         @Param("workspaceId") int workspaceId,
         @Param("query") String query);
@@ -43,6 +57,15 @@ public interface UserMapper {
     User getUserByIdForShare(int id);
     Integer lockById(int id);
     Integer lockByIdForShare(int id);
+    /**
+     * Locks the custom roles assigned to the account {@code FOR SHARE}, so a concurrent permission
+     * edit on them waits for the caller's transaction. The statement also clears the transaction's
+     * MyBatis session cache, so privilege and passkey reads made after it query committed state
+     * instead of returning answers cached earlier in the same transaction.
+     *
+     * @param id the account whose assigned custom roles are locked
+     * @return the locked role ids in ascending order
+     */
     List<Integer> lockAssignedCustomRoleIds(int id);
     boolean isAccountDeletionReserved(int id);
     /** IDs with live deletion reservations; callers supply a nonempty candidate set. */
@@ -61,6 +84,13 @@ public interface UserMapper {
     User getUserByEmail(String email);
     /** Current account-wide administrative privilege from active control-plane memberships. */
     boolean isPrivilegedAccount(int id);
+    /**
+     * Privileged accounts with no enrolled passkey, in ascending id, capped at {@code limit}. Uses
+     * the same privilege predicate as {@link #isPrivilegedAccount(int)}.
+     */
+    List<UnenrolledPrivilegedAccount> listUnenrolledPrivilegedAccounts(@Param("limit") int limit);
+    /** Uncapped counts over the population {@link #listUnenrolledPrivilegedAccounts(int)} samples. */
+    UnenrolledPrivilegedAccountCounts countUnenrolledPrivilegedAccounts();
     /** Count of real accounts, excluding the reserved {@code __connex_system__} actor; gates bootstrap provisioning. */
     int countUsers();
     List<User> search(@Param("workspaceId") int workspaceId, @Param("query") String query);

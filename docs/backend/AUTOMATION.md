@@ -283,6 +283,7 @@ Node effects/checkpoints use the established `REQUIRES_NEW`, `READ_COMMITTED` tr
 
 - Queued/waiting cancellation terminates immediately.
 - Running cancellation is cooperative and checked before every node effect.
+- Operator retry re-checks the caller's locked permissions against the run's pinned version, exactly as manual dispatch does: `RULE_MANAGE` plus every action permission that version requires, and a locked built-in admin for system mode. The caller's authorization rows are locked before the run and step rows; a refusal is a 403 that schedules nothing, resolves no intervention, and writes no audit row.
 - Automatic retry is limited to the reviewed transient lock/serialization/query-timeout classes and actions allowed by `WorkflowActionRetryPolicy`.
 - Unknown actions default to `none`.
 - Database-backed schema-v1 actions are transactional; notification effects use the stable workflow/run/node dedupe key.

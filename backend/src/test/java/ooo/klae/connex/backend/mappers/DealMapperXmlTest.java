@@ -1,25 +1,35 @@
 package ooo.klae.connex.backend.mappers;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
+import org.apache.ibatis.mapping.ResultMap;
+import org.apache.ibatis.mapping.ResultMapping;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.dto.BoardPositionUpdate;
 import ooo.klae.connex.backend.dto.MemberScope;
+import ooo.klae.connex.backend.dto.UserDto;
 import ooo.klae.connex.backend.util.AnalyticsPeriods.AnalyticsPeriod;
 
-/** Verifies every deal member-scope SQL branch resolves to the canonical owner predicate. */
+/**
+ * Verifies every deal member-scope SQL branch resolves to the canonical owner predicate, and that
+ * collaborator reads keep tenant relationship ids apart from display-safe control-plane profiles.
+ */
 class DealMapperXmlTest {
     private static final List<String> SCOPED_STATEMENTS = List.of(
         "getDealsPageFiltered",
@@ -139,6 +149,52 @@ class DealMapperXmlTest {
         }
     }
 
+    @Test
+    void collaboratorLookupReadsOnlyTenantRelationshipIds() throws Exception {
+        String sql = sql(configuration(), "getCollaboratorIds", MemberScope.allTeam());
+
+        assertEquals("SELECT dc.user_id FROM deal_collaborator dc "
+            + "WHERE dc.workspace_id = ? AND dc.deal_id = ? ORDER BY dc.user_id", sql);
+        String mapperXml = resource("mappers/DealMapper.xml").toLowerCase(Locale.ROOT);
+        assertFalse(mapperXml.contains("app_user"));
+        assertFalse(mapperXml.contains("password_hash"));
+    }
+
+    @Test
+    void collaboratorProfileHydrationSelectsOnlyDisplaySafeColumns() throws Exception {
+        Configuration configuration = new Configuration();
+        configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
+        parse(configuration, "mappers/UserMapper.xml");
+        Map<String, Object> parameters = new HashMap<>();
+        parameters.put("workspaceId", 11);
+        parameters.put("ids", List.of(3, 5));
+        String statement = UserMapper.class.getName() + ".getActiveWorkspaceMemberProfilesByIds";
+
+        String sql = configuration.getMappedStatement(statement)
+            .getBoundSql(parameters)
+            .getSql()
+            .replaceAll("\\s+", " ")
+            .trim();
+
+        assertEquals("SELECT u.id, u.username, u.display_name, u.email, u.timezone, u.locale, "
+            + "u.last_login_at, u.profile_picture_url, u.created_at, u.updated_at, "
+            + "WEIGHT_STRING(u.display_name) AS display_sort_key "
+            + "FROM app_user u JOIN workspace_member wm ON wm.user_id = u.id "
+            + "WHERE wm.workspace_id = ? AND wm.status = 'active' AND u.id IN ( ? , ? ) "
+            + "ORDER BY u.display_name, u.id", sql);
+        assertFalse(sql.contains("password_hash"));
+        ResultMap rowMap = configuration.getMappedStatement(statement).getResultMaps().getFirst();
+        ResultMapping profile = rowMap.getResultMappings().stream()
+            .filter(mapping -> "profile".equals(mapping.getProperty()))
+            .findFirst()
+            .orElseThrow();
+        assertEquals(UserDto.class, profile.getJavaType());
+        assertEquals(
+            Set.of("id", "username", "displayName", "email", "timezone", "locale", "lastLoginAt",
+                "profilePictureUrl", "createdAt", "updatedAt"),
+            configuration.getResultMap(profile.getNestedResultMapId()).getMappedProperties());
+    }
+
     private static void assertScopePredicate(Configuration configuration, String statement,
             MemberScope scope, String predicate) {
         String sql = sql(configuration, statement, scope);
@@ -206,11 +262,22 @@ class DealMapperXmlTest {
         Configuration configuration = new Configuration();
         configuration.getTypeAliasRegistry().registerAliases("ooo.klae.connex.backend.beans");
         for (String resource : List.of("mappers/PersonMapper.xml", "mappers/DealMapper.xml")) {
-            try (InputStream input = DealMapperXmlTest.class.getClassLoader().getResourceAsStream(resource)) {
-                assertNotNull(input);
-                new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
-            }
+            parse(configuration, resource);
         }
         return configuration;
+    }
+
+    private static void parse(Configuration configuration, String resource) throws Exception {
+        try (InputStream input = DealMapperXmlTest.class.getClassLoader().getResourceAsStream(resource)) {
+            assertNotNull(input);
+            new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
+        }
+    }
+
+    private static String resource(String resource) throws Exception {
+        try (InputStream input = DealMapperXmlTest.class.getClassLoader().getResourceAsStream(resource)) {
+            assertNotNull(input);
+            return new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 }

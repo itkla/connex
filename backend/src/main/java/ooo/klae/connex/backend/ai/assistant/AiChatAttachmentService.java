@@ -18,7 +18,9 @@ import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.AttachmentScanMapper;
 import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
+import ooo.klae.connex.backend.services.AttachmentQuarantineService;
 import ooo.klae.connex.backend.services.AttachmentWriteOperations;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.AuthService;
@@ -42,6 +44,7 @@ public class AiChatAttachmentService {
 
     private final AiChatMapper chatMapper;
     private final AttachmentMapper attachmentMapper;
+    private final AttachmentScanMapper attachmentScanMapper;
     private final AttachmentWriteOperations attachmentWriteOperations;
     private final AiChatAttachmentPolicy attachmentPolicy;
     private final UploadMalwareScanner uploadMalwareScanner;
@@ -124,7 +127,16 @@ public class AiChatAttachmentService {
         return AiChatAttachmentDto.from(attachment);
     }
 
-    /** Deletes one managed attachment after exact session and tenant authorization. */
+    /**
+     * Deletes one managed attachment after exact session and tenant authorization.
+     *
+     * <p>The exact row is re-read under lock after its URL references. A managed object whose scan
+     * state is not ordinary, as decided by
+     * {@link AttachmentQuarantineService#requiresQuarantineAuthority}, additionally requires
+     * {@code ATTACHMENT_QUARANTINE_MANAGE}, checked against the membership already locked by this
+     * transaction, and is audited strictly so a failed append rolls back the deletion and its queued
+     * byte removal.
+     */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.AI_USE)
     public void delete(int sessionId, int attachmentId) {
@@ -144,18 +156,38 @@ public class AiChatAttachmentService {
         if (!referenceIds.contains(attachmentId)) {
             throw inaccessible();
         }
+        Attachment locked = attachmentScanMapper.lockById(workspaceId, attachmentId);
+        if (locked == null || !Objects.equals(locked.getUrl(), attachment.getUrl())) {
+            throw inaccessible();
+        }
+        boolean quarantineDeletion =
+                AttachmentQuarantineService.requiresQuarantineAuthority(locked, managedObjectService);
+        if (quarantineDeletion) {
+            workspaceService.requirePermission(
+                    workspaceId, userId, Permission.ATTACHMENT_QUARANTINE_MANAGE);
+        }
         if (referenceIds.size() == 1) {
             managedObjectService.deleteAttachmentAfterCommit(
                     workspaceId, attachment.getUrl());
         }
         attachmentMapper.delete(workspaceId, attachmentId);
-        auditService.record(
-                "attachment.delete",
-                "attachment",
-                attachmentId,
-                attachment.getFileName(),
-                "Deleted assistant attachment " + attachment.getFileName(),
-                auditService.diff(attachment, null, AUDIT_FIELDS));
+        if (quarantineDeletion) {
+            auditService.recordStrict(
+                    "malware.quarantine_deleted",
+                    "attachment",
+                    attachmentId,
+                    null,
+                    "Deleted quarantined assistant attachment",
+                    null);
+        } else {
+            auditService.record(
+                    "attachment.delete",
+                    "attachment",
+                    attachmentId,
+                    attachment.getFileName(),
+                    "Deleted assistant attachment " + attachment.getFileName(),
+                    auditService.diff(attachment, null, AUDIT_FIELDS));
+        }
     }
 
     private void lockAndRequireAccessibleSession(

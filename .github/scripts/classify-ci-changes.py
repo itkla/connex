@@ -48,14 +48,29 @@ DOCUMENTATION_BASENAMES = {
 
 FRONTEND_DEPENDENCY_FILES = {
     "frontend/.npmrc",
+    "frontend/.pnpmfile.cjs",
+    "frontend/.pnpmfile.mjs",
     "frontend/bun.lock",
     "frontend/bun.lockb",
+    "frontend/emails/.npmrc",
+    "frontend/emails/.pnpmfile.cjs",
+    "frontend/emails/.pnpmfile.mjs",
+    "frontend/emails/package.json",
+    "frontend/emails/pnpm-workspace.yaml",
     "frontend/npm-shrinkwrap.json",
     "frontend/package-lock.json",
     "frontend/package.json",
     "frontend/pnpm-lock.yaml",
     "frontend/pnpm-workspace.yaml",
     "frontend/yarn.lock",
+}
+
+PNPM_PROJECT_BASENAMES = {
+    ".pnpmfile.cjs",
+    ".pnpmfile.mjs",
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
 }
 
 OCR_DEPENDENCY_FILES = {
@@ -143,6 +158,9 @@ def classify_paths(paths: list[str], event_name: str = "pull_request") -> tuple[
 
         if path in BACKEND_API_LEDGERS:
             categories["backend"] = True
+
+        if pure_path.name in PNPM_PROJECT_BASENAMES:
+            categories["frontend_audit"] = True
 
         if is_documentation(path) or path in ROOT_METADATA:
             continue

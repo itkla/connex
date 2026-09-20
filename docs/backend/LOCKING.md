@@ -11,6 +11,7 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
 - Revalidate the exact locked rows before deriving authorization or performing writes. Pre-lock permission/state snapshots are preliminary only.
 - Acquire broader/root locks before child/aggregate locks according to the owning contract; do not reacquire a broader root later in the transaction.
 - Keep provider/network I/O outside database transactions unless a subsystem contract explicitly requires and bounds otherwise.
+- Read control-plane data that a tenant write needs only for its response — deal-collaborator profile hydration, for example — after that write's transaction has completed. Suspending a routed tenant transaction to read the control catalog borrows a second pooled connection while the write still holds its row locks and the workspace audit-chain head, so under `catalog-per-placement` enough concurrent requests exhaust the pool and hold those locks for a whole connection timeout. Control-plane state a write must consult before it commits (quiet-hours evaluation) keeps the suspend-and-read shape, and those paths budget two pooled connections per concurrent request.
 - Changes to lock order or transaction isolation are Tier 3/high-risk and receive focused concurrency/correctness review.
 
 ## Workflow lifecycle and account offboarding
@@ -829,6 +830,31 @@ account root.
 - `EmailChangeService.requestChange` proves the current password through the shared throttled
   confirmation, then re-reads the account under the exclusive root and refuses when the password
   hash or `session_epoch` moved since the proof.
+- `EmailChangeService.requestChange` also gates privileged accounts on an enrolled passkey and a
+  fresh WebAuthn step-up (#1506). It evaluates the gate first before taking the account root and
+  audits a refusal there. Under the root, after the `session_epoch` check, it locks the account's
+  assigned custom roles `FOR SHARE` through `lockAssignedCustomRoleIds`, as
+  `PasswordResetService` and `WebAuthnService.finishRegistration` do, and evaluates the gate again
+  against committed state. That statement is mapped with `flushCache="true"`: the request is one
+  MyBatis session, so without the flush the re-check would return the privilege and passkey answers
+  cached by the pre-lock evaluation. A refusal that appears only under the root is not audited (see
+  below).
+
+Operator break-glass recovery (`MfaRecoveryService.recover`) spends its token in the same
+hierarchy (#1532). Its order is:
+
+1. `app_user` exclusive (`lockById`).
+2. `privileged_mfa_recovery_redemption`: an `INSERT IGNORE` of the token's ledger row. Zero rows
+   inserted means the token is already spent, and the ceremony is refused before anything is
+   removed.
+3. The account's `webauthn_user_entity` / `webauthn_credential` rows, through
+   `WebAuthnService.recover`. That call re-takes the `app_user` lock it already holds.
+4. The audit integrity head.
+
+The token digest is bound to one account id, so only that account's root can reach a given ledger
+row. The account root therefore already serializes concurrent redemptions, and the primary key is
+the backstop. The ledger row belongs to the recovery transaction, so any later failure rolls it back
+with the credential removal and leaves the token unspent.
 
 The audit head sits below `app_user` in this order, and an independent audit append re-acquires the
 actor's `app_user` row shared. `AuthService.requireCurrentPassword` therefore writes no audit of its
@@ -836,6 +862,24 @@ own: `MfaRecoveryService.recover` calls it while holding that row exclusively, s
 would wait on the caller's own lock until the InnoDB timeout, lose the event, and pin a second
 pooled connection. Callers that are not already holding the account root —
 `EmailChangeService.requestChange` — record the confirmation outcome themselves, before acquiring it.
+The same rule places the `auth.email_change.refused` audit ahead of `lockById`. The under-lock
+re-check of the privileged gate throws without auditing, because any append there would block on
+the request's own exclusive lock.
+
+The breached-password decision in `PasswordResetService.resetPasswordByHash` follows the same rule.
+The corpus lookup runs before any lock, but the fail-open decision reads account privilege under
+the exclusive account root so a promotion that commits while the reset waits is observed; do not
+hoist that read above `lockById`. Only the decision's audit moves.
+`PasswordCredentialService.encodeScreened` never appends it independently while a transaction is
+open:
+
+- `fail_open` is appended in the caller's transaction from a `beforeCommit` synchronization, so it
+  takes the audit head after `markConsumed` and both `invalidateForUser` calls (class 3 after class
+  2), and a failed append aborts the credential write with it.
+- `fail_closed` is appended independently from an `afterCompletion` synchronization, after the
+  rollback its own exception causes has released the account root. A failure there is logged, not
+  thrown, because the refusal already stands.
+- Outside a transaction, either decision is appended independently at once.
 
 ## Connected-provider credentials
 
@@ -873,3 +917,13 @@ writes take the same reference locks and require the exact still-live owner; sta
 release successor state. Administrative quarantine uses permission roots before the same attachment
 reference locks and revalidates held permission authority after the target lock. Never acquire
 membership roots after claiming an object. See `docs/MALWARE_SCANNING.md` for expiry/recovery limits.
+
+Ordinary attachment deletion never removes a reference on the strength of its unlocked discovery
+read. The generic route takes no membership root. When the discovery row already needs quarantine
+authority, the route delegates to the quarantine service before taking any attachment lock; that
+service keeps its permission-roots-first order and re-reads the row under lock. Otherwise the route
+locks the URL references, re-reads the exact row with a locking read, and refuses with 409 when the
+row now needs quarantine authority. It does not delegate at that point, because delegating while it
+holds attachment rows would take membership roots after them. The assistant route already holds the
+caller's membership and session roots, so it re-reads the exact row the same way and checks
+quarantine authority in place.

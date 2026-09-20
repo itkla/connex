@@ -77,6 +77,35 @@ class CiChangeClassificationTest(unittest.TestCase):
         self.assertTrue(categories["frontend_audit"])
         self.assertFalse(categories["backend"])
 
+    def test_every_file_that_configures_a_pnpm_workspace_adds_the_audit(self) -> None:
+        for path in (
+            "frontend/pnpm-workspace.yaml",
+            "frontend/.pnpmfile.cjs",
+            "frontend/.pnpmfile.mjs",
+            "frontend/emails/pnpm-workspace.yaml",
+            "frontend/emails/.pnpmfile.cjs",
+            "frontend/emails/.pnpmfile.mjs",
+            "frontend/emails/.npmrc",
+            "frontend/emails/package.json",
+            "landing/pnpm-workspace.yaml",
+            "landing/.pnpmfile.cjs",
+            "landing/.pnpmfile.mjs",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(self.classify(path)["frontend_audit"])
+
+    def test_a_pnpm_project_file_anywhere_adds_the_audit_that_discovers_it(self) -> None:
+        for path in (
+            "pnpm-workspace.yaml",
+            "frontend/tools/pnpm-lock.yaml",
+            "frontend/tools/package.json",
+            "frontend/tools/.pnpmfile.mjs",
+            "backend/src/test/resources/fixture/pnpm-lock.yaml",
+            "tools/codegen/package.json",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(self.classify(path)["frontend_audit"])
+
     def test_ocr_dependencies_add_the_ocr_audit_only(self) -> None:
         categories = self.classify("ocr/requirements.lock")
         self.assertTrue(categories["ocr"])

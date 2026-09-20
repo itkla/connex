@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,8 +42,10 @@ import ooo.klae.connex.backend.ai.AiGenerationProfile;
 import ooo.klae.connex.backend.ai.AiInvocation;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Admission;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.CacheIdentity;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.LeaderOutcome;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Rejection;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
@@ -94,6 +97,7 @@ class DealBriefServiceTest {
                 AiFeature.DEAL_BRIEF, DealBriefService.MAX_TOKENS, DealBriefService.TEMPERATURE))
                 .thenReturn(Optional.of(PROFILE));
         lenient().when(aiInvocationAdmissionService.acquire(any(), anyString(), anyBoolean())).thenReturn(admission);
+        lenient().when(aiInvocationAdmissionService.precheck(any(), anyBoolean())).thenReturn(Rejection.NONE);
         lenient().when(admission.decision()).thenReturn(Decision.LEADER);
         lenient().when(aiOutputCacheStore.saveForPersons(
                 anyInt(), any(), anyInt(), anyInt(), any(), any(), anyInt(), any(), any()))
@@ -204,7 +208,10 @@ class DealBriefServiceTest {
         when(aiOutputCacheStore.contentHash(
                 eq(PROFILE), eq(assembly.prompt()), eq(assembly.context()), anyList())).thenReturn(HASH);
         when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
-                .thenReturn(Optional.empty(), Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
+                .thenReturn(
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.of(row(HASH, 1, "2026-07-01T09:00:00Z")));
         when(aiOutputCacheStore.read("payload", DealBriefContent.class))
                 .thenReturn(Optional.of(content("Leader brief.")));
         when(admission.decision()).thenReturn(Decision.FOLLOWER);
@@ -429,7 +436,10 @@ class DealBriefServiceTest {
                 eq(PROFILE), eq(assembly.prompt()), eq(assembly.context()), anyList())).thenReturn(HASH);
         when(aiOutputCacheStore.find(
                 WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
-                .thenReturn(Optional.of(row(HASH, 0, "2026-07-01T09:00:00Z")), Optional.empty());
+                .thenReturn(
+                        Optional.of(row(HASH, 0, "2026-07-01T09:00:00Z")),
+                        Optional.of(row(HASH, 0, "2026-07-01T09:00:00Z")),
+                        Optional.empty());
         when(aiOutputCacheStore.read("payload", DealBriefContent.class)).thenReturn(Optional.of(
                 new DealBriefContent(List.of(section("Only section", "Invalid cached content.")))));
         when(aiInvocationService.completeStructured(
@@ -487,6 +497,99 @@ class DealBriefServiceTest {
         assertTrue(result.isDegraded());
         verify(aiInvocationService, never()).completeStructured(
                 any(AiInvocation.class), eq(DealBriefContent.class), eq(admission));
+    }
+
+    @Test
+    void generate_rateLimitedForcedRefreshIsRefusedBeforeTheDealIsAssembled() {
+        when(aiInvocationAdmissionService.precheck(any(), eq(true)))
+                .thenReturn(Rejection.REFRESH_THROTTLE);
+
+        DealBriefDto result = service.generate(DEAL_ID, true);
+
+        assertFalse(result.isAvailable());
+        assertEquals("rate_limited", result.getReason());
+        ArgumentCaptor<CacheIdentity> identity = ArgumentCaptor.forClass(CacheIdentity.class);
+        verify(aiInvocationAdmissionService).precheck(identity.capture(), eq(true));
+        assertEquals(
+                CacheIdentity.forSubject(WORKSPACE_ID, AiFeature.DEAL_BRIEF, DEAL_ID, Locale.ENGLISH),
+                identity.getValue());
+        verify(dealBriefAssembler, never()).assemble(anyInt(), anyInt());
+        verify(aiOutputCacheStore, never()).find(anyInt(), anyString(), anyInt(), anyInt());
+        verify(aiInvocationAdmissionService, never()).acquire(any(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void generate_quotaExhaustedWithoutStoredBriefIsRefusedBeforeTheDealIsAssembled() {
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+                .thenReturn(Optional.empty());
+        when(aiInvocationAdmissionService.precheck(any(), eq(false)))
+                .thenReturn(Rejection.ORGANIZATION_QUOTA);
+
+        DealBriefDto result = service.generate(DEAL_ID);
+
+        assertFalse(result.isAvailable());
+        assertEquals("rate_limited", result.getReason());
+        verify(dealBriefAssembler, never()).assemble(anyInt(), anyInt());
+        verify(aiOutputCacheStore, never()).contentHash(any(), any(), any(), anyList());
+        verify(aiInvocationAdmissionService, never()).acquire(any(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void generate_quotaExhaustedStillServesAValidStoredBrief() {
+        BriefAssembly assembly = assembly();
+        lenient().when(aiInvocationAdmissionService.precheck(any(), anyBoolean()))
+                .thenReturn(Rejection.ORGANIZATION_QUOTA);
+        lenient().when(admission.decision()).thenReturn(Decision.RATE_LIMITED);
+        when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly);
+        when(aiOutputCacheStore.contentHash(
+                eq(PROFILE), eq(assembly.prompt()), eq(assembly.context()), anyList())).thenReturn(HASH);
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+                .thenReturn(Optional.of(row(HASH, 0, "2026-07-01T09:00:00Z")));
+        when(aiOutputCacheStore.read("payload", DealBriefContent.class))
+                .thenReturn(Optional.of(content("Stored under quota.")));
+
+        DealBriefDto result = service.generate(DEAL_ID);
+
+        assertTrue(result.isAvailable());
+        assertEquals("Stored under quota.", result.getSections().getFirst().body());
+        assertEquals("2026-07-01T09:00:00Z", result.getGeneratedAt());
+        verify(aiInvocationAdmissionService, never()).precheck(any(), anyBoolean());
+        verify(aiInvocationAdmissionService, never()).acquire(any(), anyString(), anyBoolean());
+        verify(aiInvocationService, never()).completeStructured(
+                any(AiInvocation.class), eq(DealBriefContent.class), any(Admission.class));
+    }
+
+    /**
+     * A concurrent caller publishes a valid brief and releases its flight while this request's
+     * precheck runs, and its completed attempt is what exhausts the quota; the refusal must yield
+     * to the published row instead of reporting rate limiting.
+     */
+    @Test
+    void generate_quotaRefusalServesABriefPublishedWhileThePrecheckRan() {
+        BriefAssembly assembly = assembly();
+        AtomicReference<AiOutputCache> committed = new AtomicReference<>();
+        when(aiOutputCacheStore.find(WORKSPACE_ID, CACHE_FEATURE, DEAL_ID, AiOutputCacheStore.NO_SUBJECT))
+                .thenAnswer(invocation -> Optional.ofNullable(committed.get()));
+        when(aiInvocationAdmissionService.precheck(any(), eq(false))).thenAnswer(invocation -> {
+            committed.set(row(HASH, 0, "2026-07-01T09:00:00Z"));
+            return Rejection.ORGANIZATION_QUOTA;
+        });
+        lenient().when(admission.decision()).thenReturn(Decision.RATE_LIMITED);
+        when(dealBriefAssembler.assemble(WORKSPACE_ID, DEAL_ID)).thenReturn(assembly);
+        when(aiOutputCacheStore.contentHash(
+                eq(PROFILE), eq(assembly.prompt()), eq(assembly.context()), anyList())).thenReturn(HASH);
+        when(aiOutputCacheStore.read("payload", DealBriefContent.class))
+                .thenReturn(Optional.of(content("Published by a concurrent caller.")));
+
+        DealBriefDto result = service.generate(DEAL_ID);
+
+        assertTrue(result.isAvailable());
+        assertEquals("Published by a concurrent caller.", result.getSections().getFirst().body());
+        assertEquals("2026-07-01T09:00:00Z", result.getGeneratedAt());
+        verify(aiInvocationAdmissionService).precheck(any(), eq(false));
+        verify(aiInvocationAdmissionService, never()).acquire(any(), anyString(), anyBoolean());
+        verify(aiInvocationService, never()).completeStructured(
+                any(AiInvocation.class), eq(DealBriefContent.class), any(Admission.class));
     }
 
     private void arrangeMiss(BriefAssembly assembly) {

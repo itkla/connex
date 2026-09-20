@@ -18,6 +18,7 @@ import {
     validateEmailVerificationToken,
 } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
+import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
 import { toastError } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
 
@@ -35,26 +36,28 @@ export function ConfirmEmailForm() {
     const [status, setStatus] = useState<Status>("validating");
     const [submitting, setSubmitting] = useState(false);
 
+    useReloadOnFragmentNavigation();
+
     useEffect(() => {
         let active = true;
-        const token = takeOneTimeLinkToken();
-        const establishFlow = token
-            ? exchangeEmailVerificationToken(token).then(() => {
+        const establish = async () => {
+            const token = takeOneTimeLinkToken();
+            if (token) {
+                await exchangeEmailVerificationToken(token);
                 window.location.replace("/auth/confirm-email");
-                return { valid: true };
-            })
-            : validateEmailVerificationToken();
-        establishFlow
-            .then((result) => {
-                if (active) {
-                    setStatus(result.valid ? "ready" : "invalid");
-                }
-            })
-            .catch(() => {
-                if (active) {
-                    setStatus("invalid");
-                }
-            });
+                return;
+            }
+            const result = await validateEmailVerificationToken();
+            if (active) {
+                setStatus(result.valid ? "ready" : "invalid");
+            }
+        };
+
+        establish().catch(() => {
+            if (active) {
+                setStatus("invalid");
+            }
+        });
         return () => {
             active = false;
         };

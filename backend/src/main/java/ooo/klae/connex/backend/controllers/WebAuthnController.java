@@ -37,6 +37,7 @@ import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.LastPasskeyRemovalForbiddenException;
 import ooo.klae.connex.backend.exceptions.RequestBodyTooLargeException;
+import ooo.klae.connex.backend.exceptions.SpentRecoveryTokenException;
 import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AuditService;
@@ -349,6 +350,11 @@ public class WebAuthnController {
     /**
      * Removes inaccessible passkeys after same-account proof and a short-lived operator recovery
      * authorization. The caller remains confined until a replacement passkey is enrolled.
+     *
+     * <p>A denial is audited after the recovery transaction rolls back. Replaying a token that is
+     * already spent is recorded as {@code token_already_redeemed} rather than {@code proof_rejected}:
+     * it is only reachable with the account's first factor and a token issued for that account, so
+     * operators can tell a replay from a mistyped token. The response is identical in both cases.
      */
     @PostMapping("/recover")
     public Map<String, String> recoverCredentials(
@@ -367,7 +373,9 @@ public class WebAuthnController {
                     null,
                     user.getDisplayName(),
                     "Passkey recovery denied",
-                    "proof_rejected");
+                    exception instanceof SpentRecoveryTokenException
+                            ? "token_already_redeemed"
+                            : "proof_rejected");
             throw exception;
         }
         sessionSecurityService.completeRecoveryStamp(httpRequest, epoch);

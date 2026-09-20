@@ -8,6 +8,7 @@ import { Loader2Icon } from "lucide-react";
 import { ApiError, requestEmailChange } from "@/app/lib/api";
 import { useApiErrorToast } from "@/app/hooks/useApiErrorToast";
 import { useFieldErrors } from "@/app/hooks/useFieldErrors";
+import { usePasskeyStepUpErrorHandler } from "@/app/hooks/usePasskeyStepUpError";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,11 +30,14 @@ type Props = {
 /**
  * Collects a new email address and the current password to request a verified email change.
  * On success it shows a "check your inbox" state pointing the recipient at the new address;
- * the change only applies once they redeem the confirmation link.
+ * the change only applies once they redeem the confirmation link. A privileged account must also
+ * pass passkey step-up, which the API client runs automatically; a missing passkey or a canceled
+ * or failed ceremony gets its specific message rather than the generic failure.
  */
 export default function ChangeEmailDialog({ open, onOpenChange }: Props) {
     const t = useTranslations("AccountChangeEmail");
     const showApiError = useApiErrorToast("AccountChangeEmail");
+    const handlePasskeyStepUpError = usePasskeyStepUpErrorHandler();
     const { fieldErrors, reset, clearError, captureFieldErrors } = useFieldErrors();
 
     const [newEmail, setNewEmail] = useState("");
@@ -61,6 +65,7 @@ export default function ChangeEmailDialog({ open, onOpenChange }: Props) {
             setCurrentPassword("");
             setSent(true);
         } catch (err) {
+            if (handlePasskeyStepUpError(err)) return;
             if (!(err instanceof ApiError) || !captureFieldErrors(err)) {
                 showApiError(err, "genericError");
             }
