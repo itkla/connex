@@ -35,12 +35,13 @@ public interface AiRunLeaseSubjectHandler {
      *
      * <p>The implementation takes the lease over itself rather than being handed a token, because
      * the fence that stops a revived owner is the subject's own terminal status and that fence
-     * closes at the settler's terminal commit, not at the takeover. A settler that bumped the
-     * epoch in one transaction and wrote the subject's terminal state in a later one would leave a
-     * window in which a revived owner still reads the subject as running, settles it itself, and
-     * retires the settler's lease. Implementations must therefore call
-     * {@link AiRunLeaseService#takeOverForSettlement(AiRunLeaseKey, long)} and write the subject's
-     * terminal state in one transaction, and must take the lease last in their lock order.
+     * closes at the settler's terminal commit, not at the takeover. Implementations must therefore
+     * call {@link AiRunLeaseService#takeOverForSettlement(AiRunLeaseKey, long)} and write the
+     * subject's terminal state in one transaction, taking the lease last in their lock order. That
+     * rule, what a split commit permits, and the required lock order are recorded in
+     * {@code docs/backend/LOCKING.md} under "AI run leases", which is the authoritative statement;
+     * {@code takeOverForSettlement} declares {@code MANDATORY} propagation so an implementation
+     * that forgets it is refused rather than silently committing a standalone takeover.
      *
      * @param key the subject's lease key
      * @param expectedEpoch the epoch the sweeper observed on the expired lease

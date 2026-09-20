@@ -51,10 +51,13 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 class AiRunLeaseSweeperTest {
 
     private static final String FOREIGN_CATALOG = "cnx_foreign";
+    private static final String UNREACHABLE_CATALOG = "cnx_unreachable";
     private static final int FIRST_WORKSPACE_ID = 11;
     private static final int SECOND_WORKSPACE_ID = 22;
     private static final int TOMBSTONED_WORKSPACE_ID = 33;
     private static final int RETENTION_SECONDS = 3600;
+    private static final List<String> REAPABLE_KINDS =
+            List.of(AiRunLeaseSubject.CHAT_TURN.wireKey());
 
     private AiRunLeaseService leaseService;
     private AiRunLeaseMapper leaseMapper;
@@ -77,7 +80,7 @@ class AiRunLeaseSweeperTest {
     void everyActiveCatalogIsVisitedAndTheStartingCatalogRotatesBetweenPasses() {
         when(placementRegistry.activeCatalogs()).thenReturn(Arrays.asList(null, FOREIGN_CATALOG));
         when(leaseMapper.workspaceIdsWithExpiredLeases(anyInt(), anyInt())).thenReturn(List.of());
-        when(leaseMapper.workspaceIdsWithReapableTombstones(anyInt(), anyInt(), anyInt()))
+        when(leaseMapper.workspaceIdsWithReapableTombstones(anyInt(), any(), anyInt(), anyInt()))
                 .thenReturn(List.of());
         AiRunLeaseSweeper sweeper = sweeper(handler(AiRunLeaseSubject.CHAT_TURN));
 
@@ -168,7 +171,7 @@ class AiRunLeaseSweeperTest {
     @Test
     void anInstanceWithNoHandlerAtAllDiscoversNoLeasesAndStillReaps() {
         when(placementRegistry.activeCatalogs()).thenReturn(List.of(FOREIGN_CATALOG));
-        when(leaseMapper.workspaceIdsWithReapableTombstones(anyInt(), anyInt(), anyInt()))
+        when(leaseMapper.workspaceIdsWithReapableTombstones(anyInt(), any(), anyInt(), anyInt()))
                 .thenReturn(List.of(TOMBSTONED_WORKSPACE_ID));
         AiRunLeaseSweeper sweeper = sweeper();
 
@@ -237,7 +240,8 @@ class AiRunLeaseSweeperTest {
     void theReapVisitsAWorkspaceThatHoldsNoExpiredLeaseAtAll() {
         when(placementRegistry.activeCatalogs()).thenReturn(List.of(FOREIGN_CATALOG));
         when(leaseMapper.workspaceIdsWithExpiredLeases(anyInt(), anyInt())).thenReturn(List.of());
-        when(leaseMapper.workspaceIdsWithReapableTombstones(0, RETENTION_SECONDS, 50))
+        when(leaseMapper.workspaceIdsWithReapableTombstones(
+                0, REAPABLE_KINDS, RETENTION_SECONDS, 50))
                 .thenReturn(List.of(TOMBSTONED_WORKSPACE_ID));
         when(leaseService.reapTombstones(TOMBSTONED_WORKSPACE_ID, RETENTION_SECONDS, 50))
                 .thenReturn(4);
@@ -261,7 +265,7 @@ class AiRunLeaseSweeperTest {
                 .thenReturn(List.of(FIRST_WORKSPACE_ID));
         when(leaseMapper.findExpiredLeases(anyInt(), any(), anyInt()))
                 .thenReturn(List.of(row(FIRST_WORKSPACE_ID, 1L)));
-        when(leaseMapper.workspaceIdsWithReapableTombstones(anyInt(), anyInt(), anyInt()))
+        when(leaseMapper.workspaceIdsWithReapableTombstones(anyInt(), any(), anyInt(), anyInt()))
                 .thenReturn(List.of(TOMBSTONED_WORKSPACE_ID));
         AiRunLeaseSweeper sweeper = sweeper(handler(AiRunLeaseSubject.CHAT_TURN));
 
@@ -274,19 +278,22 @@ class AiRunLeaseSweeperTest {
     void theReapCursorAdvancesAcrossPassesAndWrapsWhenThePageRunsOut() {
         when(placementRegistry.activeCatalogs()).thenReturn(List.of(FOREIGN_CATALOG));
         when(leaseMapper.workspaceIdsWithExpiredLeases(anyInt(), anyInt())).thenReturn(List.of());
-        when(leaseMapper.workspaceIdsWithReapableTombstones(0, RETENTION_SECONDS, 50))
+        when(leaseMapper.workspaceIdsWithReapableTombstones(
+                0, REAPABLE_KINDS, RETENTION_SECONDS, 50))
                 .thenReturn(List.of(FIRST_WORKSPACE_ID, SECOND_WORKSPACE_ID));
         when(leaseMapper.workspaceIdsWithReapableTombstones(
-                SECOND_WORKSPACE_ID, RETENTION_SECONDS, 50))
+                SECOND_WORKSPACE_ID, REAPABLE_KINDS, RETENTION_SECONDS, 50))
                 .thenReturn(List.of());
         AiRunLeaseSweeper sweeper = sweeper(handler(AiRunLeaseSubject.CHAT_TURN));
 
         sweeper.sweep();
         sweeper.sweep();
 
-        verify(leaseMapper, times(2)).workspaceIdsWithReapableTombstones(0, RETENTION_SECONDS, 50);
+        verify(leaseMapper, times(2)).workspaceIdsWithReapableTombstones(
+                0, REAPABLE_KINDS, RETENTION_SECONDS, 50);
         verify(leaseMapper)
-                .workspaceIdsWithReapableTombstones(SECOND_WORKSPACE_ID, RETENTION_SECONDS, 50);
+                .workspaceIdsWithReapableTombstones(
+                        SECOND_WORKSPACE_ID, REAPABLE_KINDS, RETENTION_SECONDS, 50);
     }
 
     @Test
@@ -295,7 +302,7 @@ class AiRunLeaseSweeperTest {
         when(leaseMapper.workspaceIdsWithExpiredLeases(anyInt(), anyInt()))
                 .thenReturn(List.of(FIRST_WORKSPACE_ID));
         when(leaseMapper.findExpiredLeases(anyInt(), any(), anyInt())).thenReturn(List.of());
-        when(leaseMapper.workspaceIdsWithReapableTombstones(anyInt(), anyInt(), anyInt()))
+        when(leaseMapper.workspaceIdsWithReapableTombstones(anyInt(), any(), anyInt(), anyInt()))
                 .thenReturn(List.of(FIRST_WORKSPACE_ID));
         AiRunLeaseSweeper sweeper = sweeper(handler(AiRunLeaseSubject.CHAT_TURN));
 
@@ -337,7 +344,7 @@ class AiRunLeaseSweeperTest {
                 .thenReturn(List.of(FIRST_WORKSPACE_ID));
         when(leaseMapper.findExpiredLeases(anyInt(), any(), anyInt()))
                 .thenReturn(List.of(row(FIRST_WORKSPACE_ID, 1L)));
-        when(leaseMapper.workspaceIdsWithReapableTombstones(anyInt(), anyInt(), anyInt()))
+        when(leaseMapper.workspaceIdsWithReapableTombstones(anyInt(), any(), anyInt(), anyInt()))
                 .thenReturn(List.of(TOMBSTONED_WORKSPACE_ID));
         when(leaseService.reapTombstones(eq(TOMBSTONED_WORKSPACE_ID), anyInt(), anyInt()))
                 .thenReturn(2);
@@ -365,6 +372,80 @@ class AiRunLeaseSweeperTest {
         sweeper.sweep();
 
         assertEquals(List.of(true), recordedInsideScope);
+    }
+
+    /**
+     * The reap's discovery must ask for the same kinds its delete will touch. A discovery that
+     * asked for any aged tombstone would keep returning a workspace whose only aged tombstone
+     * belongs to a kind the delete refuses, on every cursor cycle, deleting nothing each time.
+     */
+    @Test
+    void theReapDiscoveryAsksOnlyForTheSubjectKindsItsDeleteWillTouch() {
+        when(placementRegistry.activeCatalogs()).thenReturn(List.of(FOREIGN_CATALOG));
+        when(leaseMapper.workspaceIdsWithExpiredLeases(anyInt(), anyInt())).thenReturn(List.of());
+        when(leaseMapper.workspaceIdsWithReapableTombstones(anyInt(), any(), anyInt(), anyInt()))
+                .thenReturn(List.of());
+        AiRunLeaseSweeper sweeper = sweeper(handler(AiRunLeaseSubject.CHAT_TURN));
+
+        sweeper.sweep();
+
+        assertEquals(REAPABLE_KINDS, AiRunLeaseSubject.reapableWireKeys());
+        verify(leaseMapper).workspaceIdsWithReapableTombstones(
+                0, REAPABLE_KINDS, RETENTION_SECONDS, 50);
+    }
+
+    /**
+     * One unreachable or unhealthy catalog must cost that catalog its settlement, and nothing else.
+     *
+     * <p>The discovery query runs before any workspace scope opens, so an exception from it escapes
+     * every per-workspace guard. Without a catalog boundary it would abort the whole pass, and the
+     * rotation advances only one position per tick — so with N catalogs the healthy catalog sitting
+     * directly behind the failing one would be swept about once every N ticks rather than every
+     * tick, widening dead-owner detection from one sweep interval to N of them.
+     */
+    @Test
+    void aCatalogWhoseSettlementDiscoveryThrowsStillReapsAndTheNextCatalogStillSettles() {
+        when(placementRegistry.activeCatalogs())
+                .thenReturn(List.of(UNREACHABLE_CATALOG, FOREIGN_CATALOG));
+        when(leaseMapper.workspaceIdsWithExpiredLeases(anyInt(), anyInt()))
+                .thenAnswer(invocation -> {
+                    if (UNREACHABLE_CATALOG.equals(tenantWorkScope.currentCatalog)) {
+                        throw new IllegalStateException("catalog unavailable");
+                    }
+                    return List.of(FIRST_WORKSPACE_ID);
+                });
+        when(leaseMapper.findExpiredLeases(anyInt(), any(), anyInt()))
+                .thenReturn(List.of(row(FIRST_WORKSPACE_ID, 1L)));
+        when(leaseMapper.workspaceIdsWithReapableTombstones(anyInt(), any(), anyInt(), anyInt()))
+                .thenReturn(List.of(TOMBSTONED_WORKSPACE_ID));
+        RecordingSubjectHandler handler = handler(AiRunLeaseSubject.CHAT_TURN);
+        AiRunLeaseSweeper sweeper = sweeper(handler);
+
+        sweeper.sweep();
+
+        assertEquals(List.of(1L), handler.settled);
+        verify(leaseService, times(2))
+                .reapTombstones(TOMBSTONED_WORKSPACE_ID, RETENTION_SECONDS, 50);
+    }
+
+    /** The reap phase is guarded at the same boundary, and independently of the settlement. */
+    @Test
+    void aCatalogWhoseReapDiscoveryThrowsDoesNotStopTheNextCatalogFromReaping() {
+        when(placementRegistry.activeCatalogs())
+                .thenReturn(List.of(UNREACHABLE_CATALOG, FOREIGN_CATALOG));
+        when(leaseMapper.workspaceIdsWithExpiredLeases(anyInt(), anyInt())).thenReturn(List.of());
+        when(leaseMapper.workspaceIdsWithReapableTombstones(anyInt(), any(), anyInt(), anyInt()))
+                .thenAnswer(invocation -> {
+                    if (UNREACHABLE_CATALOG.equals(tenantWorkScope.currentCatalog)) {
+                        throw new IllegalStateException("catalog unavailable");
+                    }
+                    return List.of(TOMBSTONED_WORKSPACE_ID);
+                });
+        AiRunLeaseSweeper sweeper = sweeper(handler(AiRunLeaseSubject.CHAT_TURN));
+
+        sweeper.sweep();
+
+        verify(leaseService).reapTombstones(TOMBSTONED_WORKSPACE_ID, RETENTION_SECONDS, 50);
     }
 
     private AiRunLeaseSweeper sweeper(AiRunLeaseSubjectHandler... handlers) {
@@ -439,6 +520,7 @@ class AiRunLeaseSweeperTest {
     private static final class RecordingTenantWorkScope extends TenantWorkScope {
         private final List<String> catalogs = new ArrayList<>();
         private final List<Integer> workspaceIds = new ArrayList<>();
+        private String currentCatalog;
         private int workspaceDepth;
 
         private RecordingTenantWorkScope() {
@@ -455,7 +537,13 @@ class AiRunLeaseSweeperTest {
         @Override
         public <T> T withCatalog(String catalog, Supplier<T> work) {
             catalogs.add(catalog);
-            return work.get();
+            String previous = currentCatalog;
+            currentCatalog = catalog;
+            try {
+                return work.get();
+            } finally {
+                currentCatalog = previous;
+            }
         }
 
         @Override

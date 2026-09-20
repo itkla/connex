@@ -29,7 +29,9 @@ import ooo.klae.connex.backend.notifications.AiChatRealtimeDispatcher;
  * {@code ai_chat_session → ai_chat_turn → ai_run_lease}, lease last. Taking the lease over in a
  * transaction of its own would leave a window in which a revived owner still reads the turn as
  * running, settles it itself, and retires this settler's lease on the way out — the fence is the
- * turn's status and it closes only at this transaction's commit.
+ * turn's status and it closes only at this transaction's commit. That is the general contract every
+ * lease subject owes, not a chat-turn detail, and it is recorded as such in
+ * {@code docs/backend/LOCKING.md} under "AI run leases".
  *
  * <p>Deliberately no {@code AiRestrictionEpoch} read fence, mirroring the reader-triggered expiry:
  * settlement removes a capability and writes no model-derived content, and gating it on the fence

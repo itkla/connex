@@ -203,13 +203,20 @@ public interface AiRunLeaseMapper {
      * enumeration is what keeps the table's growth bounded by the retention window rather than by
      * lifetime run volume.
      *
+     * <p>It takes the same subject kinds {@link #deleteTombstones} does, and that agreement is
+     * load-bearing rather than tidy: a discovery that returned a workspace whose only aged tombstone
+     * belongs to a kind the delete refuses to touch would return that workspace on every cursor
+     * cycle, for the life of the tenant, and delete nothing each time.
+     *
      * @param afterWorkspaceId exclusive cursor; {@code 0} starts a pass
+     * @param subjectKinds wire keys of the subject kinds that may be reaped; never empty
      * @param retentionSeconds minimum tombstone age, applied by MySQL
      * @param limit maximum workspace ids returned
      * @return ascending workspace ids
      */
     List<Integer> workspaceIdsWithReapableTombstones(
             @Param("afterWorkspaceId") int afterWorkspaceId,
+            @Param("subjectKinds") Collection<String> subjectKinds,
             @Param("retentionSeconds") int retentionSeconds,
             @Param("limit") int limit);
 

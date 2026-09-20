@@ -122,7 +122,7 @@ class AiRunLeaseWorkspaceIsolationIntegrationTest extends AbstractAiRunLeaseInte
                         sameSubjectHere.subjectId(),
                         held.owner(),
                         held.epoch()));
-        assertTrue(leaseService.takeOverForSettlement(sameSubjectHere, held.epoch()).isEmpty());
+        assertTrue(takeOverForSettlement(sameSubjectHere, held.epoch()).isEmpty());
 
         Map<String, Object> after = leaseRow(theirs);
         assertEquals(held.owner(), after.get("owner"));

@@ -42,9 +42,21 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * is visible before it silently widens the advertised detection bound.
  *
  * <p>A settlement that throws is logged and counted, and the next lease in the workspace is still
- * attempted: one wedged run must not stop every other tenant's recovery. The budget is spent on
- * leases <em>examined</em> rather than leases settled, so a workspace whose leases all lose their
- * takeover races cannot spin.
+ * attempted: one wedged run must not stop every other tenant's recovery. Failure is contained at
+ * the catalog boundary too, and at each phase independently: a discovery query aimed at one
+ * unreachable or unhealthy dedicated catalog throws before any workspace scope opens, so without
+ * that boundary the exception would escape the whole pass and every catalog the rotation had not
+ * yet reached would skip both settlement and reaping. With N catalogs and a rotation that advances
+ * one position per tick, a healthy catalog sitting directly behind a failing one would then be
+ * visited roughly once every N passes, widening dead-owner detection from about one sweep interval
+ * to N of them. The budget is spent on leases <em>examined</em> rather than leases settled, so a
+ * workspace whose leases all lose their takeover races cannot spin.
+ *
+ * <p>The reap phase carries no global per-pass budget, and the bound it does have is stated rather
+ * than implied: one pass deletes at most {@code run-lease-sweep-max-workspaces} times
+ * {@code run-lease-sweep-batch} tombstones per catalog. That is deliberate — a tombstone backlog is
+ * bounded work that shrinks on every pass and contends for no subject row lock — but it does mean
+ * the reap's cost per pass is the product of two properties rather than a single ceiling.
  *
  * <p>The tombstone reap is a second phase with its <em>own</em> catalog-pinned enumeration and its
  * own workspace cursor, and it runs whether or not the settlement budget was spent. Deriving it
@@ -132,9 +144,23 @@ public class AiRunLeaseSweeper {
         int remaining = properties.getRunLeaseSweepMaxSettlements();
         for (String catalog : catalogs) {
             if (remaining > 0 && !handledSubjectKinds.isEmpty()) {
-                remaining -= settleCatalog(catalog, remaining);
+                try {
+                    remaining -= settleCatalog(catalog, remaining);
+                } catch (RuntimeException failure) {
+                    log.warn(
+                            "AI run lease settlement pass failed catalog={} exceptionClass={}",
+                            label(catalog),
+                            failure.getClass().getSimpleName());
+                }
             }
-            reapCatalog(catalog);
+            try {
+                reapCatalog(catalog);
+            } catch (RuntimeException failure) {
+                log.warn(
+                        "AI run lease reap pass failed catalog={} exceptionClass={}",
+                        label(catalog),
+                        failure.getClass().getSimpleName());
+            }
         }
     }
 
@@ -161,6 +187,9 @@ public class AiRunLeaseSweeper {
     }
 
     private void reapCatalog(String catalog) {
+        if (AiRunLeaseSubject.reapableWireKeys().isEmpty()) {
+            return;
+        }
         AtomicInteger cursor = cursor(reapCursors, catalog);
         List<Integer> workspaceIds = reapPage(catalog, cursor.get());
         if (workspaceIds.isEmpty() && cursor.get() != 0) {
@@ -189,6 +218,7 @@ public class AiRunLeaseSweeper {
                 catalog,
                 () -> leaseMapper.workspaceIdsWithReapableTombstones(
                         afterWorkspaceId,
+                        AiRunLeaseSubject.reapableWireKeys(),
                         retentionSeconds(),
                         properties.getRunLeaseSweepMaxWorkspaces()));
     }
@@ -326,8 +356,11 @@ public class AiRunLeaseSweeper {
     }
 
     private static AtomicInteger cursor(Map<String, AtomicInteger> cursors, String catalog) {
-        return cursors.computeIfAbsent(
-                catalog == null ? DEFAULT_CATALOG : catalog, ignored -> new AtomicInteger());
+        return cursors.computeIfAbsent(label(catalog), ignored -> new AtomicInteger());
+    }
+
+    private static String label(String catalog) {
+        return catalog == null ? DEFAULT_CATALOG : catalog;
     }
 
     private static AiRunLeaseSubject subjectOf(String wireKey) {

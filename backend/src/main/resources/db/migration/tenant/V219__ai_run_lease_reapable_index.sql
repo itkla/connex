@@ -1,0 +1,22 @@
+-- The run-lease tombstone reap discovers workspaces holding a released lease older than the
+-- retention window. That discovery runs once every thirty seconds on every instance, for every
+-- pinned catalog, and it carries a workspace cursor rather than a workspace equality, so
+-- idx_ai_run_lease_released (workspace_id, released_at) cannot serve it: the cursor range consumes
+-- the leading column, which leaves released_at as a per-entry condition instead of a scan bound. In
+-- the steady state nothing is old enough to reap, so the page limit never short-circuits and the
+-- probe reads every retained tombstone above the cursor to prove an empty result - work that grows
+-- with one retention window of AI run volume rather than with the work waiting to be done.
+--
+-- Leading with released_at turns the probe into one short range bounded by the retention cutoff,
+-- and leaves workspace_id trailing as both the cursor predicate and the distinct key. A tick with
+-- nothing to reap then reads no index entries at all. subject_kind trails so the statement stays
+-- covered once it filters to the kinds whose tombstones may be deleted.
+--
+-- idx_ai_run_lease_released is retained: the per-workspace delete carries a workspace equality and
+-- is served by that index exactly as before.
+--
+-- Strictly additive: no column, constraint, or index is altered or dropped, so an instance running
+-- the previous binary is unaffected and a rollback that retains this migration only restores the
+-- scan the reap probe used to do.
+CREATE INDEX idx_ai_run_lease_reapable
+    ON ai_run_lease (released_at, workspace_id, subject_kind);
