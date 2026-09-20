@@ -80,6 +80,10 @@ class AiAssistantStepSchemaTest {
                 .schema().path("properties").path("tool").toString();
         assertTrue(core.contains("search_records"));
         assertTrue(core.contains("list_tasks"));
+        assertTrue(core.contains(AiAssistantToolCatalog.FIND_TOOLS),
+                "a core-only step must always be able to express the call that widens it");
+        assertTrue(core.contains("write_pipeline"),
+                "find_tools carries the loadable keys as a closed enum, never free text");
         assertFalse(core.contains("aggregate_metric"));
         assertFalse(core.contains("get_deal_brief"));
         assertFalse(core.contains("create_note"));

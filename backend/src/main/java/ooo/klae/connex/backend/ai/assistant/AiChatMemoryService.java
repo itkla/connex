@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 
@@ -15,6 +16,7 @@ import ooo.klae.connex.backend.ai.AiInvocationAdmissionService;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiProperties;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import ooo.klae.connex.backend.ai.masking.AiGeneratedContentScreen;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
@@ -48,6 +50,7 @@ public class AiChatMemoryService {
     private final AiInvocationAdmissionService invocationAdmissionService;
     private final AiProperties aiProperties;
     private final AiAssistantPromptAssembler promptAssembler;
+    private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantToolExecutor toolExecutor;
     private final AiAssistantSummaryGuard summaryGuard;
     private final AiAssistantSummarySchema summarySchema;
@@ -60,6 +63,14 @@ public class AiChatMemoryService {
     /**
      * Prepares current provider-sized history, compacting the oldest whole messages before the
      * supplied turn deadline.
+     *
+     * <p>The turn gets exactly one budget, measured here from
+     * {@link AiAssistantToolCatalog#reservationToolsets()} rather than from the set the first step
+     * actually sends. A turn widens its own vocabulary as it runs, and re-deriving the budget on
+     * each load would shrink {@code toolResultBytes} mid-turn — stranding tool results the turn had
+     * already admitted and executed writes against. Reserving a bounded worst case that a turn may
+     * never reach is what keeps the derived budgets monotone, and the reservation is proved to
+     * dominate every reachable loaded set by {@code AiAssistantPromptEnvelopeTest}.
      */
     public AiChatMemory prepare(
             AiChatQueuedTurn turn,
@@ -74,17 +85,17 @@ public class AiChatMemoryService {
                         ? capabilities.nativeToolReasoning()
                         : capabilities.reasoning()
                 : AiReasoningMode.NONE;
+        Set<Toolset> reservation = toolCatalog.reservationToolsets();
         int fixedEnvelopeBytes = nativeTools
                 ? invocationService.serializedPromptBytes(
-                        promptAssembler.fixedNativePrompt(),
+                        promptAssembler.fixedNativePrompt(reservation),
                         stepSchema.finalResponseSchema(),
                         reasoningMode,
                         new AiNativeToolRequest(
-                                promptAssembler.nativeToolDefinitions(
-                                        AiAssistantToolCatalog.ALL), List.of()))
+                                promptAssembler.nativeToolDefinitions(reservation), List.of()))
                 : invocationService.serializedPromptBytes(
-                        promptAssembler.fixedPrompt(AiAssistantToolCatalog.ALL),
-                        stepSchema.responseSchema(AiAssistantToolCatalog.ALL),
+                        promptAssembler.fixedPrompt(reservation),
+                        stepSchema.responseSchema(reservation),
                         reasoningMode);
         AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
                 capabilities,

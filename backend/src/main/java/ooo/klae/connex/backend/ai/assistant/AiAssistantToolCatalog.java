@@ -25,6 +25,14 @@ public class AiAssistantToolCatalog {
     /** Longest single free-text list entry, sized for one plan step rather than prose. */
     static final int MAX_TEXT_LIST_ITEM_CHARS = 120;
 
+    /**
+     * The meta-tool a turn calls to widen its own vocabulary.
+     *
+     * <p>It is the one declared-executable tool the agent loop handles itself, because it mutates
+     * per-turn state the stateless executor deliberately does not hold.
+     */
+    public static final String FIND_TOOLS = "find_tools";
+
     /** Supported JSON argument kinds. */
     public enum ArgumentKind { STRING, INTEGER, STRING_LIST, TEXT_LIST }
 
@@ -208,6 +216,46 @@ public class AiAssistantToolCatalog {
         return Collections.unmodifiableSet(reservation);
     }
 
+    /**
+     * The one model-visible statement of the enforced per-turn toolset cap.
+     *
+     * <p>Rendered from {@link #MAX_ACTIVE_TOOLSETS_PER_TURN} rather than written out, because the
+     * {@code find_tools} description and the system-prompt directive are the only places a model
+     * learns the limit: a hard-coded numeral beside a changed constant would tell every turn a
+     * number the loader does not enforce, and no assertion over a literal can catch that drift.
+     *
+     * @return the sentence both the tool description and the prompt directive end with
+     */
+    public static String capSentence() {
+        return "a request may hold at most " + MAX_ACTIVE_TOOLSETS_PER_TURN
+                + " sets beyond the core set.";
+    }
+
+    /**
+     * Whether a string is server-authored catalog vocabulary rather than tenant or model text.
+     *
+     * <p>Exists so the one tool result the server writes itself — {@code find_tools} — can be
+     * replayed verbatim instead of through the tenant-data masking pass, while still failing
+     * closed if that result ever gains a value the catalog did not author.
+     *
+     * @param value one string from a server-authored tool result
+     * @return whether the catalog declares it as a tool name or a toolset key
+     */
+    public boolean isDeclaredVocabulary(String value) {
+        if (value == null) {
+            return false;
+        }
+        if (TOOLS.containsKey(value)) {
+            return true;
+        }
+        for (Toolset toolset : Toolset.values()) {
+            if (toolset.key().equals(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** @return every loadable toolset paired with its server-authored summary, in declaration order */
     public List<Map.Entry<Toolset, String>> directory() {
         return LOADABLE.stream()
@@ -372,6 +420,8 @@ public class AiAssistantToolCatalog {
                 string("records", false, 4, 7, Set.of("person", "company", "deal")),
                 stringList("warmth", false, 1, 4, Set.of("hot", "warm", "cool", "cold")),
                 integer("days", false, 1, 365)));
+        add(tools, executable(Toolset.CORE, FIND_TOOLS,
+                string("toolset", true, 1, 32, loadableKeys())));
         add(tools, executable(Toolset.ANALYTICS, "aggregate_metric",
                 string("metric", true, 1, 32, Set.of(
                         "deal_metrics", "deal_kpis", "activity_volume",
@@ -412,6 +462,24 @@ public class AiAssistantToolCatalog {
         return Collections.unmodifiableMap(new LinkedHashMap<>(tools));
     }
 
+    /**
+     * Derives the closed {@code find_tools} enum from the loadable toolset keys.
+     *
+     * <p>A static method rather than a constant on purpose: {@code buildTools()} runs inside this
+     * class's static initialiser, so a field declared after {@link #TOOLS} would still be null
+     * here and {@code ArgumentSpec}'s {@code Set.copyOf} would throw out of {@code <clinit>} as an
+     * {@code ExceptionInInitializerError} on first catalog use rather than where it was written.
+     * A nested enum initialises on first use independently of the outer class's field order.
+     *
+     * @return the stable wire keys of every non-core toolset
+     */
+    private static Set<String> loadableKeys() {
+        return java.util.Arrays.stream(Toolset.values())
+                .filter(toolset -> toolset != Toolset.CORE)
+                .map(Toolset::key)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
     private static String description(String name) {
         return switch (name) {
             case "search_records" -> "Search visible people, companies, and deals and return reusable handles.";
@@ -425,6 +493,8 @@ public class AiAssistantToolCatalog {
             case "list_tasks" -> "List visible tasks for one record handle.";
             case "list_scope_activities" -> "List recent activity across a bounded set of records "
                     + "in one call instead of asking record by record.";
+            case FIND_TOOLS -> "Load one more named set of tools when the loaded sets cannot do "
+                    + "the job. A set can be loaded once; " + capSentence();
             case "aggregate_metric" -> "Calculate a supported workspace relationship or pipeline metric.";
             case "find_schedule_conflicts" -> "Find visible scheduling conflicts for one record and time range.";
             case "create_activity" -> "Create an immediately executed, undoable activity for one record.";

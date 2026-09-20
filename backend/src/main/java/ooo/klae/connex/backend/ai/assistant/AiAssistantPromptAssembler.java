@@ -68,6 +68,21 @@ public class AiAssistantPromptAssembler {
     private static final String ENDING_FINAL_EXAMPLE =
             "{\"text\":\"No matching activity was found for that period.\","
                     + "\"citations\":[],\"suggestions\":[],\"title\":null}";
+    /**
+     * Tells the model that its vocabulary is partial and how to widen it.
+     *
+     * <p>A model that cannot see what exists cannot decide what to load, so this travels with the
+     * constant directory of every loadable toolset rather than with the loaded declarations alone.
+     *
+     * <p>The cap is rendered from {@link AiAssistantToolCatalog#capSentence()} rather than written
+     * out here, so the only limit a model is ever told is the one the loader enforces.
+     */
+    private static final String FIND_TOOLS_DIRECTIVE =
+            "Only the tools declared in this step are callable. When they cannot do the job, call "
+                    + "find_tools with the key of one more toolset; a set loads once, and "
+                    + AiAssistantToolCatalog.capSentence()
+                    + " Every loadable set is listed below as key - what it covers - whether it "
+                    + "is already loaded.";
 
     private final ObjectMapper objectMapper;
     private final AiAssistantToolCatalog toolCatalog;
@@ -345,10 +360,11 @@ public class AiAssistantPromptAssembler {
             MaskingContext context,
             AiChatResourceRegistry resources,
             List<Map<String, Object>> attachmentData,
-            AiAssistantPromptBudget budget) {
+            AiAssistantPromptBudget budget,
+            Set<Toolset> loadedToolsets) {
         return assembleNative(
                 history, pageContext, toolTurns, context, resources,
-                attachmentData, budget, SkillContext.NONE);
+                attachmentData, budget, SkillContext.NONE, loadedToolsets);
     }
 
     /** Assembles native-tool input that also carries a skill contract and its plan evidence. */
@@ -360,12 +376,13 @@ public class AiAssistantPromptAssembler {
             AiChatResourceRegistry resources,
             List<Map<String, Object>> attachmentData,
             AiAssistantPromptBudget budget,
-            SkillContext skill) {
+            SkillContext skill,
+            Set<Toolset> loadedToolsets) {
         seedIdentifiers(pageContext.identifiers(), context);
         for (ToolTurn turn : toolTurns) {
             seedIdentifiers(turn.result().identifiers(), context);
         }
-        String system = nativeSystemPrompt();
+        String system = nativeSystemPrompt(loadedToolsets);
         PromptAssembly.Builder prompt = PromptAssembly.builder(context).system(system);
         for (AiChatMessage message : history) {
             appendHistory(prompt, message, context, resources);
@@ -649,8 +666,10 @@ public class AiAssistantPromptAssembler {
     }
 
     /** Returns the fixed native-tool prompt for exact serialized-envelope budgeting. */
-    public MaskedPrompt fixedNativePrompt() {
-        return PromptAssembly.builder(new MaskingContext()).system(nativeSystemPrompt()).build();
+    public MaskedPrompt fixedNativePrompt(Set<Toolset> loadedToolsets) {
+        return PromptAssembly.builder(new MaskingContext())
+                .system(nativeSystemPrompt(loadedToolsets))
+                .build();
     }
 
     /** Serializes the demasked tool result for its exact durable audit record. */
@@ -883,16 +902,54 @@ public class AiAssistantPromptAssembler {
         return best;
     }
 
+    /**
+     * Renders one already-executed tool result for replay.
+     *
+     * <p>{@code find_tools} is the single tool whose result this server writes itself, out of
+     * catalog constants, and it is the authoritative statement of what the turn now holds. Running
+     * it through the tenant-data replacer would let a workspace record that happens to share a
+     * toolset key or a tool name — "Analytics", "Core" — tokenize or redact those values, so the
+     * model would be told it holds a placeholder it can never name again and would burn its
+     * no-progress budget re-asking. It is therefore replayed verbatim, guarded by
+     * {@link AiAssistantToolCatalog#isDeclaredVocabulary(String)} so a future result carrying
+     * anything the catalog did not author fails closed instead of egressing unmasked.
+     *
+     * <p>Only a result that states the active set takes that path. A refused {@code find_tools}
+     * step produces the loop's ordinary {@code {"error": reason}} shape, which asserts nothing
+     * about the loaded set and so has nothing to preserve; it keeps the ordinary masked path, and
+     * keeping it there is what lets the guard stay strictly catalog-bounded.
+     */
     private ObjectNode maskedToolResult(ToolTurn turn, MaskingContext context) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("step", turn.seq());
         data.put("tool", turn.tool());
         data.put("result", turn.result().data());
-        JsonNode masked = maskStrings(objectMapper.valueToTree(data), context);
-        if (!(masked instanceof ObjectNode object)) {
+        JsonNode payload = objectMapper.valueToTree(data);
+        boolean statesTheActiveSet = AiAssistantToolCatalog.FIND_TOOLS.equals(turn.tool())
+                && turn.result().data().containsKey(AiAssistantToolsetLoader.ACTIVE_TOOLSETS);
+        JsonNode rendered = statesTheActiveSet
+                ? requireDeclaredVocabulary(payload)
+                : maskStrings(payload, context);
+        if (!(rendered instanceof ObjectNode object)) {
             throw new IllegalStateException("Assistant tool result payload is invalid");
         }
         return object;
+    }
+
+    private JsonNode requireDeclaredVocabulary(JsonNode node) {
+        if (node.isString() && !toolCatalog.isDeclaredVocabulary(node.asString())) {
+            throw new IllegalStateException(
+                    "Assistant toolset result carries text the catalog did not author");
+        }
+        if (node instanceof ObjectNode object) {
+            object.properties().forEach(entry -> requireDeclaredVocabulary(entry.getValue()));
+        }
+        if (node instanceof ArrayNode array) {
+            for (JsonNode child : array) {
+                requireDeclaredVocabulary(child);
+            }
+        }
+        return node;
     }
 
     private static void collectArrays(JsonNode node, List<ArrayNode> arrays) {
@@ -1312,6 +1369,9 @@ public class AiAssistantPromptAssembler {
 
                 List-style tool results are capped. Prefer targeted top-N and filtered queries over broad fan-out. When a result contains a [truncated: ...] marker, narrow the next call instead of repeating the same broad call. A tool result of {"error": reason} means that call was refused and nothing was read; correct the arguments or use a different tool, and never repeat a refused call unchanged. For work that takes several steps, publish a plan with set_todos and update it as you go, so the member can see what you are doing.
 
+                %s
+                %s
+
                 AUTO write tools execute immediately and are undoable. CONFIRM write tools only create a proposal and never execute until a human explicitly approves the card.
 
                 Make the final answer useful, specific, and complete. Ground every factual claim in CRM data actually retrieved during this turn. Quantify counts, dates, amounts, changes, and relationship signals when the data supports them. State plainly when requested data is missing, unavailable, or too sparse for a conclusion. Do not pad an answer, invent facts, or present unsupported inference as fact.
@@ -1332,19 +1392,50 @@ public class AiAssistantPromptAssembler {
 
                 %s
                 """.formatted(
+                        FIND_TOOLS_DIRECTIVE,
+                        toolsetDirectory(loadedToolsets),
                         ANSWER_DOCUMENT_CONTRACT,
                         FIRST_FINAL_EXAMPLE,
                         ENDING_FINAL_EXAMPLE,
                         serialized);
     }
 
-    private static String nativeSystemPrompt() {
+    /**
+     * Renders the constant directory of every loadable toolset with its current state.
+     *
+     * <p>All five loadable sets are listed on every step, loaded or not, so the directory's byte
+     * cost does not grow as sets are loaded and the reservation the turn's one budget is measured
+     * against stays an upper bound for this component too. The keys and summaries are
+     * server-authored catalog constants, never model or tenant text.
+     *
+     * @param loadedToolsets the toolsets the turn currently holds
+     * @return one directory line per loadable toolset
+     */
+    private String toolsetDirectory(Set<Toolset> loadedToolsets) {
+        StringBuilder directory = new StringBuilder();
+        for (Map.Entry<Toolset, String> entry : toolCatalog.directory()) {
+            if (!directory.isEmpty()) {
+                directory.append('\n');
+            }
+            directory.append(entry.getKey().key())
+                    .append(" - ")
+                    .append(entry.getValue())
+                    .append(" - ")
+                    .append(loadedToolsets.contains(entry.getKey()) ? "loaded" : "available");
+        }
+        return directory.toString();
+    }
+
+    private String nativeSystemPrompt(Set<Toolset> loadedToolsets) {
         return """
                 You are Ask Connex, a thorough relationship-intelligence assistant. Use only the supplied native function tools. When you have enough evidence, return exactly one JSON object matching the final-answer schema. Do not describe or encode a tool call in ordinary content.
 
                 Finish with the fewest tool steps that retrieve enough evidence to answer well. Reuse CRM data already present in this turn, never repeat the same tool arguments, and batch record kinds in one search_records call and several record reads in one get_records call when possible. Answer directly when no CRM read is needed. Tool-call efficiency must never make the final answer brief or incomplete.
 
                 List-style tool results are capped. Prefer targeted top-N and filtered queries over broad fan-out. When a result contains a [truncated: ...] marker, narrow the next call instead of repeating the same broad call. A tool result of {"error": reason} means that call was refused and nothing was read; correct the arguments or use a different tool, and never repeat a refused call unchanged. For work that takes several steps, publish a plan with set_todos and update it as you go, so the member can see what you are doing.
+
+                %s
+                %s
 
                 AUTO write tools execute immediately and are undoable. CONFIRM write tools only create a proposal and never execute until a human explicitly approves the card.
 
@@ -1363,6 +1454,8 @@ public class AiAssistantPromptAssembler {
                 Valid first final response: %s
                 Valid conversation-ending final response: %s
                 """.formatted(
+                        FIND_TOOLS_DIRECTIVE,
+                        toolsetDirectory(loadedToolsets),
                         ANSWER_DOCUMENT_CONTRACT,
                         FIRST_FINAL_EXAMPLE,
                         ENDING_FINAL_EXAMPLE);

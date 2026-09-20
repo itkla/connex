@@ -99,6 +99,39 @@ class AiAssistantEvaluationRegressionTest {
         }
     }
 
+    /**
+     * Resolves the vocabulary one golden case is judged against.
+     *
+     * <p>Production starts every turn from {@link AiAssistantToolCatalog#CORE}, so that is the
+     * default here too: a case whose candidate names a non-core tool without declaring the
+     * {@code loadedToolsets} the turn would have had to spend a {@code find_tools} step on fails
+     * the guard, exactly as the live turn would. Judging every candidate against the whole catalog
+     * would let the gate bless a first-step call production rejects as {@code tool_name}.
+     *
+     * @param evaluationCase one golden case, optionally declaring {@code loadedToolsets}
+     * @return the loaded set the candidate is permitted against
+     */
+    private Set<AiAssistantToolCatalog.Toolset> loadedToolsets(JsonNode evaluationCase) {
+        JsonNode declared = evaluationCase.get("loadedToolsets");
+        if (declared == null || !declared.isArray() || declared.isEmpty()) {
+            return AiAssistantToolCatalog.CORE;
+        }
+        Set<AiAssistantToolCatalog.Toolset> loaded =
+                new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE);
+        for (JsonNode key : declared) {
+            AiAssistantToolCatalog.Toolset toolset = AiAssistantToolCatalog.LOADABLE.stream()
+                    .filter(candidate -> candidate.key().equals(key.asString()))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Unknown evaluation toolset: " + key.asString()));
+            loaded.add(toolset);
+        }
+        assertTrue(
+                loaded.size() - 1 <= AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN,
+                "An evaluation case cannot declare more toolsets than a turn may hold");
+        return loaded;
+    }
+
     private void evaluate(String id, Category category, JsonNode evaluationCase) {
         if (category == Category.SKILL_ROUTING) {
             evaluateSkillRouting(id, evaluationCase);
@@ -106,7 +139,8 @@ class AiAssistantEvaluationRegressionTest {
         }
         JsonNode candidate = evaluationCase.get("candidate");
         assertNotNull(candidate, () -> "Missing candidate for " + id);
-        assertTrue(stepGuard.forStep(AiAssistantToolCatalog.ALL, Set.of()).permits(candidate),
+        assertTrue(
+                stepGuard.forStep(loadedToolsets(evaluationCase), Set.of()).permits(candidate),
                 () -> "Candidate failed assistant schema guard: " + id);
         AiChatResourceRegistry resources = resources(evaluationCase.path("resources"));
 

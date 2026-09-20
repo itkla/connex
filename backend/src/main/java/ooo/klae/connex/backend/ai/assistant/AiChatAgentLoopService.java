@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,6 +33,7 @@ import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ExecutedReplay;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolBudgetAudit;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolTurn;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import ooo.klae.connex.backend.ai.lease.AiRunLease;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseHeartbeat;
@@ -133,6 +135,7 @@ public class AiChatAgentLoopService {
     private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantStepSchema stepSchema;
     private final AiAssistantToolExecutor toolExecutor;
+    private final AiAssistantToolsetLoader toolsetLoader;
     private final AiAssistantWriteToolService writeToolService;
     private final AiAssistantPromptAssembler promptAssembler;
     private final AiSkillRouter skillRouter;
@@ -211,9 +214,6 @@ public class AiChatAgentLoopService {
             List<ToolTurn> toolTurns = new ArrayList<>();
             Map<Integer, AiToolCall> nativeCalls = new HashMap<>();
             boolean nativeTools = memory.nativeTools();
-            List<AiToolDefinition> nativeDefinitions = nativeTools
-                    ? promptAssembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL)
-                    : List.of();
             Map<String, AiAssistantToolResult> toolResultCache = new HashMap<>();
             Set<String> seenToolResults = new HashSet<>();
             AiStructuredRepair repair = null;
@@ -221,6 +221,7 @@ public class AiChatAgentLoopService {
             ToolBudgetAudit toolBudgetAudit = ToolBudgetAudit.NONE;
             int nativeProviderAttempts = 0;
             int noProgressSteps = 0;
+            Set<Toolset> loadedToolsets = new LinkedHashSet<>(AiAssistantToolCatalog.CORE);
             List<AiChatNarration> narration = new ArrayList<>();
             List<AiChatTodo> todos = new ArrayList<>();
             int planPublications = 0;
@@ -323,6 +324,9 @@ public class AiChatAgentLoopService {
                 Optional<AiToolCall> nativeProviderCall = Optional.empty();
                 AiChatStreamingProgress.Observer streamingObserver = null;
                 while (outcome == null) {
+                    List<AiToolDefinition> nativeDefinitions = nativeTools
+                            ? promptAssembler.nativeToolDefinitions(loadedToolsets)
+                            : List.of();
                     MaskedPrompt prompt = nativeTools
                             ? promptAssembler.assembleNative(
                                     history,
@@ -332,7 +336,8 @@ public class AiChatAgentLoopService {
                                     resources,
                                     attachmentContext.data(),
                                     memory.budget(),
-                                    stepContext)
+                                    stepContext,
+                                    loadedToolsets)
                             : promptAssembler.assemble(
                                     history,
                                     pageContext,
@@ -343,7 +348,7 @@ public class AiChatAgentLoopService {
                                     memory.budget(),
                                     stepRepair,
                                     stepContext,
-                                    AiAssistantToolCatalog.ALL);
+                                    loadedToolsets);
                     AiAssistantPromptAssembler.NativeReplay nativeReplay = nativeTools
                             ? promptAssembler.nativeReplay(
                                     toolTurns,
@@ -375,7 +380,7 @@ public class AiChatAgentLoopService {
                         invocation = invocation.withStreamObserver(streamingObserver);
                     }
                     AiRawOutputGuard outputGuard = stepGuard.forStep(
-                            AiAssistantToolCatalog.ALL,
+                            loadedToolsets,
                             maskingContext.tokenBindings().stream()
                                     .map(Map.Entry::getKey)
                                     .collect(Collectors.toUnmodifiableSet()));
@@ -422,8 +427,7 @@ public class AiChatAgentLoopService {
                                     outputGuard,
                                     closing
                                             ? stepSchema.closingResponseSchema()
-                                            : stepSchema.responseSchema(
-                                                    AiAssistantToolCatalog.ALL),
+                                            : stepSchema.responseSchema(loadedToolsets),
                                     admission,
                                     providerGuard);
                         }
@@ -542,19 +546,21 @@ public class AiChatAgentLoopService {
                     String argumentsJson = serialize(step.tool().args());
                     String toolCallKey = step.tool().name() + "\n"
                             + serialize(canonicalize(step.tool().args()));
-                    recordNativeCall(
-                            nativeTools, nativeCalls,
-                            stepNumber, nativeProviderCall);
                     String thoughtSignature = nativeProviderCall
                             .map(AiToolCall::thoughtSignature)
                             .orElse(null);
                     try {
+                        requireToolsetLoaded(loadedToolsets, step.tool().name());
+                        recordNativeCall(
+                                nativeTools, nativeCalls,
+                                stepNumber, nativeProviderCall);
                         toolExecutor.validateReferences(
                                 step.tool().name(), step.tool().args(), resources);
                     } catch (AiAssistantLoopException exception) {
                         if (!exception.recoverable()) {
                             throw exception;
                         }
+                        boolean replayable = !nativeTools || nativeCalls.containsKey(stepNumber);
                         int refusedCallId = thoughtSignature == null
                                 ? persistenceService.proposeTool(
                                         turn, stepNumber, step.tool().name(), argumentsJson)
@@ -562,28 +568,30 @@ public class AiChatAgentLoopService {
                                         turn, stepNumber, step.tool().name(), argumentsJson,
                                         thoughtSignature);
                         failTool(turn, refusedCallId, exception.detailReason());
-                        publish(turn, new AiChatStepFrameDto(
+                        publishToolStep(turn, new AiChatStepFrameDto(
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                 stepNumber, "step", step.tool().name(),
                                 "failed", exception.detailReason()));
                         noProgressSteps++;
-                        ToolTurn refusedTurn = new ToolTurn(
-                                stepNumber, step.tool().name(),
-                                refusedToolResult(exception.detailReason()));
-                        try {
-                            toolBudgetAudit = requireAdditionalToolCapacity(
-                                    nativeTools, toolTurns, refusedTurn, nativeCalls,
-                                    maskingContext, memory.budget());
-                            toolTurns.add(refusedTurn);
-                        } catch (AiAssistantLoopException capacity) {
-                            if (!closingAttempted && CLOSABLE_REASONS.contains(
-                                    capacity.terminalReason())) {
-                                closingAttempted = true;
-                                closingPending = true;
-                                closingReason = capacity.terminalReason();
-                                continue steps;
+                        if (replayable) {
+                            ToolTurn refusedTurn = new ToolTurn(
+                                    stepNumber, step.tool().name(),
+                                    refusedToolResult(exception.detailReason()));
+                            try {
+                                toolBudgetAudit = requireAdditionalToolCapacity(
+                                        nativeTools, toolTurns, refusedTurn, nativeCalls,
+                                        maskingContext, memory.budget());
+                                toolTurns.add(refusedTurn);
+                            } catch (AiAssistantLoopException capacity) {
+                                if (!closingAttempted && CLOSABLE_REASONS.contains(
+                                        capacity.terminalReason())) {
+                                    closingAttempted = true;
+                                    closingPending = true;
+                                    closingReason = capacity.terminalReason();
+                                    continue steps;
+                                }
+                                throw capacity;
                             }
-                            throw capacity;
                         }
                         if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
                             if (closingAttempted) {
@@ -596,7 +604,11 @@ public class AiChatAgentLoopService {
                         }
                         continue;
                     }
-                    AiAssistantToolResult cachedResult = toolResultCache.get(toolCallKey);
+                    boolean findTools = AiAssistantToolCatalog.FIND_TOOLS.equals(
+                            step.tool().name());
+                    AiAssistantToolResult cachedResult = findTools
+                            ? null
+                            : toolResultCache.get(toolCallKey);
                     if (cachedResult != null) {
                         noProgressSteps++;
                         if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
@@ -777,15 +789,20 @@ public class AiChatAgentLoopService {
                             : persistenceService.proposeTool(
                                     turn, stepNumber, step.tool().name(), argumentsJson,
                                     thoughtSignature);
-                    publish(turn, new AiChatStepFrameDto(
+                    publishToolStep(turn, new AiChatStepFrameDto(
                             turn.workspaceId(), turn.sessionId(), turn.turnId(),
                             stepNumber, "step", step.tool().name(),
                             "proposed", null));
                     try {
                         requireCurrentToolExecution(turn);
-                        AiAssistantToolResult toolResult = toolExecutor.execute(
-                                step.tool().name(), step.tool().args(), resources,
-                                turn.includePrivateNotes(), turn.scope());
+                        AiAssistantToolsetLoader.Load load = findTools
+                                ? toolsetLoader.load(step.tool().args(), loadedToolsets)
+                                : null;
+                        AiAssistantToolResult toolResult = load != null
+                                ? load.result()
+                                : toolExecutor.execute(
+                                        step.tool().name(), step.tool().args(), resources,
+                                        turn.includePrivateNotes(), turn.scope());
                         ToolTurn admittedTurn = new ToolTurn(
                                 stepNumber, step.tool().name(), toolResult);
                         toolBudgetAudit = requireAdditionalToolCapacity(
@@ -803,7 +820,10 @@ public class AiChatAgentLoopService {
                             failTool(turn, toolCallId, "turn_not_active");
                             return AiGenerationTaskResult.failed(INTERNAL_ERROR);
                         }
-                        publish(turn, new AiChatStepFrameDto(
+                        if (load != null) {
+                            loadedToolsets.add(load.loaded());
+                        }
+                        publishToolStep(turn, new AiChatStepFrameDto(
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                 stepNumber, "step", step.tool().name(),
                                 "executed", null));
@@ -822,7 +842,9 @@ public class AiChatAgentLoopService {
                                     stepNumber, "todos", null, null, null, null,
                                     serialize(objectMapper.valueToTree(todos))));
                         }
-                        toolResultCache.put(toolCallKey, toolResult);
+                        if (!findTools) {
+                            toolResultCache.put(toolCallKey, toolResult);
+                        }
                         boolean freshResult = seenToolResults.add(progressResultJson);
                         // Publishing a plan is bookkeeping, not evidence. Letting it reset the
                         // no-progress guard would let a model keep a turn alive on cosmetically
@@ -846,7 +868,7 @@ public class AiChatAgentLoopService {
                         }
                     } catch (AiAssistantLoopException exception) {
                         failTool(turn, toolCallId, exception.detailReason());
-                        publish(turn, new AiChatStepFrameDto(
+                        publishToolStep(turn, new AiChatStepFrameDto(
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                 stepNumber, "step", step.tool().name(),
                                 "failed", exception.detailReason()));
@@ -892,7 +914,7 @@ public class AiChatAgentLoopService {
                     } catch (RuntimeException exception) {
                         String reason = toolFailureReason(exception);
                         failTool(turn, toolCallId, reason);
-                        publish(turn, new AiChatStepFrameDto(
+                        publishToolStep(turn, new AiChatStepFrameDto(
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                                 stepNumber, "step", step.tool().name(),
                                 "failed", reason));
@@ -1049,6 +1071,59 @@ public class AiChatAgentLoopService {
             throw new AiAssistantLoopException(
                     TOOL_OUTSIDE_SKILL_AUTHORITY, TOOL_OUTSIDE_SKILL_AUTHORITY);
         }
+    }
+
+    /**
+     * Refuses a declared tool whose toolset this turn has not loaded.
+     *
+     * <p>Purely narrowing per-turn state, never an authorization decision: every tool in every
+     * loadable toolset is already reachable on a routed or generic turn, so a load restores reach
+     * rather than granting any. {@code requireSkillAuthority} runs first and keeps owning write
+     * authority, so a write tool that is both unloaded and outside its skill's declaration still
+     * settles as {@code tool_outside_skill_authority} rather than being relabelled here.
+     *
+     * <p>Raised from inside the {@code validateReferences} try so it lands on the recoverable
+     * refusal branch: the model is told {@code tool_not_loaded} and can spend a step on
+     * {@code find_tools}, and the turn keeps the closing step it is entitled to. An unknown name
+     * deliberately falls through to {@code validateReferences}, which still names it
+     * {@code unknown_tool}.
+     *
+     * <p>On both protocols this is a backstop. The raw step guard already rejects an unloaded name
+     * before parsing, and the native provider only ever receives the loaded definitions.
+     *
+     * <p>It runs before {@code recordNativeCall} on purpose. The refusal leaves the loaded set
+     * unchanged, so the next step's definitions still exclude the refused name; a recorded call
+     * and its refused result would then be replayed into an {@code AiNativeToolRequest} whose
+     * membership check rejects it with an {@code IllegalArgumentException} — an internal error in
+     * place of the recoverable refusal this check exists to produce. Refusing first means the step
+     * leaves a durable proposed-and-failed row and no replayable exchange at all. Keep that order.
+     *
+     * @param loadedToolsets the toolsets the turn currently holds
+     * @param toolName the declared tool the step proposed
+     */
+    private void requireToolsetLoaded(Set<Toolset> loadedToolsets, String toolName) {
+        if (toolCatalog.isKnown(toolName) && !toolCatalog.isLoaded(toolName, loadedToolsets)) {
+            throw AiAssistantLoopException.refusedArguments("tool_not_loaded");
+        }
+    }
+
+    /**
+     * Publishes one tool-step milestone, except for {@code find_tools}.
+     *
+     * <p>{@code find_tools} reads nothing, so it has no coverage category: mapping it would raise
+     * an {@code other} milestone live that {@code AiChatProgressService.project} omits on reload.
+     * Publishing nothing and skipping the projected row keeps the live strip and the settled
+     * transcript identical. The requester still sees the turn is alive through the existing
+     * thinking and narration channels.
+     *
+     * @param turn the running turn
+     * @param frame the step milestone the loop would otherwise publish
+     */
+    private void publishToolStep(AiChatQueuedTurn turn, AiChatStepFrameDto frame) {
+        if (AiAssistantToolCatalog.FIND_TOOLS.equals(frame.tool())) {
+            return;
+        }
+        publish(turn, frame);
     }
 
     /**

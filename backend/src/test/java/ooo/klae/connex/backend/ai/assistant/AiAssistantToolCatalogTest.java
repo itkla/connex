@@ -29,12 +29,12 @@ class AiAssistantToolCatalogTest {
         assertEquals(
                 List.of(
                         "search_records", "get_record", "get_records", "set_todos", "list_activities", "list_tasks",
-                        "list_scope_activities",
+                        "list_scope_activities", "find_tools",
                         "aggregate_metric", "find_schedule_conflicts", "get_deal_brief",
                         "create_activity", "create_task", "create_note", "add_tag",
                         "change_deal_stage", "assign_owner"),
                 catalog.tools(AiAssistantToolCatalog.ALL).stream().map(AiAssistantToolCatalog.ToolSpec::name).toList());
-        assertEquals(15, catalog.tools(AiAssistantToolCatalog.ALL).stream()
+        assertEquals(16, catalog.tools(AiAssistantToolCatalog.ALL).stream()
                 .filter(AiAssistantToolCatalog.ToolSpec::executable)
                 .count());
         assertTrue(catalog.isExecutable("find_schedule_conflicts"));
@@ -98,7 +98,7 @@ class AiAssistantToolCatalogTest {
     void nativeDefinitionsMirrorExecutableCatalogSchemasWithoutReservedTools() {
         var definitions = catalog.nativeDefinitions(objectMapper, AiAssistantToolCatalog.ALL);
 
-        assertEquals(15, definitions.size());
+        assertEquals(16, definitions.size());
         assertEquals(
                 catalog.tools(AiAssistantToolCatalog.ALL).stream()
                         .filter(AiAssistantToolCatalog.ToolSpec::executable)
@@ -134,7 +134,7 @@ class AiAssistantToolCatalogTest {
         assertEquals(
                 List.of(
                         "search_records", "get_record", "get_records", "set_todos",
-                        "list_activities", "list_tasks", "list_scope_activities"),
+                        "list_activities", "list_tasks", "list_scope_activities", "find_tools"),
                 byToolset.get(Toolset.CORE));
         assertEquals(List.of("aggregate_metric", "get_deal_brief"),
                 byToolset.get(Toolset.ANALYTICS));
@@ -205,18 +205,18 @@ class AiAssistantToolCatalogTest {
     void bothCatalogViewsReturnOnlyTheLoadedToolsInCatalogOrder() {
         assertEquals(
                 List.of("search_records", "get_record", "get_records", "set_todos",
-                        "list_activities", "list_tasks", "list_scope_activities"),
+                        "list_activities", "list_tasks", "list_scope_activities", "find_tools"),
                 catalog.tools(AiAssistantToolCatalog.CORE).stream().map(ToolSpec::name).toList());
         Set<Toolset> coreAndAnalytics = new LinkedHashSet<>(AiAssistantToolCatalog.CORE);
         coreAndAnalytics.add(Toolset.ANALYTICS);
         assertEquals(
                 List.of("search_records", "get_record", "get_records", "set_todos",
-                        "list_activities", "list_tasks", "list_scope_activities",
+                        "list_activities", "list_tasks", "list_scope_activities", "find_tools",
                         "aggregate_metric", "get_deal_brief"),
                 catalog.tools(coreAndAnalytics).stream().map(ToolSpec::name).toList());
         assertEquals(
                 List.of("search_records", "get_record", "get_records", "set_todos",
-                        "list_activities", "list_tasks", "list_scope_activities",
+                        "list_activities", "list_tasks", "list_scope_activities", "find_tools",
                         "aggregate_metric"),
                 catalog.nativeDefinitions(objectMapper, coreAndAnalytics).stream()
                         .map(definition -> definition.name())
@@ -225,6 +225,94 @@ class AiAssistantToolCatalogTest {
         assertFalse(catalog.isLoaded("aggregate_metric", AiAssistantToolCatalog.CORE));
         assertFalse(catalog.isLoaded("delete_record", AiAssistantToolCatalog.ALL));
         assertTrue(catalog.isLoaded("list_tasks", AiAssistantToolCatalog.CORE));
+    }
+
+    /**
+     * {@code find_tools} is the only model-authored path into the toolset vocabulary, so its one
+     * argument is a closed enum of exactly the loadable keys and never free text.
+     *
+     * <p>{@code core} is excluded deliberately: it is always held, so naming it could only ever be
+     * refused, and admitting it into the enum would make an always-failing call look legal.
+     */
+    @Test
+    void findToolsDeclaresOneClosedEnumArgumentOverTheLoadableKeysOnly() {
+        ToolSpec spec = catalog.tools(AiAssistantToolCatalog.CORE).stream()
+                .filter(tool -> AiAssistantToolCatalog.FIND_TOOLS.equals(tool.name()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(Toolset.CORE, spec.toolset());
+        assertEquals(AiAssistantToolCatalog.ToolTier.READ, spec.tier());
+        assertTrue(spec.executable());
+        assertFalse(catalog.isWrite(AiAssistantToolCatalog.FIND_TOOLS));
+        assertEquals(1, spec.arguments().size());
+        AiAssistantToolCatalog.ArgumentSpec argument = spec.arguments().getFirst();
+        assertEquals("toolset", argument.name());
+        assertEquals(AiAssistantToolCatalog.ArgumentKind.STRING, argument.kind());
+        assertTrue(argument.required());
+        assertEquals(
+                Set.of("analytics", "schedule", "write_activity", "write_content",
+                        "write_pipeline"),
+                argument.values());
+        assertFalse(argument.values().contains("core"));
+    }
+
+    /**
+     * The native {@code find_tools} description is one of only two places a model is ever told the
+     * per-turn cap, so it is rendered from the constant the loader enforces rather than written
+     * out: a hard-coded numeral would keep passing every test while telling the model a limit that
+     * no longer exists.
+     */
+    @Test
+    void theFindToolsDescriptionStatesTheCapTheLoaderActuallyEnforces() {
+        String description = catalog
+                .nativeDefinitions(objectMapper, AiAssistantToolCatalog.CORE).stream()
+                .filter(definition ->
+                        AiAssistantToolCatalog.FIND_TOOLS.equals(definition.name()))
+                .findFirst()
+                .orElseThrow()
+                .description();
+
+        assertTrue(description.contains(AiAssistantToolCatalog.capSentence()));
+        assertTrue(description.contains("at most "
+                + AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN
+                + " sets beyond the core set"));
+    }
+
+    /**
+     * The one tool result the server writes itself is replayed verbatim, so the catalog owns the
+     * definition of what "server-authored" means for it.
+     */
+    @Test
+    void declaredVocabularyCoversEveryToolNameAndToolsetKeyAndNothingElse() {
+        for (Toolset toolset : Toolset.values()) {
+            assertTrue(catalog.isDeclaredVocabulary(toolset.key()));
+        }
+        for (ToolSpec spec : catalog.tools(AiAssistantToolCatalog.ALL)) {
+            assertTrue(catalog.isDeclaredVocabulary(spec.name()));
+        }
+        assertFalse(catalog.isDeclaredVocabulary("Ada Lovelace"));
+        assertFalse(catalog.isDeclaredVocabulary("ANALYTICS"));
+        assertFalse(catalog.isDeclaredVocabulary(null));
+    }
+
+    /** The closed enum is enforced where the raw arguments are validated, not only in a schema. */
+    @Test
+    void findToolsRefusesEveryArgumentOutsideTheDeclaredEnum() throws Exception {
+        assertTrue(catalog.permitsArguments(
+                AiAssistantToolCatalog.FIND_TOOLS,
+                objectMapper.readTree("{\"toolset\":\"analytics\"}")));
+        assertFalse(catalog.permitsArguments(
+                AiAssistantToolCatalog.FIND_TOOLS,
+                objectMapper.readTree("{\"toolset\":\"core\"}")));
+        assertFalse(catalog.permitsArguments(
+                AiAssistantToolCatalog.FIND_TOOLS,
+                objectMapper.readTree("{\"toolset\":\"everything\"}")));
+        assertFalse(catalog.permitsArguments(
+                AiAssistantToolCatalog.FIND_TOOLS, objectMapper.readTree("{}")));
+        assertFalse(catalog.permitsArguments(
+                AiAssistantToolCatalog.FIND_TOOLS,
+                objectMapper.readTree("{\"toolset\":\"analytics\",\"force\":true}")));
     }
 
     /**

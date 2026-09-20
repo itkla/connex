@@ -97,6 +97,8 @@ Read the relevant contract before editing that subsystem:
 
 Inspect the owning package, nearest implementation, and tests in addition to the contract. Do not copy a subsystem's full protocol back into this guide.
 
+Declaring an assistant tool is contract work, not a one-line addition: every `AiAssistantToolCatalog` tool must name a `Toolset` (a declaration without one fails at class initialisation), an Ask Connex turn starts from `core` and widens itself with `find_tools` under the single `MAX_ACTIVE_TOOLSETS_PER_TURN` cap that seeded and loaded sets share, and the one per-turn prompt budget is reserved from that cap rather than from the whole catalog. Read `../docs/backend/AI_SECURITY.md` before adding, moving, or renaming one.
+
 ## Security boundaries
 
 - Auth/WebAuthn, CSRF, session rotation, tenant routing, RBAC/sharing, provider egress, secrets/crypto, and destructive data movement are high-risk work. Preserve fail-closed behavior and require the root security-focused review.
@@ -106,6 +108,7 @@ Inspect the owning package, nearest implementation, and tests in addition to the
 - `UploadContentInspector` is the sole ingress for uploaded bytes: every new upload surface must call it with a server-selected purpose and store only the resulting artifact. The contract, package member policy, and MUST/MUST NOT list for new pipelines are in `../docs/UPLOAD_CONTENT_INSPECTION.md`, pinned by `UploadContentInspectionBoundaryArchTest`.
 - Idempotency, one-use proofs, generation handles, leases, and ownership checks are data-integrity/security mechanisms. Do not simplify them without reading the owning contract and tests.
 - New tables holding workspace/org data must participate in the appropriate tenant/control lifecycle, export, teardown, and residual-verification registries. `../docs/MULTITENANCY_PLAN.md` is authoritative.
+- The fixture-driven scripted AI provider in `ai/provider/scripted` replaces the real OpenAI-compatible adapter under a profile and a flag, and must stay unbootable in any deployed edition. Its activation gates, fixture contract, and the dispatch-accounting rule every provider adapter owes are in `../docs/backend/AI_SECURITY.md`.
 
 ## Transactions and locking
 

@@ -57,6 +57,10 @@ public class AiProperties {
     /** Whether this deployment permits currently attested organizations to send unmasked data. */
     private boolean unmaskedModeEnabled = false;
 
+    /** Fixture-driven provider used to rehearse agent trajectories without a provider credential. */
+    @Valid
+    private ScriptedProvider scriptedProvider = new ScriptedProvider();
+
     /**
      * Comma-separated RFC 6052 network-specific prefixes used by this deployment's IPv4/IPv6
      * translators. Prefixes are validated at startup and let the egress policy classify translated
@@ -347,6 +351,30 @@ public class AiProperties {
             return provider.trim().equalsIgnoreCase(candidateProvider)
                     && modelId.trim().toLowerCase(Locale.ROOT).equals(normalizedModelId);
         }
+    }
+
+    /**
+     * Activation settings for the fixture-driven scripted AI provider.
+     *
+     * <p>Both fields are inert outside the {@code ai-scripted-provider} Spring profile, and a
+     * deployed edition refuses to start with {@link ScriptedProvider#enabled} true: the key sits on
+     * every edition's forbidden list, and {@code DeploymentProfileValidator} additionally refuses
+     * the flag without the profile and the profile without the flag. They are declared here so the
+     * keys have a real binding rather than travelling as loose properties nothing validates.
+     */
+    @Data
+    public static class ScriptedProvider {
+
+        /** Second activation gate, read by the scripted configuration's conditional. */
+        private boolean enabled = false;
+
+        /**
+         * Directory of script files.
+         *
+         * <p>Empty by default and never satisfied from the classpath: no script ships in the
+         * artifact, so an activated instance with no directory loads nothing and fails to start.
+         */
+        private String fixtureDir = "";
     }
 
     /**

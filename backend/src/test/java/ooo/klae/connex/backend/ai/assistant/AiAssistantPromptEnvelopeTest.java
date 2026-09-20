@@ -70,8 +70,8 @@ class AiAssistantPromptEnvelopeTest {
 
     @Test
     void theFixedEnvelopeLeavesRoomToSpareAtTheDeclaredMinimumContextWindow() {
-        int reactEnvelope = reactEnvelopeBytes();
-        int nativeEnvelope = nativeEnvelopeBytes();
+        int reactEnvelope = reactEnvelopeBytes(toolCatalog.reservationToolsets());
+        int nativeEnvelope = nativeEnvelopeBytes(toolCatalog.reservationToolsets());
         int reactFloorOutputTokens = unclampedFloorOutputTokens(reactEnvelope);
         int nativeFloorOutputTokens = unclampedFloorOutputTokens(nativeEnvelope);
         AiAssistantPromptBudget reactBudget = budget(reactEnvelope);
@@ -111,7 +111,7 @@ class AiAssistantPromptEnvelopeTest {
      */
     @Test
     void theSameEnvelopeIsRefusedOnAThirtyTwoThousandTokenModel() {
-        int reactEnvelope = reactEnvelopeBytes();
+        int reactEnvelope = reactEnvelopeBytes(toolCatalog.reservationToolsets());
         int thirtyTwoKOutputTokens = 17_920 - reactEnvelope;
         System.out.println("[envelope] 32k react fixed=" + reactEnvelope
                 + " outputTokens=" + thirtyTwoKOutputTokens
@@ -147,7 +147,7 @@ class AiAssistantPromptEnvelopeTest {
      */
     @Test
     void theSameFixedEnvelopeScalesIntoAMillionTokenWindow() {
-        int reactEnvelope = reactEnvelopeBytes();
+        int reactEnvelope = reactEnvelopeBytes(toolCatalog.reservationToolsets());
         AiAssistantPromptBudget atFloor = budget(reactEnvelope);
         AiAssistantPromptBudget atMillion = AiAssistantPromptBudget.from(
                 new AiProviderCapabilities(
@@ -189,13 +189,13 @@ class AiAssistantPromptEnvelopeTest {
     void theCoreAndReservationEnvelopesCarryExactlyTheToolsTheyDeclare() {
         assertEquals(
                 List.of("search_records", "get_record", "get_records", "set_todos",
-                        "list_activities", "list_tasks", "list_scope_activities"),
+                        "list_activities", "list_tasks", "list_scope_activities", "find_tools"),
                 promptAssembler.nativeToolDefinitions(AiAssistantToolCatalog.CORE).stream()
                         .map(definition -> definition.name())
                         .toList());
         assertEquals(
                 List.of("search_records", "get_record", "get_records", "set_todos",
-                        "list_activities", "list_tasks", "list_scope_activities",
+                        "list_activities", "list_tasks", "list_scope_activities", "find_tools",
                         "aggregate_metric", "create_activity", "create_task",
                         "create_note", "add_tag"),
                 promptAssembler.nativeToolDefinitions(toolCatalog.reservationToolsets()).stream()
@@ -235,7 +235,9 @@ class AiAssistantPromptEnvelopeTest {
      *
      * <p>The enumeration is derived from {@code MAX_ACTIVE_TOOLSETS_PER_TURN} rather than written
      * out, so raising the cap widens what is measured instead of quietly narrowing the guarantee
-     * to the combination sizes someone happened to type.
+     * to the combination sizes someone happened to type. The core-only set is enumerated too,
+     * because every turn starts there and the toolset directory marks an unloaded set with a
+     * longer word than a loaded one.
      */
     @Test
     void theReservationEnvelopeDominatesEveryReachableLoadedSet() {
@@ -327,7 +329,7 @@ class AiAssistantPromptEnvelopeTest {
     private static List<Set<Toolset>> reachableLoadedSets() {
         List<Toolset> loadable = AiAssistantToolCatalog.LOADABLE;
         List<Set<Toolset>> reachable = new ArrayList<>();
-        for (int mask = 1; mask < (1 << loadable.size()); mask++) {
+        for (int mask = 0; mask < (1 << loadable.size()); mask++) {
             if (Integer.bitCount(mask) > AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN) {
                 continue;
             }
@@ -414,7 +416,7 @@ class AiAssistantPromptEnvelopeTest {
     private int nativeEnvelopeBytes(Set<Toolset> loadedToolsets) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("system", taggedSystemPrompt(
-                promptAssembler.fixedNativePrompt().getSystemPrompt()));
+                promptAssembler.fixedNativePrompt(loadedToolsets).getSystemPrompt()));
         payload.put("messages", List.of());
         payload.put("responseSchema", stepSchema.finalResponseSchema().schema());
         payload.put("tools", promptAssembler.nativeToolDefinitions(loadedToolsets).stream()
