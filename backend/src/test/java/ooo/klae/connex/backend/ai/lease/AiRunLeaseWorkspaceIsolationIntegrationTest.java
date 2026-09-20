@@ -27,8 +27,13 @@ import ooo.klae.connex.backend.beans.AiRunLeaseRow;
  * also share an epoch and the workspace predicate is the only thing that can decide the outcome.
  * The fenced statements do take a token, so there the calling workspace's own row is deliberately
  * moved to a later epoch: the token cannot legitimately match it, and every one of renew,
- * tombstone, and takeover must therefore match nothing at all rather than reaching across into the
- * neighbour's row, which must come back byte-identical.
+ * tombstone, and settlement takeover must therefore match nothing at all rather than reaching
+ * across into the neighbour's row, which must come back byte-identical.
+ *
+ * <p>The claim path's own takeover is unfenced by design, so it is covered differently: the
+ * neighbour's lease is expired <em>before</em> the calling workspace re-claims its tombstoned row.
+ * Both rows are then takeable by subject alone, so a takeover whose workspace predicate had drifted
+ * would update two rows and the claim would be refused as a conflict instead of succeeding.
  */
 class AiRunLeaseWorkspaceIsolationIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
 
@@ -77,10 +82,10 @@ class AiRunLeaseWorkspaceIsolationIntegrationTest extends AbstractAiRunLeaseInte
         AiRunLeaseKey sameSubjectHere = key(AiRunLeaseSubject.CHAT_TURN, 4104L);
         acquire(sameSubjectHere);
         assertTrue(release(sameSubjectHere));
-        AiRunLease here = acquire(sameSubjectHere);
-        assertEquals(held.epoch() + 1L, here.epoch());
         expire(theirs);
         Map<String, Object> before = leaseRow(theirs);
+        AiRunLease here = acquire(sameSubjectHere);
+        assertEquals(held.epoch() + 1L, here.epoch());
         AiRunLease impersonation = new AiRunLease(sameSubjectHere, held.owner(), held.epoch());
 
         assertEquals(AiRunLeaseOutcome.LOST, leaseService.renew(impersonation));
