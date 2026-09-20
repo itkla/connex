@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 import {
     activeWorkspaceId,
@@ -12,6 +12,11 @@ import { message } from "./support/messages";
 /** Ask Connex copy, read from the shipped catalogue rather than pasted into this file. */
 function copy(key: string): string {
     return message("en", "common", `AskConnex.${key}`);
+}
+
+/** Account-security copy for the passkey enrolment this spec has to complete before it can ask. */
+function accountCopy(key: string): string {
+    return message("en", "account", `AccountSecurity.${key}`);
 }
 
 /**
@@ -65,6 +70,61 @@ async function createSession(
     return body.id;
 }
 
+/**
+ * Attaches a virtual authenticator to one page, mirroring `organization-settings.spec.ts`.
+ *
+ * @param page the page whose browser context receives the authenticator
+ * @returns a callback removing it again
+ */
+async function installVirtualAuthenticator(page: Page): Promise<() => Promise<void>> {
+    const session = await page.context().newCDPSession(page);
+    await session.send("WebAuthn.enable");
+    try {
+        const { authenticatorId } = await session.send("WebAuthn.addVirtualAuthenticator", {
+            options: {
+                protocol: "ctap2",
+                ctap2Version: "ctap2_1",
+                transport: "internal",
+                hasResidentKey: true,
+                hasUserVerification: true,
+                automaticPresenceSimulation: true,
+                isUserVerified: true,
+            },
+        });
+        return async () => {
+            if (page.isClosed()) return;
+            await session.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId });
+            await session.send("WebAuthn.disable");
+            await session.detach();
+        };
+    } catch (error) {
+        await session.send("WebAuthn.disable");
+        await session.detach();
+        throw error;
+    }
+}
+
+/**
+ * Enrols a passkey so the session carries the step-up the provider settings demand.
+ *
+ * `AiProviderConfigService.save` calls `SessionSecurityService.requireRecentAuthentication`
+ * unconditionally, and only a completed WebAuthn ceremony marks that proof on the session — a
+ * password login never does, whatever `CONNEX_PRIVILEGED_MFA_ENFORCED` says. So an organization
+ * cannot be pointed at any provider, scripted or real, without one, and this spec has to do what an
+ * administrator does rather than around it.
+ *
+ * @param page a page carrying the registered session and a virtual authenticator
+ * @param password the password that session registered with
+ */
+async function enrolPasskey(page: Page, password: string): Promise<void> {
+    await page.goto("/settings/personal/security");
+    await page.getByRole("button", { name: accountCopy("add") }).first().click();
+    const dialog = page.getByRole("dialog", { name: accountCopy("passwordTitle") });
+    await dialog.getByLabel(accountCopy("passwordLabel")).fill(password);
+    await dialog.getByRole("button", { name: accountCopy("continue"), exact: true }).click();
+    await expect(page.getByText(accountCopy("added"), { exact: true })).toBeVisible();
+}
+
 /** Reads one turn exactly as the member who asked for it reads it. */
 async function readTurn(
     api: APIRequestContext,
@@ -104,16 +164,22 @@ test.describe("Ask Connex scripted trajectory", () => {
             reducedMotion: "reduce",
             storageState: { cookies: [], origins: [] },
         });
+        let removeVirtualAuthenticator: (() => Promise<void>) | null = null;
         try {
             const api = context.request;
             const runId = `${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+            const password = `E2eHarness!${runId}A1`;
             await registerUser(api, {
                 username: `e2e_ai_${runId}`,
-                password: `E2eHarness!${runId}A1`,
+                password,
                 email: `e2e_ai_${runId}@example.com`,
             });
             const workspaceId = await activeWorkspaceId(api);
             const csrf = await csrfBootstrap(api);
+
+            const page = await context.newPage();
+            removeVirtualAuthenticator = await installVirtualAuthenticator(page);
+            await enrolPasskey(page, password);
             await configureScriptedAiProvider(api, workspaceId, csrf, "scripted-native-stream");
 
             const contact = await seeder(api, workspaceId, csrf).post("/api/persons", {
@@ -127,7 +193,6 @@ test.describe("Ask Connex scripted trajectory", () => {
             const sessionId = await createSession(
                 api, workspaceId, csrf, `Scripted trajectory ${runId}`);
 
-            const page = await context.newPage();
             await page.goto(`/ask-connex/${sessionId}`);
             const composer = page.getByRole("combobox", { name: copy("composerAria") });
             await expect(composer).toBeVisible();
@@ -160,6 +225,7 @@ test.describe("Ask Connex scripted trajectory", () => {
                 + JSON.stringify(turn.progress),
             ).toContain("records:complete");
         } finally {
+            await removeVirtualAuthenticator?.();
             await context.close();
         }
     });

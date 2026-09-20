@@ -93,6 +93,11 @@ export async function csrfBootstrap(api: APIRequestContext): Promise<CsrfBootstr
  * fixtures. It still has to pass the save path's address resolution, which is why the backend needs
  * `CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS`.
  *
+ * The save also demands a fresh passkey step-up on the calling session: the service calls
+ * `requireRecentAuthentication` unconditionally, and only a completed WebAuthn ceremony marks that
+ * proof. The caller must therefore enrol a passkey first — a password session never satisfies it,
+ * whatever the privileged-MFA posture says.
+ *
  * @param api request context carrying the registered tenant's session
  * @param workspaceId the workspace whose organization is configured
  * @param csrf bootstrap token for the same session
@@ -122,9 +127,10 @@ export async function configureScriptedAiProvider(
     expect(
         response.status(),
         `PUT /api/ai/provider returned ${response.status()}: ${await safeBody(response)}. `
-        + "A 400 means the backend is missing CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS=true; a 403 means "
-        + "CONNEX_PRIVILEGED_MFA_ENFORCED or CONNEX_RECENT_AUTHENTICATION_WINDOW no longer match "
-        + "what the e2e job sets. Neither is a product defect.",
+        + "A 400 means the backend is missing CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS=true; a 403 with "
+        + "RECENT_AUTHENTICATION_REQUIRED means the session has no fresh passkey step-up, or "
+        + "CONNEX_RECENT_AUTHENTICATION_WINDOW no longer matches what the e2e job sets. Neither is "
+        + "a product defect.",
     ).toBe(200);
 }
 
