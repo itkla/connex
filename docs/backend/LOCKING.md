@@ -739,10 +739,12 @@ status rather than on the sweep's `last_error`: a triggered row can be returned 
 re-claimed, so a `pending` row is left to the replay that records its own correlation, a re-claimed
 row belongs to the attempt holding the lease, and a row the sweep re-queued that a later attempt
 drove back into terminal ambiguity still accepts the only message id the provider ever accepted for
-it. A claim whose worker never returns keeps no message id, so its webhooks still match no row and
-operators apply those by hand (`docs/DELIVERABILITY.md` §3.1). Audience rows stranded before any
-reservation, and rows without a person (which are never reserved), have no age anchor and are not
-swept.
+it. Many triggered items still reach reconciliation with no message id — a worker that never
+returns, a replay that never ran, a late return refused because a newer attempt held the claim, a
+terminal write or late attach that could not be persisted, and a receipt that names no message id —
+so their webhooks still match no row and operators check the provider by hand for every triggered
+item (`docs/DELIVERABILITY.md` §3.1). Audience rows stranded before any reservation, and rows
+without a person (which are never reserved), have no age anchor and are not swept.
 
 Operator reconciliation takes locked membership permission roots first and requires both
 `CAMPAIGN_MANAGE` and `CONSENT_MANAGE`, then locks campaign, send, and delivery in that

@@ -345,11 +345,18 @@ delivery's status and its frequency reservation are all left exactly as they wer
 ID the row does not yet carry is written. It is written only onto a row that still names that
 attempt's provider and target fingerprint and that no newer attempt owns, so a claim the sweep
 returned to the queue for an idempotent replay is left to that replay, which records its own message
-ID. **A claim whose worker never came back still keeps no provider message ID** — a worker that died,
-rather than stalled, records nothing — and neither does a replay that never ran because its send was
-paused or cancelled first. Those items' webhooks match no delivery and record no suppression and no
-consent revocation, so before resolving one, check the provider's bounce and complaint records for
-that recipient and add any suppression by hand (`POST /api/suppressions`).
+ID. **Plenty of triggered reconciliation items still carry no provider message ID, and the queue does
+not show which.** A worker that died rather than stalled records nothing; a replay that never ran
+because its send was paused or cancelled records nothing; a late return that lands while a newer
+attempt holds the claim is refused, and that newer attempt may itself end ambiguous with no message
+ID; a terminal write or a late attach that could not be persisted records nothing; a receipt that
+names no message ID at all — every `smtp` submission, and any ESP response that omits the field —
+leaves nothing to attach; and a late attach that does land may land after an operator has looked.
+Those items' webhooks match no delivery and record no suppression and no consent revocation.
+**Before resolving any triggered reconciliation item, check the provider's bounce and complaint
+records for that recipient and add any suppression by hand** (`POST /api/suppressions`). Where the
+message ID was attached after all, the webhook has already recorded the suppression and the manual
+check simply finds nothing left to add.
 Generic HTTP ESP/SMS connectors default
 `idempotentSubmission` to false. A workspace administrator may enable it only after verifying that
 the configured endpoint guarantees repeated requests carrying the same `Idempotency-Key` deliver no
