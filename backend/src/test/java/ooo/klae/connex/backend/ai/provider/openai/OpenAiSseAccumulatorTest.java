@@ -115,6 +115,41 @@ class OpenAiSseAccumulatorTest {
         assertEquals("{\"city\":\"Kyoto\"}", result.toolCalls().get(1).arguments());
     }
 
+    /**
+     * Four unnumbered calls keep arrival order and each keep their own opaque replay state.
+     *
+     * <p>The two-call case pins the ordering rule; four is what a declared endpoint may really
+     * send, and the per-call replay signature is the part a batch can silently lose — one signature
+     * landing on every call, or on only the first, would produce a replay the endpoint rejects for
+     * every call but one, and nothing downstream would name the accumulator as the cause.
+     */
+    @Test
+    void keepsFourUnnumberedParallelCallsInArrivalOrderWithTheirOwnSignatures() {
+        OpenAiSseAccumulator accumulator = accumulator(new ArrayList<>());
+        List<String> cities = List.of("Osaka", "Kyoto", "Nara", "Kobe");
+
+        for (int position = 0; position < cities.size(); position++) {
+            accumulator.accept(signedUnnumberedCall(
+                    "call_" + (position + 1), cities.get(position), "sig_" + (position + 1)));
+        }
+        accumulator.accept("{\"choices\":[{\"delta\":{\"role\":\"assistant\"},"
+                + "\"finish_reason\":\"stop\"}]}");
+        accumulator.accept("[DONE]");
+
+        AiCompletionResult result = accumulator.finish();
+
+        assertEquals(4, result.toolCalls().size());
+        assertEquals(
+                List.of("call_1", "call_2", "call_3", "call_4"),
+                result.toolCalls().stream().map(call -> call.id()).toList());
+        assertEquals(
+                List.of("sig_1", "sig_2", "sig_3", "sig_4"),
+                result.toolCalls().stream().map(call -> call.thoughtSignature()).toList());
+        assertEquals(
+                cities.stream().map(city -> "{\"city\":\"" + city + "\"}").toList(),
+                result.toolCalls().stream().map(call -> call.arguments()).toList());
+    }
+
     @Test
     void rejoinsUnnumberedFragmentsThatShareOneCallIdentifier() {
         OpenAiSseAccumulator accumulator = accumulator(new ArrayList<>());
@@ -217,6 +252,15 @@ class OpenAiSseAccumulatorTest {
                         + "\"finish_reason\":null}]}"));
 
         assertEquals(List.of(), deltas);
+    }
+
+    private static String signedUnnumberedCall(String id, String city, String signature) {
+        return "{\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":"
+                + "[{\"id\":\"" + id + "\",\"type\":\"function\",\"extra_content\":"
+                + "{\"google\":{\"thought_signature\":\"" + signature + "\"}},"
+                + "\"function\":{\"name\":\"get_weather\",\"arguments\":"
+                + "\"{\\\"city\\\":\\\"" + city
+                + "\\\"}\"}}]},\"finish_reason\":null}]}";
     }
 
     private static String unnumberedCall(String id, String city) {

@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai.provider.scripted;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -118,6 +119,11 @@ public class ScriptedAiProvider implements AiProvider {
     }
 
     @Override
+    public int parallelToolCallLimit(AiProviderTarget target) {
+        return capabilityClass(target).parallelToolCalls();
+    }
+
+    @Override
     public AiCompletionResult complete(AiCompletionRequest request) {
         Resolution resolution = resolve(request);
         AiRequestDeadline deadline = request.providerAttemptExecutor()
@@ -218,6 +224,7 @@ public class ScriptedAiProvider implements AiProvider {
         return switch (emission.kind()) {
             case FAILURE -> throw failure(emission.failureKind());
             case TOOL_CALL -> toolCall(request, resolution, emission, enforcement);
+            case TOOL_CALLS -> toolCalls(request, resolution, emission, enforcement);
             case FINAL, MALFORMED -> new AiCompletionResult(
                     emission.text(),
                     SCRIPTED_TOKENS,
@@ -258,6 +265,43 @@ public class ScriptedAiProvider implements AiProvider {
                         callId(resolution),
                         emission.toolName(),
                         emission.arguments())));
+    }
+
+    /**
+     * The several function calls one assistant message carries.
+     *
+     * <p>Native only, because the JSON step envelope has no array form and the loader refuses a
+     * plural emission on any other protocol. Each call gets its own identifier, suffixed by its
+     * position, so the loop and the replay can correlate them exactly as a real endpoint's distinct
+     * ids let them. The buffered and the streamed path share this: the streamed path returns the
+     * same result object, so multiplicity travels through the observer without a second branch.
+     */
+    private static AiCompletionResult toolCalls(
+            AiCompletionRequest request,
+            Resolution resolution,
+            ScriptedAiStep.Emission emission,
+            AiStructuredOutputEnforcement enforcement) {
+        if (!resolution.cursor().nativeProtocol()) {
+            throw new AiProviderException(
+                    "Scripted AI parallel calls require the native protocol");
+        }
+        List<AiToolCall> calls = new ArrayList<>(emission.calls().size());
+        for (int position = 0; position < emission.calls().size(); position++) {
+            ScriptedAiStep.ScriptedCall call = emission.calls().get(position);
+            calls.add(new AiToolCall(
+                    callId(resolution) + "_" + (position + 1),
+                    call.toolName(),
+                    call.arguments()));
+        }
+        return new AiCompletionResult(
+                "",
+                SCRIPTED_TOKENS,
+                SCRIPTED_TOKENS,
+                STOP_REASON_TOOL_CALLS,
+                enforcement,
+                emission.reasoning(),
+                request.reasoningMode(),
+                List.copyOf(calls));
     }
 
     /**

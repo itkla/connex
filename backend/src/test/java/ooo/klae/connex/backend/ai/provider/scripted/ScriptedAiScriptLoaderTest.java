@@ -637,6 +637,150 @@ class ScriptedAiScriptLoaderTest {
         return suffix.toString();
     }
 
+    /** A plural emission loads, and its calls keep the order and the arguments it declared. */
+    @Test
+    void loadsAParallelCallEmissionInDeclarationOrder(@TempDir Path directory) throws IOException {
+        write(directory, "parallel.json", parallelScript("""
+                    {"toolName": "get_record", "arguments": "{\\"handle\\":\\"r1\\"}"},
+                    {"toolName": "list_tasks", "arguments": "{\\"handle\\":\\"r1\\"}"}
+                """, "native"));
+
+        ScriptedAiScriptLoader loader = new ScriptedAiScriptLoader(
+                directory.toString(), objectMapper);
+
+        ScriptedAiStep.Emission emission = Objects.requireNonNull(
+                loader.bySelector("connex_script_parallel_reads")).steps().getFirst().emit();
+        assertEquals(ScriptedAiStep.Kind.TOOL_CALLS, emission.kind());
+        assertEquals(
+                List.of("get_record", "list_tasks"),
+                emission.calls().stream()
+                        .map(ScriptedAiStep.ScriptedCall::toolName)
+                        .toList());
+        assertNull(emission.toolName());
+    }
+
+    /**
+     * Every shape the loader refuses for one call is refused for each call of a batch.
+     *
+     * <p>A fixture that silently emitted one call where it declared three would make a golden green
+     * while it rehearsed nothing, which is the class of failure this whole loader exists to catch
+     * at fixture-lint time rather than in a passing test run.
+     */
+    @Test
+    void refusesEveryParallelEmissionItCouldNotFaithfullyRender(@TempDir Path directory) {
+        String onePair = """
+                    {"toolName": "get_record", "arguments": "{\\"handle\\":\\"r1\\"}"},
+                    {"toolName": "list_tasks", "arguments": "{\\"handle\\":\\"r1\\"}"}
+                """;
+        String oneCall = """
+                    {"toolName": "get_record", "arguments": "{\\"handle\\":\\"r1\\"}"}
+                """;
+        String fiveCalls = oneCall.strip() + ("," + oneCall.strip()).repeat(4);
+        String notAnObject = """
+                    {"toolName": "get_record", "arguments": "[]"},
+                    {"toolName": "list_tasks", "arguments": "{\\"handle\\":\\"r1\\"}"}
+                """;
+        String badName = """
+                    {"toolName": "get record!", "arguments": "{\\"handle\\":\\"r1\\"}"},
+                    {"toolName": "list_tasks", "arguments": "{\\"handle\\":\\"r1\\"}"}
+                """;
+        String unknownField = """
+                    {"toolName": "get_record", "arguments": "{}", "deltas": []},
+                    {"toolName": "list_tasks", "arguments": "{}"}
+                """;
+
+        assertRefuses(directory, parallelScript(oneCall, "native"));
+        assertRefuses(directory, parallelScript(fiveCalls, "native"));
+        assertRefuses(directory, parallelScript(notAnObject, "native"));
+        assertRefuses(directory, parallelScript(badName, "native"));
+        assertRefuses(directory, parallelScript(unknownField, "native"));
+        assertRefuses(directory, parallelScript(onePair, "json"));
+        assertRefuses(directory, parallelScript(onePair, "any"));
+        assertRefuses(directory, """
+                {
+                  "id": "parallel_reads",
+                  "selector": "connex_script_parallel_reads",
+                  "capabilityClass": "scripted-native-parallel",
+                  "steps": [
+                    {
+                      "afterToolCalls": 0,
+                      "protocol": "native",
+                      "emit": {"kind": "tool_calls"}
+                    }
+                  ]
+                }
+                """);
+        assertRefuses(directory, """
+                {
+                  "id": "parallel_reads",
+                  "selector": "connex_script_parallel_reads",
+                  "capabilityClass": "scripted-native-parallel",
+                  "steps": [
+                    {
+                      "afterToolCalls": 0,
+                      "protocol": "native",
+                      "emit": {
+                        "kind": "final",
+                        "text": "done",
+                        "calls": [{"toolName": "get_record", "arguments": "{}"}]
+                      }
+                    }
+                  ]
+                }
+                """);
+    }
+
+    /**
+     * A credential shape inside a batched call is refused exactly as one inside a single call is.
+     *
+     * <p>The scan runs over the whole fixture before it is parsed, so the plural form opens no new
+     * route for a credential to reach a pull request or a CI log; this keeps that executable.
+     */
+    @Test
+    void refusesACredentialShapeInsideABatchedCall(@TempDir Path directory) {
+        assertRefuses(directory, parallelScript("""
+                    {"toolName": "get_record",
+                     "arguments": "{\\"handle\\":\\"sk-not-a-real-key\\"}"},
+                    {"toolName": "list_tasks", "arguments": "{\\"handle\\":\\"r1\\"}"}
+                """, "native"));
+    }
+
+    private void assertRefuses(Path root, String content) {
+        Path directory = root.resolve("refusal-" + Math.abs(content.hashCode()));
+        try {
+            Files.createDirectories(directory);
+            write(directory, "parallel.json", content);
+        } catch (IOException exception) {
+            throw new IllegalStateException("could not stage the fixture", exception);
+        }
+        assertThrows(
+                IllegalStateException.class,
+                () -> new ScriptedAiScriptLoader(directory.toString(), objectMapper),
+                "expected the loader to refuse: " + content);
+    }
+
+    private static String parallelScript(String calls, String protocol) {
+        return """
+                {
+                  "id": "parallel_reads",
+                  "selector": "connex_script_parallel_reads",
+                  "capabilityClass": "scripted-native-parallel",
+                  "steps": [
+                    {
+                      "afterToolCalls": 0,
+                      "protocol": "%s",
+                      "emit": {
+                        "kind": "tool_calls",
+                        "calls": [
+                %s
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.formatted(protocol, calls);
+    }
+
     private static String script(String selector, String id) {
         return """
                 {

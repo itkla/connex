@@ -1,0 +1,33 @@
+{
+  "id": "json_protocol_single_call",
+  "selector": "connex_script_json_protocol_single_call",
+  "capabilityClass": "scripted-json",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "json",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Quillon\",\"kinds\":[\"person\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "json",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "get_record",
+        "arguments": "{\"handle\":\"r1\"}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "json",
+      "emit": {
+        "kind": "final",
+        "text": "{\"tool\":null,\"final\":{\"text\":\"I checked [the contact](record:r1) and found nothing outstanding.\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}}"
+      }
+    }
+  ]
+}

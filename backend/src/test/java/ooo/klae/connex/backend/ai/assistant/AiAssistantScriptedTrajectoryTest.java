@@ -316,6 +316,81 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     }
 
     /**
+     * A declared endpoint's batch is refused by the loop, and nothing it named is executed.
+     *
+     * <p>The scripted provider can now emit several calls in one assistant message, and the parse
+     * boundary admits them up to the bound the operator declared — so this is the first trajectory
+     * that reaches the loop with a batch at all. The loop cannot yet execute one under per-call
+     * ownership, deadline, authorization and budget admission, so it refuses the whole response
+     * under the same {@code multiple-calls} rule an over-delivering provider has always produced.
+     * The assertions are what the fixture cannot fake: no durable tool-call row exists for either
+     * call, and the repair request the provider really received names the rule.
+     */
+    @Test
+    void aBatchedStepIsRefusedWholeAndExecutesNeitherOfItsCalls() {
+        person("Thornwood Vale", "thornwood.vale@example.invalid", null);
+        useCapabilityClass("scripted-native-parallel");
+
+        Trajectory trajectory = run(
+                "connex_script_parallel_calls_refused", "look this contact up two ways");
+
+        assertEquals(List.of(), trajectory.toolNames(),
+                "a refused batch must leave no durable tool call behind");
+        assertTrue(
+                journal().recorded().stream()
+                        .map(entry -> entry.request().nativeTools())
+                        .filter(java.util.Objects::nonNull)
+                        .allMatch(nativeTools -> nativeTools.maxParallelCalls() == 4),
+                "the declared capability class's call bound must reach the wire, or the batch was "
+                        + "refused for its cardinality before the loop ever saw it");
+        assertTrue(
+                journal().recorded().stream()
+                        .map(entry -> entry.request().nativeTools())
+                        .filter(java.util.Objects::nonNull)
+                        .map(AiNativeToolRequest::repairMessage)
+                        .filter(java.util.Objects::nonNull)
+                        .anyMatch(message -> message.contains("multiple-calls rule")),
+                "the loop must tell the model which rule its batch broke");
+        assertTrue(
+                journal().recorded().stream()
+                        .map(entry -> entry.request().nativeTools())
+                        .filter(java.util.Objects::nonNull)
+                        .allMatch(nativeTools -> nativeTools.exchanges().isEmpty()),
+                "a refused batch must replay no exchange to the provider");
+    }
+
+    /**
+     * The JSON ReAct path still writes the keys and sends the requests it always has.
+     *
+     * <p>Its counterpart pins the native path, and the correlation refactor touched the key both
+     * paths render and the request both paths build. The JSON path has no provider-assigned call
+     * identity at all, so a sole-call ordinal that leaked into its keys, or a native request that
+     * appeared on it, would be invisible in every native golden.
+     */
+    @Test
+    void aJsonProtocolTurnKeepsItsUnsuffixedKeysAndSendsNoNativeRequest() {
+        person("Quillon Marsh", "quillon.marsh@example.invalid", null);
+        useCapabilityClass("scripted-json");
+
+        Trajectory trajectory = run(
+                "connex_script_json_protocol_single_call", "check this contact before I call them");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(List.of("search_records", "get_record"), trajectory.toolNames());
+        assertEquals(
+                List.of(
+                        "turn-" + trajectory.turnId() + "-step-1",
+                        "turn-" + trajectory.turnId() + "-step-2"),
+                trajectory.toolCalls().stream()
+                        .map(AiChatToolCall::getIdempotencyKey)
+                        .toList());
+        assertTrue(
+                journal().recorded().stream()
+                        .allMatch(entry -> entry.request().nativeTools() == null),
+                "a JSON-protocol turn must send no native tool request");
+    }
+
+    /**
      * Every delimiter envelope one request carries, on either protocol.
      *
      * <p>A native turn replays a tool result as the result half of a function-call exchange rather

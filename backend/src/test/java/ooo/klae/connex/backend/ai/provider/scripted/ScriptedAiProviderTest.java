@@ -428,6 +428,90 @@ class ScriptedAiProviderTest {
         assertEquals(4_096, provider.maxOutputTokens(target("scripted-small-context")));
     }
 
+    /**
+     * A plural step returns every call it declared, each with its own identifier, in fixture order.
+     *
+     * <p>The identifiers have to be distinct because the replay correlates a tool result to its
+     * call by exactly that string, and they have to be stable because a golden reads them back out
+     * of durable rows. One batch is still one provider attempt, so it still marks the budget lease
+     * dispatched exactly once.
+     */
+    @Test
+    void returnsEveryDeclaredCallOfAParallelStepWithItsOwnIdentifier(@TempDir Path directory)
+            throws IOException {
+        ScriptedAiProvider provider = provider(directory, parallelScript("scripted-native-parallel"));
+        RecordingExecutor executor = new RecordingExecutor();
+
+        AiCompletionResult result = provider.complete(request(
+                executor, "scripted-native-parallel", SELECTOR, List.of(), null, false));
+
+        assertEquals(
+                List.of("scripted_unit_0_1", "scripted_unit_0_2", "scripted_unit_0_3"),
+                result.toolCalls().stream().map(AiToolCall::id).toList());
+        assertEquals(
+                List.of("search_records", "search_records", "search_records"),
+                result.toolCalls().stream().map(AiToolCall::name).toList());
+        assertEquals(
+                List.of(
+                        "{\"query\":\"renewal\"}",
+                        "{\"query\":\"cooling\"}",
+                        "{\"query\":\"stalled\"}"),
+                result.toolCalls().stream().map(AiToolCall::arguments).toList());
+        assertEquals("tool_calls", result.stopReason());
+        assertEquals("", result.text());
+        assertEquals(1, executor.beforeSends);
+    }
+
+    /** The streamed path carries the same multiplicity, because it returns the same result. */
+    @Test
+    void streamsAParallelStepWithoutLosingAnyOfItsCalls(@TempDir Path directory)
+            throws IOException {
+        ScriptedAiProvider provider = provider(
+                directory, parallelScript("scripted-native-parallel-stream"));
+        List<String> events = new ArrayList<>();
+        RecordingExecutor executor = new RecordingExecutor(events);
+        RecordingObserver observer = new RecordingObserver(events, -1);
+
+        AiCompletionResult result = provider.completeStreaming(
+                request(
+                        executor, "scripted-native-parallel-stream", SELECTOR,
+                        List.of(), null, false),
+                observer);
+
+        assertEquals(
+                List.of("scripted_unit_0_1", "scripted_unit_0_2", "scripted_unit_0_3"),
+                result.toolCalls().stream().map(AiToolCall::id).toList());
+        assertTrue(observer.deltas.isEmpty(), "a tool-call step streams no assistant text");
+        assertEquals(1, executor.streamExecutes);
+        assertEquals(1, executor.beforeSends);
+    }
+
+    /** A single-call step's identifier keeps the exact string it has always carried. */
+    @Test
+    void aSingleCallStepKeepsItsUnsuffixedIdentifier(@TempDir Path directory) throws IOException {
+        ScriptedAiProvider provider = provider(directory, nativeScript());
+        RecordingExecutor executor = new RecordingExecutor();
+
+        AiCompletionResult result = provider.complete(nativeRequest(executor, List.of(), null));
+
+        assertEquals("scripted_unit_0", result.toolCalls().getFirst().id());
+    }
+
+    /** Only the two parallel classes declare a per-step call bound above one. */
+    @Test
+    void onlyTheParallelCapabilityClassesDeclareABatchedCallBound(@TempDir Path directory)
+            throws IOException {
+        ScriptedAiProvider provider = provider(directory, nativeScript());
+
+        assertEquals(4, provider.parallelToolCallLimit(target("scripted-native-parallel")));
+        assertEquals(4, provider.parallelToolCallLimit(
+                target("scripted-native-parallel-stream")));
+        assertEquals(1, provider.parallelToolCallLimit(target("scripted-native")));
+        assertEquals(1, provider.parallelToolCallLimit(target("scripted-native-stream")));
+        assertEquals(1, provider.parallelToolCallLimit(target("scripted-json")));
+        assertEquals(1, provider.parallelToolCallLimit(target("scripted-small-context")));
+    }
+
     @Test
     void journalsEveryRequestItReceivedAndMarksOnlyTheDispatchedOnes(@TempDir Path directory)
             throws IOException {
@@ -570,6 +654,33 @@ class ScriptedAiProviderTest {
                   ]
                 }
                 """.formatted(FINAL_TEXT.replace("\"", "\\\""));
+    }
+
+    private static String parallelScript(String capabilityClass) {
+        return """
+                {
+                  "id": "unit",
+                  "selector": "connex_script_unit",
+                  "capabilityClass": "%s",
+                  "steps": [
+                    {
+                      "afterToolCalls": 0,
+                      "protocol": "native",
+                      "emit": {
+                        "kind": "tool_calls",
+                        "calls": [
+                          {"toolName": "search_records",
+                           "arguments": "{\\"query\\":\\"renewal\\"}"},
+                          {"toolName": "search_records",
+                           "arguments": "{\\"query\\":\\"cooling\\"}"},
+                          {"toolName": "search_records",
+                           "arguments": "{\\"query\\":\\"stalled\\"}"}
+                        ]
+                      }
+                    }
+                  ]
+                }
+                """.formatted(capabilityClass);
     }
 
     private static String streamingScript() {
