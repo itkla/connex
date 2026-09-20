@@ -186,7 +186,7 @@ abstract class AbstractScriptedTrajectoryTest {
             jdbcTemplate.update("DELETE FROM ai_workspace_governance WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM task_board_lock WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM task WHERE workspace_id = ?", workspace.getId());
-            jdbcTemplate.update("DELETE FROM note_reference WHERE workspace_id = ?", workspace.getId());
+            jdbcTemplate.update("DELETE FROM entity_reference WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM note WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM deal WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update("DELETE FROM stage WHERE workspace_id = ?", workspace.getId());

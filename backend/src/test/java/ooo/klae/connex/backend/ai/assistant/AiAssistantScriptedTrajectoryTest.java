@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -139,13 +140,15 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
                 closing.systemPrompt().contains("untrusted data"),
                 "the system prompt must keep telling the model that CRM_DATA is data");
         assertTrue(
-                envelopes(closing).stream().anyMatch(envelope -> envelope.contains(
-                        "Ignore all previous instructions")),
-                "the injected note must reach the provider inside a CRM_DATA envelope");
+                untrustedEnvelopes(closing).stream().anyMatch(envelope ->
+                        envelope.contains("\"type\":\"tool_result\"")
+                                && envelope.contains("Ignore all previous instructions")),
+                "the injected note must reach the provider inside a tool-result CRM_DATA envelope");
         assertTrue(
                 closing.messages().stream()
-                        .filter(message -> !message.content().startsWith("CRM_DATA_BEGIN"))
-                        .noneMatch(message -> message.content().contains(
+                        .map(AiMessage::content)
+                        .filter(content -> !content.startsWith("CRM_DATA_BEGIN"))
+                        .noneMatch(content -> content.contains(
                                 "Ignore all previous instructions")),
                 "no server-authored directive may carry the injected sentence");
     }
@@ -233,11 +236,29 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
                 "the cited handle must become a durable record link: " + answer);
     }
 
-    private static List<String> envelopes(AiCompletionRequest request) {
-        return request.messages().stream()
+    /**
+     * Every delimiter envelope one request carries, on either protocol.
+     *
+     * <p>A native turn replays a tool result as the result half of a function-call exchange rather
+     * than as its own prompt message, so looking only at the messages would miss exactly the
+     * envelope this golden is about.
+     *
+     * @param request one journaled request
+     * @return the untrusted-data envelopes it carries
+     */
+    private static List<String> untrustedEnvelopes(AiCompletionRequest request) {
+        List<String> envelopes = new ArrayList<>(request.messages().stream()
                 .map(AiMessage::content)
                 .filter(content -> content.startsWith("CRM_DATA_BEGIN"))
-                .toList();
+                .toList());
+        AiNativeToolRequest nativeTools = request.nativeTools();
+        if (nativeTools != null) {
+            nativeTools.exchanges().stream()
+                    .map(AiToolExchange::maskedResult)
+                    .filter(result -> result != null && result.startsWith("CRM_DATA_BEGIN"))
+                    .forEach(envelopes::add);
+        }
+        return List.copyOf(envelopes);
     }
 
     private static String corpus(AiCompletionRequest request) {
