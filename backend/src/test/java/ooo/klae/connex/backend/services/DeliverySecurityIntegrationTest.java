@@ -1885,6 +1885,9 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
                 SmsHttpDeliveryProvider.PROVIDER_ID, target.attemptTargetFingerprint(), "other-provider-message"));
         assertEquals(0, lateTriggeredCorrelation(requeuedId, target, "requeued-message"));
         assertEquals(0, lateTriggeredCorrelation(reclaimedId, target, "reclaimed-message"));
+        seizeDispatchLease(sweptId);
+        assertEquals(0, lateTriggeredCorrelation(sweptId, target, "newer-attempt-message"));
+        releaseDispatchLease(sweptId);
         assertEquals(1, lateTriggeredCorrelation(sweptId, target, "late-message"));
         assertEquals(0, lateTriggeredCorrelation(sweptId, target, "second-message"));
         assertEquals(1, lateTriggeredCorrelation(resolvedId, target, "resolved-message"));
@@ -2070,6 +2073,9 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
                 target.providerId(), "a-different-attempt-fingerprint", "changed-target-message"));
         assertEquals(0, deliveryMapper.attachLateTriggeredProviderCorrelation(workspace.getId(), replayedId,
                 SmsHttpDeliveryProvider.PROVIDER_ID, target.attemptTargetFingerprint(), "other-provider-message"));
+        seizeDispatchLease(replayedId);
+        assertEquals(0, lateTriggeredCorrelation(replayedId, target, "newer-attempt-message"));
+        releaseDispatchLease(replayedId);
         assertEquals(1, lateTriggeredCorrelation(replayedId, target, "late-message"));
         assertEquals(0, lateTriggeredCorrelation(replayedId, target, "second-message"));
         assertEquals(0, lateTriggeredCorrelation(correlatedId, target, "overwriting-message"));
@@ -2471,6 +2477,21 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         assertEquals(1, jdbcTemplate.update("UPDATE campaign_delivery"
                         + " SET dispatch_lease_until = DATE_SUB(UTC_TIMESTAMP(6), INTERVAL 1 SECOND)"
                         + " WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), deliveryId));
+        sqlSession.clearCache();
+    }
+
+    private void seizeDispatchLease(int deliveryId) {
+        assertEquals(1, jdbcTemplate.update("UPDATE campaign_delivery SET dispatch_lease_owner = ?,"
+                        + " dispatch_lease_until = DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 1 MINUTE)"
+                        + " WHERE workspace_id = ? AND id = ?",
+                UUID.randomUUID().toString(), workspace.getId(), deliveryId));
+        sqlSession.clearCache();
+    }
+
+    private void releaseDispatchLease(int deliveryId) {
+        assertEquals(1, jdbcTemplate.update("UPDATE campaign_delivery SET dispatch_lease_owner = NULL,"
+                        + " dispatch_lease_until = NULL WHERE workspace_id = ? AND id = ?",
                 workspace.getId(), deliveryId));
         sqlSession.clearCache();
     }
