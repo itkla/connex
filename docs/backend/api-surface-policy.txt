@@ -8,7 +8,7 @@ src/main/java/ooo/klae/connex/backend/ai/AiGenerationAdapterService.java	dcdccb9
 src/main/java/ooo/klae/connex/backend/ai/AiGenerationContextRunner.java	83a246ac71992b32f55a3ae3bdb93e0968428fae81b6eea0f36bf60ec42cc825
 src/main/java/ooo/klae/connex/backend/ai/AiGenerationService.java	787e6e43886a164434d718032938a0388a508f4cde54ec80ba51a7fd504d6658
 src/main/java/ooo/klae/connex/backend/ai/AiInvocationAdmissionService.java	360409aa8445dc8e5d1f95a732821ac5908481637063a1326bdc130b739f36cc
-src/main/java/ooo/klae/connex/backend/ai/AiInvocationService.java	62250e9f78b308337d260e1d74c64e9f085055ab650af263abb5e9012e72c1c1
+src/main/java/ooo/klae/connex/backend/ai/AiInvocationService.java	73545ba9c8d1d447b0313aa236ccf61d54955b105b5016c0136c0721d0110060
 src/main/java/ooo/klae/connex/backend/ai/AiOutputCacheStore.java	a7c73fdd32c19d9aed456ab39ef21373181d8a5502189531ee21b24858d45883
 src/main/java/ooo/klae/connex/backend/ai/AiProviderGateExceptions.java	cccb121a2c71fcc85c7a3611ec054fcddcb63e3a6522636faa11b37ffafc0b76
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantDateResolver.java	ecef011a2570a68311dd417f05c9fa9273f4111824ecbb3b3780b444d08b9e03
@@ -18,7 +18,7 @@ src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantPromptAssembler.ja
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantScopeReadService.java	4591db5d7943e9b5d3ae8b2ef3393ade75f7470b2836e06a85ae88636f33767a
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantSessionReadAudit.java	c4309133fc2dfd0efc0775fa7f04006bf86e2c0051b1e83a4c86791cee4011ee
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantTerminalReasons.java	b0f245036bddfd8759e8c4e0657e6b60f3de1914a9d22c7fd79bf64a9ba781cb
-src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantToolCallReadService.java	0ae2980233a57594bc4b0bfff1496e5ba6a4ed92b62e2c0a73aab5c263ba6c5f
+src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantToolCallReadService.java	dd842432c1e6f9416eb2e89f89fe29015199b87e1c79eca10284b5a56cb2ffd4
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantToolCatalog.java	19b13fd92a18c56ae915924c7d8871ece8dbdee117615ce6770b2d9fac050ac7
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantToolExecutor.java	adb369f26d9863bc9e25066380c9919353fe9df94c7daec3984f9485392308e7
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantToolsetLoader.java	dd350c63e58313552921f48fb67670eeb1960073e5b4353c08d25266468ebeb3
@@ -27,7 +27,7 @@ src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantWorkBriefReadServi
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiAssistantWriteToolService.java	d69c1a62cf5a3e343dfb0a5656640603dafed897040a3531ab7265ab378101f7
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiBriefRunService.java	b8708d8d569418ab3b7f6aa32d77aa6789bb3960de869385ed9e093315d0c8d7
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiBriefScheduleService.java	12f31731c51536385880133c98904430e4a1ea5d473553a52b48874e1a0e88c7
-src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatAgentLoopService.java	9d66d058b7af7247f5ea87dd71bd4675ab68c99ab9dc87f409598fe0f35fddd9
+src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatAgentLoopService.java	da9d1c4bbc255345aac66a3d8052c68b51e1a6e1d3658f78770bf90077889c48
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatAttachmentService.java	527b4b18071eeec6607ac4f4df8a1f457e3c4fbc3a2f940962e9c640ce7953d8
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatAttachmentTransactions.java	8a7301b6e0759122be88a2c7b7abb1b134ebba8421a9cd48b52ed80ceffed0db
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatQueryScopeResolver.java	67568fa3469714e12fe2a4a5794572c9ed48c4ce28ebe1f0da94c7036e64d449
@@ -51,7 +51,7 @@ src/main/java/ooo/klae/connex/backend/ai/masking/ConversationText.java	1e643dbdb
 src/main/java/ooo/klae/connex/backend/ai/masking/MaskingEngine.java	1468065b05fe5373ef6a7ccbb7897079af4eff026b4c59439ac65fdc5f27411f
 src/main/java/ooo/klae/connex/backend/ai/provider/bedrock/AwsSigV4Signer.java	894f734b5169eb9dd016c5f43bc554673a63db6986e86e1cf860b8b21448bc8c
 src/main/java/ooo/klae/connex/backend/ai/provider/bedrock/BedrockClient.java	49f0e7e7680c0cf65b4153a34faa2d6f15583814f06eafe2cb7d3e94c9ec17ff
-src/main/java/ooo/klae/connex/backend/ai/provider/openai/OpenAiCompatibleAdapter.java	b6442a6e8ecfdff9d655b97d93979afa3393a5f33ae145fc87e9cdf800c16f8a
+src/main/java/ooo/klae/connex/backend/ai/provider/openai/OpenAiCompatibleAdapter.java	aa64f40860a5d6f4f65517cfeb961470e453078648370e33cd6672b0987bc2eb
 src/main/java/ooo/klae/connex/backend/ai/provider/openai/OpenAiCompatibleClient.java	020e24c19c3a7a1efaf06dc3b90d0ed931f942342035eee99ae524c181a5da96
 src/main/java/ooo/klae/connex/backend/ai/provider/vertex/VertexClient.java	1b268c9cd791fb34355c5ec2756915696612a9994df44c80bfd2ae23d7ee8370
 src/main/java/ooo/klae/connex/backend/ai/report/AiReportNarrativeService.java	6b1caf9204695ab291efe74e74c6c6eecafb75f5b3635f7dafe30624b1db2808
