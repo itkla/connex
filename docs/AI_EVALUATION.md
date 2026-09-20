@@ -107,7 +107,7 @@ A refusal written into the runner bean is unenforceable, because `@Profile("ai-e
 - the profile active without `connex.ai.eval.enabled=true` → refuse;
 - the flag true without the profile → refuse (no dormant flag);
 - the profile active while `connex.maintenance.mode` is `off` → refuse, per [No scheduled work, and no startup work](#no-scheduled-work-and-no-startup-work);
-- `connex.ai.eval.enabled` joins `POSTURE_KEYS`, so the startup posture line names it, and joins `SAAS_FORBIDDEN_KEYS`, so a multi-tenant SaaS instance refuses it outright. It deliberately does **not** join the silo or on-prem forbidden lists: staging declares `silo`, and forbidding the flag there would make the runner unrunnable on the only instance it is for. The maintenance-mode and non-web refusals, not the forbidden-key scan, are what keep it out of a serving process under those editions — and in a customer deployment the flag switches on nothing at all, because the runner is not in the artifact. That asymmetry is a decision the gate below must confirm, not a detail to discover during implementation.
+- `connex.ai.eval.enabled` joins `POSTURE_KEYS`, so the startup posture line names it, and joins `SAAS_FORBIDDEN_KEYS`, so a multi-tenant SaaS instance refuses it outright. It deliberately does **not** join the silo or on-prem forbidden lists: staging declares `silo`, and forbidding the flag there would make the runner unrunnable on the only instance it is for. The maintenance-mode and non-web refusals, not the forbidden-key scan, are what keep it out of a serving process under those editions — and in a deployment installed from the published image the flag switches on nothing at all, because the runner is not in that artifact. A from-source install is the exception, discussed [below](#what-keeps-this-staging-only-and-the-part-that-is-not-settled). That asymmetry is a decision the gate below must confirm, not a detail to discover during implementation.
 
 So the design does require a validator change, one new maintenance mode, and one new posture/forbidden key, and the tracked issue owns all three.
 
@@ -119,11 +119,15 @@ The classpath question follows from where the corpus lives, and it has exactly o
 
 **So the runner, its corpus and its scorers live in a source set of their own**: one that compiles against `main`, takes neither `test`'s classpath nor `test`'s resources, and is not assembled into `bootWar`. That is a constraint on the build before it is a constraint on the runner, and the tracked issue owns it.
 
-#### That source set, and not an edition check, is what makes this staging-only
+#### What keeps this staging-only, and the part that is not settled
 
 **Edition selection does not identify staging.** [`DEPLOYMENT.md`](DEPLOYMENT.md) is explicit that one bundle serves a Connex-operated `silo` and a customer-operated `on-prem` install: those two *are* the customer-facing profiles. Any rule phrased as "permitted under `silo` and `on-prem`" is therefore a rule a customer operator can satisfy in full — the non-web launch, the profile, the flag, and a marker row they can insert with access to their own database. A design that leant on the edition would ship this runner, and its egress, into customer deployments.
 
-The admission is physical instead: **a customer deployment receives the shipped artifact, and the shipped artifact does not contain the runner.** No source set, no runner class, no corpus — nothing for a profile or a flag to switch on. Staging is the only place the runner can exist, because staging is the only place built from source. Everything in the validator section above is therefore **defence in depth on the one instance that does have the source set**; it is not the admission, and no part of this design may be read as if it were.
+Keeping the runner out of the built artifact closes the common case, and only that case: **a deployment installed from the published image receives an artifact that does not contain the runner** — no source set, no runner class, no corpus, nothing for a profile or a flag to switch on.
+
+It does not close the other supported case. [`DEPLOYMENT.md`](DEPLOYMENT.md) documents installing from source for `silo` and `on-prem`, and `backend/Dockerfile` copies the whole `src` tree into its build stage, so **an operator who builds from source holds the evaluation source set** and can launch its task against their own catalog, with their own provider credential, after inserting a marker row they have the database access to insert. For that operator the validator refusals are the only control in the way, and none of them identifies staging. They keep the runner out of a *serving* process; they do not keep it out of that operator's hands.
+
+This design does not settle that, and says so rather than implying a control that is not there. The candidates are: leave the evaluation source set out of the source a customer receives; require an admission that only Connex-operated staging can satisfy; or accept that a from-source operator may evaluate their own provider against their own synthetic data — their data, their credential, their budget — and document it as such. Choosing is a ruling for the tracked issue, and it is listed under [Open problems](#open-problems).
 
 ### The synthetic-workspace refusal
 
@@ -223,9 +227,10 @@ The pre-context startup refusals — the `ai-eval` profile in a web application,
 
 ### Open problems
 
-Two things this design cannot settle on its own. Each needs a ruling before the runner is built, and neither may be answered by an implementer discovering it mid-change.
+Three things this design cannot settle on its own. Each needs a ruling before the runner is built, and none may be answered by an implementer discovering it mid-change.
 
 - **Nothing freezes the marked organization for the duration of a run.** The runner can refuse an organization that already holds something it did not seed, but the product has no per-organization write freeze to switch on, so a member, an import or a connected capture can write to it while cases are executing — after the admission check has passed. Either the runbook owns it (nobody else holds credentials into that organization, and connected capture is never enabled there), or the tracked issue specifies a mechanism. Writing "the marked organization receives no other ingress" without one of those two is a wish.
+- **Nothing identifies staging.** Keeping the runner out of the built artifact keeps it out of every deployment installed from the published image, but an operator who installs from source holds the evaluation source set, and no validator refusal distinguishes that operator from Connex-operated staging. Leaving the source set out of what a customer receives, requiring an admission only staging can satisfy, or accepting and documenting that a from-source operator may evaluate their own provider against their own synthetic data are the candidates; the tracked issue rules.
 - **Nothing in the schema records who created a record or a tool call.** Both the seed-provenance refusal and provenance-scoped reconciliation depend on it, and the AUTO write tools create activities, tasks, notes and tags that carry no evaluation marking at all. Whether that becomes a column, a control-plane side table, or a convention over ids the runner allocates is a product decision with a migration attached — and, given that the marker table is already one migration, the two should be decided together.
 
 ### Decision gate
