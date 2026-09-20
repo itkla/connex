@@ -281,13 +281,17 @@ case_redactor_fixtures() (
     # Ask Connex journals its Spring mapping templates, which carry regex-constrained path
     # variables: braces, a colon, a backslash and a plus. Tightening either the credential-shape
     # rule or the token-bearing-parent rule against those characters would silently drop every
-    # assistant record. The path reaches awk through `awk -v raw="$path"`, and awk processes escape
-    # sequences in a -v assignment: mawk (the default /etc/alternatives/awk on this host and in CI,
-    # 1.3.4 20250131) preserves the \d, while gawk is documented to drop the backslash from an
-    # undefined escape. These vectors assert the measured mawk output.
+    # assistant record. The backslash must also survive whichever awk the host provides: the path
+    # reaches awk through the environment because a -v assignment is escape-processed, which under
+    # GNU awk rewrote `\d` to `d`.
     assert_equals redact_assistant_sessions '/api/ai/assistant/sessions' "$(support_bundle_redact_path '/api/ai/assistant/sessions')" || return 1
     assert_equals redact_assistant_turn '/api/ai/assistant/sessions/{sessionId:\d+}/turns/{turnId:\d+}' "$(support_bundle_redact_path '/api/ai/assistant/sessions/{sessionId:\d+}/turns/{turnId:\d+}')" || return 1
     assert_equals redact_assistant_presence '/api/ai/assistant/sessions/{id:\d+}/presence' "$(support_bundle_redact_path '/api/ai/assistant/sessions/{id:\d+}/presence')" || return 1
+    # `\t` and `\\` are escapes every awk defines, so unlike `\d` they were rewritten under mawk
+    # too. These two vectors therefore fail against a -v assignment on any host, not only where
+    # GNU awk is installed.
+    assert_equals redact_keeps_defined_escape '/api/x/{name:a\tb}' "$(support_bundle_redact_path '/api/x/{name:a\tb}')" || return 1
+    assert_equals redact_keeps_double_backslash '/api/x/y\\z' "$(support_bundle_redact_path '/api/x/y\\z')" || return 1
 )
 
 case_verify_valid_bundle() (
