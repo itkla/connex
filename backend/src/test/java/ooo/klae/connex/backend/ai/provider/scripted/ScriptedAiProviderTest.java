@@ -252,11 +252,12 @@ class ScriptedAiProviderTest {
         assertEquals("hello world", result.text());
         assertEquals(List.of("hello", " world"), observer.deltas);
         assertEquals(
-                List.of("reasoningMode", "open", "beforeSend",
-                        "delta", "chunk", "delta", "chunk", "closed"),
+                List.of("open", "beforeSend", "delta", "chunk", "delta", "chunk", "closed"),
                 events,
                 "the streamed order must mirror OpenAiCompatibleClient.sendStream: the transport "
-                        + "opens, and only then is the budget lease marked dispatched");
+                        + "opens, and only then is the budget lease marked dispatched. The reasoning "
+                        + "mode is announced by AiInvocationService, never by an adapter, so an "
+                        + "adapter that announced it too would deliver it twice");
         assertEquals(1, executor.streamExecutes);
         assertEquals(1, executor.beforeSends);
     }
@@ -290,7 +291,7 @@ class ScriptedAiProviderTest {
                                 false),
                         observer));
 
-        assertEquals(List.of("reasoningMode", "open", "closed"), events);
+        assertEquals(List.of("open", "closed"), events);
         assertEquals(0, executor.beforeSends);
         assertTrue(observer.deltas.isEmpty());
     }

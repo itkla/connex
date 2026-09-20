@@ -146,7 +146,6 @@ public class ScriptedAiProvider implements AiProvider {
         }
         AiRequestDeadline deadline = request.providerAttemptExecutor()
                 .deadline(aiProperties.getRequestTimeoutMs());
-        observer.onReasoningMode(request.reasoningMode());
         AtomicBoolean cancelled = new AtomicBoolean();
         return request.providerAttemptExecutor().executeStream(() -> {
             observer.onTransportOpen(() -> cancelled.set(true));
