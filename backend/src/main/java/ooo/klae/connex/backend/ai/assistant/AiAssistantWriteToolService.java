@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.EnumSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -63,6 +64,7 @@ import ooo.klae.connex.backend.services.PipelineService;
 import ooo.klae.connex.backend.services.TagService;
 import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import ooo.klae.connex.backend.services.WorkspaceService.LockedPermissionSnapshot;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -185,8 +187,9 @@ public class AiAssistantWriteToolService {
             int toolCallId,
             Consumer<AiAssistantToolResult> resultGuard) {
         requireMutationAllowed(turn.workspaceId(), turn.userId());
-        AiChatToolCall toolCall = lockAuthorizedToolCall(
+        AuthorizedToolCall authorized = lockAuthorizedToolCall(
                 turn.workspaceId(), turn.userId(), turn.sessionId(), toolCallId, null);
+        AiChatToolCall toolCall = authorized.toolCall();
         AiChatTurn storedTurn = chatMapper.getTurnByIdForUpdate(
                 turn.workspaceId(), turn.sessionId(), turn.turnId());
         if (storedTurn == null
@@ -205,7 +208,7 @@ public class AiAssistantWriteToolService {
         if (write.tier() != ToolTier.AUTO) {
             throw new ConflictException("Assistant tool requires approval");
         }
-        requirePermissions(write);
+        requirePermissions(authorized.authority(), turn.userId(), write);
         PreparedMutation mutation;
         try {
             mutation = lockMutationTarget(write);
@@ -220,6 +223,7 @@ public class AiAssistantWriteToolService {
                 turn.workspaceId(), turn.restrictionEpoch())) {
             throw new AiAssistantLoopException("restrictions_changed", "restrictions_changed");
         }
+        requirePermissions(authorized.authority(), turn.userId(), write);
         ExecutionOutcome outcome = execute(write, null, mutation);
         String resultJson = resultEnvelope(write, outcome, null);
         toolCall.setStatus(EXECUTED);
@@ -240,9 +244,10 @@ public class AiAssistantWriteToolService {
         Actor actor = currentActor();
         requireMutationAllowed(actor.workspaceId(), actor.userId());
         OwnerAssignment owner = preliminaryOwnerAssignment(actor, sessionId, toolCallId);
-        AiChatToolCall toolCall = lockAuthorizedToolCall(
+        AuthorizedToolCall authorized = lockAuthorizedToolCall(
                 actor.workspaceId(), actor.userId(), sessionId, toolCallId,
                 owner == null ? null : owner.userId());
+        AiChatToolCall toolCall = authorized.toolCall();
         if (EXECUTED.equals(toolCall.getStatus())) {
             return dto(toolCall);
         }
@@ -251,13 +256,14 @@ public class AiAssistantWriteToolService {
         if (write.tier() != ToolTier.CONFIRM) {
             throw new ConflictException("Assistant tool does not require approval");
         }
-        requirePermissions(write);
+        requirePermissions(authorized.authority(), actor.userId(), write);
         PreparedMutation mutation = lockMutationTarget(write);
         if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
                 actor.workspaceId(), write.restrictionEpoch())) {
             throw new ConflictException("Assistant proposal restrictions changed");
         }
         requireTargetUnchangedSinceProposal(toolCall, mutation);
+        requirePermissions(authorized.authority(), actor.userId(), write);
         ExecutionOutcome outcome = execute(write, owner, mutation);
         Map<String, Object> approval = new LinkedHashMap<>();
         approval.put("status", "approved");
@@ -279,7 +285,7 @@ public class AiAssistantWriteToolService {
         Actor actor = currentActor();
         requireActiveMembership(actor.workspaceId(), actor.userId());
         AiChatToolCall toolCall = lockAuthorizedToolCall(
-                actor.workspaceId(), actor.userId(), sessionId, toolCallId, null);
+                actor.workspaceId(), actor.userId(), sessionId, toolCallId, null).toolCall();
         if (REJECTED.equals(toolCall.getStatus())) {
             return dto(toolCall);
         }
@@ -310,8 +316,9 @@ public class AiAssistantWriteToolService {
     public AiAssistantToolCallDto undo(int sessionId, int toolCallId) {
         Actor actor = currentActor();
         requireActiveMembership(actor.workspaceId(), actor.userId());
-        AiChatToolCall toolCall = lockAuthorizedToolCall(
+        AuthorizedToolCall authorized = lockAuthorizedToolCall(
                 actor.workspaceId(), actor.userId(), sessionId, toolCallId, null);
+        AiChatToolCall toolCall = authorized.toolCall();
         requireStatus(toolCall, EXECUTED);
         StoredWrite write = readStored(toolCall);
         if (write.tier() != ToolTier.AUTO) {
@@ -330,7 +337,7 @@ public class AiAssistantWriteToolService {
         if (clock.instant().isAfter(expiresAt)) {
             throw new ConflictException("Assistant tool undo window has expired");
         }
-        requirePermissions(write);
+        requirePermissions(authorized.authority(), actor.userId(), write);
         undo(write, undo);
         undo.put("status", "undone");
         undo.put("undoneAt", clock.instant().toString());
@@ -502,19 +509,31 @@ public class AiAssistantWriteToolService {
         }
     }
 
-    private AiChatToolCall lockAuthorizedToolCall(
+    /**
+     * Locks the authorization rows this decision rests on, then the session and tool-call rows.
+     *
+     * <p>The authority is read once, from rows locked before anything else this transaction
+     * touches: the actor's and any principal's user roots, the workspace root, their memberships
+     * and their custom roles with those roles' permission sets, ascending by user id. Every later
+     * assertion — the tool's own permissions, and the re-assertion after the record lock — reads
+     * that snapshot in memory, so a revocation committed mid-decision cannot be missed by a
+     * non-locking re-read and no assertion can add a lock edge after a tenant record.
+     *
+     * @param targetUserId a principal the write will name, locked with no requirement of its own
+     */
+    private AuthorizedToolCall lockAuthorizedToolCall(
             int workspaceId,
             int userId,
             int sessionId,
             int toolCallId,
             Integer targetUserId) {
-        java.util.stream.Stream.of(userId, targetUserId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .sorted()
-                .forEach(memberId -> workspaceService.lockAndRequireMember(
-                        workspaceId, memberId));
-        workspaceService.requirePermission(workspaceId, userId, Permission.AI_USE);
+        Map<Integer, Set<Permission>> required = new LinkedHashMap<>();
+        required.put(userId, Set.of(Permission.AI_USE));
+        if (targetUserId != null) {
+            required.putIfAbsent(targetUserId, Set.of());
+        }
+        LockedPermissionSnapshot authority =
+                workspaceService.lockAndRequirePermissionsSnapshot(workspaceId, required);
         AiChatSession session = chatMapper.getSessionByIdForUpdate(workspaceId, userId, sessionId);
         if (session == null || !ACTIVE.equals(session.getStatus())) {
             throw inaccessible();
@@ -529,7 +548,7 @@ public class AiAssistantWriteToolService {
         if (toolCall == null || !Objects.equals(toolCall.getRequestedByUserId(), userId)) {
             throw inaccessible();
         }
-        return toolCall;
+        return new AuthorizedToolCall(toolCall, authority);
     }
 
     private void requireMutationAllowed(int workspaceId, int userId) {
@@ -545,10 +564,18 @@ public class AiAssistantWriteToolService {
         }
     }
 
+    /**
+     * Resolves, before any lock, which principal row the approval will have to lock.
+     *
+     * <p>It is deliberately not an authorization step and takes no permission read of its own. One
+     * here would run unlocked selects that the MyBatis first-level cache then replays for every
+     * later permission question in this transaction, including the domain service's own
+     * {@code @RequirePermission} check, handing each of them a pre-lock answer. Authority comes
+     * from {@link #lockAuthorizedToolCall} instead, and a caller without {@code AI_USE} is refused
+     * there with the same message.
+     */
     private OwnerAssignment preliminaryOwnerAssignment(
             Actor actor, int sessionId, int toolCallId) {
-        workspaceService.requirePermission(
-                actor.workspaceId(), actor.userId(), Permission.AI_USE);
         AiChatSession session = chatMapper.getAccessibleSessionById(
                 actor.workspaceId(), actor.userId(), sessionId);
         AiChatToolCall toolCall = chatMapper.getToolCallBySession(
@@ -632,11 +659,22 @@ public class AiAssistantWriteToolService {
         }
     }
 
-    private void requirePermissions(StoredWrite write) {
-        int workspaceId = workspaceService.getCurrentWorkspaceId();
-        int userId = workspaceService.getCurrentUserId();
-        for (Permission permission : permissions(write)) {
-            workspaceService.requirePermission(workspaceId, userId, permission);
+    /**
+     * Asserts the tool's permissions against the authority locked before the session row.
+     *
+     * <p>It performs no database access, so it may be re-asserted after a record lock without
+     * inverting the repository's membership → record order, and there is no second statement for
+     * the MyBatis first-level cache to answer with a pre-lock result.
+     */
+    private static void requirePermissions(
+            LockedPermissionSnapshot authority, int userId, StoredWrite write) {
+        authority.revalidate();
+        Set<Permission> effective = authority.effectiveFor(userId);
+        for (Permission permission : EnumSet.copyOf(permissions(write))) {
+            if (!effective.contains(permission)) {
+                throw new ForbiddenException(
+                        "Requires the " + permission + " permission in this workspace");
+            }
         }
     }
 
@@ -1133,6 +1171,11 @@ public class AiAssistantWriteToolService {
     }
 
     private record Actor(int workspaceId, int userId) {
+    }
+
+    private record AuthorizedToolCall(
+            AiChatToolCall toolCall,
+            LockedPermissionSnapshot authority) {
     }
 
     private record StoredWrite(
