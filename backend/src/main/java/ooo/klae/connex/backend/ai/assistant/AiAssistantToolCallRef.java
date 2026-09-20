@@ -18,6 +18,17 @@ package ooo.klae.connex.backend.ai.assistant;
  */
 public record AiAssistantToolCallRef(int stepNumber, int callOrdinal) {
 
+    /**
+     * The ordinal naming the sole call of its model step.
+     *
+     * <p>Named once here and referenced by every site that means it — the loop's single-call
+     * step, a server-owned skill-plan step, a write proposal and a replayed tool turn — so "sole
+     * call" is never re-encoded as a bare {@code 0} that a later site could get wrong. A site
+     * that proposed under ordinal 1 instead would render a {@code -call-1} suffix the unsuffixed
+     * write-proposal replay lookup can never find.
+     */
+    public static final int SOLE_CALL = 0;
+
     public AiAssistantToolCallRef {
         if (stepNumber <= 0) {
             throw new IllegalArgumentException("Assistant tool call step must be positive");
@@ -28,21 +39,11 @@ public record AiAssistantToolCallRef(int stepNumber, int callOrdinal) {
     }
 
     /**
-     * Returns the reference naming the sole call of one model step.
-     *
-     * @param stepNumber the durable model-step number
-     * @return the reference whose key renders exactly as it did before call ordinals existed
-     */
-    public static AiAssistantToolCallRef soleCall(int stepNumber) {
-        return new AiAssistantToolCallRef(stepNumber, 0);
-    }
-
-    /**
      * Renders the durable idempotency-key suffix this call owns.
      *
      * @return the empty string for the sole call of a step, and {@code -call-k} otherwise
      */
     public String keySuffix() {
-        return callOrdinal == 0 ? "" : "-call-" + callOrdinal;
+        return callOrdinal == SOLE_CALL ? "" : "-call-" + callOrdinal;
     }
 }

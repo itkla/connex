@@ -328,7 +328,7 @@ class AiChatAgentLoopServiceTest {
         int firstResultBytes = sizingAssembler.assemble(
                         List.of(),
                         new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(new AiAssistantPromptAssembler.ToolTurn(
+                        List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(
                                 1, "search_records", readResult)),
                         new ooo.klae.connex.backend.ai.masking.MaskingContext(),
                         new AiChatResourceRegistry(),
@@ -343,11 +343,11 @@ class AiChatAgentLoopServiceTest {
                         List.of(),
                         new AiAssistantToolResult(Map.of(), List.of()),
                         List.of(
-                                new AiAssistantPromptAssembler.ToolTurn(
+                                AiAssistantPromptAssembler.ToolTurn.soleCall(
                                         1, AiAssistantToolCatalog.FIND_TOOLS, loadResult),
-                                new AiAssistantPromptAssembler.ToolTurn(
+                                AiAssistantPromptAssembler.ToolTurn.soleCall(
                                         2, "search_records", readResult),
-                                new AiAssistantPromptAssembler.ToolTurn(
+                                AiAssistantPromptAssembler.ToolTurn.soleCall(
                                         3, "create_note", expectedWriteResult)),
                         new ooo.klae.connex.backend.ai.masking.MaskingContext(),
                         new AiChatResourceRegistry(),

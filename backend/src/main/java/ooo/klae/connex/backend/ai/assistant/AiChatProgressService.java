@@ -63,6 +63,13 @@ public class AiChatProgressService {
      * <p>A {@code find_tools} row is skipped rather than mapped: the loop publishes no step frame
      * for it, so projecting one would raise an {@code other} milestone that appeared live and
      * vanished on reload. It reads nothing, so there is no coverage for it to claim.
+     *
+     * <p>The row limit is {@link AiChatAgentLoopService#HARD_MAX_STEPS} because a turn writes at
+     * most one {@code ai_chat_tool_call} row per model step: each step takes exactly one of the
+     * read- or write-proposal paths, so the step ceiling is an exact bound on the rows. The
+     * moment a step may propose more than one call, that equality breaks and this limit has to
+     * rise with it, or a turn past the ceiling silently loses real milestones here while the
+     * suffixed keys it wrote still parse and look healthy.
      */
     public List<AiChatProgressItemDto> project(
             int workspaceId, int sessionId, int turnId, String turnStatus) {

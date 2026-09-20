@@ -806,6 +806,28 @@ class AiChatTurnPersistenceServiceTest {
         verify(chatMapper, never()).insertToolCall(org.mockito.ArgumentMatchers.any());
     }
 
+    /**
+     * A read proposal is now refused above the hard step ceiling, exactly as a write already was.
+     *
+     * <p>A deliberate tightening this change brings with it: read and write proposals share one
+     * key renderer, so the bound the write path has always enforced now covers reads too. The loop
+     * cannot reach it — it stops at {@code HARD_MAX_STEPS} before proposing — so this pins the
+     * refusal rather than a behaviour the running system relies on, and keeps a future skill plan
+     * longer than the ceiling from silently writing a key no reader's anchored pattern accepts.
+     */
+    @Test
+    void aStepNumberAboveTheHardCeilingIsRefusedForAReadProposalAsItAlreadyWasForAWrite() {
+        int beyondCeiling = AiChatAgentLoopService.HARD_MAX_STEPS + 1;
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.proposeTool(
+                        TURN, beyondCeiling, AiAssistantToolCallRef.SOLE_CALL,
+                        "search_records", "{}"));
+
+        verify(chatMapper, never()).insertToolCall(org.mockito.ArgumentMatchers.any());
+    }
+
     @Test
     void nativeThoughtSignatureSurvivesReadAndWriteProposalPersistence() {
         String thoughtSignature = "opaque /+==\nline two";

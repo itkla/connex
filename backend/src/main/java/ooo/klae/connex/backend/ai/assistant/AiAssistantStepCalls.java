@@ -36,7 +36,8 @@ record AiAssistantStepCalls(List<Call> calls) {
      * @return the step's calls as a list of one
      */
     static AiAssistantStepCalls of(AiAssistantStep.Tool tool, Optional<AiToolCall> providerCall) {
-        return new AiAssistantStepCalls(List.of(new Call(0, tool, providerCall)));
+        return new AiAssistantStepCalls(
+                List.of(new Call(AiAssistantToolCallRef.SOLE_CALL, tool, providerCall)));
     }
 
     /**

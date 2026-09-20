@@ -535,7 +535,8 @@ public class AiChatTurnPersistenceService {
             String thoughtSignature) {
         requireCurrentActor(turn);
         lockAuthorizedTurn(turn, RUNNING);
-        String idempotencyKey = turnStepKey(turn.turnId(), stepNumber, 0);
+        String idempotencyKey = turnStepKey(
+                turn.turnId(), stepNumber, AiAssistantToolCallRef.SOLE_CALL);
         AiChatToolCall existing = chatMapper.getToolCallByIdempotencyKey(
                 turn.workspaceId(), idempotencyKey);
         if (existing != null) {

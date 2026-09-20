@@ -119,10 +119,6 @@ class AiSkillPlanRunnerTest {
     }
 
     /**
-     * The page anchor reaches the read as context, never as a narrowing argument, so it cannot
-     * override a record kind the requester already declared and confirmed.
-     */
-    /**
      * A server-owned plan step is always the only call its step makes.
      *
      * <p>It therefore proposes under the sole-call ordinal, which renders the exact unsuffixed
@@ -147,9 +143,13 @@ class AiSkillPlanRunnerTest {
                 new AiChatResourceRegistry(), 16_384, () -> { });
 
         verify(persistenceService).proposeTool(
-                any(), anyInt(), eq(0), anyString(), anyString());
+                any(), anyInt(), eq(AiAssistantToolCallRef.SOLE_CALL), anyString(), anyString());
     }
 
+    /**
+     * The page anchor reaches the read as context, never as a narrowing argument, so it cannot
+     * override a record kind the requester already declared and confirmed.
+     */
     @Test
     void theAnchoringRecordReachesTheScopeReadAsContextRatherThanAsAnArgument() {
         when(scopeReadService.scopeActivities(

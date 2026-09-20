@@ -764,7 +764,7 @@ class AiInvocationServiceTest {
         MaskedPrompt prompt = promptAssembler.assemble(
                 List.of(request),
                 new AiAssistantToolResult(Map.of("records", List.of()), List.of()),
-                List.of(new AiAssistantPromptAssembler.ToolTurn(
+                List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(
                         1,
                         "search_records",
                         new AiAssistantToolResult(
@@ -848,7 +848,7 @@ class AiInvocationServiceTest {
                         "warmth", "cooling"))),
                 List.of());
         List<AiAssistantPromptAssembler.ToolTurn> turns = List.of(
-                new AiAssistantPromptAssembler.ToolTurn(
+                AiAssistantPromptAssembler.ToolTurn.soleCall(
                         1, "search_records", toolResult));
         MaskingContext context = new MaskingContext();
         MaskedPrompt prompt = promptAssembler.assembleNative(

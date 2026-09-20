@@ -97,9 +97,22 @@ public class AiAssistantPromptAssembler {
      */
     public record ToolTurn(int seq, int call, String tool, AiAssistantToolResult result) {
 
-        /** Creates the turn of a call that was the only one its model step made. */
-        public ToolTurn(int seq, String tool, AiAssistantToolResult result) {
-            this(seq, 0, tool, result);
+        /**
+         * Returns the turn of a call that was the only one its model step made.
+         *
+         * <p>A named factory rather than a three-argument constructor: the ordinal is the key the
+         * replay looks its recorded provider call up by, so a call site that omitted it would
+         * correlate against {@code (step, 0)} while the loop recorded {@code (step, k)}, and
+         * prompt assembly would fail the whole turn as an internal error rather than a refusal.
+         * Omitting it has to be a deliberate claim that the step made one call.
+         *
+         * @param seq the model step whose call produced this result, from 1
+         * @param tool the declared tool the call named
+         * @param result the tool result replayed as untrusted data
+         * @return the turn carrying the sole-call ordinal
+         */
+        public static ToolTurn soleCall(int seq, String tool, AiAssistantToolResult result) {
+            return new ToolTurn(seq, AiAssistantToolCallRef.SOLE_CALL, tool, result);
         }
 
         /** @return the correlation key this result's call owns within its turn */
@@ -872,6 +885,15 @@ public class AiAssistantPromptAssembler {
         return crmData("tool_result", data, context);
     }
 
+    /**
+     * Fits one masked tool result into the bytes still available, disclosing what it dropped.
+     *
+     * <p>The array path narrows a deep copy of the masked payload, so every correlation field it
+     * already carries survives untouched. The plain-text fallback rebuilds the payload field by
+     * field instead, and therefore has to carry the correlation fields across deliberately: a
+     * truncated result that lost its {@code call} ordinal would be the one member of a step's
+     * replayed calls the model could not tell apart from its siblings.
+     */
     private TruncatedToolResult truncatedToolResult(
             ToolTurn turn,
             MaskingContext context,
@@ -907,6 +929,9 @@ public class AiAssistantPromptAssembler {
             int candidateBytes = low + (high - low) / 2;
             ObjectNode plainCandidate = objectMapper.createObjectNode();
             plainCandidate.set("step", masked.path("step"));
+            if (masked.has("call")) {
+                plainCandidate.set("call", masked.path("call"));
+            }
             plainCandidate.set("tool", masked.path("tool"));
             plainCandidate.put(
                     "result",
