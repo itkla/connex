@@ -398,6 +398,7 @@ export default function AskConnexProvider({ children }: { children: ReactNode })
         internal: t('turnInternalError'),
         unreadable: t('turnUnreadableAnswer'),
         stalled: t('turnStalled'),
+        ownerLost: t('turnOwnerLost'),
         timeout: t('turnRanOutOfTime'),
     }), [t]);
     const terminalToast = useCallback(

@@ -239,6 +239,7 @@ export type AskConnexFailureMessage =
     | 'internal'
     | 'unreadable'
     | 'stalled'
+    | 'ownerLost'
     | 'timeout';
 
 /** One terminal reason, classified: what kind of failure it is and how it is explained. */
@@ -279,6 +280,7 @@ const TERMINAL_KINDS: Readonly<Record<string, AskConnexTerminalKind>> = {
     malformed_output: { category: 'transient', message: 'unreadable' },
     schema_repair_failed: { category: 'transient', message: 'unreadable' },
     no_progress: { category: 'transient', message: 'stalled' },
+    owner_lost: { category: 'transient', message: 'ownerLost' },
     generation_timeout: { category: 'transient', message: 'timeout' },
     turn_deadline_exceeded: { category: 'transient', message: 'timeout' },
     provider_idle_timeout: { category: 'transient', message: 'timeout' },
