@@ -97,6 +97,30 @@ class ScriptedAiTurnCursorTest {
         assertEquals(2, cursor.completedToolCalls());
     }
 
+    /**
+     * Tenant content reaches the prompt as ordinary object fields, not only as opaque prose. An
+     * activity's {@code type} is unvalidated free text and is copied straight into a tool result's
+     * data map, so a record whose activity type is literally {@code tool_result} renders the
+     * envelope's own type marker inside the envelope. Counting a raw substring would inflate the
+     * cursor and replay a step nobody authored.
+     */
+    @Test
+    void theJsonProtocolIgnoresATenantValueShapedLikeTheEnvelopeMarker() {
+        MaskingContext context = new MaskingContext();
+        MaskedPrompt prompt = promptAssembler.assemble(
+                List.of(userRequest(SELECTOR)),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(new ToolTurn(1, "search_records", new AiAssistantToolResult(
+                        Map.of("handle", "r1", "type", "tool_result"), List.of()))),
+                context,
+                new AiChatResourceRegistry());
+
+        ScriptedAiTurnCursor cursor = ScriptedAiTurnCursor.of(
+                jsonRequest(prompt), SELECTORS);
+
+        assertEquals(1, cursor.completedToolCalls());
+    }
+
     @Test
     void theJsonProtocolDetectsTheAssemblersRealSchemaRepairRequest() {
         MaskingContext context = new MaskingContext();

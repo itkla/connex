@@ -2,11 +2,14 @@ package ooo.klae.connex.backend.ai.provider.scripted;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -312,6 +315,78 @@ class ScriptedAiScriptLoaderTest {
     }
 
     @Test
+    void refusesSelectorsThatContainOneAnother(@TempDir Path directory) throws IOException {
+        write(directory, "short.json", script("connex_script_masked_egress", "masked_egress"));
+        write(directory, "long.json",
+                script("connex_script_masked_egress_stream", "masked_egress_stream"));
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> new ScriptedAiScriptLoader(directory.toString(), objectMapper));
+
+        assertTrue(exception.getMessage().contains("must not contain one another"),
+                exception.getMessage());
+    }
+
+    @Test
+    void refusesMoreScriptsThanTheDirectoryCeilingAllows(@TempDir Path directory)
+            throws IOException {
+        for (int index = 0; index <= ScriptedAiScriptLoader.MAX_SCRIPTS; index++) {
+            String suffix = alphabetic(index);
+            write(directory, "script_" + suffix + ".json",
+                    script("connex_script_bulk_" + suffix, "bulk_" + suffix));
+        }
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> new ScriptedAiScriptLoader(directory.toString(), objectMapper));
+
+        assertTrue(exception.getMessage().contains("more than "
+                + ScriptedAiScriptLoader.MAX_SCRIPTS), exception.getMessage());
+    }
+
+    @Test
+    void refusesASymlinkedFixtureDirectory(@TempDir Path root) throws IOException {
+        Path real = Files.createDirectory(root.resolve("real"));
+        write(real, "valid.json", script("connex_script_valid", "valid_script"));
+        Path link = root.resolve("link");
+        assumeSymlinks(() -> Files.createSymbolicLink(link, real));
+
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> new ScriptedAiScriptLoader(link.toString(), objectMapper));
+
+        assertEquals(ScriptedAiScriptLoader.FIXTURE_DIR_REFUSAL, exception.getMessage());
+    }
+
+    @Test
+    void doesNotLoadASymlinkedScriptInsideARealFixtureDirectory(@TempDir Path root)
+            throws IOException {
+        Path outside = Files.createDirectory(root.resolve("outside"));
+        Path target = outside.resolve("smuggled.json");
+        Files.writeString(target, script("connex_script_smuggled", "smuggled_script"),
+                StandardCharsets.UTF_8);
+        Path directory = Files.createDirectory(root.resolve("fixtures"));
+        write(directory, "valid.json", script("connex_script_valid", "valid_script"));
+        assumeSymlinks(() ->
+                Files.createSymbolicLink(directory.resolve("smuggled.json"), target));
+
+        ScriptedAiScriptLoader loader = new ScriptedAiScriptLoader(
+                directory.toString(), objectMapper);
+
+        assertEquals(1, loader.scripts().size(),
+                "a symlink may point outside the fixture directory, so it is not a script");
+        assertNull(loader.bySelector("connex_script_smuggled"));
+    }
+
+    @Test
+    void refusesASelectorTheMaskerWouldRewrite() {
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> ScriptedAiScriptLoader.requireMaskingSafeSelector(
+                        "https://example.test/scripted", Path.of("future.json")));
+
+        assertTrue(exception.getMessage().contains("does not survive masking unchanged"),
+                exception.getMessage());
+    }
+
+    @Test
     void ignoresFilesThatAreNotScripts(@TempDir Path directory) throws IOException {
         write(directory, "valid.json", script("connex_script_valid", "valid_script"));
         Files.writeString(directory.resolve("notes.md"), "ignored");
@@ -321,6 +396,34 @@ class ScriptedAiScriptLoaderTest {
                 directory.toString(), objectMapper);
 
         assertEquals(1, loader.scripts().size());
+    }
+
+    /**
+     * Skips a symlink case on a filesystem that cannot create one rather than failing it.
+     * @param link the symlink to create
+     * @throws IOException when the filesystem supports symlinks but the creation failed
+     */
+    private static void assumeSymlinks(SymlinkCreation link) throws IOException {
+        try {
+            link.create();
+        } catch (UnsupportedOperationException | FileSystemException exception) {
+            assumeTrue(false, "filesystem does not support symbolic links");
+        }
+    }
+
+    @FunctionalInterface
+    private interface SymlinkCreation {
+        void create() throws IOException;
+    }
+
+    private static String alphabetic(int index) {
+        StringBuilder suffix = new StringBuilder();
+        int remaining = index;
+        do {
+            suffix.append((char) ('a' + remaining % 26));
+            remaining /= 26;
+        } while (remaining > 0);
+        return suffix.toString();
     }
 
     private static String script(String selector, String id) {

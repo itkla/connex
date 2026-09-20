@@ -130,7 +130,34 @@ public class ScriptedAiScriptLoader {
                         "Scripted AI script selectors must be unique: " + script.selector());
             }
         }
+        requireDisjointSelectors(bySelector.keySet());
         return Map.copyOf(bySelector);
+    }
+
+    /**
+     * Refuses selectors that contain one another.
+     *
+     * <p>A selector is matched by substring search over the serialized prompt, so a request
+     * carrying the longer of two nested selectors carries the shorter one as well and matches both.
+     * The cursor then refuses the turn for having matched more than one script — a run-time failure
+     * for a fixture fault, and exactly the class of silent selector error this loader exists to
+     * catch at load time. Uniqueness by equality does not cover it.
+     *
+     * @param selectors every loaded selector
+     */
+    private static void requireDisjointSelectors(Set<String> selectors) {
+        List<String> ordered = List.copyOf(selectors);
+        for (int index = 0; index < ordered.size(); index++) {
+            for (int other = index + 1; other < ordered.size(); other++) {
+                String first = ordered.get(index);
+                String second = ordered.get(other);
+                if (first.contains(second) || second.contains(first)) {
+                    throw new IllegalStateException(
+                            "Scripted AI script selectors must not contain one another: "
+                                    + first + ", " + second);
+                }
+            }
+        }
     }
 
     private static List<Path> scriptFiles(Path directory) {
@@ -265,7 +292,20 @@ public class ScriptedAiScriptLoader {
                 deltas);
     }
 
-    private static void requireMaskingSafeSelector(String selector, Path file) {
+    /**
+     * Refuses a selector that {@code MaskingEngine} would rewrite on its way to the provider.
+     *
+     * <p>Unreachable today by construction: {@link ScriptedAiScript#SELECTOR} admits only lowercase
+     * letters and underscores, and every masker detector needs a digit, a scheme or a dot. It is
+     * kept, and kept package-private so its own test can reach it, because a future detector could
+     * make it reachable, and the failure it prevents is completely silent — a rewritten selector
+     * matches nothing, so every trajectory refuses with {@code provider_error} for a reason no
+     * assertion names.
+     *
+     * @param selector the declared selector
+     * @param file the fixture the selector came from
+     */
+    static void requireMaskingSafeSelector(String selector, Path file) {
         if (!selector.equals(MaskingEngine.maskFreeText(selector, new MaskingContext()))) {
             throw invalid(file, "selector does not survive masking unchanged");
         }

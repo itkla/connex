@@ -65,13 +65,16 @@ public class ScriptedAiProviderConfiguration {
      * @param scripts loaded scripts
      * @param journal bounded request journal
      * @param interceptors loop-thread hooks; empty in the running application
+     * @param aiProperties bound AI configuration
      * @return the scripted provider
      */
     @Bean
     ScriptedAiProvider scriptedAiProvider(
             ScriptedAiScriptLoader scripts,
             ScriptedAiRequestJournal journal,
-            ObjectProvider<ScriptedAiStepInterceptor> interceptors) {
-        return new ScriptedAiProvider(scripts, journal, interceptors.orderedStream().toList());
+            ObjectProvider<ScriptedAiStepInterceptor> interceptors,
+            AiProperties aiProperties) {
+        return new ScriptedAiProvider(
+                scripts, journal, interceptors.orderedStream().toList(), aiProperties);
     }
 }

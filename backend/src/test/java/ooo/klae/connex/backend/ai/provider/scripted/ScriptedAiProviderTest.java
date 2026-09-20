@@ -1,7 +1,8 @@
 package ooo.klae.connex.backend.ai.provider.scripted;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,11 +12,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiCredentials;
@@ -236,25 +240,10 @@ class ScriptedAiProviderTest {
     @Test
     void streamsOrderedDeltasThroughTheObserverAndTheStreamDispatchSeam(@TempDir Path directory)
             throws IOException {
-        ScriptedAiProvider provider = provider(directory, """
-                {
-                  "id": "unit",
-                  "selector": "connex_script_unit",
-                  "capabilityClass": "scripted-native-stream",
-                  "steps": [
-                    {
-                      "afterToolCalls": 0,
-                      "emit": {
-                        "kind": "final",
-                        "text": "hello world",
-                        "deltas": ["hello", " world"]
-                      }
-                    }
-                  ]
-                }
-                """);
-        RecordingExecutor executor = new RecordingExecutor();
-        RecordingObserver observer = new RecordingObserver();
+        ScriptedAiProvider provider = provider(directory, streamingScript());
+        List<String> events = new ArrayList<>();
+        RecordingExecutor executor = new RecordingExecutor(events);
+        RecordingObserver observer = new RecordingObserver(events, -1);
 
         AiCompletionResult result = provider.completeStreaming(
                 request(executor, "scripted-native-stream", SELECTOR, List.of(), null, false),
@@ -262,10 +251,68 @@ class ScriptedAiProviderTest {
 
         assertEquals("hello world", result.text());
         assertEquals(List.of("hello", " world"), observer.deltas);
-        assertEquals(List.of("reasoningMode", "open", "delta", "chunk", "delta", "chunk", "closed"),
-                observer.events);
+        assertEquals(
+                List.of("reasoningMode", "open", "beforeSend",
+                        "delta", "chunk", "delta", "chunk", "closed"),
+                events,
+                "the streamed order must mirror OpenAiCompatibleClient.sendStream: the transport "
+                        + "opens, and only then is the budget lease marked dispatched");
         assertEquals(1, executor.streamExecutes);
         assertEquals(1, executor.beforeSends);
+    }
+
+    @Test
+    void refusesAnAlreadyExpiredAttemptBeforeMarkingTheLeaseDispatched(@TempDir Path directory)
+            throws IOException {
+        ScriptedAiProvider provider = provider(directory, nativeScript());
+        RecordingExecutor executor = new RecordingExecutor();
+        executor.pinnedDeadline = expiredDeadline();
+
+        assertThrows(AiProviderCallerDeadlineExceededException.class,
+                () -> provider.complete(nativeRequest(executor, List.of(), null)));
+
+        assertEquals(1, executor.executes);
+        assertEquals(0, executor.beforeSends,
+                "an attempt whose caller deadline has elapsed must not mark a dispatch");
+    }
+
+    @Test
+    void refusesAStreamCancelledAsTheTransportOpensRatherThanDispatching(@TempDir Path directory)
+            throws IOException {
+        ScriptedAiProvider provider = provider(directory, streamingScript());
+        List<String> events = new ArrayList<>();
+        RecordingExecutor executor = new RecordingExecutor(events);
+        RecordingObserver observer = new RecordingObserver(events, 0);
+
+        assertThrows(AiProviderCallerDeadlineExceededException.class,
+                () -> provider.completeStreaming(
+                        request(executor, "scripted-native-stream", SELECTOR, List.of(), null,
+                                false),
+                        observer));
+
+        assertEquals(List.of("reasoningMode", "open", "closed"), events);
+        assertEquals(0, executor.beforeSends);
+        assertTrue(observer.deltas.isEmpty());
+    }
+
+    @Test
+    void abortsAStreamCancelledMidEmissionInsteadOfFinishingIt(@TempDir Path directory)
+            throws IOException {
+        ScriptedAiProvider provider = provider(directory, streamingScript());
+        List<String> events = new ArrayList<>();
+        RecordingExecutor executor = new RecordingExecutor(events);
+        RecordingObserver observer = new RecordingObserver(events, 1);
+
+        assertThrows(AiProviderCallerDeadlineExceededException.class,
+                () -> provider.completeStreaming(
+                        request(executor, "scripted-native-stream", SELECTOR, List.of(), null,
+                                false),
+                        observer));
+
+        assertEquals(List.of("hello"), observer.deltas,
+                "the registered cancellation must actually abort the scripted emission");
+        assertEquals(1, executor.beforeSends);
+        assertEquals("closed", events.getLast());
     }
 
     @Test
@@ -332,7 +379,7 @@ class ScriptedAiProviderTest {
     }
 
     @Test
-    void journalsEveryRequestItReceivedIncludingRefusedOnes(@TempDir Path directory)
+    void journalsEveryRequestItReceivedAndMarksOnlyTheDispatchedOnes(@TempDir Path directory)
             throws IOException {
         ScriptedAiRequestJournal journal = new ScriptedAiRequestJournal();
         ScriptedAiProvider provider = provider(directory, nativeScript(), journal);
@@ -348,9 +395,70 @@ class ScriptedAiProviderTest {
                 null)));
 
         assertEquals(2, journal.recorded().size());
-        assertSame(first, journal.recorded().getFirst());
+        assertTrue(journal.recorded().getFirst().dispatched());
+        assertFalse(journal.recorded().getLast().dispatched(),
+                "a request the provider refused before its send point never left");
+        assertEquals(1, journal.dispatched().size());
         journal.clear();
         assertTrue(journal.recorded().isEmpty());
+    }
+
+    @Test
+    void marksNoDispatchWhenTheEgressSeamRefusesTheAttempt(@TempDir Path directory)
+            throws IOException {
+        ScriptedAiRequestJournal journal = new ScriptedAiRequestJournal();
+        ScriptedAiProvider provider = provider(directory, nativeScript(), journal);
+        AiProviderAttemptExecutor refusing = new AiProviderAttemptExecutor() {
+            @Override
+            public String execute(Supplier<String> attempt) {
+                throw new AiProviderException("refused at the egress seam");
+            }
+        };
+
+        assertThrows(AiProviderException.class,
+                () -> provider.complete(nativeRequest(refusing, List.of(), null)));
+
+        assertEquals(1, journal.recorded().size(),
+                "the journal records what the provider was handed, dispatched or not");
+        assertFalse(journal.recorded().getFirst().dispatched());
+        assertTrue(journal.dispatched().isEmpty(),
+                "an attempt the restriction epoch, the feature gate or the provider guard "
+                        + "refused inside execute must not appear as egress");
+    }
+
+    @Test
+    void journalsARedactionThatCarriesNoCredentialValues(@TempDir Path directory)
+            throws IOException {
+        ScriptedAiRequestJournal journal = new ScriptedAiRequestJournal();
+        ScriptedAiProvider provider = provider(directory, nativeScript(), journal);
+        RecordingExecutor executor = new RecordingExecutor();
+        AiCompletionRequest live = new AiCompletionRequest(
+                target("scripted-native"),
+                AiCredentials.of(Map.of("apiKey", "live-provider-secret-value")),
+                "system",
+                List.of(new AiMessage("user", SELECTOR)),
+                List.of(),
+                AiOutputMode.JSON,
+                new AiResponseSchema("assistant_step", objectMapper.createObjectNode()),
+                new AiNativeToolRequest(
+                        List.of(new AiToolDefinition(
+                                "search_records", "search", objectMapper.createObjectNode())),
+                        List.of(),
+                        null,
+                        false),
+                AiReasoningMode.TAGGED,
+                executor,
+                256,
+                0.1);
+
+        provider.complete(live);
+
+        AiCompletionRequest recorded = journal.recorded().getFirst().request();
+        assertNotSame(live, recorded, "the live request must not be retained");
+        assertTrue(recorded.credentials().values().isEmpty(),
+                "decrypted BYOP credentials must never sit in a process-lifetime buffer");
+        assertEquals(List.of(new AiMessage("user", SELECTOR)), recorded.messages(),
+                "the prompt material the assertions are about is retained verbatim");
     }
 
     private void assertFailureDispatches(
@@ -385,7 +493,8 @@ class ScriptedAiProviderTest {
         return new ScriptedAiProvider(
                 new ScriptedAiScriptLoader(directory.toString(), objectMapper),
                 journal,
-                List.of());
+                List.of(),
+                new AiProperties());
     }
 
     private static String nativeScript() {
@@ -411,6 +520,34 @@ class ScriptedAiProviderTest {
                   ]
                 }
                 """.formatted(FINAL_TEXT.replace("\"", "\\\""));
+    }
+
+    private static String streamingScript() {
+        return """
+                {
+                  "id": "unit",
+                  "selector": "connex_script_unit",
+                  "capabilityClass": "scripted-native-stream",
+                  "steps": [
+                    {
+                      "afterToolCalls": 0,
+                      "emit": {
+                        "kind": "final",
+                        "text": "hello world",
+                        "deltas": ["hello", " world"]
+                      }
+                    }
+                  ]
+                }
+                """;
+    }
+
+    private static AiRequestDeadline expiredDeadline() {
+        AiRequestDeadline deadline = AiRequestDeadline.afterNanos(1);
+        while (!deadline.isExpired()) {
+            Thread.onSpinWait();
+        }
+        return deadline;
     }
 
     private AiCompletionRequest nativeRequest(
@@ -478,10 +615,35 @@ class ScriptedAiProviderTest {
                 null, null, null, false);
     }
 
+    /**
+     * Records the executor callbacks into the same ordered list the observer writes to.
+     *
+     * <p>Counting {@code beforeSend} on its own cannot fail on a dispatch-point regression: moving
+     * the call anywhere inside the supplier leaves the total at one. The relative order against
+     * {@code onTransportOpen} is the property that matters, because opening the transport is a
+     * gate in production, so it has to be observable here.
+     */
     private static final class RecordingExecutor implements AiProviderAttemptExecutor {
+        private final List<String> events;
+        private AiRequestDeadline pinnedDeadline;
         private int executes;
         private int streamExecutes;
         private int beforeSends;
+
+        private RecordingExecutor() {
+            this(new ArrayList<>());
+        }
+
+        private RecordingExecutor(List<String> events) {
+            this.events = events;
+        }
+
+        @Override
+        public AiRequestDeadline deadline(long requestTimeoutMillis) {
+            return pinnedDeadline == null
+                    ? AiProviderAttemptExecutor.super.deadline(requestTimeoutMillis)
+                    : pinnedDeadline;
+        }
 
         @Override
         public String execute(Supplier<String> attempt) {
@@ -498,12 +660,24 @@ class ScriptedAiProviderTest {
         @Override
         public void beforeSend() {
             beforeSends++;
+            events.add("beforeSend");
         }
     }
 
     private static final class RecordingObserver implements AiProviderStreamObserver {
         private final List<String> deltas = new ArrayList<>();
-        private final List<String> events = new ArrayList<>();
+        private final List<String> events;
+        private final int cancelAfterDeltas;
+        private Runnable cancellation;
+
+        private RecordingObserver() {
+            this(new ArrayList<>(), -1);
+        }
+
+        private RecordingObserver(List<String> events, int cancelAfterDeltas) {
+            this.events = events;
+            this.cancelAfterDeltas = cancelAfterDeltas;
+        }
 
         @Override
         public void onReasoningMode(AiReasoningMode reasoningMode) {
@@ -513,6 +687,10 @@ class ScriptedAiProviderTest {
         @Override
         public void onTransportOpen(Runnable cancellation) {
             events.add("open");
+            this.cancellation = cancellation;
+            if (cancelAfterDeltas == 0) {
+                cancellation.run();
+            }
         }
 
         @Override
@@ -529,6 +707,9 @@ class ScriptedAiProviderTest {
         public void onContentDelta(String text) {
             events.add("delta");
             deltas.add(text);
+            if (cancellation != null && deltas.size() == cancelAfterDeltas) {
+                cancellation.run();
+            }
         }
     }
 }

@@ -2,8 +2,11 @@ package ooo.klae.connex.backend.ai.provider.scripted;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import ooo.klae.connex.backend.ai.AiProperties;
+import ooo.klae.connex.backend.ai.egress.AiRequestDeadline;
 import ooo.klae.connex.backend.ai.provider.AiCompletionRequest;
 import ooo.klae.connex.backend.ai.provider.AiCompletionResult;
 import ooo.klae.connex.backend.ai.provider.AiOutputMode;
@@ -36,6 +39,13 @@ import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
  * adapter would write bytes. {@code beforeSend()} is the only route to the budget lease's
  * dispatched mark; {@code execute} never touches the lease. A declared failure still dispatches
  * because a transport failure in production happens after the bytes leave.
+ *
+ * <p><b>The call order mirrors the real transport, not a convenient one.</b> On the streamed path
+ * {@code OpenAiCompatibleClient.sendStream} opens the transport, re-checks cancellation and the
+ * caller deadline, and only then calls {@code beforeSend}; opening the transport is a gate, because
+ * {@code AiChatStreamingProgress.Observer.onTransportOpen} refuses a turn that is no longer
+ * running. Marking the lease dispatched before that gate would record a send production would
+ * never record. The buffered path re-checks the same way before its own {@code beforeSend}.
  */
 public class ScriptedAiProvider implements AiProvider {
 
@@ -47,20 +57,24 @@ public class ScriptedAiProvider implements AiProvider {
     private final ScriptedAiScriptLoader scripts;
     private final ScriptedAiRequestJournal journal;
     private final List<ScriptedAiStepInterceptor> interceptors;
+    private final AiProperties aiProperties;
 
     /**
      * Creates the scripted provider.
      * @param scripts loaded and validated scripts
      * @param journal bounded record of received requests
      * @param interceptors loop-thread hooks; empty on the main classpath
+     * @param aiProperties bound AI configuration, read for the provider request timeout
      */
     public ScriptedAiProvider(
             ScriptedAiScriptLoader scripts,
             ScriptedAiRequestJournal journal,
-            List<ScriptedAiStepInterceptor> interceptors) {
+            List<ScriptedAiStepInterceptor> interceptors,
+            AiProperties aiProperties) {
         this.scripts = Objects.requireNonNull(scripts, "scripts");
         this.journal = Objects.requireNonNull(journal, "journal");
         this.interceptors = List.copyOf(Objects.requireNonNull(interceptors, "interceptors"));
+        this.aiProperties = Objects.requireNonNull(aiProperties, "aiProperties");
     }
 
     @Override
@@ -106,9 +120,13 @@ public class ScriptedAiProvider implements AiProvider {
     @Override
     public AiCompletionResult complete(AiCompletionRequest request) {
         Resolution resolution = resolve(request);
+        AiRequestDeadline deadline = request.providerAttemptExecutor()
+                .deadline(aiProperties.getRequestTimeoutMs());
         AtomicReference<AiCompletionResult> result = new AtomicReference<>();
         request.providerAttemptExecutor().execute(() -> {
+            requireAttemptLive(deadline, null);
             request.providerAttemptExecutor().beforeSend();
+            resolution.entry().markDispatched();
             result.set(emit(request, resolution));
             return "";
         });
@@ -126,14 +144,19 @@ public class ScriptedAiProvider implements AiProvider {
         if (!resolution.capabilityClass().streaming()) {
             throw new AiProviderException("AI provider does not support streaming");
         }
+        AiRequestDeadline deadline = request.providerAttemptExecutor()
+                .deadline(aiProperties.getRequestTimeoutMs());
+        observer.onReasoningMode(request.reasoningMode());
+        AtomicBoolean cancelled = new AtomicBoolean();
         return request.providerAttemptExecutor().executeStream(() -> {
-            request.providerAttemptExecutor().beforeSend();
-            observer.onReasoningMode(request.reasoningMode());
-            observer.onTransportOpen(() -> {
-            });
+            observer.onTransportOpen(() -> cancelled.set(true));
             try {
+                requireAttemptLive(deadline, cancelled);
+                request.providerAttemptExecutor().beforeSend();
+                resolution.entry().markDispatched();
                 AiCompletionResult result = emit(request, resolution);
                 for (String delta : streamedDeltas(resolution.step(), result.text())) {
+                    requireAttemptLive(deadline, cancelled);
                     observer.onContentDelta(delta);
                     observer.onNetworkChunk();
                 }
@@ -142,6 +165,25 @@ public class ScriptedAiProvider implements AiProvider {
                 observer.onTransportClosed();
             }
         });
+    }
+
+    /**
+     * Refuses an attempt whose caller deadline has elapsed, or that has been cancelled.
+     *
+     * <p>The real client makes exactly this check immediately before {@code beforeSend} on both
+     * paths, and aborts a live stream by cancelling the HTTP exchange, which surfaces as the same
+     * refusal. Without it a scripted turn would answer for a member who already cancelled and
+     * would mark a budget lease dispatched for a send production would have abandoned.
+     *
+     * @param deadline the attempt deadline the executor handed out
+     * @param cancellation cancellation flag the transport registered, or {@code null} when buffered
+     */
+    private static void requireAttemptLive(AiRequestDeadline deadline, AtomicBoolean cancellation) {
+        if ((cancellation != null && cancellation.get())
+                || deadline.isExpired()
+                || Thread.currentThread().isInterrupted()) {
+            throw new AiProviderCallerDeadlineExceededException();
+        }
     }
 
     private Resolution resolve(AiCompletionRequest request) {
@@ -153,7 +195,7 @@ public class ScriptedAiProvider implements AiProvider {
             throw new AiProviderException("Unsupported AI provider");
         }
         ScriptedAiCapabilityClass capabilityClass = capabilityClass(target);
-        journal.record(request);
+        ScriptedAiRequestJournal.Entry entry = journal.record(request);
         ScriptedAiTurnCursor cursor = ScriptedAiTurnCursor.of(request, scripts.selectors());
         ScriptedAiScript script = scripts.bySelector(cursor.selector());
         if (script == null) {
@@ -168,7 +210,7 @@ public class ScriptedAiProvider implements AiProvider {
         for (ScriptedAiStepInterceptor interceptor : interceptors) {
             interceptor.beforeEmit(script.id(), cursor.completedToolCalls());
         }
-        return new Resolution(script, step, cursor, capabilityClass);
+        return new Resolution(script, step, cursor, capabilityClass, entry);
     }
 
     private static AiCompletionResult emit(AiCompletionRequest request, Resolution resolution) {
@@ -283,6 +325,7 @@ public class ScriptedAiProvider implements AiProvider {
             ScriptedAiScript script,
             ScriptedAiStep step,
             ScriptedAiTurnCursor cursor,
-            ScriptedAiCapabilityClass capabilityClass) {
+            ScriptedAiCapabilityClass capabilityClass,
+            ScriptedAiRequestJournal.Entry entry) {
     }
 }

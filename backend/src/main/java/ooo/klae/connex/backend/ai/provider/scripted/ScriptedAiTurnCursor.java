@@ -27,13 +27,21 @@ public record ScriptedAiTurnCursor(
         boolean closing,
         boolean nativeProtocol) {
 
+    /** Delimiter the prompt assembler opens every untrusted CRM-data envelope with. */
+    private static final String ENVELOPE_MARKER = "CRM_DATA_BEGIN";
+
     /**
-     * The JSON-protocol tool-result envelope the prompt assembler emits per completed tool call.
+     * The envelope type the prompt assembler stamps on a completed tool call's result.
      *
      * <p>Counted rather than inferred, because an evicted result still emits exactly one envelope,
-     * so the count stays monotonic under budget pressure. The marker cannot be forged from inside
-     * an envelope: retrieved tenant content is serialized as JSON strings, where the quotes are
-     * escaped.
+     * so the count stays monotonic under budget pressure.
+     *
+     * <p>Matched only at the envelope's <em>top level</em>, and only outside a JSON string.
+     * Retrieved tenant content is free text that reaches the prompt as ordinary object fields —
+     * an activity's {@code type} is unvalidated and lands in the tool-result data map verbatim —
+     * so a record whose activity type is literally {@code tool_result} renders this exact marker
+     * inside the envelope's {@code data}. A raw substring search would then over-count that turn
+     * and replay a step nobody authored, or refuse the turn outright.
      */
     private static final String TOOL_RESULT_MARKER = "\"type\":\"tool_result\"";
 
@@ -116,12 +124,67 @@ public record ScriptedAiTurnCursor(
             if (content == null) {
                 continue;
             }
-            int index = content.indexOf(TOOL_RESULT_MARKER);
+            int index = content.indexOf(ENVELOPE_MARKER);
             while (index >= 0) {
-                count++;
-                index = content.indexOf(TOOL_RESULT_MARKER, index + TOOL_RESULT_MARKER.length());
+                if (isToolResultEnvelope(content, index + ENVELOPE_MARKER.length())) {
+                    count++;
+                }
+                index = content.indexOf(ENVELOPE_MARKER, index + ENVELOPE_MARKER.length());
             }
         }
         return count;
+    }
+
+    /**
+     * Whether the envelope opening at {@code from} declares the tool-result type at its top level.
+     *
+     * <p>Walks the envelope object tracking nesting depth and JSON string state, so the type marker
+     * counts only when it is a key of the envelope itself. Tenant content cannot forge it: inside a
+     * JSON string every quote is escaped, and an escaped quote is not a key.
+     *
+     * @param content one prompt message's text
+     * @param from index just past the envelope delimiter
+     * @return whether this envelope is a tool result
+     */
+    private static boolean isToolResultEnvelope(String content, int from) {
+        int start = from;
+        while (start < content.length() && Character.isWhitespace(content.charAt(start))) {
+            start++;
+        }
+        if (start >= content.length() || content.charAt(start) != '{') {
+            return false;
+        }
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int index = start; index < content.length(); index++) {
+            char current = content.charAt(index);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (current == '\\') {
+                    escaped = true;
+                } else if (current == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (depth == 1 && content.startsWith(TOOL_RESULT_MARKER, index)) {
+                return true;
+            }
+            switch (current) {
+                case '{', '[' -> depth++;
+                case '}', ']' -> {
+                    depth--;
+                    if (depth == 0) {
+                        return false;
+                    }
+                }
+                case '"' -> inString = true;
+                default -> {
+                }
+            }
+        }
+        return false;
     }
 }
