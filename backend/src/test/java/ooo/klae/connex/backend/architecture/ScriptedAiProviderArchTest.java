@@ -75,6 +75,20 @@ class ScriptedAiProviderArchTest {
             "ScriptedAiRequestJournal",
             "ScriptedAiStepInterceptor");
 
+    /**
+     * Source shapes that would put a step interceptor on the main classpath.
+     *
+     * <p>A named implementation is only the obvious one. A {@code @Bean} method or a field
+     * initialiser returning the functional interface contributes an implementation as a lambda
+     * with none of the literals a class declaration would carry, which is precisely how the "zero
+     * implementations ship" claim would quietly stop being true.
+     */
+    private static final List<Pattern> INTERCEPTOR_IMPLEMENTATION_SHAPES = List.of(
+            Pattern.compile("implements\\s+ScriptedAiStepInterceptor"),
+            Pattern.compile("new\\s+ScriptedAiStepInterceptor"),
+            Pattern.compile("\\bScriptedAiStepInterceptor\\s+\\w+\\s*\\("),
+            Pattern.compile("\\bScriptedAiStepInterceptor\\s+\\w+\\s*="));
+
     /** Files permitted to name the scoped types while living outside the scripted package. */
     private static final Set<String> SCOPED_TYPE_ALLOWLIST = Set.of(
             "backend/src/test/java/ooo/klae/connex/backend/architecture/"
@@ -103,6 +117,12 @@ class ScriptedAiProviderArchTest {
         assertEquals("connex.ai.scripted-provider", conditional.prefix());
         assertEquals(List.of("enabled"), List.of(conditional.name()));
         assertEquals("true", conditional.havingValue());
+        assertFalse(conditional.havingValue().isBlank(),
+                "a blank havingValue reduces the second gate to a presence check, which any "
+                        + "value including false would satisfy");
+        assertFalse(conditional.matchIfMissing(),
+                "matchIfMissing would make the flag optional, leaving the Spring profile as the "
+                        + "only gate on the configuration");
     }
 
     @Test
@@ -172,14 +192,35 @@ class ScriptedAiProviderArchTest {
         List<String> violations = new ArrayList<>();
         for (Path file : javaFiles(Path.of("backend/src/main/java"))) {
             String source = read(file);
-            if (source.contains("implements ScriptedAiStepInterceptor")
-                    || source.contains("new ScriptedAiStepInterceptor")) {
-                violations.add(file.getFileName().toString());
+            for (Pattern shape : INTERCEPTOR_IMPLEMENTATION_SHAPES) {
+                if (shape.matcher(source).find()) {
+                    violations.add(file.getFileName() + " matches " + shape.pattern());
+                }
             }
         }
         assertTrue(violations.isEmpty(),
                 "the running application must contribute no scripted step interceptor: "
                         + violations);
+    }
+
+    @Test
+    void onlyTheGatedConfigurationDeclaresBeansInTheScriptedPackage() throws IOException {
+        List<String> violations = new ArrayList<>();
+        for (Path file : javaFiles(SCRIPTED_PACKAGE)) {
+            String name = file.getFileName().toString();
+            String source = read(file);
+            for (String stereotype : List.of(
+                    "@Component", "@Service", "@Configuration", "@Bean", "@Repository")) {
+                if (source.contains(stereotype)
+                        && !"ScriptedAiProviderConfiguration.java".equals(name)) {
+                    violations.add(name + " declares " + stereotype);
+                }
+            }
+        }
+        assertTrue(violations.isEmpty(),
+                "every scripted bean must enter the context through the one class that carries "
+                        + "both the profile and the flag; a second bean-defining class in this "
+                        + "package would be reachable in every edition: " + violations);
     }
 
     @Test
