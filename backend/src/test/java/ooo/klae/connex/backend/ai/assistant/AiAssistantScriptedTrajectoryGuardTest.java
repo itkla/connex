@@ -203,7 +203,7 @@ class AiAssistantScriptedTrajectoryGuardTest extends AbstractScriptedTrajectoryT
         Pipeline pipeline = pipeline("Guard pipeline");
         Stage discovery = stage(pipeline, "Discovery", 0);
         stage(pipeline, "Negotiation", 1);
-        Deal renewal = deal("Wexford Renewal", pipeline, discovery, customer);
+        Deal renewal = deal("Halyard Renewal", pipeline, discovery, customer);
 
         Trajectory trajectory = run(
                 "connex_script_confirm_proposal", "move this one along if you can");
@@ -219,10 +219,14 @@ class AiAssistantScriptedTrajectoryGuardTest extends AbstractScriptedTrajectoryT
 
         authenticate();
         try {
-            assertThrows(ConflictException.class,
+            ConflictException refusal = assertThrows(ConflictException.class,
                     () -> writeToolService().approve(trajectory.sessionId(), proposal.getId()),
                     "a proposal whose target was written after it was recorded must refuse rather "
                             + "than overwrite the values the member never saw");
+            assertEquals("Assistant proposal target changed", refusal.getMessage(),
+                    "approval refuses for several reasons and only one of them is freshness; "
+                            + "pinning the message is what keeps this golden from passing on a "
+                            + "permission or restriction refusal instead");
         } finally {
             clearAuthentication();
         }
