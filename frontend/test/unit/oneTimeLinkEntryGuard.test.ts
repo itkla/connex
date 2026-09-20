@@ -10,7 +10,8 @@ const READER_CALL = "takeOneTimeLinkToken";
 const ENTRY_HOOK = "useOneTimeLinkEntry";
 const SOURCE_ROOTS = ["app", "components", "lib"].map((dir) => path.join(FRONTEND, dir));
 const CODE_EXTENSIONS = [".ts", ".tsx"];
-const ROUTE_BOUNDARY_FILES = ["layout", "template", "error"];
+const ROUTE_BOUNDARY_FILES = ["layout", "template", "error", "not-found"];
+const LANDING_NOT_FOUND = CODE_EXTENSIONS.map((extension) => path.join(APP, `not-found${extension}`));
 
 /**
  * One-time-link entry routes (#1588) that must keep being discovered. The guard derives its entries
@@ -155,16 +156,15 @@ function routeOf(page: string): string {
 }
 
 /**
- * Lists the layouts, templates and error boundaries that wrap a page, plus the global error
- * boundary.
+ * Lists the layouts, templates, not-found files and error boundaries that wrap a page, plus the
+ * global error boundary. Each renders around, or in place of, an entry that is still inside the
+ * window between the strip and the sync `useOneTimeLinkEntry` schedules.
  *
- * `not-found.tsx` is deliberately not in this chain. Next can swap it in for a mounted entry, but
- * the only refresh it reaches is the landing chrome's `LanguageSwitcher`, which refreshes after the
- * visitor picks a language — many tasks after `useOneTimeLinkEntry` has handed the router the
- * stripped URL, since that sync now survives the entry's own unmount. Listing it here would fail on
- * chrome `app/not-found.tsx` carries on purpose, so the bound that covers it is the sync, not a
- * scan. Layouts, templates and error boundaries stay listed: they render around, or in place of, an
- * entry that is still inside the window between the strip and that sync.
+ * The single exception is the root `app/not-found.tsx`, which is the public landing chrome rather
+ * than an ordinary route boundary: its `LanguageSwitcher` refreshes only after the visitor picks a
+ * language, many tasks after the sync has handed the router the stripped URL, so listing it would
+ * fail on chrome it carries on purpose and the bound that covers it is the sync, not a scan. A
+ * segment-level `not-found` above an entry route carries no such justification, so it stays scanned.
  */
 function boundaryChain(page: string): string[] {
     const chain: string[] = [];
@@ -172,7 +172,7 @@ function boundaryChain(page: string): string[] {
         for (const name of ROUTE_BOUNDARY_FILES) {
             for (const extension of CODE_EXTENSIONS) {
                 const candidate = path.join(dir, `${name}${extension}`);
-                if (existsSync(candidate)) chain.push(candidate);
+                if (existsSync(candidate) && !LANDING_NOT_FOUND.includes(candidate)) chain.push(candidate);
             }
         }
         if (dir === APP) break;

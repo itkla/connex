@@ -196,6 +196,41 @@ describe("URL writers (multi-writer coexistence contract)", () => {
         expect(replaceState.mock.calls[0][0]).toEqual({ connexRecordReturn: "5f0c" });
     });
 
+    it("writeOwnedParamsToUrl keeps the marker without a state Next's patch short-circuits on", () => {
+        stubLocation("?q=foo", {
+            __NA: true,
+            __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: "seeded" },
+            connexRecordReturn: "5f0c",
+        });
+        writeOwnedParamsToUrl("/activity/all", { activity: "9" });
+
+        expect(replaceState.mock.calls[0][0]).toEqual({
+            __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: "seeded" },
+            connexRecordReturn: "5f0c",
+        });
+    });
+
+    it("pins the short-circuit Next's patched replaceState applies to a writer's state", () => {
+        const patch = readFileSync(
+            path.join(process.cwd(), "node_modules/next/dist/client/components/app-router.js"),
+            "utf8",
+        );
+
+        expect(
+            patch,
+            "Next changed the state keys its history patch short-circuits on; re-derive what the owned-params writer may pass",
+        ).toContain("if (data?.__NA || data?._N) {");
+
+        stubLocation("?q=foo", { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: "seeded" } });
+        writeOwnedParamsToUrl("/activity/all", { activity: "9" });
+        const written = replaceState.mock.calls[0][0];
+
+        expect(
+            written === null || (!("__NA" in written) && !("_N" in written)),
+            "a state carrying __NA or _N skips the ACTION_RESTORE that keeps canonicalUrl in step with the address bar",
+        ).toBe(true);
+    });
+
     it("writeSavedViewToUrl sets and clears only sv", () => {
         stubLocation("?q=acme");
         writeSavedViewToUrl("/records/contacts", "5:9");

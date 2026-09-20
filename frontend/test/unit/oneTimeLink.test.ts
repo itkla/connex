@@ -87,7 +87,7 @@ describe("syncStrippedUrlWithRouter", () => {
         expect(replaceState).not.toHaveBeenCalled();
     });
 
-    it("drops the replay when the document has moved past the stripped URL", () => {
+    it("replays the URL the document holds when something moved it past the stripped one", () => {
         const location = { hash: "#token=secret_bearer_value_123456", search: "", pathname: "/invite" };
         const replaceState = stubWindow(location, { __NA: true });
         takeOneTimeLinkToken();
@@ -97,10 +97,24 @@ describe("syncStrippedUrlWithRouter", () => {
         replaceState.mockClear();
 
         syncStrippedUrlWithRouter();
-        location.pathname = "/invite";
-        location.search = "";
+
+        expect(replaceState).toHaveBeenCalledWith(null, "", "/dashboard?workspace=42");
+    });
+
+    it("stands down while a second link's bearer is still in the fragment, and stays owed", () => {
+        const location = { hash: "#token=secret_bearer_value_123456", search: "", pathname: "/invite" };
+        const replaceState = stubWindow(location, { __NA: true });
+        takeOneTimeLinkToken();
+        location.hash = "#token=second_bearer_value_654321";
+        replaceState.mockClear();
+
         syncStrippedUrlWithRouter();
 
         expect(replaceState).not.toHaveBeenCalled();
+
+        location.hash = "";
+        syncStrippedUrlWithRouter();
+
+        expect(replaceState).toHaveBeenCalledWith(null, "", "/invite");
     });
 });

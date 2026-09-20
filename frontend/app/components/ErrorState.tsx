@@ -17,6 +17,10 @@ import { reportBoundaryErrorWithConsole } from '@/app/lib/clientErrorReporter';
  * A refresh re-publishes the router's canonical URL to the address bar, so the boundaries that can
  * sit above a one-time-link entry route — the root `error.tsx` and `global-error.tsx` — pass
  * `reset` instead. `test/unit/oneTimeLinkEntryGuard.test.ts` fails CI if either reads `retry`.
+ *
+ * Next type-checks pages, layouts and route handlers, not `error.tsx`, so nothing but this
+ * declaration ties the shape to Next. `test/unit/errorBoundaryRetry.test.tsx` mounts Next's own
+ * `ErrorBoundaryHandler` and fails if the props it passes stop matching these members.
  */
 export type SegmentErrorProps = {
     error: Error & { digest?: string };

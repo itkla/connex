@@ -24,9 +24,9 @@ import { syncStrippedUrlWithRouter } from "@/app/lib/oneTimeLink";
  * Unmounting deliberately leaves that task scheduled. An entry that strips and then goes away
  * inside the same task — a throw caught by an error boundary, a `notFound()`, a Suspense teardown —
  * is exactly the case where the router would otherwise keep the pre-strip URL, bearer included, for
- * the life of the document, with nothing left to correct it. The sync replays only the URL the
- * strip wrote and only while the document still holds it, so a stale task cannot drag the router
- * back to a page the visitor has left.
+ * the life of the document, with nothing left to correct it. The sync replays the URL the document
+ * holds when it runs, so a task that outlives the page the visitor arrived on cannot drag the
+ * router back to it.
  */
 export function useOneTimeLinkEntry(): void {
     useEffect(() => {

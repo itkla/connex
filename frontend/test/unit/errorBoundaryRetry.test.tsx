@@ -4,6 +4,7 @@ import path from "node:path";
 import { act, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
+import { ErrorBoundaryHandler, type ErrorInfo } from "next/dist/client/components/error-boundary";
 import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -112,6 +113,75 @@ const FRONTEND = process.cwd();
 const APP = path.join(FRONTEND, "app");
 const APP_SHELL = path.join(APP, "(app)");
 const ROOT_BOUNDARIES = ["error.tsx", "global-error.tsx"].map((name) => path.join(APP, name));
+const ERROR_STATE = path.join(APP, "components", "ErrorState.tsx");
+
+/** Parses a source file the way both source-level checks below read it. */
+function sourceOf(file: string): ts.SourceFile {
+    return ts.createSourceFile(
+        file,
+        readFileSync(file, "utf8"),
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TSX,
+    );
+}
+
+/** The members a named object-type alias declares, in declaration order. */
+function typeMembers(file: string, alias: string): string[] {
+    const source = sourceOf(file);
+    const declaration = source.statements.find((statement): statement is ts.TypeAliasDeclaration =>
+        ts.isTypeAliasDeclaration(statement) && statement.name.text === alias);
+    if (declaration === undefined || !ts.isTypeLiteralNode(declaration.type)) return [];
+    return declaration.type.members.flatMap((member) =>
+        (ts.isPropertySignature(member) && member.name ? [member.name.getText(source)] : []));
+}
+
+/** A child that fails during render, so Next's boundary renders its fallback instead. */
+function Throwing(): never {
+    throw new Error("boom");
+}
+
+/**
+ * Next's boundary props are a hand-written assertion in `SegmentErrorProps`: nothing in the route
+ * type-check covers an `error.tsx`, so a rename on Next's side — it already renamed this prop once,
+ * from `unstable_retry` to `retry` — would leave every boundary destructuring a prop Next no longer
+ * passes and turn "Try again" into a click-time `TypeError`. Mounting Next's own
+ * `ErrorBoundaryHandler` over a throwing child pins the real contract against the installed Next.
+ */
+describe("Next's error-boundary props", () => {
+    it("passes exactly the recovery callbacks SegmentErrorProps declares", async () => {
+        const captured: ErrorInfo[] = [];
+        const container = document.createElement("div");
+        document.body.appendChild(container);
+        const root = createRoot(container, { onCaughtError: vi.fn() });
+
+        await act(async () => {
+            root.render(
+                <ErrorBoundaryHandler
+                    pathname="/dashboard"
+                    errorComponent={(info: ErrorInfo) => {
+                        captured.push(info);
+                        return null;
+                    }}
+                >
+                    <Throwing />
+                </ErrorBoundaryHandler>,
+            );
+            await Promise.resolve();
+        });
+
+        expect(captured.length, "Next's boundary never rendered the probe").toBeGreaterThan(0);
+        const declared = typeMembers(ERROR_STATE, "SegmentErrorProps").sort();
+        expect(declared).toEqual(["error", "reset", "retry"]);
+        for (const info of captured) {
+            expect(Object.keys(info).sort()).toEqual(declared);
+            expect(typeof info.reset).toBe("function");
+            expect(typeof info.retry).toBe("function");
+        }
+
+        await act(async () => root.unmount());
+    });
+});
 
 /** Lists every segment error boundary under a directory. */
 function errorBoundaries(dir: string): string[] {
@@ -124,13 +194,7 @@ function errorBoundaries(dir: string): string[] {
 
 /** The prop names a boundary's default-exported component destructures from Next's error props. */
 function recoveryProps(file: string): string[] {
-    const source = ts.createSourceFile(
-        file,
-        readFileSync(file, "utf8"),
-        ts.ScriptTarget.Latest,
-        true,
-        ts.ScriptKind.TSX,
-    );
+    const source = sourceOf(file);
     const exported = source.statements.find((statement): statement is ts.FunctionDeclaration =>
         ts.isFunctionDeclaration(statement)
         && (statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword) ?? false));

@@ -84,6 +84,29 @@ export function writeSavedViewToUrl(pathname: string, sv: string | null): void {
 }
 
 /**
+ * The custom part of the current `history.state`: everything the app stamped on the entry, without the
+ * `__NA` marker Next's app router owns.
+ *
+ * Next's patched `replaceState` hands a call straight to the native method whenever the state it is
+ * given already carries `__NA` or `_N`, on the assumption that the router itself made the call. So
+ * passing `window.history.state` back verbatim — the obvious way to keep a custom marker — silently
+ * skips the `ACTION_RESTORE` that keeps the router's `canonicalUrl` in step with the address bar, and
+ * a stale `canonicalUrl` is what `useSearchParams` reads and what the next router action re-publishes
+ * over the URL. Handing the patch a copy without `__NA` lets it run instead: it re-attaches `__NA` and
+ * the internals tree before the native write, and the restore it dispatches replaces state with
+ * `preserveCustomHistoryState`, so the marker survives both writes.
+ *
+ * @returns the state to hand `history.replaceState`, or null when the entry carries nothing to keep
+ */
+function customHistoryState(): Record<string, unknown> | null {
+    const state: unknown = window.history.state;
+    if (state === null || typeof state !== 'object') return null;
+    const custom: Record<string, unknown> = { ...state };
+    delete custom.__NA;
+    return custom;
+}
+
+/**
  * Reflects an arbitrary set of owned params into the URL via shallow `history.replaceState`, following
  * the same #405 records-browser contract as {@link writeListStateToUrl}: it reads live
  * `window.location.search` as its base and only ever set/deletes the keys present in `owned`, so every
@@ -91,8 +114,8 @@ export function writeSavedViewToUrl(pathname: string, sv: string | null): void {
  * untouched. An `undefined` or empty value deletes its key, which is how a closed deep-linked record
  * clears itself without disturbing the surrounding query, sort, and filter state.
  *
- * The existing `history.state` is carried through rather than overwritten with null, so the router's own
- * bookkeeping and the record-return marker stamped on a list entry both survive a URL write.
+ * The record-return marker stamped on a list entry is carried through rather than overwritten with
+ * null, via {@link customHistoryState} so that the router still hears the write.
  *
  * @param pathname - the current path, used to rebuild the URL without a full navigation
  * @param owned - the complete set of keys this writer owns, mapped to their current values
@@ -108,7 +131,7 @@ export function writeOwnedParamsToUrl(
     }
     const next = params.toString();
     if (next === window.location.search.replace(/^\?/, '')) return;
-    window.history.replaceState(window.history.state, '', listStateAddress(pathname, next));
+    window.history.replaceState(customHistoryState(), '', listStateAddress(pathname, next));
 }
 
 /** Reflects only the query owner into the URL while preserving sort, pagination, filters, and deep links. */
