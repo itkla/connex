@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -21,7 +22,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -33,6 +36,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
+import org.springframework.transaction.NoTransactionException;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -188,6 +193,26 @@ class DealServiceTest extends AbstractServiceTest {
         assertThrows(ResourceNotFoundException.class,
             () -> dealService.replaceCollaborators(Integer.MAX_VALUE, List.of(member.getId())));
         assertEquals(List.of(member.getId()), dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()));
+    }
+
+    @Test
+    void collaboratorProfilesHydrateOutsideTheTenantWriteTransaction() {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        User member = newUser();
+        AtomicBoolean hydratedInsideTheWrite = new AtomicBoolean(true);
+        doAnswer(invocation -> {
+            hydratedInsideTheWrite.set(declarativeTransactionActive());
+            return invocation.callRealMethod();
+        }).when(collaboratorControlAccess).getProfiles(anyInt(), anyList());
+
+        List<UserDto> replaced = dealService.replaceCollaborators(deal.getId(), List.of(member.getId()));
+
+        assertEquals(List.of(member.getId()), replaced.stream().map(UserDto::getId).toList());
+        assertFalse(hydratedInsideTheWrite.get(),
+            "Collaborator profiles must hydrate after the tenant write transaction completes, so the "
+                + "control-plane read never pins a second pooled connection while the deal's "
+                + "collaborator row locks and the workspace audit-chain head lock are held");
     }
 
     @Test
@@ -2246,6 +2271,15 @@ class DealServiceTest extends AbstractServiceTest {
         user.setDisplayName(displayName);
         userMapper.update(user);
         return user;
+    }
+
+    private static boolean declarativeTransactionActive() {
+        try {
+            TransactionAspectSupport.currentTransactionStatus();
+            return true;
+        } catch (NoTransactionException exception) {
+            return false;
+        }
     }
 
     private static List<Integer> auditedIds(JsonNode ids) {

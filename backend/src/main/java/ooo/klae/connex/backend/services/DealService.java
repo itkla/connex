@@ -24,6 +24,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -143,6 +144,7 @@ public class DealService {
     private final DuplicateDecisionLockService duplicateDecisionLockService;
     private final RecordCreationAugmentationService recordCreationAugmentationService;
     private final DealCollaboratorControlAccess collaboratorControlAccess;
+    private final TransactionTemplate transactionTemplate;
 
     private static final DateTimeFormatter MYSQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -1904,14 +1906,26 @@ public class DealService {
      * Replaces a deal's collaborators with the given workspace members, excluding the owner. The
      * audit entry records the raw collaborator ids before and after the change.
      *
+     * <p>The tenant write runs in its own transaction and the control-plane profiles are hydrated
+     * only once that transaction has completed. Hydrating inside it would suspend a routed tenant
+     * transaction and borrow a second pooled connection while the deal's collaborator row locks and
+     * the workspace's audit-chain head lock are still held — see the connection-budget principle in
+     * {@code docs/backend/LOCKING.md}.
+     *
      * @param dealId the deal in the current workspace
      * @param userIds the requested collaborator ids
      * @return display-safe profiles of the resulting collaborators ordered by display name, then id
      */
-    @Transactional
     @RequirePermission(Permission.DEAL_UPDATE)
     public List<UserDto> replaceCollaborators(int dealId, List<Integer> userIds) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        List<Integer> after = Objects.requireNonNull(
+            transactionTemplate.execute(status -> replaceCollaboratorIds(workspaceId, dealId, userIds)),
+            "deal collaborator replacement result");
+        return collaboratorControlAccess.getProfiles(workspaceId, after);
+    }
+
+    private List<Integer> replaceCollaboratorIds(int workspaceId, int dealId, List<Integer> userIds) {
         Deal deal = dealMapper.getDealById(workspaceId, dealId);
         if (deal == null) throw new ResourceNotFoundException("Deal not found");
         List<Integer> normalized = userIds == null ? List.of() : userIds.stream().distinct().toList();
@@ -1932,6 +1946,6 @@ public class DealService {
             "Updated collaborators on " + deal.getName(),
             auditService.singleChange("collaboratorIds", before, after));
         notificationChanges.publish(workspaceId, "deal", dealId);
-        return collaboratorControlAccess.getProfiles(workspaceId, after);
+        return after;
     }
 }

@@ -39,10 +39,12 @@ import ooo.klae.connex.backend.mappers.DealMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.DealCollaboratorControlAccess;
+import ooo.klae.connex.backend.tenant.ControlCatalogRoutingInterceptor;
 import ooo.klae.connex.backend.tenant.TenantCatalogResolver;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantRoutingDataSource;
 import ooo.klae.connex.backend.tenant.TenantRoutingProperties;
+import ooo.klae.connex.backend.tenant.TenantScopeInterceptor;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
@@ -53,6 +55,9 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 class DealCollaboratorPlaneRoutingIntegrationTest {
     private static final int DEAL_ID = 501;
     private static final int MISSING_USER_ID = Integer.MAX_VALUE;
+    private static final String MAPPERS = "ooo.klae.connex.backend.mappers.";
+    private static final String USER_MAPPER = MAPPERS + "UserMapper";
+    private static final String DEAL_MAPPER = MAPPERS + "DealMapper";
 
     private static String url;
     private static String username;
@@ -144,6 +149,24 @@ class DealCollaboratorPlaneRoutingIntegrationTest {
                 statement.execute("DROP DATABASE " + scratchCatalog);
             }
         }
+    }
+
+    @Test
+    void theHydrationStatementKeepsTheProductionPlaneClassificationThisTestAssumes() {
+        assertTrue(TenantScopeInterceptor.CONTROL_PLANE_NAMESPACES.contains(USER_MAPPER),
+            "The profile hydration runs in an unrouted span with no tenant scope installed, so "
+                + "UserMapper must stay exempt from the fail-closed tenant backstop");
+        assertTrue(TenantScopeInterceptor.SCOPED_NAMESPACES.contains(DEAL_MAPPER),
+            "Collaborator ids are tenant data and must stay behind the tenant backstop");
+        assertTrue(ControlCatalogRoutingInterceptor.CONTROL_CATALOG_NAMESPACES.contains(USER_MAPPER),
+            "Profile hydration must be classified physically control-plane so it reads the default "
+                + "catalog this test proves the tenant catalog does not hold");
+        assertFalse(ControlCatalogRoutingInterceptor.CONTROL_CATALOG_NAMESPACES.contains(DEAL_MAPPER),
+            "deal_collaborator lives in the tenant catalog, so DealMapper must never route to control");
+        assertFalse(ControlCatalogRoutingInterceptor.CONTROL_CATALOG_STATEMENTS.contains(
+                USER_MAPPER + ".getActiveWorkspaceMemberProfilesByIds"),
+            "The hydration statement is classified by its namespace; a per-statement override would "
+                + "route it independently of that registry");
     }
 
     @Test
