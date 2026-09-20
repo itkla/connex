@@ -2,6 +2,17 @@ import { expect, test, type Page } from "@playwright/test";
 
 test.use({ storageState: { cookies: [], origins: [] } });
 
+/**
+ * Next publishes its app-router instance for debugging. Reaching it lets a test perform the refresh
+ * that sits behind an error boundary's retry: it supplies no URL, so it re-publishes whatever
+ * canonical URL the router still holds.
+ */
+declare global {
+    interface Window {
+        next?: { router?: { refresh: () => void } };
+    }
+}
+
 async function mockCsrf(page: Page) {
     await page.route("**/api/auth/csrf", async (route) => {
         await route.fulfill({
@@ -562,4 +573,126 @@ test("passkey enrollment confirmation re-opens a second link that lands in the s
         second: INVALID_LINK_HEADING,
     }, requestedUrls);
     expect(exchanged).toEqual([FIRST_LINK, SECOND_LINK]);
+});
+
+/** Reports whether the current history entry's state serialises to anything holding the bearer. */
+async function historyStateCarries(page: Page, bearer: string): Promise<boolean> {
+    return page.evaluate((token) => {
+        const state: unknown = window.history.state;
+        return JSON.stringify(state ?? null).includes(token);
+    }, bearer);
+}
+
+/**
+ * Marks the current history entry, refreshes through the router, and waits for the commit that
+ * drops the mark.
+ *
+ * A refresh supplies no URL of its own, so it keeps the router's canonical URL and `HistoryUpdater`
+ * writes that URL back to the address bar and the history entry. It also commits with
+ * `preserveCustomHistoryState` off, which discards the mark — the signal that the write has landed,
+ * so the assertions that follow cannot pass by running ahead of it.
+ */
+async function refreshThroughRouter(page: Page) {
+    expect(await page.evaluate(() => typeof window.next?.router?.refresh === "function")).toBe(true);
+    await page.evaluate(() => {
+        const state: unknown = window.history.state;
+        const marked = state !== null && typeof state === "object"
+            ? { ...state, refreshProbe: true }
+            : { refreshProbe: true };
+        window.history.replaceState(marked, "", window.location.href);
+    });
+
+    await page.evaluate(() => {
+        window.next?.router?.refresh();
+    });
+
+    await page.waitForFunction(() => {
+        const state: unknown = window.history.state;
+        return state === null || typeof state !== "object" || !("refreshProbe" in state);
+    });
+}
+
+test("passkey confirmation keeps its bearer out of the router's canonical URL", async ({ page }) => {
+    const requestedUrls = recordRequestedUrls(page);
+    const exchanged: string[] = [];
+    const canonical = canonicalUrl("/auth/confirm-passkey");
+    await mockCsrf(page);
+    await page.route("**/api/auth/webauthn/register/confirmation/exchange", async (route) => {
+        const body: unknown = route.request().postDataJSON();
+        exchanged.push(typeof body === "object" && body !== null && "token" in body ? String(body.token) : "");
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ message: "Confirmed" }),
+        });
+    });
+
+    await page.goto(`/auth/confirm-passkey#token=${FIRST_LINK}`);
+    await expect(page.getByRole("heading", { name: "Enrollment confirmed" })).toBeVisible();
+    await expect(page).toHaveURL(canonical);
+
+    await refreshThroughRouter(page);
+
+    await expect(page).toHaveURL(canonical);
+    await expect(page.getByRole("heading", { name: "Enrollment confirmed" })).toBeVisible();
+    expect(await historyStateCarries(page, FIRST_LINK)).toBe(false);
+
+    await page.reload();
+    await expect(page).toHaveURL(canonical);
+    expect(await historyStateCarries(page, FIRST_LINK)).toBe(false);
+    expect(requestedUrls.every((url) => !url.includes(FIRST_LINK))).toBe(true);
+    expect(exchanged).toEqual([FIRST_LINK]);
+});
+
+test("workspace invite keeps a refused exchange's bearer out of the router's canonical URL", async ({ page }) => {
+    const requestedUrls = recordRequestedUrls(page);
+    const exchanged: string[] = [];
+    const canonical = canonicalUrl("/invite");
+    await mockCsrf(page);
+    await routeGrantExchange(page, "/api/invites/exchange", {
+        location: "/invite",
+        cookie: "connex_workspace_invite_flow",
+        cookiePath: "/api/invites",
+    }, exchanged, 1);
+    await page.route("**/api/auth/me", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ id: 7, email: "recipient@example.com" }),
+        });
+    });
+    await page.route("**/api/invites", async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+                flowId: "a".repeat(64),
+                workspaceId: 42,
+                workspaceName: "Router State Workspace",
+                email: "recipient@example.com",
+                role: "member",
+                invitedByLabel: "Workspace Admin",
+                status: "pending",
+                valid: true,
+            }),
+        });
+    });
+
+    await page.goto(`/invite#token=${FIRST_LINK}`);
+    await expect(page.getByRole("heading", { name: UNAVAILABLE_HEADING })).toBeVisible();
+    await expect(page).toHaveURL(canonical);
+
+    await refreshThroughRouter(page);
+
+    await expect(page).toHaveURL(canonical);
+    await expect(page.getByRole("heading", { name: UNAVAILABLE_HEADING })).toBeVisible();
+    expect(await historyStateCarries(page, FIRST_LINK)).toBe(false);
+
+    await page.getByRole("button", { name: "Try again" }).click();
+
+    await expect(page.getByRole("heading", { name: "Join Router State Workspace" })).toBeVisible();
+    await expect(page).toHaveURL(canonical);
+    expect(await historyStateCarries(page, FIRST_LINK)).toBe(false);
+    expect(requestedUrls.every((url) => !url.includes(FIRST_LINK))).toBe(true);
+    expect(exchanged).toEqual([FIRST_LINK, FIRST_LINK]);
 });
