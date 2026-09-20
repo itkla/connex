@@ -59,6 +59,8 @@ import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * The one scripted-provider Spring context, and the fixtures every trajectory golden runs against.
@@ -137,6 +139,9 @@ abstract class AbstractScriptedTrajectoryTest {
     /** Capability class a golden runs under unless it asks for another. */
     private static final String SCRIPTED_MODEL_ID = "scripted-native";
 
+    /** Title an auto-title session carries until a settled turn generates one. */
+    static final String UNTITLED_SESSION = "Scripted trajectory";
+
     /**
      * The hook the one contributed step interceptor delegates to, or null when no test armed one.
      *
@@ -162,6 +167,7 @@ abstract class AbstractScriptedTrajectoryTest {
     @Autowired private TenantContext tenantContext;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private AiRestrictionEpoch restrictionEpoch;
+    @Autowired private ObjectMapper objectMapper;
 
     private Organization organization;
     private Workspace workspace;
@@ -404,6 +410,59 @@ abstract class AbstractScriptedTrajectoryTest {
     }
 
     /**
+     * Counts audit rows whose sanitized metadata carries one outcome and one reason.
+     *
+     * <p>A refusal that leaves no audit row is indistinguishable from a refusal that never
+     * happened, so a golden about a refused egress has to read the row rather than the exception
+     * it produced. The metadata lands in the append-only {@code changes} column as plain JSON.
+     *
+     * @param action stable audit action key
+     * @param outcome the {@code outcome} the metadata must carry
+     * @param reason the {@code reason} the metadata must carry
+     * @return how many rows match, for this workspace
+     */
+    final int auditRows(String action, String outcome, String reason) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM audit_log
+                WHERE workspace_id = ? AND action = ?
+                  AND JSON_UNQUOTE(JSON_EXTRACT(changes, '$.outcome')) = ?
+                  AND JSON_UNQUOTE(JSON_EXTRACT(changes, '$.reason')) = ?
+                """, Integer.class, workspace.getId(), action, outcome, reason);
+        return count == null ? 0 : count;
+    }
+
+    /**
+     * Reads a session's current title straight from the row.
+     *
+     * @param sessionId the trajectory's session
+     * @return the durable title
+     */
+    final String sessionTitle(int sessionId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT title FROM ai_chat_session WHERE workspace_id = ? AND id = ?",
+                String.class, workspace.getId(), sessionId);
+    }
+
+    /**
+     * Parses the structured metadata the settled answer persisted beside its text.
+     *
+     * <p>The assistant message carries the citation chips, the follow-up suggestions and the
+     * replay resources in one JSON document, so a golden about what a guard withheld has to read
+     * it rather than the rendered text: three of those channels never appear in
+     * {@code ai_chat_message.content} at all.
+     *
+     * @param trajectory one settled trajectory
+     * @return the parsed structured metadata of its single assistant answer
+     */
+    final JsonNode structuredAnswer(Trajectory trajectory) {
+        String structuredJson = trajectory.answers().size() == 1
+                ? trajectory.answers().getFirst().getStructuredJson()
+                : null;
+        assertNotNull(structuredJson, "the settled answer persisted no structured metadata");
+        return objectMapper.readTree(structuredJson);
+    }
+
+    /**
      * Counts tenant tasks currently linked to one person.
      *
      * @param personId the seeded person
@@ -576,11 +635,22 @@ abstract class AbstractScriptedTrajectoryTest {
                 id);
     }
 
+    /**
+     * Opens one auto-title session, the way the product opens a session a member did not name.
+     *
+     * <p>{@code titleUserSet} is deliberately false. The bean defaults it to true, and a
+     * user-titled session makes {@code applyGeneratedTitle} return before it writes anything — so
+     * a golden asserting that a guard withheld a model-authored title would pass on the default
+     * alone, proving the default rather than the guard.
+     *
+     * @return the new session's identifier
+     */
     private int session() {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
         session.setCreatedByUserId(member.getId());
-        session.setTitle("Scripted trajectory");
+        session.setTitle(UNTITLED_SESSION);
+        session.setTitleUserSet(false);
         session.setVisibility("private");
         session.setStatus("active");
         chatMapper.insertSession(session);
