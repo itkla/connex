@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -852,15 +853,7 @@ public class AiChatTurnPersistenceService {
             String status,
             String reason) {
         AiChatTurn stored = lockGenerationOwnedTurn(turn);
-        if (RUNNING.equals(stored.getStatus())
-                && stored.isStreamed() && stored.getPartialContentUtf16Offset() > 0
-                && (AiAssistantTerminalReasons.withdrawsAuthorization(reason)
-                        || SpecialCareTextScreen.screen(stored.getPartialContent()).excluded())
-                && chatMapper.resetTurnPartialContent(
-                        turn.workspaceId(), turn.sessionId(), turn.turnId(),
-                        stored.getPartialContentUtf16Offset()) != 1) {
-            throw new IllegalStateException("Assistant terminal stream reset lost its durable state");
-        }
+        screenTerminalPartial(stored, reason);
         if (chatMapper.updateTurnTerminal(
                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
                 status, reason, null, null) != 1) {
@@ -868,6 +861,106 @@ public class AiChatTurnPersistenceService {
         }
         releaseRunLease(turn.workspaceId(), turn.turnId());
         return true;
+    }
+
+    /**
+     * Settles one abandoned turn from an instance that never owned it, inside the settler's
+     * transaction.
+     *
+     * <p>Declared {@link Propagation#MANDATORY} deliberately. The fence that stops a revived owner
+     * is the turn's own status, and it closes when the settler commits that status — not when it
+     * takes the lease over. Letting this open its own transaction would split the takeover from
+     * the terminal write and reopen exactly that window, so the caller must already hold the
+     * transaction, the session lock, and the turn lock.
+     *
+     * <p>The partial answer passes the same special-care screen {@link #markTerminal} applies,
+     * through the shared helper, so an ownership loss cannot retain text a generation-owned
+     * failure would have purged.
+     *
+     * @param stored the turn, already locked by the caller
+     * @param status the terminal status to write
+     * @param reason the stable terminal reason
+     * @return the durable terminal projection, or empty when the turn was already terminal
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<AiChatDurableTerminal> settleOrphanedTurn(
+            AiChatTurn stored,
+            String status,
+            String reason) {
+        screenTerminalPartial(stored, reason);
+        if (chatMapper.updateTurnTerminal(
+                stored.getWorkspaceId(), stored.getSessionId(), stored.getId(),
+                status, reason, null, null) != 1) {
+            return Optional.empty();
+        }
+        releaseRunLease(stored.getWorkspaceId(), stored.getId());
+        AiChatTurn settled = chatMapper.getTurnByIdForUpdate(
+                stored.getWorkspaceId(), stored.getSessionId(), stored.getId());
+        if (settled == null) {
+            throw new IllegalStateException("Settled assistant turn is unavailable");
+        }
+        return Optional.of(new AiChatDurableTerminal(
+                settled.getStatus(),
+                settled.getTerminalReason(),
+                settled.isStreamed() ? settled.getPartialContentUtf16Offset() : 0));
+    }
+
+    /**
+     * Expires one turn that no lease covers and that has outlived the absolute turn lifetime.
+     *
+     * <p>This is the instance-independent form of the reader-triggered expiry, for the turns no
+     * lease sweeper may touch: a queued turn whose instance died before it was ever claimed, and
+     * every turn claimed by a binary that predates the lease. Both settle as today's
+     * {@code timed_out}/{@code generation_timeout}, never as an ownership loss, because no
+     * instance ever recorded ownership of them.
+     *
+     * <p>The staleness boundary is the database's, not this JVM's. The reader-triggered expiry can
+     * bind its own clock because it only ever reaches the one session its caller is reading; this
+     * pass runs unattended against every workspace the instance routes to, so a clock running ahead
+     * of MySQL would settle live turns across the estate. {@code updated_at} is written by MySQL,
+     * so MySQL is the only clock that can be compared against it safely.
+     *
+     * @param workspaceId tenant key
+     * @param sessionId the owning session
+     * @param turnId the turn
+     * @param lifetimeSeconds the absolute turn lifetime, applied by MySQL
+     * @return true when this call wrote the turn's terminal state
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public boolean expireUnleasedTurn(
+            int workspaceId,
+            int sessionId,
+            int turnId,
+            int lifetimeSeconds) {
+        if (chatMapper.getSessionByIdForMaintenanceUpdate(workspaceId, sessionId) == null) {
+            return false;
+        }
+        AiChatTurn stored = chatMapper.getTurnByIdForUpdate(workspaceId, sessionId, turnId);
+        if (stored == null) {
+            return false;
+        }
+        if (!QUEUED.equals(stored.getStatus()) && !RUNNING.equals(stored.getStatus())) {
+            return false;
+        }
+        if (chatMapper.expireTurnPastLifetime(
+                workspaceId, sessionId, turnId,
+                TIMED_OUT, GENERATION_TIMEOUT, stored.getStatus(), lifetimeSeconds) != 1) {
+            return false;
+        }
+        releaseRunLease(workspaceId, turnId);
+        return true;
+    }
+
+    private void screenTerminalPartial(AiChatTurn stored, String reason) {
+        if (RUNNING.equals(stored.getStatus())
+                && stored.isStreamed() && stored.getPartialContentUtf16Offset() > 0
+                && (AiAssistantTerminalReasons.withdrawsAuthorization(reason)
+                        || SpecialCareTextScreen.screen(stored.getPartialContent()).excluded())
+                && chatMapper.resetTurnPartialContent(
+                        stored.getWorkspaceId(), stored.getSessionId(), stored.getId(),
+                        stored.getPartialContentUtf16Offset()) != 1) {
+            throw new IllegalStateException("Assistant terminal stream reset lost its durable state");
+        }
     }
 
     /** Returns the durable terminal projection after a generation callback settles. */
@@ -992,22 +1085,28 @@ public class AiChatTurnPersistenceService {
     }
 
     private AiChatTurn expireIfStale(AiChatTurn turn, LocalDateTime cutoff) {
-        if (!QUEUED.equals(turn.getStatus()) && !RUNNING.equals(turn.getStatus())) {
+        if (!expireStaleTurn(turn, cutoff)) {
             return turn;
         }
-        int changed = chatMapper.updateTurnTerminal(
-                turn.getWorkspaceId(), turn.getSessionId(), turn.getId(),
-                TIMED_OUT, GENERATION_TIMEOUT, turn.getStatus(), cutoff);
-        if (changed == 0) {
-            return turn;
-        }
-        releaseRunLease(turn.getWorkspaceId(), turn.getId());
         AiChatTurn expired = chatMapper.getTurnByIdForUpdate(
                 turn.getWorkspaceId(), turn.getSessionId(), turn.getId());
         if (expired == null) {
             throw new IllegalStateException("Expired assistant turn is unavailable");
         }
         return expired;
+    }
+
+    private boolean expireStaleTurn(AiChatTurn turn, LocalDateTime cutoff) {
+        if (!QUEUED.equals(turn.getStatus()) && !RUNNING.equals(turn.getStatus())) {
+            return false;
+        }
+        if (chatMapper.updateTurnTerminal(
+                turn.getWorkspaceId(), turn.getSessionId(), turn.getId(),
+                TIMED_OUT, GENERATION_TIMEOUT, turn.getStatus(), cutoff) != 1) {
+            return false;
+        }
+        releaseRunLease(turn.getWorkspaceId(), turn.getId());
+        return true;
     }
 
     /**

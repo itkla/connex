@@ -59,11 +59,11 @@ class AiRunLeaseEpochMonotonicityIntegrationTest extends AbstractAiRunLeaseInteg
                         key.subjectId(),
                         first.owner(),
                         first.epoch()));
-        assertTrue(leaseService.takeOverForSettlement(key, first.epoch()).isEmpty());
+        assertTrue(takeOverForSettlement(key, first.epoch()).isEmpty());
 
         assertEquals(
                 second.epoch() + 1L,
-                leaseService.takeOverForSettlement(key, second.epoch()).orElseThrow().epoch());
+                takeOverForSettlement(key, second.epoch()).orElseThrow().epoch());
         assertEquals(leaseIdentity.owner(), leaseRow(key).get("owner"));
     }
 }
