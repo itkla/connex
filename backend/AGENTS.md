@@ -97,6 +97,8 @@ Read the relevant contract before editing that subsystem:
 
 Inspect the owning package, nearest implementation, and tests in addition to the contract. Do not copy a subsystem's full protocol back into this guide.
 
+Declaring an assistant tool is contract work, not a one-line addition: every `AiAssistantToolCatalog` tool must name a `Toolset` (a declaration without one fails at class initialisation), an Ask Connex turn starts from `core` and widens itself with `find_tools` under the single `MAX_ACTIVE_TOOLSETS_PER_TURN` cap that seeded and loaded sets share, and the one per-turn prompt budget is reserved from that cap rather than from the whole catalog. Read `../docs/backend/AI_SECURITY.md` before adding, moving, or renaming one.
+
 ## Security boundaries
 
 - Auth/WebAuthn, CSRF, session rotation, tenant routing, RBAC/sharing, provider egress, secrets/crypto, and destructive data movement are high-risk work. Preserve fail-closed behavior and require the root security-focused review.
