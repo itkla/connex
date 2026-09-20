@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -777,7 +778,7 @@ class AttachmentUploadSecurityIntegrationTest {
             MvcResult response = mvc.perform(get(url).session(session).header("X-Workspace-Id", workspace.getId()))
                 .andReturn();
             assertEquals(200, response.getResponse().getStatus(), failureDetail(response));
-            response.getAsyncResult(RACE_MILLIS);
+            assertStreamedBodySucceeded(response);
             MvcResult completed = mvc.perform(asyncDispatch(response)).andReturn();
             assertEquals(200, completed.getResponse().getStatus(), failureDetail(completed));
             try (var stored = storage.get(storedKey)) {
@@ -787,6 +788,16 @@ class AttachmentUploadSecurityIntegrationTest {
         } finally {
             clearContext();
         }
+    }
+
+    /**
+     * Fails with the throwable the streamed body raised, instead of leaving the next assertion to
+     * report an opaque status or byte mismatch. {@code StreamingResponseBodyTask} returns null on
+     * success and the throwable on failure, so a non-null async result is the failure itself.
+     */
+    private static void assertStreamedBodySucceeded(MvcResult response) {
+        Object outcome = response.getAsyncResult(RACE_MILLIS);
+        assertNull(outcome, () -> "Streamed body failed after the response committed: " + outcome);
     }
 
     private void sweepThreeTimes() {
