@@ -591,9 +591,18 @@ async function historyStateCarries(page: Page, bearer: string): Promise<boolean>
  * writes that URL back to the address bar and the history entry. It also commits with
  * `preserveCustomHistoryState` off, which discards the mark — the signal that the write has landed,
  * so the assertions that follow cannot pass by running ahead of it.
+ *
+ * Marking is only inert because the entry carries `__NA`: Next's patched `replaceState` hands a
+ * state that has it straight to the native method. Without it the mark would dispatch a restore of
+ * its own and repair the canonical URL these tests are about, so the precondition is asserted
+ * rather than assumed.
  */
 async function refreshThroughRouter(page: Page) {
     expect(await page.evaluate(() => typeof window.next?.router?.refresh === "function")).toBe(true);
+    expect(await page.evaluate(() => {
+        const state: unknown = window.history.state;
+        return state !== null && typeof state === "object" && "__NA" in state;
+    })).toBe(true);
     await page.evaluate(() => {
         const state: unknown = window.history.state;
         const marked = state !== null && typeof state === "object"
@@ -644,16 +653,11 @@ test("passkey confirmation keeps its bearer out of the router's canonical URL", 
     expect(exchanged).toEqual([FIRST_LINK]);
 });
 
-test("workspace invite keeps a refused exchange's bearer out of the router's canonical URL", async ({ page }) => {
-    const requestedUrls = recordRequestedUrls(page);
-    const exchanged: string[] = [];
-    const canonical = canonicalUrl("/invite");
-    await mockCsrf(page);
-    await routeGrantExchange(page, "/api/invites/exchange", {
-        location: "/invite",
-        cookie: "connex_workspace_invite_flow",
-        cookiePath: "/api/invites",
-    }, exchanged, 1);
+/**
+ * Answers the session and preview calls an invite renders from once its bearer is spent, under a
+ * workspace name that identifies the test whose preview rendered.
+ */
+async function routeInvitePreview(page: Page, workspaceName: string) {
     await page.route("**/api/auth/me", async (route) => {
         await route.fulfill({
             status: 200,
@@ -668,7 +672,7 @@ test("workspace invite keeps a refused exchange's bearer out of the router's can
             body: JSON.stringify({
                 flowId: "a".repeat(64),
                 workspaceId: 42,
-                workspaceName: "Router State Workspace",
+                workspaceName,
                 email: "recipient@example.com",
                 role: "member",
                 invitedByLabel: "Workspace Admin",
@@ -677,6 +681,19 @@ test("workspace invite keeps a refused exchange's bearer out of the router's can
             }),
         });
     });
+}
+
+test("workspace invite keeps a refused exchange's bearer out of the router's canonical URL", async ({ page }) => {
+    const requestedUrls = recordRequestedUrls(page);
+    const exchanged: string[] = [];
+    const canonical = canonicalUrl("/invite");
+    await mockCsrf(page);
+    await routeGrantExchange(page, "/api/invites/exchange", {
+        location: "/invite",
+        cookie: "connex_workspace_invite_flow",
+        cookiePath: "/api/invites",
+    }, exchanged, 1);
+    await routeInvitePreview(page, "Router State Workspace");
 
     await page.goto(`/invite#token=${FIRST_LINK}`);
     await expect(page.getByRole("heading", { name: UNAVAILABLE_HEADING })).toBeVisible();
@@ -691,6 +708,46 @@ test("workspace invite keeps a refused exchange's bearer out of the router's can
     await page.getByRole("button", { name: "Try again" }).click();
 
     await expect(page.getByRole("heading", { name: "Join Router State Workspace" })).toBeVisible();
+    await expect(page).toHaveURL(canonical);
+    expect(await historyStateCarries(page, FIRST_LINK)).toBe(false);
+    expect(requestedUrls.every((url) => !url.includes(FIRST_LINK))).toBe(true);
+    expect(exchanged).toEqual([FIRST_LINK, FIRST_LINK]);
+});
+
+/**
+ * The tracked variant of the case above: a link an ESP rewrote with a campaign parameter. The strip
+ * takes the query as well as the fragment, so the URL the router is handed differs from its
+ * canonical one in `search`, not only in `hash`, and Next rebuilds the page's cache node instead of
+ * matching it — a different restore path, taken one task after mount while the exchange is still in
+ * flight. A rebuild that remounted the entry would drop the bearer it retains in memory, so the
+ * refused exchange and its retry are the assertion: the entry has to still be the same instance to
+ * replay the bearer it never wrote down.
+ */
+test("workspace invite keeps a tracked link's bearer out of the router's canonical URL", async ({ page }) => {
+    const requestedUrls = recordRequestedUrls(page);
+    const exchanged: string[] = [];
+    const canonical = canonicalUrl("/invite");
+    await mockCsrf(page);
+    await routeGrantExchange(page, "/api/invites/exchange", {
+        location: "/invite",
+        cookie: "connex_workspace_invite_flow",
+        cookiePath: "/api/invites",
+    }, exchanged, 1);
+    await routeInvitePreview(page, "Tracked Link Workspace");
+
+    await page.goto(`/invite?utm_source=mail#token=${FIRST_LINK}`);
+    await expect(page.getByRole("heading", { name: UNAVAILABLE_HEADING })).toBeVisible();
+    await expect(page).toHaveURL(canonical);
+
+    await refreshThroughRouter(page);
+
+    await expect(page).toHaveURL(canonical);
+    await expect(page.getByRole("heading", { name: UNAVAILABLE_HEADING })).toBeVisible();
+    expect(await historyStateCarries(page, FIRST_LINK)).toBe(false);
+
+    await page.getByRole("button", { name: "Try again" }).click();
+
+    await expect(page.getByRole("heading", { name: "Join Tracked Link Workspace" })).toBeVisible();
     await expect(page).toHaveURL(canonical);
     expect(await historyStateCarries(page, FIRST_LINK)).toBe(false);
     expect(requestedUrls.every((url) => !url.includes(FIRST_LINK))).toBe(true);

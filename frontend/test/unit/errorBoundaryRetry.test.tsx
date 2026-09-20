@@ -1,7 +1,10 @@
 /** @vitest-environment jsdom */
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { act, type ComponentType } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { NextIntlClientProvider } from "next-intl";
+import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import AppError from "@/app/(app)/error";
@@ -102,5 +105,67 @@ describe("segment error boundaries", () => {
         expect(boundary.retry).not.toHaveBeenCalled();
 
         await act(async () => root.unmount());
+    });
+});
+
+const FRONTEND = process.cwd();
+const APP = path.join(FRONTEND, "app");
+const APP_SHELL = path.join(APP, "(app)");
+const ROOT_BOUNDARIES = ["error.tsx", "global-error.tsx"].map((name) => path.join(APP, name));
+
+/** Lists every segment error boundary under a directory. */
+function errorBoundaries(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) return errorBoundaries(full);
+        return entry.name === "error.tsx" ? [full] : [];
+    });
+}
+
+/** The prop names a boundary's default-exported component destructures from Next's error props. */
+function recoveryProps(file: string): string[] {
+    const source = ts.createSourceFile(
+        file,
+        readFileSync(file, "utf8"),
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TSX,
+    );
+    const exported = source.statements.find((statement): statement is ts.FunctionDeclaration =>
+        ts.isFunctionDeclaration(statement)
+        && (statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword) ?? false));
+    const parameter = exported?.parameters[0]?.name;
+    if (parameter === undefined || !ts.isObjectBindingPattern(parameter)) return [];
+    return parameter.elements.map((element) => (element.propertyName ?? element.name).getText(source));
+}
+
+/**
+ * The split the three mounted cases above prove, asserted across every boundary that carries it.
+ * Only `app/(app)/error.tsx` is mounted here, so without this the other sixteen app-shell
+ * boundaries could drift back to `reset` — the dead "Try again" of #1781 Part 2 — with a green
+ * suite, and nothing else looks at them: the one-time-link guard only scans boundaries that sit
+ * above an entry route, and every entry route lives outside the `(app)` group.
+ */
+describe("segment error boundary recovery ledger", () => {
+    it("recovers every app-shell boundary with Next's retry prop", () => {
+        const boundaries = errorBoundaries(APP_SHELL);
+        const violations = boundaries
+            .filter((file) => !recoveryProps(file).includes("retry"))
+            .map((file) => `${path.relative(FRONTEND, file)} does not recover with Next's retry prop`);
+
+        expect(boundaries.length).toBeGreaterThanOrEqual(17);
+        expect(violations).toEqual([]);
+    });
+
+    it("keeps the boundaries above a one-time-link entry route on reset", () => {
+        const ledger = ROOT_BOUNDARIES.map((file) => ({
+            boundary: path.relative(FRONTEND, file),
+            recovers: recoveryProps(file).filter((name) => name === "reset" || name === "retry"),
+        }));
+
+        expect(ledger).toEqual([
+            { boundary: "app/error.tsx", recovers: ["reset"] },
+            { boundary: "app/global-error.tsx", recovers: ["reset"] },
+        ]);
     });
 });
