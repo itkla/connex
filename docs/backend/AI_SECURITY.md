@@ -114,6 +114,16 @@ Activate it locally with `SPRING_PROFILES_ACTIVE=dev,ai-scripted-provider`, `CON
 - **A tool call's `arguments` must be a JSON object, and the loader parses it.** The provider never re-encodes the value: it becomes the native function call's arguments verbatim, or is spliced into the JSON step envelope as raw JSON. An unparseable fixture value would otherwise surface as malformed model output at trajectory time rather than as a refused fixture at startup.
 - **`ScriptedAiRequestJournal` records every request the provider was handed, not only the ones that left.** The provider records before the attempt executor's egress seam, which can still refuse on the restriction epoch, the feature gate, the provider guard or the admission commitment. Assert egress with `dispatched()`; `recorded()` being empty means the refusal happened *above* the provider. Entries are redactions — credentials emptied, images dropped, the live executor replaced — so no provider credential sits in a process-lifetime buffer.
 
+### Trajectory harness
+
+`AbstractScriptedTrajectoryTest` holds the one Spring context that activates the profile, and `AiAssistantScriptedTrajectoryTest` runs whole turns through it: `AiAssistantTurnService`, the generation worker, `AiChatAgentLoopService`, the real tool executor and write-tool service, and real MySQL. Nothing below the agent loop is mocked, and no provider credential exists.
+
+- **Run it with `./gradlew scriptedTrajectoryTest`, not `./gradlew test`.** The pattern `**/*ScriptedTrajectory*Test.class` is excluded from `test` so this context key does not evict a hot one out of the shared ten-slot cache, and the required `Backend — build & test` CI job runs both tasks. Name a new trajectory class to match that pattern or CI will not run it.
+- **A golden that writes must load its toolset first.** A turn starts holding only the `core` toolset, so every write tool sits behind a `find_tools` step; the fixtures spell that sequence out and the goldens assert the durable tool order, which is where a regression in toolset loading becomes visible.
+- **A fixture's search query must not be a record's whole display name.** Native replay carries the model's own call arguments back to the provider verbatim, and `OutboundLeakScan` refuses a payload containing a registered raw identifier. Query a distinctive fragment instead.
+- **Seeded write targets are backdated.** A write proposal refuses a target written in the proposal's own second, so a fixture inserted milliseconds before its turn would exercise that refusal rather than the trajectory.
+- **The harness is not transactional.** The loop runs on a worker thread that reloads the initiating identity from committed rows, so every fixture is committed and then deleted, in one fresh organization per test method.
+
 ## Unmasked disclosure and streaming
 
 `UNMASKED` disclosure is durable fail-closed posture. It may resolve only when the deployment permits it and the exact resolved destination has a current organization-admin attestation. Destination changes invalidate the attestation, and the snapshot is rechecked at provider egress.
