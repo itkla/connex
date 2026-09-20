@@ -1,7 +1,5 @@
 package ooo.klae.connex.backend.services;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -65,30 +63,7 @@ public class ShareService {
             case PERSON -> shareMapper.listPersonShares(workspaceId, entityId);
             case PIPELINE -> shareMapper.listPipelineShares(workspaceId, entityId);
         };
-        return hydrateWorkspaceNames(
-            shares, shareWorkspaceControlAccess.getForWorkspace(workspaceId));
-    }
-
-    /**
-     * Names and orders share rows from the control snapshot. A target workspace the
-     * snapshot does not contain is omitted rather than failing the listing, which is
-     * what the removed {@code JOIN workspace} did with a share whose target workspace
-     * row was gone.
-     */
-    private static List<ShareDto> hydrateWorkspaceNames(
-            List<ShareDto> shares, OrganizationWorkspaces organizationWorkspaces) {
-        List<ShareDto> hydrated = new ArrayList<>(shares.size());
-        for (ShareDto share : shares) {
-            String workspaceName = organizationWorkspaces.nameOf(share.getWorkspaceId());
-            if (workspaceName == null) {
-                continue;
-            }
-            share.setWorkspaceName(workspaceName);
-            hydrated.add(share);
-        }
-        hydrated.sort(Comparator.comparingInt(
-            (ShareDto share) -> organizationWorkspaces.rankOf(share.getWorkspaceId())));
-        return hydrated;
+        return shareWorkspaceControlAccess.getForWorkspace(workspaceId).hydrate(shares);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)

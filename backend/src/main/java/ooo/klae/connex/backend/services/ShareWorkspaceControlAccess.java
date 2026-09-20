@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +16,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.ShareDto;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -94,33 +97,26 @@ public class ShareWorkspaceControlAccess {
         }
 
         /**
-         * Whether a workspace belongs to this organization.
+         * Names and orders tenant share rows from this snapshot. A share whose target workspace
+         * the snapshot does not contain is omitted rather than failing the listing, which is what
+         * the removed {@code JOIN workspace} did with a share whose target workspace row was gone.
          *
-         * @param workspaceId workspace to test
-         * @return true when the snapshot contains it
+         * @param shares tenant share rows, without workspace names
+         * @return the same rows, named and ordered by workspace name
          */
-        public boolean contains(int workspaceId) {
-            return namesById.containsKey(workspaceId);
-        }
-
-        /**
-         * The display name of a workspace in this organization.
-         *
-         * @param workspaceId workspace to name
-         * @return its name, or null when the snapshot does not contain it
-         */
-        public String nameOf(int workspaceId) {
-            return namesById.get(workspaceId);
-        }
-
-        /**
-         * The workspace's position in the organization's name ordering.
-         *
-         * @param workspaceId workspace to rank
-         * @return its zero-based position, or -1 when the snapshot does not contain it
-         */
-        public int rankOf(int workspaceId) {
-            return workspaceIds.indexOf(workspaceId);
+        public List<ShareDto> hydrate(List<ShareDto> shares) {
+            List<ShareDto> hydrated = new ArrayList<>(shares.size());
+            for (ShareDto share : shares) {
+                String workspaceName = namesById.get(share.getWorkspaceId());
+                if (workspaceName == null) {
+                    continue;
+                }
+                share.setWorkspaceName(workspaceName);
+                hydrated.add(share);
+            }
+            hydrated.sort(Comparator.comparingInt(
+                (ShareDto share) -> workspaceIds.indexOf(share.getWorkspaceId())));
+            return hydrated;
         }
     }
 }
