@@ -5,6 +5,6 @@ import ErrorState, { type SegmentErrorProps } from '@/app/components/ErrorState'
 /**
  * Error boundary for the insights segment; renders the shared recovery state.
  */
-export default function InsightsError({ error, retry }: SegmentErrorProps) {
-    return <ErrorState error={error} retry={retry} />;
+export default function InsightsError({ error, reset, unstable_retry }: SegmentErrorProps) {
+    return <ErrorState error={error} retry={unstable_retry ?? reset} />;
 }

@@ -10,22 +10,14 @@ import { Button } from '@/components/ui/button';
 import { reportBoundaryErrorWithConsole } from '@/app/lib/clientErrorReporter';
 
 /**
- * Props Next.js passes to a route segment `error.tsx` boundary component. `retry` refreshes the
- * router, so it re-fetches and re-renders the failed segment; `reset` only re-renders the
- * boundary's children from client state.
- *
- * A refresh re-publishes the router's canonical URL to the address bar, so the boundaries that can
- * sit above a one-time-link entry route — the root `error.tsx` and `global-error.tsx` — pass
- * `reset` instead. `test/unit/oneTimeLinkEntryGuard.test.ts` fails CI if either reads `retry`.
- *
- * Next type-checks pages, layouts and route handlers, not `error.tsx`, so nothing but this
- * declaration ties the shape to Next. `test/unit/errorBoundaryRetry.test.tsx` mounts Next's own
- * `ErrorBoundaryHandler` and fails if the props it passes stop matching these members.
+ * Props Next.js passes to a route segment `error.tsx` boundary component.
+ * `unstable_retry` (Next 16.2+) re-fetches and re-renders the failed segment,
+ * while `reset` only re-renders the boundary's children from client state.
  */
 export type SegmentErrorProps = {
     error: Error & { digest?: string };
     reset: () => void;
-    retry: () => void;
+    unstable_retry?: () => void;
 };
 
 /**
@@ -33,7 +25,7 @@ export type SegmentErrorProps = {
  * calm recovery state with a retry affordance, an optional go-back action, and
  * the error digest as a support reference. Must stay a Client Component.
  * @param error the error forwarded by the boundary, including the server digest
- * @param retry callback that attempts to recover the segment
+ * @param retry callback that attempts to recover the segment, preferably `unstable_retry`
  * @param showBack whether to offer a go-back action alongside retry
  */
 export default function ErrorState({
