@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.mappers;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,6 +23,8 @@ import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccountCounts;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceRole;
+import ooo.klae.connex.backend.dto.UserDto;
+import ooo.klae.connex.backend.dto.UserProfileHydrationRow;
 import ooo.klae.connex.backend.dto.UserReferenceDto;
 
 class UserMapperTest extends AbstractMapperTest {
@@ -130,6 +134,72 @@ class UserMapperTest extends AbstractMapperTest {
         assertEquals(
             List.of(new UserReferenceDto(active.getId(), active.getDisplayName(), profilePictureUrl)),
             references);
+    }
+
+    /**
+     * Hydrates only display-safe profiles of active members, in the database's display-name
+     * collation order with the id as tie-breaker, and exposes a sort key that reproduces that order.
+     */
+    @Test
+    void getActiveWorkspaceMemberProfilesByIdsReturnsActiveProfilesInCollationOrder() {
+        String suffix = unique();
+        User zulu = newMemberNamed("Zulu " + suffix);
+        User lowerAlpha = newMemberNamed("alpha " + suffix);
+        User upperAlpha = newMemberNamed("Alpha " + suffix);
+        User accented = newMemberNamed("\u00c9mile " + suffix);
+        User japanese = newMemberNamed("\u5c71\u7530 " + suffix);
+        String profilePictureUrl = "/api/users/" + upperAlpha.getId() + "/profile-picture";
+        userMapper.updateProfilePictureUrlIfCurrent(upperAlpha.getId(), null, profilePictureUrl);
+        User pending = newUnassignedUser();
+        workspaceMapper.addPendingMember(workspace.getId(), pending.getId(), "member");
+        User inactive = newUser();
+        jdbcTemplate.update(
+            "UPDATE workspace_member SET status = 'inactive' WHERE workspace_id = ? AND user_id = ?",
+            workspace.getId(), inactive.getId());
+        User foreign = newUnassignedUser();
+        Workspace other = new Workspace();
+        other.setName("WS " + unique());
+        other.setSlug("ws_" + unique());
+        workspaceMapper.insert(other);
+        workspaceMapper.addMember(other.getId(), foreign.getId(), "member");
+
+        List<UserProfileHydrationRow> rows = userMapper.getActiveWorkspaceMemberProfilesByIds(
+            workspace.getId(),
+            List.of(
+                japanese.getId(),
+                pending.getId(),
+                zulu.getId(),
+                inactive.getId(),
+                upperAlpha.getId(),
+                foreign.getId(),
+                accented.getId(),
+                Integer.MAX_VALUE,
+                lowerAlpha.getId()));
+
+        List<Integer> databaseOrder = jdbcTemplate.queryForList(
+            "SELECT id FROM app_user WHERE id IN (?, ?, ?, ?, ?) ORDER BY display_name, id",
+            Integer.class,
+            zulu.getId(), lowerAlpha.getId(), upperAlpha.getId(), accented.getId(), japanese.getId());
+        assertEquals(
+            List.of(lowerAlpha.getId(), upperAlpha.getId(), accented.getId(), zulu.getId(), japanese.getId()),
+            databaseOrder);
+        assertEquals(databaseOrder, rows.stream().map(UserProfileHydrationRow::getId).toList());
+        assertEquals(databaseOrder, rows.reversed().stream()
+            .sorted(Comparator
+                .comparing(UserProfileHydrationRow::getDisplaySortKey, Arrays::compareUnsigned)
+                .thenComparing(UserProfileHydrationRow::getId))
+            .map(UserProfileHydrationRow::getId)
+            .toList());
+        UserDto profile = rows.get(1).getProfile();
+        assertEquals(upperAlpha.getId(), profile.getId());
+        assertEquals(upperAlpha.getUsername(), profile.getUsername());
+        assertEquals(upperAlpha.getDisplayName(), profile.getDisplayName());
+        assertEquals(upperAlpha.getEmail(), profile.getEmail());
+        assertEquals("UTC", profile.getTimezone());
+        assertEquals("en", profile.getLocale());
+        assertEquals(profilePictureUrl, profile.getProfilePictureUrl());
+        assertNotNull(profile.getCreatedAt());
+        assertNotNull(profile.getUpdatedAt());
     }
 
     /**
@@ -552,6 +622,19 @@ class UserMapperTest extends AbstractMapperTest {
                 "INSERT INTO webauthn_credential (credential_id, user_entity_user_id, public_key) VALUES (?, ?, ?)",
                 ("inventory-credential-" + unique()).getBytes(StandardCharsets.UTF_8),
                 handle, new byte[] {9, 9, 9});
+    }
+
+    private User newMemberNamed(String displayName) {
+        String suffix = unique();
+        User user = new User();
+        user.setUsername("named_" + suffix);
+        user.setDisplayName(displayName);
+        user.setEmail(suffix + "@named.example.com");
+        user.setPasswordHash("hash_" + suffix);
+        user.setTimezone("UTC");
+        userMapper.insert(user);
+        workspaceMapper.addMember(workspace.getId(), user.getId(), "member");
+        return user;
     }
 
     private User newUnassignedUser() {
