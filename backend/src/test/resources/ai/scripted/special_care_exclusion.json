@@ -17,7 +17,7 @@
       "protocol": "native",
       "emit": {
         "kind": "final",
-        "text": "{\"text\":\"[The contact](record:r1) was hospitalized last quarter, so the renewal slipped.\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}"
+        "text": "{\"text\":\"[The contact](record:r1) was hospitalized last quarter, so the renewal slipped.\",\"citations\":[\"r1\"],\"suggestions\":[\"Ask how the recovery is going\",\"Move the renewal out a quarter\"],\"title\":\"Renewal slipped after the hospital stay\"}"
       }
     }
   ]

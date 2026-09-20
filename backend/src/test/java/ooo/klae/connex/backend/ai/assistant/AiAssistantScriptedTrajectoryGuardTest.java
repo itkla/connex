@@ -21,6 +21,7 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import tools.jackson.databind.JsonNode;
 
 /**
  * Goldens 9-15: the server-owned controls a fixture cannot fake, each run as a whole turn.
@@ -29,6 +30,10 @@ import ooo.klae.connex.backend.exceptions.ConflictException;
  * were deleted? So none of them asserts anything a script authored. They assert a terminal reason
  * only a server-side refusal produces, a durable row a guard refused to write, or — where the
  * refusal happens above the provider — that the request journal proves nothing left at all.
+ *
+ * <p>The special-care invariant is pinned twice, once buffered and once streamed, because the
+ * screen runs in two places and a single golden would leave whichever channel it skipped pinned by
+ * nothing.
  *
  * <p><b>Two goldens move state the fixture has no way to reach.</b> The routed-skill golden anchors
  * its turn to a page-context record so the deterministic router selects a skill, and the
@@ -122,6 +127,29 @@ class AiAssistantScriptedTrajectoryGuardTest extends AbstractScriptedTrajectoryT
                 "a turn that made no progress must not deliver an answer anyway");
     }
 
+    /**
+     * A streamed answer reaches the transcript in the domain its requester read it in.
+     *
+     * <p>The fixture answers with a masking placeholder, because the streamed path demasks every
+     * batch itself and then compares those batches against the settled answer. Take that
+     * per-batch demasking away and the two domains disagree, the comparison refuses, and the turn
+     * ends {@code malformed_output} instead of resolving — which is why settling is the
+     * assertion here rather than anything read back off the row.
+     *
+     * <p><b>Scoped to what a native streamed fixture can actually reach.</b> The terminal-text
+     * projector confirms a {@code NATIVE_FINAL} answer only once the whole final object parses,
+     * so however many fragments the provider writes, the batcher is handed the answer once. Delta
+     * ordering and the projector's half-placeholder withholding therefore have no observable
+     * effect on this path and are not claimed here; they stay owned by their own unit tests.
+     *
+     * <p><b>Two further deliberate omissions.</b> Reading {@code partial_content} back and
+     * comparing it with the answer would prove nothing — {@code resolve} rewrites that column
+     * with the settled answer for every streamed turn, so the comparison restates the rewrite.
+     * And the requester-only channels the plan names for this golden are unreachable: narration
+     * is the text a provider returns beside a native tool call, a scripted tool-call emission
+     * carries no text, and giving it one is production code this test-only slice must not add.
+     * Those channels stay owned by {@code AiChatTranscriptProjectionTest}.
+     */
     @Test
     void aStreamedAnswerReachesTheTranscriptThroughItsOwnDeltas() {
         Person contact = person("Verity Ashcombe", "verity.ashcombe@example.invalid", null);
@@ -134,17 +162,17 @@ class AiAssistantScriptedTrajectoryGuardTest extends AbstractScriptedTrajectoryT
         assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
         assertTrue(settled.isStreamed(),
                 "a streaming-capable provider must give the turn a streamed transcript, or the "
-                        + "delta ordering this golden is about was never exercised");
-        assertEquals(List.of("search_records"), trajectory.toolNames());
+                        + "batch comparison this golden is about was never exercised");
+        assertEquals(List.of("search_records", "get_record"), trajectory.toolNames());
+        assertTrue(trajectory.answer().contains(contact.getName()),
+                "the streamed placeholder resolves to the real value in both domains, or the "
+                        + "batches and the settled answer would have disagreed: "
+                        + trajectory.answer());
+        assertFalse(trajectory.answer().contains("{{P1}}"),
+                "no request-local placeholder may survive into the streamed transcript: "
+                        + trajectory.answer());
         assertTrue(trajectory.answer().contains("](person:" + contact.getId() + ")"),
                 "the settled answer carries a durable record link: " + trajectory.answer());
-        assertTrue(trajectory.answer().endsWith("nothing is waiting on you."),
-                "the settled answer is the whole projection of the ordered deltas, not a prefix: "
-                        + trajectory.answer());
-        assertEquals(trajectory.answer(), settled.getPartialContent(),
-                "the stream a member read and the answer the transcript kept must be the same "
-                        + "text; a projection that disagreed with the settled answer is the "
-                        + "failure the streamed path's own comparison exists to catch");
     }
 
     @Test
@@ -161,16 +189,61 @@ class AiAssistantScriptedTrajectoryGuardTest extends AbstractScriptedTrajectoryT
         assertEquals(MaskingEngine.OMITTED_BY_POLICY, trajectory.answer(),
                 "suspected special-care free text is excluded from the durable answer rather than "
                         + "masked into it, so the record label the model wrote never lands either");
+
+        JsonNode structured = structuredAnswer(trajectory);
+        assertTrue(structured.get("citations").isEmpty(),
+                "an excluded answer keeps no citation chip: a resolved chip names the kind and id "
+                        + "of the very record the withheld sentence was about: " + structured);
+        assertTrue(structured.get("suggestions").isEmpty(),
+                "the follow-up suggestions are model prose the screen never sees, so they are "
+                        + "dropped with the answer rather than published beside it: " + structured);
+        assertEquals(UNTITLED_SESSION, sessionTitle(trajectory.sessionId()),
+                "the model-authored session title is unscreened free text, so an excluded answer "
+                        + "must not rename the session with it");
+    }
+
+    /**
+     * The same exclusion on the channel a member reads live.
+     *
+     * <p>Kept separate from the buffered golden rather than replacing it: the two run through
+     * different code. A buffered turn screens the text it is about to persist; a streamed turn
+     * screens the running projection and screens again as the stream settles, and neither screen
+     * is reached on the other's path. The streamed pair is pinned together — either one alone
+     * still excludes this answer — so this golden turns red when the streamed path stops
+     * screening, not when one of the two moves.
+     */
+    @Test
+    void aStreamedAnswerCarryingSpecialCareContentIsExcludedFromBothChannels() {
+        person("Delphine Hollingsworth", "delphine.hollingsworth@example.invalid", null);
+        useCapabilityClass("scripted-native-stream");
+
+        Trajectory trajectory = run(
+                "connex_script_medical_stream", "check this contact for me");
+
+        AiChatTurn settled = turnRow(trajectory);
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertTrue(settled.isStreamed(),
+                "the streamed exclusion only exists on a streamed turn");
+        assertEquals(MaskingEngine.OMITTED_BY_POLICY, trajectory.answer(),
+                "the durable answer a second reader loads carries nothing of the screened text");
+        assertEquals(MaskingEngine.OMITTED_BY_POLICY, settled.getPartialContent(),
+                "the durable partial is the text the requester read live, so an exclusion that "
+                        + "settled the answer but left the streamed projection standing would "
+                        + "publish the screened sentence to the very member it is withheld from");
     }
 
     /**
      * A restriction that lands between two model steps refuses the next egress.
      *
-     * <p>Scoped deliberately. This pins the fence and its dispatch accounting; it does not pin the
-     * durable-partial purge, which only has something to purge on a streamed turn whose partial is
-     * already durable. The epoch would have to advance between the stream's last batch and the
-     * turn's terminal write, and nothing this harness can reach runs there — the step hook fires
-     * before the emission, so the very step it arms is the step the fence refuses.
+     * <p>Scoped deliberately. This pins the fence, its dispatch accounting and its audit row; it
+     * does <em>not</em> pin the durable-partial purge, which only has something to purge on a
+     * streamed turn whose partial is already durable. The epoch would have to advance between the
+     * stream's last batch and the turn's terminal write, and nothing this harness can reach runs
+     * there — the step hook fires before the emission, so the very step it arms is the step the
+     * fence refuses. Reaching it would need a post-emission hook, which is production code this
+     * test-only slice must not add; the purge is covered at the service layer by
+     * {@code AiChatTurnPersistenceServiceTest}, and closing the end-to-end gap is a tracked
+     * residual rather than something this class silently claims.
      */
     @Test
     void anEpochAdvancingBetweenStepsRefusesTheNextEgress() {
@@ -192,6 +265,11 @@ class AiAssistantScriptedTrajectoryGuardTest extends AbstractScriptedTrajectoryT
                 "the provider was handed both steps; the second is the one the fence refused");
         assertEquals(1, journal().dispatched().size(),
                 "the epoch fence sits above the send point, so the refused step never dispatched");
+        assertEquals(1, auditRows("ai.llm.call", "blocked", "restriction_epoch"),
+                "a refused egress leaves one durable blocked row naming the epoch; the terminal "
+                        + "reason is derived from a re-read of the epoch, so without this the "
+                        + "audit trail for every refused send could disappear and the turn would "
+                        + "still be named restrictions_changed");
         assertEquals(List.of(), trajectory.answers(),
                 "an answer assembled from inputs the workspace has since restricted is not "
                         + "delivered");
