@@ -227,9 +227,10 @@ class AiAssistantScriptedTrajectoryGuardTest extends AbstractScriptedTrajectoryT
         assertEquals(MaskingEngine.OMITTED_BY_POLICY, trajectory.answer(),
                 "the durable answer a second reader loads carries nothing of the screened text");
         assertEquals(MaskingEngine.OMITTED_BY_POLICY, settled.getPartialContent(),
-                "the durable partial is the text the requester read live, so an exclusion that "
-                        + "settled the answer but left the streamed projection standing would "
-                        + "publish the screened sentence to the very member it is withheld from");
+                "settlement overwrites the durable partial with the settled answer, so this "
+                        + "cannot show what the requester read live; it pins that no streamed "
+                        + "prefix of the screened sentence survives in the durable row a later "
+                        + "reader or a resumed stream would load");
     }
 
     /**
