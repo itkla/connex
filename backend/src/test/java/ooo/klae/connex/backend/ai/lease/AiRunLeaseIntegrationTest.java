@@ -34,12 +34,14 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
      * the same row, or cleared. A bound parameter here would put a lease deadline on a JVM clock and
      * let instance skew move it. {@code GREATEST(CURRENT_TIMESTAMP(6), …)} is still the database's
      * own clock: it is how the release keeps the expiry CHECK satisfiable when that clock has
-     * stepped backwards since the lease was acquired.
+     * stepped backwards since the lease was acquired. {@code GREATEST(DATE_ADD(CURRENT_TIMESTAMP(6),
+     * …), …)} is the same guard applied to a renewal's deadline.
      */
     private static final Pattern TIMESTAMP_ASSIGNMENT = Pattern.compile(
             "(acquired_at|heartbeat_at|expires_at|released_at)\\s*=\\s*(?!"
                     + "CURRENT_TIMESTAMP\\(6\\)|DATE_ADD\\(CURRENT_TIMESTAMP\\(6\\)"
-                    + "|GREATEST\\(CURRENT_TIMESTAMP\\(6\\)|NULL)(\\S+)");
+                    + "|GREATEST\\(CURRENT_TIMESTAMP\\(6\\)"
+                    + "|GREATEST\\(\\s*DATE_ADD\\(CURRENT_TIMESTAMP\\(6\\)|NULL)(\\S+)");
 
     @Test
     void everyLeaseDeadlineIsComputedByTheDatabase() {
