@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
 
 /**
@@ -50,7 +51,7 @@ record AiAssistantStepCalls(List<Call> calls) {
     record Call(int ordinal, AiAssistantStep.Tool tool, Optional<AiToolCall> providerCall) {
 
         Call {
-            if (ordinal < 0) {
+            if (ordinal < 0 || ordinal > AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS) {
                 throw new IllegalArgumentException("Assistant step call ordinal is invalid");
             }
             Objects.requireNonNull(tool, "tool");
