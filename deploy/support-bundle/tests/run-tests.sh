@@ -1211,7 +1211,10 @@ case_journal_projection_filters_organization_before_projection() (
     assert_absent journal_query_string SENTINEL_QUERY_SECRET "$output" || return 1
     assert_absent journal_fragment SENTINEL_FRAGMENT_SECRET "$output" || return 1
     assert_absent journal_discriminator connexOrganizationId "$output" || return 1
-    jq -e 'length == 8 and (keys == ["eventClass", "level", "logger", "method", "path", "status", "timestamp", "untrustedClientAssertedCorrelationHmac"])' \
+    # `jq -e` derives its exit status from the LAST output value only, so a per-record filter stops
+    # checking every record but the last one as soon as the projection carries more than one. Slurp
+    # and assert over all of them so every projected record's key shape is gated.
+    jq -se 'all(.[]; length == 8 and (keys == ["eventClass", "level", "logger", "method", "path", "status", "timestamp", "untrustedClientAssertedCorrelationHmac"]))' \
         "$output" >/dev/null || return 1
 )
 

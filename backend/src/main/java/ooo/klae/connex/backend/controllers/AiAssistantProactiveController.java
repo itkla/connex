@@ -61,8 +61,11 @@ public class AiAssistantProactiveController {
     /**
      * Returns the calling member's brief schedule.
      *
-     * <p>A client-scheduled read loaded with the command centre; the member action that changes a
-     * schedule is the {@code PUT}, which stays fully journaled.
+     * <p>No shipped client reads this route — {@code getAiCommandCenter} already serves the
+     * schedule inline — so there is no cadence to cite. It is marked anyway, so the structural rule
+     * that every assistant read is client-driven keeps no exception a future author has to reason
+     * about. Its failures are retained, because nothing re-drives it; the member action that
+     * changes a schedule is the {@code PUT}, which stays fully journaled.
      */
     @TenantJournalClientDriven
     @GetMapping("/brief-schedule")
@@ -80,7 +83,10 @@ public class AiAssistantProactiveController {
     /**
      * Lists the calling member's watches.
      *
-     * <p>A client-scheduled read loaded with the command centre; the member actions that change a
+     * <p>No shipped client reads this route — {@code getAiCommandCenter} already serves the watches
+     * inline — so there is no cadence to cite. It is marked anyway, so the structural rule that
+     * every assistant read is client-driven keeps no exception a future author has to reason about.
+     * Its failures are retained, because nothing re-drives it; the member actions that change a
      * watch are the {@code POST}, {@code PATCH} and {@code DELETE}, which stay fully journaled.
      */
     @TenantJournalClientDriven

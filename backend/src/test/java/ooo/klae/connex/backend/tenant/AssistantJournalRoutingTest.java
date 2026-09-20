@@ -72,9 +72,13 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  * <p>A hand-set {@code BEST_MATCHING_PATTERN_ATTRIBUTE} would only prove a test constant equals
  * itself and would keep passing after a mapping rename, so every request here is routed.
  *
- * <p>Every assistant path variable is digit-constrained, so no member-authored text can occupy a
- * path segment at all. The sentinels therefore live in the two channels that could leak — the query
- * string and the request body.
+ * <p>A path segment's content is irrelevant to the journal, because the record carries the Spring
+ * mapping template and never {@code getRequestURI()} or {@code getQueryString()} — and the
+ * proactive controller's {@code /watches/{id}} is in fact unconstrained, so a digit constraint is
+ * not the reason this is safe. The sentinels therefore live in the two channels that could leak:
+ * the query string and the request body. Every sentinel assertion inspects the encoded ECS
+ * document, because the journal logs a constant message and puts every value in a key-value pair,
+ * so a check against the formatted message alone could never fail.
  */
 class AssistantJournalRoutingTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -159,8 +163,7 @@ class AssistantJournalRoutingTest {
 
     @Test
     void assistantTurnStartJournalsItsRealMappingTemplateWithoutSessionText() throws Exception {
-        MvcResult result = mockMvc.perform(post("/api/ai/assistant/sessions/42/turns")
-                .param("q", QUERY_SENTINEL)
+        MvcResult result = mockMvc.perform(post("/api/ai/assistant/sessions/42/turns?q=" + QUERY_SENTINEL)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"content\":\"" + BODY_SENTINEL + "\"}"))
             .andReturn();
@@ -179,7 +182,6 @@ class AssistantJournalRoutingTest {
         assertEquals(3, fields.get("connexOrganizationId"));
         assertEquals(202, fields.get("responseStatus"));
         assertEquals(TenantResolutionInterceptor.JOURNAL_EVENT_CLASS, fields.get("eventClass"));
-        assertFalse(event.getFormattedMessage().contains("SENTINEL"));
 
         JsonNode ecs = encodeEcs(event);
         assertEquals(routedTemplate, ecs.path("requestPath").textValue());
@@ -187,18 +189,20 @@ class AssistantJournalRoutingTest {
     }
 
     @Test
+    void theQuerySentinelOccupiesTheRealQueryString() throws Exception {
+        MvcResult result = mockMvc.perform(get("/api/ai/assistant/skills?context=" + QUERY_SENTINEL))
+            .andReturn();
+
+        assertEquals("context=" + QUERY_SENTINEL, result.getRequest().getQueryString(),
+            "MockMvc's param() populates the parameter map without setting a query string, so the "
+                + "sentinel has to arrive in the URI or every leak assertion guards nothing");
+    }
+
+    @Test
     void assistantClientDrivenReadsAreQuietUntilTheyFail() throws Exception {
-        assertQuietThenLoudOnFailure(
-            get("/api/ai/assistant/sessions/42"),
-            () -> when(assistantService.get(anyInt(), anyInt(), anyInt()))
-                .thenThrow(new RuntimeException("boom")));
         assertQuietThenLoudOnFailure(
             get("/api/ai/assistant/sessions/42/turns/7"),
             () -> when(turnService.get(anyInt(), anyInt()))
-                .thenThrow(new RuntimeException("boom")));
-        assertQuietThenLoudOnFailure(
-            get("/api/ai/assistant/sessions/42/tool-calls"),
-            () -> when(toolCallReadService.list(anyInt(), anyBoolean()))
                 .thenThrow(new RuntimeException("boom")));
         assertQuietThenLoudOnFailure(
             post("/api/ai/assistant/sessions/scope-preview")
@@ -207,26 +211,51 @@ class AssistantJournalRoutingTest {
             () -> when(turnService.previewScope(any()))
                 .thenThrow(new RuntimeException("boom")));
         assertQuietThenLoudOnFailure(
-            get("/api/ai/assistant/skills").param("context", QUERY_SENTINEL),
+            get("/api/ai/assistant/skills?context=" + QUERY_SENTINEL),
             () -> when(skillDirectoryService.list(any()))
                 .thenThrow(new RuntimeException("boom")));
     }
 
     @Test
+    void assistantReadsTheRealtimeReconnectReDrivesAreNeverJournaled() throws Exception {
+        assertNeverJournaled(
+            get("/api/ai/assistant/sessions"),
+            () -> when(assistantService.page(anyInt(), anyInt()))
+                .thenThrow(new RuntimeException("boom")));
+        assertNeverJournaled(
+            get("/api/ai/assistant/sessions/invitations"),
+            () -> when(assistantService.pageInvitations(anyInt(), anyInt()))
+                .thenThrow(new RuntimeException("boom")));
+        assertNeverJournaled(
+            get("/api/ai/assistant/sessions/42"),
+            () -> when(assistantService.get(anyInt(), anyInt(), anyInt()))
+                .thenThrow(new RuntimeException("boom")));
+        assertNeverJournaled(
+            get("/api/ai/assistant/sessions/42/attachments"),
+            () -> when(attachmentService.list(anyInt()))
+                .thenThrow(new RuntimeException("boom")));
+        assertNeverJournaled(
+            get("/api/ai/assistant/sessions/42/participants"),
+            () -> when(assistantService.participants(anyInt()))
+                .thenThrow(new RuntimeException("boom")));
+        assertNeverJournaled(
+            get("/api/ai/assistant/sessions/42/presence"),
+            () -> when(assistantService.presence(anyInt()))
+                .thenThrow(new RuntimeException("boom")));
+        assertNeverJournaled(
+            get("/api/ai/assistant/sessions/42/tool-calls"),
+            () -> when(toolCallReadService.list(anyInt(), anyBoolean()))
+                .thenThrow(new RuntimeException("boom")));
+    }
+
+    @Test
     void assistantPresenceHeartbeatIsNeverJournaled() throws Exception {
-        MockHttpServletRequestBuilder heartbeat = put("/api/ai/assistant/sessions/42/presence")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"typing\":true}");
-
-        mockMvc.perform(heartbeat).andReturn();
-        assertEquals(0, appender.list.size());
-
-        when(assistantService.touchPresence(anyInt(), anyBoolean()))
-            .thenThrow(new RuntimeException("boom"));
-        MvcResult failed = mockMvc.perform(heartbeat).andReturn();
-
-        assertEquals(500, failed.getResponse().getStatus());
-        assertEquals(0, appender.list.size());
+        assertNeverJournaled(
+            put("/api/ai/assistant/sessions/42/presence")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"typing\":true}"),
+            () -> when(assistantService.touchPresence(anyInt(), anyBoolean()))
+                .thenThrow(new RuntimeException("boom")));
     }
 
     @Test
@@ -267,7 +296,27 @@ class AssistantJournalRoutingTest {
         assertEquals(
             failure.getRequest().getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE),
             failed.get("requestPath"));
-        assertFalse(appender.list.getFirst().getFormattedMessage().contains("SENTINEL"));
+        assertFalse(encodeEcs(appender.list.getFirst()).toString().contains("SENTINEL"),
+            "a sentinel reached the encoded journal record for "
+                + failure.getRequest().getRequestURI());
+    }
+
+    private void assertNeverJournaled(
+            MockHttpServletRequestBuilder builder, Runnable failureStub) throws Exception {
+        appender.list.clear();
+        MvcResult success = mockMvc.perform(builder).andReturn();
+        assertTrue(success.getResponse().getStatus() < 400,
+            success.getRequest().getRequestURI() + " did not succeed");
+        assertEquals(0, appender.list.size(),
+            "a successful fully-silent read was journaled: " + success.getRequest().getRequestURI());
+
+        failureStub.run();
+        MvcResult failure = mockMvc.perform(builder).andReturn();
+
+        assertEquals(500, failure.getResponse().getStatus());
+        assertEquals(0, appender.list.size(),
+            "a failing fully-silent read was journaled, so a client that re-issues it forever can "
+                + "fill the support bundle's record cap: " + failure.getRequest().getRequestURI());
     }
 
     private void assertJournaledOnSuccess(int expectedStatus, MockHttpServletRequestBuilder builder)
@@ -285,7 +334,9 @@ class AssistantJournalRoutingTest {
             fields.get("requestPath"));
         assertEquals(expectedStatus, fields.get("responseStatus"));
         assertEquals(3, fields.get("connexOrganizationId"));
-        assertFalse(appender.list.getFirst().getFormattedMessage().contains("SENTINEL"));
+        assertFalse(encodeEcs(appender.list.getFirst()).toString().contains("SENTINEL"),
+            "a sentinel reached the encoded journal record for "
+                + result.getRequest().getRequestURI());
     }
 
     private static Map<String, Object> fields(ILoggingEvent event) {

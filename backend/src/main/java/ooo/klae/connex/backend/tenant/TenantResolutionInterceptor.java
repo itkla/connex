@@ -103,10 +103,12 @@ import ooo.klae.connex.backend.services.WorkspaceService;
  *
  * <p>A handler carrying {@link TenantJournalClientDriven} is journaled only when it failed, and a
  * handler carrying {@code @TenantJournalClientDriven(retainFailures = false)} — the assistant
- * presence heartbeat — is never journaled at all. Those handlers are called on the client's own
- * schedule, so their successful completions would drown the journal without answering any operator
- * question. An absent successful record on such a route is therefore a declared omission and is not
- * evidence that the request never arrived (#1439).
+ * presence heartbeat and the assistant reads the realtime socket's reconnect re-drives — is never
+ * journaled at all. Those handlers are called on the client's own schedule, so their successful
+ * completions would drown the journal without answering any operator question, and the ones a
+ * reconnect or a heartbeat re-issues would keep failing for as long as a surface stays open. An
+ * absent record on such a route is therefore a declared omission and is not evidence that the
+ * request never arrived (#1439).
  */
 @Component
 @RequiredArgsConstructor

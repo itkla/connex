@@ -69,8 +69,14 @@ public class AiAssistantController {
      * <p>Called on the client's own schedule: {@code refreshSessions} in
      * {@code AskConnexProvider.tsx} runs inside the un-coalesced {@code enqueueRealtimeRefresh}
      * fan-out that every non-delta realtime frame triggers, so its volume tracks agent steps.
+     *
+     * <p>Fully silent, because the same fan-out is re-driven by the realtime socket's own
+     * reconnect: the STOMP client reconnects on a fixed five-second delay forever, and each
+     * reconnect calls the refresh again — with no member action able to stop it, and no failure
+     * status that ends the loop. Retaining its failures would therefore be unbounded in time, the
+     * same property that silences the presence heartbeat.
      */
-    @TenantJournalClientDriven
+    @TenantJournalClientDriven(retainFailures = false)
     @GetMapping
     public PageResponse<AiChatSessionDto> page(
             @RequestParam(defaultValue = "1") int page,
@@ -94,8 +100,12 @@ public class AiAssistantController {
      *
      * <p>Called on the client's own schedule: the second half of {@code refreshSessions} in the
      * {@code enqueueRealtimeRefresh} fan-out in {@code AskConnexProvider.tsx}.
+     *
+     * <p>Fully silent for the same reason as {@link #page}: the socket's five-second reconnect
+     * loop re-drives the refresh with no member action able to end it, and the no-active-session
+     * reconnect path swallows every status, so a failing read would repeat without bound.
      */
-    @TenantJournalClientDriven
+    @TenantJournalClientDriven(retainFailures = false)
     @GetMapping("/invitations")
     public PageResponse<AiChatSessionDto> invitations(
             @RequestParam(defaultValue = "1") int page,
@@ -117,8 +127,11 @@ public class AiAssistantController {
      *
      * <p>Called on the client's own schedule: {@code refreshTranscript} in
      * {@code AskConnexProvider.tsx} reruns in full for every queued realtime refresh.
+     *
+     * <p>Fully silent for the same reason as {@link #page}: the refresh is re-driven by every
+     * socket reconnect, so a failing read repeats for as long as the surface stays open.
      */
-    @TenantJournalClientDriven
+    @TenantJournalClientDriven(retainFailures = false)
     @GetMapping("/{id:\\d+}")
     public AiChatSessionDetailDto get(
             @PathVariable int id,
@@ -182,8 +195,11 @@ public class AiAssistantController {
      *
      * <p>Called on the client's own schedule: {@code refreshCollaboration} in
      * {@code AskConnexProvider.tsx} runs per queued realtime refresh on a shared session.
+     *
+     * <p>Fully silent for the same reason as {@link #page}: the refresh is re-driven by every
+     * socket reconnect, so a failing read repeats for as long as the surface stays open.
      */
-    @TenantJournalClientDriven
+    @TenantJournalClientDriven(retainFailures = false)
     @GetMapping("/{id:\\d+}/participants")
     public List<AiChatParticipantDto> participants(@PathVariable int id) {
         return assistantService.participants(id);
@@ -203,8 +219,11 @@ public class AiAssistantController {
      *
      * <p>Called on the client's own schedule: the second half of {@code refreshCollaboration} in
      * {@code AskConnexProvider.tsx}, per queued realtime refresh on a shared session.
+     *
+     * <p>Fully silent for the same reason as {@link #page}: the refresh is re-driven by every
+     * socket reconnect, so a failing read repeats for as long as the surface stays open.
      */
-    @TenantJournalClientDriven
+    @TenantJournalClientDriven(retainFailures = false)
     @GetMapping("/{id:\\d+}/presence")
     public AiChatPresenceDto presence(@PathVariable int id) {
         return assistantService.presence(id);
@@ -246,8 +265,11 @@ public class AiAssistantController {
      *
      * <p>Called on the client's own schedule: part of {@code refreshTranscript} in
      * {@code AskConnexProvider.tsx}, per queued realtime refresh.
+     *
+     * <p>Fully silent for the same reason as {@link #page}: the refresh is re-driven by every
+     * socket reconnect, so a failing read repeats for as long as the surface stays open.
      */
-    @TenantJournalClientDriven
+    @TenantJournalClientDriven(retainFailures = false)
     @GetMapping("/{id:\\d+}/attachments")
     public List<AiChatAttachmentDto> listAttachments(@PathVariable int id) {
         return attachmentService.list(id);
@@ -336,8 +358,11 @@ public class AiAssistantController {
      * <p>Called on the client's own schedule: {@code refreshTranscript} in
      * {@code AskConnexProvider.tsx} issues it twice — once plain and once with
      * {@code pendingOnly} — per queued realtime refresh.
+     *
+     * <p>Fully silent for the same reason as {@link #page}: the refresh is re-driven by every
+     * socket reconnect, so a failing read repeats for as long as the surface stays open.
      */
-    @TenantJournalClientDriven
+    @TenantJournalClientDriven(retainFailures = false)
     @GetMapping("/{sessionId:\\d+}/tool-calls")
     public List<AiAssistantToolCallReadDto> listToolCalls(
             @PathVariable int sessionId,
@@ -359,8 +384,11 @@ public class AiAssistantController {
     /**
      * Returns one viewer-safe write-tool call in the authorized session.
      *
-     * <p>Called on the client's own schedule: the single-call read behind the same realtime
-     * refresh fan-out in {@code AskConnexProvider.tsx}.
+     * <p>Not polled: {@code AskConnexProvider.tsx} issues it only as the settle-read that follows a
+     * member's own approve, reject or undo, and once more on that action's 409. It is marked so the
+     * structural rule that every assistant read is client-driven keeps no exceptions; its volume is
+     * bounded by the member's tool actions, which are themselves journaled, so its failures are
+     * retained.
      */
     @TenantJournalClientDriven
     @GetMapping("/{sessionId:\\d+}/tool-calls/{toolCallId:\\d+}")
