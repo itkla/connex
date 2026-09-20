@@ -339,10 +339,17 @@ It attaches that message ID even when an operator has already resolved the item,
 else: the recorded `delivered` or `not_delivered` decision, the delivery's status, and its frequency
 reservation all stay exactly as the operator left them, while a later bounce or complaint for the
 message the provider accepted still suppresses the address and revokes consent.
-An expired triggered claim marked for reconciliation keeps no provider message ID: its webhooks match
-no delivery and record no suppression and no consent revocation. Before resolving such an item, check
-the provider's bounce and complaint records for that recipient and add any suppression by hand
-(`POST /api/suppressions`).
+A slow triggered worker overtaken by the expired-claim sweep attaches its provider message ID the same
+way, on the same terms: the reconciliation item, the operator's decision if one has been recorded, the
+delivery's status and its frequency reservation are all left exactly as they were, and only a message
+ID the row does not yet carry is written. It is written only onto a row that still names that
+attempt's provider and target fingerprint and that no newer attempt owns, so a claim the sweep
+returned to the queue for an idempotent replay is left to that replay, which records its own message
+ID. **A claim whose worker never came back still keeps no provider message ID** — a worker that died,
+rather than stalled, records nothing — and neither does a replay that never ran because its send was
+paused or cancelled first. Those items' webhooks match no delivery and record no suppression and no
+consent revocation, so before resolving one, check the provider's bounce and complaint records for
+that recipient and add any suppression by hand (`POST /api/suppressions`).
 Generic HTTP ESP/SMS connectors default
 `idempotentSubmission` to false. A workspace administrator may enable it only after verifying that
 the configured endpoint guarantees repeated requests carrying the same `Idempotency-Key` deliver no
