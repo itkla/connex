@@ -334,6 +334,7 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
         Trajectory trajectory = run(
                 "connex_script_parallel_calls_refused", "look this contact up two ways");
 
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
         assertEquals(List.of(), trajectory.toolNames(),
                 "a refused batch must leave no durable tool call behind");
         assertTrue(
