@@ -9,6 +9,7 @@ import ooo.klae.connex.backend.beans.UnenrolledPrivilegedAccountCounts;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiChatRealtimeRecipientDto;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
+import ooo.klae.connex.backend.dto.UserProfileHydrationRow;
 import ooo.klae.connex.backend.dto.UserReferenceDto;
 import ooo.klae.connex.backend.session.SessionEpochRestampGrant;
 
@@ -32,6 +33,17 @@ public interface UserMapper {
         @Param("ids") List<Integer> ids);
     /** Current display references for requested active members of one workspace. */
     List<UserReferenceDto> getActiveWorkspaceMemberReferencesByIds(
+        @Param("workspaceId") int workspaceId,
+        @Param("ids") List<Integer> ids);
+    /**
+     * Display-safe profiles for requested active members of one workspace, each paired with the
+     * collation key of its display name. Never selects credentials.
+     *
+     * @param workspaceId workspace whose active members may be returned
+     * @param ids nonempty candidate user ids
+     * @return matching profiles ordered by display name, then id
+     */
+    List<UserProfileHydrationRow> getActiveWorkspaceMemberProfilesByIds(
         @Param("workspaceId") int workspaceId,
         @Param("ids") List<Integer> ids);
     List<Integer> findMatchingWorkspaceMemberIds(

@@ -11,6 +11,7 @@ Read the relevant section before adding/changing `FOR UPDATE`, transaction isola
 - Revalidate the exact locked rows before deriving authorization or performing writes. Pre-lock permission/state snapshots are preliminary only.
 - Acquire broader/root locks before child/aggregate locks according to the owning contract; do not reacquire a broader root later in the transaction.
 - Keep provider/network I/O outside database transactions unless a subsystem contract explicitly requires and bounds otherwise.
+- Read control-plane data that a tenant write needs only for its response — deal-collaborator profile hydration, for example — after that write's transaction has completed. Suspending a routed tenant transaction to read the control catalog borrows a second pooled connection while the write still holds its row locks and the workspace audit-chain head, so under `catalog-per-placement` enough concurrent requests exhaust the pool and hold those locks for a whole connection timeout. Control-plane state a write must consult before it commits (quiet-hours evaluation) keeps the suspend-and-read shape, and those paths budget two pooled connections per concurrent request.
 - Changes to lock order or transaction isolation are Tier 3/high-risk and receive focused concurrency/correctness review.
 
 ## Workflow lifecycle and account offboarding
