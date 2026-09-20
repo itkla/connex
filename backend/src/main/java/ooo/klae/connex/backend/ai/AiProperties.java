@@ -179,12 +179,15 @@ public class AiProperties {
     private Duration runLeaseSweepInitialDelay = Duration.ofSeconds(60);
 
     /** Maximum workspaces one run-lease sweep pass visits per catalog. */
+    @Min(1)
     private int runLeaseSweepMaxWorkspaces = 50;
 
     /** Maximum expired leases one run-lease sweep pass reads per workspace. */
+    @Min(1)
     private int runLeaseSweepBatch = 50;
 
     /** Maximum orphan settlements one run-lease sweep pass performs. */
+    @Min(1)
     private int runLeaseSweepMaxSettlements = 200;
 
     /** Lifetime of the lease a settler takes an orphaned run over with. */
@@ -366,9 +369,22 @@ public class AiProperties {
      * lifetime means a dead owner is never detected before the generation gives up anyway. A
      * tombstone retention at or below the generation lifetime means a released lease can be deleted
      * while its former owner could still be acting, which would restart the fencing epoch at 1.
+     *
+     * <p>Every lease lifetime is also required to be a whole number of seconds, at least one.
+     * Lease deadlines are computed by the database as {@code INTERVAL n SECOND}, so a sub-second or
+     * fractional setting would be truncated on its way into SQL: {@code 900ms} would mint a lease
+     * whose deadline equals its acquisition instant — expired on arrival, silently taken over by
+     * the next claimant and handed to the settler while the run is still executing.
      */
     @PostConstruct
     void validateRunLeaseTimings() {
+        requireWholeSeconds("run-lease-ttl", runLeaseTtl);
+        requireWholeSeconds("run-lease-settlement-ttl", runLeaseSettlementTtl);
+        requireWholeSeconds("run-lease-tombstone-retention", runLeaseTombstoneRetention);
+        if (runLeaseHeartbeatInterval.isZero() || runLeaseHeartbeatInterval.isNegative()) {
+            throw new IllegalArgumentException(
+                    "connex.ai.run-lease-heartbeat-interval must be positive");
+        }
         if (runLeaseHeartbeatInterval.multipliedBy(2).compareTo(runLeaseTtl) > 0) {
             throw new IllegalArgumentException(
                     "connex.ai.run-lease-heartbeat-interval must not exceed half of run-lease-ttl");
@@ -384,6 +400,14 @@ public class AiProperties {
         if (runLeaseTombstoneRetention.compareTo(generationMaxLifetime) <= 0) {
             throw new IllegalArgumentException(
                     "connex.ai.run-lease-tombstone-retention must exceed generation-max-lifetime");
+        }
+    }
+
+    private static void requireWholeSeconds(String key, Duration value) {
+        if (value.toSeconds() < 1L || value.getNano() != 0) {
+            throw new IllegalArgumentException(
+                    "connex.ai." + key + " must be a whole number of seconds, at least one, because"
+                            + " lease deadlines are computed as INTERVAL n SECOND; got " + value);
         }
     }
 }

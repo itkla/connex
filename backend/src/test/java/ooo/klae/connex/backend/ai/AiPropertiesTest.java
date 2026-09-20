@@ -184,6 +184,49 @@ class AiPropertiesTest {
         }
     }
 
+    /**
+     * Lease deadlines are computed by MySQL as {@code INTERVAL n SECOND}, so a sub-second or
+     * fractional lifetime truncates to zero or drops its remainder on the way into SQL. A lease
+     * minted with a zero interval expires the instant it is written: the next claimant takes it
+     * over silently and a settler treats a run that has not executed a step as an orphan.
+     */
+    @Test
+    void subSecondOrFractionalRunLeaseLifetimesAreRefusedAtStartup() {
+        for (String invalid : List.of(
+                "connex.ai.run-lease-ttl=900ms",
+                "connex.ai.run-lease-ttl=45500ms",
+                "connex.ai.run-lease-settlement-ttl=500ms",
+                "connex.ai.run-lease-tombstone-retention=900ms",
+                "connex.ai.run-lease-heartbeat-interval=0s")) {
+            contextRunner
+                    .withPropertyValues(invalid)
+                    .run(context -> assertNotNull(
+                            context.getStartupFailure(),
+                            "Expected startup failure for run-lease setting " + invalid));
+        }
+    }
+
+    /**
+     * Each sweep budget bounds a pass of the detection loop. Zero would silently disable the pass it
+     * bounds — {@code LIMIT 0} returns nothing on every sweep, so no orphaned run is ever settled
+     * and the advertised dead-owner bound becomes unbounded with no error and a green job run.
+     */
+    @Test
+    void nonPositiveRunLeaseSweepBudgetsAreRefusedAtStartup() {
+        for (String knob : List.of(
+                "connex.ai.run-lease-sweep-max-workspaces",
+                "connex.ai.run-lease-sweep-batch",
+                "connex.ai.run-lease-sweep-max-settlements")) {
+            for (String invalid : List.of("0", "-1")) {
+                contextRunner
+                        .withPropertyValues(knob + "=" + invalid)
+                        .run(context -> assertNotNull(
+                                context.getStartupFailure(),
+                                "Expected startup failure for " + knob + "=" + invalid));
+            }
+        }
+    }
+
     @Test
     void nonPositiveAssistantOutputTokenLimitsFailAtStartup() {
         contextRunner.run(context -> assertNull(context.getStartupFailure()));
