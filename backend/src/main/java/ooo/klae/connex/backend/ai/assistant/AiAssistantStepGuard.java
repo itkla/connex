@@ -13,10 +13,18 @@ import ooo.klae.connex.backend.ai.AiRawOutputGuard;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import tools.jackson.databind.JsonNode;
 
-/** Raw masked-output guard for the exclusive tool-or-final assistant step schema. */
+/**
+ * Factory for the raw masked-output guards of the exclusive tool-or-final assistant step schema.
+ *
+ * <p>It is deliberately not itself an {@link AiRawOutputGuard}. Every guard it hands out is a
+ * function of one turn's loaded toolsets, so a component-wide guard would have to choose a default
+ * vocabulary, and the only default that never rejects a legitimate step — the whole catalog — is
+ * exactly the one that would admit a tool the turn never loaded. Callers name the vocabulary they
+ * mean through {@link #forStep(Set, Set)} or {@link #finalAnswerForIssuedPlaceholders(Set)}.
+ */
 @Component
 @RequiredArgsConstructor
-public class AiAssistantStepGuard implements AiRawOutputGuard {
+public class AiAssistantStepGuard {
     private static final Set<String> TOP_LEVEL_FIELDS = Set.of("tool", "final");
     private static final Set<String> TOOL_FIELDS = Set.of("name", "args");
     private static final Set<String> FINAL_FIELDS = Set.of(
@@ -47,16 +55,6 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
 
     private final AiAssistantToolCatalog toolCatalog;
 
-    @Override
-    public boolean permits(JsonNode output) {
-        return rejectionReason(output) == null;
-    }
-
-    @Override
-    public String rejectionReason(JsonNode output) {
-        return rejectionReason(output, AiAssistantToolCatalog.ALL);
-    }
-
     private String rejectionReason(JsonNode output, Set<Toolset> loadedToolsets) {
         if (output == null || !output.isObject() || !exactFields(output, TOP_LEVEL_FIELDS)) {
             return "top_level_fields";
@@ -71,36 +69,6 @@ public class AiAssistantStepGuard implements AiRawOutputGuard {
         return hasTool
                 ? toolRejection(tool, loadedToolsets)
                 : finalRejection(finalAnswer);
-    }
-
-    /**
-     * Creates a raw-output guard that also rejects bare bodies of placeholders issued for the
-     * current provider call while continuing to accept their braced forms for demasking.
-     * @param issuedPlaceholders canonical issued placeholders such as {@code {{P1}}}
-     * @return assistant schema and issued-placeholder guard
-     */
-    public AiRawOutputGuard forIssuedPlaceholders(Set<String> issuedPlaceholders) {
-        Set<String> placeholderBodies = issuedPlaceholderBodies(issuedPlaceholders);
-        if (placeholderBodies.isEmpty()) {
-            return this;
-        }
-        return new AiRawOutputGuard() {
-            @Override
-            public boolean permits(JsonNode output) {
-                return rejectionReason(output) == null;
-            }
-
-            @Override
-            public String rejectionReason(JsonNode output) {
-                String schemaRejection = AiAssistantStepGuard.this.rejectionReason(output);
-                if (schemaRejection != null) {
-                    return schemaRejection;
-                }
-                return containsBareIssuedPlaceholder(output, placeholderBodies)
-                        ? "bare_placeholder"
-                        : null;
-            }
-        };
     }
 
     /**

@@ -6,6 +6,7 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -114,7 +115,15 @@ public class AiAssistantToolCatalog {
      */
     public static final int RESERVATION_HEADROOM_TOOLSETS = 1;
 
-    /** One stable tool key, its toolset, and its execution availability. */
+    /**
+     * One stable tool key, its toolset, and its execution availability.
+     *
+     * <p>The toolset is required: every catalog view filters on it, so a declaration without one
+     * would vanish from the vocabulary, the native definitions and {@code isLoaded} for
+     * {@link #ALL} while still passing {@code isKnown}, and would throw from
+     * {@link #CORE}'s immutable {@code contains}. Failing at class initialisation keeps the
+     * partition an invariant rather than a silently enforced filter.
+     */
     public record ToolSpec(
             String name,
             Toolset toolset,
@@ -124,6 +133,7 @@ public class AiAssistantToolCatalog {
             List<ArgumentSpec> arguments) {
 
         public ToolSpec {
+            Objects.requireNonNull(toolset, name + " declares no toolset");
             arguments = List.copyOf(arguments);
         }
     }
