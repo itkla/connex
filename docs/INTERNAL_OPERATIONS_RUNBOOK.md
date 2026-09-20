@@ -764,6 +764,31 @@ ambiguous, other-tenant, background, pre-auth, and non-allowlisted records are o
 means the journal step failed and no output archive was published. Async request completions are
 also omitted because tenant resolution can change before redispatch.
 
+**Ask Connex omits its client-scheduled reads; read the rule, not a list of routes.** Under
+`/api/ai/assistant/**` the rule has exactly three cases:
+
+- **Every assistant `GET`, plus the `POST .../sessions/scope-preview` composer preview, is omitted
+  on success.** The client issues them on its own poll, debounce, and realtime-refresh schedules, so
+  their volume tracks agent steps and open surfaces rather than anything you are diagnosing. A
+  missing `200` on such a route is a declared omission, never evidence that the member's request did
+  not arrive.
+- **Omitted at _every_ status, success and failure alike:** the `PUT .../sessions/{id}/presence`
+  heartbeat, and the reads the realtime socket's reconnect re-drives — the session list, the
+  invitation list, the session detail, and that session's attachments, tool calls, participants and
+  presence. The browser re-issues each of those for as long as a surface stays open, with no member
+  action able to stop it, so retaining their failures would be unbounded in time and could exhaust
+  the projection's record cap — which raises rather than truncating, denying you an archive during
+  the very incident you are collecting for.
+- **Failures are retained** on every other assistant route: the turn poll, the scope preview, the
+  single tool-call read, the skill directory, the command centre, the brief schedule, and the watch
+  list.
+
+Every member action — starting or cancelling a turn; creating, sharing, joining, leaving or
+archiving a session; inviting or removing a participant; appending a message; uploading or deleting
+an attachment; approving, rejecting or undoing a tool call; and every audited retained-record
+`POST` — is journaled on success and on failure. Those are the records that answer "did this
+member's request arrive".
+
 **The two audit identifiers have different trust.** `audit-slice.csv` carries
 `serverMintedRequestId`, the non-spoofable within-audit pivot, and
 `untrustedClientAssertedCorrelationHmac`, an organization-scoped, domain-separated HMAC of the

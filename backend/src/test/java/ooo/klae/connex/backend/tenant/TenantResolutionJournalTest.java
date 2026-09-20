@@ -209,6 +209,63 @@ class TenantResolutionJournalTest {
         assertFalse(tenantContext.isResolved());
     }
 
+    @Test
+    void clientDrivenHandlerOmitsASuccessfulCompletion() throws Exception {
+        for (int status : new int[] {200, 302}) {
+            MockHttpServletRequest request = resolvedRequest();
+            request.setAttribute(
+                HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/ai/assistant/sessions");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            response.setStatus(status);
+            HandlerMethod handler = handler(new ClientDrivenHandler());
+
+            interceptor.preHandle(request, response, handler);
+            interceptor.afterCompletion(request, response, handler, null);
+
+            assertEquals(0, appender.list.size(), "status " + status);
+        }
+    }
+
+    @Test
+    void clientDrivenHandlerStillJournalsAFailingCompletion() throws Exception {
+        for (int status : new int[] {403, 500}) {
+            appender.list.clear();
+            MockHttpServletRequest request = resolvedRequest();
+            request.setAttribute(
+                HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, "/api/ai/assistant/sessions");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            response.setStatus(status);
+            HandlerMethod handler = handler(new ClientDrivenHandler());
+
+            interceptor.preHandle(request, response, handler);
+            interceptor.afterCompletion(request, response, handler, null);
+
+            assertEquals(1, appender.list.size(), "status " + status);
+            Map<String, Object> fields = appender.list.getFirst().getKeyValuePairs().stream()
+                .collect(Collectors.toMap(pair -> pair.key, pair -> pair.value));
+            assertEquals("/api/ai/assistant/sessions", fields.get("requestPath"));
+            assertEquals(status, fields.get("responseStatus"));
+        }
+    }
+
+    @Test
+    void retainFailuresFalseOmitsEveryCompletion() throws Exception {
+        for (int status : new int[] {200, 403, 500}) {
+            MockHttpServletRequest request = resolvedRequest();
+            request.setAttribute(
+                HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE,
+                "/api/ai/assistant/sessions/{id:\\d+}/presence");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            response.setStatus(status);
+            HandlerMethod handler = handler(new SilentClientDrivenHandler());
+
+            interceptor.preHandle(request, response, handler);
+            interceptor.afterCompletion(request, response, handler, null);
+
+            assertEquals(0, appender.list.size(), "status " + status);
+        }
+    }
+
     private MockHttpServletRequest resolvedRequest() {
         MockHttpServletRequest request = request();
         when(requestResolver.resolve(request, 7)).thenReturn(11);
@@ -249,6 +306,20 @@ class TenantResolutionJournalTest {
 
     @TenantJournalAttributable
     private static final class AttributableHandler {
+        public void handle() {
+        }
+    }
+
+    @TenantJournalAttributable
+    private static final class ClientDrivenHandler {
+        @TenantJournalClientDriven
+        public void handle() {
+        }
+    }
+
+    @TenantJournalAttributable
+    private static final class SilentClientDrivenHandler {
+        @TenantJournalClientDriven(retainFailures = false)
         public void handle() {
         }
     }
