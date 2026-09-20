@@ -8,6 +8,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -26,6 +27,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -38,6 +40,9 @@ import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
 import org.springframework.transaction.NoTransactionException;
 import org.springframework.transaction.interceptor.TransactionAspectSupport;
+import org.springframework.transaction.support.ResourceHolderSupport;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -108,6 +113,7 @@ class DealServiceTest extends AbstractServiceTest {
     @MockitoSpyBean NotificationChangePublisher notificationChanges;
     @MockitoSpyBean RuleTriggerPublisher ruleTriggers;
     @MockitoSpyBean DealCollaboratorControlAccess collaboratorControlAccess;
+    @MockitoSpyBean TransactionTemplate transactionTemplate;
 
     @Test
     void collaboratorsHydrateActiveProfilesInDisplayOrderAndAuditRawTenantIds() throws Exception {
@@ -200,19 +206,55 @@ class DealServiceTest extends AbstractServiceTest {
         Pipeline pipeline = newPipeline();
         Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
         User member = newUser();
+        AtomicInteger openWriteSpans = new AtomicInteger();
+        AtomicInteger enteredWriteSpans = new AtomicInteger();
         AtomicBoolean hydratedInsideTheWrite = new AtomicBoolean(true);
         doAnswer(invocation -> {
-            hydratedInsideTheWrite.set(declarativeTransactionActive());
+            openWriteSpans.incrementAndGet();
+            enteredWriteSpans.incrementAndGet();
+            try {
+                return invocation.callRealMethod();
+            } finally {
+                openWriteSpans.decrementAndGet();
+            }
+        }).when(transactionTemplate).execute(any());
+        doAnswer(invocation -> {
+            hydratedInsideTheWrite.set(openWriteSpans.get() > 0 || declarativeTransactionActive());
             return invocation.callRealMethod();
         }).when(collaboratorControlAccess).getProfiles(anyInt(), anyList());
 
         List<UserDto> replaced = dealService.replaceCollaborators(deal.getId(), List.of(member.getId()));
 
         assertEquals(List.of(member.getId()), replaced.stream().map(UserDto::getId).toList());
+        assertEquals(1, enteredWriteSpans.get(),
+            "The tenant write must still run through the injected TransactionTemplate; a locally "
+                + "constructed template would leave this guard blind to a hydration call moved back "
+                + "inside the write span");
         assertFalse(hydratedInsideTheWrite.get(),
             "Collaborator profiles must hydrate after the tenant write transaction completes, so the "
                 + "control-plane read never pins a second pooled connection while the deal's "
                 + "collaborator row locks and the workspace audit-chain head lock are held");
+    }
+
+    @Test
+    void collaboratorHydrationFailureNeverRollsBackTheTenantWrite() {
+        Pipeline pipeline = newPipeline();
+        Deal deal = newDeal(pipeline, newStage(pipeline, 0), newCompany());
+        User member = newUser();
+        assertFalse(boundResourceMarkedRollbackOnly(),
+            "The surrounding test transaction must start clean for this guard to mean anything");
+        doThrow(new IllegalStateException("control catalog unavailable"))
+            .when(collaboratorControlAccess).getProfiles(anyInt(), anyList());
+
+        assertThrows(IllegalStateException.class,
+            () -> dealService.replaceCollaborators(deal.getId(), List.of(member.getId())));
+
+        assertEquals(List.of(member.getId()),
+            dealMapper.getCollaboratorIds(workspace.getId(), deal.getId()));
+        assertFalse(boundResourceMarkedRollbackOnly(),
+            "Hydration runs after the tenant write has completed, so a control-plane failure must "
+                + "neither undo the replacement nor mark the caller's transaction rollback-only; a "
+                + "hydration call inside the write span would roll that span back instead");
     }
 
     @Test
@@ -2280,6 +2322,11 @@ class DealServiceTest extends AbstractServiceTest {
         } catch (NoTransactionException exception) {
             return false;
         }
+    }
+
+    private static boolean boundResourceMarkedRollbackOnly() {
+        return TransactionSynchronizationManager.getResourceMap().values().stream()
+            .anyMatch(resource -> resource instanceof ResourceHolderSupport holder && holder.isRollbackOnly());
     }
 
     private static List<Integer> auditedIds(JsonNode ids) {

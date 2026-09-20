@@ -1891,6 +1891,11 @@ public class DealService {
      * Lists a deal's collaborators. The collaborator ids come from tenant data and the profiles
      * from the control plane; collaborators who are no longer active workspace members are omitted.
      *
+     * <p>Omitting non-active members is deliberately stricter than the catalog-joined query this
+     * replaced, which returned any existing account. Because {@link #replaceCollaborators} takes a
+     * whole set, a caller that re-sends only what this method showed it drops any collaborator
+     * hidden that way.
+     *
      * @param dealId the deal in the current workspace
      * @return display-safe collaborator profiles ordered by display name, then id
      */
