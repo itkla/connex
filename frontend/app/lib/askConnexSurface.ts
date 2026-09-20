@@ -209,6 +209,12 @@ export type AskConnexRecovery = {
  * - `transient` — the request was answerable and something along the way did not hold: the provider,
  *   this service, the shape of what came back, or the time it had. None of them are statements
  *   about breadth, so the route is asking again rather than asking for less.
+ * - `interrupted` — the answer was being written and the work stopped mid-flight rather than
+ *   failing. Everything it had already saved stands, and nothing here can tell how far it got, so
+ *   the one-press repeat is withheld: repeating the same request could add a second copy of a task,
+ *   note, activity or tag the first attempt had already saved. Picking up from the words it managed
+ *   is still offered, because that hands the text back to the member to read and edit rather than
+ *   asking anything on their behalf.
  * - `generic` — anything else, including every reason this build has never heard of.
  */
 export type AskConnexFailureClass =
@@ -219,6 +225,7 @@ export type AskConnexFailureClass =
     | 'authorization'
     | 'unsupportedInput'
     | 'transient'
+    | 'interrupted'
     | 'generic';
 
 /** Which explanation a settled failure is stated with. */
@@ -280,7 +287,7 @@ const TERMINAL_KINDS: Readonly<Record<string, AskConnexTerminalKind>> = {
     malformed_output: { category: 'transient', message: 'unreadable' },
     schema_repair_failed: { category: 'transient', message: 'unreadable' },
     no_progress: { category: 'transient', message: 'stalled' },
-    owner_lost: { category: 'transient', message: 'ownerLost' },
+    owner_lost: { category: 'interrupted', message: 'ownerLost' },
     generation_timeout: { category: 'transient', message: 'timeout' },
     turn_deadline_exceeded: { category: 'transient', message: 'timeout' },
     provider_idle_timeout: { category: 'transient', message: 'timeout' },
@@ -330,6 +337,7 @@ const RECOVERY_BY_CLASS: Readonly<Record<AskConnexFailureClass, AskConnexRecover
     authorization: { retry: false, continueFromPartial: false, narrowScope: false, narrowScopeFirst: false },
     unsupportedInput: { retry: false, continueFromPartial: false, narrowScope: false, narrowScopeFirst: false },
     transient: { retry: true, continueFromPartial: true, narrowScope: false, narrowScopeFirst: false },
+    interrupted: { retry: false, continueFromPartial: true, narrowScope: false, narrowScopeFirst: false },
     generic: { retry: true, continueFromPartial: true, narrowScope: false, narrowScopeFirst: false },
 };
 
@@ -339,6 +347,11 @@ const RECOVERY_BY_CLASS: Readonly<Record<AskConnexFailureClass, AskConnexRecover
  * A breadth failure withholds continuing as well as retrying: the continue prefill re-asks the
  * question that just exceeded the guard, so it would meet the same limit that narrowing exists to
  * get under.
+ *
+ * An interrupted answer withholds the opposite half. Retry sends the original question straight
+ * back as a new request, and an answer that stopped mid-flight may already have saved something
+ * while nothing here can say what, so a one-press repeat could quietly duplicate it. Continuing
+ * only puts the words it managed into the composer for the member to read and edit, so it stays.
  *
  * @param phase the settled phase of the answer
  * @param reason its terminal reason, when the server gave one
