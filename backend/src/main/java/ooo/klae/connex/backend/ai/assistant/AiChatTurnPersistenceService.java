@@ -868,10 +868,16 @@ public class AiChatTurnPersistenceService {
      * {@code timed_out}/{@code generation_timeout}, never as an ownership loss, because no
      * instance ever recorded ownership of them.
      *
+     * <p>The staleness boundary is the database's, not this JVM's. The reader-triggered expiry can
+     * bind its own clock because it only ever reaches the one session its caller is reading; this
+     * pass runs unattended against every workspace the instance routes to, so a clock running ahead
+     * of MySQL would settle live turns across the estate. {@code updated_at} is written by MySQL,
+     * so MySQL is the only clock that can be compared against it safely.
+     *
      * @param workspaceId tenant key
      * @param sessionId the owning session
      * @param turnId the turn
-     * @param cutoff the absolute-lifetime boundary
+     * @param lifetimeSeconds the absolute turn lifetime, applied by MySQL
      * @return true when this call wrote the turn's terminal state
      */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
@@ -879,7 +885,7 @@ public class AiChatTurnPersistenceService {
             int workspaceId,
             int sessionId,
             int turnId,
-            LocalDateTime cutoff) {
+            int lifetimeSeconds) {
         if (chatMapper.getSessionByIdForMaintenanceUpdate(workspaceId, sessionId) == null) {
             return false;
         }
@@ -887,7 +893,16 @@ public class AiChatTurnPersistenceService {
         if (stored == null) {
             return false;
         }
-        return expireStaleTurn(stored, cutoff);
+        if (!QUEUED.equals(stored.getStatus()) && !RUNNING.equals(stored.getStatus())) {
+            return false;
+        }
+        if (chatMapper.expireTurnPastLifetime(
+                workspaceId, sessionId, turnId,
+                TIMED_OUT, GENERATION_TIMEOUT, stored.getStatus(), lifetimeSeconds) != 1) {
+            return false;
+        }
+        releaseRunLease(workspaceId, turnId);
+        return true;
     }
 
     private void screenTerminalPartial(AiChatTurn stored, String reason) {

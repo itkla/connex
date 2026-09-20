@@ -609,6 +609,18 @@
   <!--
     Catalog-pinned background-sweep discovery: workspace references only, no tenant content rows,
     which is why it carries a TenantScopeArchTest exemption instead of a workspace predicate.
+
+    The status equalities and the updated_at range lead and the workspace cursor trails, because
+    this probe has no workspace predicate to seek on. Every other ai_chat_turn index leads with
+    workspace_id, so a cursor range there degenerates into a scan of an index that grows one entry
+    per assistant turn ever asked - paid every thirty seconds, per catalog, to return nothing.
+    idx_ai_chat_turn_unleased_lifetime (status, updated_at, workspace_id) turns it into two short
+    ranges whose cost follows the outstanding recovery work instead, and a tick with nothing to
+    recover reads no entries at all.
+
+    The lifetime boundary is computed here rather than bound as a JVM instant: it is compared
+    against updated_at, which MySQL writes, so an instance whose clock ran ahead would otherwise
+    discover every live turn in every workspace it routes to as stale.
   -->
   <select id="workspaceIdsWithUnleasedStaleTurns" resultType="int">
     SELECT DISTINCT t.workspace_id
@@ -617,10 +629,11 @@
       ON l.workspace_id = t.workspace_id
      AND l.subject_kind = 'chat_turn'
      AND l.subject_id = t.id
-    WHERE t.workspace_id &gt; #{afterWorkspaceId}
-      AND t.status IN ('queued', 'running')
+    WHERE t.status IN ('queued', 'running')
+      AND t.updated_at &lt;=
+          DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL #{lifetimeSeconds} SECOND)
+      AND t.workspace_id &gt; #{afterWorkspaceId}
       AND l.subject_id IS NULL
-      AND t.updated_at &lt;= #{cutoff}
     ORDER BY t.workspace_id
     LIMIT #{limit}
   </select>
@@ -629,12 +642,14 @@
     The rolling-deploy and never-claimed pass. A claimed turn always has a lease row - held or
     tombstoned - so the absence of one is what says no instance ever fenced this turn and it must
     settle on the absolute lifetime rather than as an ownership loss.
+
+    Keys only: the pass locks and re-reads every turn before it writes, so projecting
+    partial_content and scope_json would put tenant transcript text on a shared scheduler thread
+    for no purpose.
   -->
-  <select id="findUnleasedStaleTurns" resultMap="turnResult">
-    SELECT t.id, t.workspace_id, t.session_id, t.requested_by_user_id, t.status,
-           t.terminal_reason, t.skill_key, t.skill_version, t.scope_json,
-           t.privacy_mode, t.streamed, t.partial_content,
-           t.partial_content_utf16_offset, t.cancel_requested_at, t.created_at, t.updated_at
+  <select id="findUnleasedStaleTurnRefs"
+          resultType="ooo.klae.connex.backend.beans.AiChatTurnRef">
+    SELECT t.session_id, t.id
     FROM ai_chat_turn t
     LEFT JOIN ai_run_lease l
       ON l.workspace_id = t.workspace_id
@@ -642,8 +657,9 @@
      AND l.subject_id = t.id
     WHERE t.workspace_id = #{workspaceId}
       AND t.status IN ('queued', 'running')
+      AND t.updated_at &lt;=
+          DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL #{lifetimeSeconds} SECOND)
       AND l.subject_id IS NULL
-      AND t.updated_at &lt;= #{cutoff}
     ORDER BY t.id
     LIMIT #{limit}
   </select>
@@ -737,6 +753,23 @@
     <if test="updatedBefore != null">
       AND updated_at &lt;= #{updatedBefore}
     </if>
+  </update>
+
+  <!--
+    The unattended lifetime pass's compare-and-set. Same shape as updateTurnTerminal above, except
+    that the staleness boundary is computed by MySQL instead of bound by the caller: this pass runs
+    on every instance against every workspace, so a JVM clock running ahead of the database would
+    settle live turns estate-wide rather than only in the one session a reader happened to open.
+  -->
+  <update id="expireTurnPastLifetime">
+    UPDATE ai_chat_turn
+    SET status = #{status}, terminal_reason = #{terminalReason,jdbcType=VARCHAR}
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id = #{id}
+      AND status = #{expectedStatus}
+      AND updated_at &lt;=
+          DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL #{lifetimeSeconds} SECOND)
   </update>
 
   <update id="appendTurnPartialContent">

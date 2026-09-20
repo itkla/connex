@@ -71,10 +71,13 @@ class TenantScopeArchTest {
      * recipient membership lock and actor-recipient projection are identity-scoped
      * coordination reads for notification offboarding. Workflow offboarding discovery
      * is bound to the departing user and only returns exact workspace/workflow/version/rule
-     * keys that are point-locked before mutation. The expired-run-lease and unleased-stale-turn
-     * discovery helpers are the same catalog-pinned scheduler shape: each returns workspace ids
-     * and no tenant content rows, and every lease or turn row they lead to is then read, locked,
-     * and mutated under a bound {@code #{workspaceId}}.
+     * keys that are point-locked before mutation. The expired-run-lease, reapable-tombstone, and
+     * unleased-stale-turn discovery helpers are the same catalog-pinned scheduler shape: each
+     * returns workspace ids and no tenant content rows, and every lease or turn row they lead to is
+     * then read, locked, and mutated under a bound {@code #{workspaceId}}. The lease sweep carries
+     * two of them because its reap must visit workspaces its settlement page never returns — a
+     * workspace whose runs all settle cleanly holds no expired lease and still accumulates
+     * tombstones.
      */
     private static final Set<String> EXEMPT_SELECTS = Set.of(
         "ooo.klae.connex.backend.mappers.NotificationMapper.findPage",
@@ -97,6 +100,7 @@ class TenantScopeArchTest {
         "ooo.klae.connex.backend.mappers.WorkflowMapper.workspaceIdsWithEnabledScheduleWorkflows",
         "ooo.klae.connex.backend.mappers.WorkflowTriggerOutboxMapper.workspaceIdsPage",
         "ooo.klae.connex.backend.mappers.AiRunLeaseMapper.workspaceIdsWithExpiredLeases",
+        "ooo.klae.connex.backend.mappers.AiRunLeaseMapper.workspaceIdsWithReapableTombstones",
         "ooo.klae.connex.backend.mappers.AiChatMapper.workspaceIdsWithUnleasedStaleTurns",
         "ooo.klae.connex.backend.mappers.TeamMapper.findReferencesForUserAnywhere",
         "ooo.klae.connex.backend.mappers.ScheduleMapper.dueScheduleRefs",

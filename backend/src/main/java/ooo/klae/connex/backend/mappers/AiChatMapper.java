@@ -10,6 +10,7 @@ import ooo.klae.connex.backend.beans.AiChatParticipant;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.beans.AiChatTurnRef;
 
 /** Workspace-scoped persistence for assistant sessions, participants, messages, turns, and tools. */
 public interface AiChatMapper {
@@ -288,19 +289,23 @@ public interface AiChatMapper {
      * Enumerates the next page of workspaces holding a stale turn that no lease covers, for
      * catalog-pinned background fan-out. Returns workspace references only, never tenant content.
      *
+     * <p>The lifetime boundary is computed by MySQL rather than bound as a JVM instant, because it
+     * is compared against {@code updated_at}, which MySQL writes. An instance whose clock ran ahead
+     * would otherwise expire live turns across every workspace it routes to.
+     *
      * @param afterWorkspaceId exclusive cursor; {@code 0} starts a pass
-     * @param cutoff the absolute-lifetime boundary
+     * @param lifetimeSeconds the absolute turn lifetime, applied by MySQL
      * @param limit maximum workspace ids returned
      * @return ascending workspace ids
      */
     List<Integer> workspaceIdsWithUnleasedStaleTurns(
         @Param("afterWorkspaceId") int afterWorkspaceId,
-        @Param("cutoff") LocalDateTime cutoff,
+        @Param("lifetimeSeconds") int lifetimeSeconds,
         @Param("limit") int limit);
 
     /**
-     * Lists non-terminal turns in one workspace that hold no lease row and are past the absolute
-     * lifetime.
+     * Lists the session and turn references of non-terminal turns in one workspace that hold no
+     * lease row and are past the absolute lifetime.
      *
      * <p>The absence of a lease row is what separates this pass from the lease sweeper, and it is
      * load-bearing rather than an optimisation. A turn claimed by an instance running a binary
@@ -309,15 +314,47 @@ public interface AiChatMapper {
      * loss nobody can evidence. A claimed turn always has a lease row, held or tombstoned, so it
      * is never returned here.
      *
+     * <p>Only the two keys the pass needs are projected. A background thread has no reason to hold
+     * the model's durable partial answer or a turn's scope JSON for every stale turn in every
+     * workspace it visits, and the settlement re-reads the row it locks anyway.
+     *
      * @param workspaceId active workspace
-     * @param cutoff the absolute-lifetime boundary
+     * @param lifetimeSeconds the absolute turn lifetime, applied by MySQL
      * @param limit maximum turns returned
-     * @return stale unleased turns, oldest first
+     * @return stale unleased turn references, oldest first
      */
-    List<AiChatTurn> findUnleasedStaleTurns(
+    List<AiChatTurnRef> findUnleasedStaleTurnRefs(
         @Param("workspaceId") int workspaceId,
-        @Param("cutoff") LocalDateTime cutoff,
+        @Param("lifetimeSeconds") int lifetimeSeconds,
         @Param("limit") int limit);
+
+    /**
+     * Settles one turn that is still in {@code expectedStatus} and whose {@code updated_at} is
+     * older than the absolute lifetime, with the boundary computed by MySQL.
+     *
+     * <p>Separate from {@link #updateTurnTerminal}'s caller-supplied {@code updatedBefore} so the
+     * unattended pass compares one database-written column against that same database's clock. The
+     * reader-triggered expiry keeps its JVM boundary: it settles only the session a member is
+     * looking at, on that member's own request, so a skewed instance can reach only what it is
+     * already serving.
+     *
+     * @param workspaceId active workspace
+     * @param sessionId the owning session
+     * @param id the turn
+     * @param status the terminal status to write
+     * @param terminalReason the stable terminal reason
+     * @param expectedStatus the non-terminal status observed under the row lock
+     * @param lifetimeSeconds the absolute turn lifetime, applied by MySQL
+     * @return rows updated; {@code 0} means the turn moved on or is not yet stale
+     */
+    int expireTurnPastLifetime(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id,
+        @Param("status") String status,
+        @Param("terminalReason") String terminalReason,
+        @Param("expectedStatus") String expectedStatus,
+        @Param("lifetimeSeconds") int lifetimeSeconds);
 
     AiChatTurn getTurnById(
         @Param("workspaceId") int workspaceId,

@@ -125,10 +125,23 @@
           AND owner IS NOT NULL
     </update>
 
+    <!--
+      The subject-kind predicate keeps a lease this instance cannot settle out of the sweep's
+      discovery window entirely. Rows are ordered oldest deadline first, so a subject kind with no
+      handler on this binary - an agent_run lease read by an instance that predates or has rolled
+      back past its handler - would otherwise sit at the head of the page on every pass, spend the
+      settlement budget, and push genuinely dead owners out of reach. It cannot be retired instead:
+      an owner of that kind may still be alive on another binary, and retiring the row would let
+      the reap delete it and restart the key's fencing epoch underneath that owner.
+    -->
     <select id="findExpiredLeases" resultMap="leaseMap">
         SELECT <include refid="columns" />
         FROM ai_run_lease
         WHERE workspace_id = #{workspaceId}
+          AND subject_kind IN
+              <foreach item="subjectKind" collection="subjectKinds" open="(" separator="," close=")">
+                  #{subjectKind}
+              </foreach>
           AND owner IS NOT NULL
           AND expires_at &lt; CURRENT_TIMESTAMP(6)
         ORDER BY expires_at, subject_kind, subject_id
@@ -144,6 +157,27 @@
         WHERE workspace_id &gt; #{afterWorkspaceId}
           AND owner IS NOT NULL
           AND expires_at &lt; CURRENT_TIMESTAMP(6)
+        ORDER BY workspace_id
+        LIMIT #{limit}
+    </select>
+
+    <!--
+      The reap's own catalog-pinned discovery, deliberately not derived from the expired-lease page
+      above. A workspace whose runs all settle normally never holds an expired lease, so driving
+      the reap off that page would never visit it and its tombstones - one per assistant turn ever
+      run - would be retained forever.
+
+      Predicated on released_at rather than owner IS NULL so the whole statement is answered by
+      idx_ai_run_lease_released (workspace_id, released_at) with no row lookups;
+      chk_ai_run_lease_release_pair makes the two predicates equivalent.
+    -->
+    <select id="workspaceIdsWithReapableTombstones" resultType="int">
+        SELECT DISTINCT workspace_id
+        FROM ai_run_lease
+        WHERE workspace_id &gt; #{afterWorkspaceId}
+          AND released_at IS NOT NULL
+          AND released_at &lt;
+              DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL #{retentionSeconds} SECOND)
         ORDER BY workspace_id
         LIMIT #{limit}
     </select>

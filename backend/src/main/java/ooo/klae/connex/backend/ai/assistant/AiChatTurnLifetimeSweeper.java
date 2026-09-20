@@ -1,8 +1,5 @@
 package ooo.klae.connex.backend.ai.assistant;
 
-import java.time.Clock;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,7 +15,7 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiProperties;
-import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.beans.AiChatTurnRef;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.observability.JobRunRecorder.JobRunDetail;
@@ -41,13 +38,23 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  *
  * <p>The window between discovery and the write is closed by the same compare-and-set the
  * reader-triggered expiry uses: the terminal write is predicated on the turn's observed status and
- * on {@code updated_at} still being older than the cutoff, and a claim that landed in between
- * necessarily refreshed that column.
+ * on {@code updated_at} still being older than the lifetime boundary, and a claim that landed in
+ * between necessarily refreshed that column. Both the discovery and the write compute that
+ * boundary in SQL, so the pass compares one database-written column against that same database's
+ * clock and no instance's clock skew can widen or narrow it.
  *
- * <p>It shares the lease sweep's cadence, pagination bounds, and enable flag, because it is the
- * companion half of the same recovery guarantee and tuning one without the other has no meaning.
- * With the flag off both passes stop and the reader-triggered expiry remains the fallback, exactly
- * as it is today.
+ * <p>It shares the lease sweep's cadence, pagination bounds, enable flag, <em>and</em> global
+ * per-pass budget, because it is the companion half of the same recovery guarantee and tuning one
+ * without the other has no meaning. The global budget is not decoration: without it one pass could
+ * issue catalogs × workspaces × batch locking transactions on the shared scheduler thread, and a
+ * backlog in one tenant would delay every other tenant's detection past the advertised bound. With
+ * the flag off both passes stop and the reader-triggered expiry remains the fallback, exactly as it
+ * is today.
+ *
+ * <p>Job runs are recorded inside {@link TenantWorkScope#inWorkspace}, because {@code job_run} is a
+ * tenant-scoped table and the tenant backstop is fail-closed off the request thread: recording
+ * after the scope closed would be refused under {@code catalog-per-placement} routing and swallowed
+ * as a warning, leaving no evidence in exactly the multi-catalog deployment that needs it.
  */
 @Component
 @RequiredArgsConstructor
@@ -60,6 +67,8 @@ public class AiChatTurnLifetimeSweeper {
 
     private static final Logger log = LoggerFactory.getLogger(AiChatTurnLifetimeSweeper.class);
     private static final String DEFAULT_CATALOG = "default";
+    private static final int LIFETIME_SECONDS =
+            Math.toIntExact(AiAssistantTurnBudget.DURABLE_LIFETIME.toSeconds());
 
     private final AiChatMapper chatMapper;
     private final AiChatTurnPersistenceService persistenceService;
@@ -67,7 +76,6 @@ public class AiChatTurnLifetimeSweeper {
     private final TenantWorkScope tenantWorkScope;
     private final JobRunRecorder jobRunRecorder;
     private final AiProperties properties;
-    private final Clock clock;
     private final Map<String, AtomicInteger> workspaceCursors = new ConcurrentHashMap<>();
     private final AtomicInteger catalogCursor = new AtomicInteger();
 
@@ -76,10 +84,13 @@ public class AiChatTurnLifetimeSweeper {
         fixedDelayString = "${connex.ai.run-lease-sweep-delay:30s}",
         initialDelayString = "${connex.ai.run-lease-sweep-initial-delay:60s}")
     public void sweep() {
-        LocalDateTime cutoff = cutoff();
+        int remaining = properties.getRunLeaseSweepMaxSettlements();
         for (String catalog : rotatedCatalogs(placementRegistry.activeCatalogs())) {
+            if (remaining <= 0) {
+                break;
+            }
             try {
-                sweepCatalog(catalog, cutoff);
+                remaining -= sweepCatalog(catalog, remaining);
             } catch (RuntimeException failure) {
                 log.warn(
                         "Assistant turn lifetime sweep failed catalog={} exceptionClass={}",
@@ -89,46 +100,67 @@ public class AiChatTurnLifetimeSweeper {
         }
     }
 
-    private void sweepCatalog(String catalog, LocalDateTime cutoff) {
+    private int sweepCatalog(String catalog, int remaining) {
         AtomicInteger cursor = workspaceCursors.computeIfAbsent(
                 catalog == null ? DEFAULT_CATALOG : catalog,
                 ignored -> new AtomicInteger());
-        List<Integer> workspaceIds = workspacePage(catalog, cursor.get(), cutoff);
+        List<Integer> workspaceIds = workspacePage(catalog, cursor.get());
         if (workspaceIds.isEmpty() && cursor.get() != 0) {
             cursor.set(0);
-            workspaceIds = workspacePage(catalog, 0, cutoff);
+            workspaceIds = workspacePage(catalog, 0);
         }
+        int visited = 0;
         int lastVisited = cursor.get();
         for (int workspaceId : workspaceIds) {
-            sweepWorkspace(workspaceId, cutoff);
+            if (visited >= remaining) {
+                break;
+            }
+            visited += sweepWorkspace(workspaceId, remaining - visited);
             lastVisited = workspaceId;
         }
         if (!workspaceIds.isEmpty()) {
             cursor.set(lastVisited);
         }
+        return visited;
     }
 
-    private List<Integer> workspacePage(String catalog, int afterWorkspaceId, LocalDateTime cutoff) {
+    private List<Integer> workspacePage(String catalog, int afterWorkspaceId) {
         return tenantWorkScope.withCatalog(
                 catalog,
                 () -> chatMapper.workspaceIdsWithUnleasedStaleTurns(
-                        afterWorkspaceId, cutoff, properties.getRunLeaseSweepMaxWorkspaces()));
+                        afterWorkspaceId,
+                        LIFETIME_SECONDS,
+                        properties.getRunLeaseSweepMaxWorkspaces()));
     }
 
-    private void sweepWorkspace(int workspaceId, LocalDateTime cutoff) {
+    private int sweepWorkspace(int workspaceId, int budget) {
+        try {
+            return tenantWorkScope.inWorkspace(
+                    workspaceId, () -> expireAndRecord(workspaceId, budget));
+        } catch (RuntimeException failure) {
+            log.warn(
+                    "Assistant turn lifetime sweep could not route workspaceId={}"
+                            + " exceptionClass={}",
+                    workspaceId,
+                    failure.getClass().getSimpleName());
+            return 0;
+        }
+    }
+
+    private int expireAndRecord(int workspaceId, int budget) {
         long startedNanos = System.nanoTime();
         JobRunDetail started = JobRunDetail.startedUtc();
         try {
-            SweepCounts counts = tenantWorkScope.inWorkspace(
-                    workspaceId, () -> expireWorkspace(workspaceId, cutoff));
+            SweepCounts counts = expireWorkspace(workspaceId, budget);
             if (counts.visited() == 0 && counts.failed() == 0) {
-                return;
+                return counts.visited();
             }
             jobRunRecorder.record(
                     JobRunRecorder.AI_CHAT_TURN_LIFETIME_SWEEP,
                     workspaceId,
                     counts.failed() == 0 ? JobRunStatus.SUCCEEDED : JobRunStatus.FAILED,
                     new JobRunDetail(started.startedAt(), metadata(counts, startedNanos)));
+            return counts.visited();
         } catch (RuntimeException failure) {
             log.warn(
                     "Assistant turn lifetime sweep failed workspaceId={} exceptionClass={}",
@@ -139,20 +171,25 @@ public class AiChatTurnLifetimeSweeper {
                     workspaceId,
                     JobRunStatus.FAILED,
                     new JobRunDetail(started.startedAt(), Map.of("phase", "workspace_sweep")));
+            return 0;
         }
     }
 
-    private SweepCounts expireWorkspace(int workspaceId, LocalDateTime cutoff) {
-        List<AiChatTurn> stale = chatMapper.findUnleasedStaleTurns(
-                workspaceId, cutoff, properties.getRunLeaseSweepBatch());
+    private SweepCounts expireWorkspace(int workspaceId, int budget) {
+        int batch = Math.min(properties.getRunLeaseSweepBatch(), budget);
+        List<AiChatTurnRef> stale =
+                chatMapper.findUnleasedStaleTurnRefs(workspaceId, LIFETIME_SECONDS, batch);
         int visited = 0;
         int expired = 0;
         int failed = 0;
-        for (AiChatTurn turn : stale) {
+        for (AiChatTurnRef turn : stale) {
+            if (visited >= budget) {
+                break;
+            }
             visited++;
             try {
                 if (persistenceService.expireUnleasedTurn(
-                        workspaceId, turn.getSessionId(), turn.getId(), cutoff)) {
+                        workspaceId, turn.sessionId(), turn.id(), LIFETIME_SECONDS)) {
                     expired++;
                 }
             } catch (RuntimeException failure) {
@@ -161,16 +198,11 @@ public class AiChatTurnLifetimeSweeper {
                         "Assistant turn lifetime expiry failed workspaceId={} turnId={}"
                                 + " exceptionClass={}",
                         workspaceId,
-                        turn.getId(),
+                        turn.id(),
                         failure.getClass().getSimpleName());
             }
         }
         return new SweepCounts(visited, expired, failed);
-    }
-
-    private LocalDateTime cutoff() {
-        return LocalDateTime.ofInstant(
-                clock.instant().minus(AiAssistantTurnBudget.DURABLE_LIFETIME), ZoneOffset.UTC);
     }
 
     private static Map<String, Object> metadata(SweepCounts counts, long startedNanos) {

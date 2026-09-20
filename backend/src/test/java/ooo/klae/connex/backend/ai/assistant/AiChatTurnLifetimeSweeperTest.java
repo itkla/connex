@@ -6,16 +6,13 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.time.Clock;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -26,7 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import ooo.klae.connex.backend.ai.AiProperties;
-import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.beans.AiChatTurnRef;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.observability.JobRunRecorder;
@@ -45,13 +42,19 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * expiry the product has always used and never with an ownership loss, because a turn it reaches
  * is one no instance ever recorded ownership of. Merging it into the lease sweeper would break
  * that.
+ *
+ * <p>The other two are about cost and evidence. The pass carries the same global per-pass budget
+ * the lease sweep does, so a backlog in one tenant cannot monopolise the shared scheduler thread
+ * and silently widen the detection bound for every other tenant; and it records its job runs inside
+ * the workspace scope, without which the tenant backstop refuses the write under catalog routing
+ * and the evidence simply never exists.
  */
 class AiChatTurnLifetimeSweeperTest {
 
     private static final String FOREIGN_CATALOG = "cnx_foreign";
     private static final int FIRST_WORKSPACE_ID = 11;
     private static final int SECOND_WORKSPACE_ID = 22;
-    private static final Instant NOW = Instant.parse("2026-09-20T12:00:00Z");
+    private static final int LIFETIME_SECONDS = 185;
 
     private AiChatMapper chatMapper;
     private AiChatTurnPersistenceService persistenceService;
@@ -75,39 +78,44 @@ class AiChatTurnLifetimeSweeperTest {
                 placementRegistry,
                 tenantWorkScope,
                 jobRunRecorder,
-                properties,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                properties);
     }
 
+    /**
+     * Every staleness boundary this pass applies is the database's, expressed as the lifetime in
+     * seconds rather than as an instant this JVM computed. The column it is compared against,
+     * {@code updated_at}, is written by MySQL, and this pass runs unattended against every
+     * workspace the instance routes to — so an instance whose clock ran ahead of the database would
+     * settle live turns estate-wide rather than only in the session a reader had open.
+     */
     @Test
-    void theCutoffIsTheAbsoluteTurnLifetimeBehindTheCurrentInstant() {
-        LocalDateTime expected = LocalDateTime.ofInstant(
-                NOW.minus(AiAssistantTurnBudget.DURABLE_LIFETIME), ZoneOffset.UTC);
+    void everyStalenessBoundaryIsTheDatabasesAndNotThisJvmsClock() {
         when(placementRegistry.activeCatalogs()).thenReturn(List.of(FOREIGN_CATALOG));
-        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), any(), anyInt()))
+        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), anyInt(), anyInt()))
                 .thenReturn(List.of(FIRST_WORKSPACE_ID));
-        when(chatMapper.findUnleasedStaleTurns(anyInt(), any(), anyInt()))
-                .thenReturn(List.of(turn(FIRST_WORKSPACE_ID, 3, 41)));
+        when(chatMapper.findUnleasedStaleTurnRefs(anyInt(), anyInt(), anyInt()))
+                .thenReturn(List.of(new AiChatTurnRef(3, 41)));
 
         sweeper.sweep();
 
-        verify(chatMapper).workspaceIdsWithUnleasedStaleTurns(0, expected, 50);
-        verify(chatMapper).findUnleasedStaleTurns(FIRST_WORKSPACE_ID, expected, 50);
-        verify(persistenceService).expireUnleasedTurn(FIRST_WORKSPACE_ID, 3, 41, expected);
+        verify(chatMapper).workspaceIdsWithUnleasedStaleTurns(0, LIFETIME_SECONDS, 50);
+        verify(chatMapper).findUnleasedStaleTurnRefs(FIRST_WORKSPACE_ID, LIFETIME_SECONDS, 50);
+        verify(persistenceService)
+                .expireUnleasedTurn(FIRST_WORKSPACE_ID, 3, 41, LIFETIME_SECONDS);
     }
 
     @Test
     void theExpiryUsesTheDurableTimeoutVocabularyAndNeverAnOwnershipLoss() {
         when(placementRegistry.activeCatalogs()).thenReturn(List.of(FOREIGN_CATALOG));
-        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), any(), anyInt()))
+        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), anyInt(), anyInt()))
                 .thenReturn(List.of(FIRST_WORKSPACE_ID));
-        when(chatMapper.findUnleasedStaleTurns(anyInt(), any(), anyInt()))
-                .thenReturn(List.of(turn(FIRST_WORKSPACE_ID, 3, 41)));
+        when(chatMapper.findUnleasedStaleTurnRefs(anyInt(), anyInt(), anyInt()))
+                .thenReturn(List.of(new AiChatTurnRef(3, 41)));
 
         sweeper.sweep();
 
         verify(persistenceService)
-                .expireUnleasedTurn(eq(FIRST_WORKSPACE_ID), eq(3), eq(41), any());
+                .expireUnleasedTurn(eq(FIRST_WORKSPACE_ID), eq(3), eq(41), anyInt());
         verify(persistenceService, never()).settleOrphanedTurn(any(), anyString(), anyString());
         verify(persistenceService, never()).markTerminal(any(), anyString(), anyString());
     }
@@ -115,34 +123,119 @@ class AiChatTurnLifetimeSweeperTest {
     @Test
     void aWorkspaceWithNoStaleUnleasedTurnSettlesNothingAndRecordsNothing() {
         when(placementRegistry.activeCatalogs()).thenReturn(List.of(FOREIGN_CATALOG));
-        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), any(), anyInt()))
+        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), anyInt(), anyInt()))
                 .thenReturn(List.of(FIRST_WORKSPACE_ID));
-        when(chatMapper.findUnleasedStaleTurns(anyInt(), any(), anyInt())).thenReturn(List.of());
+        when(chatMapper.findUnleasedStaleTurnRefs(anyInt(), anyInt(), anyInt()))
+                .thenReturn(List.of());
 
         sweeper.sweep();
 
         verify(persistenceService, never())
-                .expireUnleasedTurn(anyInt(), anyInt(), anyInt(), any());
+                .expireUnleasedTurn(anyInt(), anyInt(), anyInt(), anyInt());
         verify(jobRunRecorder, never()).record(
                 eq(JobRunRecorder.AI_CHAT_TURN_LIFETIME_SWEEP), anyInt(), any(), any());
+    }
+
+    /**
+     * The global budget the lease sweep has, which this pass previously lacked. Without it one
+     * pass issues catalogs × workspaces × batch locking transactions on the one shared scheduler
+     * thread, and a backlog in a single tenant delays every other tenant's detection past the
+     * advertised bound.
+     */
+    @Test
+    void onePassNeverExpiresMoreTurnsThanItsGlobalBudget() {
+        properties.setRunLeaseSweepMaxSettlements(3);
+        when(placementRegistry.activeCatalogs()).thenReturn(List.of(FOREIGN_CATALOG));
+        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), anyInt(), anyInt()))
+                .thenReturn(List.of(FIRST_WORKSPACE_ID, SECOND_WORKSPACE_ID));
+        when(chatMapper.findUnleasedStaleTurnRefs(eq(FIRST_WORKSPACE_ID), anyInt(), anyInt()))
+                .thenReturn(List.of(new AiChatTurnRef(3, 41), new AiChatTurnRef(3, 42)));
+        when(chatMapper.findUnleasedStaleTurnRefs(eq(SECOND_WORKSPACE_ID), anyInt(), anyInt()))
+                .thenReturn(List.of(new AiChatTurnRef(4, 43), new AiChatTurnRef(4, 44)));
+
+        sweeper.sweep();
+
+        verify(persistenceService, times(3))
+                .expireUnleasedTurn(anyInt(), anyInt(), anyInt(), anyInt());
+        verify(persistenceService, never())
+                .expireUnleasedTurn(eq(SECOND_WORKSPACE_ID), eq(4), eq(44), anyInt());
+    }
+
+    @Test
+    void theBatchNeverExceedsTheRemainingBudget() {
+        properties.setRunLeaseSweepMaxSettlements(2);
+        properties.setRunLeaseSweepBatch(50);
+        when(placementRegistry.activeCatalogs()).thenReturn(List.of(FOREIGN_CATALOG));
+        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), anyInt(), anyInt()))
+                .thenReturn(List.of(FIRST_WORKSPACE_ID));
+        when(chatMapper.findUnleasedStaleTurnRefs(anyInt(), anyInt(), anyInt()))
+                .thenReturn(List.of());
+
+        sweeper.sweep();
+
+        verify(chatMapper).findUnleasedStaleTurnRefs(FIRST_WORKSPACE_ID, LIFETIME_SECONDS, 2);
+    }
+
+    /**
+     * {@code job_run} is tenant-scoped, and the tenant backstop is fail-closed off the request
+     * thread. Recording after the workspace scope closed is refused under catalog-per-placement
+     * routing and swallowed by the recorder as a warning, so the sweep evidence would simply not
+     * exist in the deployment that most needs it.
+     */
+    @Test
+    void theJobRunIsRecordedInsideTheWorkspaceScope() {
+        List<Boolean> recordedInsideScope = new ArrayList<>();
+        doAnswer(invocation -> {
+            recordedInsideScope.add(tenantWorkScope.insideWorkspace());
+            return null;
+        }).when(jobRunRecorder).record(anyString(), anyInt(), any(), any());
+        when(placementRegistry.activeCatalogs()).thenReturn(List.of(FOREIGN_CATALOG));
+        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), anyInt(), anyInt()))
+                .thenReturn(List.of(FIRST_WORKSPACE_ID));
+        when(chatMapper.findUnleasedStaleTurnRefs(anyInt(), anyInt(), anyInt()))
+                .thenReturn(List.of(new AiChatTurnRef(3, 41)));
+
+        sweeper.sweep();
+
+        assertEquals(List.of(true), recordedInsideScope);
+    }
+
+    @Test
+    void aWorkspaceThatThrowsRecordsItsFailureInsideTheWorkspaceScope() {
+        List<Boolean> recordedInsideScope = new ArrayList<>();
+        doAnswer(invocation -> {
+            recordedInsideScope.add(tenantWorkScope.insideWorkspace());
+            return null;
+        }).when(jobRunRecorder).record(anyString(), anyInt(), any(), any());
+        when(placementRegistry.activeCatalogs()).thenReturn(List.of(FOREIGN_CATALOG));
+        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), anyInt(), anyInt()))
+                .thenReturn(List.of(FIRST_WORKSPACE_ID));
+        when(chatMapper.findUnleasedStaleTurnRefs(anyInt(), anyInt(), anyInt()))
+                .thenThrow(new IllegalStateException("discovery failed"));
+
+        sweeper.sweep();
+
+        assertEquals(List.of(true), recordedInsideScope);
     }
 
     @Test
     void oneTurnThatThrowsIsCountedAndTheRestOfTheWorkspaceStillExpires() {
         when(placementRegistry.activeCatalogs()).thenReturn(List.of(FOREIGN_CATALOG));
-        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), any(), anyInt()))
+        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), anyInt(), anyInt()))
                 .thenReturn(List.of(FIRST_WORKSPACE_ID));
-        when(chatMapper.findUnleasedStaleTurns(anyInt(), any(), anyInt()))
-                .thenReturn(List.of(
-                        turn(FIRST_WORKSPACE_ID, 3, 41), turn(FIRST_WORKSPACE_ID, 3, 42)));
-        when(persistenceService.expireUnleasedTurn(eq(FIRST_WORKSPACE_ID), eq(3), eq(41), any()))
+        when(chatMapper.findUnleasedStaleTurnRefs(anyInt(), anyInt(), anyInt()))
+                .thenReturn(List.of(new AiChatTurnRef(3, 41), new AiChatTurnRef(3, 42)));
+        when(persistenceService.expireUnleasedTurn(
+                eq(FIRST_WORKSPACE_ID), eq(3), eq(41), anyInt()))
                 .thenThrow(new IllegalStateException("expiry failed"));
-        when(persistenceService.expireUnleasedTurn(eq(FIRST_WORKSPACE_ID), eq(3), eq(42), any()))
+        when(persistenceService.expireUnleasedTurn(
+                eq(FIRST_WORKSPACE_ID), eq(3), eq(42), anyInt()))
                 .thenReturn(true);
 
         sweeper.sweep();
 
-        verify(persistenceService).expireUnleasedTurn(eq(FIRST_WORKSPACE_ID), eq(3), eq(42), any());
+        verify(persistenceService)
+                .expireUnleasedTurn(eq(FIRST_WORKSPACE_ID), eq(3), eq(42), anyInt());
         JobRunDetail detail = recordedDetail(JobRunStatus.FAILED);
         assertEquals(2, detail.metadata().get("visitedCount"));
         assertEquals(1, detail.metadata().get("expiredCount"));
@@ -153,7 +246,7 @@ class AiChatTurnLifetimeSweeperTest {
     @Test
     void everyActiveCatalogIsVisitedAndTheStartingCatalogRotatesBetweenPasses() {
         when(placementRegistry.activeCatalogs()).thenReturn(Arrays.asList(null, FOREIGN_CATALOG));
-        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), any(), anyInt()))
+        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), anyInt(), anyInt()))
                 .thenReturn(List.of());
 
         sweeper.sweep();
@@ -167,18 +260,20 @@ class AiChatTurnLifetimeSweeperTest {
     @Test
     void theWorkspaceCursorAdvancesAcrossPassesAndWrapsWhenThePageRunsOut() {
         when(placementRegistry.activeCatalogs()).thenReturn(List.of(FOREIGN_CATALOG));
-        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(eq(0), any(), anyInt()))
+        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(eq(0), anyInt(), anyInt()))
                 .thenReturn(List.of(FIRST_WORKSPACE_ID, SECOND_WORKSPACE_ID));
-        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(eq(SECOND_WORKSPACE_ID), any(), anyInt()))
+        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(
+                eq(SECOND_WORKSPACE_ID), anyInt(), anyInt()))
                 .thenReturn(List.of());
-        when(chatMapper.findUnleasedStaleTurns(anyInt(), any(), anyInt())).thenReturn(List.of());
+        when(chatMapper.findUnleasedStaleTurnRefs(anyInt(), anyInt(), anyInt()))
+                .thenReturn(List.of());
 
         sweeper.sweep();
         sweeper.sweep();
 
-        verify(chatMapper, times(2)).workspaceIdsWithUnleasedStaleTurns(eq(0), any(), anyInt());
+        verify(chatMapper, times(2)).workspaceIdsWithUnleasedStaleTurns(eq(0), anyInt(), anyInt());
         verify(chatMapper)
-                .workspaceIdsWithUnleasedStaleTurns(eq(SECOND_WORKSPACE_ID), any(), anyInt());
+                .workspaceIdsWithUnleasedStaleTurns(eq(SECOND_WORKSPACE_ID), anyInt(), anyInt());
         assertEquals(
                 List.of(
                         FIRST_WORKSPACE_ID, SECOND_WORKSPACE_ID,
@@ -189,11 +284,11 @@ class AiChatTurnLifetimeSweeperTest {
     @Test
     void aWorkspaceThatThrowsIsRecordedAndTheNextWorkspaceStillRuns() {
         when(placementRegistry.activeCatalogs()).thenReturn(List.of(FOREIGN_CATALOG));
-        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), any(), anyInt()))
+        when(chatMapper.workspaceIdsWithUnleasedStaleTurns(anyInt(), anyInt(), anyInt()))
                 .thenReturn(List.of(FIRST_WORKSPACE_ID, SECOND_WORKSPACE_ID));
-        when(chatMapper.findUnleasedStaleTurns(eq(FIRST_WORKSPACE_ID), any(), anyInt()))
+        when(chatMapper.findUnleasedStaleTurnRefs(eq(FIRST_WORKSPACE_ID), anyInt(), anyInt()))
                 .thenThrow(new IllegalStateException("discovery failed"));
-        when(chatMapper.findUnleasedStaleTurns(eq(SECOND_WORKSPACE_ID), any(), anyInt()))
+        when(chatMapper.findUnleasedStaleTurnRefs(eq(SECOND_WORKSPACE_ID), anyInt(), anyInt()))
                 .thenReturn(List.of());
 
         sweeper.sweep();
@@ -215,24 +310,20 @@ class AiChatTurnLifetimeSweeperTest {
         return detail.getValue();
     }
 
-    private static AiChatTurn turn(int workspaceId, int sessionId, int turnId) {
-        AiChatTurn turn = new AiChatTurn();
-        turn.setWorkspaceId(workspaceId);
-        turn.setSessionId(sessionId);
-        turn.setId(turnId);
-        turn.setStatus("running");
-        return turn;
-    }
-
     private static final class RecordingTenantWorkScope extends TenantWorkScope {
         private final List<String> catalogs = new ArrayList<>();
         private final List<Integer> workspaceIds = new ArrayList<>();
+        private int workspaceDepth;
 
         private RecordingTenantWorkScope() {
             super(
                     new TenantContext(),
                     mock(TenantCatalogResolver.class),
                     mock(WorkspaceMapper.class));
+        }
+
+        private boolean insideWorkspace() {
+            return workspaceDepth > 0;
         }
 
         @Override
@@ -244,13 +335,23 @@ class AiChatTurnLifetimeSweeperTest {
         @Override
         public void inWorkspace(int workspaceId, Runnable work) {
             workspaceIds.add(workspaceId);
-            work.run();
+            workspaceDepth++;
+            try {
+                work.run();
+            } finally {
+                workspaceDepth--;
+            }
         }
 
         @Override
         public <T> T inWorkspace(int workspaceId, Supplier<T> work) {
             workspaceIds.add(workspaceId);
-            return work.get();
+            workspaceDepth++;
+            try {
+                return work.get();
+            } finally {
+                workspaceDepth--;
+            }
         }
     }
 }

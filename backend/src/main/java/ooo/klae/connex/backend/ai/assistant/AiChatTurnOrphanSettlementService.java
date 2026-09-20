@@ -60,6 +60,19 @@ public class AiChatTurnOrphanSettlementService {
      * genuinely dead owners. Retiring it is safe without a token because this transaction holds
      * the turn's row lock, so no other settler can be mid-settlement on it.
      *
+     * <p><strong>The bound on the retained partial answer, stated rather than inferred.</strong>
+     * The settled turn keeps whatever partial answer the vanished owner had already committed,
+     * subject to the special-care screen — but <em>only</em> that screen. The
+     * authorization-withdrawal branch the same screen applies for {@code restrictions_changed} and
+     * {@code access_revoked} cannot fire here, because {@code owner_lost} is deliberately not an
+     * authorization withdrawal and because a withdrawal that landed after the owner stopped is not
+     * observable to a settler at all: {@code AiRestrictionEpoch} is in-JVM with no durable per-turn
+     * epoch, so nothing in the database records the epoch the turn was prepared at. A turn whose
+     * requester's authority was withdrawn mid-run therefore retains text a live owner's terminal
+     * write would have purged. That is strictly better than today's reader-triggered expiry, which
+     * purges nothing at all, and it is a real residual rather than a closed case; the durable
+     * cross-instance restriction epoch it needs is #941.
+     *
      * @param key the turn's lease key
      * @param expectedEpoch the epoch the sweeper observed on the expired lease
      * @return true when this call wrote the turn's terminal state

@@ -169,7 +169,8 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
         acquire(liveKey);
         expire(expiredKey);
 
-        List<AiRunLeaseRow> expired = leaseMapper.findExpiredLeases(workspace.getId(), 10);
+        List<AiRunLeaseRow> expired =
+                leaseMapper.findExpiredLeases(workspace.getId(), List.of(CHAT_TURN), 10);
         assertEquals(1, expired.size());
         assertEquals(3005L, expired.get(0).getSubjectId());
         assertEquals(CHAT_TURN, expired.get(0).getSubjectKind());
@@ -188,7 +189,9 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
         assertEquals(expiredLease.epoch() + 1L, takeover.epoch());
         assertEquals(AiRunLeaseOutcome.LOST, leaseService.renew(expiredLease));
         assertEquals(AiRunLeaseOutcome.HELD, leaseService.renew(takeover));
-        assertTrue(leaseMapper.findExpiredLeases(workspace.getId(), 10).isEmpty());
+        assertTrue(
+                leaseMapper.findExpiredLeases(workspace.getId(), List.of(CHAT_TURN), 10)
+                        .isEmpty());
     }
 
     @Test
@@ -278,7 +281,9 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
 
         assertEquals(AiRunLeaseOutcome.LOST, leaseService.renew(held));
 
-        assertEquals(1, leaseMapper.findExpiredLeases(workspace.getId(), 10).size());
+        assertEquals(
+                1,
+                leaseMapper.findExpiredLeases(workspace.getId(), List.of(CHAT_TURN), 10).size());
         assertEquals(
                 expiredDeadline,
                 leaseRow(key).get("expires_at"),
@@ -336,7 +341,9 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
         assertNull(row.get("owner"));
         assertNotNull(row.get("released_at"));
         assertEquals(takeover.epoch(), ((Number) row.get("epoch")).longValue());
-        assertTrue(leaseMapper.findExpiredLeases(workspace.getId(), 10).isEmpty());
+        assertTrue(
+                leaseMapper.findExpiredLeases(workspace.getId(), List.of(CHAT_TURN), 10)
+                        .isEmpty());
     }
 
     /**

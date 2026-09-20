@@ -162,14 +162,24 @@ public interface AiRunLeaseMapper {
             @Param("subjectId") long subjectId);
 
     /**
-     * Lists held leases in one workspace whose deadline has passed, oldest first.
+     * Lists held leases in one workspace whose deadline has passed, oldest first, restricted to
+     * the subject kinds the caller can actually settle.
+     *
+     * <p>The subject-kind predicate bounds the discovery window rather than filtering it after the
+     * fact. A lease whose kind no handler on this binary owns can neither be settled nor retired —
+     * an owner of that kind may still be alive on another binary — so leaving it in the page would
+     * let it hold the head of an oldest-first ordering permanently and spend the settlement budget
+     * on every pass.
      *
      * @param workspaceId tenant key
+     * @param subjectKinds wire keys the caller can settle; never empty
      * @param limit maximum rows returned
-     * @return expired held leases
+     * @return expired held leases of the requested kinds
      */
     List<AiRunLeaseRow> findExpiredLeases(
-            @Param("workspaceId") int workspaceId, @Param("limit") int limit);
+            @Param("workspaceId") int workspaceId,
+            @Param("subjectKinds") Collection<String> subjectKinds,
+            @Param("limit") int limit);
 
     /**
      * Enumerates the next page of workspaces holding an expired lease, for catalog-pinned
@@ -181,6 +191,27 @@ public interface AiRunLeaseMapper {
      */
     List<Integer> workspaceIdsWithExpiredLeases(
             @Param("afterWorkspaceId") int afterWorkspaceId, @Param("limit") int limit);
+
+    /**
+     * Enumerates the next page of workspaces holding a tombstone older than the retention window,
+     * for catalog-pinned background fan-out. Returns workspace references only, never tenant
+     * content.
+     *
+     * <p>Deliberately separate from {@link #workspaceIdsWithExpiredLeases}. A workspace whose runs
+     * all settle normally never holds an expired lease and would therefore never be visited by that
+     * page, while it still accumulates one tombstone per run it completes. Reaping off its own
+     * enumeration is what keeps the table's growth bounded by the retention window rather than by
+     * lifetime run volume.
+     *
+     * @param afterWorkspaceId exclusive cursor; {@code 0} starts a pass
+     * @param retentionSeconds minimum tombstone age, applied by MySQL
+     * @param limit maximum workspace ids returned
+     * @return ascending workspace ids
+     */
+    List<Integer> workspaceIdsWithReapableTombstones(
+            @Param("afterWorkspaceId") int afterWorkspaceId,
+            @Param("retentionSeconds") int retentionSeconds,
+            @Param("limit") int limit);
 
     /**
      * Deletes tombstones older than the retention window in one workspace, for the subject kinds

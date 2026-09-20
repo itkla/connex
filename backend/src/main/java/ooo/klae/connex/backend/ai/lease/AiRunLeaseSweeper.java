@@ -24,12 +24,15 @@ import ooo.klae.connex.backend.services.PlacementRegistry;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /**
- * Settles durable AI runs whose owning instance stopped proving it still owned them.
+ * Settles durable AI runs whose owning instance stopped proving it still owned them, and collects
+ * the tombstones their releases leave behind.
  *
  * <p>Detection is driven from {@code ai_run_lease} alone, for any subject kind, and settlement is
  * dispatched through {@link AiRunLeaseSubjectHandler}. That is what makes this one mechanism rather
  * than a turn-specific one: a new leasable subject adds one handler and inherits this pass, its
- * pagination, its budgets, and its reap unchanged.
+ * pagination, its budgets, and its reap unchanged. Discovery asks only for the subject kinds this
+ * binary has a handler for, so a lease this instance could neither settle nor safely retire cannot
+ * occupy the head of an oldest-first page and starve genuinely dead owners.
  *
  * <p>The pass is paginated because it runs every thirty seconds. A rotating catalog cursor and a
  * per-catalog workspace cursor keep one pass bounded by {@code run-lease-sweep-max-workspaces} and
@@ -43,8 +46,19 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * leases <em>examined</em> rather than leases settled, so a workspace whose leases all lose their
  * takeover races cannot spin.
  *
- * <p>The tombstone reap runs in the same pass, per workspace, and only for the subject kinds that
- * declare their runs provably shorter than the retention window.
+ * <p>The tombstone reap is a second phase with its <em>own</em> catalog-pinned enumeration and its
+ * own workspace cursor, and it runs whether or not the settlement budget was spent. Deriving it
+ * from the expired-lease page would have been the defect that matters most here: a workspace whose
+ * runs all settle normally never holds an expired lease, so it would never be visited, and its
+ * tombstones — one per run it has ever completed — would be retained for the life of the tenant.
+ *
+ * <p>Every job run is recorded inside {@link TenantWorkScope#inWorkspace}, not after it. The
+ * recorder writes to {@code job_run}, a tenant-scoped table, and the tenant backstop is fail-closed
+ * off the request thread: recording outside the scope would be refused under
+ * {@code catalog-per-placement} routing and swallowed as a warning, leaving the multi-catalog
+ * deployment this rotation exists for with no sweep evidence at all. The one case that still
+ * records nothing is a workspace whose placement cannot be resolved, which has no catalog to write
+ * the row to.
  */
 @Component
 @ConditionalOnProperty(
@@ -56,6 +70,8 @@ public class AiRunLeaseSweeper {
 
     private static final Logger log = LoggerFactory.getLogger(AiRunLeaseSweeper.class);
     private static final String DEFAULT_CATALOG = "default";
+    private static final String SETTLEMENT_PHASE = "lease_settlement";
+    private static final String REAP_PHASE = "tombstone_reap";
 
     private final AiRunLeaseService leaseService;
     private final AiRunLeaseMapper leaseMapper;
@@ -65,7 +81,9 @@ public class AiRunLeaseSweeper {
     private final AiProperties properties;
     private final Map<AiRunLeaseSubject, AiRunLeaseSubjectHandler> handlers =
             new EnumMap<>(AiRunLeaseSubject.class);
-    private final Map<String, AtomicInteger> workspaceCursors = new ConcurrentHashMap<>();
+    private final List<String> handledSubjectKinds;
+    private final Map<String, AtomicInteger> settlementCursors = new ConcurrentHashMap<>();
+    private final Map<String, AtomicInteger> reapCursors = new ConcurrentHashMap<>();
     private final AtomicInteger catalogCursor = new AtomicInteger();
 
     /**
@@ -93,16 +111,19 @@ public class AiRunLeaseSweeper {
         this.tenantWorkScope = tenantWorkScope;
         this.jobRunRecorder = jobRunRecorder;
         this.properties = properties;
+        List<String> wireKeys = new ArrayList<>(subjectHandlers.size());
         for (AiRunLeaseSubjectHandler handler : subjectHandlers) {
             AiRunLeaseSubjectHandler previous = handlers.put(handler.subject(), handler);
             if (previous != null) {
                 throw new IllegalStateException(
                         "Duplicate AI run lease subject handler for " + handler.subject());
             }
+            wireKeys.add(handler.subject().wireKey());
         }
+        this.handledSubjectKinds = List.copyOf(wireKeys);
     }
 
-    /** Runs one bounded pass across the catalogs this instance routes to. */
+    /** Runs one bounded settlement pass and one reap pass across this instance's catalogs. */
     @Scheduled(
         fixedDelayString = "${connex.ai.run-lease-sweep-delay:30s}",
         initialDelayString = "${connex.ai.run-lease-sweep-initial-delay:60s}")
@@ -110,21 +131,19 @@ public class AiRunLeaseSweeper {
         List<String> catalogs = rotatedCatalogs(placementRegistry.activeCatalogs());
         int remaining = properties.getRunLeaseSweepMaxSettlements();
         for (String catalog : catalogs) {
-            if (remaining <= 0) {
-                break;
+            if (remaining > 0 && !handledSubjectKinds.isEmpty()) {
+                remaining -= settleCatalog(catalog, remaining);
             }
-            remaining -= sweepCatalog(catalog, remaining);
+            reapCatalog(catalog);
         }
     }
 
-    private int sweepCatalog(String catalog, int remaining) {
-        AtomicInteger cursor = workspaceCursors.computeIfAbsent(
-                catalog == null ? DEFAULT_CATALOG : catalog,
-                ignored -> new AtomicInteger());
-        List<Integer> workspaceIds = workspacePage(catalog, cursor.get());
+    private int settleCatalog(String catalog, int remaining) {
+        AtomicInteger cursor = cursor(settlementCursors, catalog);
+        List<Integer> workspaceIds = settlementPage(catalog, cursor.get());
         if (workspaceIds.isEmpty() && cursor.get() != 0) {
             cursor.set(0);
-            workspaceIds = workspacePage(catalog, 0);
+            workspaceIds = settlementPage(catalog, 0);
         }
         int examined = 0;
         int lastVisited = cursor.get();
@@ -141,19 +160,57 @@ public class AiRunLeaseSweeper {
         return examined;
     }
 
-    private List<Integer> workspacePage(String catalog, int afterWorkspaceId) {
+    private void reapCatalog(String catalog) {
+        AtomicInteger cursor = cursor(reapCursors, catalog);
+        List<Integer> workspaceIds = reapPage(catalog, cursor.get());
+        if (workspaceIds.isEmpty() && cursor.get() != 0) {
+            cursor.set(0);
+            workspaceIds = reapPage(catalog, 0);
+        }
+        int lastVisited = cursor.get();
+        for (int workspaceId : workspaceIds) {
+            reapWorkspace(workspaceId);
+            lastVisited = workspaceId;
+        }
+        if (!workspaceIds.isEmpty()) {
+            cursor.set(lastVisited);
+        }
+    }
+
+    private List<Integer> settlementPage(String catalog, int afterWorkspaceId) {
         return tenantWorkScope.withCatalog(
                 catalog,
                 () -> leaseMapper.workspaceIdsWithExpiredLeases(
                         afterWorkspaceId, properties.getRunLeaseSweepMaxWorkspaces()));
     }
 
+    private List<Integer> reapPage(String catalog, int afterWorkspaceId) {
+        return tenantWorkScope.withCatalog(
+                catalog,
+                () -> leaseMapper.workspaceIdsWithReapableTombstones(
+                        afterWorkspaceId,
+                        retentionSeconds(),
+                        properties.getRunLeaseSweepMaxWorkspaces()));
+    }
+
     private int sweepWorkspace(int workspaceId, int budget) {
+        try {
+            return tenantWorkScope.inWorkspace(
+                    workspaceId, () -> settleAndRecord(workspaceId, budget));
+        } catch (RuntimeException failure) {
+            log.warn(
+                    "AI run lease sweep could not route workspaceId={} exceptionClass={}",
+                    workspaceId,
+                    failure.getClass().getSimpleName());
+            return 0;
+        }
+    }
+
+    private int settleAndRecord(int workspaceId, int budget) {
         long startedNanos = System.nanoTime();
         JobRunDetail started = JobRunDetail.startedUtc();
         try {
-            SweepCounts counts = tenantWorkScope.inWorkspace(
-                    workspaceId, () -> settleWorkspace(workspaceId, budget));
+            SweepCounts counts = settleWorkspace(workspaceId, budget);
             if (counts.isEmpty()) {
                 return counts.examined();
             }
@@ -172,14 +229,57 @@ public class AiRunLeaseSweeper {
                     JobRunRecorder.AI_RUN_LEASE_SWEEP,
                     workspaceId,
                     JobRunStatus.FAILED,
-                    new JobRunDetail(started.startedAt(), Map.of("phase", "workspace_sweep")));
+                    new JobRunDetail(started.startedAt(), Map.of("phase", SETTLEMENT_PHASE)));
             return 0;
+        }
+    }
+
+    private void reapWorkspace(int workspaceId) {
+        try {
+            tenantWorkScope.inWorkspace(workspaceId, () -> reapAndRecord(workspaceId));
+        } catch (RuntimeException failure) {
+            log.warn(
+                    "AI run lease reap could not route workspaceId={} exceptionClass={}",
+                    workspaceId,
+                    failure.getClass().getSimpleName());
+        }
+    }
+
+    private void reapAndRecord(int workspaceId) {
+        long startedNanos = System.nanoTime();
+        JobRunDetail started = JobRunDetail.startedUtc();
+        try {
+            int deleted = leaseService.reapTombstones(
+                    workspaceId, retentionSeconds(), properties.getRunLeaseSweepBatch());
+            if (deleted == 0) {
+                return;
+            }
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("phase", REAP_PHASE);
+            metadata.put("deletedCount", deleted);
+            metadata.put("durationMs", elapsedMs(startedNanos));
+            jobRunRecorder.record(
+                    JobRunRecorder.AI_RUN_LEASE_SWEEP,
+                    workspaceId,
+                    JobRunStatus.SUCCEEDED,
+                    new JobRunDetail(started.startedAt(), metadata));
+        } catch (RuntimeException failure) {
+            log.warn(
+                    "AI run lease reap failed workspaceId={} exceptionClass={}",
+                    workspaceId,
+                    failure.getClass().getSimpleName());
+            jobRunRecorder.record(
+                    JobRunRecorder.AI_RUN_LEASE_SWEEP,
+                    workspaceId,
+                    JobRunStatus.FAILED,
+                    new JobRunDetail(started.startedAt(), Map.of("phase", REAP_PHASE)));
         }
     }
 
     private SweepCounts settleWorkspace(int workspaceId, int budget) {
         int batch = Math.min(properties.getRunLeaseSweepBatch(), budget);
-        List<AiRunLeaseRow> expired = leaseMapper.findExpiredLeases(workspaceId, batch);
+        List<AiRunLeaseRow> expired =
+                leaseMapper.findExpiredLeases(workspaceId, handledSubjectKinds, batch);
         int examined = 0;
         int settled = 0;
         int failed = 0;
@@ -203,33 +303,31 @@ public class AiRunLeaseSweeper {
                         failure.getClass().getSimpleName());
             }
         }
-        int deleted = leaseService.reapTombstones(
-                workspaceId,
-                Math.toIntExact(properties.getRunLeaseTombstoneRetention().toSeconds()),
-                properties.getRunLeaseSweepBatch());
-        return new SweepCounts(examined, settled, failed, deleted);
+        return new SweepCounts(examined, settled, failed);
     }
 
     private boolean settleLease(AiRunLeaseRow row) {
         AiRunLeaseSubject subject = subjectOf(row.getSubjectKind());
-        if (subject == null) {
-            log.warn(
-                    "AI run lease names an unknown subject kind workspaceId={} subjectKind={}",
-                    row.getWorkspaceId(),
-                    row.getSubjectKind());
-            return false;
-        }
-        AiRunLeaseSubjectHandler handler = handlers.get(subject);
+        AiRunLeaseSubjectHandler handler = subject == null ? null : handlers.get(subject);
         if (handler == null) {
             log.warn(
-                    "No AI run lease handler owns subject kind {} workspaceId={}",
-                    subject,
+                    "AI run lease discovery returned an unhandled subject kind {} workspaceId={}",
+                    row.getSubjectKind(),
                     row.getWorkspaceId());
             return false;
         }
         AiRunLeaseKey key =
                 new AiRunLeaseKey(row.getWorkspaceId(), subject, row.getSubjectId());
         return handler.settleOrphan(key, row.getEpoch());
+    }
+
+    private int retentionSeconds() {
+        return Math.toIntExact(properties.getRunLeaseTombstoneRetention().toSeconds());
+    }
+
+    private static AtomicInteger cursor(Map<String, AtomicInteger> cursors, String catalog) {
+        return cursors.computeIfAbsent(
+                catalog == null ? DEFAULT_CATALOG : catalog, ignored -> new AtomicInteger());
     }
 
     private static AiRunLeaseSubject subjectOf(String wireKey) {
@@ -243,12 +341,16 @@ public class AiRunLeaseSweeper {
 
     private static Map<String, Object> metadata(SweepCounts counts, long startedNanos) {
         Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("phase", SETTLEMENT_PHASE);
         metadata.put("visitedCount", counts.examined());
         metadata.put("expiredCount", counts.settled());
         metadata.put("failedCount", counts.failed());
-        metadata.put("deletedCount", counts.deleted());
-        metadata.put("durationMs", (System.nanoTime() - startedNanos) / 1_000_000L);
+        metadata.put("durationMs", elapsedMs(startedNanos));
         return metadata;
+    }
+
+    private static long elapsedMs(long startedNanos) {
+        return (System.nanoTime() - startedNanos) / 1_000_000L;
     }
 
     private List<String> rotatedCatalogs(List<String> catalogs) {
@@ -263,10 +365,10 @@ public class AiRunLeaseSweeper {
         return rotated;
     }
 
-    /** One workspace's contribution to a pass. */
-    private record SweepCounts(int examined, int settled, int failed, int deleted) {
+    /** One workspace's contribution to a settlement pass. */
+    private record SweepCounts(int examined, int settled, int failed) {
         private boolean isEmpty() {
-            return examined == 0 && failed == 0 && deleted == 0;
+            return examined == 0 && failed == 0;
         }
     }
 }
