@@ -7,10 +7,11 @@ const FRONTEND = process.cwd();
 const APP = path.join(FRONTEND, "app");
 const READER_MODULE = path.join(APP, "lib", "oneTimeLink.ts");
 const READER_CALL = "takeOneTimeLinkToken";
-const RELOAD_HOOK = "useReloadOnFragmentNavigation";
+const ENTRY_HOOK = "useOneTimeLinkEntry";
 const SOURCE_ROOTS = ["app", "components", "lib"].map((dir) => path.join(FRONTEND, dir));
 const CODE_EXTENSIONS = [".ts", ".tsx"];
-const ROUTE_BOUNDARY_FILES = ["layout", "template", "error"];
+const ROUTE_BOUNDARY_FILES = ["layout", "template", "error", "not-found"];
+const LANDING_NOT_FOUND = CODE_EXTENSIONS.map((extension) => path.join(APP, `not-found${extension}`));
 
 /**
  * One-time-link entry routes (#1588) that must keep being discovered. The guard derives its entries
@@ -154,14 +155,24 @@ function routeOf(page: string): string {
         .join("/");
 }
 
-/** Lists the layouts, templates and error boundaries that wrap a page, plus the global error boundary. */
+/**
+ * Lists the layouts, templates, not-found files and error boundaries that wrap a page, plus the
+ * global error boundary. Each renders around, or in place of, an entry that is still inside the
+ * window between the strip and the sync `useOneTimeLinkEntry` schedules.
+ *
+ * The single exception is the root `app/not-found.tsx`, which is the public landing chrome rather
+ * than an ordinary route boundary: its `LanguageSwitcher` refreshes only after the visitor picks a
+ * language, many tasks after the sync has handed the router the stripped URL, so listing it would
+ * fail on chrome it carries on purpose and the bound that covers it is the sync, not a scan. A
+ * segment-level `not-found` above an entry route carries no such justification, so it stays scanned.
+ */
 function boundaryChain(page: string): string[] {
     const chain: string[] = [];
     for (let dir = path.dirname(page); dir.startsWith(APP); dir = path.dirname(dir)) {
         for (const name of ROUTE_BOUNDARY_FILES) {
             for (const extension of CODE_EXTENSIONS) {
                 const candidate = path.join(dir, `${name}${extension}`);
-                if (existsSync(candidate)) chain.push(candidate);
+                if (existsSync(candidate) && !LANDING_NOT_FOUND.includes(candidate)) chain.push(candidate);
             }
         }
         if (dir === APP) break;
@@ -179,8 +190,9 @@ function entryPages(): string[] {
 
 /**
  * Every source module, outside the reader itself, that references the bearer reader. Each one reads
- * the bearer once on mount, so it must reload on a same-tab fragment navigation or a second emailed
- * link would linger in the URL while the page kept the previous flow's state.
+ * the bearer once on mount, so it must run the entry hook: without it a second emailed link that
+ * lands in the same tab would linger in the URL while the page kept the previous flow's state, and
+ * the app router would keep the pre-strip URL it seeded from `location.href`.
  */
 function readerModules(): string[] {
     return SOURCE_ROOTS
@@ -244,10 +256,12 @@ function conditionalRefresherBindings(file: string): Map<string, string> {
 
 /**
  * Router-state triggers in one module that would re-publish a stripped bearer. Next's app router
- * seeds `canonicalUrl` from `location.href` before `takeOneTimeLinkToken()` strips the fragment and
- * never learns about that strip, so any later router action on the entry (a refresh, a server
- * action, or a retry control that falls back to a refresh) makes `HistoryUpdater` write the stale
- * canonical URL, bearer included, back into the address bar and the current history entry.
+ * seeds `canonicalUrl` from `location.href` before `takeOneTimeLinkToken()` strips the fragment;
+ * `useOneTimeLinkEntry` hands it the stripped URL on the commit after mount, but only a mounted
+ * entry reaches that commit. An entry that strips and then throws keeps the pre-strip canonical
+ * URL, and any router action that reuses it (a refresh, a server action, or a retry control that
+ * falls back to a refresh) makes `HistoryUpdater` write it, bearer included, back into the address
+ * bar and the current history entry. The rule stays as the belt to that brace.
  */
 function routerTriggers(file: string): string[] {
     const violations: string[] = [];
@@ -308,7 +322,7 @@ describe("one-time-link entry guard", () => {
         expect(pages.map(routeOf)).toEqual(expect.arrayContaining(KNOWN_ENTRY_ROUTES));
     });
 
-    it("reloads every bearer-reading component on a same-tab fragment navigation", () => {
+    it("runs the entry hook in every bearer-reading component", () => {
         const readers = readerModules();
         const violations = readers.flatMap((file) => {
             const calls: ts.CallExpression[] = [];
@@ -320,9 +334,9 @@ describe("one-time-link entry guard", () => {
             return calls
                 .filter((call) => {
                     const component = outermostFunction(call);
-                    return component === null || !callsIdentifier(component, RELOAD_HOOK);
+                    return component === null || !callsIdentifier(component, ENTRY_HOOK);
                 })
-                .map((call) => `${location(file, call)} reads the bearer without ${RELOAD_HOOK}()`);
+                .map((call) => `${location(file, call)} reads the bearer without ${ENTRY_HOOK}()`);
         });
 
         expect(readers.length).toBeGreaterThanOrEqual(KNOWN_ENTRY_ROUTES.length);

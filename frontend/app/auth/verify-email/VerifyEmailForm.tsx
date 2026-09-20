@@ -18,7 +18,7 @@ import {
     validateEmailChangeToken,
 } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
-import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
+import { useOneTimeLinkEntry } from "@/app/hooks/useOneTimeLinkEntry";
 import type { RevokedInvitation } from "@/app/lib/types";
 import { toastError } from "@/app/lib/toast";
 import AuthBrandPanel from "@/app/components/auth/AuthBrandPanel";
@@ -38,7 +38,7 @@ export function VerifyEmailForm() {
     const [submitting, setSubmitting] = useState(false);
     const [revokedInvitations, setRevokedInvitations] = useState<RevokedInvitation[]>([]);
 
-    useReloadOnFragmentNavigation();
+    useOneTimeLinkEntry();
 
     useEffect(() => {
         let active = true;

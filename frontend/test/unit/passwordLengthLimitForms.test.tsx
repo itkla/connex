@@ -42,6 +42,7 @@ vi.mock("@/app/lib/api", async (importOriginal) => ({
 
 vi.mock("@/app/lib/oneTimeLink", () => ({
     takeOneTimeLinkToken: () => null,
+    syncStrippedUrlWithRouter: () => {},
 }));
 
 vi.mock("@/app/lib/toast", async (importOriginal) => ({
