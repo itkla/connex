@@ -33,7 +33,7 @@ src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatQueryScopeResolver.java
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatRecordObservation.java	c76092f69b9d1487b2f122631145a44943807155c9f6e00ada5483321fab4cde
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatScopeCalendar.java	7a98d45b2af4333f5b54cff27a38697d52158542d87c865e98664e6a302e52e0
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatScopePeriod.java	afb38e8f897f5a0c76ad5908563ac6edc278a160e825942a3a65fdb0527bd804
-src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatTurnPersistenceService.java	92a4c129544f629822601012837a1c4703d4d289af90758a7a0085c832ca2223
+src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatTurnPersistenceService.java	34e4abb4906b75d45d1c6cfb39e68f54be847f218b4281f3e03bba177a45867d
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiChatTurnTerminalCoordinator.java	5229e2fee23257a873ed5d64d3447fae4bd15ac44c33335454feef7f2c755539
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiCommandCenterService.java	9aaf418b0c899a21dd000589791ec49564370ea6f6cee08743d4e039fbbc261f
 src/main/java/ooo/klae/connex/backend/ai/assistant/AiSkillCatalog.java	6b28e15edfcf9d252db25300b53fb2afa4a730c04a70b5121ead8b61437e1364
