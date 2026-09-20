@@ -30,6 +30,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
+import ooo.klae.connex.backend.ai.lease.AiRunLease;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
@@ -52,6 +56,8 @@ class AiChatTurnPersistenceServiceTest {
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
             7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of());
     private static final Instant NOW = Instant.parse("2026-08-12T00:00:00Z");
+    private static final AiRunLeaseKey LEASE_KEY = new AiRunLeaseKey(
+            TURN.workspaceId(), AiRunLeaseSubject.CHAT_TURN, TURN.turnId());
 
     private AiAssistantSessionReadAudit sessionReadAudit;
     private AiChatSession auditedSession;
@@ -64,6 +70,7 @@ class AiChatTurnPersistenceServiceTest {
     private AiAssistantToolExecutor toolExecutor;
     private AiChatTurn storedTurn;
     private AiChatRealtimeDispatcher realtimeDispatcher;
+    private AiRunLeaseService runLeaseService;
     private AiChatTurnPersistenceService service;
 
     @BeforeEach
@@ -77,6 +84,7 @@ class AiChatTurnPersistenceServiceTest {
         toolExecutor = mock(AiAssistantToolExecutor.class);
         realtimeDispatcher = mock(AiChatRealtimeDispatcher.class);
         sessionReadAudit = mock(AiAssistantSessionReadAudit.class);
+        runLeaseService = mock(AiRunLeaseService.class);
         service = new AiChatTurnPersistenceService(
                 chatMapper,
                 attachmentMapper,
@@ -88,7 +96,8 @@ class AiChatTurnPersistenceServiceTest {
                 sessionReadAudit,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 realtimeDispatcher,
-                JsonMapper.builder().build());
+                JsonMapper.builder().build(),
+                runLeaseService);
         AiChatSession session = new AiChatSession();
         auditedSession = session;
         session.setId(TURN.sessionId());
@@ -433,7 +442,8 @@ class AiChatTurnPersistenceServiceTest {
                 mock(AiAssistantSessionReadAudit.class),
                 Clock.systemUTC(),
                 dispatcher,
-                JsonMapper.builder().build());
+                JsonMapper.builder().build(),
+                mock(AiRunLeaseService.class));
         User owner = new User();
         owner.setId(TURN.userId());
         AiChatSession session = new AiChatSession();
@@ -800,6 +810,103 @@ class AiChatTurnPersistenceServiceTest {
                 TURN.sessionId(),
                 new AiChatTurnCreateRequest("Summarize", tenRecords),
                 TURN.restrictionEpoch()));
+    }
+
+    @Test
+    void claimingAQueuedTurnTakesItsRunLeaseAfterTheDurableClaim() {
+        storedTurn.setStatus("queued");
+        when(chatMapper.markTurnRunning(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(1);
+        AiRunLease claimed = lease(3L);
+        when(runLeaseService.acquireInCurrentTransaction(LEASE_KEY)).thenReturn(claimed);
+
+        assertEquals(claimed, service.markRunning(TURN));
+
+        InOrder order = inOrder(chatMapper, runLeaseService);
+        order.verify(chatMapper).markTurnRunning(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+        order.verify(runLeaseService).acquireInCurrentTransaction(LEASE_KEY);
+    }
+
+    @Test
+    void aClaimRefusedBeforeItsDurableWriteTakesNoRunLease() {
+        storedTurn.setStatus("running");
+
+        assertThrows(ConflictException.class, () -> service.markRunning(TURN));
+
+        verify(chatMapper, never()).markTurnRunning(anyInt(), anyInt(), anyInt());
+        verify(runLeaseService, never()).acquireInCurrentTransaction(any());
+    }
+
+    @Test
+    void aClaimWhoseDurableWriteMatchesNothingFailsLoudlyAndTakesNoRunLease() {
+        storedTurn.setStatus("queued");
+        when(chatMapper.markTurnRunning(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(0);
+
+        assertThrows(IllegalStateException.class, () -> service.markRunning(TURN));
+
+        verify(runLeaseService, never()).acquireInCurrentTransaction(any());
+    }
+
+    @Test
+    void everyDurableTerminalWriteTombstonesTheRunLeaseInItsOwnTransaction() {
+        when(chatMapper.updateTurnTerminal(
+                anyInt(), anyInt(), anyInt(), any(), any(), any(), any())).thenReturn(1);
+        when(chatMapper.nextMessageSequence(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(2);
+        when(chatMapper.cancelTurn(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(1);
+
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertTrue(service.markTerminal(TURN, "failed", "owner_lost"));
+            assertTrue(service.resolve(TURN, "Answer", null, 5, 3));
+            service.cancel(TURN.sessionId(), TURN.turnId());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+
+        verify(runLeaseService, times(3)).releaseHeldInCurrentTransaction(LEASE_KEY);
+    }
+
+    @Test
+    void aTerminalWriteThatChangedNothingTombstonesNoRunLease() {
+        when(chatMapper.updateTurnTerminal(
+                anyInt(), anyInt(), anyInt(), any(), any(), any(), any())).thenReturn(0);
+
+        assertFalse(service.markTerminal(TURN, "failed", "owner_lost"));
+
+        verify(runLeaseService, never()).releaseHeldInCurrentTransaction(any());
+    }
+
+    @Test
+    void aLazilyExpiredTurnTombstonesItsRunLeaseWithTheSameTerminalWrite() {
+        LocalDateTime cutoff = LocalDateTime.ofInstant(
+                NOW.minus(AiAssistantTurnBudget.DURABLE_LIFETIME), ZoneOffset.UTC);
+        AiChatTurn expired = new AiChatTurn();
+        expired.setId(TURN.turnId());
+        expired.setWorkspaceId(TURN.workspaceId());
+        expired.setSessionId(TURN.sessionId());
+        expired.setRequestedByUserId(TURN.userId());
+        expired.setStatus("timed_out");
+        expired.setTerminalReason("generation_timeout");
+        when(chatMapper.getTurnByIdForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId()))
+                .thenReturn(storedTurn, expired);
+        when(chatMapper.updateTurnTerminal(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
+                "timed_out", "generation_timeout", "running", cutoff)).thenReturn(1);
+
+        assertEquals("timed_out", service.readTurn(TURN.sessionId(), TURN.turnId()).getStatus());
+
+        verify(runLeaseService).releaseHeldInCurrentTransaction(LEASE_KEY);
+    }
+
+    private static AiRunLease lease(long epoch) {
+        return new AiRunLease(LEASE_KEY, "11111111-2222-3333-4444-555555555555", epoch);
     }
 
     private static Attachment attachment(int id) {
