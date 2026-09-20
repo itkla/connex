@@ -485,18 +485,26 @@ abstract class AbstractScriptedTrajectoryTest {
      * nothing to do with it. Cancelling is what a member does, and the loop already honours it, so
      * the failure stays on the one test that earned it.
      *
+     * <p>A cancellation that throws proves nothing about the turn: the expected cause is a turn
+     * that settled on its own in the meantime, but a transient database failure throws too and
+     * leaves the worker running. Only the durable row says which, so it is read either way and the
+     * refusal is reported beside whatever the row shows rather than in place of it.
+     *
      * @param sessionId the turn's session
      * @param turnId the runaway turn
-     * @return the durable status the turn came to rest in, for the failure message
+     * @return how the cancellation went and the durable status the turn came to rest in, for the
+     *     failure message
      */
     private String stopRunawayTurn(int sessionId, int turnId) {
+        String cancellation = "cancelled";
         try {
             turnService.cancel(sessionId, turnId);
         } catch (RuntimeException exception) {
-            return "already terminal (" + exception.getClass().getSimpleName() + ")";
+            cancellation = "cancellation refused (" + exception.getClass().getSimpleName() + ")";
         }
         AiChatTurn stopped = poll(sessionId, turnId, CANCELLATION_DEADLINE, STOPPED_STATUSES);
-        return stopped == null ? "still running" : stopped.getStatus();
+        return cancellation + ", durable status "
+                + (stopped == null ? "still running" : stopped.getStatus());
     }
 
     /**
