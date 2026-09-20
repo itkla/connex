@@ -52,7 +52,7 @@ class AiSkillPlanRunnerTest {
         workspaceService = mock(WorkspaceService.class);
         when(workspaceService.permissionsFor(WORKSPACE_ID, USER_ID))
                 .thenReturn(Set.of(Permission.AI_USE));
-        when(persistenceService.proposeTool(any(), anyInt(), anyString(), anyString()))
+        when(persistenceService.proposeTool(any(), anyInt(), anyInt(), anyString(), anyString()))
                 .thenReturn(88);
         runner = new AiSkillPlanRunner(
                 persistenceService,
@@ -115,7 +115,35 @@ class AiSkillPlanRunnerTest {
                 new AiChatResourceRegistry(), 16_384, () -> { }));
 
         verify(persistenceService, never()).proposeTool(
-                any(), anyInt(), anyString(), anyString());
+                any(), anyInt(), anyInt(), anyString(), anyString());
+    }
+
+    /**
+     * A server-owned plan step is always the only call its step makes.
+     *
+     * <p>It therefore proposes under the sole-call ordinal, which renders the exact unsuffixed
+     * durable key this runner has always written — the key the model loop's own step numbering
+     * interleaves with in one namespace, and the one the progress projection scans by prefix.
+     */
+    @Test
+    void aServerOwnedPlanStepProposesUnderTheSoleCallOrdinal() {
+        when(scopeReadService.scopeActivities(
+                any(), any(), any(), anyList(), any(), anyInt(), anyInt(), any()))
+                .thenReturn(new AiAssistantToolResult(java.util.Map.of("records", List.of()),
+                        List.of()));
+
+        runner.run(
+                TURN,
+                new AiSkillRouter.Routing(
+                        skillCatalog.find("activity_digest_v1").orElseThrow(),
+                        AiSkillRouter.MATCHED,
+                        new AiSkillRouter.Subject("person", 12),
+                        false),
+                AiChatQueryScope.none(),
+                new AiChatResourceRegistry(), 16_384, () -> { });
+
+        verify(persistenceService).proposeTool(
+                any(), anyInt(), eq(AiAssistantToolCallRef.SOLE_CALL), anyString(), anyString());
     }
 
     /**

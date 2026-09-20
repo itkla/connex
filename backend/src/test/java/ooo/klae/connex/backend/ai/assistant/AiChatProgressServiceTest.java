@@ -133,6 +133,32 @@ class AiChatProgressServiceTest {
     }
 
 
+    /**
+     * A row whose key names a call ordinal still projects under its own step.
+     *
+     * <p>The parser is anchored, so an unrecognised key falls through to the {@code HARD_MAX_STEPS}
+     * placeholder and sorts a real milestone to the end of the turn, after the synthetic answer
+     * milestone. The optional suffix group is what keeps a row written by a call that shared its
+     * step from landing there.
+     */
+    @Test
+    void aKeyNamingACallOrdinalStillProjectsUnderItsOwnStep() {
+        AiChatToolCall batched = toolCall(2, "list_activities", "executed", "{\"activities\":[]}");
+        batched.setIdempotencyKey("turn-7-step-2-call-3");
+        when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", 64))
+                .thenReturn(List.of(
+                        toolCall(1, "search_records", "executed", "{\"records\":[{}]}"),
+                        batched));
+
+        assertEquals(
+                List.of(
+                        new AiChatProgressItemDto(0, "scope", "complete", null, false),
+                        new AiChatProgressItemDto(1, "records", "complete", 1, false),
+                        new AiChatProgressItemDto(2, "activities", "complete", 0, false),
+                        new AiChatProgressItemDto(65, "answer", "complete", null, false)),
+                service.project(3, 5, 7, "resolved"));
+    }
+
     private static AiChatToolCall toolCall(
             int step, String name, String status, String resultJson) {
         AiChatToolCall toolCall = new AiChatToolCall();
