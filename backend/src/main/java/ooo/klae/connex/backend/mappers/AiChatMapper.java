@@ -236,6 +236,22 @@ public interface AiChatMapper {
         @Param("skillKey") String skillKey,
         @Param("skillVersion") String skillVersion);
 
+    /**
+     * Reads one turn's status without taking a row lock.
+     *
+     * <p>This is the run lease heartbeat's cross-instance stop signal, read once per tick. It takes
+     * no lock, so the lease leaf never joins the {@code ai_chat_session → ai_chat_turn} lock chain
+     * the claim and terminal paths walk, and it is keyed by turn alone because a lease subject key
+     * carries a workspace and a subject id and no session.
+     *
+     * @param workspaceId active workspace
+     * @param id the turn
+     * @return the stored status, or null when this workspace holds no such turn
+     */
+    String getTurnStatus(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id);
+
     AiChatTurn getTurnById(
         @Param("workspaceId") int workspaceId,
         @Param("sessionId") int sessionId,

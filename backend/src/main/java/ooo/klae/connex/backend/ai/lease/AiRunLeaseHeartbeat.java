@@ -90,8 +90,17 @@ public class AiRunLeaseHeartbeat {
     /**
      * Starts renewing one lease until the returned handle is closed or ownership is lost.
      *
+     * <p>Starting deliberately does not touch the guard's anchor. The claim already anchored it on
+     * the instant it issued the lease write ({@link
+     * AiRunLeaseService#acquireInCurrentTransaction(AiRunLeaseKey, AiRunLeaseGuard)}), which is at
+     * or before every deadline MySQL can have assigned. Re-anchoring here would move the local
+     * fence to a reading taken after the write — after the commit, and after however long this
+     * worker was descheduled on the way to this line — so a worker paused past the lifetime would
+     * report itself healthy over a lease a settler was already entitled to take, which is the
+     * exact failure the fence exists to prevent.
+     *
      * @param lease the fencing token to keep alive
-     * @param guard the owner's ownership flag, fed by every tick
+     * @param guard the owner's ownership flag, anchored by the claim and fed by every tick
      * @return a handle that cancels the schedule
      */
     public AutoCloseable start(AiRunLease lease, AiRunLeaseGuard guard) {
@@ -115,14 +124,14 @@ public class AiRunLeaseHeartbeat {
                 intervalMillis,
                 TimeUnit.MILLISECONDS);
         handle.set(tick);
-        if (guard.reason().isPresent()) {
+        if (guard.isStopped()) {
             cancel(handle);
         }
         return () -> cancel(handle);
     }
 
     boolean beat(AiRunLease lease, AiRunLeaseGuard guard) {
-        if (guard.reason().isPresent()) {
+        if (guard.isStopped()) {
             return true;
         }
         AiRunLeaseKey key = lease.key();

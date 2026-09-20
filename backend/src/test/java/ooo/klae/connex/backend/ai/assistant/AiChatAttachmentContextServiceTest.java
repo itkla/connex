@@ -21,6 +21,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,8 @@ class AiChatAttachmentContextServiceTest {
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
             7, 11, 13, 17, 19, 1, 23L, true, List.of(), List.of(31, 32, 33));
     private static final Instant NOW = Instant.parse("2026-08-11T00:00:00Z");
+    /** The ownership check for the cases whose subject is bounding rather than ownership. */
+    private static final Runnable NO_STOP = () -> { };
 
     private AiChatTurnPersistenceService persistenceService;
     private AiChatAttachmentPolicy attachmentPolicy;
@@ -84,7 +87,7 @@ class AiChatAttachmentContextServiceTest {
                 .thenReturn("a".repeat(AiChatAttachmentPolicy.MAX_PROMPT_TEXT_CHARS))
                 .thenReturn("b".repeat(AiChatAttachmentPolicy.MAX_PROMPT_TEXT_CHARS));
 
-        AiChatAttachmentContext context = service.prepare(TURN, NOW.plusSeconds(70));
+        AiChatAttachmentContext context = service.prepare(TURN, NOW.plusSeconds(70), NO_STOP);
 
         assertEquals(3, context.data().size());
         assertEquals("", context.data().get(2).get("content"));
@@ -105,7 +108,7 @@ class AiChatAttachmentContextServiceTest {
                         + " victim@example.com "
                         + "tail".repeat(20));
 
-        AiChatAttachmentContext context = service.prepare(TURN, NOW.plusSeconds(70));
+        AiChatAttachmentContext context = service.prepare(TURN, NOW.plusSeconds(70), NO_STOP);
 
         String retained = (String) context.data().getFirst().get("content");
         assertEquals(32_000, retained.length());
@@ -129,7 +132,7 @@ class AiChatAttachmentContextServiceTest {
         MaskingEngine.maskField(EntityKind.PERSON, "Ada Lovelace", maskingContext);
 
         AiChatAttachmentContext context = service.prepare(
-                TURN, NOW.plusSeconds(70), maskingContext);
+                TURN, NOW.plusSeconds(70), maskingContext, NO_STOP);
 
         String retained = (String) context.data().getFirst().get("content");
         assertEquals(32_000, retained.length());
@@ -149,7 +152,7 @@ class AiChatAttachmentContextServiceTest {
                 .thenReturn("x".repeat(31_985)
                         + " The contact discussed a diagnosis.");
 
-        AiChatAttachmentContext context = service.prepare(TURN, NOW.plusSeconds(70));
+        AiChatAttachmentContext context = service.prepare(TURN, NOW.plusSeconds(70), NO_STOP);
 
         assertEquals(
                 "[omitted by policy]",
@@ -174,7 +177,7 @@ class AiChatAttachmentContextServiceTest {
                 isA(Runnable.class)))
                 .thenReturn(new AiCompletionOutcome("A scanned note", 0, 12, 4, "stop"));
 
-        AiChatAttachmentContext context = service.prepare(TURN, NOW.plusSeconds(70));
+        AiChatAttachmentContext context = service.prepare(TURN, NOW.plusSeconds(70), NO_STOP);
 
         assertEquals("A scanned note", context.data().getFirst().get("content"));
         assertEquals(12, context.inputTokens());
@@ -216,10 +219,56 @@ class AiChatAttachmentContextServiceTest {
 
         assertThrows(
                 ResourceNotFoundException.class,
-                () -> service.prepare(TURN, NOW.plusSeconds(70)));
+                () -> service.prepare(TURN, NOW.plusSeconds(70), NO_STOP));
 
         verify(persistenceService, times(2)).requireRunning(TURN);
         verify(invocationService).complete(
+                any(AiInvocation.class),
+                eq(directAdmission),
+                eq(TURN.restrictionEpoch()),
+                isA(Runnable.class));
+        verify(managedObjectService, never()).openAttachment(TURN.workspaceId(), second);
+    }
+
+    /**
+     * Every image costs its own provider call, so an owner that lost the run while the first was
+     * being described must be refused at the second rather than after the whole attachment phase
+     * returns. The check sits beside the turn-status check that already guards each file and each
+     * send, so the reaction bound stays one substep rather than one preparation.
+     */
+    @Test
+    void ownershipLostWhileDescribingAnImageStopsBeforeTheNextOne() {
+        Attachment first = attachment(31, "first.jpg", "image/jpeg");
+        Attachment second = attachment(32, "second.jpg", "image/jpeg");
+        byte[] jpeg = { (byte) 0xff, (byte) 0xd8, (byte) 0xff, 1 };
+        AiInputImage inputImage = new AiInputImage("image/jpeg", jpeg, 1, 1);
+        when(persistenceService.loadAttachments(TURN)).thenReturn(List.of(first, second));
+        when(managedObjectService.openAttachment(TURN.workspaceId(), first))
+                .thenReturn(content(jpeg));
+        when(attachmentPolicy.readImage(eq("first.jpg"), any(), eq((long) jpeg.length)))
+                .thenReturn(inputImage);
+        when(invocationAdmissionService.acquireDirect()).thenReturn(directAdmission);
+        when(invocationService.complete(
+                any(AiInvocation.class),
+                eq(directAdmission),
+                eq(TURN.restrictionEpoch()),
+                isA(Runnable.class)))
+                .thenReturn(new AiCompletionOutcome("First image", 0, 12, 4, "stop"));
+        AtomicInteger ownershipChecks = new AtomicInteger();
+        Runnable stopsAfterTheFirstImage = () -> {
+            if (ownershipChecks.incrementAndGet() > 2) {
+                throw new AiAssistantLoopException(
+                        AiAssistantTerminalReasons.OWNER_LOST,
+                        AiAssistantTerminalReasons.OWNER_LOST);
+            }
+        };
+
+        AiAssistantLoopException stopped = assertThrows(
+                AiAssistantLoopException.class,
+                () -> service.prepare(TURN, NOW.plusSeconds(70), stopsAfterTheFirstImage));
+
+        assertEquals(AiAssistantTerminalReasons.OWNER_LOST, stopped.terminalReason());
+        verify(invocationService, times(1)).complete(
                 any(AiInvocation.class),
                 eq(directAdmission),
                 eq(TURN.restrictionEpoch()),
@@ -254,7 +303,7 @@ class AiChatAttachmentContextServiceTest {
 
         assertThrows(
                 ResourceNotFoundException.class,
-                () -> service.prepare(TURN, NOW.plusSeconds(70)));
+                () -> service.prepare(TURN, NOW.plusSeconds(70), NO_STOP));
 
         verify(attachmentPolicy).readImage(
                 eq("scan.jpg"), any(), eq((long) jpeg.length));
@@ -265,7 +314,7 @@ class AiChatAttachmentContextServiceTest {
     void expiredTurnDeadlinePreventsAttachmentReadsAndProviderCalls() {
         assertThrows(
                 AiAssistantLoopException.class,
-                () -> service.prepare(TURN, NOW));
+                () -> service.prepare(TURN, NOW, NO_STOP));
 
         verify(persistenceService, never()).loadAttachments(TURN);
         verify(invocationService, never()).complete(

@@ -126,6 +126,41 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
         assertTrue(leaseRegistry.find(key).isEmpty());
     }
 
+    /**
+     * The owner token lives in one JVM's memory, so a terminal write routed to any other instance
+     * — a cancel behind a load balancer, a lazy expiry on a turn poll — carries no token. Forgoing
+     * the release there would leave the row held for good, because the reap deletes tombstones
+     * only. Forgetting the token is a faithful stand-in for a second instance: the token's whole
+     * scope is this map.
+     */
+    @Test
+    void aTerminalWriteFromAnInstanceHoldingNoTokenStillRetiresTheHeldRow() {
+        AiRunLeaseKey key = key(AiRunLeaseSubject.CHAT_TURN, 3021L);
+        AiRunLease held = acquire(key);
+        leaseRegistry.forget(held);
+
+        assertTrue(release(key));
+
+        Map<String, Object> row = leaseRow(key);
+        assertNull(row.get("owner"));
+        assertNotNull(row.get("released_at"));
+        assertEquals(held.epoch(), ((Number) row.get("epoch")).longValue());
+        assertEquals(AiRunLeaseOutcome.LOST, leaseService.renew(held));
+    }
+
+    @Test
+    void retiringAnAlreadyReleasedRowChangesNothingAndReportsNoRelease() {
+        AiRunLeaseKey key = key(AiRunLeaseSubject.CHAT_TURN, 3022L);
+        AiRunLease held = acquire(key);
+        assertTrue(release(key));
+        Object releasedAt = leaseRow(key).get("released_at");
+
+        assertFalse(release(key));
+
+        assertEquals(releasedAt, leaseRow(key).get("released_at"));
+        assertEquals(held.epoch(), ((Number) leaseRow(key).get("epoch")).longValue());
+    }
+
     @Test
     void expiredLeaseDiscoveryIsWorkspacePagedAndTakeoverIsEpochFenced() {
         AiRunLeaseKey expiredKey = key(AiRunLeaseSubject.CHAT_TURN, 3005L);
@@ -228,6 +263,32 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
     }
 
     /**
+     * Once a lease is past its deadline a settler is entitled to take it over, so a returning owner
+     * has to learn it lost rather than push the deadline out and race that settler. The refusal is
+     * in SQL because the database clock is the only one every instance shares: an owner whose
+     * monotonic clock did not advance across a suspended host is exactly the case its own
+     * self-fence cannot see.
+     */
+    @Test
+    void aRenewalIsRefusedOnceTheLeaseHasAlreadyExpired() {
+        AiRunLeaseKey key = key(AiRunLeaseSubject.CHAT_TURN, 3014L);
+        AiRunLease held = acquire(key);
+        expire(key);
+        Object expiredDeadline = leaseRow(key).get("expires_at");
+
+        assertEquals(AiRunLeaseOutcome.LOST, leaseService.renew(held));
+
+        assertEquals(1, leaseMapper.findExpiredLeases(workspace.getId(), 10).size());
+        assertEquals(
+                expiredDeadline,
+                leaseRow(key).get("expires_at"),
+                "A refused renewal must leave the expired deadline exactly where it was");
+        assertTrue(
+                leaseService.takeOverForSettlement(key, held.epoch()).isPresent(),
+                "A settler must still be able to claim the lease the renewal was refused for");
+    }
+
+    /**
      * A renewal computes its deadline from the database clock, so a clock that stepped backwards by
      * more than the lifetime would place the new deadline before {@code acquired_at} and the expiry
      * CHECK would reject every renewal, stopping a healthy owner through its own self-fence.
@@ -288,7 +349,7 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
         AiRunLeaseKey key = key(AiRunLeaseSubject.CHAT_TURN, 3012L);
 
         transactions.execute(status -> {
-            AiRunLease claimed = leaseService.acquireInCurrentTransaction(key);
+            AiRunLease claimed = leaseService.acquireInCurrentTransaction(key, freshGuard());
             status.setRollbackOnly();
             return claimed;
         });

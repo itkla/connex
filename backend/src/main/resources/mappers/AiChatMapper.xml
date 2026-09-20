@@ -565,6 +565,17 @@
       AND status = 'running'
   </update>
 
+  <!--
+    The run lease heartbeat's liveness read. Deliberately no FOR UPDATE: it runs on every tick and a
+    lock here would put the lease leaf into the session -> turn -> lease chain it must stay out of.
+  -->
+  <select id="getTurnStatus" resultType="string">
+    SELECT status
+    FROM ai_chat_turn
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+  </select>
+
   <select id="getTurnById" resultMap="turnResult">
     SELECT id, workspace_id, session_id, requested_by_user_id, status,
            terminal_reason, skill_key, skill_version, scope_json,

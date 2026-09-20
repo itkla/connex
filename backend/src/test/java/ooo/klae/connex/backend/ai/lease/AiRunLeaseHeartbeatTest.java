@@ -217,6 +217,30 @@ class AiRunLeaseHeartbeatTest {
         assertEquals(Optional.of(AiRunLeaseGuard.RENEW_GAP), guard.reason());
     }
 
+    /**
+     * Starting a heartbeat may never move the anchor the claim set. The claim reads the guard's
+     * clock immediately before it writes the lease, so that anchor is at or before the deadline
+     * MySQL assigned; a worker descheduled between the claim's commit and this call would
+     * otherwise re-anchor on a later reading and report itself healthy over a lease a settler is
+     * already entitled to take over.
+     */
+    @Test
+    void startingAHeartbeatNeverMovesTheAnchorTheClaimSet() throws Exception {
+        AtomicLong nanos = new AtomicLong();
+        AiRunLeaseGuard guard = new AiRunLeaseGuard(properties.getRunLeaseTtl(), nanos::get);
+        guard.recordRenewal(guard.clockNanos());
+        nanos.set(properties.getRunLeaseTtl().toNanos() + 1L);
+
+        AutoCloseable handle = newHeartbeat().start(LEASE, guard);
+
+        assertTrue(
+                guard.isStopped(),
+                "A worker paused past the lease lifetime must not be re-anchored by starting"
+                        + " its heartbeat");
+        assertEquals(Optional.of(AiRunLeaseGuard.RENEW_GAP), guard.reason());
+        handle.close();
+    }
+
     private void awaitRenewals(int expected) throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
         while (System.nanoTime() < deadline) {
