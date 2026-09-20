@@ -186,6 +186,7 @@ class AiInvocationServiceTest {
                 .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
         when(aiProvider.nativeToolReasoningCapability(resolved.target()))
                 .thenReturn(AiReasoningMode.NATIVE);
+        when(aiProvider.parallelToolCallLimit(resolved.target())).thenReturn(4);
 
         AiProviderCapabilities capabilities =
                 service.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT);
@@ -196,7 +197,44 @@ class AiInvocationServiceTest {
         assertEquals(65_536, capabilities.maxOutputTokens());
         assertEquals(AiToolCallingMode.NATIVE_FUNCTIONS, capabilities.toolCalling());
         assertEquals(AiReasoningMode.NATIVE, capabilities.nativeToolReasoning());
+        assertEquals(4, capabilities.parallelToolCalls());
         verify(aiProvider, never()).complete(any());
+    }
+
+    /**
+     * An adapter answering outside the ceiling gets single-call behaviour, not a failed feature.
+     *
+     * <p>The per-step call ceiling is the one capability an adapter answers with a number rather
+     * than a closed type, and this seam feeds every AI feature in the organization. Refusing here
+     * would turn one adapter's arithmetic mistake into a dead assistant, a dead deal brief and a
+     * dead report narrative; clamping gives the behaviour every undeclared endpoint already has.
+     */
+    @Test
+    void anAdapterAnsweringOutsideTheCallCeilingIsClampedToOneCallPerStep() {
+        when(aiProvider.structuredOutputCapability(resolved.target()))
+                .thenReturn(AiStructuredOutputEnforcement.PROMPT_ONLY);
+        when(aiProvider.reasoningCapability(resolved.target()))
+                .thenReturn(AiReasoningMode.TAGGED);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(200_000);
+        when(aiProvider.maxOutputTokens(resolved.target())).thenReturn(65_536);
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.nativeToolReasoningCapability(resolved.target()))
+                .thenReturn(AiReasoningMode.TAGGED);
+        when(aiProvider.parallelToolCallLimit(resolved.target())).thenReturn(0);
+
+        assertEquals(
+                1,
+                service.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)
+                        .parallelToolCalls());
+
+        when(aiProvider.parallelToolCallLimit(resolved.target()))
+                .thenReturn(AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS + 1);
+
+        assertEquals(
+                AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS,
+                service.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)
+                        .parallelToolCalls());
     }
 
     @Test

@@ -105,6 +105,13 @@ public class AiInvocationService {
 
     /**
      * Resolves adapter-declared capabilities for the current organization provider configuration.
+     *
+     * <p>The per-step call ceiling is clamped rather than trusted. It is the one capability an
+     * adapter answers with a number instead of a closed type, and the safe direction is unambiguous
+     * — an adapter answering nonsense gets the single-call behaviour every undeclared endpoint
+     * has — so clamping here keeps a future adapter's arithmetic mistake from failing every AI
+     * feature in the organization at the capability seam.
+     *
      * @param feature feature whose provider gate must be satisfied
      * @return exact configured-target capabilities without performing provider egress
      */
@@ -123,7 +130,10 @@ public class AiInvocationService {
                 adapter.toolCallingCapability(resolved.target()),
                 adapter.nativeToolReasoningCapability(resolved.target()),
                 adapter.supportsStreaming(resolved.target()),
-                adapter.parallelToolCallLimit(resolved.target()));
+                Math.clamp(
+                        adapter.parallelToolCallLimit(resolved.target()),
+                        1,
+                        AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS));
     }
 
     /**
