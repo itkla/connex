@@ -388,6 +388,42 @@ Invitation/participant-removal paths lock caller/target active memberships ascen
 
 The session row is the per-session mutex. Allocate message sequence with the established `MAX(seq)+1` calculation while holding the session root, insert, and update `last_message_at`. Do not lock the message aggregate or use `MAX(seq) ... FOR UPDATE`.
 
+### Assistant write tools
+
+Every mutating assistant tool decision — immediate execution, approval, rejection, undo — runs at
+`READ_COMMITTED` in `AiAssistantWriteToolService` and acquires its locks in exactly this order:
+
+1. **Locked authorization roots**, through one `WorkspaceService.lockAndRequirePermissionsSnapshot`
+   covering the actor and any principal the write will name. That single call takes the user roots
+   `FOR SHARE`, the active workspace root `FOR SHARE`, the memberships and the custom-role rows with
+   their permission sets, ascending by user id, and asserts the actor's `AI_USE` from those rows.
+2. Exact `(workspace_id,id)` `ai_chat_session` root `FOR UPDATE`.
+3. Exact `ai_chat_tool_call` row `FOR UPDATE`.
+4. Immediate tier only: exact `ai_chat_turn` row `FOR UPDATE`. The real order is session → tool call
+   → turn, not session → turn → tool call.
+5. `task_board_lock` workspace root, when the tool creates a task.
+6. The target record row — `FOR SHARE` for a board-holding tool, `FOR UPDATE` otherwise, or the
+   ordered stage-change rows for a deal stage move.
+
+**The authority is the locked snapshot, and nothing re-reads it.** The tool's own permissions become
+known only after step 3 has read the durable proposal, so they are asserted in memory against the
+step-1 snapshot, and re-asserted the same way after the record lock through
+`LockedPermissionSnapshot.revalidate()` plus `effectiveFor(actorId)`. Two rules keep that sound and
+both are load-bearing:
+
+- **No permission read may happen before step 1 in the same transaction.** An unlocked
+  `permissionsFor` read populates the MyBatis first-level cache, and every later permission question
+  in that transaction — including a domain service's own `@RequirePermission` check — is then
+  answered with the pre-lock result. `preliminaryOwnerAssignment` resolves which principal row to
+  lock and deliberately takes no permission read of its own for this reason.
+- **No permission read may happen after step 1 either.** In-memory assertion performs no database
+  access, so re-asserting after a record lock cannot add an authorization edge behind a tenant row
+  and cannot invert the repository's membership → record order.
+
+A revocation committed while a decision is in flight therefore either serializes against the locked
+role rows or is seen by them, and the write is refused with the ordinary
+`Requires the X permission in this workspace` 403.
+
 ### AI run leases
 
 `ai_run_lease` is a leaf. The lock order is `ai_chat_session` → `ai_chat_turn` → `ai_run_lease`, and
