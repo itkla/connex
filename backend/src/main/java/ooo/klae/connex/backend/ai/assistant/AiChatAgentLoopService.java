@@ -8,6 +8,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -275,11 +276,13 @@ public class AiChatAgentLoopService {
                 stepOffset = execution.lastStepNumber();
                 maxSteps = Math.min(maxSteps, HARD_MAX_STEPS - stepOffset);
                 if (execution.executed()) {
+                    Set<Toolset> seeded = seededToolsets(routing.skill());
                     // Attribution is written only once the plan actually produced the evidence the
                     // answer is built from, so the durable turn row and the answer's own skill
                     // metadata can never name a declaration the turn did not really run under.
                     persistenceService.applySkill(
                             turn, routing.skill().key(), routing.skill().version());
+                    loadedToolsets.addAll(seeded);
                     skillReference = new AiAssistantPromptAssembler.SkillReference(
                             routing.skill().key(), routing.skill().version());
                     skillContext = new AiAssistantPromptAssembler.SkillContext(
@@ -1061,6 +1064,49 @@ public class AiChatAgentLoopService {
             log.warn("Assistant turn lease heartbeat did not stop cleanly exceptionClass={}",
                     exception.getClass().getName());
         }
+    }
+
+    /**
+     * Resolves the toolsets a routed declaration wants its synthesis step to start from.
+     *
+     * <p>Seeding spends from the one {@code MAX_ACTIVE_TOOLSETS_PER_TURN} budget a turn has, not
+     * from a second allowance beside it: the set's own size is the counter, so a turn seeded to
+     * the cap is refused its next {@code find_tools} exactly as a turn that loaded its way there
+     * is, and {@code reservationToolsets()} stays a strict upper bound on the vocabulary any
+     * reachable turn can send. {@code SkillSpec} enforces the cap and the key vocabulary where a
+     * skill is declared, so an undeclarable key cannot reach a running turn; the lookup still
+     * fails closed rather than silently seeding nothing.
+     *
+     * <p>Called only from inside the {@code execution.executed()} branch, beside the durable
+     * {@code applySkill} write. That coupling is the whole of the reconstruction contract for a
+     * seeded turn: a reader rebuilding the loaded set from {@code ai_chat_turn.skill_key} and
+     * {@code skill_version} plus the turn's {@code find_tools} rows sees a routed-but-unexecuted
+     * turn as core-only, which is exactly what the turn held.
+     *
+     * <p>Resolved <strong>before</strong> that write, and never after it. This lookup fails closed,
+     * so resolving it second would let a declaration carrying an unresolvable key persist the
+     * attribution and then settle the turn as an internal error — leaving a reader to reconstruct
+     * a loaded set for a turn that held nothing, the one disagreement the coupling exists to make
+     * impossible. The refusal has to precede the row, not follow it.
+     *
+     * <p>{@code applySkill} returns whether its status-predicated update matched, and this call
+     * site deliberately does not branch on it: the same transaction takes the turn's row lock
+     * through {@code lockAuthorizedTurn(turn, RUNNING)} before the update, so a zero-row result is
+     * unreachable for a caller that reached the method at all. The discarded boolean is that stated
+     * invariant. A future caller that reaches {@code applySkill} without the lock would break it,
+     * which is why the invariant is recorded on the method itself.
+     *
+     * @param skill the routed declaration whose plan produced the evidence being synthesized
+     * @return the non-core toolsets the turn starts holding
+     */
+    private static Set<Toolset> seededToolsets(AiSkillCatalog.SkillSpec skill) {
+        Set<Toolset> seeded = new LinkedHashSet<>();
+        for (String key : skill.toolsets()) {
+            seeded.add(Objects.requireNonNull(
+                    AiAssistantToolCatalog.loadableByKey(key),
+                    () -> skill.key() + " declares an unknown toolset " + key));
+        }
+        return seeded;
     }
 
     /**
