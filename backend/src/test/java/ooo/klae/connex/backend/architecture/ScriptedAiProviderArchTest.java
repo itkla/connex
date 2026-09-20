@@ -54,6 +54,12 @@ class ScriptedAiProviderArchTest {
     /** The Gradle task that owns every scripted trajectory golden. */
     private static final String TRAJECTORY_TASK = "scriptedTrajectoryTest";
 
+    /** The display name of the one CI job branch protection requires for backend changes. */
+    private static final String REQUIRED_BACKEND_JOB = "Backend — build & test";
+
+    /** A job key line in the CI workflow: exactly two spaces of indentation, then the key. */
+    private static final Pattern WORKFLOW_JOB_HEADER = Pattern.compile("^ {2}[A-Za-z0-9_-]+:\\s*$");
+
     /** The class-name shape both that task's include and the {@code test} exclude are keyed on. */
     private static final Pattern TRAJECTORY_CLASS_NAME =
             Pattern.compile(".*ScriptedTrajectory.*Test\\.java");
@@ -343,10 +349,7 @@ class ScriptedAiProviderArchTest {
     @Test
     void theTrajectoryTaskIsReachableFromTheLifecycleAndFromRequiredCi() throws IOException {
         String build = read(BUILD_SCRIPT);
-        List<String> gradleInvocations = read(CI_WORKFLOW).lines()
-                .map(String::strip)
-                .filter(line -> line.contains("gradlew"))
-                .toList();
+        List<String> gradleInvocations = requiredBackendJobGradleInvocations(read(CI_WORKFLOW));
 
         assertTrue(build.contains("tasks.register('" + TRAJECTORY_TASK + "'"),
                 "the trajectory goldens must keep their own Gradle task");
@@ -438,6 +441,47 @@ class ScriptedAiProviderArchTest {
                 .getDeclaredField("FORBIDDEN_KEYS_BY_PROFILE");
         field.setAccessible(true);
         return (Map<String, List<String>>) field.get(null);
+    }
+
+    /**
+     * Returns the Gradle commands run by the required backend job alone.
+     *
+     * <p>Other jobs in the same workflow also run Gradle, and a comment can name any task, so
+     * searching the whole file would stay satisfied after the required job stopped running the
+     * goldens. Only uncommented lines inside the job whose display name branch protection requires
+     * are returned.
+     *
+     * @param workflow the CI workflow source
+     * @return the required backend job's Gradle command lines, stripped
+     */
+    private static List<String> requiredBackendJobGradleInvocations(String workflow) {
+        List<String> invocations = new ArrayList<>();
+        List<String> current = new ArrayList<>();
+        boolean requiredJob = false;
+        for (String line : workflow.split("\\R")) {
+            if (WORKFLOW_JOB_HEADER.matcher(line).matches()) {
+                if (requiredJob) {
+                    invocations.addAll(current);
+                }
+                current = new ArrayList<>();
+                requiredJob = false;
+                continue;
+            }
+            String stripped = line.strip();
+            if (stripped.startsWith("#")) {
+                continue;
+            }
+            if (stripped.equals("name: " + REQUIRED_BACKEND_JOB)) {
+                requiredJob = true;
+            }
+            if (stripped.contains("gradlew")) {
+                current.add(stripped);
+            }
+        }
+        if (requiredJob) {
+            invocations.addAll(current);
+        }
+        return invocations;
     }
 
     private static String read(Path path) throws IOException {
