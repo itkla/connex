@@ -1,13 +1,22 @@
 package ooo.klae.connex.backend.ai.lease;
 
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.IntConsumer;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DeadlockLoserDataAccessException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiProperties;
@@ -32,6 +41,8 @@ import ooo.klae.connex.backend.mappers.AiRunLeaseMapper;
 @RequiredArgsConstructor
 public class AiRunLeaseService {
 
+    private static final Logger log = LoggerFactory.getLogger(AiRunLeaseService.class);
+
     private final AiRunLeaseMapper leaseMapper;
     private final AiRunLeaseIdentity identity;
     private final AiRunLeaseRegistry registry;
@@ -46,9 +57,16 @@ public class AiRunLeaseService {
      * refused: silently taking one over is exactly the failure the fencing scheme exists to
      * prevent.
      *
+     * <p>A subject that has never been leased has no row to lock, and an absent primary key takes
+     * no lock at READ COMMITTED, so two first claimants can both reach the insert. The loser is
+     * refused by the primary key (or by the deadlock its lock wait resolves into) and is reported
+     * as the same {@link ConflictException} a live lease produces, rather than as a raw data-access
+     * failure no caller's contract describes.
+     *
      * @param key the lease key
      * @return the fencing token this instance now holds
-     * @throws ConflictException when a live lease already holds the subject
+     * @throws ConflictException when a live lease already holds the subject, or when a concurrent
+     *     first claimant won the race to insert it
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public AiRunLease acquireInCurrentTransaction(AiRunLeaseKey key) {
@@ -59,14 +77,7 @@ public class AiRunLeaseService {
                 key.workspaceId(), key.subject().wireKey(), key.subjectId());
         long epoch;
         if (existing == null) {
-            if (leaseMapper.insert(
-                    key.workspaceId(),
-                    key.subject().wireKey(),
-                    key.subjectId(),
-                    owner,
-                    ttlSeconds) != 1) {
-                throw new IllegalStateException("AI run lease insert affected no row");
-            }
+            insertFirstClaim(key, owner, ttlSeconds);
             epoch = 1L;
         } else {
             if (leaseMapper.takeOver(
@@ -80,8 +91,29 @@ public class AiRunLeaseService {
             epoch = existing.getEpoch() + 1L;
         }
         AiRunLease lease = new AiRunLease(key, owner, epoch);
-        registry.register(lease);
+        registerUntilRollback(lease);
         return lease;
+    }
+
+    private void insertFirstClaim(AiRunLeaseKey key, String owner, int ttlSeconds) {
+        try {
+            if (leaseMapper.insert(
+                    key.workspaceId(),
+                    key.subject().wireKey(),
+                    key.subjectId(),
+                    owner,
+                    ttlSeconds) != 1) {
+                throw new IllegalStateException("AI run lease insert affected no row");
+            }
+        } catch (DuplicateKeyException | DeadlockLoserDataAccessException race) {
+            log.debug(
+                    "Lost the race to insert the first AI run lease for workspace {} subject {} {}",
+                    key.workspaceId(),
+                    key.subject().wireKey(),
+                    key.subjectId(),
+                    race);
+            throw new ConflictException("AI run is already leased by another instance");
+        }
     }
 
     /**
@@ -113,6 +145,10 @@ public class AiRunLeaseService {
      * nothing. A key this instance holds no token for is a correct no-op: it means a takeover has
      * already re-fenced the row.
      *
+     * <p>The token is forgotten only once the enclosing transaction commits. A terminal transaction
+     * that rolls back leaves the row held and this instance still holding its token, so the retry
+     * can tombstone it rather than abandoning a lease the database still shows as held.
+     *
      * @param key the lease key
      * @return {@code true} when this instance's token matched and the row was tombstoned
      */
@@ -130,12 +166,17 @@ public class AiRunLeaseService {
                 key.subjectId(),
                 lease.owner(),
                 lease.epoch());
-        registry.forget(key);
+        forgetOnCommit(lease);
         return updated == 1;
     }
 
     /**
      * Claims an expired lease observed at {@code expectedEpoch} so this instance may settle it.
+     *
+     * <p>The takeover token is registered exactly as a claim's is, because the settler releases it
+     * through {@link #releaseHeldInCurrentTransaction(AiRunLeaseKey)} once it has written the
+     * subject's terminal state. Without the registration that release would find no token, skip the
+     * tombstone, and leave a held settlement lease for the next sweep pass to rediscover.
      *
      * @param key the lease key
      * @param expectedEpoch the epoch the settler observed
@@ -155,14 +196,20 @@ public class AiRunLeaseService {
         if (updated != 1) {
             return Optional.empty();
         }
-        return Optional.of(new AiRunLease(key, owner, expectedEpoch + 1L));
+        AiRunLease takeover = new AiRunLease(key, owner, expectedEpoch + 1L);
+        registerUntilRollback(takeover);
+        return Optional.of(takeover);
     }
 
     /**
-     * Deletes tombstones in one workspace that are older than the retention window.
+     * Deletes tombstones in one workspace that are older than the retention window, for the subject
+     * kinds that declare themselves reapable.
      *
-     * <p>The configured retention is validated to exceed the maximum lifetime of any generation, so
-     * no owner that could still write can outlive its own tombstone.
+     * <p>A delete restarts that key's fencing epoch at 1, so it is sound only while the retention
+     * provably exceeds the longest run of that kind. {@link AiRunLeaseSubject#CHAT_TURN} is bounded
+     * by {@code generation-max-lifetime}, which the property validation refuses to let the retention
+     * fall below. A kind with no declared bound keeps its tombstone instead: the reap fails closed
+     * rather than resetting a fence under an owner that may still act.
      *
      * @param workspaceId tenant key
      * @param retentionSeconds minimum tombstone age
@@ -171,10 +218,49 @@ public class AiRunLeaseService {
      */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public int reapTombstones(int workspaceId, int retentionSeconds, int limit) {
-        return leaseMapper.deleteTombstones(workspaceId, retentionSeconds, limit);
+        List<String> reapable = Arrays.stream(AiRunLeaseSubject.values())
+                .filter(AiRunLeaseSubject::isTombstoneReapable)
+                .map(AiRunLeaseSubject::wireKey)
+                .toList();
+        if (reapable.isEmpty()) {
+            return 0;
+        }
+        return leaseMapper.deleteTombstones(workspaceId, reapable, retentionSeconds, limit);
+    }
+
+    private void registerUntilRollback(AiRunLease lease) {
+        registry.register(lease);
+        afterCompletion(status -> {
+            if (status != TransactionSynchronization.STATUS_COMMITTED) {
+                registry.forget(lease);
+            }
+        });
+    }
+
+    private void forgetOnCommit(AiRunLease lease) {
+        afterCompletion(status -> {
+            if (status == TransactionSynchronization.STATUS_COMMITTED) {
+                registry.forget(lease);
+            }
+        });
+    }
+
+    private static void afterCompletion(IntConsumer completion) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                completion.accept(status);
+            }
+        });
     }
 
     private static int seconds(Duration duration) {
+        if (duration.toSeconds() < 1L || duration.getNano() != 0) {
+            throw new IllegalArgumentException(
+                    "AI run lease durations must be a whole number of seconds, at least one,"
+                            + " because the database computes deadlines as INTERVAL n SECOND; got "
+                            + duration);
+        }
         return Math.toIntExact(duration.toSeconds());
     }
 }

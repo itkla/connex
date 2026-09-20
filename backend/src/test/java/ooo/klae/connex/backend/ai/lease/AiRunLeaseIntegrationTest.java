@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -29,12 +30,16 @@ import ooo.klae.connex.backend.beans.AiRunLeaseRow;
 class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
 
     /**
-     * Timestamp columns may only ever be assigned from the database clock or cleared. A bound
-     * parameter here would put a lease deadline on a JVM clock and let instance skew move it.
+     * Timestamp columns may only ever be assigned from the database clock, from another column of
+     * the same row, or cleared. A bound parameter here would put a lease deadline on a JVM clock and
+     * let instance skew move it. {@code GREATEST(CURRENT_TIMESTAMP(6), …)} is still the database's
+     * own clock: it is how the release keeps the expiry CHECK satisfiable when that clock has
+     * stepped backwards since the lease was acquired.
      */
     private static final Pattern TIMESTAMP_ASSIGNMENT = Pattern.compile(
             "(acquired_at|heartbeat_at|expires_at|released_at)\\s*=\\s*(?!"
-                    + "CURRENT_TIMESTAMP\\(6\\)|DATE_ADD\\(CURRENT_TIMESTAMP\\(6\\)|NULL)(\\S+)");
+                    + "CURRENT_TIMESTAMP\\(6\\)|DATE_ADD\\(CURRENT_TIMESTAMP\\(6\\)"
+                    + "|GREATEST\\(CURRENT_TIMESTAMP\\(6\\)|NULL)(\\S+)");
 
     @Test
     void everyLeaseDeadlineIsComputedByTheDatabase() {
@@ -157,14 +162,131 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
         acquire(freshKey);
         assertTrue(release(oldKey));
         assertTrue(release(freshKey));
-        jdbcTemplate.update(
-                "UPDATE ai_run_lease SET released_at = DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 2 HOUR)"
-                        + " WHERE workspace_id = ? AND subject_kind = ? AND subject_id = ?",
-                oldKey.workspaceId(), oldKey.subject().wireKey(), oldKey.subjectId());
+        ageTombstone(oldKey);
 
         assertEquals(1, leaseService.reapTombstones(workspace.getId(), 3600, 50));
 
         assertEquals(1, leaseCount());
         assertNotNull(leaseRow(freshKey).get("released_at"));
+    }
+
+    /**
+     * Deleting a tombstone restarts that key's fencing epoch at 1, which is only safe while the
+     * retention window provably exceeds the longest run of that kind. {@code generation-max-lifetime}
+     * bounds a chat turn and the property validation keeps the retention above it; nothing bounds an
+     * agent run yet, so its tombstone is kept rather than have its fence reset under an owner that
+     * may still act.
+     */
+    @Test
+    void theReapKeepsTombstonesOfASubjectKindWhoseRunLengthIsNotYetBounded() {
+        AiRunLeaseKey turnKey = key(AiRunLeaseSubject.CHAT_TURN, 3009L);
+        AiRunLeaseKey agentKey = key(AiRunLeaseSubject.AGENT_RUN, 3009L);
+        acquire(turnKey);
+        acquire(agentKey);
+        assertTrue(release(turnKey));
+        assertTrue(release(agentKey));
+        ageTombstone(turnKey);
+        ageTombstone(agentKey);
+
+        assertEquals(1, leaseService.reapTombstones(workspace.getId(), 3600, 50));
+
+        assertEquals(1, leaseCount());
+        assertNotNull(leaseRow(agentKey).get("released_at"));
+        assertEquals(2L, acquire(agentKey).epoch());
+    }
+
+    /**
+     * The release runs inside the durable terminal transaction that carries the subject's result,
+     * so it must never be the statement that fails. A database clock stepped backwards between
+     * acquisition and release (NTP step, VM snapshot restore, host correction) would make a bare
+     * {@code CURRENT_TIMESTAMP(6)} deadline earlier than {@code acquired_at} and the expiry CHECK
+     * would refuse the whole transaction.
+     */
+    @Test
+    void aReleaseSurvivesADatabaseClockThatSteppedBackwardsSinceAcquisition() {
+        AiRunLeaseKey key = key(AiRunLeaseSubject.CHAT_TURN, 3010L);
+        acquire(key);
+        jdbcTemplate.update(
+                "UPDATE ai_run_lease"
+                        + " SET acquired_at = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 5 SECOND),"
+                        + " heartbeat_at = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 5 SECOND),"
+                        + " expires_at = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 50 SECOND)"
+                        + " WHERE workspace_id = ? AND subject_kind = ? AND subject_id = ?",
+                key.workspaceId(), key.subject().wireKey(), key.subjectId());
+
+        assertTrue(release(key));
+
+        Map<String, Object> row = leaseRow(key);
+        assertNull(row.get("owner"));
+        assertNotNull(row.get("released_at"));
+        assertEquals(
+                0L,
+                ((Number) row.get("ttl_micros")).longValue(),
+                "A release may not push the deadline past acquisition, only back to it");
+    }
+
+    /**
+     * A settler releases its takeover through the same entry point an owner uses. An unregistered
+     * takeover token would make that release a silent no-op, leaving a held settlement lease that
+     * every later sweep pass rediscovers as an expired lease on an already-terminal subject.
+     */
+    @Test
+    void aSettlerCanTombstoneTheLeaseItJustTookOver() {
+        AiRunLeaseKey key = key(AiRunLeaseSubject.CHAT_TURN, 3011L);
+        AiRunLease abandoned = acquire(key);
+        expire(key);
+
+        AiRunLease takeover =
+                leaseService.takeOverForSettlement(key, abandoned.epoch()).orElseThrow();
+        assertTrue(release(key));
+
+        Map<String, Object> row = leaseRow(key);
+        assertNull(row.get("owner"));
+        assertNotNull(row.get("released_at"));
+        assertEquals(takeover.epoch(), ((Number) row.get("epoch")).longValue());
+        assertTrue(leaseMapper.findExpiredLeases(workspace.getId(), 10).isEmpty());
+    }
+
+    /**
+     * The JVM-local token must never disagree with the committed row. A claim that rolls back
+     * leaves no row, so it must leave no token either — otherwise the map grows an entry nothing
+     * ever prunes and this instance offers a fence it does not hold.
+     */
+    @Test
+    void aClaimThatRollsBackLeavesNeitherARowNorAToken() {
+        AiRunLeaseKey key = key(AiRunLeaseSubject.CHAT_TURN, 3012L);
+
+        transactions.execute(status -> {
+            AiRunLease claimed = leaseService.acquireInCurrentTransaction(key);
+            status.setRollbackOnly();
+            return claimed;
+        });
+
+        assertEquals(0, leaseCount());
+        assertTrue(leaseRegistry.find(key).isEmpty());
+    }
+
+    /**
+     * A terminal transaction that rolls back leaves the lease held, so this instance must keep its
+     * token for the retry. Forgetting it inline would strand a held lease a settler then takes over
+     * as if the owner had died, even though the run ended cleanly.
+     */
+    @Test
+    void aReleaseThatRollsBackKeepsTheTokenAndTheHeldRow() {
+        AiRunLeaseKey key = key(AiRunLeaseSubject.CHAT_TURN, 3013L);
+        AiRunLease held = acquire(key);
+
+        transactions.execute(status -> {
+            boolean released = leaseService.releaseHeldInCurrentTransaction(key);
+            status.setRollbackOnly();
+            return released;
+        });
+
+        assertEquals(Optional.of(held), leaseRegistry.find(key));
+        assertEquals(leaseIdentity.owner(), leaseRow(key).get("owner"));
+        assertNull(leaseRow(key).get("released_at"));
+
+        assertTrue(release(key));
+        assertNotNull(leaseRow(key).get("released_at"));
     }
 }

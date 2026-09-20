@@ -16,6 +16,10 @@ import org.springframework.stereotype.Component;
  * {@code (owner, epoch)} pair in MySQL, and the registry only decides which token this instance
  * offers. A missing entry therefore makes a release a correct no-op — it means a takeover has
  * already re-fenced the row.
+ *
+ * <p>Every mutation is driven by {@link AiRunLeaseService} from a transaction-completion callback,
+ * so this map cannot disagree with the committed row: a claim that rolls back removes its entry
+ * again, and a release forgets its token only once the tombstone commits.
  */
 @Component
 public class AiRunLeaseRegistry {
@@ -44,12 +48,16 @@ public class AiRunLeaseRegistry {
     }
 
     /**
-     * Forgets the token for one subject.
+     * Forgets one token, leaving any newer token for the same key in place.
      *
-     * @param key the lease key
+     * <p>The token is matched as well as the key so that a late completion callback cannot drop a
+     * fresher claim's token — a re-claim of the same subject registers before the previous claim's
+     * transaction has finished unwinding.
+     *
+     * @param lease the token to forget
      */
-    public void forget(AiRunLeaseKey key) {
-        Objects.requireNonNull(key, "key");
-        leases.remove(key);
+    public void forget(AiRunLease lease) {
+        Objects.requireNonNull(lease, "lease");
+        leases.remove(lease.key(), lease);
     }
 }

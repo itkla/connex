@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import java.util.Collection;
 import java.util.List;
 
 import org.apache.ibatis.annotations.Mapper;
@@ -159,15 +160,22 @@ public interface AiRunLeaseMapper {
             @Param("afterWorkspaceId") int afterWorkspaceId, @Param("limit") int limit);
 
     /**
-     * Deletes tombstones older than the retention window in one workspace.
+     * Deletes tombstones older than the retention window in one workspace, for the subject kinds
+     * whose runs are provably shorter than that window.
+     *
+     * <p>The subject-kind predicate is load-bearing: deleting a tombstone restarts that key's
+     * fencing epoch at 1, so a kind whose runs may outlive the retention must keep its tombstone
+     * rather than have its fence reset under a still-live owner.
      *
      * @param workspaceId tenant key
+     * @param subjectKinds wire keys of the subject kinds that may be reaped; never empty
      * @param retentionSeconds minimum tombstone age, applied by MySQL
      * @param limit maximum rows deleted
      * @return rows deleted
      */
     int deleteTombstones(
             @Param("workspaceId") int workspaceId,
+            @Param("subjectKinds") Collection<String> subjectKinds,
             @Param("retentionSeconds") int retentionSeconds,
             @Param("limit") int limit);
 }

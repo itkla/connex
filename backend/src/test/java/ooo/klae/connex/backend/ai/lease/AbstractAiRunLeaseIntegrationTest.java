@@ -24,8 +24,15 @@ import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
- * Shared real-database fixture for the run-lease drills: one throwaway organization, workspace, and
- * member, plus the transaction template the caller-joining lease methods require.
+ * Shared real-database fixture for the run-lease drills: two throwaway organizations and
+ * workspaces, a member in the first, and the transaction template the caller-joining lease methods
+ * require.
+ *
+ * <p>The second workspace exists so that every statement capable of reaching more than one row can
+ * be asserted against a neighbouring tenant holding the same subject id and epoch.
+ * {@code TenantScopeArchTest} documents its own {@code #{workspaceId}} check as a presence, not a
+ * placement, heuristic — a binding in an unrelated subquery would still pass it — and names runtime
+ * cross-workspace coverage as the layer that catches the rest.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -46,6 +53,8 @@ abstract class AbstractAiRunLeaseIntegrationTest {
 
     Organization organization;
     Workspace workspace;
+    Organization neighbourOrganization;
+    Workspace neighbourWorkspace;
     User member;
     TransactionTemplate transactions;
 
@@ -62,6 +71,17 @@ abstract class AbstractAiRunLeaseIntegrationTest {
         workspace.setName("AI run lease " + unique);
         workspace.setSlug("ai-run-lease-" + unique);
         workspaceMapper.insert(workspace);
+
+        neighbourOrganization = new Organization();
+        neighbourOrganization.setName("AI run lease neighbour " + unique);
+        neighbourOrganization.setSlug("ai-run-lease-neighbour-" + unique);
+        organizationMapper.insert(neighbourOrganization);
+
+        neighbourWorkspace = new Workspace();
+        neighbourWorkspace.setOrgId(neighbourOrganization.getId());
+        neighbourWorkspace.setName("AI run lease neighbour " + unique);
+        neighbourWorkspace.setSlug("ai-run-lease-neighbour-" + unique);
+        workspaceMapper.insert(neighbourWorkspace);
 
         member = new User();
         member.setUsername("ai-run-lease-" + unique);
@@ -81,6 +101,11 @@ abstract class AbstractAiRunLeaseIntegrationTest {
     @AfterEach
     void removeTenantFixture() {
         tenantContext.clear();
+        if (neighbourWorkspace != null) {
+            jdbcTemplate.update(
+                    "DELETE FROM ai_run_lease WHERE workspace_id = ?", neighbourWorkspace.getId());
+            jdbcTemplate.update("DELETE FROM workspace WHERE id = ?", neighbourWorkspace.getId());
+        }
         if (workspace != null) {
             jdbcTemplate.update("DELETE FROM ai_run_lease WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update(
@@ -98,6 +123,10 @@ abstract class AbstractAiRunLeaseIntegrationTest {
         return new AiRunLeaseKey(workspace.getId(), subject, subjectId);
     }
 
+    AiRunLeaseKey neighbourKey(AiRunLeaseSubject subject, long subjectId) {
+        return new AiRunLeaseKey(neighbourWorkspace.getId(), subject, subjectId);
+    }
+
     AiRunLease acquire(AiRunLeaseKey key) {
         return transactions.execute(status -> leaseService.acquireInCurrentTransaction(key));
     }
@@ -105,6 +134,19 @@ abstract class AbstractAiRunLeaseIntegrationTest {
     boolean release(AiRunLeaseKey key) {
         return Boolean.TRUE.equals(
                 transactions.execute(status -> leaseService.releaseHeldInCurrentTransaction(key)));
+    }
+
+    /**
+     * Ages a tombstone so the reap's retention predicate matches it.
+     *
+     * @param key the tombstoned lease key
+     */
+    void ageTombstone(AiRunLeaseKey key) {
+        jdbcTemplate.update(
+                "UPDATE ai_run_lease"
+                        + " SET released_at = DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 2 HOUR)"
+                        + " WHERE workspace_id = ? AND subject_kind = ? AND subject_id = ?",
+                key.workspaceId(), key.subject().wireKey(), key.subjectId());
     }
 
     void expire(AiRunLeaseKey key) {
@@ -128,9 +170,13 @@ abstract class AbstractAiRunLeaseIntegrationTest {
     }
 
     int leaseCount() {
+        return leaseCount(workspace.getId());
+    }
+
+    int leaseCount(int workspaceId) {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM ai_run_lease WHERE workspace_id = ?",
-                Integer.class, workspace.getId());
+                Integer.class, workspaceId);
         return count == null ? 0 : count;
     }
 }

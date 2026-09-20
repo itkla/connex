@@ -83,11 +83,16 @@
           AND epoch = #{epoch}
     </update>
 
+    <!-- GREATEST, not a bare CURRENT_TIMESTAMP(6): the release still reads the database clock, but
+         if that clock has stepped backwards (NTP step, VM snapshot restore, host correction) since
+         the lease was acquired, a bare reading would be earlier than acquired_at and
+         chk_ai_run_lease_expiry would refuse the release. That refusal happens inside the durable
+         terminal transaction, so it would discard the work that transaction carries. -->
     <update id="tombstone">
         UPDATE ai_run_lease
         SET owner = NULL,
             released_at = CURRENT_TIMESTAMP(6),
-            expires_at = CURRENT_TIMESTAMP(6)
+            expires_at = GREATEST(CURRENT_TIMESTAMP(6), acquired_at)
         WHERE workspace_id = #{workspaceId}
           AND subject_kind = #{subjectKind}
           AND subject_id = #{subjectId}
@@ -118,9 +123,15 @@
         LIMIT #{limit}
     </select>
 
+    <!-- Deleting a tombstone restarts that key's fencing epoch at 1, so only subject kinds whose
+         runs are provably shorter than the retention window are listed here. -->
     <delete id="deleteTombstones">
         DELETE FROM ai_run_lease
         WHERE workspace_id = #{workspaceId}
+          AND subject_kind IN
+              <foreach item="subjectKind" collection="subjectKinds" open="(" separator="," close=")">
+                  #{subjectKind}
+              </foreach>
           AND owner IS NULL
           AND released_at &lt;
               DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL #{retentionSeconds} SECOND)
