@@ -662,26 +662,36 @@ the triggered expired-claim sweep. It never runs inside the reservation transact
 workspace root, and adds no lock edge. Send status is not filtered, because a completed, paused, or
 cancelled send can own the stranded row; scheduler discovery includes workspaces whose only work is
 such a row. The same pass then settles every audience send that is still `running` with nothing
-`pending` or `dispatching`, and every audience send whose `failed_count` disagrees with its failed
-rows while it still owns an unresolved reconciliation row: it completes such a running send and
-refreshes the counters, without resolving a provider, so a connector disabled after the worker died
-cannot keep the send running. The completion is a single compare-and-set that proves the absence of
-`pending` and `dispatching` rows in the same statement that writes `completed`, so a live worker's
-terminal write cannot land between the proof and the completion; because no delivery can return to
-`pending` or `dispatching` afterwards, the counter refresh that follows a completion reads every
-delivery in its final state. A `dispatching` row may belong to a live worker, so that send stays
-`running`: the worker's own settlement completes it after its terminal write, an attempt it abandons
-after reserving is swept and settled by a later pass, and one abandoned before reserving is left to
-the dispatch loop's own settlement. Those sends are selected by that durable predicate, not
-remembered from the sweep, because a marked row no longer matches the sweep: a settlement that fails
-is found again on a later pass — whole, since a failed completion also defers that pass's counter
-refresh — and scheduler discovery includes workspaces whose only work is such a stale counter. The
-`running` branch of the predicate deliberately carries no reconciliation-row condition, because a
-provider webhook (`applyProviderStatus`) and an operator resolution (`resolveReconciliation`) both
-clear `reconciliation_required_at`, and the webhook also moves the row out of `failed`; a send whose
-worker has died must not depend on a marker another actor may clear. Both branches stay inside one
-workspace's sends. Settlement takes the same single-row auto-commit writes on `campaign_send` the
-dispatch loop already runs, so it adds no lock edge. A slow but live worker that writes after the
+`pending` or `dispatching`: it completes the send and refreshes the counters, without resolving a
+provider, so a connector disabled after the worker died cannot keep the send running. The completion
+is a single compare-and-set that proves the absence of `pending` and `dispatching` rows in the same
+statement that writes `completed`, so a live worker's terminal write cannot land between the proof
+and the completion; because no delivery can return to `pending` or `dispatching` afterwards, the
+counter refresh that follows a completion reads every delivery in its final state. A `dispatching`
+row may belong to a live worker, so that send stays `running`: the worker's own settlement completes
+it after its terminal write, an attempt it abandons after reserving is swept and settled by a later
+pass, and one abandoned before reserving is left to the dispatch loop's own settlement. That send is
+selected by a durable predicate, not remembered from the sweep, because a marked row no longer
+matches the sweep: a settlement that fails is found again on a later pass, and scheduler discovery
+already returns a workspace that owns a `running` send. The predicate deliberately carries no
+reconciliation-row condition, because a provider webhook (`applyProviderStatus`) and an operator
+resolution (`resolveReconciliation`) both clear `reconciliation_required_at`, and the webhook also
+moves the row out of `failed`; a send whose worker has died must not depend on a marker another actor
+may clear. It is answered from `idx_campaign_send_status` plus one index probe per running send, so
+its cost follows the workspace's running sends and never its delivery history.
+
+A send that is already `completed` when the sweep marks one of its rows owes only its counters, and
+those are refreshed from the sweep's own result in the same pass rather than by a
+counter-disagreement selector: comparing `failed_count` with a `COUNT(*)` of failed rows is a
+dependent subquery over every audience send's delivery history, which the scheduler would pay on
+every tick, and putting the reconciliation `EXISTS` first does not bound it, because
+`reconciliation_required_at` is not in `idx_campaign_delivery_send_status` and the probe therefore
+reads the same failed rows from the clustered index. The bound that leaves: if a pass dies between
+the sweep's compare-and-set and its counter refresh, an already completed send under-reports
+`failed_count` until an operator resolves the reconciliation row the sweep created, which refreshes
+the counters itself. The delivery row is terminal and reconcilable throughout, so nothing is lost
+except the send-level counter. Settlement takes the same single-row auto-commit writes on
+`campaign_send` the dispatch loop already runs, so it adds no lock edge. A slow but live worker that writes after the
 sweep loses its `status = 'dispatching'` compare-and-set and leaves the row reconcilable. It then
 attaches its provider id and message id to that swept row through a second single-row
 compare-and-set, and changes neither status, reconciliation state, nor the reservation, so provider
