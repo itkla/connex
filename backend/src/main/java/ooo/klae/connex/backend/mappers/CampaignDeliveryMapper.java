@@ -225,6 +225,28 @@ public interface CampaignDeliveryMapper {
             @Param("lastError") String lastError,
             @Param("lastErrorCode") String lastErrorCode);
 
+    /**
+     * Records the provider message id of a triggered submission whose owner-fenced terminal write
+     * lost to the expired-claim sweep, on an unleased row that still names this attempt's target and
+     * carries no message id yet. It never changes the row's status, reconciliation state, operator
+     * resolution, or lease, and it refuses a row the sweep returned to the queue or a newer attempt
+     * has claimed. A row an idempotent replay dispatched is accepted only because that replay's
+     * receipt named no message id, so the row settled correlation-free and this submission's id is
+     * the only one a bounce or complaint for the deduplicated message can resolve.
+     * @param workspaceId the owning workspace
+     * @param id the delivery
+     * @param providerId the provider that accepted the message, as this attempt's claim recorded it
+     * @param attemptTargetFingerprint the target fingerprint this attempt's claim recorded
+     * @param providerMessageId the provider's message id
+     * @return one if the swept row now carries the correlation
+     */
+    int attachLateTriggeredProviderCorrelation(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("providerId") String providerId,
+            @Param("attemptTargetFingerprint") String attemptTargetFingerprint,
+            @Param("providerMessageId") String providerMessageId);
+
     int markDispatched(
             @Param("workspaceId") int workspaceId,
             @Param("id") int id,

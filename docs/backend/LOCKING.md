@@ -730,10 +730,26 @@ bounce and complaint webhooks still resolve to the row and record suppression an
 That statement accepts a swept row with no provider id whether it is still awaiting reconciliation or
 an operator has already resolved it — a resolved row keeps neither the sweep's `last_error` nor its
 reconciliation marker, so that branch is anchored on the operator outcome, and an audience row is
-never returned to `pending`, so no later attempt can own the correlation it writes. An expired
-triggered claim marked ambiguous stores no message id, so its webhooks match no row; operators apply
-those by hand (`docs/DELIVERABILITY.md` §3.1). Audience rows stranded before any reservation, and
-rows without a person (which are never reserved), have no age anchor and are not swept.
+never returned to `pending`, so no later attempt can own the correlation it writes. A slow triggered
+worker whose owner-fenced terminal write loses to the expired-claim sweep attaches its message id
+through the matching statement on the triggered path. A triggered claim persists the provider id and
+the attempt target fingerprint, so that statement identifies the attempt by both instead of by the
+absence of a provider id, and it fences on an absent lease owner plus a settled status rather than on
+the sweep's `last_error`: a triggered row can be returned to `pending` and re-claimed, so a `pending`
+row is left to the replay that records its own correlation, a re-claimed row belongs to the attempt
+holding the lease, and a row the sweep re-queued that a later attempt drove back into terminal
+ambiguity still accepts the only message id the provider ever accepted for it. The statement also
+accepts a `dispatched` row that carries no message id, which is what `markTriggeredDispatched` leaves
+behind when the replay's own receipt named none: it writes that null over the column unconditionally
+and clears the lease, so the row settles correlation-free and only the late attempt's id can resolve
+its webhooks. Both attempts submit the same `Idempotency-Key`, so on a connector an administrator
+marked idempotent that id names the one message the provider kept. Many triggered items still reach
+reconciliation with no message id — a worker that never returns, a replay that never ran, a late
+return refused because a newer attempt held the claim, a terminal write or late attach that could
+not be persisted, and a receipt that names no message id from either attempt —
+so their webhooks still match no row and operators check the provider by hand for every triggered
+item (`docs/DELIVERABILITY.md` §3.1). Audience rows stranded before any reservation, and rows
+without a person (which are never reserved), have no age anchor and are not swept.
 
 Operator reconciliation takes locked membership permission roots first and requires both
 `CAMPAIGN_MANAGE` and `CONSENT_MANAGE`, then locks campaign, send, and delivery in that
