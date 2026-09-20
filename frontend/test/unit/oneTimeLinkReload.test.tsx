@@ -10,7 +10,7 @@ import { ResetPasswordForm } from "@/app/auth/reset-password/ResetPasswordForm";
 import { VerifyEmailForm } from "@/app/auth/verify-email/VerifyEmailForm";
 import DocumentAcceptanceEntry from "@/app/components/marketing/campaigns/DocumentAcceptanceEntry";
 import UnsubscribeEntry from "@/app/components/marketing/campaigns/UnsubscribeEntry";
-import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
+import { useOneTimeLinkEntry } from "@/app/hooks/useOneTimeLinkEntry";
 import InviteLinkPage from "@/app/invite-link/page";
 import InvitePage from "@/app/invite/page";
 import {
@@ -21,7 +21,7 @@ import {
     validateEmailVerificationToken,
     validateResetToken,
 } from "@/app/lib/api";
-import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
+import { syncStrippedUrlWithRouter, takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
 import enAuth from "@/messages/en/auth.json";
 import enErrors from "@/messages/en/errors.json";
 import enUnsubscribe from "@/messages/en/unsubscribe.json";
@@ -52,6 +52,7 @@ vi.mock("@/app/lib/api", async (importOriginal) => {
 
 vi.mock("@/app/lib/oneTimeLink", () => ({
     takeOneTimeLinkToken: vi.fn(() => null),
+    syncStrippedUrlWithRouter: vi.fn(),
 }));
 
 vi.mock("@/app/components/auth/AuthBrandPanel", () => ({
@@ -117,7 +118,7 @@ async function navigateFragment(path: string, token: string) {
 }
 
 function FragmentProbe() {
-    useReloadOnFragmentNavigation();
+    useOneTimeLinkEntry();
     return null;
 }
 
@@ -126,11 +127,22 @@ function StrippingEntryProbe({ take, onToken }: {
     take: () => string | null;
     onToken: (token: string | null) => void;
 }) {
-    useReloadOnFragmentNavigation();
+    useOneTimeLinkEntry();
     useEffect(() => {
         onToken(take());
     }, [take, onToken]);
     return null;
+}
+
+/**
+ * Mirrors `AppRouter`, which installs the `history` patch the router sync depends on in its own
+ * mount effect — the effect React runs after every descendant's.
+ */
+function PatchInstaller({ children, onInstall }: PropsWithChildren<{ onInstall: () => void }>) {
+    useEffect(() => {
+        onInstall();
+    }, [onInstall]);
+    return children;
 }
 
 async function settleQueuedEvents() {
@@ -140,7 +152,7 @@ async function settleQueuedEvents() {
     });
 }
 
-describe("useReloadOnFragmentNavigation", () => {
+describe("useOneTimeLinkEntry", () => {
     it("reloads once per fragment navigation and stops listening after unmount", async () => {
         const { reload } = stubLocation();
         const root = await mount(FragmentProbe);
@@ -152,6 +164,27 @@ describe("useReloadOnFragmentNavigation", () => {
         await act(async () => root.unmount());
         await navigateFragment("/auth/reset-password", "third-link");
         expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("hands the router the stripped URL only once the history patch is installed", async () => {
+        const order: string[] = [];
+        vi.mocked(syncStrippedUrlWithRouter).mockImplementationOnce(() => {
+            order.push("router sync");
+        });
+        function PatchedEntry() {
+            return (
+                <PatchInstaller onInstall={() => order.push("history patch")}>
+                    <FragmentProbe />
+                </PatchInstaller>
+            );
+        }
+
+        const root = await mount(PatchedEntry);
+        await settleQueuedEvents();
+
+        expect(order).toEqual(["history patch", "router sync"]);
+
+        await act(async () => root.unmount());
     });
 
     it("does not reload when the real one-time-link reader strips the fragment", async () => {

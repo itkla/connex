@@ -11,7 +11,7 @@ import {
     getUnsubscribeInfo,
 } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
-import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
+import { useOneTimeLinkEntry } from "@/app/hooks/useOneTimeLinkEntry";
 import type { DeliveryUnsubscribeInfo } from "@/app/lib/types";
 
 type EntryState =
@@ -65,7 +65,7 @@ export default function UnsubscribeEntry() {
         };
     }, []);
 
-    useReloadOnFragmentNavigation();
+    useOneTimeLinkEntry();
 
     return (
         <main className="grid min-h-dvh place-items-center bg-background px-6 py-12">

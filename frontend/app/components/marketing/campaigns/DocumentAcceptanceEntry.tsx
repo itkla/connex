@@ -14,7 +14,7 @@ import {
     getDocumentAcceptancePreview,
 } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
-import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
+import { useOneTimeLinkEntry } from "@/app/hooks/useOneTimeLinkEntry";
 import type {
     DocumentAcceptanceFailureKind,
     DocumentAcceptancePreview,
@@ -129,7 +129,7 @@ export default function DocumentAcceptanceEntry() {
         };
     }, [keepAliveOpen]);
 
-    useReloadOnFragmentNavigation();
+    useOneTimeLinkEntry();
 
     if (state.status === "loading") {
         return (

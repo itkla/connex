@@ -16,7 +16,7 @@ import {
     me,
 } from "@/app/lib/api";
 import { takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
-import { useReloadOnFragmentNavigation } from "@/app/hooks/useReloadOnFragmentNavigation";
+import { useOneTimeLinkEntry } from "@/app/hooks/useOneTimeLinkEntry";
 import type { InvitePreview, User, WorkspaceRole } from "@/app/lib/types";
 
 type InvitePageState =
@@ -41,7 +41,7 @@ export default function InvitePage() {
     const [attempt, setAttempt] = useState(0);
     const retainedBearer = useRef<string | null>(null);
 
-    useReloadOnFragmentNavigation();
+    useOneTimeLinkEntry();
 
     useEffect(() => {
         let active = true;
