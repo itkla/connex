@@ -706,11 +706,13 @@ public class CampaignDispatchService {
      * lost to the expired-claim sweep, so the provider's bounce and complaint webhooks still resolve
      * to the row and record suppression and consent revocation. The swept row keeps its status, its
      * reconciliation state, and any operator decision; a row the sweep returned to the queue for an
-     * idempotent replay is refused here and correlated by that replay's own terminal write. A
-     * receipt that names no message id, which the SMTP transport never does and an ESP response may
-     * omit, is skipped: no webhook could resolve to the row it would write, so reporting it as
-     * correlated would only mislead reconciliation. A persistence fault is logged because the row is
-     * already reconcilable without it.
+     * idempotent replay is refused here and correlated by that replay's own terminal write, unless
+     * that replay's receipt named no message id and settled the row correlation-free, in which case
+     * the shared idempotency key makes this submission's id the only one that names the message the
+     * connector kept. A receipt that names no message id, which the SMTP transport never does and an
+     * ESP response may omit, is skipped: no webhook could resolve to the row it would write, so
+     * reporting it as correlated would only mislead reconciliation. A persistence fault is logged
+     * because the row is already reconcilable without it.
      */
     private void attachLateTriggeredProviderCorrelation(
             int workspaceId, int deliveryId, ResolvedDeliveryProvider target, String providerMessageId) {

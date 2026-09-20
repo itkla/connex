@@ -230,7 +230,9 @@ public interface CampaignDeliveryMapper {
      * lost to the expired-claim sweep, on an unleased row that still names this attempt's target and
      * carries no message id yet. It never changes the row's status, reconciliation state, operator
      * resolution, or lease, and it refuses a row the sweep returned to the queue or a newer attempt
-     * has claimed.
+     * has claimed. A row an idempotent replay dispatched is accepted only because that replay's
+     * receipt named no message id, so the row settled correlation-free and this submission's id is
+     * the only one a bounce or complaint for the deduplicated message can resolve.
      * @param workspaceId the owning workspace
      * @param id the delivery
      * @param providerId the provider that accepted the message, as this attempt's claim recorded it

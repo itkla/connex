@@ -345,13 +345,21 @@ delivery's status and its frequency reservation are all left exactly as they wer
 ID the row does not yet carry is written. It is written only onto a row that still names that
 attempt's provider and target fingerprint and that no newer attempt owns, so a claim the sweep
 returned to the queue for an idempotent replay is left to that replay, which records its own message
-ID. **Plenty of triggered reconciliation items still carry no provider message ID, and the queue does
+ID. If that replay's own receipt names no message ID, it still marks the delivery sent and leaves the
+row with no correlation at all; because both attempts carried the same `Idempotency-Key`, the late
+attempt's message ID names the one message an idempotent connector kept, so it is attached to the
+sent row. Nothing else about that row changes — it stays `dispatched`, with its submission time and
+its frequency reservation as the replay left them — and a bounce or complaint for that message now
+suppresses the address and revokes consent instead of matching nothing.
+**Plenty of triggered reconciliation items still carry no provider message ID, and the queue does
 not show which.** A worker that died rather than stalled records nothing; a replay that never ran
 because its send was paused or cancelled records nothing; a late return that lands while a newer
 attempt holds the claim is refused, and that newer attempt may itself end ambiguous with no message
 ID; a terminal write or a late attach that could not be persisted records nothing; a receipt that
 names no message ID at all — every `smtp` submission, and any ESP response that omits the field —
-leaves nothing to attach; and a late attach that does land may land after an operator has looked.
+leaves nothing to attach, and where both the original attempt and its replay name none the row keeps
+no correlation whatever its status; and a late attach that does land may land after an operator has
+looked.
 Those items' webhooks match no delivery and record no suppression and no consent revocation.
 **Before resolving any triggered reconciliation item, check the provider's bounce and complaint
 records for that recipient and add any suppression by hand** (`POST /api/suppressions`). Where the
