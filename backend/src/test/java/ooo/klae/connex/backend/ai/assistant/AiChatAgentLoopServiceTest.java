@@ -757,6 +757,13 @@ class AiChatAgentLoopServiceTest {
         return objectMapper.writeValueAsString(invocation.prompt().getMessages());
     }
 
+    /** The prompt's untrusted message contents, unescaped, as the provider would receive them. */
+    private static String messageText(AiInvocation invocation) {
+        return invocation.prompt().getMessages().stream()
+                .map(message -> message.getContent())
+                .reduce("", (left, right) -> left + "\n" + right);
+    }
+
     /**
      * A loop that stops making progress still answers.
      *
@@ -3226,6 +3233,370 @@ class AiChatAgentLoopServiceTest {
         assertTrue(metadata.getValue().contains(
                 "\"skill\":{\"key\":\"activity_digest_v1\",\"version\":\""
                         + digest.version() + "\"}"));
+    }
+
+    /**
+     * A tool outside the loaded set is a recoverable refusal raised inside the validateReferences
+     * try, so the model is told what happened and the turn keeps the answer it was entitled to.
+     *
+     * <p>Raised outside every try block it would reach the outer catch, which returns the terminal
+     * reason without consulting {@code recoverable()} and without arming the closing step, so a
+     * turn that only needed to spend a step on find_tools would have forfeited its answer.
+     */
+    @Test
+    void aToolOutsideTheLoadedSetIsRefusedRecoverablyAndTheTurnStillAnswers() throws Exception {
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep(
+                        "aggregate_metric", "{\"metric\":\"deal_metrics\"}")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer(
+                                "I could not read the pipeline metric.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService).proposeTool(
+                eq(TURN), eq(1), eq("aggregate_metric"), any());
+        verify(persistenceService).failTool(
+                eq(TURN), eq(29), contains("tool_not_loaded"));
+        verify(toolExecutor, never()).execute(
+                eq("aggregate_metric"), any(), any(), any(Boolean.class), any());
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        assertFalse(messageText(invocations.getAllValues().getFirst())
+                .contains("tool_not_loaded"));
+        assertTrue(messageText(invocations.getAllValues().getLast())
+                .contains("\"error\":\"tool_not_loaded\""));
+    }
+
+    /**
+     * The load is what widens the turn: the step after it carries strictly more vocabulary, and
+     * the tool it unlocked then executes normally.
+     */
+    @Test
+    void aLoadWidensTheVocabularyAndTheUnlockedToolThenExecutes() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeLoad("call_1", "analytics"))
+                .thenReturn(nativeTool(
+                        "call_2", "aggregate_metric", "{\"metric\":\"deal_metrics\"}"))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Pipeline is healthy.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(3)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        List<String> beforeLoad = definitionNames(requests.getAllValues().getFirst());
+        List<String> afterLoad = definitionNames(requests.getAllValues().get(1));
+        assertTrue(afterLoad.size() > beforeLoad.size());
+        assertTrue(afterLoad.containsAll(beforeLoad));
+        assertFalse(beforeLoad.contains("aggregate_metric"));
+        assertTrue(afterLoad.contains("aggregate_metric"));
+        assertTrue(beforeLoad.contains(AiAssistantToolCatalog.FIND_TOOLS));
+        verify(toolExecutor).execute(
+                eq("aggregate_metric"), any(JsonNode.class), any(), eq(true), any());
+        verify(toolExecutor, never()).execute(
+                eq(AiAssistantToolCatalog.FIND_TOOLS), any(), any(), any(Boolean.class), any());
+    }
+
+    /**
+     * Widening the definition list mid-turn must not disturb an exchange the provider already
+     * signed: the replay after a load still carries the earlier call's thought signature byte for
+     * byte, which is what keeps Gemini's native replay valid.
+     */
+    @Test
+    void aPreLoadExchangeSurvivesALaterLoadWithItsThoughtSignatureIntact() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeTool(
+                        "call_1", "search_records",
+                        "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}",
+                        "opaque-signature /+=="))
+                .thenReturn(nativeLoad("call_2", "analytics"))
+                .thenReturn(nativeTool(
+                        "call_3", "aggregate_metric", "{\"metric\":\"deal_metrics\"}"))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Pipeline is healthy.", List.of())));
+        when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any()))
+                .thenReturn(
+                        new AiAssistantToolResult(Map.of("records", List.of("r1")), List.of()),
+                        new AiAssistantToolResult(Map.of("count", 1), List.of()));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(4)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        AiNativeToolRequest afterLoad = requests.getAllValues().getLast();
+        assertEquals("call_1", afterLoad.exchanges().getFirst().call().id());
+        assertEquals("opaque-signature /+==",
+                afterLoad.exchanges().getFirst().call().thoughtSignature());
+        assertTrue(definitionNames(afterLoad).contains("aggregate_metric"));
+    }
+
+    /**
+     * A repeated find_tools reaches the loader instead of the result cache.
+     *
+     * <p>The cache is keyed on name plus arguments, so a repeat of an earlier key would replay the
+     * stored result: the model would be told, authoritatively, that it holds fewer toolsets than
+     * it does, and the already-loaded refusal would never be raised. Both the read and the write
+     * skip this tool, so every find_tools step also keeps exactly one durable row.
+     */
+    @Test
+    void aRepeatedFindToolsIsRefusedByTheLoaderRatherThanServedFromTheCache() throws Exception {
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("analytics")))
+                .thenReturn(parsed(loadStep("schedule")))
+                .thenReturn(parsed(loadStep("analytics")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer("Nothing to report.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService, times(3)).proposeTool(
+                eq(TURN), anyInt(), eq(AiAssistantToolCatalog.FIND_TOOLS), any());
+        verify(persistenceService, times(2)).finishTool(
+                eq(TURN), anyInt(), eq("executed"), any());
+        verify(persistenceService).failTool(
+                eq(TURN), eq(29), contains("toolset_already_loaded"));
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(4)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        String lastPrompt = messageText(invocations.getAllValues().getLast());
+        assertTrue(lastPrompt.contains("\"error\":\"toolset_already_loaded\""));
+        assertTrue(lastPrompt.contains("\"remainingLoads\":0"));
+    }
+
+    /**
+     * The loaded set's own size is the per-turn counter, so a third load is refused recoverably
+     * rather than quietly widening the vocabulary past what the budget reserved for.
+     */
+    @Test
+    void aThirdLoadIsRefusedBecauseTheSetIsItsOwnCounter() throws Exception {
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("analytics")))
+                .thenReturn(parsed(loadStep("schedule")))
+                .thenReturn(parsed(loadStep("write_content")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer("Nothing to report.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService).failTool(
+                eq(TURN), eq(29), contains("toolset_load_limit_reached"));
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(4)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        assertTrue(messageText(invocations.getAllValues().getLast())
+                .contains("\"error\":\"toolset_load_limit_reached\""));
+        assertFalse(
+                invocations.getAllValues().getLast().prompt().getSystemPrompt()
+                        .contains("create_note"),
+                "a refused load must not widen the vocabulary it was refused for");
+    }
+
+    /**
+     * A find_tools step publishes no milestone frame at all.
+     *
+     * <p>It reads nothing, so it has no coverage category: a frame would be projected through the
+     * unmapped {@code other} source live, which {@code AiChatProgressService.project} omits on
+     * reload, and the coverage strip would disagree with the settled transcript.
+     */
+    @Test
+    void aFindToolsStepPublishesNoMilestoneFrameWhileARealReadStillDoes() throws Exception {
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("analytics")))
+                .thenReturn(parsed(toolStep(
+                        "search_records", "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        ArgumentCaptor<AiChatStepFrameDto> frames =
+                ArgumentCaptor.forClass(AiChatStepFrameDto.class);
+        verify(realtimeDispatcher, atLeastOnce()).sessionNow(
+                eq(TURN.workspaceId()), eq(TURN.sessionId()), frames.capture());
+        List<AiChatStepFrameDto> steps = frames.getAllValues().stream()
+                .filter(frame -> "step".equals(frame.kind()))
+                .toList();
+        assertFalse(steps.isEmpty(), "a real read still raises its own milestone");
+        assertTrue(steps.stream().allMatch(frame -> "records".equals(frame.tool())),
+                "find_tools would arrive as the unmapped other category");
+    }
+
+    /**
+     * The loaded set is reconstructible from rows the turn already writes, which is why this slice
+     * adds no migration and no production reader: the last executed find_tools result states the
+     * whole active set, and it agrees with the vocabulary the final provider call carried.
+     */
+    @Test
+    void theDurableFindToolsRowsReconstructTheVocabularyTheFinalCallCarried() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeLoad("call_1", "analytics"))
+                .thenReturn(nativeLoad("call_2", "write_content"))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Nothing to report.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        ArgumentCaptor<String> results = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService, times(2)).finishTool(
+                eq(TURN), anyInt(), eq("executed"), results.capture());
+        JsonNode lastRow = objectMapper.readTree(results.getAllValues().getLast());
+        List<String> reconstructed = new java.util.ArrayList<>();
+        lastRow.path("active").forEach(key -> reconstructed.add(key.asString()));
+
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(3)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        assertEquals(
+                new java.util.LinkedHashSet<>(reconstructed),
+                definitionNames(requests.getAllValues().getLast()).stream()
+                        .map(name -> catalog.toolsetOf(name).key())
+                        .collect(java.util.stream.Collectors.toCollection(
+                                java.util.LinkedHashSet::new)));
+        assertEquals(List.of("core", "analytics", "write_content"), reconstructed);
+        verify(persistenceService, never()).applySkill(eq(TURN), any(), any());
+    }
+
+    /**
+     * Write authority is decided before the loaded set is consulted, so loading a toolset can
+     * never launder a tool past the declaration its routed skill was admitted under.
+     *
+     * <p>The companion case — an unloaded write tool outside authority auditing under the same
+     * reason rather than tool_not_loaded — is
+     * {@link #aReadAuthoritySkillCannotReachAWriteToolAfterItsPlanHasRun()}.
+     */
+    @Test
+    void loadingAWriteToolsetGrantsNoAuthorityARoutedSkillNeverDeclared() throws Exception {
+        routedDigest();
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("write_pipeline")))
+                .thenReturn(parsed(toolStep(
+                        "change_deal_stage",
+                        "{\"handle\":\"r1\",\"stage\":\"Closed Won\"}")));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("tool_outside_skill_authority", result.reason());
+        verify(writeToolService, never()).prepare(any(), any(), any(), anyLong());
+        verify(persistenceService, never()).proposeTool(
+                eq(TURN), anyInt(), eq("change_deal_stage"), any());
+    }
+
+    /**
+     * The loaded set is turn state, not an authority gate: a read in a freshly loaded toolset runs
+     * on a READ-authority routed skill exactly as it would on a generic turn, because loading
+     * restores reach the taxonomy removed rather than granting reach that never existed.
+     */
+    @Test
+    void aReadInAFreshlyLoadedToolsetExecutesOnAReadAuthoritySkill() throws Exception {
+        routedDigest();
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("analytics")))
+                .thenReturn(parsed(toolStep(
+                        "aggregate_metric", "{\"metric\":\"deal_metrics\"}")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer(
+                                "Forty-one accounts were reviewed.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(toolExecutor).execute(
+                eq("aggregate_metric"), any(JsonNode.class), any(), eq(true), any());
+        verify(persistenceService, never()).failTool(eq(TURN), anyInt(), contains("not_loaded"));
+    }
+
+    private static List<String> definitionNames(AiNativeToolRequest request) {
+        return request.definitions().stream()
+                .map(definition -> definition.name())
+                .toList();
     }
 
     private static AiChatMessage message(int id, String content) {
