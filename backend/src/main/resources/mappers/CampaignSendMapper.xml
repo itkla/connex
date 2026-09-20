@@ -131,12 +131,20 @@
     LIMIT #{limit}
   </select>
 
-  <!-- This statement runs once per scheduler tick for every catalog, so every branch has to be
-       answerable from an index probe per send. A send still running is already discovered by the
-       first branch, which is what brings the recovery settlement back to a send whose worker died;
-       a stale failed counter is deliberately not a discovery reason, because detecting one costs a
-       dependent COUNT(*) over every audience send's failed deliveries, which scales with delivery
-       history rather than with outstanding recovery work. -->
+  <!-- This statement runs once per scheduler tick for every catalog and carries no workspace
+       predicate, so each arm has to be bounded by outstanding work rather than by history. The send
+       arm is unchanged: a send still running is discovered by its own status, which is what brings
+       the recovery settlement back to a send whose worker died. The abandoned-attempt arm is driven
+       by the dispatching delivery rows instead of by every audience send, because a stranded attempt
+       usually belongs to a send that already completed, so a send-driven branch would cost one index
+       probe per historical audience send on every tick. Leading the arm with status and
+       dispatch_lease_owner makes it two equalities plus a frequency_reserved_at range on
+       idx_campaign_delivery_unleased_reservation (V216), so a tick with nothing to recover reads no
+       delivery rows; no index that leads with workspace_id could be seeked here. A stale failed
+       counter is deliberately not a discovery reason, because detecting one costs a dependent
+       COUNT(*) over every audience send's failed deliveries, which again scales with delivery history
+       rather than with outstanding recovery work. UNION keeps the result one distinct set of
+       workspace ids. -->
   <select id="workspaceIdsWithQueuedSends" resultType="int">
     SELECT DISTINCT workspace_id FROM campaign_send
     WHERE status IN ('queued', 'running')
@@ -147,15 +155,17 @@
           AND ((#{triggeredSendEnabled} AND d.status = 'pending')
             OR (d.status = 'dispatching'
               AND d.dispatch_lease_until &lt; UTC_TIMESTAMP(6)))))
-      OR (origin = 'audience' AND EXISTS (
-        SELECT 1 FROM campaign_delivery d
-        WHERE d.workspace_id = campaign_send.workspace_id
-          AND d.send_id = campaign_send.id
-          AND d.status = 'dispatching'
-          AND d.dispatch_lease_owner IS NULL
-          AND d.submitted_at IS NULL
-          AND d.frequency_reserved_at &lt; DATE_SUB(UTC_TIMESTAMP(6),
-            INTERVAL #{audienceReservationGraceMicros} MICROSECOND)))
+    UNION
+    SELECT d.workspace_id FROM campaign_delivery d
+    WHERE d.status = 'dispatching'
+      AND d.dispatch_lease_owner IS NULL
+      AND d.frequency_reserved_at &lt; DATE_SUB(UTC_TIMESTAMP(6),
+        INTERVAL #{audienceReservationGraceMicros} MICROSECOND)
+      AND d.submitted_at IS NULL
+      AND EXISTS (
+        SELECT 1 FROM campaign_send s
+        WHERE s.workspace_id = d.workspace_id AND s.id = d.send_id
+          AND s.origin = 'audience')
   </select>
 
 </mapper>

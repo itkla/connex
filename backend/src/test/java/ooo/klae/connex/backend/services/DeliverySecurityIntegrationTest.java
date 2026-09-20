@@ -1297,6 +1297,36 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
     }
 
     @Test
+    void schedulerDiscoveryFollowsOutstandingAudienceAttemptsAndNotSettledSendHistory() {
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        long graceMicros = reservationGraceMicros();
+        Person delivered = recipient();
+        CampaignSendDto history = readySend(delivered, DeliveryChannel.EMAIL);
+        int deliveredId = pendingDelivery(history);
+        dispatch(history);
+        expireReservation(deliveredId, reservationGraceSeconds() + 60);
+
+        assertEquals("dispatched", deliveryMapper.getDelivery(workspace.getId(), deliveredId).getStatus());
+        assertEquals("completed", campaignSendMapper.getSend(workspace.getId(), history.id()).getStatus());
+        assertFalse(campaignSendMapper.workspaceIdsWithQueuedSends(false, graceMicros).contains(workspace.getId()));
+
+        Person stranded = recipient();
+        CampaignSendDto owner = readySend(stranded, DeliveryChannel.EMAIL);
+        int strandedId = strandedAudienceAttempt(stranded, owner);
+        expireReservation(strandedId, reservationGraceSeconds() + 60);
+        asTriggeredSend(owner);
+
+        assertFalse(campaignSendMapper.workspaceIdsWithQueuedSends(false, graceMicros).contains(workspace.getId()));
+
+        assertEquals(1, jdbcTemplate.update("UPDATE campaign_send SET origin = 'audience',"
+                + " status = 'completed' WHERE workspace_id = ? AND id = ?", workspace.getId(), owner.id()));
+        sqlSession.clearCache();
+
+        assertTrue(campaignSendMapper.workspaceIdsWithQueuedSends(false, graceMicros).contains(workspace.getId()));
+        assertEquals(1, submissions.size());
+    }
+
+    @Test
     void theAudienceReservationCompareAndSetOnlyMarksAnAttemptThatIsStillAbandoned() {
         configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
         long graceMicros = reservationGraceMicros();

@@ -75,8 +75,12 @@ public interface CampaignSendMapper {
 
     /**
      * Enumerates the pinned catalog's workspaces with dispatch or recovery work: queued or running
-     * sends, triggered work, abandoned audience attempts whose reservation expired past the grace, and
-     * audience sends whose failed counter is stale while they own an unresolved reconciliation row.
+     * sends, triggered work, and abandoned audience attempts whose reservation expired past the
+     * grace. A stale failed counter is not one of those reasons: the sweep refreshes the counters of
+     * the sends it marked in the same pass, and a counter a fault leaves stale is repaired when the
+     * operator resolves the reconciliation row that sweep created. The abandoned-attempt arm is
+     * driven by the dispatching delivery rows rather than by every audience send, so its cost follows
+     * the outstanding recovery work instead of the catalog's send history.
      * @param triggeredSendEnabled whether pending triggered deliveries count as work
      * @param audienceReservationGraceMicros how long past its reservation an audience attempt is abandoned
      * @return the workspace ids

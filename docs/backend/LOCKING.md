@@ -662,13 +662,20 @@ row on the delivery joined to its send for `origin` — the same statement shape
 the triggered expired-claim sweep. It never runs inside the reservation transaction, holds no
 workspace root, and adds no lock edge. Send status is not filtered, because a completed, paused, or
 cancelled send can own the stranded row; scheduler discovery includes workspaces whose only work is
-such a row. The same pass then settles every audience send that is still `running` with nothing
-`pending` or `dispatching`: it completes the send and refreshes the counters, without resolving a
-provider, so a connector disabled after the worker died cannot keep the send running. The completion
-is a single compare-and-set that proves the absence of `pending` and `dispatching` rows in the same
-statement that writes `completed`, so a live worker's terminal write cannot land between the proof
-and the completion; because no delivery can return to `pending` or `dispatching` afterwards, the
-counter refresh that follows a completion reads every delivery in its final state. A `dispatching`
+such a row. That discovery arm is driven by the `dispatching` delivery rows rather than by every
+audience send, because a stranded attempt usually belongs to a send that already completed, so a
+send-driven branch would cost one index probe per historical audience send on every tick.
+`idx_campaign_delivery_unleased_reservation` (V216) answers it as `status` and `dispatch_lease_owner`
+equalities plus a `frequency_reserved_at` range, so a tick with nothing to recover reads no delivery
+rows; the statement runs once per catalog with no workspace predicate, so no index leading with
+`workspace_id` could be seeked for it. The same pass then settles every audience send that is still
+`running` with nothing `pending` or `dispatching`: it completes the send and refreshes the counters,
+without resolving a provider, so a connector disabled after the worker died cannot keep the send
+running. The completion is a single compare-and-set that proves the absence of `pending` and
+`dispatching` rows in the same statement that writes `completed`, so a live worker's terminal write
+cannot land between the proof and the completion; because no delivery can return to `pending` or
+`dispatching` afterwards, the counter refresh that follows a completion reads every delivery in its
+final state. A `dispatching`
 row may belong to a live worker, so that send stays `running`: the worker's own settlement completes
 it after its terminal write, an attempt it abandons after reserving is swept and settled by a later
 pass, and one abandoned before reserving is left to the dispatch loop's own settlement. That send is
