@@ -286,6 +286,30 @@
         OR d.reconciliation_outcome IS NOT NULL)
   </update>
 
+  <!-- The same late write on the triggered path, where the claim already persisted the provider id
+       and the attempt target fingerprint, so those identify the attempt instead of the audience
+       statement's provider_id IS NULL: both must still name the target this submission went to.
+       A triggered row can be returned to pending and re-claimed, so the fence is the absence of a
+       lease owner plus a terminal or operator-resolved status: a pending row is left to the replay
+       that will record its own correlation, and a re-claimed row belongs to the newer attempt that
+       owns the lease. The sweep's last_error is deliberately not compared, because a row the sweep
+       re-queued can reach the same terminal ambiguity through a later attempt while this
+       submission's message id is still the only one the provider ever accepted for it. -->
+  <update id="attachLateTriggeredProviderCorrelation">
+    UPDATE campaign_delivery d
+    JOIN campaign_send s ON s.workspace_id = d.workspace_id AND s.id = d.send_id
+    SET d.provider_message_id = #{providerMessageId}
+    WHERE d.workspace_id = #{workspaceId} AND d.id = #{id}
+      AND d.dispatch_lease_owner IS NULL
+      AND d.provider_message_id IS NULL
+      AND d.provider_id = #{providerId}
+      AND d.attempt_target_fingerprint = #{attemptTargetFingerprint}
+      AND s.origin = 'triggered'
+      AND ((d.status = 'failed' AND d.submitted_at IS NULL
+          AND d.reconciliation_required_at IS NOT NULL AND d.reconciliation_outcome IS NULL)
+        OR d.reconciliation_outcome IS NOT NULL)
+  </update>
+
   <update id="markDispatched">
     UPDATE campaign_delivery
     SET status = 'dispatched', skip_reason = NULL, provider_id = #{providerId},
