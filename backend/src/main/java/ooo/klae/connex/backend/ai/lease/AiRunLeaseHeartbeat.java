@@ -27,7 +27,13 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * {@link AiRunLeaseSubjectHandler}, and only then renews. A renewal that throws is unknown, not
  * lost: it is logged and retried, and if the outage outlasts the lease lifetime the lease expires
  * and a settler takes the run over — the correct outcome for an owner that cannot reach the
- * database. Only an authoritative loss or a subject that is no longer running stops the schedule.
+ * database. An authoritative loss, a subject that is no longer running, or a subject kind no
+ * handler owns stops the schedule.
+ *
+ * <p>A missing handler fails closed in both directions: {@link #start(AiRunLease, AiRunLeaseGuard)}
+ * refuses to begin heartbeating a subject kind nothing can answer for, and a tick that somehow
+ * reaches one stops the run rather than renewing blind. Renewing without a liveness read would
+ * leave the documented cross-instance stop bound silently absent for that kind.
  *
  * <p>The pool is sized from {@code run-lease-heartbeat-threads}, validated to cover the generation
  * worker count, so one slow renewal cannot head-of-line-block another run's tick.
@@ -83,6 +89,13 @@ public class AiRunLeaseHeartbeat {
     public AutoCloseable start(AiRunLease lease, AiRunLeaseGuard guard) {
         Objects.requireNonNull(lease, "lease");
         Objects.requireNonNull(guard, "guard");
+        if (!handlers.containsKey(lease.key().subject())) {
+            throw new IllegalStateException(
+                    "No AI run lease subject handler is registered for "
+                            + lease.key().subject()
+                            + ", so this instance could not observe a cross-instance stop signal"
+                            + " for the run it is about to heartbeat");
+        }
         AtomicReference<ScheduledFuture<?>> handle = new AtomicReference<>();
         ScheduledFuture<?> tick = scheduler.scheduleWithFixedDelay(
                 () -> {
@@ -105,11 +118,12 @@ public class AiRunLeaseHeartbeat {
             return true;
         }
         AiRunLeaseKey key = lease.key();
+        long issuedAt = guard.clockNanos();
         try {
             Optional<String> stop = tenantWorkScope.inWorkspace(
                     key.workspaceId(), () -> observe(lease));
             if (stop.isEmpty()) {
-                guard.recordRenewal();
+                guard.recordRenewal(issuedAt);
                 return false;
             }
             guard.stop(stop.get());
@@ -135,7 +149,14 @@ public class AiRunLeaseHeartbeat {
     private Optional<String> observe(AiRunLease lease) {
         AiRunLeaseKey key = lease.key();
         AiRunLeaseSubjectHandler handler = handlers.get(key.subject());
-        if (handler != null && !handler.isSubjectRunning(key.workspaceId(), key.subjectId())) {
+        if (handler == null) {
+            log.error(
+                    "No AI run lease subject handler for {}; stopping the run rather than renewing"
+                            + " a lease whose stop signal this instance cannot observe",
+                    key.subject().wireKey());
+            return Optional.of(AiRunLeaseGuard.NO_SUBJECT_HANDLER);
+        }
+        if (!handler.isSubjectRunning(key.workspaceId(), key.subjectId())) {
             return Optional.of(AiRunLeaseGuard.SUBJECT_STOPPED);
         }
         if (leaseService.renew(lease) == AiRunLeaseOutcome.LOST) {

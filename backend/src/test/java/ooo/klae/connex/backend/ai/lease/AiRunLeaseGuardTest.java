@@ -52,13 +52,44 @@ class AiRunLeaseGuardTest {
         AiRunLeaseGuard guard = guard();
 
         nanos.set(Duration.ofSeconds(40).toNanos());
-        guard.recordRenewal();
+        guard.recordRenewal(guard.clockNanos());
         nanos.set(Duration.ofSeconds(84).toNanos());
 
         assertFalse(guard.isStopped());
 
         nanos.set(Duration.ofSeconds(86).toNanos());
         assertTrue(guard.isStopped());
+    }
+
+    /**
+     * The window runs from the instant the renewal was issued, because the database wrote its own
+     * deadline part-way through that round trip. Anchoring on completion instead would put the
+     * local deadline after the database's, leaving a window in which a settler may take the run
+     * over while this guard still answers healthy.
+     */
+    @Test
+    void theWindowRunsFromTheRenewalsIssueInstantRatherThanItsCompletion() {
+        AiRunLeaseGuard guard = guard();
+        long issuedAt = guard.clockNanos();
+
+        nanos.set(Duration.ofSeconds(10).toNanos());
+        guard.recordRenewal(issuedAt);
+
+        nanos.set(Duration.ofSeconds(45).toNanos() + 1L);
+        assertTrue(guard.isStopped());
+        assertEquals(Optional.of(AiRunLeaseGuard.RENEW_GAP), guard.reason());
+    }
+
+    @Test
+    void aLateRenewalRecordIsNeverAllowedToRewindTheWindow() {
+        AiRunLeaseGuard guard = guard();
+
+        nanos.set(Duration.ofSeconds(30).toNanos());
+        guard.recordRenewal(guard.clockNanos());
+        guard.recordRenewal(0L);
+
+        nanos.set(Duration.ofSeconds(74).toNanos());
+        assertFalse(guard.isStopped());
     }
 
     @Test

@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.lease;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -15,6 +16,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.AfterEach;
@@ -131,6 +133,53 @@ class AiRunLeaseHeartbeatTest {
         properties.setRunLeaseHeartbeatThreads(6);
 
         assertEquals(6, newHeartbeat().poolSize());
+    }
+
+    /**
+     * Without a handler there is no liveness read, so renewing anyway would leave the documented
+     * cross-instance stop bound silently absent for that subject kind — the owner would keep
+     * working after another instance had cancelled the run.
+     */
+    @Test
+    void aSubjectKindNoHandlerOwnsStopsTheRunRatherThanRenewingBlind() {
+        routeThroughWorkspace();
+        heartbeat = new AiRunLeaseHeartbeat(leaseService, tenantWorkScope, properties, List.of());
+        AiRunLeaseGuard guard = guard();
+
+        assertTrue(heartbeat.beat(LEASE, guard));
+
+        assertEquals(Optional.of(AiRunLeaseGuard.NO_SUBJECT_HANDLER), guard.reason());
+        verify(leaseService, never()).renew(any());
+    }
+
+    @Test
+    void aHeartbeatIsRefusedOutrightForASubjectKindNoHandlerOwns() {
+        heartbeat = new AiRunLeaseHeartbeat(leaseService, tenantWorkScope, properties, List.of());
+
+        assertThrows(IllegalStateException.class, () -> heartbeat.start(LEASE, guard()));
+    }
+
+    /**
+     * The guard's window must run from the instant the renewal was issued: MySQL wrote its own
+     * deadline part-way through the round trip, so anchoring on completion would put the local
+     * fence after the database's and let a settler take the run over while the guard still
+     * answered healthy.
+     */
+    @Test
+    void theSelfFenceIsAnchoredBeforeTheRenewalRoundTripNotAfterIt() {
+        routeThroughWorkspace();
+        AtomicLong nanos = new AtomicLong();
+        AiRunLeaseGuard guard = new AiRunLeaseGuard(properties.getRunLeaseTtl(), nanos::get);
+        when(leaseService.renew(LEASE)).thenAnswer(invocation -> {
+            nanos.set(Duration.ofSeconds(10).toNanos());
+            return AiRunLeaseOutcome.HELD;
+        });
+
+        assertFalse(newHeartbeat().beat(LEASE, guard));
+
+        nanos.set(properties.getRunLeaseTtl().toNanos() + 1L);
+        assertTrue(guard.isStopped(), "The self-fence must expire one TTL after the renewal issued");
+        assertEquals(Optional.of(AiRunLeaseGuard.RENEW_GAP), guard.reason());
     }
 
     private void awaitRenewals(int expected) throws InterruptedException {
