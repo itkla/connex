@@ -464,21 +464,42 @@ public class AiChatTurnPersistenceService {
         return attachments;
     }
 
-    /** Persists a demasked read-tool proposal before execution. */
+    /**
+     * Persists a demasked read-tool proposal before execution.
+     *
+     * @param turn the running turn
+     * @param stepNumber the durable model-step number
+     * @param callOrdinal the call's position in its step, 0 when it is the step's only call
+     * @param toolName the declared tool the call named
+     * @param argumentsJson the demasked arguments the model proposed
+     * @return the durable tool-call row id
+     */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public int proposeTool(
             AiChatQueuedTurn turn,
             int stepNumber,
+            int callOrdinal,
             String toolName,
             String argumentsJson) {
-        return proposeTool(turn, stepNumber, toolName, argumentsJson, null);
+        return proposeTool(turn, stepNumber, callOrdinal, toolName, argumentsJson, null);
     }
 
-    /** Persists a demasked read-tool proposal with optional opaque provider replay state. */
+    /**
+     * Persists a demasked read-tool proposal with optional opaque provider replay state.
+     *
+     * @param turn the running turn
+     * @param stepNumber the durable model-step number
+     * @param callOrdinal the call's position in its step, 0 when it is the step's only call
+     * @param toolName the declared tool the call named
+     * @param argumentsJson the demasked arguments the model proposed
+     * @param thoughtSignature opaque provider replay state, or null
+     * @return the durable tool-call row id
+     */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public int proposeTool(
             AiChatQueuedTurn turn,
             int stepNumber,
+            int callOrdinal,
             String toolName,
             String argumentsJson,
             String thoughtSignature) {
@@ -491,7 +512,7 @@ public class AiChatTurnPersistenceService {
         toolCall.setStatus(PROPOSED);
         toolCall.setArgumentsJson(argumentsJson);
         toolCall.setThoughtSignature(thoughtSignature);
-        toolCall.setIdempotencyKey("turn-" + turn.turnId() + "-step-" + stepNumber);
+        toolCall.setIdempotencyKey(turnStepKey(turn.turnId(), stepNumber, callOrdinal));
         chatMapper.insertToolCall(toolCall);
         return toolCall.getId();
     }
@@ -514,7 +535,7 @@ public class AiChatTurnPersistenceService {
             String thoughtSignature) {
         requireCurrentActor(turn);
         lockAuthorizedTurn(turn, RUNNING);
-        String idempotencyKey = turnStepKey(turn.turnId(), stepNumber);
+        String idempotencyKey = turnStepKey(turn.turnId(), stepNumber, 0);
         AiChatToolCall existing = chatMapper.getToolCallByIdempotencyKey(
                 turn.workspaceId(), idempotencyKey);
         if (existing != null) {
@@ -539,13 +560,28 @@ public class AiChatTurnPersistenceService {
         return new AiAssistantToolProposal(toolCall.getId(), PROPOSED, null, true);
     }
 
-    private static String turnStepKey(int turnId, int stepNumber) {
+    /**
+     * Renders the durable idempotency key one tool call owns.
+     *
+     * <p>A call that was the only one its step made keeps the exact key this service has always
+     * written — no suffix at all — so every write, every {@code find_tools}, every unbatched read
+     * and every server-side skill plan step stays byte-identical, along with the {@code
+     * turn-N-step-} prefix scan that reads them back. Only a call that shared its step renders the
+     * {@code -call-k} suffix, which fits the existing column and its uniqueness constraint.
+     *
+     * @param turnId the durable turn id
+     * @param stepNumber the durable model-step number
+     * @param callOrdinal the call's position in its step, 0 when it is the step's only call
+     * @return the durable idempotency key
+     */
+    private static String turnStepKey(int turnId, int stepNumber, int callOrdinal) {
         if (turnId <= 0
                 || stepNumber <= 0
                 || stepNumber > AiChatAgentLoopService.HARD_MAX_STEPS) {
             throw new IllegalArgumentException("Assistant tool turn and step must be positive");
         }
-        return "turn-" + turnId + "-step-" + stepNumber;
+        return "turn-" + turnId + "-step-" + stepNumber
+                + new AiAssistantToolCallRef(stepNumber, callOrdinal).keySuffix();
     }
 
     private String userMessageMetadata(

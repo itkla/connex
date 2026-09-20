@@ -211,7 +211,7 @@ class AiChatAgentLoopServiceTest {
                 new AiAssistantToolResult(Map.of(), List.of()));
         when(toolExecutor.execute(any(), any(), any(), any(Boolean.class), any())).thenReturn(
                 new AiAssistantToolResult(Map.of("records", List.of()), List.of()));
-        when(persistenceService.proposeTool(eq(TURN), anyInt(), any(), any())).thenReturn(29);
+        when(persistenceService.proposeTool(eq(TURN), anyInt(), anyInt(), any(), any())).thenReturn(29);
         when(persistenceService.finishTool(eq(TURN), anyInt(), any(), any())).thenReturn(true);
         when(restrictionEpoch.current(TURN.workspaceId())).thenReturn(TURN.restrictionEpoch());
         when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(true);
@@ -960,7 +960,7 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome());
         verify(persistenceService, times(2)).proposeTool(
-                eq(TURN), anyInt(), eq("search_records"), any());
+                eq(TURN), anyInt(), anyInt(), eq("search_records"), any());
         verify(persistenceService).failTool(
                 eq(TURN), anyInt(), contains("invalid_tool_arguments"));
         verify(toolExecutor).execute(
@@ -1276,7 +1276,7 @@ class AiChatAgentLoopServiceTest {
                 .contains("arguments-not-object"));
         verify(toolExecutor, never()).execute(
                 any(), any(), any(), any(Boolean.class), any());
-        verify(persistenceService, never()).proposeTool(eq(TURN), anyInt(), any(), any());
+        verify(persistenceService, never()).proposeTool(eq(TURN), anyInt(), anyInt(), any(), any());
     }
 
     @Test
@@ -2130,7 +2130,7 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
         verify(persistenceService, atMost(8)).proposeTool(
-                eq(TURN), anyInt(), eq("set_todos"), any());
+                eq(TURN), anyInt(), anyInt(), eq("set_todos"), any());
     }
 
     /**
@@ -3044,7 +3044,7 @@ class AiChatAgentLoopServiceTest {
                         any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                         eq(directAdmission), any(Runnable.class));
         verify(persistenceService).proposeTool(
-                eq(TURN), eq(2), eq("list_scope_activities"), any());
+                eq(TURN), eq(2), eq(0), eq("list_scope_activities"), any());
     }
 
     /**
@@ -3102,7 +3102,7 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals("tool_outside_skill_authority", result.reason());
         verify(persistenceService, never()).proposeTool(
-                eq(TURN), anyInt(), eq("create_task"), any());
+                eq(TURN), anyInt(), anyInt(), eq("create_task"), any());
     }
 
     @Test
@@ -3293,7 +3293,7 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
         verify(persistenceService).proposeTool(
-                eq(TURN), eq(1), eq("aggregate_metric"), any());
+                eq(TURN), eq(1), eq(0), eq("aggregate_metric"), any());
         verify(persistenceService).failTool(
                 eq(TURN), eq(29), contains("tool_not_loaded"));
         verify(toolExecutor, never()).execute(
@@ -3427,7 +3427,7 @@ class AiChatAgentLoopServiceTest {
 
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
         verify(persistenceService, times(3)).proposeTool(
-                eq(TURN), anyInt(), eq(AiAssistantToolCatalog.FIND_TOOLS), any());
+                eq(TURN), anyInt(), anyInt(), eq(AiAssistantToolCatalog.FIND_TOOLS), any());
         verify(persistenceService, times(2)).finishTool(
                 eq(TURN), anyInt(), eq("executed"), any());
         verify(persistenceService).failTool(
@@ -3591,7 +3591,7 @@ class AiChatAgentLoopServiceTest {
         assertEquals("tool_outside_skill_authority", result.reason());
         verify(writeToolService, never()).prepare(any(), any(), any(), anyLong());
         verify(persistenceService, never()).proposeTool(
-                eq(TURN), anyInt(), eq("change_deal_stage"), any());
+                eq(TURN), anyInt(), anyInt(), eq("change_deal_stage"), any());
     }
 
     /**
@@ -4077,7 +4077,7 @@ class AiChatAgentLoopServiceTest {
         verify(toolExecutor).execute(
                 eq("aggregate_metric"), any(JsonNode.class), any(), eq(true), any());
         verify(persistenceService, never()).proposeTool(
-                eq(TURN), anyInt(), eq(AiAssistantToolCatalog.FIND_TOOLS), any());
+                eq(TURN), anyInt(), anyInt(), eq(AiAssistantToolCatalog.FIND_TOOLS), any());
         verify(persistenceService, never()).failTool(eq(TURN), anyInt(), contains("not_loaded"));
         ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
         verify(invocationService, times(2)).completeStructuredRepairable(
@@ -4271,7 +4271,7 @@ class AiChatAgentLoopServiceTest {
         verify(persistenceService).applySkill(
                 eq(TURN), appliedKey.capture(), appliedVersion.capture());
         verify(persistenceService, never()).proposeTool(
-                eq(TURN), anyInt(), eq(AiAssistantToolCatalog.FIND_TOOLS), any());
+                eq(TURN), anyInt(), anyInt(), eq(AiAssistantToolCatalog.FIND_TOOLS), any());
         Map<String, AiSkillCatalog.SkillSpec> declarations =
                 Map.of(seeded.key() + "@" + seeded.version(), seeded);
         AiSkillCatalog.SkillSpec recorded = declarations.get(

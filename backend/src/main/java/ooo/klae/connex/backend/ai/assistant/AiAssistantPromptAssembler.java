@@ -87,8 +87,25 @@ public class AiAssistantPromptAssembler {
     private final ObjectMapper objectMapper;
     private final AiAssistantToolCatalog toolCatalog;
 
-    /** One already-executed tool result that re-enters the next model step as untrusted data. */
-    public record ToolTurn(int seq, String tool, AiAssistantToolResult result) {
+    /**
+     * One already-executed tool result that re-enters the next model step as untrusted data.
+     *
+     * @param seq the model step whose call produced this result, from 1
+     * @param call the call's position within that step, or 0 when it was the step's only call
+     * @param tool the declared tool the call named
+     * @param result the tool result replayed as untrusted data
+     */
+    public record ToolTurn(int seq, int call, String tool, AiAssistantToolResult result) {
+
+        /** Creates the turn of a call that was the only one its model step made. */
+        public ToolTurn(int seq, String tool, AiAssistantToolResult result) {
+            this(seq, 0, tool, result);
+        }
+
+        /** @return the correlation key this result's call owns within its turn */
+        public AiAssistantToolCallRef ref() {
+            return new AiAssistantToolCallRef(seq, call);
+        }
     }
 
     /**
@@ -506,7 +523,7 @@ public class AiAssistantPromptAssembler {
     /** Builds bounded native call/result pairs under the shared tool replay allocation. */
     public NativeReplay nativeReplay(
             List<ToolTurn> toolTurns,
-            Map<Integer, AiToolCall> nativeCalls,
+            Map<AiAssistantToolCallRef, AiToolCall> nativeCalls,
             MaskingContext context,
             AiAssistantPromptBudget budget,
             AiStructuredRepair repair) {
@@ -528,13 +545,16 @@ public class AiAssistantPromptAssembler {
         List<AiToolCall> orderedCalls = orderedNativeCalls(toolTurns, nativeCalls);
         List<AiToolExchange> exchanges = new ArrayList<>(toolTurns.size());
         for (int index = 0; index < toolTurns.size(); index++) {
+            ToolTurn turn = toolTurns.get(index);
             AiToolCall call = orderedCalls.get(index);
             BoundedToolExchange exchange = bounded.exchanges().get(index);
             exchanges.add(new AiToolExchange(
                     new AiToolCall(
                             call.id(), call.name(), exchange.arguments(),
                             call.thoughtSignature()),
-                    exchange.result()));
+                    exchange.result(),
+                    turn.seq(),
+                    turn.call()));
         }
         return new NativeReplay(exchanges, repairContent, bounded.audit());
     }
@@ -569,7 +589,7 @@ public class AiAssistantPromptAssembler {
     public ToolBudgetAudit requireAdditionalNativeExchangeCapacity(
             List<ToolTurn> toolTurns,
             ToolTurn prospectiveTurn,
-            Map<Integer, AiToolCall> nativeCalls,
+            Map<AiAssistantToolCallRef, AiToolCall> nativeCalls,
             MaskingContext context,
             AiAssistantPromptBudget budget) {
         List<ToolTurn> prospectiveTurns = new ArrayList<>(toolTurns);
@@ -603,7 +623,7 @@ public class AiAssistantPromptAssembler {
     /** Returns honesty counters for native results and replayed call arguments. */
     public ToolBudgetAudit nativeToolBudgetAudit(
             List<ToolTurn> toolTurns,
-            Map<Integer, AiToolCall> nativeCalls,
+            Map<AiAssistantToolCallRef, AiToolCall> nativeCalls,
             MaskingContext context,
             AiAssistantPromptBudget budget) {
         for (ToolTurn turn : toolTurns) {
@@ -630,7 +650,8 @@ public class AiAssistantPromptAssembler {
                     toolBudgetAudit(exactReplay, context, budget));
         }
         ToolTurn boundedReplay = new ToolTurn(
-                replay.seq(), replay.tool(), truncatedExecutedReplay(replay.result()));
+                replay.seq(), replay.call(), replay.tool(),
+                truncatedExecutedReplay(replay.result()));
         List<ToolTurn> boundedWithHistory = appended(toolTurns, boundedReplay);
         ToolBudgetAudit audit = toolBudgetAudit(boundedWithHistory, context, budget);
         return new ExecutedReplay(boundedWithHistory, audit);
@@ -640,7 +661,7 @@ public class AiAssistantPromptAssembler {
     public ExecutedReplay withExecutedNativeReplay(
             List<ToolTurn> toolTurns,
             ToolTurn replay,
-            Map<Integer, AiToolCall> nativeCalls,
+            Map<AiAssistantToolCallRef, AiToolCall> nativeCalls,
             MaskingContext context,
             AiAssistantPromptBudget budget) {
         List<ToolTurn> exactReplay = appended(toolTurns, replay);
@@ -651,7 +672,8 @@ public class AiAssistantPromptAssembler {
                             exactReplay, nativeCalls, context, budget));
         }
         ToolTurn boundedReplay = new ToolTurn(
-                replay.seq(), replay.tool(), truncatedExecutedReplay(replay.result()));
+                replay.seq(), replay.call(), replay.tool(),
+                truncatedExecutedReplay(replay.result()));
         List<ToolTurn> boundedWithHistory = appended(toolTurns, boundedReplay);
         ToolBudgetAudit audit = nativeToolBudgetAudit(
                 boundedWithHistory, nativeCalls, context, budget);
@@ -705,7 +727,7 @@ public class AiAssistantPromptAssembler {
 
     private BoundedToolResults boundedNativeToolResults(
             List<ToolTurn> toolTurns,
-            Map<Integer, AiToolCall> nativeCalls,
+            Map<AiAssistantToolCallRef, AiToolCall> nativeCalls,
             MaskingContext context,
             AiAssistantPromptBudget budget,
             int availableBytes) {
@@ -842,6 +864,9 @@ public class AiAssistantPromptAssembler {
     private String evictedToolResult(ToolTurn turn, MaskingContext context) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("step", turn.seq());
+        if (turn.call() >= 1) {
+            data.put("call", turn.call());
+        }
         data.put("tool", turn.tool());
         data.put("result", EVICTED_TOOL_RESULT);
         return crmData("tool_result", data, context);
@@ -918,10 +943,18 @@ public class AiAssistantPromptAssembler {
      * step produces the loop's ordinary {@code {"error": reason}} shape, which asserts nothing
      * about the loaded set and so has nothing to preserve; it keeps the ordinary masked path, and
      * keeping it there is what lets the guard stay strictly catalog-bounded.
+     *
+     * <p>The call ordinal is rendered only when the call was one of several its step made. A step
+     * that made a single call carries ordinal 0 and emits no {@code call} field at all, so its
+     * replay stays byte-identical to the one this assembler produced before ordinals existed —
+     * which is exactly what the fixed-envelope and injection goldens measure.
      */
     private ObjectNode maskedToolResult(ToolTurn turn, MaskingContext context) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("step", turn.seq());
+        if (turn.call() >= 1) {
+            data.put("call", turn.call());
+        }
         data.put("tool", turn.tool());
         data.put("result", turn.result().data());
         JsonNode payload = objectMapper.valueToTree(data);
@@ -1043,7 +1076,7 @@ public class AiAssistantPromptAssembler {
 
     private boolean exactNativeReplayFits(
             List<ToolTurn> toolTurns,
-            Map<Integer, AiToolCall> nativeCalls,
+            Map<AiAssistantToolCallRef, AiToolCall> nativeCalls,
             MaskingContext context,
             AiAssistantPromptBudget budget) {
         for (ToolTurn turn : toolTurns) {
@@ -1062,10 +1095,10 @@ public class AiAssistantPromptAssembler {
 
     private static List<AiToolCall> orderedNativeCalls(
             List<ToolTurn> toolTurns,
-            Map<Integer, AiToolCall> nativeCalls) {
+            Map<AiAssistantToolCallRef, AiToolCall> nativeCalls) {
         List<AiToolCall> ordered = new ArrayList<>(toolTurns.size());
         for (ToolTurn turn : toolTurns) {
-            AiToolCall call = nativeCalls.get(turn.seq());
+            AiToolCall call = nativeCalls.get(turn.ref());
             if (call == null || !call.name().equals(turn.tool())) {
                 throw new IllegalStateException("Native tool call replay is unavailable");
             }

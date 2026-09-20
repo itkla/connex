@@ -36,18 +36,22 @@ record AiAssistantStepCalls(List<Call> calls) {
      * @return the step's calls as a list of one
      */
     static AiAssistantStepCalls of(AiAssistantStep.Tool tool, Optional<AiToolCall> providerCall) {
-        return new AiAssistantStepCalls(List.of(new Call(tool, providerCall)));
+        return new AiAssistantStepCalls(List.of(new Call(0, tool, providerCall)));
     }
 
     /**
      * One proposed tool call of a model step and the provider call that carried it.
      *
+     * @param ordinal the call's position in its step, or 0 when it is the step's only call
      * @param tool the demasked tool name and arguments the step proposed
      * @param providerCall the native call, empty on the JSON ReAct path
      */
-    record Call(AiAssistantStep.Tool tool, Optional<AiToolCall> providerCall) {
+    record Call(int ordinal, AiAssistantStep.Tool tool, Optional<AiToolCall> providerCall) {
 
         Call {
+            if (ordinal < 0) {
+                throw new IllegalArgumentException("Assistant step call ordinal is invalid");
+            }
             Objects.requireNonNull(tool, "tool");
             providerCall = Objects.requireNonNull(providerCall, "providerCall");
         }

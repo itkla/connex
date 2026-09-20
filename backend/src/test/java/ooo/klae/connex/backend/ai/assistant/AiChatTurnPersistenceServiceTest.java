@@ -767,12 +767,51 @@ class AiChatTurnPersistenceServiceTest {
                 "turn-18-step-1".equals(toolCall.getIdempotencyKey())));
     }
 
+    /**
+     * The key a step's only call writes has not changed, and a batched one suffixes it.
+     *
+     * <p>Ordinal 0 means "the sole call of its step" and has to render the exact legacy key: every
+     * write, every {@code find_tools}, every unbatched read and every server-side plan step writes
+     * it, the write-proposal replay looks it up verbatim, and the progress projection scans rows by
+     * the {@code turn-N-step-} prefix. Only a call that shared its step renders {@code -call-k},
+     * which fits the existing column and its uniqueness constraint without any schema change.
+     */
+    @Test
+    void theSoleCallOfAStepKeepsItsLegacyKeyWhileBatchedCallsSuffixTheirOrdinal() {
+        service.proposeTool(TURN, 4, 0, "search_records", "{}");
+        service.proposeTool(TURN, 5, 1, "search_records", "{}");
+        service.proposeTool(TURN, 5, 2, "list_tasks", "{}");
+
+        ArgumentCaptor<AiChatToolCall> persisted =
+                ArgumentCaptor.forClass(AiChatToolCall.class);
+        verify(chatMapper, times(3)).insertToolCall(persisted.capture());
+        assertEquals(
+                List.of(
+                        "turn-" + TURN.turnId() + "-step-4",
+                        "turn-" + TURN.turnId() + "-step-5-call-1",
+                        "turn-" + TURN.turnId() + "-step-5-call-2"),
+                persisted.getAllValues().stream()
+                        .map(AiChatToolCall::getIdempotencyKey)
+                        .toList());
+        assertTrue(persisted.getAllValues().getFirst().getIdempotencyKey().length() <= 64);
+        assertTrue(persisted.getAllValues().getLast().getIdempotencyKey().length() <= 64);
+    }
+
+    @Test
+    void aNegativeCallOrdinalIsRefusedBeforeAnyRowIsWritten() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.proposeTool(TURN, 4, -1, "search_records", "{}"));
+
+        verify(chatMapper, never()).insertToolCall(org.mockito.ArgumentMatchers.any());
+    }
+
     @Test
     void nativeThoughtSignatureSurvivesReadAndWriteProposalPersistence() {
         String thoughtSignature = "opaque /+==\nline two";
 
         service.proposeTool(
-                TURN, 1, "search_records", "{\"query\":\"pipeline\"}",
+                TURN, 1, 0, "search_records", "{\"query\":\"pipeline\"}",
                 thoughtSignature);
         AiAssistantPreparedWrite write = new AiAssistantPreparedWrite(
                 "create_note",

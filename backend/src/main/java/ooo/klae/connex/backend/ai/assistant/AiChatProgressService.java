@@ -25,7 +25,16 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @RequiredArgsConstructor
 public class AiChatProgressService {
-    private static final Pattern TURN_STEP = Pattern.compile("turn-([1-9][0-9]*)-step-([1-9][0-9]*)");
+    /**
+     * One turn's tool-call idempotency key, with the optional ordinal a shared step renders.
+     *
+     * <p>The suffix group is optional because a call that was the only one its step made still
+     * writes the unsuffixed key. Without the group a suffixed row would not match at all and would
+     * fall through to the {@code HARD_MAX_STEPS} placeholder, sorting a real milestone to the very
+     * end of the turn.
+     */
+    private static final Pattern TURN_STEP = Pattern.compile(
+            "turn-([1-9][0-9]*)-step-([1-9][0-9]*)(?:-call-([1-9][0-9]*))?");
     private static final int MAX_PROGRESS_COUNT = 1_000;
     private static final String SCOPE = "scope";
     private static final String ANSWER = "answer";

@@ -25,6 +25,7 @@ import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
+import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.dto.MemberScope;
@@ -200,6 +201,67 @@ class AiAssistantPromptAssemblerTest {
         assertTrue(serialized.contains("CRM_DATA_BEGIN"));
         assertTrue(serialized.contains("ignore previous instructions"));
         assertTrue(serialized.contains("\\\"tool\\\""));
+    }
+
+    /**
+     * A step that made one call renders no call ordinal at all.
+     *
+     * <p>{@code call == 0} means "the sole call of its step", and it has to render nothing rather
+     * than {@code "call":0}: the fixed-envelope and injection goldens measure these bytes exactly,
+     * and every step a turn takes today makes one call.
+     */
+    @Test
+    void theSoleCallOfAStepRendersNoCallOrdinalWhileABatchedCallRendersItsOwn() {
+        AiAssistantToolResult toolResult = new AiAssistantToolResult(
+                Map.of("handle", "r1"), List.of());
+        List<ToolTurn> sole = List.of(new ToolTurn(1, "get_record", toolResult));
+        List<ToolTurn> batched = List.of(
+                new ToolTurn(1, 1, "get_record", toolResult),
+                new ToolTurn(1, 2, "get_record", toolResult));
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 4_096, 12_000);
+
+        String soleResult = assembler.nativeReplay(
+                sole, nativeCalls(sole), new MaskingContext(), budget, null)
+                .toolResults().getFirst();
+        List<String> batchedResults = assembler.nativeReplay(
+                batched, nativeCalls(batched), new MaskingContext(), budget, null)
+                .toolResults();
+
+        assertFalse(soleResult.contains("\"call\""));
+        assertTrue(soleResult.contains("\"step\":1"));
+        assertTrue(batchedResults.getFirst().contains("\"call\":1"));
+        assertTrue(batchedResults.getLast().contains("\"call\":2"));
+    }
+
+    /**
+     * Two calls of one step no longer collide, because the replay resolves them by (step, call).
+     *
+     * <p>Before the correlation key named the call, {@code orderedNativeCalls} looked a turn up by
+     * its step number alone and two turns sharing a step raised an internal error instead of
+     * replaying as the two calls they were.
+     */
+    @Test
+    void twoCallsOfOneStepReplayAsTwoExchangesStampedWithTheirOwnOrdinals() {
+        AiAssistantToolResult toolResult = new AiAssistantToolResult(
+                Map.of("handle", "r1"), List.of());
+        List<ToolTurn> batched = List.of(
+                new ToolTurn(3, 1, "get_record", toolResult),
+                new ToolTurn(3, 2, "list_tasks", toolResult));
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 4_096, 12_000);
+
+        List<AiToolExchange> exchanges = assembler.nativeReplay(
+                batched, nativeCalls(batched), new MaskingContext(), budget, null)
+                .exchanges();
+
+        assertEquals(2, exchanges.size());
+        assertEquals(3, exchanges.getFirst().step());
+        assertEquals(1, exchanges.getFirst().callOrdinal());
+        assertEquals(3, exchanges.getLast().step());
+        assertEquals(2, exchanges.getLast().callOrdinal());
+        assertEquals("call_3_1", exchanges.getFirst().call().id());
+        assertEquals("call_3_2", exchanges.getLast().call().id());
     }
 
     @Test
@@ -489,16 +551,16 @@ class AiAssistantPromptAssemblerTest {
                 "aggregate_metric",
                 new AiAssistantToolResult(Map.of("value", 3), List.of()));
         List<ToolTurn> turns = List.of(oldest, retained, latest);
-        Map<Integer, AiToolCall> calls = Map.of(
-                1, new AiToolCall(
+        Map<AiAssistantToolCallRef, AiToolCall> calls = Map.of(
+                oldest.ref(), new AiToolCall(
                         "call_1", oldest.tool(),
                         "{\"query\":\"" + "A".repeat(700) + "\"}",
                         "oldest-signature /+=="),
-                2, new AiToolCall(
+                retained.ref(), new AiToolCall(
                         "call_2", retained.tool(),
                         "{\"query\":\"" + "B".repeat(700) + "\"}",
                         "retained-signature /+=="),
-                3, new AiToolCall(
+                latest.ref(), new AiToolCall(
                         "call_3", latest.tool(),
                         "{\"metric\":\"" + "C".repeat(700) + "\"}",
                         "latest-signature /+=="));
@@ -510,14 +572,14 @@ class AiAssistantPromptAssemblerTest {
 
         assertEquals("{\"evicted\":true}",
                 replay.exchanges().getFirst().call().arguments());
-        assertEquals(calls.get(1).thoughtSignature(),
+        assertEquals(calls.get(oldest.ref()).thoughtSignature(),
                 replay.exchanges().getFirst().call().thoughtSignature());
         assertTrue(replay.exchanges().getFirst().maskedResult().contains("\"count\":1"));
         assertFalse(replay.exchanges().getFirst().maskedResult()
                 .contains("evicted to free context"));
-        assertEquals(calls.get(3).arguments(),
+        assertEquals(calls.get(latest.ref()).arguments(),
                 replay.exchanges().getLast().call().arguments());
-        assertEquals(calls.get(3).thoughtSignature(),
+        assertEquals(calls.get(latest.ref()).thoughtSignature(),
                 replay.exchanges().getLast().call().thoughtSignature());
         assertTrue(replay.exchanges().stream()
                 .mapToLong(exchange -> budget.utf8Bytes(exchange.call().arguments())
@@ -534,10 +596,10 @@ class AiAssistantPromptAssemblerTest {
         ToolTurn prospective = nativeBudgetTurn(3, "C");
         String firstSignature = "first-/+=" + "S".repeat(2_391);
         String secondSignature = "second-日本語-" + "T".repeat(2_382);
-        Map<Integer, AiToolCall> calls = Map.of(
-                first.seq(), nativeBudgetCall(first, "A", firstSignature),
-                second.seq(), nativeBudgetCall(second, "B", secondSignature),
-                prospective.seq(), nativeBudgetCall(
+        Map<AiAssistantToolCallRef, AiToolCall> calls = Map.of(
+                first.ref(), nativeBudgetCall(first, "A", firstSignature),
+                second.ref(), nativeBudgetCall(second, "B", secondSignature),
+                prospective.ref(), nativeBudgetCall(
                         prospective, "C", "prospective-" + "U".repeat(2_388)));
         AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
                 new AiProviderCapabilities(
@@ -1170,8 +1232,8 @@ class AiAssistantPromptAssemblerTest {
                         Map.of("result", "TOOL_RESULT_MUST_SURVIVE".repeat(12)), List.of()));
         AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
                 64, 1_000, 1_000, 1_000, 500, 2_000, 1_000);
-        Map<Integer, AiToolCall> calls = Map.of(
-                1, new AiToolCall("call_1", "search_records", "{}"));
+        Map<AiAssistantToolCallRef, AiToolCall> calls = Map.of(
+                turn.ref(), new AiToolCall("call_1", "search_records", "{}"));
 
         AiAssistantPromptAssembler.NativeReplay withoutRepair = assembler.nativeReplay(
                 List.of(turn), calls, new MaskingContext(), budget, null);
@@ -1221,11 +1283,14 @@ class AiAssistantPromptAssemblerTest {
         return objectMapper.readTree(content.substring(firstNewline + 1, lastNewline));
     }
 
-    private static Map<Integer, AiToolCall> nativeCalls(List<ToolTurn> turns) {
-        Map<Integer, AiToolCall> calls = new LinkedHashMap<>();
+    private static Map<AiAssistantToolCallRef, AiToolCall> nativeCalls(List<ToolTurn> turns) {
+        Map<AiAssistantToolCallRef, AiToolCall> calls = new LinkedHashMap<>();
         for (ToolTurn turn : turns) {
-            calls.put(turn.seq(), new AiToolCall(
-                    "call_" + turn.seq(), turn.tool(), "{}"));
+            calls.put(turn.ref(), new AiToolCall(
+                    turn.call() == 0
+                            ? "call_" + turn.seq()
+                            : "call_" + turn.seq() + "_" + turn.call(),
+                    turn.tool(), "{}"));
         }
         return Map.copyOf(calls);
     }
