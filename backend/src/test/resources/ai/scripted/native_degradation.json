@@ -1,0 +1,33 @@
+{
+  "id": "native_degradation",
+  "selector": "connex_script_native_degradation",
+  "capabilityClass": "scripted-native",
+  "expectsNativeDegradation": true,
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "failure",
+        "failureKind": "rejected"
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "protocol": "json",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Bellweather\",\"kinds\":[\"person\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "json",
+      "emit": {
+        "kind": "final",
+        "text": "{\"tool\":null,\"final\":{\"text\":\"I checked [the contact](record:r1) and found nothing outstanding.\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}}"
+      }
+    }
+  ]
+}
