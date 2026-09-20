@@ -132,6 +132,7 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
             "AMBIGUOUS: Worker claim expired after the delivery target changed";
     private static final String EARLIER_ATTEMPT_AMBIGUOUS =
             "AMBIGUOUS: An earlier provider attempt requires reconciliation";
+    private static final String IDEMPOTENCY_HEADER = "Idempotency-Key";
 
     @Autowired private DeliveryProviderConfigService configService;
     @MockitoSpyBean private DeliveryProviderConfigMapper configMapper;
@@ -176,11 +177,13 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
                 when(transport.post(any(), any(), any(), anyLong())).thenAnswer(invocation -> {
                     URI endpoint = invocation.getArgument(0);
                     Map<String, String> headers = invocation.getArgument(1);
+                    boolean omitsMessageId = responseOmitsMessageId;
                     submissions.add(new RecordedSubmission(endpoint, Map.copyOf(headers)));
+                    int submission = submissions.size();
                     submissionObserver.run();
-                    byte[] body = (responseOmitsMessageId
+                    byte[] body = (omitsMessageId
                             ? "{}"
-                            : "{\"messageId\":\"message-" + submissions.size() + "\"}")
+                            : "{\"messageId\":\"message-" + submission + "\"}")
                             .getBytes(StandardCharsets.UTF_8);
                     return new DeadlineBoundHttpTransport.Response(responseStatus, body);
                 }));
@@ -1980,6 +1983,109 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         assertNull(uncorrelated.getProviderMessageId());
     }
 
+    @Test
+    void aTriggeredReplayThatNamesNoMessageIdKeepsTheOriginalCorrelationSoAHardBounceStillSuppresses()
+            throws Exception {
+        Person person = recipient();
+        configService.save(idempotentProviderRequest());
+        CampaignSendDto send = readySend(person, DeliveryChannel.EMAIL);
+        int deliveryId = pendingDelivery(send);
+        asTriggeredSend(send);
+        when(triggeredSendGate.enabled()).thenReturn(true);
+        submissionObserver = () -> {
+            if (submissions.size() > 1) {
+                return;
+            }
+            responseOmitsMessageId = true;
+            expireDispatchLease(deliveryId);
+            assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+            sqlSession.clearCache();
+            CampaignDelivery replayed = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+            assertEquals("dispatched", replayed.getStatus());
+            assertNotNull(replayed.getSubmittedAt());
+            assertNull(replayed.getProviderMessageId());
+        };
+
+        assertTrue(dispatchService.processSend(workspace.getId(), send.id()));
+        sqlSession.clearCache();
+
+        assertEquals(2, submissions.size());
+        assertEquals(submissions.getFirst().headers().get(IDEMPOTENCY_HEADER),
+                submissions.getLast().headers().get(IDEMPOTENCY_HEADER));
+        CampaignDelivery late = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals("dispatched", late.getStatus());
+        assertNull(late.getReconciliationRequiredAt());
+        assertNull(late.getReconciliationOutcome());
+        assertEquals(HttpEspDeliveryProvider.PROVIDER_ID, late.getProviderId());
+        assertEquals("message-1", late.getProviderMessageId());
+        assertEquals(1, deliveryEvents(deliveryId, "dispatched"));
+        assertEquals(0, deliveryEvents(deliveryId, "failed"));
+        assertFalse(suppressedOrRevoked(person));
+
+        assertEquals(1, ingest("{\"event\":\"bounce\",\"bounceType\":\"hard\",\"eventId\":\"bounce-"
+                + unique() + "\",\"messageId\":\"message-1\"}"));
+
+        CampaignDelivery bounced = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals("bounced", bounced.getStatus());
+        assertEquals(1, deliveryEvents(deliveryId, "bounced"));
+        assertTrue(audienceEligibilityService.suppressedIds(
+                workspace.getId(), List.of(person.getId()), "email").contains(person.getId()));
+        assertTrue(audienceEligibilityService.revokedConsentIds(
+                workspace.getId(), List.of(person.getId()), "email", "marketing").contains(person.getId()));
+    }
+
+    @Test
+    void theLateTriggeredCorrelationTakesAnUncorrelatedReplayButNeverALeasedOrCorrelatedOne() {
+        configService.save(idempotentProviderRequest());
+        when(triggeredSendGate.enabled()).thenReturn(false);
+        ResolvedDeliveryProvider target =
+                configService.resolveForWorkspace(workspace.getId(), DeliveryChannel.EMAIL);
+        Person replayedPerson = recipient();
+        int replayedId = expiredTriggeredClaim(
+                replayedPerson, readySend(replayedPerson, DeliveryChannel.EMAIL), target);
+        Person correlatedPerson = recipient();
+        int correlatedId = expiredTriggeredClaim(
+                correlatedPerson, readySend(correlatedPerson, DeliveryChannel.EMAIL), target);
+        String replayOwner = UUID.randomUUID().toString();
+        String correlatedOwner = UUID.randomUUID().toString();
+        assertEquals(1, deliveryMapper.recoverExpiredTriggeredClaim(
+                workspace.getId(), replayedId, target.attemptTargetFingerprint()));
+        assertEquals(1, deliveryMapper.recoverExpiredTriggeredClaim(
+                workspace.getId(), correlatedId, target.attemptTargetFingerprint()));
+        assertEquals(1, deliveryMapper.claimTriggered(workspace.getId(), replayedId, replayOwner,
+                DISPATCH_LEASE_MICROS, target.providerId(), target.attemptTargetFingerprint()));
+        assertEquals(1, deliveryMapper.claimTriggered(workspace.getId(), correlatedId, correlatedOwner,
+                DISPATCH_LEASE_MICROS, target.providerId(), target.attemptTargetFingerprint()));
+        sqlSession.clearCache();
+
+        assertEquals(0, lateTriggeredCorrelation(replayedId, target, "still-leased-message"));
+
+        assertEquals(1, deliveryMapper.markTriggeredDispatched(
+                workspace.getId(), replayedId, replayOwner, target.providerId(), null));
+        assertEquals(1, deliveryMapper.markTriggeredDispatched(
+                workspace.getId(), correlatedId, correlatedOwner, target.providerId(), "replay-message"));
+        sqlSession.clearCache();
+
+        assertEquals(0, deliveryMapper.attachLateTriggeredProviderCorrelation(workspace.getId(), replayedId,
+                target.providerId(), "a-different-attempt-fingerprint", "changed-target-message"));
+        assertEquals(0, deliveryMapper.attachLateTriggeredProviderCorrelation(workspace.getId(), replayedId,
+                SmsHttpDeliveryProvider.PROVIDER_ID, target.attemptTargetFingerprint(), "other-provider-message"));
+        assertEquals(1, lateTriggeredCorrelation(replayedId, target, "late-message"));
+        assertEquals(0, lateTriggeredCorrelation(replayedId, target, "second-message"));
+        assertEquals(0, lateTriggeredCorrelation(correlatedId, target, "overwriting-message"));
+
+        CampaignDelivery correlated = deliveryMapper.getDelivery(workspace.getId(), replayedId);
+        assertEquals("dispatched", correlated.getStatus());
+        assertEquals("late-message", correlated.getProviderMessageId());
+        assertNull(correlated.getReconciliationRequiredAt());
+        assertNull(correlated.getReconciliationOutcome());
+        assertNotNull(correlated.getSubmittedAt());
+        CampaignDelivery untouched = deliveryMapper.getDelivery(workspace.getId(), correlatedId);
+        assertEquals("dispatched", untouched.getStatus());
+        assertEquals("replay-message", untouched.getProviderMessageId());
+        assertEquals(0, submissions.size());
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"delivered", "not_delivered"})
     void aTriggeredSubmissionThatLosesToTheClaimSweepStillCorrelatesAfterAnOperatorResolvedIt(String resolution)
@@ -2325,6 +2431,13 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
         request.setEndpoint("https://" + channel.token() + ".provider.test/send");
         request.setFromAddress(channel == DeliveryChannel.EMAIL ? "sender@provider.test" : "Connex");
         request.setApiKey(apiKey);
+        return request;
+    }
+
+    private DeliveryProviderConfigRequest idempotentProviderRequest() {
+        DeliveryProviderConfigRequest request =
+                providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL));
+        request.setIdempotentSubmission(true);
         return request;
     }
 
