@@ -257,6 +257,45 @@ class AiAssistantToolCatalogTest {
         assertFalse(argument.values().contains("core"));
     }
 
+    /**
+     * The native {@code find_tools} description is one of only two places a model is ever told the
+     * per-turn cap, so it is rendered from the constant the loader enforces rather than written
+     * out: a hard-coded numeral would keep passing every test while telling the model a limit that
+     * no longer exists.
+     */
+    @Test
+    void theFindToolsDescriptionStatesTheCapTheLoaderActuallyEnforces() {
+        String description = catalog
+                .nativeDefinitions(objectMapper, AiAssistantToolCatalog.CORE).stream()
+                .filter(definition ->
+                        AiAssistantToolCatalog.FIND_TOOLS.equals(definition.name()))
+                .findFirst()
+                .orElseThrow()
+                .description();
+
+        assertTrue(description.contains(AiAssistantToolCatalog.capSentence()));
+        assertTrue(description.contains("at most "
+                + AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN
+                + " sets beyond the core set"));
+    }
+
+    /**
+     * The one tool result the server writes itself is replayed verbatim, so the catalog owns the
+     * definition of what "server-authored" means for it.
+     */
+    @Test
+    void declaredVocabularyCoversEveryToolNameAndToolsetKeyAndNothingElse() {
+        for (Toolset toolset : Toolset.values()) {
+            assertTrue(catalog.isDeclaredVocabulary(toolset.key()));
+        }
+        for (ToolSpec spec : catalog.tools(AiAssistantToolCatalog.ALL)) {
+            assertTrue(catalog.isDeclaredVocabulary(spec.name()));
+        }
+        assertFalse(catalog.isDeclaredVocabulary("Ada Lovelace"));
+        assertFalse(catalog.isDeclaredVocabulary("ANALYTICS"));
+        assertFalse(catalog.isDeclaredVocabulary(null));
+    }
+
     /** The closed enum is enforced where the raw arguments are validated, not only in a schema. */
     @Test
     void findToolsRefusesEveryArgumentOutsideTheDeclaredEnum() throws Exception {

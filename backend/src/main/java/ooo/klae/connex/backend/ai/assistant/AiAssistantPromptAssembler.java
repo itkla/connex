@@ -73,12 +73,16 @@ public class AiAssistantPromptAssembler {
      *
      * <p>A model that cannot see what exists cannot decide what to load, so this travels with the
      * constant directory of every loadable toolset rather than with the loaded declarations alone.
+     *
+     * <p>The cap is rendered from {@link AiAssistantToolCatalog#capSentence()} rather than written
+     * out here, so the only limit a model is ever told is the one the loader enforces.
      */
     private static final String FIND_TOOLS_DIRECTIVE =
             "Only the tools declared in this step are callable. When they cannot do the job, call "
-                    + "find_tools with the key of one more toolset; a set loads once, and a "
-                    + "request may hold at most two sets beyond the core set. Every loadable set "
-                    + "is listed below as key - what it covers - whether it is already loaded.";
+                    + "find_tools with the key of one more toolset; a set loads once, and "
+                    + AiAssistantToolCatalog.capSentence()
+                    + " Every loadable set is listed below as key - what it covers - whether it "
+                    + "is already loaded.";
 
     private final ObjectMapper objectMapper;
     private final AiAssistantToolCatalog toolCatalog;
@@ -898,16 +902,54 @@ public class AiAssistantPromptAssembler {
         return best;
     }
 
+    /**
+     * Renders one already-executed tool result for replay.
+     *
+     * <p>{@code find_tools} is the single tool whose result this server writes itself, out of
+     * catalog constants, and it is the authoritative statement of what the turn now holds. Running
+     * it through the tenant-data replacer would let a workspace record that happens to share a
+     * toolset key or a tool name — "Analytics", "Core" — tokenize or redact those values, so the
+     * model would be told it holds a placeholder it can never name again and would burn its
+     * no-progress budget re-asking. It is therefore replayed verbatim, guarded by
+     * {@link AiAssistantToolCatalog#isDeclaredVocabulary(String)} so a future result carrying
+     * anything the catalog did not author fails closed instead of egressing unmasked.
+     *
+     * <p>Only a result that states the active set takes that path. A refused {@code find_tools}
+     * step produces the loop's ordinary {@code {"error": reason}} shape, which asserts nothing
+     * about the loaded set and so has nothing to preserve; it keeps the ordinary masked path, and
+     * keeping it there is what lets the guard stay strictly catalog-bounded.
+     */
     private ObjectNode maskedToolResult(ToolTurn turn, MaskingContext context) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("step", turn.seq());
         data.put("tool", turn.tool());
         data.put("result", turn.result().data());
-        JsonNode masked = maskStrings(objectMapper.valueToTree(data), context);
-        if (!(masked instanceof ObjectNode object)) {
+        JsonNode payload = objectMapper.valueToTree(data);
+        boolean statesTheActiveSet = AiAssistantToolCatalog.FIND_TOOLS.equals(turn.tool())
+                && turn.result().data().containsKey(AiAssistantToolsetLoader.ACTIVE_TOOLSETS);
+        JsonNode rendered = statesTheActiveSet
+                ? requireDeclaredVocabulary(payload)
+                : maskStrings(payload, context);
+        if (!(rendered instanceof ObjectNode object)) {
             throw new IllegalStateException("Assistant tool result payload is invalid");
         }
         return object;
+    }
+
+    private JsonNode requireDeclaredVocabulary(JsonNode node) {
+        if (node.isString() && !toolCatalog.isDeclaredVocabulary(node.asString())) {
+            throw new IllegalStateException(
+                    "Assistant toolset result carries text the catalog did not author");
+        }
+        if (node instanceof ObjectNode object) {
+            object.properties().forEach(entry -> requireDeclaredVocabulary(entry.getValue()));
+        }
+        if (node instanceof ArrayNode array) {
+            for (JsonNode child : array) {
+                requireDeclaredVocabulary(child);
+            }
+        }
+        return node;
     }
 
     private static void collectArrays(JsonNode node, List<ArrayNode> arrays) {

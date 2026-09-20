@@ -216,6 +216,46 @@ public class AiAssistantToolCatalog {
         return Collections.unmodifiableSet(reservation);
     }
 
+    /**
+     * The one model-visible statement of the enforced per-turn toolset cap.
+     *
+     * <p>Rendered from {@link #MAX_ACTIVE_TOOLSETS_PER_TURN} rather than written out, because the
+     * {@code find_tools} description and the system-prompt directive are the only places a model
+     * learns the limit: a hard-coded numeral beside a changed constant would tell every turn a
+     * number the loader does not enforce, and no assertion over a literal can catch that drift.
+     *
+     * @return the sentence both the tool description and the prompt directive end with
+     */
+    public static String capSentence() {
+        return "a request may hold at most " + MAX_ACTIVE_TOOLSETS_PER_TURN
+                + " sets beyond the core set.";
+    }
+
+    /**
+     * Whether a string is server-authored catalog vocabulary rather than tenant or model text.
+     *
+     * <p>Exists so the one tool result the server writes itself — {@code find_tools} — can be
+     * replayed verbatim instead of through the tenant-data masking pass, while still failing
+     * closed if that result ever gains a value the catalog did not author.
+     *
+     * @param value one string from a server-authored tool result
+     * @return whether the catalog declares it as a tool name or a toolset key
+     */
+    public boolean isDeclaredVocabulary(String value) {
+        if (value == null) {
+            return false;
+        }
+        if (TOOLS.containsKey(value)) {
+            return true;
+        }
+        for (Toolset toolset : Toolset.values()) {
+            if (toolset.key().equals(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** @return every loadable toolset paired with its server-authored summary, in declaration order */
     public List<Map.Entry<Toolset, String>> directory() {
         return LOADABLE.stream()
@@ -454,8 +494,7 @@ public class AiAssistantToolCatalog {
             case "list_scope_activities" -> "List recent activity across a bounded set of records "
                     + "in one call instead of asking record by record.";
             case FIND_TOOLS -> "Load one more named set of tools when the loaded sets cannot do "
-                    + "the job. A set can be loaded once; a request may hold at most two sets "
-                    + "beyond the core set.";
+                    + "the job. A set can be loaded once; " + capSentence();
             case "aggregate_metric" -> "Calculate a supported workspace relationship or pipeline metric.";
             case "find_schedule_conflicts" -> "Find visible scheduling conflicts for one record and time range.";
             case "create_activity" -> "Create an immediately executed, undoable activity for one record.";

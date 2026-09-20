@@ -1346,7 +1346,12 @@ class AiAssistantPromptAssemblerTest {
                 assembler.fixedPrompt(AiAssistantToolCatalog.CORE).getSystemPrompt(),
                 assembler.fixedNativePrompt(AiAssistantToolCatalog.CORE).getSystemPrompt())) {
             assertTrue(prompt.contains("call find_tools with the key of one more toolset"));
-            assertTrue(prompt.contains("at most two sets beyond the core set"));
+            assertTrue(
+                    prompt.contains(AiAssistantToolCatalog.capSentence()),
+                    "the directive must state the cap the loader enforces");
+            assertTrue(prompt.contains("at most "
+                    + AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN
+                    + " sets beyond the core set"));
             for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
                 assertTrue(
                         prompt.contains(toolset.key() + " - " + toolset.summary() + " - available"),
@@ -1371,5 +1376,96 @@ class AiAssistantPromptAssemblerTest {
         assertTrue(widenedReact.contains("aggregate_metric"));
         assertEquals(
                 AiAssistantToolCatalog.LOADABLE.size(), catalog.directory().size());
+    }
+
+    /**
+     * The find_tools result is the server's own statement of what the turn now holds, so it is
+     * replayed verbatim rather than through the tenant-data replacer.
+     *
+     * <p>A workspace record named after a toolset key seeds that word into the turn's masking
+     * context. Running the server-authored result through the replacer would hand the model
+     * {@code {"loaded":"[redacted]","active":["core","{{P1}}"]}} — a set it can never name again,
+     * so it re-issues find_tools with a placeholder, is refused by the closed enum, and burns its
+     * no-progress budget. Ordinary tool results still mask, and the outbound leak scan still
+     * passes, because the key is server text the system prompt emits on every step.
+     */
+    @Test
+    void theServerAuthoredFindToolsResultSurvivesARecordNamedAfterAToolsetKey() throws Exception {
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        java.util.Set<AiAssistantToolCatalog.Toolset> loaded =
+                new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE);
+        loaded.add(AiAssistantToolCatalog.Toolset.ANALYTICS);
+        AiAssistantToolResult findToolsResult = new AiAssistantToolsetLoader(catalog)
+                .load(
+                        objectMapper.readTree("{\"toolset\":\"analytics\"}"),
+                        new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE))
+                .result();
+        AiAssistantToolResult companyRead = new AiAssistantToolResult(
+                Map.of("handle", "r1", "name", "Analytics"),
+                List.of(new Identifier("company", "Analytics")));
+        MaskingContext context = new MaskingContext();
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(
+                        new ToolTurn(1, "get_record", companyRead),
+                        new ToolTurn(2, AiAssistantToolCatalog.FIND_TOOLS, findToolsResult)),
+                context,
+                new AiChatResourceRegistry(),
+                loaded);
+
+        String replayedRead = prompt.getMessages().get(prompt.getMessages().size() - 2)
+                .getContent();
+        String replayedLoad = prompt.getMessages().getLast().getContent();
+        assertFalse(replayedRead.contains("Analytics"),
+                "an ordinary tool result still masks a record's own name");
+        assertTrue(replayedLoad.contains("\"loaded\":\"analytics\""));
+        assertTrue(replayedLoad.contains("[\"core\",\"analytics\"]"));
+        assertTrue(replayedLoad.contains("\"aggregate_metric\""));
+        assertFalse(replayedLoad.contains("redacted"));
+        assertFalse(replayedLoad.contains("{{P"));
+        String payload = objectMapper.writeValueAsString(Map.of(
+                "system", prompt.getSystemPrompt(),
+                "messages", prompt.getMessages().stream()
+                        .map(message -> Map.of(
+                                "role", message.getRole(), "content", message.getContent()))
+                        .toList()));
+        OutboundLeakScan.assertNoLeakInServerEnvelope(payload, context, objectMapper);
+    }
+
+    /**
+     * The verbatim path is guarded rather than trusted: a find_tools result that states the active
+     * set and carries anything the catalog did not author fails closed instead of egressing
+     * unmasked. A refused find_tools step states no set and keeps the ordinary masked path.
+     */
+    @Test
+    void aFindToolsResultCarryingUnauthoredTextFailsClosedRatherThanEgressing() throws Exception {
+        AiAssistantToolResult forged = new AiAssistantToolResult(
+                Map.of("loaded", "analytics", "active", List.of("core", "Ada Lovelace")),
+                List.of());
+
+        assertThrows(IllegalStateException.class, () -> assembler.assemble(
+                List.of(),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(new ToolTurn(1, AiAssistantToolCatalog.FIND_TOOLS, forged)),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL));
+
+        MaskedPrompt refused = assembler.assemble(
+                List.of(),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(new ToolTurn(
+                        1,
+                        AiAssistantToolCatalog.FIND_TOOLS,
+                        new AiAssistantToolResult(
+                                Map.of("error", "toolset_already_loaded"), List.of()))),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
+
+        assertTrue(refused.getMessages().getLast().getContent()
+                .contains("\"error\":\"toolset_already_loaded\""));
     }
 }
