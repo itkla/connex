@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -30,6 +31,7 @@ import ooo.klae.connex.backend.ai.provider.AiToolCallingMode;
 import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
 import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import ooo.klae.connex.backend.ai.provider.OpenAiChatParameters;
+import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiProviderProfile;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
@@ -39,8 +41,16 @@ import tools.jackson.databind.node.ObjectNode;
  * Adapter for customer-supplied OpenAI-compatible chat-completions endpoints. The adapter
  * revalidates the configured base URI, preserves its authority and path, translates Connex's
  * narrow provider request, and normalizes the response.
+ *
+ * <p>The profile negation is what lets the fixture-driven
+ * {@link ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiProvider} answer under the same
+ * {@code openai_compatible} id without weakening either closed provider-id set.
+ * {@code AiProviderRouter} refuses duplicate adapter ids, so exactly one of the two may exist at a
+ * time. Deleting this annotation does not enable a bypass — the scripted profile is unbootable
+ * outside dev and test — it makes that profile fail with an obscure duplicate-id error instead.
  */
 @Service
+@Profile("!" + ScriptedAiProviderProfile.NAME)
 @RequiredArgsConstructor
 public class OpenAiCompatibleAdapter implements AiProvider {
     private static final String PROVIDER_OPENAI_COMPATIBLE = "openai_compatible";
