@@ -4,6 +4,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.LongSupplier;
 
@@ -215,7 +217,7 @@ public class CampaignDispatchService {
      * absence of outstanding work and completes the send, so a live worker's terminal write cannot land
      * between the proof and the completion, and the refresh that follows a completion reads every
      * delivery in its final state. The sweep can run beside a live worker whose unleased attempt is
-     * still in flight: the completion then does nothing, the counters are refreshed anyway, and that
+     * still in flight: the send is not selected at all until that attempt is terminal, and the
      * worker's own {@link #settle} completes the send after its terminal write. An attempt the worker
      * abandons after reserving is marked and settled by a later sweep, one abandoned before reserving
      * is left to the dispatch loop's {@link #settle}, and a send left running by a worker that died
@@ -614,12 +616,11 @@ public class CampaignDispatchService {
      * written only after the provider returns, so an abandoned attempt may already have been
      * submitted and is never replayed. Its frequency reservation is kept until an operator resolves
      * it. Each row is one auto-commit compare-and-set, so a late worker loses its terminal write.
-     * The owning sends are settled afterwards, even when a later row fails, through a durable query
-     * rather than an in-memory list: a marked row no longer matches this sweep, so a settlement that
-     * fails is found again on a later pass instead of leaving stale counters or a running send.
+     * The owning sends are settled afterwards, even when a later row fails.
      */
     private void recoverExpiredAudienceReservations(int workspaceId) {
         long graceMicros = audienceReservationGraceMicros();
+        Set<Integer> sweptSends = new TreeSet<>();
         try {
             for (CampaignDelivery abandoned : campaignDeliveryMapper.expiredAudienceReservationsPage(
                     workspaceId, graceMicros, triggeredSendGate.dispatchPageSize())) {
@@ -631,6 +632,7 @@ public class CampaignDispatchService {
                         CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) != 1) {
                     continue;
                 }
+                sweptSends.add(abandoned.getSendId());
                 try {
                     appendEvent(workspaceId, abandoned.getId(), "failed", EXPIRED_AUDIENCE_RESERVATION);
                 } catch (RuntimeException exception) {
@@ -639,9 +641,33 @@ public class CampaignDispatchService {
                 }
             }
         } finally {
+            settleAudienceRecovery(workspaceId, sweptSends);
+        }
+    }
+
+    /**
+     * Settles every audience send the durable selector still owes a completion, then refreshes the
+     * counters of the sends this pass swept that the settlement did not already refresh. The
+     * selector is durable, so a send left running by a dead worker is found again on a later pass
+     * however the reconciliation row it owns is later resolved. A send that is no longer running
+     * owes only its counters, and those are refreshed from this pass's own sweep result rather than
+     * from a counter-disagreement scan, which would cost a dependent {@code COUNT(*)} over every
+     * audience send's failed deliveries on every tick. The bound that leaves: if this pass dies
+     * between the compare-and-set and the refresh, an already completed send under-reports
+     * {@code failed_count} until an operator resolves the reconciliation row the sweep created,
+     * which refreshes the counters itself.
+     */
+    private void settleAudienceRecovery(int workspaceId, Set<Integer> sweptSends) {
+        Set<Integer> countersOwed = new TreeSet<>(sweptSends);
+        try {
             for (int sendId : campaignSendMapper.audienceSendsAwaitingRecoverySettlement(
                     workspaceId, triggeredSendGate.dispatchPageSize())) {
+                countersOwed.remove(sendId);
                 settleRecovered(workspaceId, sendId);
+            }
+        } finally {
+            for (int sendId : countersOwed) {
+                campaignSendMapper.refreshCounters(workspaceId, sendId);
             }
         }
     }

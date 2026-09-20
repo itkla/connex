@@ -113,29 +113,30 @@
        left it that way: that evidence lives in the send and its own deliveries, so it survives a
        provider webhook or an operator resolution clearing the reconciliation marker the sweep wrote
        (applyProviderStatus and resolveReconciliation both clear reconciliation_required_at, and the
-       webhook also moves the row out of failed). A send that is no longer running is only revisited
-       for a failed counter that disagrees with its failed rows while it still owns an unresolved
-       reconciliation row, which keeps that branch tied to sweep work. A dispatching row may belong to
-       a live worker, whose own settlement completes the send. Settling it needs no provider. Both
-       branches stay inside one workspace's sends (idx_campaign_send_status). -->
+       webhook also moves the row out of failed). A dispatching row may belong to a live worker, whose
+       own settlement completes the send. Settling it needs no provider. The predicate is driven by
+       idx_campaign_send_status (workspace_id, status) and one index probe per running send on
+       idx_campaign_delivery_send_status, so its cost follows the workspace's running sends and never
+       its delivery history. A counter left stale by a sweep is deliberately not discovered here: the
+       sweep refreshes the counters of the sends it marked in the same pass, and a fault between the
+       two is repaired when the operator resolves the reconciliation row the sweep created. -->
   <select id="audienceSendsAwaitingRecoverySettlement" resultType="int">
     SELECT s.id FROM campaign_send s
-    WHERE s.workspace_id = #{workspaceId} AND s.origin = 'audience'
-      AND ((s.status = 'running' AND NOT EXISTS (
-            SELECT 1 FROM campaign_delivery p
-            WHERE p.workspace_id = s.workspace_id AND p.send_id = s.id
-              AND p.status IN ('pending', 'dispatching')))
-        OR (s.failed_count &lt;&gt; (
-            SELECT COUNT(*) FROM campaign_delivery f
-            WHERE f.workspace_id = s.workspace_id AND f.send_id = s.id AND f.status = 'failed')
-          AND EXISTS (
-            SELECT 1 FROM campaign_delivery r
-            WHERE r.workspace_id = s.workspace_id AND r.send_id = s.id AND r.status = 'failed'
-              AND r.reconciliation_required_at IS NOT NULL)))
+    WHERE s.workspace_id = #{workspaceId} AND s.origin = 'audience' AND s.status = 'running'
+      AND NOT EXISTS (
+        SELECT 1 FROM campaign_delivery p
+        WHERE p.workspace_id = s.workspace_id AND p.send_id = s.id
+          AND p.status IN ('pending', 'dispatching'))
     ORDER BY s.id
     LIMIT #{limit}
   </select>
 
+  <!-- This statement runs once per scheduler tick for every catalog, so every branch has to be
+       answerable from an index probe per send. A send still running is already discovered by the
+       first branch, which is what brings the recovery settlement back to a send whose worker died;
+       a stale failed counter is deliberately not a discovery reason, because detecting one costs a
+       dependent COUNT(*) over every audience send's failed deliveries, which scales with delivery
+       history rather than with outstanding recovery work. -->
   <select id="workspaceIdsWithQueuedSends" resultType="int">
     SELECT DISTINCT workspace_id FROM campaign_send
     WHERE status IN ('queued', 'running')
@@ -155,18 +156,6 @@
           AND d.submitted_at IS NULL
           AND d.frequency_reserved_at &lt; DATE_SUB(UTC_TIMESTAMP(6),
             INTERVAL #{audienceReservationGraceMicros} MICROSECOND)))
-      OR (origin = 'audience'
-        AND failed_count &lt;&gt; (
-          SELECT COUNT(*) FROM campaign_delivery f
-          WHERE f.workspace_id = campaign_send.workspace_id
-            AND f.send_id = campaign_send.id
-            AND f.status = 'failed')
-        AND EXISTS (
-          SELECT 1 FROM campaign_delivery r
-          WHERE r.workspace_id = campaign_send.workspace_id
-            AND r.send_id = campaign_send.id
-            AND r.status = 'failed'
-            AND r.reconciliation_required_at IS NOT NULL))
   </select>
 
 </mapper>

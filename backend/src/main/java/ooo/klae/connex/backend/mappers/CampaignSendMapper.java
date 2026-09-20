@@ -60,12 +60,11 @@ public interface CampaignSendMapper {
 
     /**
      * Returns one bounded page of audience sends that are not yet settled: they are still running
-     * with no pending or dispatching delivery, or their failed counter disagrees with their failed
-     * deliveries while they still own an unresolved reconciliation row. A dispatching delivery may
-     * belong to a live worker, whose own settlement completes the send. The running branch depends
-     * only on the send and its deliveries, so a provider webhook or an operator resolution that
-     * clears the reconciliation marker cannot strand the send, and a settlement that fails after a
-     * recovery sweep is found again on a later pass.
+     * with no pending or dispatching delivery. A dispatching delivery may belong to a live worker,
+     * whose own settlement completes the send. The predicate depends only on the send and its own
+     * deliveries, so a provider webhook or an operator resolution that clears the reconciliation
+     * marker cannot strand the send, and a settlement that fails after a recovery sweep is found
+     * again on a later pass.
      * @param workspaceId the owning workspace
      * @param limit the page size
      * @return the send ids, ordered by id
