@@ -187,6 +187,15 @@ describe("useOneTimeLinkEntry", () => {
         await act(async () => root.unmount());
     });
 
+    it("hands the router the stripped URL even when the entry unmounts first", async () => {
+        const root = await mount(FragmentProbe);
+
+        await act(async () => root.unmount());
+        await settleQueuedEvents();
+
+        expect(syncStrippedUrlWithRouter).toHaveBeenCalledTimes(1);
+    });
+
     it("does not reload when the real one-time-link reader strips the fragment", async () => {
         const { takeOneTimeLinkToken } = await vi.importActual<typeof import("@/app/lib/oneTimeLink")>(
             "@/app/lib/oneTimeLink",

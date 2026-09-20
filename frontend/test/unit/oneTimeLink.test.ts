@@ -1,13 +1,24 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { syncStrippedUrlWithRouter, takeOneTimeLinkToken } from "@/app/lib/oneTimeLink";
+type OneTimeLinkModule = typeof import("@/app/lib/oneTimeLink");
+
+let takeOneTimeLinkToken: OneTimeLinkModule["takeOneTimeLinkToken"];
+let syncStrippedUrlWithRouter: OneTimeLinkModule["syncStrippedUrlWithRouter"];
+
+beforeEach(async () => {
+    vi.resetModules();
+    ({ takeOneTimeLinkToken, syncStrippedUrlWithRouter } = await import("@/app/lib/oneTimeLink"));
+});
 
 afterEach(() => {
     vi.unstubAllGlobals();
 });
 
+/** The mutable location stub both the strip and the router sync read. */
+type StubLocation = { hash: string; search: string; pathname: string };
+
 /** Stubs the window surface both the strip and the router sync touch. */
-function stubWindow(location: { hash: string; search: string; pathname: string }, state: unknown) {
+function stubWindow(location: StubLocation, state: unknown) {
     const replaceState = vi.fn();
     vi.stubGlobal("window", { location, history: { state, replaceState } });
     return replaceState;
@@ -27,8 +38,6 @@ describe("takeOneTimeLinkToken", () => {
             "",
             "/auth/reset-password",
         );
-
-        syncStrippedUrlWithRouter();
     });
 
     it("returns null without rewriting an already canonical URL", () => {
@@ -42,12 +51,13 @@ describe("takeOneTimeLinkToken", () => {
 
 describe("syncStrippedUrlWithRouter", () => {
     it("replays the stripped URL with a state the router patch has to adopt", () => {
-        const replaceState = stubWindow({
-            hash: "#token=secret_bearer_value_123456",
-            search: "",
-            pathname: "/invite",
-        }, { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: "seeded" } });
+        const location = { hash: "#token=secret_bearer_value_123456", search: "", pathname: "/invite" };
+        const replaceState = stubWindow(
+            location,
+            { __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: { tree: "seeded" } },
+        );
         takeOneTimeLinkToken();
+        location.hash = "";
         replaceState.mockClear();
 
         syncStrippedUrlWithRouter();
@@ -56,12 +66,10 @@ describe("syncStrippedUrlWithRouter", () => {
     });
 
     it("replays the stripped URL once", () => {
-        const replaceState = stubWindow({
-            hash: "#token=secret_bearer_value_123456",
-            search: "",
-            pathname: "/invite",
-        }, { __NA: true });
+        const location = { hash: "#token=secret_bearer_value_123456", search: "", pathname: "/invite" };
+        const replaceState = stubWindow(location, { __NA: true });
         takeOneTimeLinkToken();
+        location.hash = "";
         replaceState.mockClear();
 
         syncStrippedUrlWithRouter();
@@ -74,6 +82,23 @@ describe("syncStrippedUrlWithRouter", () => {
         const replaceState = stubWindow({ hash: "", search: "", pathname: "/invite" }, { __NA: true });
         takeOneTimeLinkToken();
 
+        syncStrippedUrlWithRouter();
+
+        expect(replaceState).not.toHaveBeenCalled();
+    });
+
+    it("drops the replay when the document has moved past the stripped URL", () => {
+        const location = { hash: "#token=secret_bearer_value_123456", search: "", pathname: "/invite" };
+        const replaceState = stubWindow(location, { __NA: true });
+        takeOneTimeLinkToken();
+        location.hash = "";
+        location.pathname = "/dashboard";
+        location.search = "?workspace=42";
+        replaceState.mockClear();
+
+        syncStrippedUrlWithRouter();
+        location.pathname = "/invite";
+        location.search = "";
         syncStrippedUrlWithRouter();
 
         expect(replaceState).not.toHaveBeenCalled();

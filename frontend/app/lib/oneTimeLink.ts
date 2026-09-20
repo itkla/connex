@@ -1,4 +1,9 @@
-let routerHoldsStrippedUrl = false;
+let strippedUrl: string | null = null;
+
+/** The document's current URL below the origin, the form `syncStrippedUrlWithRouter` compares. */
+function currentUrl(): string {
+    return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
 
 /**
  * Reads the one-time bearer from the URL fragment and removes the entire non-canonical URL before
@@ -9,7 +14,8 @@ let routerHoldsStrippedUrl = false;
  * navigation and browsers still exclude fragments from HTTP requests.
  *
  * The strip passes Next's own history state so the entry keeps `__NA`, which means the app router
- * never learns of it; `syncStrippedUrlWithRouter` closes that gap once the router can hear it.
+ * never learns of it; `syncStrippedUrlWithRouter` closes that gap once the router can hear it, and
+ * replays the exact URL written here rather than re-reading the address bar.
  */
 export function takeOneTimeLinkToken(): string | null {
     if (typeof window === "undefined") {
@@ -18,7 +24,7 @@ export function takeOneTimeLinkToken(): string | null {
     const token = new URLSearchParams(window.location.hash.slice(1)).get("token");
     if (window.location.hash || window.location.search) {
         window.history.replaceState(window.history.state, "", window.location.pathname);
-        routerHoldsStrippedUrl = true;
+        strippedUrl = window.location.pathname;
     }
     return token?.trim() || null;
 }
@@ -35,6 +41,11 @@ export function takeOneTimeLinkToken(): string | null {
  * instead makes the patch copy `__NA` and the internals tree onto a fresh state and dispatch the
  * restore, so the router adopts the bearer-free URL and the history entry stays app-router owned.
  *
+ * The replayed URL is the one the strip wrote, not whatever the address bar holds a task later, and
+ * the sync stands down if the document has moved on in between: a restore carries a URL, so
+ * replaying a stale one would drag the router back to it. The flag clears only once the write has
+ * returned, so a refused `replaceState` leaves the sync owed rather than silently spent.
+ *
  * Only Next's patch may receive this call. The native method would write the `null` through and
  * drop `__NA`, which leaves a history entry a later back navigation cannot restore, and would not
  * correct the canonical URL either; callers must run it no earlier than a task scheduled from a
@@ -42,9 +53,14 @@ export function takeOneTimeLinkToken(): string | null {
  * `useOneTimeLinkEntry` is the only supported caller.
  */
 export function syncStrippedUrlWithRouter(): void {
-    if (typeof window === "undefined" || !routerHoldsStrippedUrl) {
+    if (typeof window === "undefined" || strippedUrl === null) {
         return;
     }
-    routerHoldsStrippedUrl = false;
-    window.history.replaceState(null, "", window.location.pathname);
+    const replayed = strippedUrl;
+    if (currentUrl() !== replayed) {
+        strippedUrl = null;
+        return;
+    }
+    window.history.replaceState(null, "", replayed);
+    strippedUrl = null;
 }

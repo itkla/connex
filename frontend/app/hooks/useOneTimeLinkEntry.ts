@@ -19,15 +19,21 @@ import { syncStrippedUrlWithRouter } from "@/app/lib/oneTimeLink";
  * `history` patch that `AppRouter` installs in its own mount effect, which React runs after every
  * descendant's. React flushes a commit's effects synchronously within one task, so a task scheduled
  * here runs after that patch is installed, and after the mount effect that strips, whichever
- * component owns it. Unmounting cancels the sync rather than leaving it to run without an entry.
+ * component owns it.
+ *
+ * Unmounting deliberately leaves that task scheduled. An entry that strips and then goes away
+ * inside the same task — a throw caught by an error boundary, a `notFound()`, a Suspense teardown —
+ * is exactly the case where the router would otherwise keep the pre-strip URL, bearer included, for
+ * the life of the document, with nothing left to correct it. The sync replays only the URL the
+ * strip wrote and only while the document still holds it, so a stale task cannot drag the router
+ * back to a page the visitor has left.
  */
 export function useOneTimeLinkEntry(): void {
     useEffect(() => {
         const reopen = () => window.location.reload();
         window.addEventListener("hashchange", reopen);
-        const scheduledSync = window.setTimeout(syncStrippedUrlWithRouter);
+        window.setTimeout(syncStrippedUrlWithRouter);
         return () => {
-            window.clearTimeout(scheduledSync);
             window.removeEventListener("hashchange", reopen);
         };
     }, []);

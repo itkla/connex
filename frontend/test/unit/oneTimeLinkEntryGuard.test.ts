@@ -154,7 +154,18 @@ function routeOf(page: string): string {
         .join("/");
 }
 
-/** Lists the layouts, templates and error boundaries that wrap a page, plus the global error boundary. */
+/**
+ * Lists the layouts, templates and error boundaries that wrap a page, plus the global error
+ * boundary.
+ *
+ * `not-found.tsx` is deliberately not in this chain. Next can swap it in for a mounted entry, but
+ * the only refresh it reaches is the landing chrome's `LanguageSwitcher`, which refreshes after the
+ * visitor picks a language — many tasks after `useOneTimeLinkEntry` has handed the router the
+ * stripped URL, since that sync now survives the entry's own unmount. Listing it here would fail on
+ * chrome `app/not-found.tsx` carries on purpose, so the bound that covers it is the sync, not a
+ * scan. Layouts, templates and error boundaries stay listed: they render around, or in place of, an
+ * entry that is still inside the window between the strip and that sync.
+ */
 function boundaryChain(page: string): string[] {
     const chain: string[] = [];
     for (let dir = path.dirname(page); dir.startsWith(APP); dir = path.dirname(dir)) {
