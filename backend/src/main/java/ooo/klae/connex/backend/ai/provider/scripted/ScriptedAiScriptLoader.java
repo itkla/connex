@@ -364,12 +364,18 @@ public class ScriptedAiScriptLoader {
      * degradation but no JSON step for the retried position, so the retry reselects the rejecting
      * step and the trajectory terminates in a second rejection having rehearsed nothing.
      *
+     * <p>A rejecting <em>repair</em> step is outside this rule. The loop degrades only on its first
+     * native attempt; a repair attempt is by definition a later one, so a rejection there fails the
+     * turn, and demanding a degradation declaration for it would make the fixture state something
+     * false about its own trajectory.
+     *
      * @param script the parsed script
      * @param file the fixture it came from
      */
     private static void requireDeclaredDegradation(ScriptedAiScript script, Path file) {
         boolean rejectsFirstNativeStep = script.steps().stream().anyMatch(step ->
                 step.afterToolCalls() == 0
+                        && !step.onRepair()
                         && step.protocol().admits(true)
                         && step.emit().kind() == ScriptedAiStep.Kind.FAILURE
                         && step.emit().failureKind() == ScriptedAiStep.FailureKind.REJECTED);

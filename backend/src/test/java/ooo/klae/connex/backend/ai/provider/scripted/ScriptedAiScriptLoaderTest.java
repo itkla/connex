@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.provider.scripted;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -147,6 +148,43 @@ class ScriptedAiScriptLoaderTest {
 
         assertTrue(exception.getMessage().contains("JSON-protocol step for the retried first"),
                 exception.getMessage());
+    }
+
+    /**
+     * The loop degrades to the JSON protocol only on its first native attempt. A repair attempt is
+     * a later one, so a rejection there fails the turn; a fixture rehearsing that failure must load
+     * without claiming a degradation that will never happen.
+     */
+    @Test
+    void acceptsARejectingNativeRepairStepWithoutADegradationDeclaration(@TempDir Path directory)
+            throws IOException {
+        write(directory, "repair-rejected.json", """
+                {
+                  "id": "repair_rejected",
+                  "selector": "connex_script_repair_rejected",
+                  "capabilityClass": "scripted-native",
+                  "steps": [
+                    {
+                      "afterToolCalls": 0,
+                      "protocol": "native",
+                      "emit": {"kind": "malformed", "text": "not json"}
+                    },
+                    {
+                      "afterToolCalls": 0,
+                      "onRepair": true,
+                      "protocol": "native",
+                      "emit": {"kind": "failure", "failureKind": "rejected"}
+                    }
+                  ]
+                }
+                """);
+
+        ScriptedAiScriptLoader loader = new ScriptedAiScriptLoader(
+                directory.toString(), objectMapper);
+
+        ScriptedAiScript script = loader.bySelector("connex_script_repair_rejected");
+        assertFalse(script.expectsNativeDegradation());
+        assertEquals(2, script.steps().size());
     }
 
     @Test
