@@ -67,7 +67,7 @@ Each of these was paid for once. Every one is decided by code named beside it.
 These are gaps in reach, not gaps in the product. Closing any of them means adding a production seam, which a test-only change must not do.
 
 - **Requester-only live channels (thinking, narration, todos).** Narration is the text a provider returns *beside* a native tool call, and a scripted tool-call emission carries no text; giving it one is production code. The guarantee stays owned by `AiChatTranscriptProjectionTest` and `AiChatStreamingProgressTest` at their own layers.
-- **The durable-partial purge under `restrictions_changed`.** The purge only has something to purge on a streamed turn whose partial is already durable, so the epoch would have to advance between the stream's last batch and the terminal write. The step interceptor fires *before* the emission, so the very step it arms is the step the fence refuses and no partial is ever written. Reaching it needs a post-emission hook. `AiChatTurnPersistenceServiceTest` covers it at the service layer; the end-to-end gap is a tracked residual.
+- **The durable-partial purge under `restrictions_changed`.** The purge only has something to purge on a streamed turn whose partial is already durable, so the epoch would have to advance between the stream's last batch and the terminal write. The step interceptor fires *before* the emission, so the very step it arms is the step the fence refuses and no partial is ever written. Reaching it needs a post-emission hook. `AiChatTurnPersistenceServiceTest` covers it at the service layer; the end-to-end gap is recorded in the description of PR #1813 and **no issue tracks it yet** — anyone who wants it closed should file one against epic #1787 rather than assume it is scheduled.
 - **Streamed delta ordering.** `AiAssistantTextDeltaProjector` confirms a `NATIVE_FINAL` answer only once the whole final object parses, so however many fragments the provider writes, the batcher is handed the answer once. Ordering and the projector's half-placeholder withholding have no observable effect on a native streamed trajectory, and the streamed golden deliberately claims neither.
 
 The live runner does not close these either. It changes who writes the model's words; it does not add a seam.
@@ -84,10 +84,32 @@ The harness answers "does the server do the right thing with this model output?"
 
 **An operator launches it, by hand, and nothing else can.** Concretely:
 
-- A one-shot non-web process — `spring.main.web-application-type=none` — launched from the staging checkout, in the shape `seedData` already uses for the volume seeder (see [`VOLUME_SEEDER.md`](VOLUME_SEEDER.md)). A dedicated `ai-eval` Spring profile gates the runner bean, and a `connex.ai.eval.enabled=true` flag gates it a second time, exactly as the scripted seam pairs a profile with a flag.
+- A one-shot non-web process — `spring.main.web-application-type=none` — launched from the staging checkout by hand. A dedicated `ai-eval` Spring profile gates the runner bean, and a `connex.ai.eval.enabled=true` flag gates it a second time, exactly as the scripted seam pairs a profile with a flag.
 - **No controller, no endpoint, no job queue, no `@Scheduled` trigger, and no automation-rule action.** There must be no tenant-reachable path to it and no unattended path to it. A scheduled evaluator is a standing authorization to spend an organization's budget and egress to a provider with nobody watching, and that is not a thing the product should be able to do by accident.
-- It runs under the **same** `CONNEX_DEPLOYMENT_PROFILE` the staging instance declares, so it inherits the edition's posture rather than escaping it, and it needs no new forbidden key and no validator change.
+- It runs under the **same** `CONNEX_DEPLOYMENT_PROFILE` the staging instance declares, so it inherits the edition's posture rather than escaping it.
 - It refuses to start if `ai-scripted-provider` is active or its flag is set. Under a declared edition that combination already refuses; the runner's own refusal is the message an operator reads when they have mixed the two up.
+
+#### The activation refusals belong in the validator, not in the runner
+
+A refusal written into the runner bean is unenforceable, because `@Profile("ai-eval")` means the bean does not exist in exactly the configurations the refusal is for. The paired flag/profile rules therefore go in `DeploymentProfileValidator.evaluate`, beside `refuseScriptedAiProvider`, so they are raised from `DeploymentProfileEnvironmentPostProcessor` after ConfigData and before any context exists:
+
+- the `ai-eval` profile active while `spring.main.web-application-type` is anything but `none` → refuse. This is the load-bearing one. Without it, appending `ai-eval` to `SPRING_PROFILES_ACTIVE` in `/etc/connex-staging/backend.env` — the same file [`STAGING_DEPLOY.md`](STAGING_DEPLOY.md) already tells an operator to edit for `CONNEX_DEPLOYMENT_PROFILE` and `CONNEX_WORKSPACES_ALLOW_CREATION` — boots the serving, tenant-facing instance with an evaluation runner live in-process;
+- the profile active without `connex.ai.eval.enabled=true` → refuse;
+- the flag true without the profile → refuse (no dormant flag);
+- `connex.ai.eval.enabled` joins `POSTURE_KEYS`, so the startup posture line names it, and joins `SAAS_FORBIDDEN_KEYS`, so a multi-tenant SaaS instance refuses it outright. It deliberately does **not** join the silo or on-prem forbidden lists: staging declares `silo`, and forbidding the flag there would make the runner unrunnable on the only instance it is for. The non-web refusal, not the forbidden-key scan, is what keeps it out of the serving process under those editions. That asymmetry is a decision the gate below must confirm, not a detail to discover during implementation.
+
+So the design does require a validator change and one new posture/forbidden key, and the tracked issue owns both.
+
+#### It is not a `seedData` variant, and it cannot use `seedData`'s classpath
+
+The runner copies the volume seeder's *posture* — operator-launched, one-shot, non-web, profile plus flag (see [`VOLUME_SEEDER.md`](VOLUME_SEEDER.md)) — and nothing else. Every further condition `SeederStartupConfigurationValidator.validateActivated` enforces is one this runner cannot meet: `seeder` must be the **only** active profile, `connex.maintenance.mode` must be `seeder`, `connex.deployment.profile` must be **unset**, and `SeederGuard` refuses a protected Connex catalog outright. The eval runner runs beside staging's declared edition against staging's own catalog. Reusing the seeder's launcher would mean weakening those checks, which is not on offer.
+
+The classpath follows from where the corpus lives. `backend/src/test/resources/ai/assistant-evaluation.json` and the category scorers are on the **test** source set, while `seedData` runs on `sourceSets.main.output + configurations.productionRuntimeClasspath` — so a `seedData`-shaped launcher reads a null stream and has no corpus. Either:
+
+- the runner is a dedicated Gradle task over `sourceSets.test.runtimeClasspath`, the way `scriptedTrajectoryTest` already is (staging builds from source, so the test sources are present there); **or**
+- the corpus and the scoring helpers move out of `src/test` into the main source set first.
+
+Pick one in the tracked issue. Neither is free, and the design is not buildable without saying which.
 
 ### The synthetic-workspace refusal
 
@@ -95,15 +117,19 @@ The harness answers "does the server do the right thing with this model output?"
 
 An earlier sketch proposed keying on the organization slug. **That does not hold, and a future implementer should not reach for it.** `WorkspaceService.generateSlug` derives the organization slug from the member-supplied workspace name at self-service registration (lower-cased, punctuation collapsed, plus a random suffix), so a registrant who names a workspace "Synthetic Eval" gets a slug beginning `synthetic-eval-`. A tenant-settable string is not a marker.
 
-The marker must therefore be:
+**A workspace-scoped marker does not bound the blast radius, because the resources a run consumes are organization-scoped.** The provider row and its credential resolve through `AiProviderConfigService.isReadyForOrg(int orgId)` / `resolveForOrg(int orgId, int actorId)`, the spend is reserved through `AiOrganizationBudgetCoordinator.reserve(int orgId, …)`, and the disclosure mode and egress destination are the organization's. A synthetic workspace created inside a real customer organization — self-service workspace creation is on at staging — would satisfy a workspace-only marker while spending that customer's budget, using that customer's credential and egressing to that customer's configured destination under that customer's own attestation, with nobody at that customer having agreed to an evaluation run. The marker must therefore bind the **organization**.
 
-- **a control-plane row with no API surface** — a small table beside the other operator-owned control-plane tables (`organization` and `workspace` are already control-plane, as are `tenant_operation_lease` and friends), naming the workspace ids the runner may target, written by a migration or by an operator with database access and by nothing else;
+The marker must be:
+
+- **an organization-level admission, enforced over every workspace in it** — the marker row names the organization id *and* the workspace id, and the runner refuses unless the target workspace is marked, its organization is marked, and the organization holds **no** workspace without a marker row. That last clause is what stops a marked workspace from riding inside a real tenant;
+- **a control-plane row with no API surface** — a small table beside the other operator-owned control-plane tables (`organization` and `workspace` are already control-plane, as are `tenant_operation_lease` and friends). The **migration creates the table and nothing else**: migrations run on every edition, so a migration that inserted marker rows would ship a synthetic-workspace admission into production SaaS, silo and on-prem instances. Rows are inserted per environment by an operator with database access, and by nothing else;
 - **read-only to every tenant path** — no controller, no mapper statement reachable from a tenant request, no DTO field. If a workspace admin can flip it, it is not a marker;
-- **checked before anything else**, and fail-closed: an absent row, an unreadable table, or an ambiguous match refuses the run. The refusal names the workspace and the marker, so the operator's next action is obvious.
+- **registered where the repo's guards require**, which a new workspace-keyed control table is not allowed to skip: its mapper namespace in `TenantScopeInterceptor.CONTROL_PLANE_NAMESPACES` (`TenantRegistryCompletenessArchTest` fails the build otherwise), the table in `TablePlaneRegistry.CONTROL_PLANE_TABLES`, and exactly one lifecycle disposition — `CONTROL_PLANE_WORKSPACE_STATE_TABLES` or a `ControlWorkspaceLifecycleRegistry` declaration — so `TablePlaneArchTest.everyBaseTableIsClassifiedInExactlyOnePlane` and `everyDirectWorkspaceKeyedControlTableHasAnExplicitLifecycleDisposition` pass and tenant teardown, export and residual verification cover it. [`backend/MIGRATIONS.md`](backend/MIGRATIONS.md) states the same obligation, and [`MULTITENANCY_PLAN.md`](MULTITENANCY_PLAN.md) is authoritative. The teardown and export disposition is part of the acceptance criteria the [decision gate](#decision-gate) asks for, not an implementation detail;
+- **checked before anything else**, and fail-closed: an absent row, an unreadable table, an ambiguous match, or a marker row whose workspace or organization no longer exists refuses the run. A dangling row is a stale admission, not a permissive one. The refusal names the workspace and the marker, so the operator's next action is obvious.
 
 A second, independent condition should sit beside it rather than replacing it: the operator supplies the workspace id explicitly on the command line, so a marked workspace is necessary but not sufficient. Neither condition alone is allowed to start a run.
 
-**The runner never sends real tenant data to a provider** is the invariant this buys. It is not achieved by filtering or redacting what the runner reads — that would be a second masking implementation, and a second implementation of a control is a second thing to get wrong. It is achieved by refusing to read anything that is not already synthetic.
+**The runner never sends real tenant data to a provider** is the invariant this buys. It is not achieved by filtering or redacting what the runner reads — that would be a second masking implementation, and a second implementation of a control is a second thing to get wrong. It is achieved by refusing to read anything that is not already synthetic, and by refusing an organization that holds anything else.
 
 ### Through the pipeline, never around it
 
@@ -142,7 +168,14 @@ The report carries **no model text and no record values**, only ids, tool names,
 - The inverse is fingerprint-guarded: `undo` deletes the created activity, task or note only while it still matches the state the write recorded. A record edited in between refuses, which is correct and must be reported rather than forced.
 - **`add_tag` has no inverse.** `undo` refuses it outright. The runner must report an un-reverted `add_tag` as a residue on the run rather than claiming a clean exit, and a case whose expected path adds a tag should not be in the live corpus in the first place.
 
-The honest statement of the cleanup guarantee is therefore: *the runner reverses every AUTO write it can, immediately, and names every one it could not.* The disposable synthetic workspace — not the undo path — is what makes a residue survivable.
+**A run that dies between a write and its undo leaves that write durable, and the undo path cannot be resumed later.** A killed JVM — a deploy, an operator interrupt, the host's own memory killer — is the ordinary case, not the exotic one. By the time anyone looks, `undo` refuses on three independent grounds: the ten-minute window has passed, the chat session is no longer `ACTIVE`, and the call requires the original member's `AI_USE` permission in a locked membership. So the design needs a startup step, not a hope:
+
+- **Reconcile before scoring anything.** On launch, before the first case, the runner scans the marked organization's `ai_chat_tool_call` rows for EXECUTED AUTO writes whose `undo.status` is still `available`, and reverses each one through the same service under the same identity. What it reverses and what it could not, it reports.
+- **State what happens past the window.** A row outside the ten-minute window is not undoable by any code path the product owns; the runner does not reach around the service to delete it. It is listed in the report as residue, with its tool-call id and workspace, for an operator to clear by hand.
+
+The honest statement of the cleanup guarantee is therefore: *the runner reverses every AUTO write it can, immediately; reconciles what a previous run left behind; and names every one it could not reverse.*
+
+**Nothing in this design disposes of the synthetic workspace.** The marker names persistent workspace ids and there is no teardown, reset or re-seed step here, so residue persists until an operator clears it. If the answer is meant to be a disposable environment — reset and re-seed the synthetic organization between runs — that is a runbook step with an owner and a trigger, and the tracked issue has to specify it. It is not something the runner does today, and no claim in this document should rest on it.
 
 ### What it must refuse
 
@@ -151,9 +184,12 @@ Fail closed and stop, rather than adapting:
 - an unmarked target workspace, or a marker row the runner could not read;
 - a target organization with no enabled provider row, or one whose adapter cannot completely resolve its configuration;
 - the `ai-scripted-provider` profile or flag being present;
-- a `connex.ai.eval.*` flag set without the `ai-eval` profile, or the profile without the flag;
-- a target workspace holding any record whose owner is not the synthetic member — a cheap second read that catches a marker pointed at the wrong workspace;
+- a target organization holding any workspace that is not itself marked — the second read that catches a marker pointed at a workspace inside a real tenant;
 - any attempt to write the report anywhere a tenant request can serve it.
+
+**Why that second read is an organization scan and not an ownership check.** An earlier sketch refused "a target workspace holding any record whose owner is not the synthetic member". That is not expressible against the schema: `owner_id` exists only on `deal`, `company` and `person` and is nullable on all three, while activities, tasks, notes and tags — everything the AUTO write tools create — carry no owner column at all. Read literally, the check refuses every candidate and the runner never starts; relaxed to "null or the synthetic member", it admits a bulk-imported customer workspace, which is exactly the case it was written to catch.
+
+The pre-context startup refusals — the `ai-eval` profile in a web application, the profile without the flag, the flag without the profile, and the flag under SaaS — are deliberately absent from this list, because they are not the runner's to make; see [the validator section](#the-activation-refusals-belong-in-the-validator-not-in-the-runner). By the time the runner has a bean, they have already passed.
 
 ### Decision gate
 
@@ -161,7 +197,7 @@ Fail closed and stop, rather than adapting:
 
 Before any code:
 
-- it needs **its own tracked issue**, with the marker table's shape, the corpus, and the staging runbook entry as acceptance criteria;
+- it needs **its own tracked issue**, with these as acceptance criteria: the marker table's shape and its plane/lifecycle registrations; the validator refusals and the one new posture key, including the deliberate asymmetry that forbids the flag under SaaS but not under the edition staging declares; which classpath the corpus is read from; the corpus itself; the crash reconciliation pass; and the staging runbook entry, including who resets the synthetic organization and when;
 - it needs **founder approval** for the egress itself;
 - it needs the review a Tier 3 change gets: a security review for the egress and the marker, and a second reviewer for correctness and cleanup.
 
