@@ -1789,6 +1789,169 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
     }
 
     @Test
+    void aTriggeredSubmissionThatLosesToTheClaimSweepKeepsItsCorrelationSoAHardBounceStillSuppresses()
+            throws Exception {
+        Person person = recipient();
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        CampaignSendDto send = readySend(person, DeliveryChannel.EMAIL);
+        int deliveryId = pendingDelivery(send);
+        asTriggeredSend(send);
+        when(triggeredSendGate.enabled()).thenReturn(true);
+        submissionObserver = () -> {
+            expireDispatchLease(deliveryId);
+            assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+            CampaignDelivery overtaken = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+            assertEquals("failed", overtaken.getStatus());
+            assertEquals(EXPIRED_NON_IDEMPOTENT_CLAIM, overtaken.getLastError());
+            assertNull(overtaken.getProviderMessageId());
+        };
+
+        assertTrue(dispatchService.processSend(workspace.getId(), send.id()));
+        sqlSession.clearCache();
+
+        assertEquals(1, submissions.size());
+        CampaignDelivery late = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals("failed", late.getStatus());
+        assertEquals(EXPIRED_NON_IDEMPOTENT_CLAIM, late.getLastError());
+        assertEquals("deadline_ambiguous", late.getLastErrorCode());
+        assertNotNull(late.getReconciliationRequiredAt());
+        assertNull(late.getReconciliationOutcome());
+        assertEquals(HttpEspDeliveryProvider.PROVIDER_ID, late.getProviderId());
+        assertEquals("message-1", late.getProviderMessageId());
+        assertNull(late.getSubmittedAt());
+        assertNotNull(late.getFrequencyReservedAt());
+        assertEquals(1, deliveryEvents(deliveryId, "failed"));
+        assertEquals(0, deliveryEvents(deliveryId, "dispatched"));
+        assertFalse(suppressedOrRevoked(person));
+
+        assertEquals(1, ingest("{\"event\":\"bounce\",\"bounceType\":\"hard\",\"eventId\":\"bounce-"
+                + unique() + "\",\"messageId\":\"message-1\"}"));
+
+        CampaignDelivery bounced = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals("bounced", bounced.getStatus());
+        assertNull(bounced.getReconciliationRequiredAt());
+        assertEquals(1, deliveryEvents(deliveryId, "bounced"));
+        assertTrue(audienceEligibilityService.suppressedIds(
+                workspace.getId(), List.of(person.getId()), "email").contains(person.getId()));
+        assertTrue(audienceEligibilityService.revokedConsentIds(
+                workspace.getId(), List.of(person.getId()), "email", "marketing").contains(person.getId()));
+    }
+
+    @Test
+    void theLateTriggeredCorrelationCompareAndSetRefusesRequeuedAndReclaimedAttempts() {
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        when(triggeredSendGate.enabled()).thenReturn(false);
+        ResolvedDeliveryProvider target =
+                configService.resolveForWorkspace(workspace.getId(), DeliveryChannel.EMAIL);
+        Person sweptPerson = recipient();
+        int sweptId = expiredTriggeredClaim(sweptPerson, readySend(sweptPerson, DeliveryChannel.EMAIL), target);
+        Person resolvedPerson = recipient();
+        CampaignSendDto resolvedSend = readySend(resolvedPerson, DeliveryChannel.EMAIL);
+        int resolvedId = expiredTriggeredClaim(resolvedPerson, resolvedSend, target);
+        Person requeuedPerson = recipient();
+        int requeuedId = expiredTriggeredClaim(
+                requeuedPerson, readySend(requeuedPerson, DeliveryChannel.EMAIL), target);
+        Person reclaimedPerson = recipient();
+        int reclaimedId = expiredTriggeredClaim(
+                reclaimedPerson, readySend(reclaimedPerson, DeliveryChannel.EMAIL), target);
+        assertEquals(1, deliveryMapper.recoverExpiredTriggeredClaim(
+                workspace.getId(), requeuedId, target.attemptTargetFingerprint()));
+        assertEquals(1, deliveryMapper.recoverExpiredTriggeredClaim(
+                workspace.getId(), reclaimedId, target.attemptTargetFingerprint()));
+        assertEquals(1, deliveryMapper.claimTriggered(workspace.getId(), reclaimedId,
+                UUID.randomUUID().toString(), DISPATCH_LEASE_MICROS, target.providerId(),
+                target.attemptTargetFingerprint()));
+
+        assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+        triggeredSendService.reconcile(resolvedSend.campaignId(), resolvedId,
+                new CampaignDeliveryReconciliationRequest("not_delivered"));
+        sqlSession.clearCache();
+
+        assertEquals(0, deliveryMapper.attachLateTriggeredProviderCorrelation(workspace.getId(), sweptId,
+                target.providerId(), "a-different-attempt-fingerprint", "changed-target-message"));
+        assertEquals(0, deliveryMapper.attachLateTriggeredProviderCorrelation(workspace.getId(), sweptId,
+                SmsHttpDeliveryProvider.PROVIDER_ID, target.attemptTargetFingerprint(), "other-provider-message"));
+        assertEquals(0, lateTriggeredCorrelation(requeuedId, target, "requeued-message"));
+        assertEquals(0, lateTriggeredCorrelation(reclaimedId, target, "reclaimed-message"));
+        assertEquals(1, lateTriggeredCorrelation(sweptId, target, "late-message"));
+        assertEquals(0, lateTriggeredCorrelation(sweptId, target, "second-message"));
+        assertEquals(1, lateTriggeredCorrelation(resolvedId, target, "resolved-message"));
+        sqlSession.clearCache();
+
+        CampaignDelivery correlated = deliveryMapper.getDelivery(workspace.getId(), sweptId);
+        assertEquals("failed", correlated.getStatus());
+        assertEquals(EXPIRED_NON_IDEMPOTENT_CLAIM, correlated.getLastError());
+        assertNotNull(correlated.getReconciliationRequiredAt());
+        assertNull(correlated.getReconciliationOutcome());
+        assertEquals("late-message", correlated.getProviderMessageId());
+        assertNotNull(correlated.getFrequencyReservedAt());
+        CampaignDelivery resolved = deliveryMapper.getDelivery(workspace.getId(), resolvedId);
+        assertEquals("operator_not_delivered", resolved.getReconciliationOutcome());
+        assertNull(resolved.getReconciliationRequiredAt());
+        assertEquals("resolved-message", resolved.getProviderMessageId());
+        CampaignDelivery requeued = deliveryMapper.getDelivery(workspace.getId(), requeuedId);
+        assertEquals("pending", requeued.getStatus());
+        assertNull(requeued.getProviderMessageId());
+        CampaignDelivery reclaimed = deliveryMapper.getDelivery(workspace.getId(), reclaimedId);
+        assertEquals("dispatching", reclaimed.getStatus());
+        assertNull(reclaimed.getProviderMessageId());
+        assertEquals(0, submissions.size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"delivered", "not_delivered"})
+    void aTriggeredSubmissionThatLosesToTheClaimSweepStillCorrelatesAfterAnOperatorResolvedIt(String resolution)
+            throws Exception {
+        Person person = recipient();
+        configService.save(providerRequest(DeliveryChannel.EMAIL, key(DeliveryChannel.EMAIL)));
+        CampaignSendDto send = readySend(person, DeliveryChannel.EMAIL);
+        int deliveryId = pendingDelivery(send);
+        asTriggeredSend(send);
+        when(triggeredSendGate.enabled()).thenReturn(true);
+        submissionObserver = () -> {
+            expireDispatchLease(deliveryId);
+            assertEquals(0, dispatchService.processWorkspace(workspace.getId()));
+            CampaignDelivery swept = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+            assertEquals("failed", swept.getStatus());
+            assertNotNull(swept.getReconciliationRequiredAt());
+            triggeredSendService.reconcile(send.campaignId(), deliveryId,
+                    new CampaignDeliveryReconciliationRequest(resolution));
+            sqlSession.clearCache();
+            CampaignDelivery resolved = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+            assertEquals("operator_" + resolution, resolved.getReconciliationOutcome());
+            assertNull(resolved.getProviderMessageId());
+        };
+
+        assertTrue(dispatchService.processSend(workspace.getId(), send.id()));
+        sqlSession.clearCache();
+
+        boolean delivered = "delivered".equals(resolution);
+        assertEquals(1, submissions.size());
+        CampaignDelivery late = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals(delivered ? "dispatched" : "failed", late.getStatus());
+        assertEquals("operator_" + resolution, late.getReconciliationOutcome());
+        assertNull(late.getReconciliationRequiredAt());
+        assertEquals(delivered, late.getFrequencyReservedAt() != null);
+        assertEquals(HttpEspDeliveryProvider.PROVIDER_ID, late.getProviderId());
+        assertEquals("message-1", late.getProviderMessageId());
+        assertEquals(1, deliveryEvents(deliveryId, "failed"));
+        assertEquals(0, deliveryEvents(deliveryId, "dispatched"));
+        assertFalse(suppressedOrRevoked(person));
+
+        assertEquals(1, ingest("{\"event\":\"bounce\",\"bounceType\":\"hard\",\"eventId\":\"bounce-"
+                + unique() + "\",\"messageId\":\"message-1\"}"));
+
+        CampaignDelivery bounced = deliveryMapper.getDelivery(workspace.getId(), deliveryId);
+        assertEquals(delivered ? "bounced" : "failed", bounced.getStatus());
+        assertEquals("operator_" + resolution, bounced.getReconciliationOutcome());
+        assertEquals(1, deliveryEvents(deliveryId, "bounced"));
+        assertTrue(audienceEligibilityService.suppressedIds(
+                workspace.getId(), List.of(person.getId()), "email").contains(person.getId()));
+        assertTrue(audienceEligibilityService.revokedConsentIds(
+                workspace.getId(), List.of(person.getId()), "email", "marketing").contains(person.getId()));
+    }
+
+    @Test
     void aWebhookThatClearsTheReconciliationMarkerCannotStrandARunningSend() throws Exception {
         Person abandonedRecipient = recipient();
         Person inFlightRecipient = peerOf(abandonedRecipient);
@@ -1909,6 +2072,26 @@ class DeliverySecurityIntegrationTest extends CampaignRealDbTestSupport {
                 "deadline_ambiguous");
         sqlSession.clearCache();
         return updated;
+    }
+
+    private int lateTriggeredCorrelation(
+            int deliveryId, ResolvedDeliveryProvider target, String providerMessageId) {
+        int updated = deliveryMapper.attachLateTriggeredProviderCorrelation(workspace.getId(), deliveryId,
+                target.providerId(), target.attemptTargetFingerprint(), providerMessageId);
+        sqlSession.clearCache();
+        return updated;
+    }
+
+    private int expiredTriggeredClaim(Person person, CampaignSendDto send, ResolvedDeliveryProvider target) {
+        int deliveryId = pendingDelivery(send);
+        asTriggeredSend(send);
+        String owner = UUID.randomUUID().toString();
+        assertEquals(1, deliveryMapper.claimTriggered(workspace.getId(), deliveryId, owner,
+                DISPATCH_LEASE_MICROS, target.providerId(), target.attemptTargetFingerprint()));
+        assertEquals(CampaignFrequencyAdmissionService.Admission.RESERVED, frequencyAdmissionService.reserve(
+                workspace.getId(), deliveryId, person.getId(), "email", owner, 24));
+        expireDispatchLease(deliveryId);
+        return deliveryId;
     }
 
     private boolean suppressedOrRevoked(Person person) {
