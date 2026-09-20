@@ -81,6 +81,53 @@ export async function csrfBootstrap(api: APIRequestContext): Promise<CsrfBootstr
     return body;
 }
 
+/**
+ * Points one organization at the scripted AI provider, over the same controller an operator uses.
+ *
+ * Only ever call this for a tenant the calling spec registered itself. Provider readiness is per
+ * organization, which is the whole reason the scripted profile can be on for the shared e2e stack
+ * without making AI usable for the project storage-state tenants — and several specs assert exactly
+ * that honest refusal. Configuring a shared tenant here would delete their premise.
+ *
+ * The endpoint is a loopback literal that is never dialed: the scripted adapter answers from
+ * fixtures. It still has to pass the save path's address resolution, which is why the backend needs
+ * `CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS`.
+ *
+ * @param api request context carrying the registered tenant's session
+ * @param workspaceId the workspace whose organization is configured
+ * @param csrf bootstrap token for the same session
+ * @param modelId a scripted capability class, e.g. `scripted-native-stream`
+ */
+export async function configureScriptedAiProvider(
+    api: APIRequestContext,
+    workspaceId: number,
+    csrf: CsrfBootstrap,
+    modelId: string,
+): Promise<void> {
+    const response = await api.put(`/api/ai/provider?workspaceId=${workspaceId}`, {
+        timeout: 120_000,
+        headers: {
+            "X-Workspace-Id": String(workspaceId),
+            [csrf.headerName]: csrf.token,
+        },
+        data: {
+            provider: "openai_compatible",
+            modelId,
+            endpoint: "http://127.0.0.1:8080/v1",
+            allowInternalEndpoint: true,
+            noTrainingAttested: true,
+            enabled: true,
+        },
+    });
+    expect(
+        response.status(),
+        `PUT /api/ai/provider returned ${response.status()}: ${await safeBody(response)}. `
+        + "A 400 means the backend is missing CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS=true; a 403 means "
+        + "CONNEX_PRIVILEGED_MFA_ENFORCED or CONNEX_RECENT_AUTHENTICATION_WINDOW no longer match "
+        + "what the e2e job sets. Neither is a product defect.",
+    ).toBe(200);
+}
+
 /** A seeding client bound to one workspace and CSRF token. */
 export type Seeder = {
     post: (path: string, data: Record<string, unknown>) => Promise<Record<string, unknown>>;
