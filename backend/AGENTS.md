@@ -106,6 +106,7 @@ Inspect the owning package, nearest implementation, and tests in addition to the
 - `UploadContentInspector` is the sole ingress for uploaded bytes: every new upload surface must call it with a server-selected purpose and store only the resulting artifact. The contract, package member policy, and MUST/MUST NOT list for new pipelines are in `../docs/UPLOAD_CONTENT_INSPECTION.md`, pinned by `UploadContentInspectionBoundaryArchTest`.
 - Idempotency, one-use proofs, generation handles, leases, and ownership checks are data-integrity/security mechanisms. Do not simplify them without reading the owning contract and tests.
 - New tables holding workspace/org data must participate in the appropriate tenant/control lifecycle, export, teardown, and residual-verification registries. `../docs/MULTITENANCY_PLAN.md` is authoritative.
+- The fixture-driven scripted AI provider in `ai/provider/scripted` replaces the real OpenAI-compatible adapter under a profile and a flag, and must stay unbootable in any deployed edition. Its activation gates, fixture contract, and the dispatch-accounting rule every provider adapter owes are in `../docs/backend/AI_SECURITY.md`.
 
 ## Transactions and locking
 
