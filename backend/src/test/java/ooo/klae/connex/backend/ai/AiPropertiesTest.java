@@ -197,7 +197,8 @@ class AiPropertiesTest {
                 "connex.ai.run-lease-ttl=45500ms",
                 "connex.ai.run-lease-settlement-ttl=500ms",
                 "connex.ai.run-lease-tombstone-retention=900ms",
-                "connex.ai.run-lease-heartbeat-interval=0s")) {
+                "connex.ai.run-lease-heartbeat-interval=0s",
+                "connex.ai.run-lease-heartbeat-interval=PT0.0005S")) {
             contextRunner
                     .withPropertyValues(invalid)
                     .run(context -> assertNotNull(

@@ -226,6 +226,35 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
     }
 
     /**
+     * A renewal computes its deadline from the database clock, so a clock that stepped backwards by
+     * more than the lifetime would place the new deadline before {@code acquired_at} and the expiry
+     * CHECK would reject every renewal, stopping a healthy owner through its own self-fence.
+     */
+    @Test
+    void aRenewalSurvivesADatabaseClockThatSteppedBackwardsByMoreThanTheLifetime() {
+        AiRunLeaseKey key = key(AiRunLeaseSubject.CHAT_TURN, 3013L);
+        AiRunLease held = acquire(key);
+        jdbcTemplate.update(
+                "UPDATE ai_run_lease"
+                        + " SET acquired_at = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 120 SECOND),"
+                        + " heartbeat_at = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 120 SECOND),"
+                        + " expires_at = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 165 SECOND)"
+                        + " WHERE workspace_id = ? AND subject_kind = ? AND subject_id = ?",
+                key.workspaceId(), key.subject().wireKey(), key.subjectId());
+
+        assertEquals(AiRunLeaseOutcome.HELD, leaseService.renew(held));
+
+        Map<String, Object> row = leaseRow(key);
+        assertEquals(held.owner(), row.get("owner"));
+        assertNull(row.get("released_at"));
+        assertEquals(
+                0L,
+                ((Number) row.get("ttl_micros")).longValue(),
+                "A renewal under a stepped-back clock holds the deadline at acquisition rather"
+                        + " than violating the expiry constraint");
+    }
+
+    /**
      * A settler releases its takeover through the same entry point an owner uses. An unregistered
      * takeover token would make that release a silent no-op, leaving a held settlement lease that
      * every later sweep pass rediscovers as an expired lease on an already-terminal subject.

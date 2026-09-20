@@ -381,9 +381,9 @@ public class AiProperties {
         requireWholeSeconds("run-lease-ttl", runLeaseTtl);
         requireWholeSeconds("run-lease-settlement-ttl", runLeaseSettlementTtl);
         requireWholeSeconds("run-lease-tombstone-retention", runLeaseTombstoneRetention);
-        if (runLeaseHeartbeatInterval.isZero() || runLeaseHeartbeatInterval.isNegative()) {
+        if (runLeaseHeartbeatInterval.toMillis() < 1) {
             throw new IllegalArgumentException(
-                    "connex.ai.run-lease-heartbeat-interval must be positive");
+                    "connex.ai.run-lease-heartbeat-interval must be at least one millisecond");
         }
         if (runLeaseHeartbeatInterval.multipliedBy(2).compareTo(runLeaseTtl) > 0) {
             throw new IllegalArgumentException(

@@ -129,6 +129,41 @@ class AiRunLeaseHeartbeatTest {
     }
 
     @Test
+    void aSlowFailingRenewalIsFollowedPromptlyRatherThanAWholeIntervalLater() throws Exception {
+        routeThroughWorkspace();
+        AtomicLong attempts = new AtomicLong();
+        AtomicLong firstReturnedAt = new AtomicLong();
+        AtomicLong secondStartedAt = new AtomicLong();
+        when(leaseService.renew(LEASE)).thenAnswer(invocation -> {
+            if (attempts.incrementAndGet() == 1L) {
+                Thread.sleep(1_500L);
+                firstReturnedAt.set(System.nanoTime());
+                throw new IllegalStateException("statement timed out");
+            }
+            secondStartedAt.compareAndSet(0L, System.nanoTime());
+            return AiRunLeaseOutcome.HELD;
+        });
+        properties.setRunLeaseHeartbeatInterval(Duration.ofSeconds(1));
+        AiRunLeaseHeartbeat beating = newHeartbeat();
+
+        AutoCloseable handle = beating.start(LEASE, guard());
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (secondStartedAt.get() == 0L && System.nanoTime() < deadline) {
+            Thread.sleep(25L);
+        }
+        handle.close();
+
+        assertTrue(secondStartedAt.get() != 0L, "The heartbeat never retried after a slow failure");
+        long gapMillis =
+                Duration.ofNanos(secondStartedAt.get() - firstReturnedAt.get()).toMillis();
+        assertTrue(
+                gapMillis < 500L,
+                "The attempt after a slow failure began " + gapMillis + " ms after it returned;"
+                        + " a fixed delay would wait the whole one-second interval and can carry"
+                        + " the retry past the lease deadline");
+    }
+
+    @Test
     void theHeartbeatPoolIsSizedFromTheConfiguredThreadCount() {
         properties.setRunLeaseHeartbeatThreads(6);
 

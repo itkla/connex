@@ -229,10 +229,10 @@ public class AiRunLeaseService {
     }
 
     private void registerUntilRollback(AiRunLease lease) {
-        registry.register(lease);
+        Runnable undoRegistration = registry.register(lease);
         afterCompletion(status -> {
             if (status != TransactionSynchronization.STATUS_COMMITTED) {
-                registry.forget(lease);
+                undoRegistration.run();
             }
         });
     }

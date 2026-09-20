@@ -75,7 +75,8 @@
     <update id="renew">
         UPDATE ai_run_lease
         SET heartbeat_at = CURRENT_TIMESTAMP(6),
-            expires_at = DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL #{ttlSeconds} SECOND)
+            expires_at = GREATEST(
+                DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL #{ttlSeconds} SECOND), acquired_at)
         WHERE workspace_id = #{workspaceId}
           AND subject_kind = #{subjectKind}
           AND subject_id = #{subjectId}

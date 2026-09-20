@@ -30,6 +30,14 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * database. An authoritative loss, a subject that is no longer running, or a subject kind no
  * handler owns stops the schedule.
  *
+ * <p>Ticks run at a fixed rate measured from the claim, not at a fixed delay after the previous
+ * tick returns. A renewal that fails slowly — a statement that waits out its timeout — would
+ * otherwise push the next attempt a whole interval past the moment the failure returned, which with
+ * three beats per lifetime lets one slow failure carry the retry beyond the deadline even though
+ * the outage was far shorter than the lease. At a fixed rate the overdue tick runs as soon as the
+ * slow one returns. Ticks of one lease never overlap, and a tick that finds the guard already
+ * stopped returns without touching the database, so the catch-up after a long stall is cheap.
+ *
  * <p>A missing handler fails closed in both directions: {@link #start(AiRunLease, AiRunLeaseGuard)}
  * refuses to begin heartbeating a subject kind nothing can answer for, and a tick that somehow
  * reaches one stops the run rather than renewing blind. Renewing without a liveness read would
@@ -97,7 +105,7 @@ public class AiRunLeaseHeartbeat {
                             + " for the run it is about to heartbeat");
         }
         AtomicReference<ScheduledFuture<?>> handle = new AtomicReference<>();
-        ScheduledFuture<?> tick = scheduler.scheduleWithFixedDelay(
+        ScheduledFuture<?> tick = scheduler.scheduleAtFixedRate(
                 () -> {
                     if (beat(lease, guard)) {
                         cancel(handle);

@@ -18,8 +18,8 @@ import org.springframework.stereotype.Component;
  * already re-fenced the row.
  *
  * <p>Every mutation is driven by {@link AiRunLeaseService} from a transaction-completion callback,
- * so this map cannot disagree with the committed row: a claim that rolls back removes its entry
- * again, and a release forgets its token only once the tombstone commits.
+ * so this map cannot disagree with the committed row: a claim that rolls back puts back whatever
+ * token it displaced, and a release forgets its token only once the tombstone commits.
  */
 @Component
 public class AiRunLeaseRegistry {
@@ -29,11 +29,25 @@ public class AiRunLeaseRegistry {
     /**
      * Records the token this instance will offer for one subject.
      *
+     * <p>The returned action undoes exactly this registration, for a claim whose transaction does
+     * not commit. MySQL has then rolled the row back to the epoch the displaced token names, and
+     * this instance's heartbeat for that epoch may still be renewing it, so the displaced token is
+     * put back: a bare removal would leave a live lease whose terminal write finds nothing to
+     * tombstone.
+     *
+     * <p>The undo matches its own token by identity, not by value. The row lock is released before
+     * a completion callback runs, so another claim on this instance can commit the same epoch first
+     * and register a token that is equal to the rolled-back one while being a different, valid
+     * claim. That registration must survive the undo.
+     *
      * @param lease the freshly claimed lease
+     * @return the action that undoes this registration and restores whatever it displaced
      */
-    public void register(AiRunLease lease) {
+    public Runnable register(AiRunLease lease) {
         Objects.requireNonNull(lease, "lease");
-        leases.put(lease.key(), lease);
+        AiRunLease displaced = leases.put(lease.key(), lease);
+        return () -> leases.compute(
+                lease.key(), (key, current) -> current == lease ? displaced : current);
     }
 
     /**
