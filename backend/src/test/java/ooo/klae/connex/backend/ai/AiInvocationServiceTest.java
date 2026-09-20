@@ -829,7 +829,7 @@ class AiInvocationServiceTest {
         AiNativeToolRequest fixedTools = new AiNativeToolRequest(
                 promptAssembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL), List.of());
         int fixedEnvelopeBytes = service.serializedPromptBytes(
-                promptAssembler.fixedNativePrompt(),
+                promptAssembler.fixedNativePrompt(AiAssistantToolCatalog.ALL),
                 stepSchema.finalResponseSchema(),
                 AiReasoningMode.NATIVE,
                 fixedTools);
@@ -856,7 +856,8 @@ class AiInvocationServiceTest {
                 context,
                 new AiChatResourceRegistry(),
                 List.of(),
-                budget);
+                budget,
+                AiAssistantToolCatalog.ALL);
         AiToolCall call = new AiToolCall(
                 "call_1",
                 "search_records",

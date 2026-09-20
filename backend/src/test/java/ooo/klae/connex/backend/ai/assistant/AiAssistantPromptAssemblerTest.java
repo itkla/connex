@@ -250,7 +250,7 @@ class AiAssistantPromptAssemblerTest {
         assertTrue(nativeResult.startsWith("CRM_DATA_BEGIN"));
         assertEquals("{}", nativeReplay.exchanges().getFirst().call().arguments());
         assertEquals(AiAssistantPromptAssembler.ToolBudgetAudit.NONE, nativeReplay.audit());
-        assertTrue(assembler.fixedNativePrompt().getSystemPrompt()
+        assertTrue(assembler.fixedNativePrompt(AiAssistantToolCatalog.ALL).getSystemPrompt()
                 .contains("List-style tool results are capped"));
     }
 
@@ -638,7 +638,8 @@ class AiAssistantPromptAssemblerTest {
                 context,
                 new AiChatResourceRegistry(),
                 List.of(),
-                budget);
+                budget,
+                AiAssistantToolCatalog.ALL);
         String nativeResult = assembler.nativeReplay(
                 turns, nativeCalls(turns), context, budget, null)
                 .toolResults().getFirst();
@@ -1323,5 +1324,52 @@ class AiAssistantPromptAssemblerTest {
         assertTrue(prompt.getMessages().stream()
                 .anyMatch(message -> message.getContent() != null
                         && message.getContent().contains("server-declared query scope")));
+    }
+
+    /**
+     * A model that cannot see what exists cannot decide what to load, so both system prompts name
+     * find_tools and carry the same constant directory of every loadable toolset.
+     *
+     * <p>The directory lists all five sets on every step, loaded or not, which is what keeps its
+     * byte cost from growing as a turn widens itself and therefore keeps the reservation the one
+     * per-turn budget is measured from an upper bound for this component too. Only the marker per
+     * line moves with the loaded set; the tool declarations themselves stay loaded-set-only.
+     */
+    @Test
+    void bothSystemPromptsCarryTheConstantToolsetDirectoryAndTheFindToolsContract() {
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        java.util.Set<AiAssistantToolCatalog.Toolset> withAnalytics =
+                new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE);
+        withAnalytics.add(AiAssistantToolCatalog.Toolset.ANALYTICS);
+
+        for (String prompt : List.of(
+                assembler.fixedPrompt(AiAssistantToolCatalog.CORE).getSystemPrompt(),
+                assembler.fixedNativePrompt(AiAssistantToolCatalog.CORE).getSystemPrompt())) {
+            assertTrue(prompt.contains("call find_tools with the key of one more toolset"));
+            assertTrue(prompt.contains("at most two sets beyond the core set"));
+            for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+                assertTrue(
+                        prompt.contains(toolset.key() + " - " + toolset.summary() + " - available"),
+                        toolset.key() + " is missing from the core-step toolset directory");
+            }
+            assertFalse(prompt.contains("core - "),
+                    "core is always held and is never a legal find_tools argument");
+        }
+
+        String widenedReact = assembler.fixedPrompt(withAnalytics).getSystemPrompt();
+        String widenedNative = assembler.fixedNativePrompt(withAnalytics).getSystemPrompt();
+        for (String prompt : List.of(widenedReact, widenedNative)) {
+            assertTrue(prompt.contains("analytics - "
+                    + AiAssistantToolCatalog.Toolset.ANALYTICS.summary() + " - loaded"));
+            assertTrue(prompt.contains("schedule - "
+                    + AiAssistantToolCatalog.Toolset.SCHEDULE.summary() + " - available"));
+        }
+        assertFalse(
+                assembler.fixedPrompt(AiAssistantToolCatalog.CORE).getSystemPrompt()
+                        .contains("aggregate_metric"),
+                "declarations stay loaded-set-only even though the directory is constant");
+        assertTrue(widenedReact.contains("aggregate_metric"));
+        assertEquals(
+                AiAssistantToolCatalog.LOADABLE.size(), catalog.directory().size());
     }
 }
