@@ -57,6 +57,28 @@ class AiRunLeaseWorkspaceIsolationIntegrationTest extends AbstractAiRunLeaseInte
                 "The neighbour's own expired lease must still be visible to the neighbour");
     }
 
+    /**
+     * The unfenced retire matches on the key alone, so it is the one release statement whose
+     * tenant binding is not also carried by an owner token. A neighbouring tenant holding the same
+     * subject id must come back untouched.
+     */
+    @Test
+    void anUnfencedRetireNeverReachesANeighboursLease() {
+        AiRunLeaseKey mine = key(AiRunLeaseSubject.CHAT_TURN, 4105L);
+        AiRunLeaseKey theirs = neighbourKey(AiRunLeaseSubject.CHAT_TURN, 4105L);
+        AiRunLease held = acquire(mine);
+        AiRunLease neighbourHeld = acquire(theirs);
+        leaseRegistry.forget(held);
+        leaseRegistry.forget(neighbourHeld);
+
+        assertTrue(release(mine));
+
+        assertNull(leaseRow(mine).get("owner"));
+        assertNotNull(leaseRow(mine).get("released_at"));
+        assertEquals(neighbourHeld.owner(), leaseRow(theirs).get("owner"));
+        assertNull(leaseRow(theirs).get("released_at"));
+    }
+
     @Test
     void theReapDeletesOnlyTheCallingWorkspacesTombstones() {
         AiRunLeaseKey mine = key(AiRunLeaseSubject.CHAT_TURN, 4103L);

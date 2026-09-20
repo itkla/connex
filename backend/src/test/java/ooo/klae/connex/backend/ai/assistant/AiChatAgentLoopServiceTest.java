@@ -56,6 +56,7 @@ import ooo.klae.connex.backend.ai.lease.AiRunLease;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseHeartbeat;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
 import ooo.klae.connex.backend.ai.masking.Demasker;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
@@ -109,6 +110,7 @@ class AiChatAgentLoopServiceTest {
     private AiChatAttachmentContextService attachmentContextService;
     private AiChatTurnPersistenceService persistenceService;
     private AiRunLeaseHeartbeat runLeaseHeartbeat;
+    private AiRunLeaseService runLeaseService;
     private AtomicInteger heartbeatStops;
     private AutoCloseable leaseHeartbeat;
     private AiChatProgressService progressService;
@@ -134,6 +136,7 @@ class AiChatAgentLoopServiceTest {
         attachmentContextService = mock(AiChatAttachmentContextService.class);
         persistenceService = mock(AiChatTurnPersistenceService.class);
         runLeaseHeartbeat = mock(AiRunLeaseHeartbeat.class);
+        runLeaseService = mock(AiRunLeaseService.class);
         heartbeatStops = new AtomicInteger();
         leaseHeartbeat = heartbeatStops::incrementAndGet;
         progressService = mock(AiChatProgressService.class);
@@ -171,6 +174,7 @@ class AiChatAgentLoopServiceTest {
                 attachmentContextService,
                 persistenceService,
                 runLeaseHeartbeat,
+                runLeaseService,
                 progressService,
                 citationProjector,
                 restrictionEpoch,
@@ -2795,6 +2799,7 @@ class AiChatAgentLoopServiceTest {
                 attachmentContextService,
                 persistenceService,
                 runLeaseHeartbeat,
+                runLeaseService,
                 progressService,
                 citationProjector,
                 restrictionEpoch,
@@ -3209,6 +3214,72 @@ class AiChatAgentLoopServiceTest {
         order.verify(persistenceService).markRunning(TURN);
         order.verify(runLeaseHeartbeat).start(eq(LEASE), any(AiRunLeaseGuard.class));
         assertEquals(1, heartbeatStops.get());
+        verify(runLeaseService, never()).releaseHeldInCurrentTransaction(any());
+        verify(runLeaseService).forgetLocalToken(LEASE);
+    }
+
+    /**
+     * The loop must drop its token on the way out, because a turn whose terminal write never lands
+     * — a rejected terminal callback, a coordinator that threw — has nothing else that would.
+     * Releasing the lease here instead would leave the turn running and unleased, which is the
+     * window the lease exists to close.
+     */
+    @Test
+    void aTurnThatEndsExceptionallyDropsItsTokenWithoutReleasingItsLease() {
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class)))
+                .thenThrow(new IllegalStateException("prepare failed"));
+
+        service.run(TURN);
+
+        verify(runLeaseService).forgetLocalToken(LEASE);
+        verify(runLeaseService, never()).releaseHeldInCurrentTransaction(any());
+    }
+
+    @Test
+    void aRefusedClaimDropsNoTokenBecauseItTookNone() {
+        when(persistenceService.markRunning(TURN))
+                .thenThrow(new ForbiddenException("Workspace membership is no longer active"));
+
+        service.run(TURN);
+
+        verify(runLeaseService).forgetLocalToken(null);
+        verify(runLeaseService, never()).releaseHeldInCurrentTransaction(any());
+    }
+
+    /**
+     * Preparing the memory and the attachment context each invoke the model before the step loop's
+     * first checkpoint is reached, so ownership polled only inside that loop would let a stopped
+     * owner charge the organization for a further provider call it had no right to make.
+     */
+    @Test
+    void ownershipLostWhilePreparingTheTurnStopsBeforeTheNextProviderCall() {
+        AiRunLeaseGuard[] started = new AiRunLeaseGuard[1];
+        when(runLeaseHeartbeat.start(eq(LEASE), any(AiRunLeaseGuard.class)))
+                .thenAnswer(invocation -> {
+                    started[0] = invocation.getArgument(1);
+                    return leaseHeartbeat;
+                });
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class)))
+                .thenAnswer(invocation -> {
+                    started[0].stop(AiRunLeaseGuard.SUBJECT_STOPPED);
+                    return new AiChatMemory(
+                            List.of(message(TURN.userMessageId(), "Summarize my pipeline")),
+                            new AiAssistantPromptBudget(
+                                    64, 64_000, 16_000, 16_000, 16_000, 112_000),
+                            0,
+                            0);
+                });
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("owner_lost", result.reason());
+        verify(attachmentContextService, never()).prepare(any(), any(Instant.class), any());
+        verify(invocationService, never()).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals(1, heartbeatStops.get());
     }
 
     @Test
@@ -3252,7 +3323,8 @@ class AiChatAgentLoopServiceTest {
                 any(AiInvocation.class), eq(AiAssistantStep.class),
                 any(AiRawOutputGuard.class), any(AiResponseSchema.class),
                 eq(directAdmission), any(Runnable.class));
-        verify(persistenceService, never()).markTerminal(any(), any(), any());
+        verify(runLeaseService, never()).releaseHeldInCurrentTransaction(any());
+        verify(runLeaseService).forgetLocalToken(LEASE);
         assertEquals(1, heartbeatStops.get());
     }
 
@@ -3287,6 +3359,51 @@ class AiChatAgentLoopServiceTest {
         verify(toolExecutor, never()).execute(
                 any(), any(), any(), any(Boolean.class), any());
         assertEquals(1, heartbeatStops.get());
+    }
+
+    /**
+     * The checkpoint immediately before a tool runs is the last one a turn crosses, and it is the
+     * only one that can stop a write the model has already decided on. Ownership is therefore lost
+     * here after the step loop's post-answer checkpoint has already passed, so that checkpoint
+     * cannot stand in for this one: the turn deadline read between the two is what trips the
+     * guard.
+     */
+    @Test
+    void ownershipLostAfterTheAnswerWasCheckedStillStopsBeforeTheToolRuns() throws Exception {
+        AiAssistantStep toolStep = new AiAssistantStep(
+                new AiAssistantStep.Tool(
+                        "search_records",
+                        objectMapper.readTree("{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}")),
+                null);
+        AtomicInteger answered = new AtomicInteger();
+        AiRunLeaseGuard[] started = new AiRunLeaseGuard[1];
+        when(runLeaseHeartbeat.start(eq(LEASE), any(AiRunLeaseGuard.class)))
+                .thenAnswer(invocation -> {
+                    started[0] = invocation.getArgument(1);
+                    return leaseHeartbeat;
+                });
+        when(clock.instant()).thenAnswer(invocation -> {
+            if (answered.get() > 0 && started[0] != null) {
+                started[0].stop(AiRunLeaseGuard.LEASE_LOST);
+            }
+            return NOW;
+        });
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), eq(directAdmission), any(Runnable.class)))
+                .thenAnswer(invocation -> {
+                    answered.incrementAndGet();
+                    return parsed(toolStep);
+                });
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("owner_lost", result.reason());
+        assertEquals(1, answered.get());
+        verify(toolExecutor, never()).execute(
+                any(), any(), any(), any(Boolean.class), any());
+        verify(toolExecutor, never()).validateReferences(any(), any(), any());
     }
 
     private static AiChatMessage message(int id, String content) {

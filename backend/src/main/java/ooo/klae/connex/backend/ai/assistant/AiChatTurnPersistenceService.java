@@ -958,13 +958,25 @@ public class AiChatTurnPersistenceService {
     }
 
     /**
-     * Tombstones the turn's run lease inside the terminal transaction that just changed its row.
+     * Releases the turn's run lease inside the terminal transaction that just changed its row.
      *
      * <p>Releasing here rather than where the generation loop ends is what keeps the coverage
      * invariant true: a process killed between the loop returning and this write leaves a held,
      * expiring lease that a settler can find, not an unleased running turn nobody is bounded to.
-     * The release is fenced on this instance's own token, so a stale owner whose terminal write
-     * lost to a takeover tombstones nothing.
+     *
+     * <p>Every caller has already changed the turn's terminal row under a predicate that only a
+     * non-terminal turn matches, so reaching here is proof that no owner may act on the turn any
+     * further — including when the write landed on an instance that never held the lease, which a
+     * cancel or a turn poll behind a load balancer routinely does. The release therefore retires
+     * the row whether or not this instance holds a token; only when it does is the release also
+     * fenced on {@code (owner, epoch)}.
+     *
+     * <p>The fence this leaves is the turn's status, and it closes when a settler commits the
+     * turn's terminal state — not when it takes the lease over. A settler that bumps the epoch in
+     * one transaction and writes the turn's terminal status in a later one leaves a window in
+     * which a revived owner still reads {@code running} and can settle the turn itself, retiring
+     * the settler's lease. Orphan settlement must therefore take the lease over and write the
+     * terminal status in a single transaction.
      */
     private void releaseRunLease(int workspaceId, int turnId) {
         runLeaseService.releaseHeldInCurrentTransaction(leaseKey(workspaceId, turnId));

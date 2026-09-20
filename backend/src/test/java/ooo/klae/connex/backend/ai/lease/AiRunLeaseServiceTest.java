@@ -147,6 +147,57 @@ class AiRunLeaseServiceTest {
 
         assertTrue(registry.find(KEY).isEmpty());
         verify(leaseMapper).tombstone(7, CHAT_TURN, 42L, identity.owner(), 1L);
+        verify(leaseMapper, never()).retire(anyInt(), anyString(), anyLong());
+    }
+
+    /**
+     * The token is JVM-local, so a terminal write that lands anywhere but the claiming instance
+     * has none to fence with. Skipping the release there would leave the row held and unreleased
+     * for good: the reap deletes tombstones only, so nothing in this design would ever retire it.
+     */
+    @Test
+    void releasingASubjectThisInstanceHoldsNoTokenForRetiresTheRowByKey() {
+        when(leaseMapper.retire(7, CHAT_TURN, 42L)).thenReturn(1);
+
+        assertTrue(service.releaseHeldInCurrentTransaction(KEY));
+
+        verify(leaseMapper).retire(7, CHAT_TURN, 42L);
+        verify(leaseMapper, never())
+                .tombstone(anyInt(), anyString(), anyLong(), anyString(), anyLong());
+    }
+
+    @Test
+    void retiringARowThatWasAlreadyReleasedReportsNoRelease() {
+        when(leaseMapper.retire(7, CHAT_TURN, 42L)).thenReturn(0);
+
+        assertFalse(service.releaseHeldInCurrentTransaction(KEY));
+    }
+
+    /**
+     * A worker drops its token when it stops working, so a run whose terminal write never lands
+     * cannot leave the token behind for the life of the process. Dropping it must never touch the
+     * lease row: the run's lease has to stay held and expiring for a settler to find.
+     */
+    @Test
+    void forgettingALocalTokenReleasesNothingAndEmptiesTheRegistry() {
+        when(leaseMapper.lockForUpdate(7, CHAT_TURN, 42L)).thenReturn(null);
+        when(leaseMapper.insert(7, CHAT_TURN, 42L, identity.owner(), 45)).thenReturn(1);
+        AiRunLease claimed = service.acquireInCurrentTransaction(KEY);
+        commit();
+
+        service.forgetLocalToken(claimed);
+
+        assertTrue(registry.find(KEY).isEmpty());
+        verify(leaseMapper, never())
+                .tombstone(anyInt(), anyString(), anyLong(), anyString(), anyLong());
+        verify(leaseMapper, never()).retire(anyInt(), anyString(), anyLong());
+    }
+
+    @Test
+    void forgettingNoTokenAtAllIsAcceptedSoARefusedClaimNeedsNoBranch() {
+        service.forgetLocalToken(null);
+
+        verifyNoMoreInteractions(leaseMapper);
     }
 
     /**
@@ -216,14 +267,6 @@ class AiRunLeaseServiceTest {
                 IllegalArgumentException.class, () -> service.acquireInCurrentTransaction(KEY));
 
         verify(leaseMapper, never()).insert(anyInt(), anyString(), anyLong(), anyString(), anyInt());
-    }
-
-    @Test
-    void releasingAKeyThisInstanceHoldsNoTokenForTouchesNothing() {
-        assertFalse(service.releaseHeldInCurrentTransaction(KEY));
-
-        verify(leaseMapper, never()).tombstone(anyInt(), anyString(), anyLong(), anyString(), anyLong());
-        verifyNoMoreInteractions(leaseMapper);
     }
 
     @Test

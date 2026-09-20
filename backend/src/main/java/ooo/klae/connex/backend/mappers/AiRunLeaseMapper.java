@@ -139,6 +139,29 @@ public interface AiRunLeaseMapper {
             @Param("epoch") long epoch);
 
     /**
+     * Retires one subject's held lease by key alone, without the holder's fencing token.
+     *
+     * <p>Unlike {@link #tombstone}, this matches whichever instance holds the row. It exists for
+     * the terminal write that lands on an instance holding no token — a cancel or a lazy expiry
+     * routed to a different instance from the one that claimed the run — where the durable
+     * terminal state the caller has just committed, rather than a token, is the proof that no
+     * owner may act on the subject any more. Callers must have changed the subject's terminal row
+     * in the same transaction first.
+     *
+     * <p>{@code epoch} is retained exactly as the fenced tombstone retains it, so the key's
+     * fencing epoch stays strictly increasing across repeated claims.
+     *
+     * @param workspaceId tenant key
+     * @param subjectKind stable wire key of the leasable subject kind
+     * @param subjectId the subject's identifier within the workspace
+     * @return rows updated; {@code 0} means the row was already released or absent
+     */
+    int retire(
+            @Param("workspaceId") int workspaceId,
+            @Param("subjectKind") String subjectKind,
+            @Param("subjectId") long subjectId);
+
+    /**
      * Lists held leases in one workspace whose deadline has passed, oldest first.
      *
      * @param workspaceId tenant key

@@ -90,6 +90,15 @@ public class AiRunLeaseHeartbeat {
     /**
      * Starts renewing one lease until the returned handle is closed or ownership is lost.
      *
+     * <p>Starting re-anchors the guard's self-fence on the lease that was just claimed. A caller
+     * constructs its guard before the claim — the claim can refuse, and the guard is what the
+     * failure path reads — and the claim itself can take a long time, because it waits behind the
+     * membership and subject row locks. Left anchored at construction, that wait would be spent
+     * out of the lease lifetime, and the first poll after a slow claim could fail a run whose
+     * database deadline is a full lifetime away and whose heartbeat has not yet had a chance to
+     * tick. The re-anchor can only move the local fence later than construction and never later
+     * than the deadline MySQL just wrote, which is the direction this fence must err.
+     *
      * @param lease the fencing token to keep alive
      * @param guard the owner's ownership flag, fed by every tick
      * @return a handle that cancels the schedule
@@ -104,6 +113,7 @@ public class AiRunLeaseHeartbeat {
                             + ", so this instance could not observe a cross-instance stop signal"
                             + " for the run it is about to heartbeat");
         }
+        guard.recordRenewal(guard.clockNanos());
         AtomicReference<ScheduledFuture<?>> handle = new AtomicReference<>();
         ScheduledFuture<?> tick = scheduler.scheduleAtFixedRate(
                 () -> {

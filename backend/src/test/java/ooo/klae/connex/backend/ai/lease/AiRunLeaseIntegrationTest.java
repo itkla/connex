@@ -126,6 +126,41 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
         assertTrue(leaseRegistry.find(key).isEmpty());
     }
 
+    /**
+     * The owner token lives in one JVM's memory, so a terminal write routed to any other instance
+     * — a cancel behind a load balancer, a lazy expiry on a turn poll — carries no token. Forgoing
+     * the release there would leave the row held for good, because the reap deletes tombstones
+     * only. Forgetting the token is a faithful stand-in for a second instance: the token's whole
+     * scope is this map.
+     */
+    @Test
+    void aTerminalWriteFromAnInstanceHoldingNoTokenStillRetiresTheHeldRow() {
+        AiRunLeaseKey key = key(AiRunLeaseSubject.CHAT_TURN, 3021L);
+        AiRunLease held = acquire(key);
+        leaseRegistry.forget(held);
+
+        assertTrue(release(key));
+
+        Map<String, Object> row = leaseRow(key);
+        assertNull(row.get("owner"));
+        assertNotNull(row.get("released_at"));
+        assertEquals(held.epoch(), ((Number) row.get("epoch")).longValue());
+        assertEquals(AiRunLeaseOutcome.LOST, leaseService.renew(held));
+    }
+
+    @Test
+    void retiringAnAlreadyReleasedRowChangesNothingAndReportsNoRelease() {
+        AiRunLeaseKey key = key(AiRunLeaseSubject.CHAT_TURN, 3022L);
+        AiRunLease held = acquire(key);
+        assertTrue(release(key));
+        Object releasedAt = leaseRow(key).get("released_at");
+
+        assertFalse(release(key));
+
+        assertEquals(releasedAt, leaseRow(key).get("released_at"));
+        assertEquals(held.epoch(), ((Number) leaseRow(key).get("epoch")).longValue());
+    }
+
     @Test
     void expiredLeaseDiscoveryIsWorkspacePagedAndTakeoverIsEpochFenced() {
         AiRunLeaseKey expiredKey = key(AiRunLeaseSubject.CHAT_TURN, 3005L);

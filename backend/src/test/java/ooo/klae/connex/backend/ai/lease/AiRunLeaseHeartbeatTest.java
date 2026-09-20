@@ -217,6 +217,27 @@ class AiRunLeaseHeartbeatTest {
         assertEquals(Optional.of(AiRunLeaseGuard.RENEW_GAP), guard.reason());
     }
 
+    /**
+     * A caller builds its guard before the claim, because the claim can refuse and the failure
+     * path reads the guard. The claim itself waits behind the membership and subject row locks, so
+     * a guard left anchored at construction spends that wait out of the lease lifetime and can
+     * stop a freshly leased run before its heartbeat has ticked once — for a lease whose database
+     * deadline is a full lifetime away.
+     */
+    @Test
+    void startingAHeartbeatReanchorsTheSelfFenceOnTheFreshlyClaimedLease() throws Exception {
+        AtomicLong nanos = new AtomicLong();
+        AiRunLeaseGuard guard = new AiRunLeaseGuard(properties.getRunLeaseTtl(), nanos::get);
+        nanos.set(properties.getRunLeaseTtl().toNanos() * 2L);
+
+        AutoCloseable handle = newHeartbeat().start(LEASE, guard);
+
+        assertFalse(
+                guard.isStopped(),
+                "A claim slower than the lease lifetime must not stop the run it just leased");
+        handle.close();
+    }
+
     private void awaitRenewals(int expected) throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
         while (System.nanoTime() < deadline) {

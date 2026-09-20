@@ -101,6 +101,24 @@
           AND epoch = #{epoch}
     </update>
 
+    <!-- Deliberately unfenced, and deliberately reachable only from a transaction that has already
+         written the subject's terminal state. The owner token lives in one JVM's memory, so a
+         terminal write that lands on any other instance - a cancel behind a load balancer, a lazy
+         expiry on a turn poll - has no token to fence with. Without this the row would stay
+         owner IS NOT NULL / released_at IS NULL forever: the reap deletes tombstones only, so
+         nothing would ever retire it. epoch is retained exactly as the fenced tombstone retains
+         it, so the key's fencing epoch stays strictly increasing. -->
+    <update id="retire">
+        UPDATE ai_run_lease
+        SET owner = NULL,
+            released_at = CURRENT_TIMESTAMP(6),
+            expires_at = GREATEST(CURRENT_TIMESTAMP(6), acquired_at)
+        WHERE workspace_id = #{workspaceId}
+          AND subject_kind = #{subjectKind}
+          AND subject_id = #{subjectId}
+          AND owner IS NOT NULL
+    </update>
+
     <select id="findExpiredLeases" resultMap="leaseMap">
         SELECT <include refid="columns" />
         FROM ai_run_lease

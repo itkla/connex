@@ -35,6 +35,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolTurn;
 import ooo.klae.connex.backend.ai.lease.AiRunLease;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseHeartbeat;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
@@ -140,6 +141,7 @@ public class AiChatAgentLoopService {
     private final AiChatAttachmentContextService attachmentContextService;
     private final AiChatTurnPersistenceService persistenceService;
     private final AiRunLeaseHeartbeat runLeaseHeartbeat;
+    private final AiRunLeaseService runLeaseService;
     private final AiChatProgressService progressService;
     private final AiChatCitationProjector citationProjector;
     private final AiRestrictionEpoch restrictionEpoch;
@@ -156,14 +158,23 @@ public class AiChatAgentLoopService {
      * that lease alive for as long as it works. It never releases it: the durable terminal write
      * tombstones the lease, so a process killed between here and that write leaves an expiring
      * lease another instance can settle rather than a running turn with no owner. The {@code
-     * finally} therefore only stops the heartbeat.
+     * finally} therefore only stops the heartbeat and drops this instance's local token, so a turn
+     * whose terminal write never lands cannot leave that token behind for the life of the process.
+     *
+     * <p>Ownership is polled between every pair of turn steps that can block, not only inside the
+     * step loop: preparing the memory and the attachment context each invoke the model on their
+     * own, and a routed skill plan runs its own durable reads, all before the first model step.
+     * Polling only in the step loop would leave the stated reaction bound — one heartbeat interval
+     * plus the in-flight provider call's remaining deadline — true of the loop and false of the
+     * preparation, where a stopped owner could still charge the organization for two further
+     * provider calls.
      */
     public AiGenerationTaskResult<AiChatTurnGenerationResult> run(AiChatQueuedTurn turn) {
         AiRunLeaseGuard ownership = new AiRunLeaseGuard(aiProperties.getRunLeaseTtl());
         AutoCloseable heartbeat = null;
+        AiRunLease lease = null;
         try {
             requireWorkspaceEnabled(turn);
-            AiRunLease lease;
             try {
                 lease = persistenceService.markRunning(turn);
             } catch (ForbiddenException exception) {
@@ -192,6 +203,9 @@ public class AiChatAgentLoopService {
             AiAssistantToolResult pageContext = toolExecutor.pageContext(
                     promptContext, resources);
             pageContext.identifiers().forEach(identifier -> identifier.seed(maskingContext));
+            if (ownership.isStopped()) {
+                return AiGenerationTaskResult.failed(AiAssistantTerminalReasons.OWNER_LOST);
+            }
             AiChatAttachmentContext attachmentContext =
                     attachmentContextService.prepare(turn, deadline, maskingContext);
             List<ToolTurn> toolTurns = new ArrayList<>();
@@ -232,6 +246,9 @@ public class AiChatAgentLoopService {
             int maxSteps = Math.min(
                     governanceService.assistantMaxSteps(turn.workspaceId()), HARD_MAX_STEPS);
             if (routing.routed()) {
+                if (ownership.isStopped()) {
+                    return AiGenerationTaskResult.failed(AiAssistantTerminalReasons.OWNER_LOST);
+                }
                 AiSkillPlanRunner.Execution execution = skillPlanRunner.run(
                         turn,
                         routing,
@@ -984,6 +1001,7 @@ public class AiChatAgentLoopService {
             return AiGenerationTaskResult.failed(INTERNAL_ERROR);
         } finally {
             stopHeartbeat(heartbeat);
+            runLeaseService.forgetLocalToken(lease);
         }
     }
 
@@ -991,8 +1009,12 @@ public class AiChatAgentLoopService {
      * Stops renewing the turn's lease without releasing it.
      *
      * <p>The lease stays held on purpose. The durable terminal write runs after this method, in a
-     * different call stack, and tombstones the lease there; releasing it here would open a window
+     * different call stack, and releases the lease there; releasing it here would open a window
      * in which the turn is running and unleased, which is the window the lease exists to close.
+     * Dropping the local token alongside is safe for the same reason it is necessary: the terminal
+     * write's licence to release is the terminal row it just changed, not a token, so it releases
+     * the lease with or without one — while a turn whose terminal write never lands would
+     * otherwise leave its token in this instance's memory for the life of the process.
      */
     private void stopHeartbeat(AutoCloseable heartbeat) {
         if (heartbeat == null) {
