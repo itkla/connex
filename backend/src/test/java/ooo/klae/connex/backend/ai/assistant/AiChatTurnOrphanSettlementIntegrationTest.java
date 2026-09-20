@@ -33,6 +33,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseIdentity;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseSweeper;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.AiChatTurnRef;
@@ -45,6 +46,7 @@ import ooo.klae.connex.backend.mappers.AiRunLeaseMapper;
 import ooo.klae.connex.backend.mappers.OrganizationMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
+import ooo.klae.connex.backend.observability.JobRunRecorder;
 import ooo.klae.connex.backend.tenant.TenantContext;
 
 /**
@@ -63,6 +65,11 @@ import ooo.klae.connex.backend.tenant.TenantContext;
  * terminal write must be one transaction: a settlement that fails after taking the lease over has
  * to leave the lease exactly as it found it. Splitting them puts the epoch bump on disk while the
  * turn still reads running, which is the window a revived owner walks through.
+ *
+ * <p>The last two drills run a whole scheduled pass. Both sweepers' own tests mock their mappers,
+ * so without these nothing drives discovery, workspace routing, and settlement together through
+ * the real tenant-scope interceptor and the real discovery statements. This context has no web
+ * environment, so the calling thread is off the request thread exactly as the scheduler thread is.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -76,6 +83,8 @@ class AiChatTurnOrphanSettlementIntegrationTest {
 
     @Autowired AiChatTurnOrphanSettlementService settlementService;
     @Autowired AiChatTurnPersistenceService persistenceService;
+    @Autowired AiRunLeaseSweeper leaseSweeper;
+    @Autowired AiChatTurnLifetimeSweeper lifetimeSweeper;
     @Autowired AiRunLeaseIdentity leaseIdentity;
     @Autowired AiRunLeaseMapper leaseMapper;
     @Autowired AiChatMapper chatMapper;
@@ -125,6 +134,7 @@ class AiChatTurnOrphanSettlementIntegrationTest {
     void removeTenantFixture() {
         tenantContext.clear();
         if (workspace != null) {
+            jdbcTemplate.update("DELETE FROM job_run WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update(
                     "DELETE FROM ai_run_lease WHERE workspace_id = ?", workspace.getId());
             jdbcTemplate.update(
@@ -331,6 +341,36 @@ class AiChatTurnOrphanSettlementIntegrationTest {
         assertEquals("running", turnRow(turnId).get("status"));
     }
 
+    @Test
+    void aScheduledLeasePassDiscoversAndSettlesAnOrphanedTurnEndToEnd() {
+        int turnId = insertTurn("running");
+        insertDeadOwnerLease(turnId, 3L);
+
+        sweepUntil(leaseSweeper::sweep, () -> !"running".equals(turnRow(turnId).get("status")));
+
+        Map<String, Object> turn = turnRow(turnId);
+        assertEquals("failed", turn.get("status"));
+        assertEquals(AiAssistantTerminalReasons.OWNER_LOST, turn.get("terminal_reason"));
+        Map<String, Object> lease = leaseRow(key(turnId));
+        assertNull(lease.get("owner"));
+        assertNotNull(lease.get("released_at"));
+        assertEquals(4L, ((Number) lease.get("epoch")).longValue());
+        assertEquals(1, jobRuns(JobRunRecorder.AI_RUN_LEASE_SWEEP));
+    }
+
+    @Test
+    void aScheduledLifetimePassDiscoversAndExpiresAnUnleasedStaleTurnEndToEnd() {
+        int turnId = insertTurn("running");
+        ageTurns();
+
+        sweepUntil(lifetimeSweeper::sweep, () -> !"running".equals(turnRow(turnId).get("status")));
+
+        Map<String, Object> turn = turnRow(turnId);
+        assertEquals("timed_out", turn.get("status"));
+        assertEquals("generation_timeout", turn.get("terminal_reason"));
+        assertEquals(1, jobRuns(JobRunRecorder.AI_CHAT_TURN_LIFETIME_SWEEP));
+    }
+
     private <T> T inTenant(Supplier<T> work) {
         tenantContext.set(workspace.getId(), organization.getId(), member.getId(), "owner", null);
         try {
@@ -349,6 +389,26 @@ class AiChatTurnOrphanSettlementIntegrationTest {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while holding the session row lock");
         }
+    }
+
+    /**
+     * Runs scheduled passes until this fixture's turn settles. A pass is paged by a rotating
+     * workspace cursor and a shared schema can hold other fixtures ahead of this one, so the bound
+     * is a number of passes, never a wall-clock wait.
+     */
+    private static void sweepUntil(Runnable pass, Supplier<Boolean> settled) {
+        for (int passes = 0; passes < 64 && !settled.get(); passes++) {
+            pass.run();
+        }
+    }
+
+    private int jobRuns(String jobName) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM job_run WHERE workspace_id = ? AND job_name = ?",
+                Integer.class,
+                workspace.getId(),
+                jobName);
+        return count == null ? 0 : count;
     }
 
     private AiRunLeaseKey key(int turnId) {
