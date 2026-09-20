@@ -14,6 +14,8 @@ import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -573,6 +575,45 @@ class ScriptedAiScriptLoaderTest {
             link.create();
         } catch (UnsupportedOperationException | FileSystemException exception) {
             assumeTrue(false, "filesystem does not support symbolic links");
+        }
+    }
+
+    /**
+     * Loads the fixtures that actually ship with this source set, not a fixture written here.
+     *
+     * <p>Every other test in this class builds its own {@code @TempDir} corpus, so a malformed
+     * shipped fixture — a selector containing another one, a typo in {@code capabilityClass},
+     * overlapping step predicates — would pass the whole {@code test} task and only surface in
+     * {@code scriptedTrajectoryTest}, as a Spring context load failure that reports every
+     * trajectory golden as red for a fault in one file none of them uses.
+     *
+     * @throws Exception if the shipped fixture directory cannot be resolved or read
+     */
+    @Test
+    void loadsEveryFixtureThatShipsWithThisSourceSet() throws Exception {
+        Path shipped = Path.of(Objects.requireNonNull(
+                        getClass().getResource("/ai/scripted"),
+                        "the scripted fixtures are missing from the test classpath")
+                .toURI());
+        List<Path> files;
+        try (Stream<Path> listing = Files.list(shipped)) {
+            files = listing
+                    .filter(path -> path.getFileName().toString().endsWith(".json"))
+                    .sorted()
+                    .toList();
+        }
+        assertFalse(files.isEmpty(), "the shipped fixture directory must not be empty");
+
+        ScriptedAiScriptLoader loader = new ScriptedAiScriptLoader(
+                shipped.toString(), objectMapper);
+
+        assertEquals(files.size(), loader.scripts().size(),
+                "every shipped fixture must yield exactly one script: " + files);
+        assertEquals(files.size(), loader.selectors().size(),
+                "shipped selectors must stay unique: " + loader.selectors());
+        for (ScriptedAiScript script : loader.scripts()) {
+            assertNotNull(loader.bySelector(script.selector()),
+                    script.id() + " is not reachable by its own selector");
         }
     }
 

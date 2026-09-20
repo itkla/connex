@@ -134,6 +134,16 @@ public class AiSkillCatalog {
      * ceilings today. These fields state intent for the result-contract validator that will enforce
      * them; do not read them as guarantees.
      *
+     * <p><strong>A seeded toolset must be one the declaration can actually use.</strong> Seeding is
+     * all-or-nothing over an object family, while write authority is per tool plus an authority
+     * tier, so a declaration naming {@code write_pipeline} while its {@code authority} is
+     * {@code READ} — or while its {@code allowedTools} omits a member — would put write tools in
+     * front of the model from the synthesis step's first render that {@code requireSkillAuthority}
+     * then refuses with {@code tool_outside_skill_authority}. That refusal is raised outside every
+     * recoverable branch of the agent loop and its reason is not closable, so the turn would settle
+     * as a hard failure, with no answer, on a tool the server itself offered. The compact
+     * constructor therefore refuses the declaration rather than letting a seed arm it.
+     *
      * @param key stable additive catalog key
      * @param version semantic version of this declaration
      * @param availability whether this build can execute the key
@@ -205,10 +215,19 @@ public class AiSkillCatalog {
                         "Skill " + key + " declares more toolsets than one turn may hold");
             }
             for (String toolset : toolsets) {
-                if (AiAssistantToolCatalog.LOADABLE.stream()
-                        .noneMatch(loadable -> loadable.key().equals(toolset))) {
+                AiAssistantToolCatalog.Toolset loadable =
+                        AiAssistantToolCatalog.loadableByKey(toolset);
+                if (loadable == null) {
                     throw new IllegalArgumentException(
                             "Skill " + key + " declares an unknown toolset " + toolset);
+                }
+                for (String writeTool : AiAssistantToolCatalog.writeToolsOf(loadable)) {
+                    if (authority == Authority.READ || !allowedTools.contains(writeTool)) {
+                        throw new IllegalArgumentException(
+                                "Skill " + key + " seeds toolset " + toolset
+                                        + " but its authority and allowedTools cannot call "
+                                        + writeTool);
+                    }
                 }
             }
             requiredMetrics = Set.copyOf(requiredMetrics);

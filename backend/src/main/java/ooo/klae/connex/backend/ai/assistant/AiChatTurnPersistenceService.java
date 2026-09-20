@@ -202,6 +202,15 @@ public class AiChatTurnPersistenceService {
      * <p>Written before the plan executes so a turn that later fails still names the declaration
      * that produced it, which is what makes a failure attributable to a specific skill version.
      *
+     * <p><strong>The returned flag cannot be false for a caller that got here.</strong> The update
+     * is predicated on the turn still being {@code running}, and this same transaction takes the
+     * turn's row lock through {@code lockAuthorizedTurn(turn, RUNNING)} first, so the predicate
+     * cannot then miss. The agent loop relies on that: it seeds the turn's loaded toolsets beside
+     * this call without branching on the result, and a zero-row update would leave a turn running a
+     * seeded vocabulary while {@code ai_chat_turn.skill_key} stayed null — a set no reader could
+     * reconstruct. A caller that reaches this method without holding that lock breaks the
+     * invariant and must consume the flag instead.
+     *
      * @param turn running turn
      * @param skillKey stable catalog key
      * @param skillVersion semantic version of the declaration

@@ -47,6 +47,36 @@ class ScriptedAiProviderArchTest {
             "backend/src/main/java/ooo/klae/connex/backend/ai/provider/AiProviderRouter.java");
     private static final Path AGENT_GUIDE = Path.of("backend/AGENTS.md");
     private static final Path AI_SECURITY_CONTRACT = Path.of("docs/backend/AI_SECURITY.md");
+    private static final Path BUILD_SCRIPT = Path.of("backend/build.gradle");
+    private static final Path CI_WORKFLOW = Path.of(".github/workflows/ci.yml");
+    private static final Path TEST_SOURCE_ROOT = Path.of("backend/src/test/java");
+
+    /** The Gradle task that owns every scripted trajectory golden. */
+    private static final String TRAJECTORY_TASK = "scriptedTrajectoryTest";
+
+    /** The display name of the one CI job branch protection requires for backend changes. */
+    private static final String REQUIRED_BACKEND_JOB = "Backend — build & test";
+
+    /** A job key line in the CI workflow: exactly two spaces of indentation, then the key. */
+    private static final Pattern WORKFLOW_JOB_HEADER = Pattern.compile("^ {2}[A-Za-z0-9_-]+:\\s*$");
+
+    /** The class-name shape both that task's include and the {@code test} exclude are keyed on. */
+    private static final Pattern TRAJECTORY_CLASS_NAME =
+            Pattern.compile(".*ScriptedTrajectory.*Test\\.java");
+
+    /**
+     * Source shapes that put a test class inside the scripted-provider Spring context.
+     *
+     * <p>Extending the harness is the obvious one. Declaring the profile directly is how a future
+     * class would join that context without going through the harness at all, which is the case
+     * the name-based Gradle split cannot see.
+     */
+    private static final List<Pattern> TRAJECTORY_CLASS_SHAPES = List.of(
+            Pattern.compile("extends\\s+AbstractScriptedTrajectoryTest"),
+            Pattern.compile(
+                    "@ActiveProfiles\\s*\\([^)]*(ScriptedAiProviderProfile\\.NAME"
+                            + "|ai-scripted-provider)",
+                    Pattern.DOTALL));
 
     /**
      * Phrases that only a full subsystem contract carries.
@@ -104,10 +134,19 @@ class ScriptedAiProviderArchTest {
             Pattern.compile("\\bScriptedAiStepInterceptor\\s+\\w+\\s*\\("),
             Pattern.compile("\\bScriptedAiStepInterceptor\\s+\\w+\\s*="));
 
-    /** Files permitted to name the scoped types while living outside the scripted package. */
+    /**
+     * Files permitted to name the scoped types while living outside the scripted package.
+     *
+     * <p>Only tests, and only the two that must hold the journal bean to assert what a trajectory
+     * would have sent. Any other entry here is a production reference wearing a test's file name.
+     */
     private static final Set<String> SCOPED_TYPE_ALLOWLIST = Set.of(
             "backend/src/test/java/ooo/klae/connex/backend/architecture/"
-                    + "ScriptedAiProviderArchTest.java");
+                    + "ScriptedAiProviderArchTest.java",
+            "backend/src/test/java/ooo/klae/connex/backend/ai/assistant/"
+                    + "AbstractScriptedTrajectoryTest.java",
+            "backend/src/test/java/ooo/klae/connex/backend/ai/assistant/"
+                    + "AiAssistantScriptedTrajectoryTest.java");
 
     @Test
     void theRealOpenAiCompatibleAdapterKeepsItsProfileNegation() {
@@ -269,6 +308,65 @@ class ScriptedAiProviderArchTest {
     }
 
     @Test
+    void everyScopedTypeAllowlistEntryNamesAnExistingTestSource() {
+        List<String> violations = new ArrayList<>();
+        for (String entry : SCOPED_TYPE_ALLOWLIST) {
+            if (!entry.startsWith(TEST_SOURCE_ROOT + "/")) {
+                violations.add(entry + " is not a test source");
+            } else if (!Files.exists(repoRoot().resolve(entry))) {
+                violations.add(entry + " does not exist");
+            }
+        }
+        assertTrue(violations.isEmpty(),
+                "the scoped-type allowlist exists so a test can hold the journal bean; a main "
+                        + "source on it would make the provider or the journal reachable from "
+                        + "production with nothing failing: " + violations);
+    }
+
+    @Test
+    void everyClassInTheScriptedContextCarriesTheNameItsGradleTaskSelects() throws IOException {
+        List<String> violations = new ArrayList<>();
+        for (Path file : javaFiles(TEST_SOURCE_ROOT)) {
+            String name = file.getFileName().toString();
+            if (TRAJECTORY_CLASS_NAME.matcher(name).matches()) {
+                continue;
+            }
+            String source = read(file);
+            for (Pattern shape : TRAJECTORY_CLASS_SHAPES) {
+                if (shape.matcher(source).find()) {
+                    violations.add(relative(file));
+                    break;
+                }
+            }
+        }
+        assertTrue(violations.isEmpty(),
+                "the scripted context is split out of the shared test fork by class name, so a "
+                        + "class that joins it under another name is excluded from neither task "
+                        + "and runs back inside the shared fork it was split out of — silently, "
+                        + "because the suite stays green: " + violations);
+    }
+
+    @Test
+    void theTrajectoryTaskIsReachableFromTheLifecycleAndFromRequiredCi() throws IOException {
+        String build = read(BUILD_SCRIPT);
+        List<String> gradleInvocations = requiredBackendJobGradleInvocations(read(CI_WORKFLOW));
+
+        assertTrue(build.contains("tasks.register('" + TRAJECTORY_TASK + "'"),
+                "the trajectory goldens must keep their own Gradle task");
+        assertTrue(Pattern.compile(
+                        "tasks\\.named\\('check'\\)\\s*\\{[^}]*" + TRAJECTORY_TASK, Pattern.DOTALL)
+                        .matcher(build).find(),
+                "check must depend on " + TRAJECTORY_TASK + ", or `gradlew check` and `gradlew "
+                        + "build` run a strictly smaller suite than CI and report success");
+        assertFalse(gradleInvocations.isEmpty(),
+                "the required backend job must still run Gradle");
+        assertTrue(gradleInvocations.stream().anyMatch(line -> line.contains(TRAJECTORY_TASK)),
+                "the trajectory goldens are excluded from `test`, so the required backend CI job "
+                        + "has to name " + TRAJECTORY_TASK + " as well; a task nothing runs proves "
+                        + "nothing: " + gradleInvocations);
+    }
+
+    @Test
     void noShippedOperatorTemplateActivatesTheScriptedProvider() throws IOException {
         List<String> violations = new ArrayList<>();
         for (Path template : operatorTemplates()) {
@@ -343,6 +441,47 @@ class ScriptedAiProviderArchTest {
                 .getDeclaredField("FORBIDDEN_KEYS_BY_PROFILE");
         field.setAccessible(true);
         return (Map<String, List<String>>) field.get(null);
+    }
+
+    /**
+     * Returns the Gradle commands run by the required backend job alone.
+     *
+     * <p>Other jobs in the same workflow also run Gradle, and a comment can name any task, so
+     * searching the whole file would stay satisfied after the required job stopped running the
+     * goldens. Only uncommented lines inside the job whose display name branch protection requires
+     * are returned.
+     *
+     * @param workflow the CI workflow source
+     * @return the required backend job's Gradle command lines, stripped
+     */
+    private static List<String> requiredBackendJobGradleInvocations(String workflow) {
+        List<String> invocations = new ArrayList<>();
+        List<String> current = new ArrayList<>();
+        boolean requiredJob = false;
+        for (String line : workflow.split("\\R")) {
+            if (WORKFLOW_JOB_HEADER.matcher(line).matches()) {
+                if (requiredJob) {
+                    invocations.addAll(current);
+                }
+                current = new ArrayList<>();
+                requiredJob = false;
+                continue;
+            }
+            String stripped = line.strip();
+            if (stripped.startsWith("#")) {
+                continue;
+            }
+            if (stripped.equals("name: " + REQUIRED_BACKEND_JOB)) {
+                requiredJob = true;
+            }
+            if (stripped.contains("gradlew")) {
+                current.add(stripped);
+            }
+        }
+        if (requiredJob) {
+            invocations.addAll(current);
+        }
+        return invocations;
     }
 
     private static String read(Path path) throws IOException {

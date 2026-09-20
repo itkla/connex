@@ -417,6 +417,9 @@ public class CampaignDispatchService {
             } else if (leaseOwner == null) {
                 attachLateAudienceProviderCorrelation(
                         workspaceId, deliveryId, target.providerId(), receipt.providerMessageId());
+            } else {
+                attachLateTriggeredProviderCorrelation(
+                        workspaceId, deliveryId, target, receipt.providerMessageId());
             }
         } else {
             String failure = receipt.status() == DispatchStatus.AMBIGUOUS
@@ -691,6 +694,39 @@ public class CampaignDispatchService {
                     EXPIRED_AUDIENCE_RESERVATION,
                     CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) == 1) {
                 log.warn("Campaign delivery {} was accepted after its reservation expired;"
+                        + " its reconciliation state is unchanged", deliveryId);
+            }
+        } catch (RuntimeException exception) {
+            log.warn("Campaign delivery {} late provider correlation could not be recorded", deliveryId);
+        }
+    }
+
+    /**
+     * Records the provider correlation of a triggered submission whose owner-fenced terminal write
+     * lost to the expired-claim sweep, so the provider's bounce and complaint webhooks still resolve
+     * to the row and record suppression and consent revocation. The swept row keeps its status, its
+     * reconciliation state, and any operator decision; a row the sweep returned to the queue for an
+     * idempotent replay is refused here and correlated by that replay's own terminal write, unless
+     * that replay's receipt named no message id and settled the row correlation-free, in which case
+     * the shared idempotency key makes this submission's id the only one that names the message the
+     * connector kept. A receipt that names no message id, which the SMTP transport never does and an
+     * ESP response may omit, is skipped: no webhook could resolve to the row it would write, so
+     * reporting it as correlated would only mislead reconciliation. A persistence fault is logged
+     * because the row is already reconcilable without it.
+     */
+    private void attachLateTriggeredProviderCorrelation(
+            int workspaceId, int deliveryId, ResolvedDeliveryProvider target, String providerMessageId) {
+        if (providerMessageId == null || providerMessageId.isBlank()) {
+            return;
+        }
+        try {
+            if (campaignDeliveryMapper.attachLateTriggeredProviderCorrelation(
+                    workspaceId,
+                    deliveryId,
+                    target.providerId(),
+                    target.attemptTargetFingerprint(),
+                    providerMessageId) == 1) {
+                log.warn("Campaign delivery {} was accepted after its claim expired;"
                         + " its reconciliation state is unchanged", deliveryId);
             }
         } catch (RuntimeException exception) {

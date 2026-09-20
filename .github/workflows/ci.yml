@@ -166,7 +166,11 @@ jobs:
     needs: classify
     if: needs.classify.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # `test` alone measured 46-48 minutes on the last runs before scriptedTrajectoryTest joined
+    # this step, which left under ten minutes of headroom under the previous 60-minute ceiling.
+    # A job cancelled on the timeout produces no test failure and reads as a hang, so the budget
+    # is raised rather than left to convert a slow-runner day into an unexplained cancellation.
+    timeout-minutes: 75
     services:
       mysql:
         image: mysql:8.4.10@sha256:c831a0f11348d402b43d77453e17d770be2eef356615a2823fe0f5a0d6c8b9af
@@ -194,9 +198,12 @@ jobs:
           cache: gradle
       - name: Allow non-SUPER routine creation under binary logging
         run: mysql -h 127.0.0.1 -P 3306 -uroot -pci-${{ github.run_id }}-${{ github.run_attempt }}-root -e "SET GLOBAL log_bin_trust_function_creators = 1;"
+      # scriptedTrajectoryTest owns the one Spring context that activates the ai-scripted-provider
+      # profile and is therefore excluded from `test`. It must be named here as well: a Gradle task
+      # no required job runs proves nothing, and these are the end-to-end agent trajectories.
       - name: Test (runs Flyway migrations, arch tests, tenant-isolation tests)
         working-directory: backend
-        run: bash gradlew test --no-daemon --stacktrace
+        run: bash gradlew test scriptedTrajectoryTest --no-daemon --stacktrace
       # Spring reports one failed context load as failures for every test sharing that context.
       # Surface MySQL's capacity counter separately so connection exhaustion cannot mimic a product regression.
       - name: Diagnose MySQL connection capacity
