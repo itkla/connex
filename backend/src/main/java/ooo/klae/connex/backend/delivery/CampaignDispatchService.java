@@ -4,6 +4,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.LongSupplier;
 
@@ -58,6 +60,8 @@ public class CampaignDispatchService {
             "AMBIGUOUS: Worker claim expired after the delivery target changed";
     private static final String RECOVERED_CHANGED_TARGET_CLAIM =
             "AMBIGUOUS: Delivery target changed before a recovered attempt could resume";
+    private static final String EXPIRED_AUDIENCE_RESERVATION =
+            "AMBIGUOUS: Audience dispatch did not finish before its reservation expired";
     private static final String NOT_DISPATCHABLE_SKIP_REASON = "not_dispatchable";
 
     private final CampaignSendMapper campaignSendMapper;
@@ -74,14 +78,19 @@ public class CampaignDispatchService {
     private final CampaignFrequencyAdmissionService frequencyAdmissionService;
     private LongSupplier nanoTimeSource = System::nanoTime;
 
-    /** Processes every queued send in the workspace. Never throws. */
+    /**
+     * Runs the workspace's recovery sweeps, then processes every queued send in it. Never throws: a
+     * failed recovery sweep is counted and logged but never starves the queued sends that follow it.
+     *
+     * @param workspaceId owning workspace
+     * @return the number of queued sends and recovery sweeps that failed
+     */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public int processWorkspace(int workspaceId) {
         if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
             return 0;
         }
-        recoverExpiredTriggeredClaims(workspaceId);
-        int failed = 0;
+        int failed = recoverAbandonedAttempts(workspaceId);
         for (int sendId : campaignSendMapper.queuedSendIds(
                 workspaceId, triggeredSendGate.enabled())) {
             try {
@@ -98,7 +107,8 @@ public class CampaignDispatchService {
     }
 
     /**
-     * Dispatches the pending deliveries of one send, claim-first. Never throws.
+     * Dispatches the pending deliveries of one send, claim-first, after the workspace's recovery
+     * sweeps. Never throws; a failed recovery sweep is logged and does not block the dispatch.
      *
      * @param workspaceId owning workspace
      * @param sendId send to dispatch
@@ -113,8 +123,34 @@ public class CampaignDispatchService {
         if (!capabilityRegistry.isAvailable(Capability.CAMPAIGN_DELIVERY)) {
             return true;
         }
-        recoverExpiredTriggeredClaims(workspaceId);
+        recoverAbandonedAttempts(workspaceId);
         return processSendReady(workspaceId, sendId);
+    }
+
+    /**
+     * Runs the expired triggered-claim and audience-reservation sweeps, isolating each one so a
+     * recovery fault is retried on the next pass instead of aborting the dispatch that follows.
+     *
+     * @param workspaceId owning workspace
+     * @return the number of sweeps that failed
+     */
+    private int recoverAbandonedAttempts(int workspaceId) {
+        int failed = 0;
+        try {
+            recoverExpiredTriggeredClaims(workspaceId);
+        } catch (RuntimeException exception) {
+            failed++;
+            log.warn("Expired triggered claim recovery failed in workspace {}: {}",
+                    workspaceId, exception.getClass().getSimpleName());
+        }
+        try {
+            recoverExpiredAudienceReservations(workspaceId);
+        } catch (RuntimeException exception) {
+            failed++;
+            log.warn("Expired audience reservation recovery failed in workspace {}: {}",
+                    workspaceId, exception.getClass().getSimpleName());
+        }
+        return failed;
     }
 
     private boolean processSendReady(int workspaceId, int sendId) {
@@ -159,14 +195,44 @@ public class CampaignDispatchService {
             }
             dispatchOne(workspaceId, send, channel, target, dispatcher, revision, deliveryId);
         }
+        settle(workspaceId, sendId);
+        return true;
+    }
+
+    /**
+     * Refreshes a send's counters and completes a running audience send with no pending delivery
+     * left.
+     */
+    private void settle(int workspaceId, int sendId) {
         campaignSendMapper.refreshCounters(workspaceId, sendId);
-        CampaignSend settled = campaignSendMapper.getSend(workspaceId, sendId);
-        if (settled != null && "running".equals(settled.getStatus())
-                && "audience".equals(settled.getOrigin())
+        if (runningAudienceSend(workspaceId, sendId)
                 && campaignDeliveryMapper.countPending(workspaceId, sendId) == 0) {
             campaignSendMapper.markCompleted(workspaceId, sendId);
         }
-        return true;
+    }
+
+    /**
+     * Settles a send found by the recovery sweep: it completes a running audience send with no pending
+     * or dispatching delivery left, then refreshes that send's counters. One compare-and-set proves the
+     * absence of outstanding work and completes the send, so a live worker's terminal write cannot land
+     * between the proof and the completion, and the refresh that follows a completion reads every
+     * delivery in its final state. The sweep can run beside a live worker whose unleased attempt is
+     * still in flight: the send is not selected at all until that attempt is terminal, and the
+     * worker's own {@link #settle} completes the send after its terminal write. An attempt the worker
+     * abandons after reserving is marked and settled by a later sweep, one abandoned before reserving
+     * is left to the dispatch loop's {@link #settle}, and a send left running by a worker that died
+     * between its terminal write and its settlement is found again by the durable selector. Settling
+     * needs no provider, so a send whose remaining work was recovered settles even while its provider
+     * is unusable.
+     */
+    private void settleRecovered(int workspaceId, int sendId) {
+        campaignSendMapper.markSettledAudienceSendCompleted(workspaceId, sendId);
+        campaignSendMapper.refreshCounters(workspaceId, sendId);
+    }
+
+    private boolean runningAudienceSend(int workspaceId, int sendId) {
+        CampaignSend send = campaignSendMapper.getSend(workspaceId, sendId);
+        return send != null && "running".equals(send.getStatus()) && "audience".equals(send.getOrigin());
     }
 
     private void dispatchOne(int workspaceId, CampaignSend send, DeliveryChannel channel,
@@ -348,6 +414,9 @@ public class CampaignDispatchService {
             }
             if (updated == 1) {
                 appendEvent(workspaceId, deliveryId, "dispatched", receipt.detail());
+            } else if (leaseOwner == null) {
+                attachLateAudienceProviderCorrelation(
+                        workspaceId, deliveryId, target.providerId(), receipt.providerMessageId());
             }
         } else {
             String failure = receipt.status() == DispatchStatus.AMBIGUOUS
@@ -539,6 +608,98 @@ public class CampaignDispatchService {
                 }
             }
         }
+    }
+
+    /**
+     * Turns abandoned audience attempts into terminal ambiguous rows that require reconciliation.
+     * An audience claim carries no owner fence or target fingerprint, and {@code submitted_at} is
+     * written only after the provider returns, so an abandoned attempt may already have been
+     * submitted and is never replayed. Its frequency reservation is kept until an operator resolves
+     * it. Each row is one auto-commit compare-and-set, so a late worker loses its terminal write.
+     * The owning sends are settled afterwards, even when a later row fails.
+     */
+    private void recoverExpiredAudienceReservations(int workspaceId) {
+        long graceMicros = audienceReservationGraceMicros();
+        Set<Integer> sweptSends = new TreeSet<>();
+        try {
+            for (CampaignDelivery abandoned : campaignDeliveryMapper.expiredAudienceReservationsPage(
+                    workspaceId, graceMicros, triggeredSendGate.dispatchPageSize())) {
+                if (campaignDeliveryMapper.markExpiredAudienceReservationAmbiguous(
+                        workspaceId,
+                        abandoned.getId(),
+                        graceMicros,
+                        EXPIRED_AUDIENCE_RESERVATION,
+                        CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) != 1) {
+                    continue;
+                }
+                sweptSends.add(abandoned.getSendId());
+                try {
+                    appendEvent(workspaceId, abandoned.getId(), "failed", EXPIRED_AUDIENCE_RESERVATION);
+                } catch (RuntimeException exception) {
+                    log.warn("Campaign delivery {} reservation-expiry event could not be appended",
+                            abandoned.getId());
+                }
+            }
+        } finally {
+            settleAudienceRecovery(workspaceId, sweptSends);
+        }
+    }
+
+    /**
+     * Settles every audience send the durable selector still owes a completion, then refreshes the
+     * counters of the sends this pass swept that the settlement did not already refresh. The
+     * selector is durable, so a send left running by a dead worker is found again on a later pass
+     * however the reconciliation row it owns is later resolved. A send that is no longer running
+     * owes only its counters, and those are refreshed from this pass's own sweep result rather than
+     * from a counter-disagreement scan, which would cost a dependent {@code COUNT(*)} over every
+     * audience send's failed deliveries on every tick. The bound that leaves: if this pass dies
+     * between the compare-and-set and the refresh, an already completed send under-reports
+     * {@code failed_count} until an operator resolves the reconciliation row the sweep created,
+     * which refreshes the counters itself.
+     */
+    private void settleAudienceRecovery(int workspaceId, Set<Integer> sweptSends) {
+        Set<Integer> countersOwed = new TreeSet<>(sweptSends);
+        try {
+            for (int sendId : campaignSendMapper.audienceSendsAwaitingRecoverySettlement(
+                    workspaceId, triggeredSendGate.dispatchPageSize())) {
+                countersOwed.remove(sendId);
+                settleRecovered(workspaceId, sendId);
+            }
+        } finally {
+            for (int sendId : countersOwed) {
+                campaignSendMapper.refreshCounters(workspaceId, sendId);
+            }
+        }
+    }
+
+    /**
+     * Records the provider correlation of an audience submission whose terminal write lost to the
+     * reservation sweep, so the provider's bounce and complaint webhooks still resolve to the row and
+     * record suppression and consent revocation. The swept row keeps its status, its reconciliation
+     * state, and its reservation, whether it is still awaiting reconciliation or an operator has
+     * already resolved it; a persistence fault is logged because the row is already reconcilable
+     * without it.
+     */
+    private void attachLateAudienceProviderCorrelation(
+            int workspaceId, int deliveryId, String providerId, String providerMessageId) {
+        try {
+            if (campaignDeliveryMapper.attachLateAudienceProviderCorrelation(
+                    workspaceId,
+                    deliveryId,
+                    providerId,
+                    providerMessageId,
+                    EXPIRED_AUDIENCE_RESERVATION,
+                    CampaignDeliveryFailureReason.DEADLINE_AMBIGUOUS.token()) == 1) {
+                log.warn("Campaign delivery {} was accepted after its reservation expired;"
+                        + " its reconciliation state is unchanged", deliveryId);
+            }
+        } catch (RuntimeException exception) {
+            log.warn("Campaign delivery {} late provider correlation could not be recorded", deliveryId);
+        }
+    }
+
+    private long audienceReservationGraceMicros() {
+        return deliveryProperties.providerCallReservationGrace().toNanos() / 1_000L;
     }
 
     private long dispatchLeaseMicros() {
