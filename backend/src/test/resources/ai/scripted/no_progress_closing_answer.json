@@ -1,0 +1,46 @@
+{
+  "id": "no_progress_closing_answer",
+  "selector": "connex_script_closing_answer",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Thornbury\",\"kinds\":[\"person\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Thornbury\",\"kinds\":[\"person\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Thornbury\",\"kinds\":[\"person\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "closing": true,
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\": \"I found [the contact](record:r1), and repeating the same search gave me nothing new, so this is everything I can confirm.\", \"citations\": [\"r1\"], \"suggestions\": [], \"title\": null}"
+      }
+    }
+  ]
+}

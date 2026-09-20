@@ -10,11 +10,16 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.ObjIntConsumer;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -24,8 +29,10 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiProviderProfile;
 import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiRequestJournal;
+import ooo.klae.connex.backend.ai.provider.scripted.ScriptedAiStepInterceptor;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -39,6 +46,7 @@ import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.dto.AiChatTurnAcceptedDto;
 import ooo.klae.connex.backend.dto.AiChatTurnCreateRequest;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
@@ -51,6 +59,8 @@ import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.tenant.TenantContext;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * The one scripted-provider Spring context, and the fixtures every trajectory golden runs against.
@@ -79,8 +89,36 @@ import ooo.klae.connex.backend.tenant.TenantContext;
                 "connex.ai.scripted-provider.enabled=true"
         })
 @ActiveProfiles({"test", ScriptedAiProviderProfile.NAME})
+@Import(AbstractScriptedTrajectoryTest.ScriptedStepInterceptorConfiguration.class)
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 abstract class AbstractScriptedTrajectoryTest {
+
+    /**
+     * Contributes the single loop-thread step interceptor the scripted provider will find.
+     *
+     * <p>Production contributes none, and the architecture test fails the build if an
+     * implementation ever appears in {@code src/main}. This one exists for the class of golden
+     * whose subject is what happens when turn state changes <em>between</em> two model steps: the
+     * state has to move on the loop thread, at the step boundary, because moving it before the
+     * turn started would rehearse a different code path entirely.
+     */
+    @TestConfiguration(proxyBeanMethods = false)
+    static class ScriptedStepInterceptorConfiguration {
+
+        /**
+         * Creates the one interceptor, which does nothing until a golden arms the hook.
+         * @return the delegating interceptor
+         */
+        @Bean
+        ScriptedAiStepInterceptor trajectoryStepInterceptor() {
+            return (scriptId, completedToolCalls) -> {
+                ObjIntConsumer<String> hook = STEP_HOOK.get();
+                if (hook != null) {
+                    hook.accept(scriptId, completedToolCalls);
+                }
+            };
+        }
+    }
 
     /** Longest a scripted turn may take to settle before the harness calls it a failure. */
     private static final Duration TERMINAL_DEADLINE = Duration.ofSeconds(90);
@@ -98,8 +136,21 @@ abstract class AbstractScriptedTrajectoryTest {
     private static final List<String> STOPPED_STATUSES =
             List.of("resolved", "failed", "timed_out", "cancelled");
 
-    /** Capability class every slice-2 golden is authored against. */
+    /** Capability class a golden runs under unless it asks for another. */
     private static final String SCRIPTED_MODEL_ID = "scripted-native";
+
+    /** Title an auto-title session carries until a settled turn generates one. */
+    static final String UNTITLED_SESSION = "Scripted trajectory";
+
+    /**
+     * The hook the one contributed step interceptor delegates to, or null when no test armed one.
+     *
+     * <p>Static because the interceptor is a context bean and the context outlives every method
+     * that runs in it. Cleared before and after each method, so an armed hook can never survive
+     * into a golden that did not ask for it.
+     */
+    private static final AtomicReference<ObjIntConsumer<String>> STEP_HOOK =
+            new AtomicReference<>();
 
     @Autowired private AiAssistantTurnService turnService;
     @Autowired private AiAssistantWriteToolService writeToolService;
@@ -115,6 +166,8 @@ abstract class AbstractScriptedTrajectoryTest {
     @Autowired private WorkspaceMapper workspaceMapper;
     @Autowired private TenantContext tenantContext;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private AiRestrictionEpoch restrictionEpoch;
+    @Autowired private ObjectMapper objectMapper;
 
     private Organization organization;
     private Workspace workspace;
@@ -149,6 +202,7 @@ abstract class AbstractScriptedTrajectoryTest {
 
     @BeforeEach
     void prepareTenant() {
+        STEP_HOOK.set(null);
         String unique = UUID.randomUUID().toString().substring(0, 8);
         organization = new Organization();
         organization.setName("Scripted trajectory " + unique);
@@ -182,6 +236,7 @@ abstract class AbstractScriptedTrajectoryTest {
 
     @AfterEach
     void cleanUpTenant() {
+        STEP_HOOK.set(null);
         clearAuthentication();
         journal.clear();
         if (workspace != null) {
@@ -240,6 +295,63 @@ abstract class AbstractScriptedTrajectoryTest {
     }
 
     /**
+     * Repoints this workspace's organization at another scripted capability class.
+     *
+     * <p>The configured model id is the only dimension a trajectory can vary, so a golden about
+     * streaming, about the JSON protocol, or about the context floor selects it here before its
+     * turn starts. Readiness is re-resolved per turn and nothing caches the row, so the change
+     * takes effect on the next {@link #run(String, String)}.
+     *
+     * @param modelId a declared scripted capability class model id
+     */
+    final void useCapabilityClass(String modelId) {
+        jdbcTemplate.update(
+                "UPDATE ai_provider_config SET model_id = ? WHERE org_id = ?",
+                modelId, organization.getId());
+    }
+
+    /**
+     * Arms the loop-thread hook the contributed step interceptor delegates to.
+     *
+     * <p>The hook runs on the worker thread, after the scripted cursor resolves and before the
+     * step is emitted, which is the only place a golden can move turn state exactly where
+     * production moves it — between two model steps rather than before the turn.
+     *
+     * @param hook receives the resolved script id and the tool calls completed so far
+     */
+    final void onScriptedStep(ObjIntConsumer<String> hook) {
+        STEP_HOOK.set(hook);
+    }
+
+    /** Advances this workspace's processing-restriction epoch, as a restriction sweep would. */
+    final void advanceRestrictionEpoch() {
+        restrictionEpoch.bump(workspace.getId());
+    }
+
+    /**
+     * Moves a record's stored update timestamp to now, as a colleague's concurrent edit would.
+     *
+     * @param table the record's table
+     * @param id the record's identifier
+     */
+    final void touch(String table, int id) {
+        jdbcTemplate.update(
+                "UPDATE " + table + " SET updated_at = NOW() WHERE workspace_id = ? AND id = ?",
+                workspace.getId(), id);
+    }
+
+    /**
+     * Reads the durable turn row a settled trajectory left behind.
+     *
+     * @param trajectory one settled trajectory
+     * @return the durable turn
+     */
+    final AiChatTurn turnRow(Trajectory trajectory) {
+        return chatMapper.getTurnById(
+                workspace.getId(), trajectory.sessionId(), trajectory.turnId());
+    }
+
+    /**
      * Runs one whole turn under a fresh session and waits for its durable terminal state.
      *
      * @param selector the script selector the member's own words carry
@@ -247,11 +359,28 @@ abstract class AbstractScriptedTrajectoryTest {
      * @return the settled turn
      */
     final Trajectory run(String selector, String request) {
+        return run(selector, request, List.of());
+    }
+
+    /**
+     * Runs one whole turn anchored to the records an active page would have supplied.
+     *
+     * <p>Page context is what anchors a routed skill to its subject, so a golden about skill
+     * authority has to supply it the way the product does rather than naming the record in prose.
+     *
+     * @param selector the script selector the member's own words carry
+     * @param request the rest of the member's request
+     * @param pageContext records the turn is anchored to
+     * @return the settled turn
+     */
+    final Trajectory run(
+            String selector, String request, List<AiChatPageContextDto> pageContext) {
         authenticate();
         try {
             int sessionId = session();
             AiChatTurnAcceptedDto accepted = turnService.start(
-                    sessionId, new AiChatTurnCreateRequest(selector + " " + request, List.of()));
+                    sessionId,
+                    new AiChatTurnCreateRequest(selector + " " + request, pageContext));
             AiChatTurn settled = awaitTerminal(sessionId, accepted.turnId());
             return new Trajectory(
                     sessionId,
@@ -278,6 +407,59 @@ abstract class AbstractScriptedTrajectoryTest {
                 "SELECT COUNT(*) FROM audit_log WHERE workspace_id = ? AND action = ?",
                 Integer.class, workspace.getId(), action);
         return count == null ? 0 : count;
+    }
+
+    /**
+     * Counts audit rows whose sanitized metadata carries one outcome and one reason.
+     *
+     * <p>A refusal that leaves no audit row is indistinguishable from a refusal that never
+     * happened, so a golden about a refused egress has to read the row rather than the exception
+     * it produced. The metadata lands in the append-only {@code changes} column as plain JSON.
+     *
+     * @param action stable audit action key
+     * @param outcome the {@code outcome} the metadata must carry
+     * @param reason the {@code reason} the metadata must carry
+     * @return how many rows match, for this workspace
+     */
+    final int auditRows(String action, String outcome, String reason) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM audit_log
+                WHERE workspace_id = ? AND action = ?
+                  AND JSON_UNQUOTE(JSON_EXTRACT(changes, '$.outcome')) = ?
+                  AND JSON_UNQUOTE(JSON_EXTRACT(changes, '$.reason')) = ?
+                """, Integer.class, workspace.getId(), action, outcome, reason);
+        return count == null ? 0 : count;
+    }
+
+    /**
+     * Reads a session's current title straight from the row.
+     *
+     * @param sessionId the trajectory's session
+     * @return the durable title
+     */
+    final String sessionTitle(int sessionId) {
+        return jdbcTemplate.queryForObject(
+                "SELECT title FROM ai_chat_session WHERE workspace_id = ? AND id = ?",
+                String.class, workspace.getId(), sessionId);
+    }
+
+    /**
+     * Parses the structured metadata the settled answer persisted beside its text.
+     *
+     * <p>The assistant message carries the citation chips, the follow-up suggestions and the
+     * replay resources in one JSON document, so a golden about what a guard withheld has to read
+     * it rather than the rendered text: three of those channels never appear in
+     * {@code ai_chat_message.content} at all.
+     *
+     * @param trajectory one settled trajectory
+     * @return the parsed structured metadata of its single assistant answer
+     */
+    final JsonNode structuredAnswer(Trajectory trajectory) {
+        String structuredJson = trajectory.answers().size() == 1
+                ? trajectory.answers().getFirst().getStructuredJson()
+                : null;
+        assertNotNull(structuredJson, "the settled answer persisted no structured metadata");
+        return objectMapper.readTree(structuredJson);
     }
 
     /**
@@ -453,11 +635,22 @@ abstract class AbstractScriptedTrajectoryTest {
                 id);
     }
 
+    /**
+     * Opens one auto-title session, the way the product opens a session a member did not name.
+     *
+     * <p>{@code titleUserSet} is deliberately false. The bean defaults it to true, and a
+     * user-titled session makes {@code applyGeneratedTitle} return before it writes anything — so
+     * a golden asserting that a guard withheld a model-authored title would pass on the default
+     * alone, proving the default rather than the guard.
+     *
+     * @return the new session's identifier
+     */
     private int session() {
         AiChatSession session = new AiChatSession();
         session.setWorkspaceId(workspace.getId());
         session.setCreatedByUserId(member.getId());
-        session.setTitle("Scripted trajectory");
+        session.setTitle(UNTITLED_SESSION);
+        session.setTitleUserSet(false);
         session.setVisibility("private");
         session.setStatus("active");
         chatMapper.insertSession(session);
