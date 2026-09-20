@@ -1915,7 +1915,9 @@ public class DealService {
      * only once that transaction has completed. Hydrating inside it would suspend a routed tenant
      * transaction and borrow a second pooled connection while the deal's collaborator row locks and
      * the workspace's audit-chain head lock are still held — see the connection-budget principle in
-     * {@code docs/backend/LOCKING.md}.
+     * {@code docs/backend/LOCKING.md}. Callers must therefore not wrap this method in their own
+     * transaction: the inner template would join it instead of committing, and the hydration would
+     * run inside the caller's routed transaction again.
      *
      * @param dealId the deal in the current workspace
      * @param userIds the requested collaborator ids

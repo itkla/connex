@@ -23,6 +23,11 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
  * Hydrates deal-collaborator profiles from the control catalog. Collaborator ids are tenant data;
  * the matching account profiles are control data, so the lookup suspends any routed tenant
  * transaction, reads on the default catalog, and restores the tenant transaction afterwards.
+ *
+ * <p>Ids beyond {@code PROFILE_BATCH_SIZE} are read in several statements and merged in memory by
+ * the sort key the server returns, so the merge reproduces the mapper's {@code ORDER BY} only under
+ * a NO PAD collation such as {@code utf8mb4_0900_ai_ci}. Under a PAD SPACE collation two display
+ * names differing only in trailing spaces could merge in the other order across batches.
  */
 @Component
 @RequiredArgsConstructor
