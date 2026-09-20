@@ -175,6 +175,56 @@ public interface CampaignDeliveryMapper {
             @Param("lastError") String lastError,
             @Param("lastErrorCode") String lastErrorCode);
 
+    /**
+     * Returns one bounded page of unleased audience attempts, with their sends, whose frequency
+     * reservation expired more than the grace ago without a submission or terminal write.
+     * @param workspaceId the owning workspace
+     * @param graceMicros how long past the reservation an attempt must be before it counts as abandoned
+     * @param limit the page size
+     * @return the abandoned attempts, ordered by id
+     */
+    List<CampaignDelivery> expiredAudienceReservationsPage(
+            @Param("workspaceId") int workspaceId,
+            @Param("graceMicros") long graceMicros,
+            @Param("limit") int limit);
+
+    /**
+     * Marks one abandoned audience attempt as requiring operator reconciliation, keeping its
+     * frequency reservation; it never returns the attempt to {@code pending}.
+     * @param workspaceId the owning workspace
+     * @param id the delivery
+     * @param graceMicros the same grace the page was selected with
+     * @param lastError the ambiguous failure detail
+     * @param lastErrorCode the bounded reason code
+     * @return one if the still-abandoned attempt was marked
+     */
+    int markExpiredAudienceReservationAmbiguous(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("graceMicros") long graceMicros,
+            @Param("lastError") String lastError,
+            @Param("lastErrorCode") String lastErrorCode);
+
+    /**
+     * Records the provider correlation of a submission whose terminal write lost to the audience
+     * reservation sweep, on the still-unresolved swept row that carries no provider id yet. It never
+     * changes the row's status, reconciliation requirement, or frequency reservation.
+     * @param workspaceId the owning workspace
+     * @param id the delivery
+     * @param providerId the provider that accepted the message
+     * @param providerMessageId the provider's message id
+     * @param lastError the failure detail the sweep wrote
+     * @param lastErrorCode the reason code the sweep wrote
+     * @return one if the swept row now carries the correlation
+     */
+    int attachLateAudienceProviderCorrelation(
+            @Param("workspaceId") int workspaceId,
+            @Param("id") int id,
+            @Param("providerId") String providerId,
+            @Param("providerMessageId") String providerMessageId,
+            @Param("lastError") String lastError,
+            @Param("lastErrorCode") String lastErrorCode);
+
     int markDispatched(
             @Param("workspaceId") int workspaceId,
             @Param("id") int id,

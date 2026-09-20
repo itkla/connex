@@ -35,8 +35,9 @@ public class CampaignFrequencyAdmissionService {
      * refusal is a claim this worker still owns that cannot be admitted — a suspended workspace, a
      * send that stopped being dispatchable, or a recipient that is no longer resolvable — and the
      * caller must terminate the row instead of leaving it {@code dispatching} forever, because an
-     * audience delivery has no lease and no recovery sweep while its unique send/person key blocks
-     * any replacement row.
+     * audience delivery has no lease and its only recovery sweep keys on an expired reservation,
+     * which a refused claim never wrote, while its unique send/person key blocks any replacement row.
+     * The sweep runs in its own auto-commit statement, never inside this transaction.
      */
     public enum Admission {
         RESERVED, CAPPED, CLAIM_LOST, REFUSED
