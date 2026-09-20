@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.atMost;
@@ -26,6 +27,7 @@ import static org.mockito.Mockito.when;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -1193,6 +1195,112 @@ class AiChatAgentLoopServiceTest {
                 any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
                 any(AiResponseSchema.class), any(AiNativeToolRequest.class),
                 eq(directAdmission), any(Runnable.class));
+    }
+
+    /**
+     * The turn's own snapshot of the per-step call bound is what rides on every native request.
+     *
+     * <p>Snapshotted once in {@code AiChatMemory} rather than re-resolved per step, so an operator
+     * changing the declaration mid-turn cannot move the bound under a turn that already sent
+     * requests under the old one.
+     */
+    @Test
+    void theTurnsSnapshottedCallBoundRidesOnEveryNativeRequest() throws Exception {
+        useNativeMemory(
+                new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000), 4);
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Nothing needs attention.", List.of())));
+
+        service.run(TURN);
+
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals(4, requests.getValue().maxParallelCalls());
+    }
+
+    /** An undeclared endpoint's turn keeps sending the single-call bound it always has. */
+    @Test
+    void anUndeclaredEndpointsTurnStillBoundsEveryStepToOneCall() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Nothing needs attention.", List.of())));
+
+        service.run(TURN);
+
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertEquals(1, requests.getValue().maxParallelCalls());
+    }
+
+    /**
+     * A declared endpoint's batch is refused by the loop, because the loop cannot yet execute one.
+     *
+     * <p>The parse boundary now admits up to the declared bound, so a batch reaches the loop
+     * intact. Executing its first call would run one quarter of a decision the model made as a
+     * whole, under an ownership, deadline, authorization and budget admission that were polled once
+     * for the step. Until the loop executes a batch under those checks per call, it refuses the
+     * response under the same {@code multiple-calls} repair rule an over-delivering provider has
+     * always produced — and nothing is proposed, executed or recorded.
+     */
+    @Test
+    void aBatchedNativeResponseIsStillRefusedAsMultipleCallsWithoutExecutingAnything()
+            throws Exception {
+        useNativeMemory(
+                new AiAssistantPromptBudget(64, 64_000, 16_000, 16_000, 16_000, 112_000), 4);
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeToolBatch(List.of(
+                        new AiToolCall(
+                                "call_1", "search_records",
+                                "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}"),
+                        new AiToolCall(
+                                "call_2", "search_records",
+                                "{\"query\":\"cooling\",\"kinds\":[\"person\"]}"))));
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.FAILED, result.outcome());
+        assertEquals("malformed_output", result.reason());
+        verify(toolExecutor, never()).execute(any(), any(), any(), any(Boolean.class), any());
+        verify(persistenceService, never()).proposeTool(
+                any(), anyInt(), anyInt(), anyString(), anyString(), any());
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, atLeastOnce()).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertTrue(
+                requests.getAllValues().stream()
+                        .map(AiNativeToolRequest::repairMessage)
+                        .filter(java.util.Objects::nonNull)
+                        .anyMatch(message -> message.contains("multiple-calls rule")),
+                "the loop must tell the model which rule its batch broke");
     }
 
     @Test
@@ -2932,13 +3040,35 @@ class AiChatAgentLoopServiceTest {
     }
 
     private void useNativeMemory(AiAssistantPromptBudget budget) {
+        useNativeMemory(budget, 1);
+    }
+
+    private void useNativeMemory(AiAssistantPromptBudget budget, int parallelToolCalls) {
         when(memoryService.prepare(eq(TURN), any(), any(Instant.class), any())).thenReturn(
                 new AiChatMemory(
                         List.of(message(TURN.userMessageId(), "Summarize my pipeline")),
                         budget,
                         0,
                         0,
-                        true));
+                        true,
+                        parallelToolCalls));
+    }
+
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> nativeToolBatch(
+            List<AiToolCall> calls) throws JacksonException {
+        List<JsonNode> arguments = new ArrayList<>(calls.size());
+        for (AiToolCall call : calls) {
+            arguments.add(objectMapper.readTree(call.arguments()));
+        }
+        return new AiNativeToolCompletion.Tool<>(
+                calls,
+                arguments,
+                0,
+                3,
+                5,
+                "tool_calls",
+                Optional.empty(),
+                Optional.empty());
     }
 
     private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> nativeTool(

@@ -113,7 +113,7 @@ class AiNativeToolRequestTest {
     }
 
     @Test
-    void refusesAnExchangeWithoutAStepOrWithANegativeOrdinal() {
+    void refusesAnExchangeWithoutAStepOrWithAnOrdinalOutsideTheCallCeiling() {
         AiToolCall call = new AiToolCall("call_1", "get_record", "{}");
 
         assertThrows(
@@ -122,6 +122,44 @@ class AiNativeToolRequestTest {
         assertThrows(
                 IllegalArgumentException.class,
                 () -> new AiToolExchange(call, "CRM_DATA_BEGIN\n{}\nCRM_DATA_END", 1, -1));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new AiToolExchange(
+                        call,
+                        "CRM_DATA_BEGIN\n{}\nCRM_DATA_END",
+                        1,
+                        AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS + 1));
+    }
+
+    /**
+     * The per-step call bound is the request's own, not something each reader re-derives.
+     *
+     * <p>Both the adapter that serializes {@code parallel_tool_calls} and the parser that refuses
+     * an over-delivering response read it here, so a request carrying an impossible bound is
+     * refused where it is built rather than acted on twice.
+     */
+    @Test
+    void boundsTheParallelCallCeilingToWhatOneStepCanEverCarry() {
+        assertEquals(
+                1,
+                new AiNativeToolRequest(List.of(DEFINITION), List.of()).maxParallelCalls());
+        assertEquals(
+                AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS,
+                new AiNativeToolRequest(
+                        List.of(DEFINITION),
+                        List.of(),
+                        null,
+                        false,
+                        AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS).maxParallelCalls());
+
+        for (int invalid : new int[] {
+                0, -1, AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS + 1}) {
+            assertThrows(
+                    IllegalArgumentException.class,
+                    () -> new AiNativeToolRequest(
+                            List.of(DEFINITION), List.of(), null, false, invalid),
+                    "expected a refusal for maxParallelCalls " + invalid);
+        }
     }
 
     private static AiToolExchange exchange(String id, int step, int callOrdinal) {

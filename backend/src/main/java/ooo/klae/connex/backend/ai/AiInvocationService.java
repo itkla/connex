@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.ai;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -120,7 +122,8 @@ public class AiInvocationService {
                 adapter.maxOutputTokens(resolved.target()),
                 adapter.toolCallingCapability(resolved.target()),
                 adapter.nativeToolReasoningCapability(resolved.target()),
-                adapter.supportsStreaming(resolved.target()));
+                adapter.supportsStreaming(resolved.target()),
+                adapter.parallelToolCallLimit(resolved.target()));
     }
 
     /**
@@ -531,7 +534,8 @@ public class AiInvocationService {
         ReasoningNormalization reasoning = captured.ambiguous()
                 ? new ReasoningNormalization(Optional.empty(), "reasoning_boundary")
                 : normalizeReasoning(captured.reasoning(), invocation);
-        if (result.toolCalls().size() != 1) {
+        List<AiToolCall> calls = result.toolCalls();
+        if (calls.size() > nativeTools.maxParallelCalls()) {
             return malformedNativeTool(
                     raw, invocation, result, reasoning, "native_multiple_calls");
         }
@@ -541,52 +545,75 @@ public class AiInvocationService {
                     raw, invocation, result, reasoning, "native_call_content");
         }
         ReasoningNormalization narration = normalizeNarration(captured.answer(), invocation);
-        AiToolCall call = result.toolCalls().getFirst();
-        if (nativeTools.exchanges().stream()
-                .anyMatch(exchange -> exchange.call().id().equals(call.id()))) {
-            return malformedNativeTool(
-                    raw, invocation, result, reasoning, "native_duplicate_call_id");
+        Set<String> seenIds = new HashSet<>();
+        for (AiToolCall call : calls) {
+            if (!seenIds.add(call.id())
+                    || nativeTools.exchanges().stream()
+                            .anyMatch(exchange -> exchange.call().id().equals(call.id()))) {
+                return malformedNativeTool(
+                        raw, invocation, result, reasoning, "native_duplicate_call_id");
+            }
         }
-        JsonNode arguments;
-        try {
-            arguments = objectMapper.readTree(call.arguments());
-        } catch (JacksonException | IllegalArgumentException exception) {
-            return malformedNativeTool(
-                    raw, invocation, result, reasoning, "native_arguments_not_object");
+        List<JsonNode> callArguments = new ArrayList<>(calls.size());
+        int warnings = 0;
+        for (AiToolCall call : calls) {
+            JsonNode arguments;
+            try {
+                arguments = objectMapper.readTree(call.arguments());
+            } catch (JacksonException | IllegalArgumentException exception) {
+                return malformedNativeTool(
+                        raw, invocation, result, reasoning, "native_arguments_not_object");
+            }
+            if (arguments == null || !arguments.isObject()) {
+                return malformedNativeTool(
+                        raw, invocation, result, reasoning, "native_arguments_not_object");
+            }
+            ObjectNode step = objectMapper.createObjectNode();
+            ObjectNode tool = step.putObject("tool");
+            tool.put("name", call.name());
+            tool.set("args", arguments);
+            step.putNull("final");
+            String rejectionReason = toolGuard.rejectionReason(step);
+            if (rejectionReason != null) {
+                return malformedNativeTool(
+                        raw,
+                        invocation,
+                        result,
+                        reasoning,
+                        "tool_name".equals(rejectionReason)
+                                ? "native_unknown_tool"
+                                : "native_invalid_arguments");
+            }
+            warnings = saturatedSum(warnings, demaskTree(arguments, invocation.context()));
+            callArguments.add(arguments);
         }
-        if (arguments == null || !arguments.isObject()) {
-            return malformedNativeTool(
-                    raw, invocation, result, reasoning, "native_arguments_not_object");
-        }
-        ObjectNode step = objectMapper.createObjectNode();
-        ObjectNode tool = step.putObject("tool");
-        tool.put("name", call.name());
-        tool.set("args", arguments);
-        step.putNull("final");
-        String rejectionReason = toolGuard.rejectionReason(step);
-        if (rejectionReason != null) {
-            return malformedNativeTool(
-                    raw,
-                    invocation,
-                    result,
-                    reasoning,
-                    "tool_name".equals(rejectionReason)
-                            ? "native_unknown_tool"
-                            : "native_invalid_arguments");
-        }
-        int warnings = demaskTree(arguments, invocation.context());
         raw.close();
         emitAudit(raw, invocation, "success", result.inputTokens(), result.outputTokens(),
                 result.stopReason(), warnings, null, true, PARSE_OUTCOME_PARSED);
         return new AiNativeToolCompletion.Tool<>(
-                call,
-                arguments,
+                calls,
+                callArguments,
                 warnings,
                 result.inputTokens(),
                 result.outputTokens(),
                 result.stopReason(),
                 reasoning.rejectionReason() == null ? reasoning.content() : Optional.empty(),
                 narration.rejectionReason() == null ? narration.content() : Optional.empty());
+    }
+
+    /**
+     * Sums one response's per-call demask warnings without letting the total wrap to zero.
+     *
+     * <p>A non-zero total fails the whole turn as malformed output, so a wrapped sum would be a
+     * silent pass for the exact response the count exists to refuse.
+     *
+     * @param total warnings counted so far
+     * @param addition one call's warnings
+     * @return the bounded sum
+     */
+    private static int saturatedSum(int total, int addition) {
+        int sum = total + addition;
+        return sum < 0 ? Integer.MAX_VALUE : sum;
     }
 
     private <T> AiNativeToolCompletion<T> malformedNativeTool(

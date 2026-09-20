@@ -425,7 +425,8 @@ public final class AiModelCatalog {
      */
     public static boolean streamingDeclared(
             Family family, AiProviderTarget target, List<AiProperties.ModelOverride> overrides) {
-        return endpointDeclared(family, target, overrides, AiProperties.ModelOverride::streamingFor);
+        return endpointDeclared(
+                family, target, overrides, AiProperties.ModelOverride::streamingFor, false);
     }
 
     /**
@@ -443,27 +444,51 @@ public final class AiModelCatalog {
      */
     public static boolean thoughtsDeclared(
             Family family, AiProviderTarget target, List<AiProperties.ModelOverride> overrides) {
-        return endpointDeclared(family, target, overrides, AiProperties.ModelOverride::thoughtsFor);
+        return endpointDeclared(
+                family, target, overrides, AiProperties.ModelOverride::thoughtsFor, false);
     }
 
-    private static boolean endpointDeclared(
+    /**
+     * How many function calls an operator has declared this exact endpoint may emit in one step.
+     *
+     * <p>Answered from declaration alone, on the same terms as {@link #streamingDeclared}, and
+     * clamped to {@link AiProviderCapabilities#MAX_PARALLEL_TOOL_CALLS} so a configuration mistake
+     * widens nothing past the ceiling the loop and the durable key shape were sized for. An
+     * undeclared endpoint — which is every endpoint until an operator records a probe — answers 1,
+     * which is exactly today's behaviour at every layer below.
+     *
+     * @param family provider family owning the target
+     * @param target configured provider target, may be {@code null}
+     * @param overrides deployment overrides, may be {@code null}
+     * @return the declared per-step call ceiling, between 1 and
+     *     {@link AiProviderCapabilities#MAX_PARALLEL_TOOL_CALLS}
+     */
+    public static int parallelReadCalls(
+            Family family, AiProviderTarget target, List<AiProperties.ModelOverride> overrides) {
+        int declared = endpointDeclared(
+                family, target, overrides, AiProperties.ModelOverride::parallelReadCallsFor, 1);
+        return Math.clamp(declared, 1, AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS);
+    }
+
+    private static <T> T endpointDeclared(
             Family family,
             AiProviderTarget target,
             List<AiProperties.ModelOverride> overrides,
-            EndpointDeclaration declaration) {
+            EndpointDeclaration<T> declaration,
+            T undeclared) {
         if (overrides == null || overrides.isEmpty() || target == null) {
-            return false;
+            return undeclared;
         }
         String normalizedModelId = family.normalize(modelIdOf(target));
         if (normalizedModelId == null || normalizedModelId.isBlank()) {
-            return false;
+            return undeclared;
         }
-        boolean declared = false;
+        T declared = undeclared;
         for (AiProperties.ModelOverride override : overrides) {
             if (override == null) {
                 continue;
             }
-            Boolean value = declaration.resolve(
+            T value = declaration.resolve(
                     override, family.providerId(), normalizedModelId, target.endpoint());
             if (value != null) {
                 declared = value;
@@ -472,10 +497,14 @@ public final class AiModelCatalog {
         return declared;
     }
 
-    /** One override's answer to an endpoint-scoped capability question. */
+    /**
+     * One override's answer to an endpoint-scoped capability question.
+     *
+     * @param <T> the declared value's type, {@code null} when the override says nothing
+     */
     @FunctionalInterface
-    private interface EndpointDeclaration {
-        Boolean resolve(
+    private interface EndpointDeclaration<T> {
+        T resolve(
                 AiProperties.ModelOverride override,
                 String providerId,
                 String normalizedModelId,

@@ -45,6 +45,7 @@ import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
 import ooo.klae.connex.backend.ai.provider.AiInvocationProtocol;
 import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiProviderCallerDeadlineExceededException;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
@@ -76,6 +77,21 @@ import tools.jackson.databind.node.ObjectNode;
 @RequiredArgsConstructor
 public class AiChatAgentLoopService {
     static final int HARD_MAX_STEPS = 64;
+
+    /**
+     * The most {@code ai_chat_tool_call} rows one turn can leave behind.
+     *
+     * <p>A projection bound, not a guard. The step loop already refuses past {@link #HARD_MAX_STEPS}
+     * and a step carries at most {@link AiProviderCapabilities#MAX_PARALLEL_TOOL_CALLS} calls, so a
+     * check against this number could never fire; what it is for is the row limit the progress
+     * projection passes to {@code listToolCallsByTurn}. That limit used to be the step ceiling
+     * itself, which was exact only while one step wrote one row. A turn whose steps may write
+     * several rows would silently lose real milestones under the old limit while every suffixed key
+     * it wrote still parsed and looked healthy.
+     */
+    static final int MAX_TOOL_CALL_ROWS_PER_TURN =
+            HARD_MAX_STEPS * AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS;
+
     private static final int MAX_CONSECUTIVE_NO_PROGRESS_STEPS = 2;
     /**
      * The whole-turn narration budget. Each segment is already bounded to a status sentence; this
@@ -419,7 +435,8 @@ public class AiChatAgentLoopService {
                                     nativeDefinitions,
                                     nativeReplay.exchanges(),
                                     nativeReplay.repairMessage(),
-                                    closing);
+                                    closing,
+                                    memory.parallelToolCalls());
                             nativeProviderAttempts++;
                             NativeStepAttempt nativeAttempt = nativeStepAttempt(
                                     invocationService.completeNativeToolsRepairable(
@@ -1472,9 +1489,33 @@ public class AiChatAgentLoopService {
         }
     }
 
+    /**
+     * Translates one native completion into the step attempt the loop's single path consumes.
+     *
+     * <p>A response carrying several calls is refused here, under the same
+     * {@code native_multiple_calls} repair rule the parse boundary used to raise for it. The
+     * boundary now bounds a response by what the operator declared for the endpoint rather than by
+     * the literal one, so a declared endpoint's batch reaches this method intact — and this loop
+     * cannot yet execute a batch under one per-call authorization, ownership, deadline and budget
+     * admission. Refusing it keeps the model's instruction and the turn's outcome exactly what an
+     * over-delivering provider has always produced, rather than executing the first call of a
+     * decision the model made as four.
+     */
     private static NativeStepAttempt nativeStepAttempt(
             AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion) {
         return switch (completion) {
+            case AiNativeToolCompletion.Tool<AiAssistantStep.FinalAnswer> tool
+                    when tool.providerCalls().size() > 1 -> new NativeStepAttempt(
+                    new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Malformed<>(
+                                    AiStructuredOutcome.REASON_MALFORMED,
+                                    tool.inputTokens(),
+                                    tool.outputTokens(),
+                                    tool.stopReason()),
+                            Optional.of(AiStructuredRepair.from("native_multiple_calls", "")),
+                            tool.reasoning()),
+                    Optional.empty(),
+                    true);
             case AiNativeToolCompletion.Tool<AiAssistantStep.FinalAnswer> tool -> {
                 AiAssistantStep step = new AiAssistantStep(
                         new AiAssistantStep.Tool(

@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -13,10 +15,26 @@ public sealed interface AiNativeToolCompletion<T> {
     String stopReason();
     Optional<String> reasoning();
 
-    /** Validated, demasked native function call ready for the assistant's normal routing. */
+    /**
+     * Every validated, demasked native function call one model step produced.
+     *
+     * <p>Plural because a declared endpoint may answer one model decision with several calls, while
+     * singular stays the overwhelming case. {@link #providerCall()} and {@link #arguments()} name
+     * the sole call and refuse rather than guess when the response carried a batch, so no caller
+     * can silently read the first of four and act as if that were the whole decision.
+     *
+     * @param providerCalls the step's calls in the order the provider emitted them, never empty
+     * @param callArguments each call's demasked arguments object, one per call in the same order
+     * @param demaskWarnings demask warnings summed across every call of the response
+     * @param inputTokens provider-reported prompt tokens for the whole response
+     * @param outputTokens provider-reported generated tokens for the whole response
+     * @param stopReason provider-reported stop reason for the whole response
+     * @param reasoning display-only reasoning returned beside the calls
+     * @param narration model-authored narration returned beside the calls
+     */
     record Tool<T>(
-            AiToolCall providerCall,
-            JsonNode arguments,
+            List<AiToolCall> providerCalls,
+            List<JsonNode> callArguments,
             int demaskWarnings,
             int inputTokens,
             int outputTokens,
@@ -24,7 +42,7 @@ public sealed interface AiNativeToolCompletion<T> {
             Optional<String> reasoning,
             Optional<String> narration) implements AiNativeToolCompletion<T> {
 
-        /** Creates a tool completion whose provider emitted no narration alongside the call. */
+        /** Creates a single-call tool completion whose provider emitted no narration beside it. */
         public Tool(
                 AiToolCall providerCall,
                 JsonNode arguments,
@@ -37,27 +55,90 @@ public sealed interface AiNativeToolCompletion<T> {
                     stopReason, reasoning, Optional.empty());
         }
 
+        /** Creates a single-call tool completion, the shape every undeclared endpoint produces. */
+        public Tool(
+                AiToolCall providerCall,
+                JsonNode arguments,
+                int demaskWarnings,
+                int inputTokens,
+                int outputTokens,
+                String stopReason,
+                Optional<String> reasoning,
+                Optional<String> narration) {
+            this(
+                    List.of(Objects.requireNonNull(providerCall, "providerCall")),
+                    List.of(Objects.requireNonNull(arguments, "arguments")),
+                    demaskWarnings,
+                    inputTokens,
+                    outputTokens,
+                    stopReason,
+                    reasoning,
+                    narration);
+        }
+
         public Tool {
-            Objects.requireNonNull(providerCall, "providerCall");
-            JsonNode source = Objects.requireNonNull(arguments, "arguments");
-            if (!source.isObject()) {
-                throw new IllegalArgumentException("AI native tool arguments must be an object");
+            providerCalls = List.copyOf(Objects.requireNonNull(providerCalls, "providerCalls"));
+            List<JsonNode> declared =
+                    List.copyOf(Objects.requireNonNull(callArguments, "callArguments"));
+            if (providerCalls.isEmpty() || providerCalls.size() != declared.size()) {
+                throw new IllegalArgumentException(
+                        "AI native tool calls and arguments must correspond");
             }
-            arguments = source.deepCopy();
+            callArguments = List.copyOf(deepCopies(declared));
             Objects.requireNonNull(stopReason, "stopReason");
             reasoning = Objects.requireNonNull(reasoning, "reasoning");
             narration = Objects.requireNonNull(narration, "narration");
         }
 
-        @Override
+        /**
+         * Returns the one call a single-call response carried.
+         *
+         * @return the sole provider call
+         * @throws IllegalStateException when the response carried more than one call
+         */
+        public AiToolCall providerCall() {
+            requireSoleCall();
+            return providerCalls.getFirst();
+        }
+
+        /**
+         * Returns the demasked arguments a single-call response carried.
+         *
+         * @return a defensive copy of the sole call's arguments
+         * @throws IllegalStateException when the response carried more than one call
+         */
         public JsonNode arguments() {
-            return arguments.deepCopy();
+            requireSoleCall();
+            return callArguments.getFirst().deepCopy();
+        }
+
+        public List<JsonNode> callArguments() {
+            return List.copyOf(deepCopies(callArguments));
+        }
+
+        private void requireSoleCall() {
+            if (providerCalls.size() != 1) {
+                throw new IllegalStateException(
+                        "AI native tool response carried " + providerCalls.size() + " calls");
+            }
+        }
+
+        private static List<JsonNode> deepCopies(List<JsonNode> arguments) {
+            List<JsonNode> copies = new ArrayList<>(arguments.size());
+            for (JsonNode node : arguments) {
+                if (node == null || !node.isObject()) {
+                    throw new IllegalArgumentException(
+                            "AI native tool arguments must be an object");
+                }
+                copies.add(node.deepCopy());
+            }
+            return copies;
         }
 
         @Override
         public String toString() {
-            return "Tool[providerCall=" + providerCall
-                    + ", arguments=<redacted>"
+            return "Tool[providerCalls=" + providerCalls
+                    + ", callArguments=<redacted>"
                     + ", demaskWarnings=" + demaskWarnings
                     + ", inputTokens=" + inputTokens
                     + ", outputTokens=" + outputTokens

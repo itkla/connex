@@ -147,6 +147,24 @@ public class OpenAiCompatibleAdapter implements AiProvider {
                 AiModelCatalog.Family.OPENAI_COMPATIBLE, target, aiProperties.getModelOverrides());
     }
 
+    /**
+     * How many function calls this configured endpoint may emit in one assistant message.
+     *
+     * <p>Declared by an operator per endpoint rather than assumed, and for a behavioural reason
+     * rather than a syntactic one: {@code parallel_tool_calls} already travels on every request as
+     * {@code false}, so the field itself is known to be accepted. What an operator has to verify
+     * before declaring is that the endpoint emits several calls with distinct ids and its own
+     * replay signature per call, and that it accepts a replayed assistant message carrying several
+     * of them. An undeclared endpoint keeps the single-call behaviour this adapter has always had.
+     *
+     * @see AiModelCatalog#parallelReadCalls
+     */
+    @Override
+    public int parallelToolCallLimit(AiProviderTarget target) {
+        return AiModelCatalog.parallelReadCalls(
+                AiModelCatalog.Family.OPENAI_COMPATIBLE, target, aiProperties.getModelOverrides());
+    }
+
     @Override
     public AiCompletionResult complete(AiCompletionRequest request) {
         if (request == null) {
@@ -408,7 +426,7 @@ public class OpenAiCompatibleAdapter implements AiProvider {
             function.set("parameters", definition.parametersSchema());
         }
         root.put("tool_choice", nativeTools.finalOnly() ? "none" : "auto");
-        root.put("parallel_tool_calls", false);
+        root.put("parallel_tool_calls", nativeTools.maxParallelCalls() > 1);
     }
 
     private static AiStructuredOutputEnforcement requestedEnforcement(

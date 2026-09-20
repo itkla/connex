@@ -2,7 +2,18 @@ package ooo.klae.connex.backend.ai.provider;
 
 import java.util.Objects;
 
-/** Exact adapter capabilities for one configured provider target. */
+/**
+ * Exact adapter capabilities for one configured provider target.
+ *
+ * @param structuredOutput structured-output enforcement the target accepts
+ * @param reasoning reasoning protocol the target answers under
+ * @param contextWindowTokens declared context window in tokens
+ * @param maxOutputTokens declared maximum generated output in tokens
+ * @param toolCalling function-tool protocol the target accepts
+ * @param nativeToolReasoning reasoning protocol used alongside native function tools
+ * @param streaming whether the target accepts a streamed completion request
+ * @param parallelToolCalls how many function calls one model step of this target may carry, from 1
+ */
 public record AiProviderCapabilities(
         AiStructuredOutputEnforcement structuredOutput,
         AiReasoningMode reasoning,
@@ -10,7 +21,20 @@ public record AiProviderCapabilities(
         int maxOutputTokens,
         AiToolCallingMode toolCalling,
         AiReasoningMode nativeToolReasoning,
-        boolean streaming) {
+        boolean streaming,
+        int parallelToolCalls) {
+
+    /**
+     * The most function calls one model step may ever carry, whatever an operator declares.
+     *
+     * <p>A declaration ceiling rather than a preference. Four is the smallest number that collapses
+     * a record crawl — a record plus its activities, tasks and notes — into one model decision, and
+     * it keeps a turn's worst-case durable tool-call rows at a number one progress projection query
+     * can still read whole. Raising it is a constant change plus a fresh endpoint probe, never a
+     * silent widening.
+     */
+    public static final int MAX_PARALLEL_TOOL_CALLS = 4;
+
     private static final int ESTIMATED_UTF8_BYTES_PER_TOKEN = 4;
 
     public AiProviderCapabilities {
@@ -25,6 +49,23 @@ public record AiProviderCapabilities(
             throw new IllegalArgumentException(
                     "AI maximum output tokens must fit within the context window");
         }
+        if (parallelToolCalls < 1 || parallelToolCalls > MAX_PARALLEL_TOOL_CALLS) {
+            throw new IllegalArgumentException(
+                    "AI parallel tool calls must be between 1 and " + MAX_PARALLEL_TOOL_CALLS);
+        }
+    }
+
+    /** Creates capabilities whose target carries at most one function call per model step. */
+    public AiProviderCapabilities(
+            AiStructuredOutputEnforcement structuredOutput,
+            AiReasoningMode reasoning,
+            int contextWindowTokens,
+            int maxOutputTokens,
+            AiToolCallingMode toolCalling,
+            AiReasoningMode nativeToolReasoning,
+            boolean streaming) {
+        this(structuredOutput, reasoning, contextWindowTokens, maxOutputTokens,
+                toolCalling, nativeToolReasoning, streaming, 1);
     }
 
     /** Creates capabilities with buffered provider delivery and a conservative output ceiling. */

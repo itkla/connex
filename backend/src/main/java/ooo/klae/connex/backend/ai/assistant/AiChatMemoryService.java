@@ -259,7 +259,8 @@ public class AiChatMemoryService {
                 budget,
                 inputTokens,
                 outputTokens,
-                nativeTools);
+                nativeTools,
+                capabilities.parallelToolCalls());
     }
 
     static List<AiChatMessage> boundedHistory(
