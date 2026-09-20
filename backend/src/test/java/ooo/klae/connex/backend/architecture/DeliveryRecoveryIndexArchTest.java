@@ -25,9 +25,10 @@ import org.springframework.boot.test.context.SpringBootTest;
  * can be seeked for its abandoned-attempt arm. Only an index leading with {@code status} and
  * {@code dispatch_lease_owner}, with {@code frequency_reserved_at} behind them, turns that arm into
  * two equalities plus a range and lets a tick with nothing to recover read no delivery rows.
- * Without it the arm degrades to a full {@code campaign_delivery} scan on every tick, so discovery
- * cost follows delivery history instead of outstanding recovery work — the regression this guard
- * exists to prevent. The statement's row semantics are pinned elsewhere and stay green either way,
+ * Without it the optimizer falls back to a scan — of {@code campaign_delivery}, or of
+ * {@code campaign_send} with one delivery probe per send — on every tick, so discovery cost follows
+ * send and delivery history instead of outstanding recovery work, the regression this guard exists
+ * to prevent. The statement's row semantics are pinned elsewhere and stay green either way,
  * which is why the index itself needs a live-schema guard.
  */
 @SpringBootTest
