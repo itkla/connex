@@ -139,7 +139,7 @@
        usually belongs to a send that already completed, so a send-driven branch would cost one index
        probe per historical audience send on every tick. Leading the arm with status and
        dispatch_lease_owner makes it two equalities plus a frequency_reserved_at range on
-       idx_campaign_delivery_unleased_reservation (V216), so a tick with nothing to recover reads no
+       idx_campaign_delivery_unleased_reservation, so a tick with nothing to recover reads no
        delivery rows; no index that leads with workspace_id could be seeked here. A stale failed
        counter is deliberately not a discovery reason, because detecting one costs a dependent
        COUNT(*) over every audience send's failed deliveries, which again scales with delivery history

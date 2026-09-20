@@ -665,10 +665,12 @@ cancelled send can own the stranded row; scheduler discovery includes workspaces
 such a row. That discovery arm is driven by the `dispatching` delivery rows rather than by every
 audience send, because a stranded attempt usually belongs to a send that already completed, so a
 send-driven branch would cost one index probe per historical audience send on every tick.
-`idx_campaign_delivery_unleased_reservation` (V216) answers it as `status` and `dispatch_lease_owner`
+`idx_campaign_delivery_unleased_reservation` answers it as `status` and `dispatch_lease_owner`
 equalities plus a `frequency_reserved_at` range, so a tick with nothing to recover reads no delivery
 rows; the statement runs once per catalog with no workspace predicate, so no index leading with
-`workspace_id` could be seeked for it. The same pass then settles every audience send that is still
+`workspace_id` could be seeked for it. Every statement stays correct without that index and only the
+scan returns, so `DeliveryRecoveryIndexArchTest` pins its leading columns against a later index
+consolidation. The same pass then settles every audience send that is still
 `running` with nothing `pending` or `dispatching`: it completes the send and refreshes the counters,
 without resolving a provider, so a connector disabled after the worker died cannot keep the send
 running. The completion is a single compare-and-set that proves the absence of `pending` and

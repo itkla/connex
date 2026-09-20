@@ -78,7 +78,7 @@ public interface CampaignSendMapper {
      * sends, triggered work, and abandoned audience attempts whose reservation expired past the
      * grace. A stale failed counter is not one of those reasons: the sweep refreshes the counters of
      * the sends it marked in the same pass, and a counter a fault leaves stale is repaired when the
-     * operator resolves the reconciliation row that sweep created. The abandoned-attempt arm is
+     * operator resolves the reconciliation row the sweep created. The abandoned-attempt arm is
      * driven by the dispatching delivery rows rather than by every audience send, so its cost follows
      * the outstanding recovery work instead of the catalog's send history.
      * @param triggeredSendEnabled whether pending triggered deliveries count as work
