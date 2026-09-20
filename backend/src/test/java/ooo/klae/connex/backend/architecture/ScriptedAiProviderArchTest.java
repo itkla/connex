@@ -104,10 +104,19 @@ class ScriptedAiProviderArchTest {
             Pattern.compile("\\bScriptedAiStepInterceptor\\s+\\w+\\s*\\("),
             Pattern.compile("\\bScriptedAiStepInterceptor\\s+\\w+\\s*="));
 
-    /** Files permitted to name the scoped types while living outside the scripted package. */
+    /**
+     * Files permitted to name the scoped types while living outside the scripted package.
+     *
+     * <p>Only tests, and only the two that must hold the journal bean to assert what a trajectory
+     * would have sent. Any other entry here is a production reference wearing a test's file name.
+     */
     private static final Set<String> SCOPED_TYPE_ALLOWLIST = Set.of(
             "backend/src/test/java/ooo/klae/connex/backend/architecture/"
-                    + "ScriptedAiProviderArchTest.java");
+                    + "ScriptedAiProviderArchTest.java",
+            "backend/src/test/java/ooo/klae/connex/backend/ai/assistant/"
+                    + "AbstractScriptedTrajectoryTest.java",
+            "backend/src/test/java/ooo/klae/connex/backend/ai/assistant/"
+                    + "AiAssistantScriptedTrajectoryTest.java");
 
     @Test
     void theRealOpenAiCompatibleAdapterKeepsItsProfileNegation() {

@@ -122,6 +122,13 @@ tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
 }
 
+// The scripted trajectory harness is the one test context that activates the ai-scripted-provider
+// Spring profile, so it is a context key nothing else in the suite shares. It runs in its own fork
+// with its own context cache and connection budget instead of evicting a hot context out of the
+// shared one. The required Backend CI job runs `test scriptedTrajectoryTest`: a task nothing runs
+// proves nothing.
+def scriptedTrajectoryPattern = '**/*ScriptedTrajectory*Test.class'
+
 tasks.named('test') {
 	useJUnitPlatform()
 	maxHeapSize = '2048m'
@@ -130,6 +137,19 @@ tasks.named('test') {
 	// One test fork retains at most 10 cached pools. Including one context loading, the application-pool
 	// budget is (10 + 1) * 10 = 110, leaving 41 of MySQL's default 151 for auxiliary test connections.
 	systemProperty 'spring.test.context.cache.maxSize', '10'
+	exclude scriptedTrajectoryPattern
+}
+
+tasks.register('scriptedTrajectoryTest', Test) {
+	group = 'verification'
+	description = 'Runs scripted agent trajectories end to end against the scripted AI provider.'
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform()
+	maxHeapSize = '2048m'
+	maxParallelForks = 1
+	include scriptedTrajectoryPattern
+	systemProperty 'spring.test.context.cache.maxSize', '2'
 }
 
 def seederRuntimeClasspath = sourceSets.main.output + configurations.productionRuntimeClasspath

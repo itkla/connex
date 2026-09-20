@@ -412,6 +412,18 @@ class AiAssistantPromptInjectionGoldenTest {
         throw new AssertionError("Expected parsed structured output but was " + outcome);
     }
 
+    /**
+     * Minimal in-test provider for this golden's prompt assertions. <b>Not a model for a new
+     * adapter.</b>
+     *
+     * <p>It produces its output inside {@code providerAttemptExecutor().execute(...)} and never
+     * calls {@code beforeSend()}, so it never marks the organization budget lease dispatched. That
+     * is harmless here — this class asserts what the assembled prompt contains, and no assertion in
+     * it is about dispatch accounting — but an adapter copied from this shape would pass every
+     * functional test while under-counting real sends. A real adapter owes both calls, in the
+     * transport's own order; {@code AiBudgetDispatchBoundaryTest} and the fixture-driven adapter in
+     * {@code ai.provider.scripted} own that contract.
+     */
     private static final class DeterministicProvider implements AiProvider {
         private final Deque<String> outputs;
         private final List<AiCompletionRequest> requests = new ArrayList<>();
