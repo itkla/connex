@@ -707,10 +707,16 @@ public class CampaignDispatchService {
      * to the row and record suppression and consent revocation. The swept row keeps its status, its
      * reconciliation state, and any operator decision; a row the sweep returned to the queue for an
      * idempotent replay is refused here and correlated by that replay's own terminal write. A
-     * persistence fault is logged because the row is already reconcilable without it.
+     * receipt that names no message id, which the SMTP transport never does and an ESP response may
+     * omit, is skipped: no webhook could resolve to the row it would write, so reporting it as
+     * correlated would only mislead reconciliation. A persistence fault is logged because the row is
+     * already reconcilable without it.
      */
     private void attachLateTriggeredProviderCorrelation(
             int workspaceId, int deliveryId, ResolvedDeliveryProvider target, String providerMessageId) {
+        if (providerMessageId == null || providerMessageId.isBlank()) {
+            return;
+        }
         try {
             if (campaignDeliveryMapper.attachLateTriggeredProviderCorrelation(
                     workspaceId,
