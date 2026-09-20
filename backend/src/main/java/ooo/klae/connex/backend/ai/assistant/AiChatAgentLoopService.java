@@ -505,20 +505,21 @@ public class AiChatAgentLoopService {
                     String argumentsJson = serialize(step.tool().args());
                     String toolCallKey = step.tool().name() + "\n"
                             + serialize(canonicalize(step.tool().args()));
-                    recordNativeCall(
-                            nativeTools, nativeCalls,
-                            stepNumber, nativeProviderCall);
                     String thoughtSignature = nativeProviderCall
                             .map(AiToolCall::thoughtSignature)
                             .orElse(null);
                     try {
                         requireToolsetLoaded(loadedToolsets, step.tool().name());
+                        recordNativeCall(
+                                nativeTools, nativeCalls,
+                                stepNumber, nativeProviderCall);
                         toolExecutor.validateReferences(
                                 step.tool().name(), step.tool().args(), resources);
                     } catch (AiAssistantLoopException exception) {
                         if (!exception.recoverable()) {
                             throw exception;
                         }
+                        boolean replayable = !nativeTools || nativeCalls.containsKey(stepNumber);
                         int refusedCallId = thoughtSignature == null
                                 ? persistenceService.proposeTool(
                                         turn, stepNumber, step.tool().name(), argumentsJson)
@@ -531,23 +532,25 @@ public class AiChatAgentLoopService {
                                 stepNumber, "step", step.tool().name(),
                                 "failed", exception.detailReason()));
                         noProgressSteps++;
-                        ToolTurn refusedTurn = new ToolTurn(
-                                stepNumber, step.tool().name(),
-                                refusedToolResult(exception.detailReason()));
-                        try {
-                            toolBudgetAudit = requireAdditionalToolCapacity(
-                                    nativeTools, toolTurns, refusedTurn, nativeCalls,
-                                    maskingContext, memory.budget());
-                            toolTurns.add(refusedTurn);
-                        } catch (AiAssistantLoopException capacity) {
-                            if (!closingAttempted && CLOSABLE_REASONS.contains(
-                                    capacity.terminalReason())) {
-                                closingAttempted = true;
-                                closingPending = true;
-                                closingReason = capacity.terminalReason();
-                                continue steps;
+                        if (replayable) {
+                            ToolTurn refusedTurn = new ToolTurn(
+                                    stepNumber, step.tool().name(),
+                                    refusedToolResult(exception.detailReason()));
+                            try {
+                                toolBudgetAudit = requireAdditionalToolCapacity(
+                                        nativeTools, toolTurns, refusedTurn, nativeCalls,
+                                        maskingContext, memory.budget());
+                                toolTurns.add(refusedTurn);
+                            } catch (AiAssistantLoopException capacity) {
+                                if (!closingAttempted && CLOSABLE_REASONS.contains(
+                                        capacity.terminalReason())) {
+                                    closingAttempted = true;
+                                    closingPending = true;
+                                    closingReason = capacity.terminalReason();
+                                    continue steps;
+                                }
+                                throw capacity;
                             }
-                            throw capacity;
                         }
                         if (noProgressSteps >= MAX_CONSECUTIVE_NO_PROGRESS_STEPS) {
                             if (closingAttempted) {
@@ -751,8 +754,11 @@ public class AiChatAgentLoopService {
                             "proposed", null));
                     try {
                         requireCurrentToolExecution(turn);
-                        AiAssistantToolResult toolResult = findTools
+                        AiAssistantToolsetLoader.Load load = findTools
                                 ? toolsetLoader.load(step.tool().args(), loadedToolsets)
+                                : null;
+                        AiAssistantToolResult toolResult = load != null
+                                ? load.result()
                                 : toolExecutor.execute(
                                         step.tool().name(), step.tool().args(), resources,
                                         turn.includePrivateNotes(), turn.scope());
@@ -772,6 +778,9 @@ public class AiChatAgentLoopService {
                                 turn, toolCallId, "executed", resultJson)) {
                             failTool(turn, toolCallId, "turn_not_active");
                             return AiGenerationTaskResult.failed(INTERNAL_ERROR);
+                        }
+                        if (load != null) {
+                            loadedToolsets.add(load.loaded());
                         }
                         publishToolStep(turn, new AiChatStepFrameDto(
                                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
@@ -1014,6 +1023,13 @@ public class AiChatAgentLoopService {
      *
      * <p>On both protocols this is a backstop. The raw step guard already rejects an unloaded name
      * before parsing, and the native provider only ever receives the loaded definitions.
+     *
+     * <p>It runs before {@code recordNativeCall} on purpose. The refusal leaves the loaded set
+     * unchanged, so the next step's definitions still exclude the refused name; a recorded call
+     * and its refused result would then be replayed into an {@code AiNativeToolRequest} whose
+     * membership check rejects it with an {@code IllegalArgumentException} — an internal error in
+     * place of the recoverable refusal this check exists to produce. Refusing first means the step
+     * leaves a durable proposed-and-failed row and no replayable exchange at all. Keep that order.
      *
      * @param loadedToolsets the toolsets the turn currently holds
      * @param toolName the declared tool the step proposed

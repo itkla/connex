@@ -309,7 +309,8 @@ class AiChatAgentLoopServiceTest {
         AiAssistantToolResult loadResult = new AiAssistantToolsetLoader(
                         new AiAssistantToolCatalog())
                 .load(objectMapper.readTree("{\"toolset\":\"write_content\"}"),
-                        new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE));
+                        new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE))
+                .result();
         int bothResultsBytes = sizingAssembler.assemble(
                         List.of(),
                         new AiAssistantToolResult(Map.of(), List.of()),
@@ -3591,6 +3592,169 @@ class AiChatAgentLoopServiceTest {
         verify(toolExecutor).execute(
                 eq("aggregate_metric"), any(JsonNode.class), any(), eq(true), any());
         verify(persistenceService, never()).failTool(eq(TURN), anyInt(), contains("not_loaded"));
+    }
+
+    /**
+     * The tool_not_loaded refusal has to be survivable on the native protocol too.
+     *
+     * <p>The refusal leaves the loaded set alone, so the next step's definitions still exclude the
+     * refused name. Recording the provider call and replaying a refused result for it would then
+     * hand {@code AiNativeToolRequest} an exchange its membership check rejects with an
+     * {@code IllegalArgumentException} — caught by the outer runtime catch as a bare internal
+     * error, which is exactly the forfeit moving the check inside the try was meant to prevent.
+     * The step leaves its durable proposed-and-failed row and no replayable exchange at all, and
+     * the turn still answers.
+     */
+    @Test
+    void aNativeToolOutsideTheLoadedSetIsRefusedWithoutStrandingAReplayableExchange()
+            throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeTool(
+                        "call_1", "aggregate_metric", "{\"metric\":\"deal_metrics\"}"))
+                .thenReturn(nativeTool(
+                        "call_2", "search_records",
+                        "{\"query\":\"pipeline\",\"kinds\":[\"deal\"]}"))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Pipeline is healthy.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService).failTool(eq(TURN), eq(29), contains("tool_not_loaded"));
+        verify(toolExecutor, never()).execute(
+                eq("aggregate_metric"), any(), any(), any(Boolean.class), any());
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(3)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        assertTrue(requests.getAllValues().get(1).exchanges().isEmpty(),
+                "a refused unloaded call must leave no exchange the definitions cannot resolve");
+        assertEquals(
+                List.of("search_records"),
+                requests.getAllValues().getLast().exchanges().stream()
+                        .map(exchange -> exchange.call().name())
+                        .toList());
+    }
+
+    /**
+     * The widening is committed only after the durable executed row lands.
+     *
+     * <p>Widening in memory first and admitting the result afterwards leaves a turn holding a
+     * toolset whose {@code ai_chat_tool_call} row settled as failed with no {@code result_json} —
+     * so the durable reconstruction ("last executed find_tools row to result_json.active") reports
+     * core while the live turn's prompt, schema and guard all admit analytics. Here replay
+     * capacity refuses the result, the reason is closable, and the closing step must therefore
+     * still be rendered from core.
+     */
+    @Test
+    void aFindToolsStepRefusedAfterExecutionLeavesTheLoadedSetUnchanged() throws Exception {
+        when(memoryService.prepare(eq(TURN), any(), any(Instant.class))).thenReturn(
+                new AiChatMemory(
+                        List.of(message(TURN.userMessageId(), "Summarize my pipeline")),
+                        new AiAssistantPromptBudget(64, 4_096, 256, 256, 100, 4_808),
+                        0,
+                        0));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("analytics")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer(
+                                "I could not widen my tools.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService, never()).finishTool(
+                eq(TURN), anyInt(), eq("executed"), any());
+        verify(persistenceService).failTool(
+                eq(TURN), eq(29), contains("tool_result_budget_exhausted"));
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        String closingSystemPrompt =
+                invocations.getAllValues().getLast().prompt().getSystemPrompt();
+        assertTrue(
+                closingSystemPrompt.contains("analytics - "
+                        + AiAssistantToolCatalog.Toolset.ANALYTICS.summary() + " - available"),
+                "a load whose step never settled as executed must not widen the turn");
+        assertFalse(closingSystemPrompt.contains("aggregate_metric"));
+    }
+
+    /**
+     * Reaching any non-core tool now costs one governance step for the load, so the effective
+     * floor for a non-core trajectory is three steps: load, call, close.
+     *
+     * <p>{@code assistantMaxSteps} is operator-settable down to 1, so a workspace below that floor
+     * loses the non-core catalog rather than only latency. That is a declared consequence of the
+     * taxonomy, recorded in {@code docs/backend/AI_SECURITY.md} and pinned by this test and its
+     * companion: below the floor the turn still answers from what it has instead of failing.
+     */
+    @Test
+    void aTwoStepWorkspaceLosesTheNonCoreCatalogButStillAnswers() throws Exception {
+        when(governanceService.assistantMaxSteps(TURN.workspaceId())).thenReturn(2);
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("analytics")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer(
+                                "I could not read the pipeline metric.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        verify(toolExecutor, never()).execute(
+                eq("aggregate_metric"), any(), any(), any(Boolean.class), any());
+    }
+
+    /** Three steps is the declared floor: load, call, close all fit. */
+    @Test
+    void threeStepsFundTheLoadTheNonCoreCallAndTheAnswer() throws Exception {
+        when(governanceService.assistantMaxSteps(TURN.workspaceId())).thenReturn(3);
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("analytics")))
+                .thenReturn(parsed(toolStep(
+                        "aggregate_metric", "{\"metric\":\"deal_metrics\"}")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(toolExecutor).execute(
+                eq("aggregate_metric"), any(JsonNode.class), any(), eq(true), any());
     }
 
     private static List<String> definitionNames(AiNativeToolRequest request) {

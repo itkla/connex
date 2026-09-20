@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,6 +11,7 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolSpec;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -26,26 +28,62 @@ class AiAssistantToolsetLoaderTest {
      * being told it holds less than it does.
      */
     @Test
-    void aFirstLoadWidensTheSetAndNamesTheWholeActiveSetAfterwards() throws Exception {
+    void aFirstLoadNamesTheWholeActiveSetItWillProduce() throws Exception {
         Set<Toolset> loaded = turnSet();
 
-        AiAssistantToolResult result = loader.load(args("write_activity"), loaded);
+        AiAssistantToolsetLoader.Load load = loader.load(args("write_activity"), loaded);
 
-        assertEquals(Set.of(Toolset.CORE, Toolset.WRITE_ACTIVITY), loaded);
-        assertEquals("write_activity", result.data().get("loaded"));
-        assertEquals(List.of("core", "write_activity"), result.data().get("active"));
-        assertEquals(List.of("create_activity", "create_task"), result.data().get("tools"));
+        assertEquals(Toolset.WRITE_ACTIVITY, load.loaded());
+        assertEquals("write_activity", load.result().data().get("loaded"));
+        assertEquals(List.of("core", "write_activity"), load.result().data().get("active"));
+        assertEquals(
+                List.of("create_activity", "create_task"), load.result().data().get("tools"));
         assertEquals(
                 AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN - 1,
-                result.data().get("remainingLoads"));
-        assertTrue(result.identifiers().isEmpty());
+                load.result().data().get("remainingLoads"));
+        assertTrue(load.result().identifiers().isEmpty());
+    }
+
+    /**
+     * The loader never mutates. The loop commits the widening only after the durable executed row
+     * lands, so a step that settles any other way cannot leave the turn holding a toolset whose
+     * row says the step failed — which is exactly what the durable reconstruction rule reads.
+     */
+    @Test
+    void resolvingALoadLeavesTheTurnSetUntouchedUntilTheLoopCommitsIt() throws Exception {
+        Set<Toolset> loaded = turnSet();
+
+        AiAssistantToolsetLoader.Load load = loader.load(args("analytics"), loaded);
+
+        assertEquals(AiAssistantToolCatalog.CORE, loaded);
+        commit(loaded, load);
+        assertEquals(Set.of(Toolset.CORE, Toolset.ANALYTICS), loaded);
+    }
+
+    /**
+     * A reserved declaration stays in the rendered vocabulary with its unavailable reason, but is
+     * never advertised as something the load just unlocked: calling it is a non-recoverable
+     * executor refusal, so the turn would forfeit the read it spent a governance step to reach.
+     */
+    @Test
+    void theResultNamesOnlyExecutableToolsSoAReservedDeclarationIsNeverAdvertised()
+            throws Exception {
+        List<String> declared = catalog.tools(Set.of(Toolset.ANALYTICS)).stream()
+                .map(ToolSpec::name)
+                .toList();
+        assertTrue(declared.contains("get_deal_brief"), "analytics still declares the reserved read");
+        assertFalse(catalog.isExecutable("get_deal_brief"));
+
+        AiAssistantToolsetLoader.Load load = loader.load(args("analytics"), turnSet());
+
+        assertEquals(List.of("aggregate_metric"), load.result().data().get("tools"));
     }
 
     /** A second load of a held set is recoverable, so the model can correct it and carry on. */
     @Test
     void loadingAToolsetTwiceIsARecoverableRefusalThatLeavesTheSetAlone() throws Exception {
         Set<Toolset> loaded = turnSet();
-        loader.load(args("analytics"), loaded);
+        commit(loaded, loader.load(args("analytics"), loaded));
 
         AiAssistantLoopException refused = assertThrows(
                 AiAssistantLoopException.class,
@@ -64,8 +102,8 @@ class AiAssistantToolsetLoaderTest {
     @Test
     void aTurnAtTheCapIsRefusedHoweverItGotThere() throws Exception {
         Set<Toolset> loadedByCalls = turnSet();
-        loader.load(args("analytics"), loadedByCalls);
-        loader.load(args("schedule"), loadedByCalls);
+        commit(loadedByCalls, loader.load(args("analytics"), loadedByCalls));
+        commit(loadedByCalls, loader.load(args("schedule"), loadedByCalls));
         Set<Toolset> seededToTheCap = turnSet();
         seededToTheCap.add(Toolset.WRITE_CONTENT);
         seededToTheCap.add(Toolset.WRITE_PIPELINE);
@@ -121,7 +159,7 @@ class AiAssistantToolsetLoaderTest {
      */
     @Test
     void theLoaderTakesNoHandleReadsNothingAndConsultsNoScope() throws Exception {
-        AiAssistantToolCatalog.ToolSpec spec = catalog.tools(AiAssistantToolCatalog.CORE).stream()
+        ToolSpec spec = catalog.tools(AiAssistantToolCatalog.CORE).stream()
                 .filter(tool -> AiAssistantToolCatalog.FIND_TOOLS.equals(tool.name()))
                 .findFirst()
                 .orElseThrow();
@@ -129,17 +167,39 @@ class AiAssistantToolsetLoaderTest {
                 .noneMatch(argument -> "handle".equals(argument.name())
                         || "handles".equals(argument.name())));
 
-        Set<Toolset> loaded = turnSet();
-        AiAssistantToolResult result = loader.load(args("schedule"), loaded);
+        AiAssistantToolsetLoader.Load load = loader.load(args("schedule"), turnSet());
 
-        assertEquals(List.of("find_schedule_conflicts"), result.data().get("tools"));
+        assertEquals(List.of("find_schedule_conflicts"), load.result().data().get("tools"));
+    }
+
+    /**
+     * Every string the result carries is catalog vocabulary, which is what lets the prompt
+     * assembler replay it verbatim instead of through the tenant-data replacer.
+     */
+    @Test
+    void everyStringTheResultCarriesIsDeclaredCatalogVocabulary() throws Exception {
+        for (Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+            AiAssistantToolsetLoader.Load load = loader.load(args(toolset.key()), turnSet());
+            assertTrue(catalog.isDeclaredVocabulary(
+                    (String) load.result().data().get("loaded")));
+            for (Object key : (List<?>) load.result().data().get("active")) {
+                assertTrue(catalog.isDeclaredVocabulary((String) key));
+            }
+            for (Object name : (List<?>) load.result().data().get("tools")) {
+                assertTrue(catalog.isDeclaredVocabulary((String) name));
+            }
+        }
     }
 
     private int secondLoadRemaining() throws JacksonException {
         Set<Toolset> loaded = turnSet();
-        loader.load(args("analytics"), loaded);
-        AiAssistantToolResult second = loader.load(args("schedule"), loaded);
-        return (int) second.data().get("remainingLoads");
+        commit(loaded, loader.load(args("analytics"), loaded));
+        AiAssistantToolsetLoader.Load second = loader.load(args("schedule"), loaded);
+        return (int) second.result().data().get("remainingLoads");
+    }
+
+    private static void commit(Set<Toolset> loaded, AiAssistantToolsetLoader.Load load) {
+        loaded.add(load.loaded());
     }
 
     private static Set<Toolset> turnSet() {
