@@ -125,10 +125,23 @@
           AND owner IS NOT NULL
     </update>
 
+    <!--
+      The subject-kind predicate keeps a lease this instance cannot settle out of the sweep's
+      discovery window entirely. Rows are ordered oldest deadline first, so a subject kind with no
+      handler on this binary - an agent_run lease read by an instance that predates or has rolled
+      back past its handler - would otherwise sit at the head of the page on every pass, spend the
+      settlement budget, and push genuinely dead owners out of reach. It cannot be retired instead:
+      an owner of that kind may still be alive on another binary, and retiring the row would let
+      the reap delete it and restart the key's fencing epoch underneath that owner.
+    -->
     <select id="findExpiredLeases" resultMap="leaseMap">
         SELECT <include refid="columns" />
         FROM ai_run_lease
         WHERE workspace_id = #{workspaceId}
+          AND subject_kind IN
+              <foreach item="subjectKind" collection="subjectKinds" open="(" separator="," close=")">
+                  #{subjectKind}
+              </foreach>
           AND owner IS NOT NULL
           AND expires_at &lt; CURRENT_TIMESTAMP(6)
         ORDER BY expires_at, subject_kind, subject_id
@@ -144,6 +157,42 @@
         WHERE workspace_id &gt; #{afterWorkspaceId}
           AND owner IS NOT NULL
           AND expires_at &lt; CURRENT_TIMESTAMP(6)
+        ORDER BY workspace_id
+        LIMIT #{limit}
+    </select>
+
+    <!--
+      The reap's own catalog-pinned discovery, deliberately not derived from the expired-lease page
+      above. A workspace whose runs all settle normally never holds an expired lease, so driving
+      the reap off that page would never visit it and its tombstones - one per assistant turn ever
+      run - would be retained forever.
+
+      The release-time predicate must lead the index, not trail it. This probe carries a workspace
+      CURSOR rather than a workspace equality, so on idx_ai_run_lease_released
+      (workspace_id, released_at) the cursor range consumes the leading column and released_at
+      degrades to a per-entry condition: in the steady state, when nothing is old enough to reap,
+      MySQL would read every retained tombstone above the cursor to prove an empty result - every
+      thirty seconds, on every instance, for every catalog. idx_ai_run_lease_reapable
+      (released_at, workspace_id, subject_kind) bounds the scan by age instead, so a tick with
+      nothing to reap reads no index entries at all, and it still covers the statement.
+
+      Predicated on released_at rather than owner IS NULL because that is the column the index
+      leads with; chk_ai_run_lease_release_pair makes the two predicates equivalent.
+
+      The subject-kind predicate matches deleteTombstones below. Without it a workspace whose only
+      aged tombstone is of a kind the delete refuses to touch would be rediscovered on every cursor
+      cycle and would delete nothing on each visit.
+    -->
+    <select id="workspaceIdsWithReapableTombstones" resultType="int">
+        SELECT DISTINCT workspace_id
+        FROM ai_run_lease
+        WHERE released_at &lt;
+              DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL #{retentionSeconds} SECOND)
+          AND workspace_id &gt; #{afterWorkspaceId}
+          AND subject_kind IN
+              <foreach item="subjectKind" collection="subjectKinds" open="(" separator="," close=")">
+                  #{subjectKind}
+              </foreach>
         ORDER BY workspace_id
         LIMIT #{limit}
     </select>

@@ -46,14 +46,17 @@ class AiRunLeaseWorkspaceIsolationIntegrationTest extends AbstractAiRunLeaseInte
         expire(mine);
         expire(theirs);
 
-        List<AiRunLeaseRow> expired = leaseMapper.findExpiredLeases(workspace.getId(), 50);
+        List<AiRunLeaseRow> expired =
+                leaseMapper.findExpiredLeases(workspace.getId(), List.of(CHAT_TURN), 50);
 
         assertEquals(1, expired.size());
         assertEquals(4101L, expired.get(0).getSubjectId());
         assertEquals(workspace.getId(), expired.get(0).getWorkspaceId());
         assertEquals(
                 1,
-                leaseMapper.findExpiredLeases(neighbourWorkspace.getId(), 50).size(),
+                leaseMapper
+                        .findExpiredLeases(neighbourWorkspace.getId(), List.of(CHAT_TURN), 50)
+                        .size(),
                 "The neighbour's own expired lease must still be visible to the neighbour");
     }
 
@@ -119,7 +122,7 @@ class AiRunLeaseWorkspaceIsolationIntegrationTest extends AbstractAiRunLeaseInte
                         sameSubjectHere.subjectId(),
                         held.owner(),
                         held.epoch()));
-        assertTrue(leaseService.takeOverForSettlement(sameSubjectHere, held.epoch()).isEmpty());
+        assertTrue(takeOverForSettlement(sameSubjectHere, held.epoch()).isEmpty());
 
         Map<String, Object> after = leaseRow(theirs);
         assertEquals(held.owner(), after.get("owner"));

@@ -177,7 +177,7 @@ class AiAssistantScopeReadServiceTest {
         String providerInput = mapper.writeValueAsString(new AiAssistantPromptAssembler(
                 mapper, new AiAssistantToolCatalog()).assemble(
                         List.of(), new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(new AiAssistantPromptAssembler.ToolTurn(1, "scope_activities", result)),
+                        List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "scope_activities", result)),
                         context, resources,
                         AiAssistantToolCatalog.ALL).getMessages());
 

@@ -59,8 +59,16 @@ public class AiAssistantToolCallReadService {
     private static final String OWNER_FIELD = "owner";
     private static final String STAGE_FIELD = "stage";
     private static final Set<String> CREATED_RECORD_KINDS = Set.of("activity", "task", "note");
+    /**
+     * One turn's tool-call idempotency key, with the optional ordinal a shared step renders.
+     *
+     * <p>Anchored and still strict: a malformed key is rejected exactly as before and the step
+     * number stays bounded by the loop's own backstop. The optional suffix group is forward-looking
+     * only — a write is always the sole call of its step, so no row this service reads today
+     * carries one — and it exists so a suffixed row parses instead of being dropped silently.
+     */
     private static final Pattern TURN_STEP_KEY = Pattern.compile(
-            "^turn-([1-9][0-9]*)-step-([1-9][0-9]*)$");
+            "^turn-([1-9][0-9]*)-step-([1-9][0-9]*)(?:-call-([1-9][0-9]*))?$");
 
     private final AiAssistantToolCatalog toolCatalog;
     private final AiChatMapper chatMapper;

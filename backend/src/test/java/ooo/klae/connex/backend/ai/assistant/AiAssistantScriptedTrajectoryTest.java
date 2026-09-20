@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -270,6 +271,48 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
                 "no request-local placeholder may survive into the transcript: " + answer);
         assertTrue(answer.contains("](person:" + contact.getId() + ")"),
                 "the cited handle must become a durable record link: " + answer);
+    }
+
+    /**
+     * A real multi-step native turn still correlates one call per step, on the wire and on disk.
+     *
+     * <p>Tool calls are now named by {@code (step, call)} rather than by step alone, and the replay
+     * an adapter serializes is grouped by that step. Nothing observable may move while a step still
+     * carries exactly one call, so this reads both halves of the claim from a turn that really ran:
+     * every journaled native request replays one exchange per step with ascending step numbers and
+     * the sole-call ordinal, and every durable row keeps the unsuffixed {@code turn-N-step-M} key
+     * the progress projection and the write-proposal replay look up verbatim.
+     */
+    @Test
+    void aNativeTurnKeepsOneUnsuffixedCallPerStepOnTheWireAndInItsDurableRows() {
+        person("Kestrel Marlow", "kestrel.marlow@example.invalid", null);
+
+        Trajectory trajectory = run(
+                "connex_script_multi_step_read", "check this contact before I call them");
+
+        assertEquals("resolved", trajectory.status(), trajectory.terminalReason());
+        assertEquals(
+                List.of(
+                        "turn-" + trajectory.turnId() + "-step-1",
+                        "turn-" + trajectory.turnId() + "-step-2"),
+                trajectory.toolCalls().stream()
+                        .map(AiChatToolCall::getIdempotencyKey)
+                        .toList());
+        boolean sawAReplayedExchange = false;
+        for (ScriptedAiRequestJournal.Entry entry : journal().recorded()) {
+            AiNativeToolRequest nativeTools = entry.request().nativeTools();
+            assertNotNull(nativeTools, "every step of this fixture runs the native protocol");
+            List<AiToolExchange> exchanges = nativeTools.exchanges();
+            sawAReplayedExchange = sawAReplayedExchange || !exchanges.isEmpty();
+            for (int index = 0; index < exchanges.size(); index++) {
+                assertEquals(index + 1, exchanges.get(index).step(),
+                        "one exchange per step, in step order");
+                assertEquals(0, exchanges.get(index).callOrdinal(),
+                        "a step carrying one call must stay the sole-call ordinal");
+            }
+        }
+        assertTrue(sawAReplayedExchange,
+                "a multi-step turn must replay its earlier exchanges to the provider");
     }
 
     /**
