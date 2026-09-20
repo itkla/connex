@@ -32,6 +32,9 @@ import ooo.klae.connex.backend.ai.AiStructuredOutcome;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ExecutedReplay;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolBudgetAudit;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantPromptAssembler.ToolTurn;
+import ooo.klae.connex.backend.ai.lease.AiRunLease;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseHeartbeat;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
@@ -136,6 +139,7 @@ public class AiChatAgentLoopService {
     private final AiChatMemoryService memoryService;
     private final AiChatAttachmentContextService attachmentContextService;
     private final AiChatTurnPersistenceService persistenceService;
+    private final AiRunLeaseHeartbeat runLeaseHeartbeat;
     private final AiChatProgressService progressService;
     private final AiChatCitationProjector citationProjector;
     private final AiRestrictionEpoch restrictionEpoch;
@@ -145,19 +149,27 @@ public class AiChatAgentLoopService {
     private final AiWorkspaceGovernanceService governanceService;
     private final Clock clock;
 
-    /** Runs one committed turn under the shared generation context. */
+    /**
+     * Runs one committed turn under the shared generation context.
+     *
+     * <p>The claim that flips the turn to running also takes its run lease, and this method keeps
+     * that lease alive for as long as it works. It never releases it: the durable terminal write
+     * tombstones the lease, so a process killed between here and that write leaves an expiring
+     * lease another instance can settle rather than a running turn with no owner. The {@code
+     * finally} therefore only stops the heartbeat.
+     */
     public AiGenerationTaskResult<AiChatTurnGenerationResult> run(AiChatQueuedTurn turn) {
+        AiRunLeaseGuard ownership = new AiRunLeaseGuard(aiProperties.getRunLeaseTtl());
+        AutoCloseable heartbeat = null;
         try {
             requireWorkspaceEnabled(turn);
-            boolean running;
+            AiRunLease lease;
             try {
-                running = persistenceService.markRunning(turn);
+                lease = persistenceService.markRunning(turn);
             } catch (ForbiddenException exception) {
                 return AiGenerationTaskResult.failed("access_revoked");
             }
-            if (!running) {
-                return AiGenerationTaskResult.failed(INTERNAL_ERROR);
-            }
+            heartbeat = runLeaseHeartbeat.start(lease, ownership);
             Instant deadline = clock.instant().plus(AiAssistantTurnBudget.TURN);
             publish(turn, new AiChatStepFrameDto(
                     turn.workspaceId(), turn.sessionId(), turn.turnId(),
@@ -280,6 +292,10 @@ public class AiChatAgentLoopService {
                 AiAssistantPromptBudget.requireAssistantContextFloor(
                         invocationService.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)
                                 .contextWindowTokens());
+                if (ownership.isStopped()) {
+                    return AiGenerationTaskResult.failed(
+                            AiAssistantTerminalReasons.OWNER_LOST);
+                }
                 if (deadlineReached(deadline)) {
                     return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
                 }
@@ -429,6 +445,10 @@ public class AiChatAgentLoopService {
                             });
                     inputTokens = addTokens(inputTokens, inputTokens(outcome));
                     outputTokens = addTokens(outputTokens, outputTokens(outcome));
+                    if (ownership.isStopped()) {
+                        return AiGenerationTaskResult.failed(
+                                AiAssistantTerminalReasons.OWNER_LOST);
+                    }
                     if (deadlineReached(deadline)) {
                         return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
                     }
@@ -493,6 +513,10 @@ public class AiChatAgentLoopService {
                     }
                     if (streamingObserver != null) {
                         streamingObserver.requireNoTerminalText();
+                    }
+                    if (ownership.isStopped()) {
+                        return AiGenerationTaskResult.failed(
+                                AiAssistantTerminalReasons.OWNER_LOST);
                     }
                     if (deadlineReached(deadline)) {
                         return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
@@ -958,6 +982,27 @@ public class AiChatAgentLoopService {
             log.warn("Assistant turn failed exceptionClass={}",
                     exception.getClass().getName());
             return AiGenerationTaskResult.failed(INTERNAL_ERROR);
+        } finally {
+            stopHeartbeat(heartbeat);
+        }
+    }
+
+    /**
+     * Stops renewing the turn's lease without releasing it.
+     *
+     * <p>The lease stays held on purpose. The durable terminal write runs after this method, in a
+     * different call stack, and tombstones the lease there; releasing it here would open a window
+     * in which the turn is running and unleased, which is the window the lease exists to close.
+     */
+    private void stopHeartbeat(AutoCloseable heartbeat) {
+        if (heartbeat == null) {
+            return;
+        }
+        try {
+            heartbeat.close();
+        } catch (Exception exception) {
+            log.warn("Assistant turn lease heartbeat did not stop cleanly exceptionClass={}",
+                    exception.getClass().getName());
         }
     }
 

@@ -37,6 +37,7 @@ public class AiChatTurnTerminalCoordinator {
             AiAssistantTerminalReasons.CONTEXT_WINDOW_TOO_SMALL,
             AiAssistantTerminalReasons.RESTRICTIONS_CHANGED,
             AiAssistantTerminalReasons.ACCESS_REVOKED,
+            AiAssistantTerminalReasons.OWNER_LOST,
             INTERNAL_ERROR);
     private static final Set<String> TIMED_OUT_REASONS = Set.of(
             "generation_timeout",

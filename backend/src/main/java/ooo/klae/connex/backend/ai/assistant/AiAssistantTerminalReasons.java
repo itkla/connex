@@ -16,6 +16,16 @@ public final class AiAssistantTerminalReasons {
      * larger model fixes it without restarting anything. Asking the same question again cannot help.
      */
     public static final String CONTEXT_WINDOW_TOO_SMALL = "context_window_too_small";
+    /**
+     * The instance that held this turn's run lease stopped proving it still owned the turn.
+     *
+     * <p>Deliberately absent from {@link #AUTHORIZATION_WITHDRAWN}: nobody's authority changed, so
+     * the durable partial answer is retained under the same special-care screen every other
+     * non-withdrawing reason applies. Deliberately a failure rather than a timeout, because a
+     * timed-out turn tells the requester their question took too long when in fact a server
+     * stopped.
+     */
+    public static final String OWNER_LOST = "owner_lost";
 
     /**
      * The terminal reasons that withdraw the requester's authorization to read what the turn

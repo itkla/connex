@@ -16,6 +16,10 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
+import ooo.klae.connex.backend.ai.lease.AiRunLease;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -69,6 +73,7 @@ public class AiChatTurnPersistenceService {
     private final Clock clock;
     private final AiChatRealtimeDispatcher realtimeDispatcher;
     private final ObjectMapper objectMapper;
+    private final AiRunLeaseService runLeaseService;
 
     /** Commits the user message and queued turn under the session sequence mutex. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -260,13 +265,33 @@ public class AiChatTurnPersistenceService {
         }
     }
 
-    /** Marks a queued turn running after re-locking membership and session authorization. */
+    /**
+     * Marks a queued turn running after re-locking membership and session authorization, and
+     * claims its run lease in the same transaction.
+     *
+     * <p>The claim and the lease share one transaction so that a claim which rolls back leaves no
+     * lease row, and a committed claim always leaves one. That is the half of the coverage
+     * invariant this method owns: from here until a durable terminal write tombstones it, the turn
+     * has a lease row whose expiry bounds how long an abandoned turn can sit running.
+     *
+     * <p>The compare-and-set cannot lose: {@code lockAuthorizedTurn} holds the turn's row lock and
+     * already refuses a turn whose stored status is not queued, so a second claimant serializes
+     * behind it and throws before reaching the update. A zero row count is therefore an invariant
+     * violation rather than a contended claim, and it fails loudly.
+     *
+     * @param turn the committed queued turn
+     * @return the fencing token this instance now holds for the turn
+     */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
-    public boolean markRunning(AiChatQueuedTurn turn) {
+    public AiRunLease markRunning(AiChatQueuedTurn turn) {
         requireCurrentActor(turn);
         lockAuthorizedTurn(turn, QUEUED);
-        return chatMapper.markTurnRunning(
-                turn.workspaceId(), turn.sessionId(), turn.turnId()) == 1;
+        if (chatMapper.markTurnRunning(
+                turn.workspaceId(), turn.sessionId(), turn.turnId()) != 1) {
+            throw new IllegalStateException("Assistant turn claim lost its durable state");
+        }
+        return runLeaseService.acquireInCurrentTransaction(
+                leaseKey(turn.workspaceId(), turn.turnId()));
     }
 
     /** Loads the bounded most-recent transcript after current access revalidation. */
@@ -628,6 +653,7 @@ public class AiChatTurnPersistenceService {
         if (chatMapper.cancelTurn(workspaceId, sessionId, turnId) != 1) {
             throw new ConflictException("Assistant turn is already terminal");
         }
+        releaseRunLease(workspaceId, turnId);
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
@@ -724,6 +750,7 @@ public class AiChatTurnPersistenceService {
                 RUNNING, null) != 1) {
             throw new IllegalStateException("Assistant turn resolution lost its durable state");
         }
+        releaseRunLease(turn.workspaceId(), turn.turnId());
         chatMapper.updateLastMessageAt(turn.workspaceId(), turn.sessionId());
         return true;
     }
@@ -781,9 +808,13 @@ public class AiChatTurnPersistenceService {
                         stored.getPartialContentUtf16Offset()) != 1) {
             throw new IllegalStateException("Assistant terminal stream reset lost its durable state");
         }
-        return chatMapper.updateTurnTerminal(
+        if (chatMapper.updateTurnTerminal(
                 turn.workspaceId(), turn.sessionId(), turn.turnId(),
-                status, reason, null, null) == 1;
+                status, reason, null, null) != 1) {
+            return false;
+        }
+        releaseRunLease(turn.workspaceId(), turn.turnId());
+        return true;
     }
 
     /** Returns the durable terminal projection after a generation callback settles. */
@@ -917,12 +948,30 @@ public class AiChatTurnPersistenceService {
         if (changed == 0) {
             return turn;
         }
+        releaseRunLease(turn.getWorkspaceId(), turn.getId());
         AiChatTurn expired = chatMapper.getTurnByIdForUpdate(
                 turn.getWorkspaceId(), turn.getSessionId(), turn.getId());
         if (expired == null) {
             throw new IllegalStateException("Expired assistant turn is unavailable");
         }
         return expired;
+    }
+
+    /**
+     * Tombstones the turn's run lease inside the terminal transaction that just changed its row.
+     *
+     * <p>Releasing here rather than where the generation loop ends is what keeps the coverage
+     * invariant true: a process killed between the loop returning and this write leaves a held,
+     * expiring lease that a settler can find, not an unleased running turn nobody is bounded to.
+     * The release is fenced on this instance's own token, so a stale owner whose terminal write
+     * lost to a takeover tombstones nothing.
+     */
+    private void releaseRunLease(int workspaceId, int turnId) {
+        runLeaseService.releaseHeldInCurrentTransaction(leaseKey(workspaceId, turnId));
+    }
+
+    private static AiRunLeaseKey leaseKey(int workspaceId, int turnId) {
+        return new AiRunLeaseKey(workspaceId, AiRunLeaseSubject.CHAT_TURN, turnId);
     }
 
     private LocalDateTime expiryCutoff() {
