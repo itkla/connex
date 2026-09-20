@@ -166,7 +166,11 @@ jobs:
     needs: classify
     if: needs.classify.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # `test` alone measured 46-48 minutes on the last runs before scriptedTrajectoryTest joined
+    # this step, which left under ten minutes of headroom under the previous 60-minute ceiling.
+    # A job cancelled on the timeout produces no test failure and reads as a hang, so the budget
+    # is raised rather than left to convert a slow-runner day into an unexplained cancellation.
+    timeout-minutes: 75
     services:
       mysql:
         image: mysql:8.4.10@sha256:c831a0f11348d402b43d77453e17d770be2eef356615a2823fe0f5a0d6c8b9af

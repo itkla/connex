@@ -152,6 +152,13 @@ tasks.register('scriptedTrajectoryTest', Test) {
 	systemProperty 'spring.test.context.cache.maxSize', '2'
 }
 
+// `test` no longer covers the trajectory goldens, so every lifecycle entry point that used to run
+// them through `test` has to name the new task or it silently runs a smaller suite than CI and
+// still reports success. ScriptedAiProviderArchTest pins this line and the CI step together.
+tasks.named('check') {
+	dependsOn 'scriptedTrajectoryTest'
+}
+
 def seederRuntimeClasspath = sourceSets.main.output + configurations.productionRuntimeClasspath
 
 tasks.register('seedData', org.springframework.boot.gradle.tasks.run.BootRun) {

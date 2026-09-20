@@ -88,8 +88,15 @@ abstract class AbstractScriptedTrajectoryTest {
     /** Delay between durable turn reads while a turn is still running. */
     private static final Duration POLL_INTERVAL = Duration.ofMillis(100);
 
+    /** Longest the harness waits for a cancelled runaway turn to stop touching shared state. */
+    private static final Duration CANCELLATION_DEADLINE = Duration.ofSeconds(30);
+
     private static final List<String> TERMINAL_STATUSES =
             List.of("resolved", "failed", "timed_out");
+
+    /** Every status a turn can come to rest in once the harness has cancelled it. */
+    private static final List<String> STOPPED_STATUSES =
+            List.of("resolved", "failed", "timed_out", "cancelled");
 
     /** Capability class every slice-2 golden is authored against. */
     private static final String SCRIPTED_MODEL_ID = "scripted-native";
@@ -315,9 +322,6 @@ abstract class AbstractScriptedTrajectoryTest {
     /**
      * Seeds one person whose display name is distinctive enough to assert masking against.
      *
-     * <p>Backdated because a write proposal refuses a target written in its own second, which would
-     * turn a write golden into a staleness test.
-     *
      * @param name display name
      * @param email structured contact field, never part of a record tool result
      * @param phone structured contact field, never part of a record tool result
@@ -425,6 +429,23 @@ abstract class AbstractScriptedTrajectoryTest {
         return deal;
     }
 
+    /**
+     * Moves a seeded record's stored update timestamp out of the second its turn runs in.
+     *
+     * <p>This matters on exactly one path. {@code AiAssistantWriteToolService.approve} refuses a
+     * CONFIRM proposal whose target was written in the proposal's own second, because the stored
+     * timestamps cannot say which happened first. Nothing else consults
+     * {@code AiAssistantProposalFreshness}: proposing a write does not, an AUTO execution does not,
+     * and the read service uses it only to decorate a card with a display-only staleness flag. A
+     * record seeded milliseconds before its own approval would therefore refuse, and the golden
+     * would silently become a staleness test.
+     *
+     * <p><b>A golden that means to pin that refusal must not use this.</b> Backdating disarms it.
+     * Seed such a target without backdating, or touch it again after the proposal is recorded.
+     *
+     * @param table the seeded record's table
+     * @param id the seeded record's identifier
+     */
     private void backdate(String table, int id) {
         jdbcTemplate.update(
                 "UPDATE " + table + " SET updated_at = updated_at - INTERVAL 5 SECOND WHERE id = ?",
@@ -443,18 +464,60 @@ abstract class AbstractScriptedTrajectoryTest {
     }
 
     private AiChatTurn awaitTerminal(int sessionId, int turnId) {
-        Instant deadline = Instant.now().plus(TERMINAL_DEADLINE);
+        AiChatTurn settled = poll(sessionId, turnId, TERMINAL_DEADLINE, TERMINAL_STATUSES);
+        if (settled != null) {
+            return settled;
+        }
+        String abandoned = stopRunawayTurn(sessionId, turnId);
+        throw new IllegalStateException(String.format(
+                Locale.ROOT,
+                "scripted trajectory turn %d never settled within %s; after cancellation it was %s",
+                turnId, TERMINAL_DEADLINE, abandoned));
+    }
+
+    /**
+     * Stops a turn that outran the harness deadline before the fixture is deleted underneath it.
+     *
+     * <p>The turn's own budget is far longer than this harness waits, so an exceeded deadline
+     * leaves a live worker still calling the provider. Tearing the tenant down around it would let
+     * that worker keep appending to the context-scoped request journal — past the next test's
+     * {@code @BeforeEach} clear — and the next golden would fail on a dispatch count that has
+     * nothing to do with it. Cancelling is what a member does, and the loop already honours it, so
+     * the failure stays on the one test that earned it.
+     *
+     * @param sessionId the turn's session
+     * @param turnId the runaway turn
+     * @return the durable status the turn came to rest in, for the failure message
+     */
+    private String stopRunawayTurn(int sessionId, int turnId) {
+        try {
+            turnService.cancel(sessionId, turnId);
+        } catch (RuntimeException exception) {
+            return "already terminal (" + exception.getClass().getSimpleName() + ")";
+        }
+        AiChatTurn stopped = poll(sessionId, turnId, CANCELLATION_DEADLINE, STOPPED_STATUSES);
+        return stopped == null ? "still running" : stopped.getStatus();
+    }
+
+    /**
+     * Reads the durable turn until it reaches one of the given statuses, or the bound elapses.
+     *
+     * @param sessionId the turn's session
+     * @param turnId the turn
+     * @param bound how long to keep reading
+     * @param statuses the statuses that end the wait
+     * @return the settled turn, or null when the bound elapsed first
+     */
+    private AiChatTurn poll(int sessionId, int turnId, Duration bound, List<String> statuses) {
+        Instant deadline = Instant.now().plus(bound);
         while (true) {
             AiChatTurn turn = chatMapper.getTurnById(workspace.getId(), sessionId, turnId);
             assertNotNull(turn, "the durable turn row disappeared while the trajectory ran");
-            if (TERMINAL_STATUSES.contains(turn.getStatus())) {
+            if (statuses.contains(turn.getStatus())) {
                 return turn;
             }
             if (Instant.now().isAfter(deadline)) {
-                throw new IllegalStateException(String.format(
-                        Locale.ROOT,
-                        "scripted trajectory turn %d never settled; last status was %s",
-                        turnId, turn.getStatus()));
+                return null;
             }
             sleep();
         }
