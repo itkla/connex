@@ -17,18 +17,25 @@ import ooo.klae.connex.backend.beans.AiRunLeaseRow;
  *
  * <p>{@code TenantScopeArchTest} checks that a scoped statement <em>mentions</em>
  * {@code #{workspaceId}}; its own Javadoc calls that a presence-not-placement heuristic, because a
- * binding in an unrelated subquery would still pass. This is the second layer: each key here exists
- * in both workspaces with the same subject id, the same owner string, and the same epoch, so the
- * workspace predicate is the only thing that can decide the outcome. A workspace binding that
- * drifted out of a top-level {@code WHERE} would let one tenant's sweeper read, re-fence, or delete
- * another tenant's lease rows, and it would leave every other test in this package green.
+ * binding in an unrelated subquery would still pass. This is the second layer, and the fixture is
+ * built so that a binding which drifted out of a top-level {@code WHERE} fails here: every subject
+ * id under test exists in <em>both</em> workspaces, so a statement that resolved its workspace
+ * through a subquery on this table would still find the neighbour's row by subject id alone.
+ *
+ * <p>The two workspaces' rows carry the same owner string, because one JVM mints one
+ * {@code AiRunLeaseIdentity}. The discovery and reap passes take no fencing token, so those keys
+ * also share an epoch and the workspace predicate is the only thing that can decide the outcome.
+ * The fenced statements do take a token, so there the calling workspace's own row is deliberately
+ * moved to a later epoch: the token cannot legitimately match it, and every one of renew,
+ * tombstone, and takeover must therefore match nothing at all rather than reaching across into the
+ * neighbour's row, which must come back byte-identical.
  */
 class AiRunLeaseWorkspaceIsolationIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
 
     @Test
     void expiredLeaseDiscoveryPerWorkspaceNeverReturnsANeighboursRow() {
         AiRunLeaseKey mine = key(AiRunLeaseSubject.CHAT_TURN, 4101L);
-        AiRunLeaseKey theirs = neighbourKey(AiRunLeaseSubject.CHAT_TURN, 4102L);
+        AiRunLeaseKey theirs = neighbourKey(AiRunLeaseSubject.CHAT_TURN, 4101L);
         acquire(mine);
         acquire(theirs);
         expire(mine);
@@ -68,6 +75,12 @@ class AiRunLeaseWorkspaceIsolationIntegrationTest extends AbstractAiRunLeaseInte
         AiRunLeaseKey theirs = neighbourKey(AiRunLeaseSubject.CHAT_TURN, 4104L);
         AiRunLease held = acquire(theirs);
         AiRunLeaseKey sameSubjectHere = key(AiRunLeaseSubject.CHAT_TURN, 4104L);
+        acquire(sameSubjectHere);
+        assertTrue(release(sameSubjectHere));
+        AiRunLease here = acquire(sameSubjectHere);
+        assertEquals(held.epoch() + 1L, here.epoch());
+        expire(theirs);
+        Map<String, Object> before = leaseRow(theirs);
         AiRunLease impersonation = new AiRunLease(sameSubjectHere, held.owner(), held.epoch());
 
         assertEquals(AiRunLeaseOutcome.LOST, leaseService.renew(impersonation));
@@ -79,13 +92,20 @@ class AiRunLeaseWorkspaceIsolationIntegrationTest extends AbstractAiRunLeaseInte
                         sameSubjectHere.subjectId(),
                         held.owner(),
                         held.epoch()));
-        expire(theirs);
         assertTrue(leaseService.takeOverForSettlement(sameSubjectHere, held.epoch()).isEmpty());
 
-        Map<String, Object> row = leaseRow(theirs);
-        assertEquals(held.owner(), row.get("owner"));
-        assertEquals(held.epoch(), ((Number) row.get("epoch")).longValue());
-        assertNull(row.get("released_at"));
-        assertEquals(0, leaseCount(workspace.getId()));
+        Map<String, Object> after = leaseRow(theirs);
+        assertEquals(held.owner(), after.get("owner"));
+        assertEquals(held.epoch(), ((Number) after.get("epoch")).longValue());
+        assertNull(after.get("released_at"));
+        assertEquals(before.get("heartbeat_at"), after.get("heartbeat_at"));
+        assertEquals(before.get("expires_at"), after.get("expires_at"));
+        assertEquals(before.get("acquired_at"), after.get("acquired_at"));
+
+        Map<String, Object> ours = leaseRow(sameSubjectHere);
+        assertEquals(here.owner(), ours.get("owner"));
+        assertEquals(here.epoch(), ((Number) ours.get("epoch")).longValue());
+        assertNull(ours.get("released_at"));
+        assertEquals(1, leaseCount(workspace.getId()));
     }
 }
