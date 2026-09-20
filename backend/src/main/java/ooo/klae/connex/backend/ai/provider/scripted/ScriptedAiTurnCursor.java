@@ -19,6 +19,16 @@ import ooo.klae.connex.backend.ai.provider.AiToolExchange;
  * calls the loop has completed, whether it is a schema repair, and whether it is the closing step.
  * A provider that had to be told those things out of band would be a control channel, and a
  * control channel is exactly the shape a production bypass takes.
+ *
+ * <p><b>Protocol control state is read from the assembler's structure, never from its text.</b>
+ * The serialized prompt contains every system, member and CRM string in the turn, so searching it
+ * for the repair delimiter or the closing sentence would let an ordinary sentence a member typed —
+ * or a company name, an activity subject, a note — move the provider into a state the loop never
+ * entered. The assembler emits untrusted content only inside a delimiter envelope that occupies a
+ * whole message, and its own directives as bare messages, so the segment's shape decides. The
+ * script <em>selector</em> is the deliberate exception: it is carried by the requesting member's
+ * own words on purpose, and it selects which fixture answers rather than which protocol state the
+ * loop is in.
  */
 public record ScriptedAiTurnCursor(
         String selector,
@@ -27,8 +37,14 @@ public record ScriptedAiTurnCursor(
         boolean closing,
         boolean nativeProtocol) {
 
+    /** Provider role the prompt assembler emits every server-authored directive under. */
+    private static final String ROLE_USER = "user";
+
     /** Delimiter the prompt assembler opens every untrusted CRM-data envelope with. */
     private static final String ENVELOPE_MARKER = "CRM_DATA_BEGIN";
+
+    /** Delimiter the prompt assembler opens every member-authored request envelope with. */
+    private static final String USER_REQUEST_MARKER = "USER_REQUEST_BEGIN";
 
     /**
      * The envelope type the prompt assembler stamps on a completed tool call's result.
@@ -45,10 +61,13 @@ public record ScriptedAiTurnCursor(
      */
     private static final String TOOL_RESULT_MARKER = "\"type\":\"tool_result\"";
 
-    /** Delimiter the prompt assembler wraps a JSON-protocol schema-repair request in. */
+    /** Delimiter opening the offending output inside a JSON-protocol schema-repair request. */
     private static final String REPAIR_MARKER = "MODEL_OUTPUT_BEGIN";
 
-    /** Opening of the loop's server-authored closing directive. */
+    /** Delimiter closing a schema-repair request, which is that message's final text. */
+    private static final String REPAIR_END_MARKER = "MODEL_OUTPUT_END";
+
+    /** Opening sentence of the loop's server-authored closing directive. */
     private static final String CLOSING_MARKER = "You have no investigation steps left.";
 
     public ScriptedAiTurnCursor {
@@ -91,9 +110,78 @@ public record ScriptedAiTurnCursor(
                         : countToolResults(request.messages()),
                 nativeProtocol
                         ? nativeTools.repairMessage() != null
-                        : corpus.contains(REPAIR_MARKER),
-                nativeProtocol ? nativeTools.finalOnly() : corpus.contains(CLOSING_MARKER),
+                        : isRepairAttempt(request.messages()),
+                nativeProtocol ? nativeTools.finalOnly() : isClosing(request.messages()),
                 nativeProtocol);
+    }
+
+    /**
+     * Whether the last JSON-protocol message is the assembler's schema-repair request.
+     *
+     * <p>Derived from the prompt's structure, never from a substring of its text. The assembler
+     * appends the repair request last, as a bare server-authored user turn whose final characters
+     * are the offending-output end delimiter. Every untrusted string in the same prompt — the
+     * member's own words, a tool result, a CRM field — arrives inside its own delimiter envelope
+     * and is therefore not a server-authored segment at all, so a member who types the repair
+     * marker verbatim changes nothing here.
+     *
+     * @param messages the prompt's messages in order
+     * @return whether this request is a repair attempt
+     */
+    private static boolean isRepairAttempt(List<AiMessage> messages) {
+        if (messages.isEmpty()) {
+            return false;
+        }
+        AiMessage last = messages.getLast();
+        if (!isServerAuthoredDirective(last)) {
+            return false;
+        }
+        String content = last.content().strip();
+        return content.endsWith(REPAIR_END_MARKER) && content.contains(REPAIR_MARKER);
+    }
+
+    /**
+     * Whether the JSON-protocol prompt carries the loop's closing directive.
+     *
+     * <p>Same structural rule as the repair request: the directive is emitted as a whole bare user
+     * turn beside the turn's other server-authored contract text, so only a segment that is not an
+     * untrusted envelope can be one. A member, an activity subject or any other CRM value quoting
+     * the closing sentence travels inside an envelope and cannot reach this state.
+     *
+     * @param messages the prompt's messages in order
+     * @return whether the loop asked for the closing answer
+     */
+    private static boolean isClosing(List<AiMessage> messages) {
+        for (AiMessage message : messages) {
+            if (isServerAuthoredDirective(message)
+                    && message.content().strip().startsWith(CLOSING_MARKER)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Whether one message is a server-authored directive rather than untrusted data.
+     *
+     * <p>The assembler emits exactly two kinds of user turn: a delimiter envelope opening with
+     * {@code CRM_DATA_BEGIN} or {@code USER_REQUEST_BEGIN}, which carries retrieved tenant content
+     * or a member's own words; and a bare directive it wrote itself. The leading delimiter is the
+     * whole discriminator, and it cannot be forged from inside an envelope because the envelope's
+     * body is serialized JSON — a member's text is a JSON string value, never the first characters
+     * of the message.
+     *
+     * @param message one prompt message
+     * @return whether the message is server-authored directive text
+     */
+    private static boolean isServerAuthoredDirective(AiMessage message) {
+        if (!ROLE_USER.equals(message.role())) {
+            return false;
+        }
+        String content = message.content();
+        return content != null
+                && !content.startsWith(ENVELOPE_MARKER)
+                && !content.startsWith(USER_REQUEST_MARKER);
     }
 
     private static String corpus(AiCompletionRequest request) {
@@ -117,19 +205,27 @@ public record ScriptedAiTurnCursor(
         return corpus.toString();
     }
 
+    /**
+     * Counts the tool-result envelopes the assembler emitted, by segment rather than by substring.
+     *
+     * <p>Each envelope is a whole user message that opens with the delimiter, so only a message's
+     * leading envelope is a real one. A record field or a member's sentence that spells the
+     * delimiter out lives inside another envelope's serialized body and is never counted.
+     *
+     * @param messages the prompt's messages in order
+     * @return completed tool calls the loop has replayed
+     */
     private static int countToolResults(List<AiMessage> messages) {
         int count = 0;
         for (AiMessage message : messages) {
             String content = message.content();
-            if (content == null) {
+            if (!ROLE_USER.equals(message.role())
+                    || content == null
+                    || !content.startsWith(ENVELOPE_MARKER)) {
                 continue;
             }
-            int index = content.indexOf(ENVELOPE_MARKER);
-            while (index >= 0) {
-                if (isToolResultEnvelope(content, index + ENVELOPE_MARKER.length())) {
-                    count++;
-                }
-                index = content.indexOf(ENVELOPE_MARKER, index + ENVELOPE_MARKER.length());
+            if (isToolResultEnvelope(content, ENVELOPE_MARKER.length())) {
+                count++;
             }
         }
         return count;
