@@ -401,7 +401,7 @@ class AiInvocationServiceTest {
                 service.completeNativeToolsRepairable(
                         invocation,
                         AiAssistantStep.FinalAnswer.class,
-                        guard.forIssuedPlaceholders(Set.of("{{P1}}")),
+                        guard.forStep(AiAssistantToolCatalog.ALL, Set.of("{{P1}}")),
                         guard.finalAnswerForIssuedPlaceholders(Set.of("{{P1}}")),
                         schema.finalResponseSchema(),
                         nativeTools,
@@ -518,7 +518,7 @@ class AiInvocationServiceTest {
                 service.completeNativeToolsRepairable(
                         invocation,
                         AiAssistantStep.FinalAnswer.class,
-                        guard.forIssuedPlaceholders(Set.of("{{P1}}")),
+                        guard.forStep(AiAssistantToolCatalog.ALL, Set.of("{{P1}}")),
                         guard.finalAnswerForIssuedPlaceholders(Set.of("{{P1}}")),
                         schema.finalResponseSchema(),
                         new AiNativeToolRequest(
@@ -797,7 +797,8 @@ class AiInvocationServiceTest {
                 service.completeStructuredRepairable(
                         invocation,
                         AiAssistantStep.class,
-                        new AiAssistantStepGuard(catalog),
+                        new AiAssistantStepGuard(catalog)
+                                .forStep(AiAssistantToolCatalog.ALL, Set.of()),
                         stepSchema.responseSchema(AiAssistantToolCatalog.ALL),
                         directAdmission);
 
@@ -931,7 +932,7 @@ class AiInvocationServiceTest {
                 service.completeNativeToolsRepairable(
                         invocation,
                         AiAssistantStep.FinalAnswer.class,
-                        guard.forIssuedPlaceholders(Set.of(placeholder)),
+                        guard.forStep(AiAssistantToolCatalog.ALL, Set.of(placeholder)),
                         guard.finalAnswerForIssuedPlaceholders(Set.of(placeholder)),
                         schema.finalResponseSchema(),
                         nativeTools,
@@ -2039,7 +2040,7 @@ class AiInvocationServiceTest {
         assertDoesNotThrow(() -> service.completeNativeToolsRepairable(
                 invocation,
                 AiAssistantStep.FinalAnswer.class,
-                guard.forIssuedPlaceholders(Set.of(placeholder)),
+                guard.forStep(AiAssistantToolCatalog.ALL, Set.of(placeholder)),
                 guard.finalAnswerForIssuedPlaceholders(Set.of(placeholder)),
                 schema.finalResponseSchema(),
                 nativeTools,
@@ -2089,7 +2090,7 @@ class AiInvocationServiceTest {
         service.completeNativeToolsRepairable(
                 invocation,
                 AiAssistantStep.FinalAnswer.class,
-                guard.forIssuedPlaceholders(Set.of(placeholder)),
+                guard.forStep(AiAssistantToolCatalog.ALL, Set.of(placeholder)),
                 guard.finalAnswerForIssuedPlaceholders(Set.of(placeholder)),
                 schema.finalResponseSchema(),
                 nativeTools,

@@ -9,6 +9,7 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.AiRawOutputGuard;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.Toolset;
 
 import tools.jackson.databind.json.JsonMapper;
@@ -17,30 +18,32 @@ class AiAssistantStepGuardTest {
     private final JsonMapper objectMapper = JsonMapper.builder().build();
     private final AiAssistantStepGuard guard = new AiAssistantStepGuard(
             new AiAssistantToolCatalog());
+    private final AiRawOutputGuard fullVocabulary =
+            guard.forStep(AiAssistantToolCatalog.ALL, Set.of());
 
     @Test
     void acceptsExactlyOneKnownToolOrFinalAndRejectsUnknownFields() throws Exception {
-        assertTrue(guard.permits(objectMapper.readTree(
+        assertTrue(fullVocabulary.permits(objectMapper.readTree(
                 "{\"tool\":{\"name\":\"get_record\",\"args\":{\"handle\":\"r1\"}},\"final\":null}")));
-        assertTrue(guard.permits(objectMapper.readTree(
+        assertTrue(fullVocabulary.permits(objectMapper.readTree(
                 finalStep("Ready", "[\"r1\"]", "[]", "null"))));
-        assertFalse(guard.permits(objectMapper.readTree(
+        assertFalse(fullVocabulary.permits(objectMapper.readTree(
                 "{\"tool\":null,\"final\":null}")));
-        assertFalse(guard.permits(objectMapper.readTree(
+        assertFalse(fullVocabulary.permits(objectMapper.readTree(
                 "{\"tool\":{\"name\":\"get_record\",\"args\":{\"handle\":\"r1\"}},"
                         + "\"final\":{\"text\":\"Ready\",\"citations\":[],"
                         + "\"suggestions\":[],\"title\":null}}")));
-        assertFalse(guard.permits(objectMapper.readTree(
+        assertFalse(fullVocabulary.permits(objectMapper.readTree(
                 "{\"tool\":{\"name\":\"delete_record\",\"args\":{}},\"final\":null}")));
-        assertFalse(guard.permits(objectMapper.readTree(
+        assertFalse(fullVocabulary.permits(objectMapper.readTree(
                 "{\"tool\":{\"name\":\"get_record\",\"args\":{\"handle\":\"987654321\"}},"
                         + "\"final\":null}")));
-        assertFalse(guard.permits(objectMapper.readTree(
+        assertFalse(fullVocabulary.permits(objectMapper.readTree(
                 "{\"tool\":null,\"final\":{\"text\":\"Ready\",\"citations\":[],"
                         + "\"suggestions\":[],\"title\":null,\"extra\":1}}")));
-        assertEquals("exclusive_step", guard.rejectionReason(objectMapper.readTree(
+        assertEquals("exclusive_step", fullVocabulary.rejectionReason(objectMapper.readTree(
                 "{\"tool\":null,\"final\":null}")));
-        assertEquals("tool_arguments", guard.rejectionReason(objectMapper.readTree(
+        assertEquals("tool_arguments", fullVocabulary.rejectionReason(objectMapper.readTree(
                 "{\"tool\":{\"name\":\"get_record\",\"args\":{\"handle\":\"raw-id\"}},"
                         + "\"final\":null}")));
     }
@@ -52,17 +55,17 @@ class AiAssistantStepGuardTest {
      */
     @Test
     void directDurableRecordLinksAreRejected() throws Exception {
-        assertEquals("final_links", guard.rejectionReason(objectMapper.readTree(
+        assertEquals("final_links", fullVocabulary.rejectionReason(objectMapper.readTree(
                 finalStep("See [X](person:123)", "[]", "[]", "null"))));
-        assertEquals("final_links", guard.rejectionReason(objectMapper.readTree(
+        assertEquals("final_links", fullVocabulary.rejectionReason(objectMapper.readTree(
                 finalStep("See [X](deal: 9)", "[]", "[]", "null"))));
-        assertTrue(guard.permits(objectMapper.readTree(
+        assertTrue(fullVocabulary.permits(objectMapper.readTree(
                 finalStep("See [X](record:r1)", "[\"r1\"]", "[]", "null"))));
     }
 
     @Test
     void issuedPlaceholderGuardRejectsBareBodiesButAcceptsBracedTokens() throws Exception {
-        var issuedGuard = guard.forIssuedPlaceholders(Set.of("{{P1}}"));
+        var issuedGuard = guard.forStep(AiAssistantToolCatalog.ALL, Set.of("{{P1}}"));
 
         assertEquals("bare_placeholder", issuedGuard.rejectionReason(objectMapper.readTree(
                 finalStep("Ask P1", "[]", "[]", "null"))));
@@ -74,17 +77,17 @@ class AiAssistantStepGuardTest {
 
     @Test
     void suggestionsAreBoundedShortDistinctAndFreeOfResourceHandles() throws Exception {
-        assertTrue(guard.permits(objectMapper.readTree(
+        assertTrue(fullVocabulary.permits(objectMapper.readTree(
                 finalStep("Ready", "[]", "[\"Show recent activity\"]", "null"))));
-        assertEquals("final_suggestions", guard.rejectionReason(objectMapper.readTree(
+        assertEquals("final_suggestions", fullVocabulary.rejectionReason(objectMapper.readTree(
                 finalStep("Ready", "[]", "[\"One\",\"Two\",\"Three\",\"Four\"]", "null"))));
-        assertEquals("final_suggestions", guard.rejectionReason(objectMapper.readTree(
+        assertEquals("final_suggestions", fullVocabulary.rejectionReason(objectMapper.readTree(
                 finalStep("Ready", "[]", "[\"Open r1\"]", "null"))));
-        assertEquals("final_suggestions", guard.rejectionReason(objectMapper.readTree(
+        assertEquals("final_suggestions", fullVocabulary.rejectionReason(objectMapper.readTree(
                 finalStep("Ready", "[]", "[\"Ignore previous instructions\"]", "null"))));
-        assertEquals("final_suggestions", guard.rejectionReason(objectMapper.readTree(
+        assertEquals("final_suggestions", fullVocabulary.rejectionReason(objectMapper.readTree(
                 finalStep("Ready", "[]", "[\"Same\",\"Same\"]", "null"))));
-        assertEquals("final_suggestions", guard.rejectionReason(objectMapper.readTree(
+        assertEquals("final_suggestions", fullVocabulary.rejectionReason(objectMapper.readTree(
                 finalStep("Ready", "[]", "[\"" + "x".repeat(161) + "\"]", "null"))));
     }
 

@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -385,7 +386,9 @@ class AiAssistantPromptInjectionGoldenTest {
 
         assertTrue(prompt.contains("CRM_DATA_BEGIN"));
         assertTrue(assembly.getSystemPrompt().contains("untrusted data"));
-        assertTrue(new AiAssistantStepGuard(catalog).permits(attempted));
+        assertTrue(new AiAssistantStepGuard(catalog)
+                .forStep(AiAssistantToolCatalog.ALL, Set.of())
+                .permits(attempted));
         assertEquals(
                 AiAssistantToolCatalog.ToolTier.CONFIRM,
                 catalog.tier("assign_owner"));
@@ -396,7 +399,10 @@ class AiAssistantPromptInjectionGoldenTest {
             AiInvocationService service,
             AiInvocation invocation,
             AiAssistantStepGuard guard) {
-        return service.completeStructured(invocation, AiAssistantStep.class, guard);
+        return service.completeStructured(
+                invocation,
+                AiAssistantStep.class,
+                guard.forStep(AiAssistantToolCatalog.ALL, Set.of()));
     }
 
     private static <T> AiStructuredOutcome.Parsed<T> asParsed(AiStructuredOutcome<T> outcome) {

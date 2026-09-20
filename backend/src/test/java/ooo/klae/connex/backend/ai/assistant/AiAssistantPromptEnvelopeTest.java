@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -55,14 +56,10 @@ class AiAssistantPromptEnvelopeTest {
      */
     private static final int MINIMUM_FLOOR_OUTPUT_TOKENS = 2 * CONFIGURED_MAX_OUTPUT_TOKENS;
 
-    /**
-     * The most one loadable toolset may add to either serialized envelope.
-     *
-     * <p>Sized above today's widest family with room for it to grow, and well under the margin the
-     * reservation leaves at the floor, so a family that outgrows it is split rather than quietly
-     * eating the answer budget.
-     */
-    private static final int MAX_TOOLSET_ENVELOPE_BYTES = 4_096;
+    /** Loadable toolsets the reservation carries, and therefore the ceiling's divisor. */
+    private static final int RESERVED_LOADABLE_TOOLSETS =
+            AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN
+                    + AiAssistantToolCatalog.RESERVATION_HEADROOM_TOOLSETS;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final AiAssistantToolCatalog toolCatalog = new AiAssistantToolCatalog();
@@ -184,6 +181,9 @@ class AiAssistantPromptEnvelopeTest {
      * <p>A byte threshold alone would not notice a wiring that quietly reverted to the whole
      * catalog while still fitting the floor. Asserting the definition names, and that a core-only
      * ReAct prompt never mentions a non-core tool, fails on the defect rather than on its size.
+     *
+     * <p>Both expectations are literal for the same reason: deriving either side from the catalog
+     * call under test would make the assertion move with the defect instead of catching it.
      */
     @Test
     void theCoreAndReservationEnvelopesCarryExactlyTheToolsTheyDeclare() {
@@ -194,13 +194,21 @@ class AiAssistantPromptEnvelopeTest {
                         .map(definition -> definition.name())
                         .toList());
         assertEquals(
-                toolCatalog.nativeDefinitions(objectMapper, toolCatalog.reservationToolsets())
-                        .stream()
-                        .map(definition -> definition.name())
-                        .toList(),
+                List.of("search_records", "get_record", "get_records", "set_todos",
+                        "list_activities", "list_tasks", "list_scope_activities",
+                        "aggregate_metric", "create_activity", "create_task",
+                        "create_note", "add_tag"),
                 promptAssembler.nativeToolDefinitions(toolCatalog.reservationToolsets()).stream()
                         .map(definition -> definition.name())
-                        .toList());
+                        .toList(),
+                "the reservation is core plus the "
+                        + RESERVED_LOADABLE_TOOLSETS + " weightiest loadable toolsets; if the"
+                        + " weight ranking legitimately moved, re-measure and re-pin this list"
+                        + " rather than deriving it from the call under test");
+        assertEquals(
+                Set.of(Toolset.CORE, Toolset.ANALYTICS,
+                        Toolset.WRITE_ACTIVITY, Toolset.WRITE_CONTENT),
+                Set.copyOf(toolCatalog.reservationToolsets()));
 
         String coreReactPrompt =
                 promptAssembler.fixedPrompt(AiAssistantToolCatalog.CORE).getSystemPrompt();
@@ -219,33 +227,35 @@ class AiAssistantPromptEnvelopeTest {
      * The turn gets one budget, measured once from {@code reservationToolsets()}, so that
      * measurement has to dominate every loaded set a turn can actually reach.
      *
-     * <p>{@code reservationToolsets()} picks its two toolsets by a pure-catalog weight proxy,
-     * because the catalog cannot serialize a prompt. This measures the real envelope for every
-     * reachable pair on both protocols instead of trusting the proxy: if a future toolset makes
-     * the proxy pick the wrong pair, the budget would silently under-reserve, and this fails with
-     * the numbers printed rather than starving a turn.
+     * <p>{@code reservationToolsets()} picks its toolsets by a pure-catalog weight proxy, because
+     * the catalog cannot serialize a prompt. This measures the real envelope for every reachable
+     * loaded set on both protocols instead of trusting the proxy: if a future toolset makes the
+     * proxy pick the wrong combination, the budget would silently under-reserve, and this fails
+     * with the numbers printed rather than starving a turn.
+     *
+     * <p>The enumeration is derived from {@code MAX_ACTIVE_TOOLSETS_PER_TURN} rather than written
+     * out, so raising the cap widens what is measured instead of quietly narrowing the guarantee
+     * to the combination sizes someone happened to type.
      */
     @Test
     void theReservationEnvelopeDominatesEveryReachableLoadedSet() {
         int reservationReact = reactEnvelopeBytes(toolCatalog.reservationToolsets());
         int reservationNative = nativeEnvelopeBytes(toolCatalog.reservationToolsets());
-        List<Toolset> loadable = AiAssistantToolCatalog.LOADABLE;
 
-        for (int first = 0; first < loadable.size(); first++) {
-            for (int second = first + 1; second < loadable.size(); second++) {
-                Set<Toolset> pair = loaded(loadable.get(first), loadable.get(second));
-                int react = reactEnvelopeBytes(pair);
-                int nativeBytes = nativeEnvelopeBytes(pair);
-                System.out.println("[envelope] pair=" + pair
-                        + " react=" + react + " native=" + nativeBytes);
-                assertTrue(react <= reservationReact,
-                        () -> "loaded set " + pair + " serializes " + react
-                                + " JSON-ReAct bytes, more than the reserved "
-                                + reservationReact);
-                assertTrue(nativeBytes <= reservationNative,
-                        () -> "loaded set " + pair + " serializes " + nativeBytes
-                                + " native bytes, more than the reserved " + reservationNative);
-            }
+        List<Set<Toolset>> reachable = reachableLoadedSets();
+        assertFalse(reachable.isEmpty(), "no reachable loaded set was enumerated");
+        for (Set<Toolset> candidate : reachable) {
+            int react = reactEnvelopeBytes(candidate);
+            int nativeBytes = nativeEnvelopeBytes(candidate);
+            System.out.println("[envelope] loaded=" + candidate
+                    + " react=" + react + " native=" + nativeBytes);
+            assertTrue(react <= reservationReact,
+                    () -> "loaded set " + candidate + " serializes " + react
+                            + " JSON-ReAct bytes, more than the reserved "
+                            + reservationReact);
+            assertTrue(nativeBytes <= reservationNative,
+                    () -> "loaded set " + candidate + " serializes " + nativeBytes
+                            + " native bytes, more than the reserved " + reservationNative);
         }
 
         System.out.println("[envelope] reservation=" + toolCatalog.reservationToolsets()
@@ -267,17 +277,30 @@ class AiAssistantPromptEnvelopeTest {
     }
 
     /**
-     * Bounds what one toolset may cost the envelope when it is loaded.
+     * Bounds what one toolset may cost the envelope, at the value that actually keeps the floor.
      *
-     * <p>The reservation grows with the biggest declared family rather than with the catalog, so a
-     * family that grows past this ceiling has to be split rather than silently pushing the
-     * reservation back toward the floor.
+     * <p>The ceiling is not a chosen number. The reservation is core plus
+     * {@link #RESERVED_LOADABLE_TOOLSETS} loadable toolsets, so if every one of them stayed within
+     * {@code (largest floor-admissible envelope - core envelope) / RESERVED_LOADABLE_TOOLSETS} the
+     * reservation cannot breach the floor assertion in
+     * {@link #theReservationEnvelopeDominatesEveryReachableLoadedSet}. That makes this an advance
+     * warning for the assertion it protects rather than a second, unrelated threshold: a family
+     * that outgrows it must be split before the floor check is the thing that fails.
      */
     @Test
-    void noSingleToolsetCostsMoreThanItsDeclaredEnvelopeCeiling() {
+    void noSingleToolsetCostsMoreThanTheFloorMarginFundsPerToolset() {
         int coreReact = reactEnvelopeBytes(AiAssistantToolCatalog.CORE);
         int coreNative = nativeEnvelopeBytes(AiAssistantToolCatalog.CORE);
-        System.out.println("[envelope] core react=" + coreReact + " native=" + coreNative);
+        int admissible = floorAdmissibleEnvelopeBytes();
+        int reactCeiling = (admissible - coreReact) / RESERVED_LOADABLE_TOOLSETS;
+        int nativeCeiling = (admissible - coreNative) / RESERVED_LOADABLE_TOOLSETS;
+        System.out.println("[envelope] core react=" + coreReact + " native=" + coreNative
+                + " floorAdmissible=" + admissible
+                + " reservedLoadableToolsets=" + RESERVED_LOADABLE_TOOLSETS
+                + " reactCeiling=" + reactCeiling + " nativeCeiling=" + nativeCeiling);
+        assertTrue(reactCeiling > 0 && nativeCeiling > 0,
+                "the floor margin funds no per-toolset growth at all; the core envelope itself is"
+                        + " already at the floor");
 
         for (Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
             int reactDelta = reactEnvelopeBytes(loaded(toolset)) - coreReact;
@@ -286,14 +309,62 @@ class AiAssistantPromptEnvelopeTest {
                     + " reactDelta=" + reactDelta + " nativeDelta=" + nativeDelta);
             assertTrue(reactDelta > 0,
                     () -> toolset.key() + " adds no tools to the JSON-ReAct vocabulary");
-            assertTrue(reactDelta <= MAX_TOOLSET_ENVELOPE_BYTES,
+            assertTrue(reactDelta <= reactCeiling,
                     () -> toolset.key() + " costs " + reactDelta
-                            + " JSON-ReAct bytes, past the "
-                            + MAX_TOOLSET_ENVELOPE_BYTES + "-byte per-toolset ceiling");
-            assertTrue(nativeDelta <= MAX_TOOLSET_ENVELOPE_BYTES,
+                            + " JSON-ReAct bytes, past the " + reactCeiling
+                            + "-byte share the floor margin funds per reserved toolset");
+            assertTrue(nativeDelta <= nativeCeiling,
                     () -> toolset.key() + " costs " + nativeDelta
-                            + " native bytes, past the "
-                            + MAX_TOOLSET_ENVELOPE_BYTES + "-byte per-toolset ceiling");
+                            + " native bytes, past the " + nativeCeiling
+                            + "-byte share the floor margin funds per reserved toolset");
+        }
+    }
+
+    /**
+     * Enumerates every loaded set a turn can reach: core plus any combination of up to
+     * {@code MAX_ACTIVE_TOOLSETS_PER_TURN} loadable toolsets.
+     */
+    private static List<Set<Toolset>> reachableLoadedSets() {
+        List<Toolset> loadable = AiAssistantToolCatalog.LOADABLE;
+        List<Set<Toolset>> reachable = new ArrayList<>();
+        for (int mask = 1; mask < (1 << loadable.size()); mask++) {
+            if (Integer.bitCount(mask) > AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN) {
+                continue;
+            }
+            Set<Toolset> candidate = new LinkedHashSet<>(AiAssistantToolCatalog.CORE);
+            for (int index = 0; index < loadable.size(); index++) {
+                if ((mask & (1 << index)) != 0) {
+                    candidate.add(loadable.get(index));
+                }
+            }
+            reachable.add(candidate);
+        }
+        return reachable;
+    }
+
+    /**
+     * The largest fixed envelope that still leaves {@link #MINIMUM_FLOOR_OUTPUT_TOKENS} at the
+     * declared floor, found by bisection because the budget derivation is not invertible.
+     */
+    private static int floorAdmissibleEnvelopeBytes() {
+        int admissible = 0;
+        int refused = 1 << 20;
+        while (refused - admissible > 1) {
+            int candidate = admissible + (refused - admissible) / 2;
+            if (clearsFloor(candidate)) {
+                admissible = candidate;
+            } else {
+                refused = candidate;
+            }
+        }
+        return admissible;
+    }
+
+    private static boolean clearsFloor(int fixedEnvelopeBytes) {
+        try {
+            return unclampedFloorOutputTokens(fixedEnvelopeBytes) >= MINIMUM_FLOOR_OUTPUT_TOKENS;
+        } catch (RuntimeException refused) {
+            return false;
         }
     }
 

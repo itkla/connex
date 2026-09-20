@@ -271,7 +271,7 @@ class AiChatMemoryServiceTest {
                 nativeTools.capture());
         assertEquals(15, nativeTools.getValue().definitions().size());
         verify(invocationService, never()).serializedPromptBytes(
-                any(MaskedPrompt.class), argThat(AiChatMemoryServiceTest::isFullCatalogStepSchema),
+                any(MaskedPrompt.class), any(AiResponseSchema.class),
                 eq(AiReasoningMode.TAGGED));
     }
 

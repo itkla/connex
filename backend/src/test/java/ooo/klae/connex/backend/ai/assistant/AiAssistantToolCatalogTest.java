@@ -2,8 +2,8 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -127,7 +127,6 @@ class AiAssistantToolCatalogTest {
     void everyDeclaredToolBelongsToExactlyOneToolsetAndCoreIsPinned() {
         Map<Toolset, List<String>> byToolset = new EnumMap<>(Toolset.class);
         for (ToolSpec spec : catalog.tools(AiAssistantToolCatalog.ALL)) {
-            assertNotNull(spec.toolset(), spec.name() + " declares no toolset");
             byToolset.computeIfAbsent(spec.toolset(), key -> new ArrayList<>())
                     .add(spec.name());
         }
@@ -150,6 +149,30 @@ class AiAssistantToolCatalogTest {
                 byToolset.values().stream().mapToInt(List::size).sum());
         assertEquals(Toolset.CORE, catalog.toolsetOf("list_tasks"));
         assertNull(catalog.toolsetOf("delete_record"));
+    }
+
+    /**
+     * A declaration without a toolset has to fail where it is written, not where it is filtered.
+     *
+     * <p>Every catalog view filters on the toolset, so a null one would drop the tool out of the
+     * vocabulary, the native definitions and {@code isLoaded} for {@code ALL} while
+     * {@code isKnown} still passed — the step guard would then reject it as {@code tool_name} — and
+     * would throw from {@code CORE}, an immutable set whose {@code contains} dereferences its
+     * argument, turning prompt assembly into an unhandled failure. No assertion over the built
+     * catalog can observe either case, because the offending spec is already filtered away.
+     */
+    @Test
+    void aToolDeclaredWithoutAToolsetIsRefusedAtDeclaration() {
+        NullPointerException refused = assertThrows(NullPointerException.class,
+                () -> new ToolSpec(
+                        "orphan_tool",
+                        null,
+                        AiAssistantToolCatalog.ToolTier.READ,
+                        true,
+                        null,
+                        List.of()));
+
+        assertTrue(refused.getMessage().contains("orphan_tool"));
     }
 
     /**
