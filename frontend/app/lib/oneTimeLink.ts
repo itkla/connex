@@ -9,7 +9,7 @@ let routerHoldsStrippedUrl = false;
  * navigation and browsers still exclude fragments from HTTP requests.
  *
  * The strip passes Next's own history state so the entry keeps `__NA`, which means the app router
- * never learns of it; `syncStrippedUrlWithRouter` closes that gap on the following commit.
+ * never learns of it; `syncStrippedUrlWithRouter` closes that gap once the router can hear it.
  */
 export function takeOneTimeLinkToken(): string | null {
     if (typeof window === "undefined") {
@@ -36,9 +36,10 @@ export function takeOneTimeLinkToken(): string | null {
  * restore, so the router adopts the bearer-free URL and the history entry stays app-router owned.
  *
  * Only Next's patch may receive this call. The native method would write the `null` through and
- * drop `__NA`, which leaves a history entry a later back navigation cannot restore; callers must
- * run it no earlier than the commit after mount, once `AppRouter`'s own mount effect has installed
- * the patch. `useOneTimeLinkEntry` is the only supported caller.
+ * drop `__NA`, which leaves a history entry a later back navigation cannot restore, and would not
+ * correct the canonical URL either; callers must run it no earlier than a task scheduled from a
+ * mount effect, by which point `AppRouter`'s own mount effect has installed the patch.
+ * `useOneTimeLinkEntry` is the only supported caller.
  */
 export function syncStrippedUrlWithRouter(): void {
     if (typeof window === "undefined" || !routerHoldsStrippedUrl) {
