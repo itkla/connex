@@ -1,0 +1,47 @@
+{
+  "id": "no_progress_replay",
+  "selector": "connex_script_no_progress",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Thornbury\",\"kinds\":[\"person\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Thornbury\",\"kinds\":[\"person\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "closing": false,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Thornbury\",\"kinds\":[\"person\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 2,
+      "protocol": "native",
+      "closing": true,
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Thornbury\",\"kinds\":[\"person\"]}"
+      }
+    }
+  ]
+}

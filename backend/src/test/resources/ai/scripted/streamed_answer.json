@@ -1,0 +1,30 @@
+{
+  "id": "streamed_answer",
+  "selector": "connex_script_streamed_answer",
+  "capabilityClass": "scripted-native-stream",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_call",
+        "toolName": "search_records",
+        "arguments": "{\"query\":\"Ashcombe\",\"kinds\":[\"person\"]}"
+      }
+    },
+    {
+      "afterToolCalls": 1,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"I reviewed [the contact](record:r1) and nothing is waiting on you.\",\"citations\":[\"r1\"],\"suggestions\":[],\"title\":null}",
+        "deltas": [
+          "{\"text\":\"I reviewed ",
+          "[the contact](record:r1)",
+          " and nothing is waiting on you.\",\"citations\":[\"r1\"],",
+          "\"suggestions\":[],\"title\":null}"
+        ]
+      }
+    }
+  ]
+}
