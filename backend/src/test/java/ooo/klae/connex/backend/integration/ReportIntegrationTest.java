@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -1924,7 +1925,8 @@ class ReportIntegrationTest {
         assertNotNull(orgId);
         Workspace otherWorkspace = newWorkspaceInOrg(orgId);
         assertEquals(1, shareMapper.sharePipeline(
-                pipelineId, workspace.getId(), otherWorkspace.getId(), member.getId(), false));
+                pipelineId, workspace.getId(), otherWorkspace.getId(), member.getId(), false,
+                    orgWorkspaceIdsJson(workspaceMapper, workspace.getId())));
         for (int index = 0; index < 8; index++) {
             int otherWonDealId = insertClosedDeal(otherWorkspace.getId(), pipelineId, wonStageId,
                     "Other reached-stage won " + index, "10.00", "USD", true, today.minusMonths(1));
@@ -1968,7 +1970,8 @@ class ReportIntegrationTest {
         int pipelineId = insertPipeline(pipelineOwner.getId(), "Neutral forecast pipeline");
         int stageId = insertStage(pipelineOwner.getId(), pipelineId, "Neutral stage", 1);
         assertEquals(1, shareMapper.sharePipeline(
-                pipelineId, pipelineOwner.getId(), workspace.getId(), pipelineOwnerMember.getId(), false));
+                pipelineId, pipelineOwner.getId(), workspace.getId(), pipelineOwnerMember.getId(), false,
+                    orgWorkspaceIdsJson(workspaceMapper, pipelineOwner.getId())));
         insertOpenDeal(workspace.getId(), pipelineId, stageId,
                 "Neutral open", "100.00", "USD", inHorizon);
 

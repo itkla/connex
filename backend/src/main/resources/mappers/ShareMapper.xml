@@ -22,23 +22,37 @@
        violating either inserts nothing and returns 0. Row counts are driver-
        dependent (an unchanged re-grant reports 1 under found-rows semantics but 0
        under affected-rows), so ShareService confirms via the *ShareExists probes
-       before treating 0 as a refusal — the contract holds under either setting. -->
+       before treating 0 as a refusal — the contract holds under either setting.
+
+       The organization ceiling used to be `JOIN workspace tw ... tw.org_id = ow.org_id`.
+       The `workspace` table is control-plane, so that join cannot execute once an org's
+       data lives in its own catalog (#811, parent #485). It is now the control-derived
+       allowlist `orgWorkspaceIdsJson` that ShareService loads in one unrouted snapshot —
+       the same trusted-allowlist model the read-path ceilings already use (IdentityMapper,
+       PersonEdgeMapper, AiAssistantIdentifierMapper). BOTH sides are still checked here:
+       the owning workspace and the target workspace must each appear in the snapshot, so
+       an allowlist built for some other organization refuses the grant on the owner side.
+       A NULL or empty allowlist selects no rows, so the statement fails closed. -->
   <insert id="shareCompany">
     INSERT INTO company_share (company_id, workspace_id, granted_by, can_edit)
-    SELECT c.id, tw.id, #{grantedBy}, #{canEdit}
+    SELECT c.id, target_workspace.id, #{grantedBy}, #{canEdit}
     FROM company c
-    JOIN workspace ow ON ow.id = c.workspace_id
-    JOIN workspace tw ON tw.id = #{targetWorkspaceId} AND tw.org_id = ow.org_id
+    JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) owner_workspace
+      ON owner_workspace.id = c.workspace_id
+    JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) target_workspace
+      ON target_workspace.id = #{targetWorkspaceId}
     WHERE c.id = #{id} AND c.workspace_id = #{workspaceId}
       AND c.archived_at IS NULL
     ON DUPLICATE KEY UPDATE can_edit = #{canEdit}, granted_by = #{grantedBy}
   </insert>
   <insert id="sharePerson">
     INSERT INTO person_share (person_id, workspace_id, granted_by, can_edit)
-    SELECT p.id, tw.id, #{grantedBy}, #{canEdit}
+    SELECT p.id, target_workspace.id, #{grantedBy}, #{canEdit}
     FROM person p
-    JOIN workspace ow ON ow.id = p.workspace_id
-    JOIN workspace tw ON tw.id = #{targetWorkspaceId} AND tw.org_id = ow.org_id
+    JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) owner_workspace
+      ON owner_workspace.id = p.workspace_id
+    JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) target_workspace
+      ON target_workspace.id = #{targetWorkspaceId}
     WHERE p.id = #{id} AND p.workspace_id = #{workspaceId}
       AND p.provision_ceased_at IS NULL
       AND p.archived_at IS NULL
@@ -46,10 +60,12 @@
   </insert>
   <insert id="sharePipeline">
     INSERT INTO pipeline_share (pipeline_id, workspace_id, granted_by, can_edit)
-    SELECT pl.id, tw.id, #{grantedBy}, #{canEdit}
+    SELECT pl.id, target_workspace.id, #{grantedBy}, #{canEdit}
     FROM pipeline pl
-    JOIN workspace ow ON ow.id = pl.workspace_id
-    JOIN workspace tw ON tw.id = #{targetWorkspaceId} AND tw.org_id = ow.org_id
+    JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) owner_workspace
+      ON owner_workspace.id = pl.workspace_id
+    JOIN JSON_TABLE(#{orgWorkspaceIdsJson}, '$[*]' COLUMNS(id INT PATH '$')) target_workspace
+      ON target_workspace.id = #{targetWorkspaceId}
     WHERE pl.id = #{id} AND pl.workspace_id = #{workspaceId}
     ON DUPLICATE KEY UPDATE can_edit = #{canEdit}, granted_by = #{grantedBy}
   </insert>
@@ -115,29 +131,32 @@
     WHERE s.pipeline_id = #{id} AND s.workspace_id = #{targetWorkspaceId}
   </delete>
 
+  <!-- Listings return tenant share rows only. The workspace NAME and the name ordering the
+       response carries are control-plane data, so ShareService hydrates and orders them from
+       its unrouted organization snapshot (#811). A share row whose target is absent from that
+       snapshot is dropped there, exactly as the removed `JOIN workspace` dropped a share whose
+       target workspace row no longer existed — V65 removed the foreign key that used to make
+       that impossible. -->
   <select id="listCompanyShares" resultType="ooo.klae.connex.backend.dto.ShareDto">
-    SELECT s.workspace_id AS workspaceId, w.name AS workspaceName, s.can_edit AS canEdit, s.created_at AS createdAt
+    SELECT s.workspace_id AS workspaceId, s.can_edit AS canEdit, s.created_at AS createdAt
     FROM company_share s
     JOIN company c ON c.id = s.company_id AND c.workspace_id = #{workspaceId}
-    JOIN workspace w ON w.id = s.workspace_id
     WHERE s.company_id = #{id}
-    ORDER BY w.name
+    ORDER BY s.workspace_id
   </select>
   <select id="listPersonShares" resultType="ooo.klae.connex.backend.dto.ShareDto">
-    SELECT s.workspace_id AS workspaceId, w.name AS workspaceName, s.can_edit AS canEdit, s.created_at AS createdAt
+    SELECT s.workspace_id AS workspaceId, s.can_edit AS canEdit, s.created_at AS createdAt
     FROM person_share s
     JOIN person p ON p.id = s.person_id AND p.workspace_id = #{workspaceId}
-    JOIN workspace w ON w.id = s.workspace_id
     WHERE s.person_id = #{id}
-    ORDER BY w.name
+    ORDER BY s.workspace_id
   </select>
   <select id="listPipelineShares" resultType="ooo.klae.connex.backend.dto.ShareDto">
-    SELECT s.workspace_id AS workspaceId, w.name AS workspaceName, s.can_edit AS canEdit, s.created_at AS createdAt
+    SELECT s.workspace_id AS workspaceId, s.can_edit AS canEdit, s.created_at AS createdAt
     FROM pipeline_share s
     JOIN pipeline pl ON pl.id = s.pipeline_id AND pl.workspace_id = #{workspaceId}
-    JOIN workspace w ON w.id = s.workspace_id
     WHERE s.pipeline_id = #{id}
-    ORDER BY w.name
+    ORDER BY s.workspace_id
   </select>
 
   <update id="clearCompanyShareGrantedByAnywhere">

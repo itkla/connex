@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -85,7 +86,8 @@ class PipelineServiceTest extends AbstractServiceTest {
         workspaceMapper.insert(sibling);
         workspaceMapper.addMember(sibling.getId(), currentUser.getId(), "owner");
         shareMapper.sharePipeline(
-            pipeline.getId(), workspace.getId(), sibling.getId(), currentUser.getId(), false);
+            pipeline.getId(), workspace.getId(), sibling.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, workspace.getId()));
         workspace = sibling;
         authenticateAs(currentUser, sibling.getId());
         Deal granteeDeal = newDeal(pipeline, sharedStage, newCompany());

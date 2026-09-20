@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -701,7 +702,8 @@ class AttachmentUploadSecurityIntegrationTest {
             shared.setName("Shared upload target " + unique());
             companies.insert(shared);
             assertEquals(1, shares.shareCompany(
-                shared.getId(), sourceWorkspace.getId(), workspace.getId(), target.getId(), false));
+                shared.getId(), sourceWorkspace.getId(), workspace.getId(), target.getId(), false,
+                    orgWorkspaceIdsJson(workspaces, sourceWorkspace.getId())));
             return shared.getId();
         }
         Person shared = new Person();
@@ -709,7 +711,8 @@ class AttachmentUploadSecurityIntegrationTest {
         shared.setName("Shared upload target " + unique());
         people.insert(shared);
         assertEquals(1, shares.sharePerson(
-            shared.getId(), sourceWorkspace.getId(), workspace.getId(), target.getId(), false));
+            shared.getId(), sourceWorkspace.getId(), workspace.getId(), target.getId(), false,
+                orgWorkspaceIdsJson(workspaces, sourceWorkspace.getId())));
         return shared.getId();
     }
 

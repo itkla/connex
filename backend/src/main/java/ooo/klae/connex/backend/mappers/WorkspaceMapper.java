@@ -88,6 +88,18 @@ public interface WorkspaceMapper {
         @Param("afterId") int afterId, @Param("limit") int limit);
     List<Integer> findWorkspaceIdsLifecyclePage(
         @Param("afterId") int afterId, @Param("limit") int limit);
+    /**
+     * Loads the id and name of every workspace in the anchor workspace's organization,
+     * ordered by name then id. This is the control-plane snapshot record sharing uses as
+     * its same-organization ceiling and as its workspace-name hydration source (#811), so
+     * it deliberately applies no lifecycle filter — the {@code ShareMapper} joins it
+     * replaces applied none either.
+     *
+     * @param workspaceId workspace anchoring the organization
+     * @return id/name rows in name then id order, empty when the anchor does not exist
+     */
+    List<Workspace> findOrganizationWorkspacesForShare(@Param("workspaceId") int workspaceId);
+
     List<Workspace> findByOrgId(@Param("orgId") int orgId);
     List<Workspace> findActiveByOrgIdPage(
         @Param("orgId") int orgId,

@@ -309,6 +309,19 @@
     LIMIT #{limit}
   </select>
 
+  <!-- Share hydration snapshot (#811). This replaces the control-plane `workspace` joins the
+       tenant-scoped ShareMapper used to carry, so it must reproduce them exactly: those joins had
+       no lifecycle predicate, and adding one here would silently stop listing (and stop granting
+       to) a target workspace whose organization is winding down. Ordering by name then id is what
+       the removed `ORDER BY w.name` produced, made total. -->
+  <select id="findOrganizationWorkspacesForShare" resultType="Workspace">
+    SELECT peer.id, peer.name
+    FROM workspace anchor
+    JOIN workspace peer ON peer.org_id = anchor.org_id
+    WHERE anchor.id = #{workspaceId}
+    ORDER BY peer.name, peer.id
+  </select>
+
   <select id="findByOrgId" resultType="Workspace">
     SELECT w.id, w.org_id, w.name, w.slug, w.timezone,
            w.identity_version AS identityVersion, w.created_at, w.updated_at
