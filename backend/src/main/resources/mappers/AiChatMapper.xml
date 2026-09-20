@@ -225,6 +225,24 @@
     FOR UPDATE
   </select>
 
+  <!--
+    The background settlement passes' session lock. No viewer, so no participation projection:
+    the columns a viewer-scoped lock computes are all about one member's relationship to the
+    session, and a maintenance pass has no member.
+  -->
+  <select id="getSessionByIdForMaintenanceUpdate" resultMap="sessionResult">
+    SELECT s.id, s.workspace_id, s.created_by_user_id, s.title, s.title_user_set,
+           s.visibility, s.status,
+           NULL AS participation_status,
+           FALSE AS owned_by_current_user,
+           FALSE AS history_summarized,
+           s.last_message_at, s.archived_at, s.created_at, s.updated_at
+    FROM ai_chat_session s
+    WHERE s.workspace_id = #{workspaceId}
+      AND s.id = #{id}
+    FOR UPDATE
+  </select>
+
   <select id="sessionExists" resultType="boolean">
     SELECT EXISTS(
       SELECT 1
@@ -576,6 +594,76 @@
       AND id = #{id}
   </select>
 
+  <!--
+    The orphan settlement's session lookup. A lease key names a workspace and a turn and no
+    session, and the session lock comes first in the documented order, so this has to be read
+    before any lock is taken. A turn never changes session, so reading it unlocked is exact.
+  -->
+  <select id="getTurnSessionId" resultType="java.lang.Integer">
+    SELECT session_id
+    FROM ai_chat_turn
+    WHERE workspace_id = #{workspaceId}
+      AND id = #{id}
+  </select>
+
+  <!--
+    Catalog-pinned background-sweep discovery: workspace references only, no tenant content rows,
+    which is why it carries a TenantScopeArchTest exemption instead of a workspace predicate.
+
+    The status equalities and the updated_at range lead and the workspace cursor trails, because
+    this probe has no workspace predicate to seek on. Every other ai_chat_turn index leads with
+    workspace_id, so a cursor range there degenerates into a scan of an index that grows one entry
+    per assistant turn ever asked - paid every thirty seconds, per catalog, to return nothing.
+    idx_ai_chat_turn_unleased_lifetime (status, updated_at, workspace_id) turns it into two short
+    ranges whose cost follows the outstanding recovery work instead, and a tick with nothing to
+    recover reads no entries at all.
+
+    The lifetime boundary is computed here rather than bound as a JVM instant: it is compared
+    against updated_at, which MySQL writes, so an instance whose clock ran ahead would otherwise
+    discover every live turn in every workspace it routes to as stale.
+  -->
+  <select id="workspaceIdsWithUnleasedStaleTurns" resultType="int">
+    SELECT DISTINCT t.workspace_id
+    FROM ai_chat_turn t
+    LEFT JOIN ai_run_lease l
+      ON l.workspace_id = t.workspace_id
+     AND l.subject_kind = 'chat_turn'
+     AND l.subject_id = t.id
+    WHERE t.status IN ('queued', 'running')
+      AND t.updated_at &lt;=
+          DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL #{lifetimeSeconds} SECOND)
+      AND t.workspace_id &gt; #{afterWorkspaceId}
+      AND l.subject_id IS NULL
+    ORDER BY t.workspace_id
+    LIMIT #{limit}
+  </select>
+
+  <!--
+    The rolling-deploy and never-claimed pass. A claimed turn always has a lease row - held or
+    tombstoned - so the absence of one is what says no instance ever fenced this turn and it must
+    settle on the absolute lifetime rather than as an ownership loss.
+
+    Keys only: the pass locks and re-reads every turn before it writes, so projecting
+    partial_content and scope_json would put tenant transcript text on a shared scheduler thread
+    for no purpose.
+  -->
+  <select id="findUnleasedStaleTurnRefs"
+          resultType="ooo.klae.connex.backend.beans.AiChatTurnRef">
+    SELECT t.session_id, t.id
+    FROM ai_chat_turn t
+    LEFT JOIN ai_run_lease l
+      ON l.workspace_id = t.workspace_id
+     AND l.subject_kind = 'chat_turn'
+     AND l.subject_id = t.id
+    WHERE t.workspace_id = #{workspaceId}
+      AND t.status IN ('queued', 'running')
+      AND t.updated_at &lt;=
+          DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL #{lifetimeSeconds} SECOND)
+      AND l.subject_id IS NULL
+    ORDER BY t.id
+    LIMIT #{limit}
+  </select>
+
   <select id="getTurnById" resultMap="turnResult">
     SELECT id, workspace_id, session_id, requested_by_user_id, status,
            terminal_reason, skill_key, skill_version, scope_json,
@@ -665,6 +753,23 @@
     <if test="updatedBefore != null">
       AND updated_at &lt;= #{updatedBefore}
     </if>
+  </update>
+
+  <!--
+    The unattended lifetime pass's compare-and-set. Same shape as updateTurnTerminal above, except
+    that the staleness boundary is computed by MySQL instead of bound by the caller: this pass runs
+    on every instance against every workspace, so a JVM clock running ahead of the database would
+    settle live turns estate-wide rather than only in the one session a reader happened to open.
+  -->
+  <update id="expireTurnPastLifetime">
+    UPDATE ai_chat_turn
+    SET status = #{status}, terminal_reason = #{terminalReason,jdbcType=VARCHAR}
+    WHERE workspace_id = #{workspaceId}
+      AND session_id = #{sessionId}
+      AND id = #{id}
+      AND status = #{expectedStatus}
+      AND updated_at &lt;=
+          DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL #{lifetimeSeconds} SECOND)
   </update>
 
   <update id="appendTurnPartialContent">

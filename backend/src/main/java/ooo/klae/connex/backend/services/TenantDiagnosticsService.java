@@ -60,6 +60,14 @@ import tools.jackson.databind.ObjectMapper;
 public class TenantDiagnosticsService {
     private static final TypeReference<Map<String, Object>> DETAIL_TYPE = new TypeReference<>() {
     };
+    /**
+     * The scheduled jobs whose last run, last success, and last failure this surface reports.
+     *
+     * <p>The two AI recovery sweeps are here because the durable-turn recovery bound rests on them:
+     * a lease sweep or lifetime sweep that is failing for one tenant is the difference between a
+     * stuck assistant turn settling within about a minute and it staying stuck, and this list is the
+     * only place that failure becomes visible without reading {@code job_run} by hand.
+     */
     private static final List<String> JOB_NAMES = List.of(
             JobRunRecorder.NOTIFICATION_RECONCILIATION,
             JobRunRecorder.REPORT_DELIVERY,
@@ -70,7 +78,9 @@ public class TenantDiagnosticsService {
             JobRunRecorder.OBJECT_DELETION_RETRY,
             JobRunRecorder.APPROVAL_RECONCILIATION,
             JobRunRecorder.RELATIONSHIP_SIGNAL_RECONCILIATION,
-            JobRunRecorder.LEAD_RESPONSE_SLA);
+            JobRunRecorder.LEAD_RESPONSE_SLA,
+            JobRunRecorder.AI_RUN_LEASE_SWEEP,
+            JobRunRecorder.AI_CHAT_TURN_LIFETIME_SWEEP);
     private static final Set<String> JOB_DETAIL_KEYS = Set.of(
             "phase",
             "purgedCount",
@@ -82,7 +92,10 @@ public class TenantDiagnosticsService {
             "failedCount",
             "scheduleId",
             "snapshotId",
-            "recipientCount");
+            "recipientCount",
+            "expiredCount",
+            "visitedCount",
+            "durationMs");
 
     private final DeploymentProperties deploymentProperties;
     private final CapabilityRegistry capabilityRegistry;
