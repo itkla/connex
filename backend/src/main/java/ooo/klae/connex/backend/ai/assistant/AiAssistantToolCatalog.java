@@ -109,6 +109,26 @@ public class AiAssistantToolCatalog {
     public static final int MAX_ACTIVE_TOOLSETS_PER_TURN = 2;
 
     /**
+     * Resolves a wire key onto the loadable toolset that declares it.
+     *
+     * <p>The one lookup every caller that accepts a key uses — a skill declaration, the turn's
+     * seed, the {@code find_tools} loader — so no caller can string-match its way to a toolset the
+     * catalog does not declare, and {@code core} is never reachable from a key: it is always held
+     * and is never something a declaration or a model may ask for.
+     *
+     * @param key a declared lowercase toolset key
+     * @return the loadable toolset with that key, or {@code null} when no declaration owns it
+     */
+    public static Toolset loadableByKey(String key) {
+        for (Toolset toolset : LOADABLE) {
+            if (toolset.key().equals(key)) {
+                return toolset;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Extra loadable toolsets the reservation carries beyond {@link #MAX_ACTIVE_TOOLSETS_PER_TURN}.
      *
      * <p>The weight proxy below is not a byte count, and it cannot be: the two protocols serialize

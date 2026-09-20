@@ -120,13 +120,11 @@ public class AiAssistantToolsetLoader {
         if (requested == null || !requested.isString()) {
             throw AiAssistantLoopException.refusedArguments(INVALID_ARGUMENTS);
         }
-        String key = requested.asString();
-        for (Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
-            if (toolset.key().equals(key)) {
-                return toolset;
-            }
+        Toolset resolved = AiAssistantToolCatalog.loadableByKey(requested.asString());
+        if (resolved == null) {
+            throw AiAssistantLoopException.refusedArguments(INVALID_ARGUMENTS);
         }
-        throw AiAssistantLoopException.refusedArguments(INVALID_ARGUMENTS);
+        return resolved;
     }
 
     private static int loadableCount(Set<Toolset> loadedToolsets) {

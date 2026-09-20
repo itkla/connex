@@ -23,12 +23,15 @@ import static org.mockito.Mockito.when;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -3755,6 +3758,294 @@ class AiChatAgentLoopServiceTest {
         assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
         verify(toolExecutor).execute(
                 eq("aggregate_metric"), any(JsonNode.class), any(), eq(true), any());
+    }
+
+    /**
+     * A routed skill's declared toolsets are held from the synthesis step's first render, so the
+     * declaration does not spend a governance step rediscovering the reads it already named.
+     *
+     * <p>Every shipped skill declares none today, so this is the forward contract Phase 1 consumes
+     * rather than a behaviour change, and it is proved against a test-only declaration rather than
+     * by moving a product skill onto a toolset.
+     */
+    @Test
+    void aRoutedSkillSeedsItsDeclaredToolsetSoSynthesisSpendsNoStepOnALoad() throws Exception {
+        AiSkillCatalog.SkillSpec seeded = routedSeedingSkill(Set.of("analytics"));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep(
+                        "aggregate_metric", "{\"metric\":\"deal_metrics\"}")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService).applySkill(TURN, seeded.key(), seeded.version());
+        verify(toolExecutor).execute(
+                eq("aggregate_metric"), any(JsonNode.class), any(), eq(true), any());
+        verify(persistenceService, never()).proposeTool(
+                eq(TURN), anyInt(), eq(AiAssistantToolCatalog.FIND_TOOLS), any());
+        verify(persistenceService, never()).failTool(eq(TURN), anyInt(), contains("not_loaded"));
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        String firstSystemPrompt =
+                invocations.getAllValues().getFirst().prompt().getSystemPrompt();
+        assertTrue(
+                firstSystemPrompt.contains("analytics - "
+                        + AiAssistantToolCatalog.Toolset.ANALYTICS.summary() + " - loaded"),
+                "a seeded toolset is held, so the directory must not offer it as available");
+        assertTrue(firstSystemPrompt.contains("aggregate_metric"));
+        assertTrue(
+                firstSystemPrompt.contains("schedule - "
+                        + AiAssistantToolCatalog.Toolset.SCHEDULE.summary() + " - available"),
+                "seeding widens only what the declaration named");
+    }
+
+    /**
+     * Seeded and loaded toolsets spend from one allowance, because the set's own size is the
+     * counter. A second counter beside it would let a routed turn reach twice the vocabulary the
+     * single per-turn budget was reserved for.
+     */
+    @Test
+    void aSeededToolsetAndALoadedOneShareTheOnePerTurnCap() throws Exception {
+        routedSeedingSkill(Set.of("analytics"));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("schedule")))
+                .thenReturn(parsed(loadStep("write_content")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        ArgumentCaptor<String> results = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).finishTool(
+                eq(TURN), anyInt(), eq("executed"), results.capture());
+        JsonNode executedRow = objectMapper.readTree(results.getValue());
+        assertEquals(0, executedRow.path("remainingLoads").asInt(),
+                "the seeded set already spent half the one allowance");
+        assertEquals(
+                List.of("core", "analytics", "schedule"),
+                executedRow.path("active").valueStream()
+                        .map(JsonNode::asString)
+                        .toList());
+        verify(persistenceService).failTool(
+                eq(TURN), eq(29), contains("toolset_load_limit_reached"));
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(3)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        assertTrue(messageText(invocations.getAllValues().getLast())
+                .contains("\"error\":\"toolset_load_limit_reached\""));
+        assertFalse(
+                invocations.getAllValues().getLast().prompt().getSystemPrompt()
+                        .contains("create_note"),
+                "a refused load must not widen the vocabulary it was refused for");
+    }
+
+    /**
+     * A declaration seeded to the cap has no load left to spend, exactly as a turn that loaded its
+     * way there has none.
+     */
+    @Test
+    void aSkillSeededToTheCapIsRefusedItsFirstLoad() throws Exception {
+        routedSeedingSkill(Set.of("analytics", "write_content"));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("schedule")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService).failTool(
+                eq(TURN), eq(29), contains("toolset_load_limit_reached"));
+        verify(persistenceService, never()).finishTool(
+                eq(TURN), anyInt(), eq("executed"), any());
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        assertFalse(
+                invocations.getAllValues().getLast().prompt().getSystemPrompt()
+                        .contains("find_schedule_conflicts"),
+                "a refused load must not widen the vocabulary it was refused for");
+    }
+
+    /**
+     * A routed plan that produced no evidence seeds nothing, because the seed sits inside the same
+     * {@code execution.executed()} branch as the durable skill attribution.
+     *
+     * <p>P0.4's resume reader rebuilds the loaded set from {@code ai_chat_turn.skill_key} plus the
+     * turn's find_tools rows, so a turn whose declaration was never applied and whose toolsets were
+     * seeded anyway would reconstruct as core while having run wider. The two writes have to agree.
+     */
+    @Test
+    void aRoutedPlanThatDidNotExecuteSeedsNothingAndNamesNoSkill() throws Exception {
+        AiSkillCatalog.SkillSpec seeded = seedingSkill(Set.of("analytics"));
+        when(skillRouter.route(anyInt(), anyInt(), any(), any(), any()))
+                .thenReturn(new AiSkillRouter.Routing(
+                        seeded, AiSkillRouter.MATCHED, null, false));
+        when(skillPlanRunner.run(eq(TURN), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new AiSkillPlanRunner.Execution(false, Map.of(), 0, false));
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(toolStep(
+                        "aggregate_metric", "{\"metric\":\"deal_metrics\"}")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer(
+                                "I could not read the pipeline metric.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService, never()).applySkill(eq(TURN), any(), any());
+        verify(persistenceService).failTool(eq(TURN), eq(29), contains("tool_not_loaded"));
+        verify(toolExecutor, never()).execute(
+                eq("aggregate_metric"), any(), any(), any(Boolean.class), any());
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        assertTrue(
+                invocations.getAllValues().getFirst().prompt().getSystemPrompt()
+                        .contains("analytics - "
+                                + AiAssistantToolCatalog.Toolset.ANALYTICS.summary()
+                                + " - available"),
+                "a declaration the turn never ran under holds nothing");
+    }
+
+    /**
+     * The seeded half of the reconstruction contract: the durable skill attribution plus the
+     * declaration it names rebuilds exactly the vocabulary the turn's provider call carried, with
+     * no find_tools row and therefore no migration needed to record it.
+     */
+    @Test
+    void theDurableSkillAttributionReconstructsASeededTurnsVocabulary() throws Exception {
+        useNativeMemory(new AiAssistantPromptBudget(
+                64, 64_000, 16_000, 16_000, 16_000, 112_000));
+        AiSkillCatalog.SkillSpec seeded = routedSeedingSkill(Set.of("analytics"));
+        when(invocationService.completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), any(AiNativeToolRequest.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(nativeTool(
+                        "call_1", "aggregate_metric", "{\"metric\":\"deal_metrics\"}"))
+                .thenReturn(nativeFinal(new AiAssistantStep.FinalAnswer(
+                        "Pipeline is healthy.", List.of())));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        ArgumentCaptor<String> appliedKey = ArgumentCaptor.forClass(String.class);
+        verify(persistenceService).applySkill(eq(TURN), appliedKey.capture(), eq(seeded.version()));
+        verify(persistenceService, never()).proposeTool(
+                eq(TURN), anyInt(), eq(AiAssistantToolCatalog.FIND_TOOLS), any());
+        Map<String, AiSkillCatalog.SkillSpec> declarations = Map.of(seeded.key(), seeded);
+        Set<String> reconstructed = new LinkedHashSet<>(
+                List.of(AiAssistantToolCatalog.Toolset.CORE.key()));
+        reconstructed.addAll(declarations.get(appliedKey.getValue()).toolsets());
+
+        ArgumentCaptor<AiNativeToolRequest> requests =
+                ArgumentCaptor.forClass(AiNativeToolRequest.class);
+        verify(invocationService, times(2)).completeNativeToolsRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.FinalAnswer.class),
+                any(AiRawOutputGuard.class), any(AiRawOutputGuard.class),
+                any(AiResponseSchema.class), requests.capture(),
+                eq(directAdmission), any(Runnable.class));
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        assertEquals(
+                reconstructed,
+                definitionNames(requests.getAllValues().getLast()).stream()
+                        .map(name -> catalog.toolsetOf(name).key())
+                        .collect(Collectors.toCollection(LinkedHashSet::new)));
+        assertEquals(Set.of("core", "analytics"), reconstructed);
+    }
+
+    private AiSkillCatalog.SkillSpec routedSeedingSkill(Set<String> toolsets) {
+        AiSkillCatalog.SkillSpec seeded = seedingSkill(toolsets);
+        when(skillRouter.route(anyInt(), anyInt(), any(), any(), any()))
+                .thenReturn(new AiSkillRouter.Routing(
+                        seeded, AiSkillRouter.MATCHED, null, false));
+        when(skillPlanRunner.run(eq(TURN), any(), any(), any(), anyInt(), any()))
+                .thenReturn(new AiSkillPlanRunner.Execution(
+                        true,
+                        Map.of("skill", seeded.key(), "evidence", List.of(Map.of(
+                                "kind", "deal_attention",
+                                "status", "ok",
+                                "data", Map.of("matchedRecords", 3)))),
+                        1,
+                        false));
+        return seeded;
+    }
+
+    /**
+     * A test-only declaration that names toolsets, because no shipped skill does: seeding is the
+     * forward contract Phase 1's write skills consume, and proving it by moving a product skill
+     * onto a toolset would change what real turns send.
+     */
+    private static AiSkillCatalog.SkillSpec seedingSkill(Set<String> toolsets) {
+        return new AiSkillCatalog.SkillSpec(
+                "seeding_probe_v1",
+                "1.0.0",
+                AiSkillCatalog.Availability.AVAILABLE,
+                null,
+                "askConnex.skills.seedingProbe.name",
+                "askConnex.skills.seedingProbe.description",
+                Set.of(),
+                false,
+                Set.of(),
+                Set.of(),
+                List.of(),
+                Set.of("aggregate_metric"),
+                toolsets,
+                Set.of(),
+                Set.of(),
+                Set.of(),
+                false,
+                Set.of(Permission.AI_USE),
+                AiFeature.ASSISTANT_CHAT,
+                32_768,
+                AiSkillCatalog.Authority.READ,
+                new AiSkillCatalog.Bounds(0, 0, 0, 0),
+                new AiSkillCatalog.Budgets(6, 0L, 0),
+                Integer.MAX_VALUE,
+                AiSkillCatalog.PartialBehavior.FAIL_CLOSED,
+                new AiSkillCatalog.Evaluation("seeding_probe_v1", 0, Set.of()),
+                List.of(),
+                "Answer from the pipeline metric the plan retrieved.");
     }
 
     private static List<String> definitionNames(AiNativeToolRequest request) {

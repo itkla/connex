@@ -205,8 +205,7 @@ public class AiSkillCatalog {
                         "Skill " + key + " declares more toolsets than one turn may hold");
             }
             for (String toolset : toolsets) {
-                if (AiAssistantToolCatalog.LOADABLE.stream()
-                        .noneMatch(loadable -> loadable.key().equals(toolset))) {
+                if (AiAssistantToolCatalog.loadableByKey(toolset) == null) {
                     throw new IllegalArgumentException(
                             "Skill " + key + " declares an unknown toolset " + toolset);
                 }
