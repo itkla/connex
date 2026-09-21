@@ -2,11 +2,12 @@
 Description=Prune the Connex staging release quarantine daily
 
 [Timer]
-# Early morning, well away from the five-minute deploy cadence.
-OnCalendar=*-*-* 04:20:00
+# Hourly. Daily left the reaper a day behind a busy afternoon: entries became eligible long after
+# the filesystem had already tightened toward the deploy preflight floor.
+OnCalendar=hourly
 # The host is not always up at 04:20; catch up on the next boot rather than skipping a day.
 Persistent=true
-RandomizedDelaySec=600
+RandomizedDelaySec=300
 
 [Install]
 WantedBy=timers.target

@@ -36,13 +36,15 @@ set -Eeuo pipefail
 STAGING_DIR="${CONNEX_STAGING_DIR:-/opt/connex-staging}"
 STATE_DIR="$STAGING_DIR/.staging"
 RELEASE_QUARANTINE_DIR="$STATE_DIR/release-quarantine"
+SCRATCH_GLOB=".target-release-*"
 MARKER="$STATE_DIR/deployed-sha"
 ROLLBACK_MARKER="$STATE_DIR/rollback-sha"
 FRONTEND_RUNNING_MARKER="$STATE_DIR/frontend-running"
 LOG_TAG="connex-staging-prune"
 
-# A tree must sit unclaimed for this long before it is a candidate.
-MIN_AGE_SECONDS="${CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS:-86400}"
+# A tree must sit unclaimed for this long before it is a candidate. A deploy takes roughly ten
+# minutes, so this is a wide margin on settling, not the primary safety property.
+MIN_AGE_SECONDS="${CONNEX_STAGING_PRUNE_MIN_AGE_SECONDS:-14400}"
 
 # Entries to keep even when they are old enough, newest first, for post-mortems.
 KEEP_RECENT="${CONNEX_STAGING_PRUNE_KEEP_RECENT:-2}"
@@ -125,6 +127,44 @@ frontend_started_at() {
     stat -c %Y -- "$proc_dir"
 }
 
+# A build writes into $STATE_DIR/.target-release-<sha>.XXXXXX and removes it on both the success and
+# failure paths. A killed build never gets there, and the scratch — most of a full frontend and
+# backend build — is stranded. Nothing else reclaims it.
+#
+# This only runs while the deploy lock is held, so no live build owns a scratch directory here.
+# The age floor is belt and braces on that.
+reap_orphaned_scratch() {
+    local now="$1" path age created freed=0 size
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        if [ ! -d "$path" ] || [ -L "$path" ]; then
+            continue
+        fi
+        created="$(stat -c %Z -- "$path")" || continue
+        age=$((now - created))
+        if [ "$age" -lt "$MIN_AGE_SECONDS" ]; then
+            log "Skipped scratch $(basename -- "$path"): ${age}s old, below the ${MIN_AGE_SECONDS}s minimum"
+            continue
+        fi
+        if path_referenced_by_any_process "$path"; then
+            log "Skipped scratch $(basename -- "$path"): a live process still references it"
+            continue
+        fi
+        size="$(du -s -B1 -- "$path" | awk 'NR == 1 { print $1 }')" || size=0
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "Would remove orphaned scratch $(basename -- "$path") (${size} bytes)"
+            continue
+        fi
+        if rm -rf -- "$path"; then
+            freed=$((freed + size))
+            log "Removed orphaned scratch $(basename -- "$path") (${size} bytes)"
+        else
+            log "Refused: could not remove orphaned scratch $(basename -- "$path")"
+        fi
+    done < <(find "$STATE_DIR" -mindepth 1 -maxdepth 1 -name "$SCRATCH_GLOB" -print 2>/dev/null)
+    [ "$freed" -eq 0 ] || log "Reclaimed $freed bytes of orphaned build scratch"
+}
+
 main() {
     # Never race a deploy: it is the thing performing the renames this program reasons about.
     if [ -e "$LOCK_FILE" ]; then
@@ -150,6 +190,8 @@ main() {
         return 1
     fi
     now="$(date +%s)"
+
+    reap_orphaned_scratch "$now"
 
     local entries path sha age index=0 pruned=0 freed=0 size
     entries="$(find "$RELEASE_QUARANTINE_DIR" -mindepth 1 -maxdepth 1 -printf '%T@ %p\n' 2>/dev/null \

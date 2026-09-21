@@ -43,6 +43,8 @@ setup() {
         mkdir -p "$q/$entry"; printf 'x\n' > "$q/$entry/file"
     done
     mkdir -p "$q/$KEEP_ONE" "$q/$KEEP_TWO" "$q/$YOUNG"
+    # Orphaned build scratch, as a killed deploy leaves behind.
+    mkdir -p "$state/.target-release-${OLD_ONE}.abc123/frontend"
     # Distinct mtimes: `sort -rn` is not stable, so equal stamps would make which entry the
     # keep-recent window retains a coin flip. Newest first: YOUNG, KEEP_ONE, KEEP_TWO, then the rest.
     touch -d "@$(( $(date +%s) - 60 ))"     "$q/$YOUNG"
@@ -89,6 +91,7 @@ main() {
 
     run "$root" > "$root/run.log" 2>&1 || { fail prune_exits_zero "$(tail -3 "$root/run.log")"; }
 
+    assert_dir_missing orphaned_scratch_is_removed "$root/staging/.staging/.target-release-${OLD_ONE}.abc123"
     assert_dir_missing old_entries_are_pruned "$q/$OLD_ONE"
     assert_dir_missing second_old_entry_is_pruned "$q/$OLD_TWO"
     assert_dir_exists committed_release_survives "$q/$DEPLOYED"
@@ -106,6 +109,7 @@ main() {
     setup "$root"
     MIN_AGE=999999 run "$root" > "$root/age.log" 2>&1 || fail age_gate_exits_zero "$(tail -3 "$root/age.log")"
     assert_dir_exists age_gate_keeps_everything "$q/$OLD_ONE"
+    assert_dir_exists age_gate_keeps_scratch "$root/staging/.staging/.target-release-${OLD_ONE}.abc123"
 
     # No readable frontend marker means the reaper cannot prove anything: refuse.
     setup "$root"; rm -f "$root/staging/.staging/frontend-running"
