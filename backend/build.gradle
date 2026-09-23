@@ -95,7 +95,7 @@ dependencies {
 	implementation 'com.twelvemonkeys.imageio:imageio-webp:3.14.0'
 	implementation 'org.springframework.boot:spring-boot-flyway'
 	implementation 'org.flywaydb:flyway-mysql'
-	implementation("org.springframework.data:spring-data-commons:4.1.0")
+	implementation("org.springframework.data:spring-data-commons:4.1.1")
 	implementation 'org.springframework.security:spring-security-webauthn'
 	implementation 'org.springframework.security:spring-security-messaging'
 	implementation platform('software.amazon.awssdk:bom:2.51.3')
