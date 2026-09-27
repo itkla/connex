@@ -60,6 +60,33 @@ class ScriptedAiProviderArchTest {
     /** A job key line in the CI workflow: exactly two spaces of indentation, then the key. */
     private static final Pattern WORKFLOW_JOB_HEADER = Pattern.compile("^ {2}[A-Za-z0-9_-]+:\\s*$");
 
+    /** The one job whose backend declares no edition and loads the browser suite's fixtures. */
+    private static final String BROWSER_STACK_JOB = "frontend-tests";
+
+    /** The one step in that job permitted to name the seam. */
+    private static final String BROWSER_STACK_BOOT_STEP = "Boot backend (dev profile, fresh schema)";
+
+    /**
+     * The workflow that boots the seam on purpose to watch a declared edition refuse it.
+     *
+     * <p>Its mentions are assertions and one deliberate activation, never a serving stack. The
+     * activation is still checked: it has to carry a declared deployment profile on the same line,
+     * which is what makes it a refusal proof rather than a second place the seam runs.
+     */
+    private static final String REFUSAL_PROOF_WORKFLOW = "deploy-smoke.yml";
+
+    /**
+     * A shell assignment or YAML {@code env:} entry that actually puts the profile into a process
+     * environment.
+     *
+     * <p>The character class deliberately excludes regex metacharacters, so the grep patterns the
+     * refusal-proof workflow uses to search operator templates — {@code
+     * SPRING_PROFILES_ACTIVE=.*ai-scripted-provider} — are not mistaken for activations.
+     */
+    private static final Pattern ACTIVATING_PROFILE_ASSIGNMENT = Pattern.compile(
+            "SPRING_PROFILES_ACTIVE(=|:\\s*)[\"']?[A-Za-z0-9_,.-]*"
+                    + ScriptedAiProviderProfile.NAME);
+
     /** The class-name shape both that task's include and the {@code test} exclude are keyed on. */
     private static final Pattern TRAJECTORY_CLASS_NAME =
             Pattern.compile(".*ScriptedTrajectory.*Test\\.java");
@@ -390,6 +417,73 @@ class ScriptedAiProviderArchTest {
     }
 
     @Test
+    void onlyTheBrowserStackStepInCiActivatesTheScriptedSeam() throws IOException {
+        List<String> violations = new ArrayList<>();
+        for (Path workflow : workflows()) {
+            String file = workflow.getFileName().toString();
+            String step = "";
+            String job = "";
+            int number = 0;
+            for (String line : read(workflow).split("\\R")) {
+                number++;
+                String stripped = line.strip();
+                if (WORKFLOW_JOB_HEADER.matcher(line).matches()) {
+                    job = stripped.substring(0, stripped.length() - 1);
+                    step = "";
+                }
+                if (stripped.startsWith("- name: ")) {
+                    step = stripped.substring("- name: ".length()).strip();
+                }
+                if (stripped.startsWith("#") || !mentionsScriptedSeam(stripped)) {
+                    continue;
+                }
+                if (REFUSAL_PROOF_WORKFLOW.equals(file)) {
+                    if (ACTIVATING_PROFILE_ASSIGNMENT.matcher(stripped).find()
+                            && !stripped.contains("CONNEX_DEPLOYMENT_PROFILE=")) {
+                        violations.add(file + ":" + number + " activates the seam without the "
+                                + "declared edition that makes it a refusal proof: " + stripped);
+                    }
+                    continue;
+                }
+                if (!CI_WORKFLOW.getFileName().toString().equals(file)
+                        || !BROWSER_STACK_JOB.equals(job)
+                        || !BROWSER_STACK_BOOT_STEP.equals(step)) {
+                    violations.add(file + ":" + number + " (job " + job + ", step \"" + step
+                            + "\") names the scripted seam: " + stripped);
+                }
+            }
+        }
+
+        assertTrue(violations.isEmpty(),
+                "the scripted seam is admissible only where the stack declares no edition and "
+                        + "loads the one fixture directory the browser suite owns — job "
+                        + BROWSER_STACK_JOB + ", step \"" + BROWSER_STACK_BOOT_STEP + "\" of "
+                        + CI_WORKFLOW + ". Nothing else in .github/workflows may name it, because "
+                        + "a second stack booting this recipe would run the fixture adapter and "
+                        + "the loosened AI egress opt-in with every existing gate still green: "
+                        + violations);
+    }
+
+    @Test
+    void theBrowserStackStepStillCarriesTheWholeActivationRecipe() throws IOException {
+        List<String> settings = browserStackBootSettings(read(CI_WORKFLOW));
+
+        assertTrue(settings.stream().anyMatch(setting ->
+                        setting.startsWith("SPRING_PROFILES_ACTIVE:")
+                                && setting.contains(ScriptedAiProviderProfile.NAME)),
+                "the browser stack must still activate the profile, or the rule above passes "
+                        + "vacuously while the trajectory spec fails on an honest refusal: "
+                        + settings);
+        for (String required : List.of(
+                "CONNEX_AI_SCRIPTED_PROVIDER_ENABLED:",
+                "CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR:",
+                "CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS:")) {
+            assertTrue(settings.stream().anyMatch(setting -> setting.startsWith(required)),
+                    "the browser stack boot step must still set " + required + ": " + settings);
+        }
+    }
+
+    @Test
     void theScriptedContractLivesInTheAuthoritativeDocumentNotTheAgentGuide() throws IOException {
         String contract = read(AI_SECURITY_CONTRACT);
         String guide = read(AGENT_GUIDE);
@@ -410,6 +504,57 @@ class ScriptedAiProviderArchTest {
         assertTrue(guide.contains("ai/provider/scripted")
                         && guide.contains("docs/backend/AI_SECURITY.md"),
                 "backend/AGENTS.md must still route the scripted package to its contract");
+    }
+
+    /**
+     * Tests whether one workflow line names the scripted seam in any of its spellings.
+     *
+     * @param line a stripped workflow line
+     * @return true when the line names the profile or one of its environment variables
+     */
+    private static boolean mentionsScriptedSeam(String line) {
+        return line.contains(ScriptedAiProviderProfile.NAME)
+                || line.contains("CONNEX_AI_SCRIPTED_PROVIDER_");
+    }
+
+    /**
+     * Returns every environment setting declared by the browser stack's backend boot step.
+     *
+     * @param workflow the CI workflow source
+     * @return the stripped {@code KEY: value} lines of that step's {@code env:} block
+     */
+    private static List<String> browserStackBootSettings(String workflow) {
+        List<String> settings = new ArrayList<>();
+        boolean inJob = false;
+        boolean inStep = false;
+        for (String line : workflow.split("\\R")) {
+            String stripped = line.strip();
+            if (WORKFLOW_JOB_HEADER.matcher(line).matches()) {
+                inJob = stripped.equals(BROWSER_STACK_JOB + ":");
+                inStep = false;
+                continue;
+            }
+            if (stripped.startsWith("- name: ")) {
+                inStep = inJob
+                        && stripped.substring("- name: ".length()).strip()
+                                .equals(BROWSER_STACK_BOOT_STEP);
+                continue;
+            }
+            if (inStep && !stripped.startsWith("#") && stripped.contains(": ")) {
+                settings.add(stripped);
+            }
+        }
+        return settings;
+    }
+
+    private static List<Path> workflows() throws IOException {
+        try (Stream<Path> files = Files.list(repoRoot().resolve(".github/workflows"))) {
+            return files
+                    .filter(path -> path.getFileName().toString().endsWith(".yml")
+                            || path.getFileName().toString().endsWith(".yaml"))
+                    .sorted(Comparator.comparing(Path::toString))
+                    .toList();
+        }
     }
 
     private static List<Path> operatorTemplates() throws IOException {
