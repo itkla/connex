@@ -49,6 +49,57 @@ type TurnProgress = { seq: number; source: string; status: string; count: number
 /** The member-facing projection of one turn: its terminal state and its tool-call milestones. */
 type TurnState = { status: string; terminalReason: string | null; progress: TurnProgress[] };
 
+/** Statuses a turn still moves out of; everything else is terminal and will not change again. */
+const PENDING_STATUSES = new Set(["queued", "running"]);
+
+/**
+ * Collects the streamed answer fragments the requester's browser is pushed over its own queue.
+ *
+ * This is the only assertion in the spec that the buffered path cannot satisfy. Every other
+ * artefact here — the chip, the answer tail, the tool-call rows — is read from the settled
+ * transcript, which `scripted-native` produces just as well as `scripted-native-stream`. The
+ * streamed channel exists only while the turn runs, and a frame that already arrived cannot be
+ * missed by a late assertion, so capturing frames beats racing the DOM for the live tail.
+ */
+function collectStreamedAnswer(page: Page): {
+    connected: () => boolean;
+    fragments: () => string[];
+} {
+    const fragments: string[] = [];
+    const socketFrames: string[] = [];
+    let connected = false;
+    page.on("websocket", (socket) => {
+        socket.on("framereceived", (frame) => {
+            const payload = typeof frame.payload === "string"
+                ? frame.payload
+                : frame.payload.toString("utf8");
+            if (payload.startsWith("CONNECTED")) connected = true;
+            socketFrames.push(payload);
+        });
+    });
+    return {
+        connected: () => connected,
+        fragments: () => {
+            for (const payload of socketFrames.splice(0)) {
+                for (const body of payload.split("\n\n")) {
+                    const start = body.indexOf("{");
+                    if (start < 0) continue;
+                    let parsed: unknown;
+                    try {
+                        parsed = JSON.parse(body.slice(start).replace(/\0/g, ""));
+                    } catch {
+                        continue;
+                    }
+                    if (typeof parsed !== "object" || parsed === null) continue;
+                    const { kind, text } = parsed as { kind?: unknown; text?: unknown };
+                    if (kind === "delta" && typeof text === "string") fragments.push(text);
+                }
+            }
+            return [...fragments];
+        },
+    };
+}
+
 /** Creates the chat the member will type into, through the API the drawer itself posts to. */
 async function createSession(
     api: APIRequestContext,
@@ -141,6 +192,44 @@ async function readTurn(
 }
 
 /**
+ * Waits for the turn to stop moving, then hands back what it settled as.
+ *
+ * Diagnosing the turn before looking at the page is the difference between a failure that names
+ * its own cause and one that names the DOM. Any breakage that settles the turn non-`resolved` — a
+ * selector the masker rewrote, an assembler change that moves the cursor, a skill-authority
+ * refusal — leaves the chip absent; asserting the chip first would burn the whole timeout and
+ * report a missing link while the terminal reason that explains it went unread. The ordering costs
+ * nothing: `AiChatTurnPersistenceService.resolve` inserts the assistant message and flips the turn
+ * to `resolved` in one transaction, so a turn that reads `resolved` already has the message the
+ * chip renders from.
+ *
+ * @param api request context carrying the requester's session
+ * @param workspaceId the turn's tenant
+ * @param sessionId the chat the turn belongs to
+ * @param turnId the turn to wait on
+ * @returns the settled turn projection
+ */
+async function awaitTerminal(
+    api: APIRequestContext,
+    workspaceId: number,
+    sessionId: number,
+    turnId: number,
+): Promise<TurnState> {
+    let turn = await readTurn(api, workspaceId, sessionId, turnId);
+    const deadline = Date.now() + 120_000;
+    while (PENDING_STATUSES.has(turn.status) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        turn = await readTurn(api, workspaceId, sessionId, turnId);
+    }
+    expect(
+        turn.status,
+        `the turn never settled resolved: ${JSON.stringify(turn)}. A terminal reason names the `
+        + "control that refused; a still-running turn means the worker never finished.",
+    ).toBe("resolved");
+    return turn;
+}
+
+/**
  * One whole agent turn driven from a browser against the scripted provider (#1420 §6).
  *
  * The stack this runs in has the `ai-scripted-provider` profile on for every tenant, but provider
@@ -149,6 +238,13 @@ async function readTurn(
  * assertions in `ask-connex.spec.ts` and `ask-connex-command-center.spec.ts` stay green in the same
  * run. That is the merge gate for this mode, and the reason this spec never borrows a project
  * storage state.
+ *
+ * The spec reads the turn to a terminal state before it looks at the page, so a refused turn fails
+ * on its terminal reason rather than on a missing link. The streamed-fragment assertion is the only
+ * one the buffered `scripted-native` class could not satisfy; the rest read the settled transcript.
+ * The citation chip is the strongest thing a member can see: it renders only for a citation the
+ * turn registered, so it exists only because `search_records` found the contact, `get_record` read
+ * it, and the cited handle was rewritten back into a record the viewer is authorized to open.
  */
 test.describe("Ask Connex scripted trajectory", () => {
     test("a member sends a question and reads the answer the scripted tools produced", async ({
@@ -193,9 +289,17 @@ test.describe("Ask Connex scripted trajectory", () => {
             const sessionId = await createSession(
                 api, workspaceId, csrf, `Scripted trajectory ${runId}`);
 
+            const streamed = collectStreamedAnswer(page);
             await page.goto(`/ask-connex/${sessionId}`);
             const composer = page.getByRole("combobox", { name: copy("composerAria") });
             await expect(composer).toBeVisible();
+            await expect
+                .poll(streamed.connected, {
+                    timeout: 30_000,
+                    message: "the assistant session socket never completed its STOMP handshake, so "
+                        + "no streamed fragment could reach this page however the turn ran",
+                })
+                .toBe(true);
 
             const accepted = page.waitForResponse((response) =>
                 response.request().method() === "POST"
@@ -206,24 +310,24 @@ test.describe("Ask Connex scripted trajectory", () => {
             const { turnId } = (await (await accepted).json()) as { turnId: number };
             expect(turnId).toBeGreaterThan(0);
 
-            /**
-             * The chip is the strongest thing a member can see here: it renders only for a citation
-             * the turn actually registered, so it exists only because `search_records` found the
-             * contact, `get_record` read it, and the handle the fixture cited was rewritten back
-             * into a real record the viewer is authorized to open.
-             */
-            const chip = page.getByRole("link", { name: ANSWER_LINK_LABEL });
-            await expect(chip).toBeVisible({ timeout: 120_000 });
-            await expect(chip).toHaveAttribute("href", `/records/contacts/${contactId}`);
-            await expect(page.getByText(ANSWER_TAIL).first()).toBeVisible();
-
-            const turn = await readTurn(api, workspaceId, sessionId, turnId);
-            expect(turn.status, turn.terminalReason ?? "no terminal reason").toBe("resolved");
+            const turn = await awaitTerminal(api, workspaceId, sessionId, turnId);
             expect(
                 turn.progress.map((item) => `${item.source}:${item.status}`),
                 `the read tool calls must reach the member's own turn projection: `
                 + JSON.stringify(turn.progress),
             ).toContain("records:complete");
+
+            const fragments = streamed.fragments();
+            expect(
+                fragments.join(""),
+                "the requester's own queue must carry the answer as it is written: "
+                + JSON.stringify(fragments),
+            ).toContain(ANSWER_TAIL);
+
+            const chip = page.getByRole("link", { name: ANSWER_LINK_LABEL });
+            await expect(chip).toBeVisible({ timeout: 30_000 });
+            await expect(chip).toHaveAttribute("href", `/records/contacts/${contactId}`);
+            await expect(page.getByText(ANSWER_TAIL).first()).toBeVisible();
         } finally {
             await removeVirtualAuthenticator?.();
             await context.close();

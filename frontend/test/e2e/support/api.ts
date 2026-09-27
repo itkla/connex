@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
+
 import type { APIRequestContext } from "@playwright/test";
 import { expect } from "@playwright/test";
+
+import { runFixturePath, type E2ETenantScope } from "../../../playwright.config";
 
 /** A record created by the setup project, addressable by both id and visible name. */
 export type SeededRecord = { id: number; name: string };
@@ -81,13 +85,43 @@ export async function csrfBootstrap(api: APIRequestContext): Promise<CsrfBootstr
     return body;
 }
 
+/** The tenants the setup projects own and every storage-state spec shares. */
+const SHARED_PROJECT_SCOPES: readonly E2ETenantScope[] = ["desktop", "mobile"];
+
+/**
+ * Reads the workspace id of every tenant a setup project provisioned for the whole suite.
+ *
+ * A scope whose fixture is absent contributes nothing: a run that drives only the desktop project
+ * never writes the mobile one, and a missing file must not fail a spec that was never going to
+ * touch that tenant anyway.
+ *
+ * @returns the shared tenants' workspace ids, in scope order
+ */
+function sharedProjectWorkspaceIds(): number[] {
+    return SHARED_PROJECT_SCOPES.flatMap((scope) => {
+        let raw: string;
+        try {
+            raw = readFileSync(runFixturePath(scope), "utf8");
+        } catch {
+            return [];
+        }
+        const parsed: unknown = JSON.parse(raw);
+        if (typeof parsed !== "object" || parsed === null) return [];
+        const { workspaceId } = parsed as { workspaceId?: unknown };
+        return typeof workspaceId === "number" ? [workspaceId] : [];
+    });
+}
+
 /**
  * Points one organization at the scripted AI provider, over the same controller an operator uses.
  *
  * Only ever call this for a tenant the calling spec registered itself. Provider readiness is per
  * organization, which is the whole reason the scripted profile can be on for the shared e2e stack
  * without making AI usable for the project storage-state tenants — and several specs assert exactly
- * that honest refusal. Configuring a shared tenant here would delete their premise.
+ * that honest refusal. Configuring a shared tenant here would delete their premise, in a different
+ * file, as a retried flake. This function therefore refuses a shared tenant outright rather than
+ * asking the next caller to read this paragraph: its signature is shape-identical to `seeder`, the
+ * idiom every other spec reaches for, so the mistake is a copied call away.
  *
  * The endpoint is a loopback literal that is never dialed: the scripted adapter answers from
  * fixtures. It still has to pass the save path's address resolution, which is why the backend needs
@@ -109,6 +143,15 @@ export async function configureScriptedAiProvider(
     csrf: CsrfBootstrap,
     modelId: string,
 ): Promise<void> {
+    const shared = sharedProjectWorkspaceIds();
+    if (shared.includes(workspaceId)) {
+        throw new Error(
+            `Workspace ${workspaceId} belongs to a shared setup-project tenant (${shared.join(", ")}). `
+            + "Configuring a provider there makes AiProviderConfigService.isReady true for its "
+            + "organization, which turns the provider-less refusal assertions in ask-connex.spec.ts "
+            + "red in a file this spec never touched. Register your own tenant first.",
+        );
+    }
     const response = await api.put(`/api/ai/provider?workspaceId=${workspaceId}`, {
         timeout: 120_000,
         headers: {
@@ -130,7 +173,12 @@ export async function configureScriptedAiProvider(
         + "A 400 means the backend is missing CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS=true; a 403 with "
         + "RECENT_AUTHENTICATION_REQUIRED means the session has no fresh passkey step-up, or "
         + "CONNEX_RECENT_AUTHENTICATION_WINDOW no longer matches what the e2e job sets. Neither is "
-        + "a product defect.",
+        + "a product defect. A backend that saves the row but then answers provider_error is "
+        + "missing the rest of the recipe: SPRING_PROFILES_ACTIVE=dev,ai-scripted-provider, "
+        + "CONNEX_AI_SCRIPTED_PROVIDER_ENABLED=true and CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR "
+        + "pointing at frontend/test/e2e/fixtures/ai-scripted — without the profile the real "
+        + "OpenAI-compatible adapter dials this loopback endpoint instead. See "
+        + "docs/backend/AI_SECURITY.md and frontend/AGENTS.md.",
     ).toBe(200);
 }
 
