@@ -23,6 +23,9 @@ import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * Goldens 1-8: whole scripted trajectories run end to end with nothing mocked below the loop.
@@ -316,15 +319,17 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     }
 
     /**
-     * A declared endpoint's batch is refused by the loop, and nothing it named is executed.
+     * A declared endpoint that batches anyway is refused whole, and nothing it named is executed.
      *
-     * <p>The scripted provider can now emit several calls in one assistant message, and the parse
-     * boundary admits them up to the bound the operator declared — so this is the first trajectory
-     * that reaches the loop with a batch at all. The loop cannot yet execute one under per-call
-     * ownership, deadline, authorization and budget admission, so it refuses the whole response
-     * under the same {@code multiple-calls} rule an over-delivering provider has always produced.
-     * The assertions are what the fixture cannot fake: no durable tool-call row exists for either
-     * call, and the repair request the provider really received names the rule.
+     * <p>The scripted provider can emit several calls in one assistant message, and this capability
+     * class declares the widest bound. The loop cannot yet execute a batch under per-call ownership,
+     * deadline, authorization and budget admission, so it asks for one call per step however much
+     * the endpoint declares; the batch is then refused at the parse boundary under the same
+     * {@code multiple-calls} rule an over-delivering provider has always produced, and audited as
+     * the malformed response it is rather than as a clean parse the server discarded. The
+     * assertions are what the fixture cannot fake: no durable tool-call row exists for either call,
+     * every request the provider received asked for one call, the repair it received names the
+     * rule, and both batched responses were audited as malformed native tool calls.
      */
     @Test
     void aBatchedStepIsRefusedWholeAndExecutesNeitherOfItsCalls() {
@@ -341,9 +346,8 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
                 journal().recorded().stream()
                         .map(entry -> entry.request().nativeTools())
                         .filter(java.util.Objects::nonNull)
-                        .allMatch(nativeTools -> nativeTools.maxParallelCalls() == 4),
-                "the declared capability class's call bound must reach the wire, or the batch was "
-                        + "refused for its cardinality before the loop ever saw it");
+                        .allMatch(nativeTools -> nativeTools.maxParallelCalls() == 1),
+                "a loop that cannot execute a batch must not ask a declared endpoint for one");
         assertTrue(
                 journal().recorded().stream()
                         .map(entry -> entry.request().nativeTools())
@@ -358,15 +362,23 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
                         .filter(java.util.Objects::nonNull)
                         .allMatch(nativeTools -> nativeTools.exchanges().isEmpty()),
                 "a refused batch must replay no exchange to the provider");
+        assertEquals(
+                2,
+                auditRowsParsedAs("ai.llm.call", "malformed_output", "native_tool_call"),
+                "each batched response the server refused must be audited as malformed");
+        assertEquals(0, auditRowsParsedAs("ai.llm.call", "parsed", "native_tool_call"));
     }
 
     /**
-     * The JSON ReAct path still writes the keys and sends the requests it always has.
+     * The JSON ReAct path still writes the keys and replays the results it always has.
      *
      * <p>Its counterpart pins the native path, and the correlation refactor touched the key both
-     * paths render and the request both paths build. The JSON path has no provider-assigned call
-     * identity at all, so a sole-call ordinal that leaked into its keys, or a native request that
-     * appeared on it, would be invisible in every native golden.
+     * paths render and the tool-result envelope both paths replay. The JSON path has no
+     * provider-assigned call identity at all, so a sole-call ordinal that leaked into its keys or
+     * into a replayed result, or a replay renumbered or reordered by the refactor, would be
+     * invisible in every native golden. Each request the provider really received is read back:
+     * the n-th carries exactly the results of steps 1..n-1, in order, each naming its own step and
+     * tool and none carrying a call ordinal.
      */
     @Test
     void aJsonProtocolTurnKeepsItsUnsuffixedKeysAndSendsNoNativeRequest() {
@@ -385,10 +397,55 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
                 trajectory.toolCalls().stream()
                         .map(AiChatToolCall::getIdempotencyKey)
                         .toList());
-        assertTrue(
-                journal().recorded().stream()
-                        .allMatch(entry -> entry.request().nativeTools() == null),
-                "a JSON-protocol turn must send no native tool request");
+        List<AiCompletionRequest> requests = journal().recorded().stream()
+                .map(ScriptedAiRequestJournal.Entry::request)
+                .toList();
+        assertEquals(3, requests.size());
+        assertEquals(List.of(), replayedToolResults(requests.get(0)));
+        assertEquals(
+                List.of("{\"step\":1,\"tool\":\"search_records\"}"),
+                replayedToolResults(requests.get(1)));
+        assertEquals(
+                List.of(
+                        "{\"step\":1,\"tool\":\"search_records\"}",
+                        "{\"step\":2,\"tool\":\"get_record\"}"),
+                replayedToolResults(requests.get(2)));
+    }
+
+    /**
+     * The correlation fields of every tool result one JSON-protocol request replays, in order.
+     *
+     * <p>Reads the envelopes the assembler wrote into the prompt messages and keeps each result's
+     * {@code step}, its {@code call} ordinal when one is present, and its {@code tool} — so a
+     * leaked ordinal shows up as an extra field rather than being filtered away.
+     *
+     * @param request one journaled request
+     * @return compact JSON of each replayed result's correlation fields
+     */
+    private static List<String> replayedToolResults(AiCompletionRequest request) {
+        ObjectMapper mapper = new ObjectMapper();
+        List<String> results = new ArrayList<>();
+        for (AiMessage message : request.messages()) {
+            String content = message.content();
+            if (!content.startsWith("CRM_DATA_BEGIN\n")) {
+                continue;
+            }
+            String body = content.substring(
+                    "CRM_DATA_BEGIN\n".length(), content.lastIndexOf("\nCRM_DATA_END"));
+            JsonNode envelope = mapper.readTree(body);
+            if (!"tool_result".equals(envelope.path("type").asString())) {
+                continue;
+            }
+            JsonNode data = envelope.path("data");
+            ObjectNode correlation = mapper.createObjectNode();
+            correlation.set("step", data.path("step"));
+            if (data.has("call")) {
+                correlation.set("call", data.path("call"));
+            }
+            correlation.set("tool", data.path("tool"));
+            results.add(correlation.toString());
+        }
+        return List.copyOf(results);
     }
 
     /**

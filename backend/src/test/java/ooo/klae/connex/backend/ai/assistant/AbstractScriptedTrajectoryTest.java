@@ -432,6 +432,27 @@ abstract class AbstractScriptedTrajectoryTest {
     }
 
     /**
+     * Counts provider-call audit rows by how the server parsed the response they record.
+     *
+     * <p>A refused response and an accepted one can share an audit outcome, so a golden about a
+     * response the server discarded has to read the parse outcome to tell them apart.
+     *
+     * @param action stable audit action key
+     * @param parseOutcome the {@code parseOutcome} the metadata must carry
+     * @param schemaRule the {@code schemaRule} diagnostic the metadata must carry
+     * @return how many rows match, for this workspace
+     */
+    final int auditRowsParsedAs(String action, String parseOutcome, String schemaRule) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM audit_log
+                WHERE workspace_id = ? AND action = ?
+                  AND JSON_UNQUOTE(JSON_EXTRACT(changes, '$.parseOutcome')) = ?
+                  AND JSON_UNQUOTE(JSON_EXTRACT(changes, '$.schemaRule')) = ?
+                """, Integer.class, workspace.getId(), action, parseOutcome, schemaRule);
+        return count == null ? 0 : count;
+    }
+
+    /**
      * Reads a session's current title straight from the row.
      *
      * @param sessionId the trajectory's session
