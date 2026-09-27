@@ -626,6 +626,30 @@ public class WorkspaceService {
             }
         }
 
+        /**
+         * The locked effective permissions of a user whose authorization was resolved here.
+         *
+         * <p>Callers that learn which permission they need only after taking a further lock assert
+         * it against this set instead of issuing a second read, which would be answered by the
+         * MyBatis first-level cache and could invert the membership → record lock order. A user
+         * registered with an empty required set is refused rather than reported as holding nothing:
+         * their custom-role permission rows are deliberately left unlocked in that case, so an empty
+         * answer there would be indistinguishable from a genuine absence of grants.
+         *
+         * @param userId the member whose locked authority is being read
+         * @return the effective permissions read from rows this transaction still holds
+         * @throws IllegalArgumentException when no permission was required for that user
+         */
+        public Set<Permission> effectiveFor(int userId) {
+            Set<Permission> required = requiredByUser.get(userId);
+            Set<Permission> effective = effectiveByUser.get(userId);
+            if (required == null || required.isEmpty() || effective == null) {
+                throw new IllegalArgumentException(
+                    "Locked permissions were not resolved for user " + userId);
+            }
+            return effective;
+        }
+
         private static Map<Integer, Set<Permission>> immutablePermissionMap(
                 Map<Integer, Set<Permission>> source) {
             Map<Integer, Set<Permission>> copy = new LinkedHashMap<>();
