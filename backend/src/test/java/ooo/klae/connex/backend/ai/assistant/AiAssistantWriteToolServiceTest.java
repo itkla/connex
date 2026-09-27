@@ -549,6 +549,56 @@ class AiAssistantWriteToolServiceTest {
     }
 
     @Test
+    void approverWithoutAiUseIsRefusedByTheLockedAuthorityBeforeAnySessionLock() throws Exception {
+        AiAssistantPreparedWrite write = prepared(
+                "change_deal_stage",
+                "{\"handle\":\"r1\",\"stage\":\"Proposal\"}",
+                "deal",
+                44);
+        stored(write, 29);
+        doThrow(new ForbiddenException("Requires the AI_USE permission in this workspace"))
+                .when(workspaceService)
+                .lockAndRequirePermissionsSnapshot(eq(TURN.workspaceId()), any());
+
+        ForbiddenException refused = assertThrows(
+                ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        assertEquals("Requires the AI_USE permission in this workspace", refused.getMessage());
+        verify(workspaceService).lockAndRequirePermissionsSnapshot(
+                TURN.workspaceId(), Map.of(TURN.userId(), Set.of(Permission.AI_USE)));
+        verify(workspaceService, never()).permissionsFor(anyInt(), anyInt());
+        verify(chatMapper, never()).getSessionByIdForUpdate(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId());
+    }
+
+    @Test
+    void approverWithoutAiUseLearnsAnUnresolvableOwnerBeforeTheLockedAuthorityRefusal()
+            throws Exception {
+        User owner = new User();
+        owner.setId(21);
+        owner.setDisplayName("Grace Hopper");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
+        AiAssistantPreparedWrite write = prepared(
+                "assign_owner",
+                "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "company",
+                52);
+        stored(write, 29);
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of());
+        doThrow(new ForbiddenException("Requires the AI_USE permission in this workspace"))
+                .when(workspaceService)
+                .lockAndRequirePermissionsSnapshot(eq(TURN.workspaceId()), any());
+
+        ResourceNotFoundException refused = assertThrows(
+                ResourceNotFoundException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        assertEquals("Owner is unavailable or ambiguous", refused.getMessage());
+        verify(workspaceService, never()).lockAndRequirePermissionsSnapshot(anyInt(), any());
+        verify(workspaceService, never()).permissionsFor(anyInt(), anyInt());
+        verify(companyService, never()).updateOwner(eq(52), any());
+    }
+
+    @Test
     void approvalRefusesWhenThePersistedProposalRestrictionEpochAdvanced() throws Exception {
         User owner = new User();
         owner.setId(21);
