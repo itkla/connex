@@ -370,6 +370,40 @@ class AiAssistantScriptedTrajectoryTest extends AbstractScriptedTrajectoryTest {
     }
 
     /**
+     * A batch that invented a placeholder ends the turn instead of being repaired for its size.
+     *
+     * <p>The loop asks for one call per step, so the parse boundary refuses this batch for its
+     * size; the second call names a placeholder the turn never issued, and the boundary demasks the
+     * response before it decides, so the refusal ends the turn as malformed output — what one call
+     * inventing that placeholder gets. The fixture scripts the repair a laundering server would ask
+     * for, answered with a clean final answer, so this golden passes only if the server never asks:
+     * one provider request, a failed turn, no answer, no durable tool call, and one audit row
+     * recording the refused response as a malformed native call.
+     */
+    @Test
+    void aBatchInventingAPlaceholderEndsTheTurnWithoutARepair() {
+        person("Thornwood Vale", "thornwood.vale@example.invalid", null);
+        useCapabilityClass("scripted-native-parallel");
+
+        Trajectory trajectory = run(
+                "connex_script_parallel_calls_invented_placeholder",
+                "look this contact up two ways");
+
+        assertEquals("failed", trajectory.status());
+        assertEquals("malformed_output", trajectory.terminalReason());
+        assertEquals(1, journal().recorded().size(),
+                "an invented placeholder must end the turn, not earn the cardinality repair");
+        assertEquals(List.of(), trajectory.toolNames(),
+                "a refused batch must leave no durable tool call behind");
+        assertEquals(List.of(), trajectory.answers(),
+                "a turn ended for an invented placeholder delivers no answer");
+        assertEquals(
+                1,
+                auditRowsParsedAs("ai.llm.call", "malformed_output", "native_tool_call"),
+                "the refused response must be audited as a malformed native call");
+    }
+
+    /**
      * The JSON ReAct path still writes the keys and replays the results it always has.
      *
      * <p>Its counterpart pins the native path, and the correlation refactor touched the key both

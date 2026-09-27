@@ -559,7 +559,8 @@ public class AiInvocationService {
         List<AiToolCall> calls = result.toolCalls();
         if (calls.size() > nativeTools.maxParallelCalls()) {
             return malformedNativeTool(
-                    raw, invocation, result, reasoning, "native_multiple_calls");
+                    raw, invocation, result, reasoning, "native_multiple_calls",
+                    overBoundDemaskWarnings(calls, invocation.context()));
         }
         if (captured.ambiguous()
                 || CompletionNormalizer.containsReasoningTag(captured.answer())) {
@@ -638,23 +639,65 @@ public class AiInvocationService {
         return sum < 0 ? Integer.MAX_VALUE : sum;
     }
 
+    /**
+     * Counts the demask warnings of a response about to be refused for carrying too many calls.
+     *
+     * <p>The cardinality refusal is repairable and an invented placeholder is not, so the count is
+     * taken before the refusal is decided rather than skipped because of it. Every call whose
+     * arguments parse as a JSON object is demasked exactly as an admitted call is; a call whose
+     * arguments do not is left uncounted, as the admitted path refuses it before demasking. The raw
+     * step guard is deliberately not consulted: the response is refused for its size whatever it
+     * says, and a guard rejection must not decide which refusal it gets.
+     *
+     * @param calls every call the over-bound response carried
+     * @param context the invocation's request-local masking context
+     * @return the saturated sum of every object-shaped call's demask warnings
+     */
+    private int overBoundDemaskWarnings(List<AiToolCall> calls, MaskingContext context) {
+        int warnings = 0;
+        for (AiToolCall call : calls) {
+            JsonNode arguments;
+            try {
+                arguments = objectMapper.readTree(call.arguments());
+            } catch (JacksonException | IllegalArgumentException exception) {
+                continue;
+            }
+            if (arguments != null && arguments.isObject()) {
+                warnings = saturatedSum(warnings, demaskTree(arguments, context));
+            }
+        }
+        return warnings;
+    }
+
     private <T> AiNativeToolCompletion<T> malformedNativeTool(
             RawInvocation raw,
             AiInvocation invocation,
             AiCompletionResult result,
             ReasoningNormalization reasoning,
             String repairRule) {
+        return malformedNativeTool(raw, invocation, result, reasoning, repairRule, 0);
+    }
+
+    private <T> AiNativeToolCompletion<T> malformedNativeTool(
+            RawInvocation raw,
+            AiInvocation invocation,
+            AiCompletionResult result,
+            ReasoningNormalization reasoning,
+            String repairRule,
+            int demaskWarnings) {
         raw.close();
         emitAudit(
                 raw, invocation, "success", result.inputTokens(), result.outputTokens(),
-                result.stopReason(), null, null, true, AiStructuredOutcome.REASON_MALFORMED,
+                result.stopReason(), demaskWarnings == 0 ? null : demaskWarnings, null, true,
+                AiStructuredOutcome.REASON_MALFORMED,
                 new MalformedDiagnostic("native_tool_call", result.text().length(), false));
         return new AiNativeToolCompletion.Malformed<>(
                 result.inputTokens(),
                 result.outputTokens(),
                 result.stopReason(),
                 reasoning.rejectionReason() == null ? reasoning.content() : Optional.empty(),
-                repairRule);
+                repairRule,
+                demaskWarnings);
     }
 
     private <T> AiStructuredRepairAttempt<T> malformed(

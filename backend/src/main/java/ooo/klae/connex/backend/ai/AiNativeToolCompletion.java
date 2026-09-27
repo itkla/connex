@@ -172,13 +172,30 @@ public sealed interface AiNativeToolCompletion<T> {
         }
     }
 
-    /** Repairable rejection for a malformed native function-call envelope. */
+    /**
+     * A native function-call envelope the server refused.
+     *
+     * <p>Repairable under {@code repairRule} unless {@code demaskWarnings} is non-zero. A response
+     * refused for carrying more calls than its request permitted is still demasked before it is
+     * refused, and a non-zero count there means one of its calls invented a placeholder: that ends
+     * the turn as malformed output exactly as it would for a single call, so it is never offered
+     * the cardinality repair merely because the call had a sibling.
+     *
+     * @param inputTokens provider-reported prompt tokens for the whole response
+     * @param outputTokens provider-reported generated tokens for the whole response
+     * @param stopReason provider-reported stop reason for the whole response
+     * @param reasoning display-only reasoning returned beside the calls
+     * @param repairRule the stable envelope rule the response broke
+     * @param demaskWarnings unknown placeholder references counted across the refused response's
+     *     calls; non-zero means the refusal ends the turn instead of earning a repair
+     */
     record Malformed<T>(
             int inputTokens,
             int outputTokens,
             String stopReason,
             Optional<String> reasoning,
-            String repairRule) implements AiNativeToolCompletion<T> {
+            String repairRule,
+            int demaskWarnings) implements AiNativeToolCompletion<T> {
 
         public Malformed(
                 int inputTokens,
@@ -188,10 +205,24 @@ public sealed interface AiNativeToolCompletion<T> {
             this(inputTokens, outputTokens, stopReason, reasoning, "native_tool_call");
         }
 
+        /** Creates a repairable refusal whose response invented no placeholder. */
+        public Malformed(
+                int inputTokens,
+                int outputTokens,
+                String stopReason,
+                Optional<String> reasoning,
+                String repairRule) {
+            this(inputTokens, outputTokens, stopReason, reasoning, repairRule, 0);
+        }
+
         public Malformed {
             Objects.requireNonNull(stopReason, "stopReason");
             reasoning = Objects.requireNonNull(reasoning, "reasoning");
             Objects.requireNonNull(repairRule, "repairRule");
+            if (demaskWarnings < 0) {
+                throw new IllegalArgumentException(
+                        "AI native tool demask warnings must not be negative");
+            }
         }
 
         @Override
@@ -200,7 +231,8 @@ public sealed interface AiNativeToolCompletion<T> {
                     + ", outputTokens=" + outputTokens
                     + ", stopReason=" + stopReason
                     + ", reasoning=<redacted>"
-                    + ", repairRule=" + repairRule + "]";
+                    + ", repairRule=" + repairRule
+                    + ", demaskWarnings=" + demaskWarnings + "]";
         }
     }
 }

@@ -104,7 +104,9 @@ public class AiChatAgentLoopService {
      * batches again on the repair, and the turn loses its investigation — and the parse boundary
      * would audit as parsed a response the server then discarded. With the request bounded here, an
      * over-delivering endpoint is refused at the parse boundary under {@code native_multiple_calls}
-     * and audited as malformed, exactly as before the declaration existed.
+     * and audited as malformed, as before the declaration existed — unless one of its calls invented
+     * a placeholder, which the boundary counts before refusing the response and which ends the turn
+     * as malformed output rather than earning the repair.
      */
     static final int MAX_EXECUTABLE_CALLS_PER_STEP = 1;
 
@@ -1526,7 +1528,13 @@ public class AiChatAgentLoopService {
      *
      * <p>The demask rule is enforced before the cardinality rule, not after it. A response whose
      * calls invented a placeholder fails the turn as malformed output when it carries one call, and
-     * it must not be laundered into a repairable cardinality refusal because it carried two.
+     * it must not be laundered into a repairable cardinality refusal because it carried two. The
+     * parse boundary holds a response above the request's bound to the same rule: it demasks the
+     * response before refusing it for its size and carries the count on the refusal, and a refusal
+     * carrying a non-zero count settles here exactly as a demasked batch does — as malformed
+     * output with no repair — whichever repair rule the envelope broke. That is the only path an
+     * over-delivered batch takes while the request is bounded to one call; the batch case below
+     * stays as the defence behind the boundary for a batch within the request's bound.
      */
     private static NativeStepAttempt nativeStepAttempt(
             AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion) {
@@ -1600,6 +1608,20 @@ public class AiChatAgentLoopService {
                         Optional.empty(),
                         false);
             }
+            case AiNativeToolCompletion.Malformed<AiAssistantStep.FinalAnswer> malformed
+                    when malformed.demaskWarnings() != 0 -> new NativeStepAttempt(
+                    new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Malformed<>(
+                                    AiStructuredOutcome.REASON_MALFORMED,
+                                    malformed.inputTokens(),
+                                    malformed.outputTokens(),
+                                    malformed.stopReason()),
+                            Optional.empty(),
+                            malformed.reasoning()),
+                    Optional.empty(),
+                    false,
+                    Optional.empty(),
+                    true);
             case AiNativeToolCompletion.Malformed<AiAssistantStep.FinalAnswer> malformed -> {
                 AiStructuredOutcome<AiAssistantStep> outcome =
                         new AiStructuredOutcome.Malformed<>(

@@ -598,6 +598,85 @@ class AiInvocationServiceTest {
     }
 
     /**
+     * A response above the requested bound is demasked before it is refused for its size.
+     *
+     * <p>The cardinality refusal is repairable and an invented placeholder is not. While the loop
+     * bounds every request to one call, this refusal is the only path an over-delivered batch
+     * takes, so checking cardinality first would hand a response that invented a placeholder a
+     * repair merely because the call had a sibling. The refusal carries the count, and its audit
+     * row records it beside the malformed native-call diagnostic.
+     */
+    @Test
+    void aResponseAboveTheRequestedCallBoundThatInventsAPlaceholderCarriesItsWarnings() {
+        AiNativeToolCompletion.Malformed<?> malformed = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
+                completeNativeTools(
+                        1,
+                        List.of(
+                                searchCall("call_1", "{{P1}}"),
+                                searchCall("call_2", "{{P99}}"))));
+
+        assertEquals(1, malformed.demaskWarnings());
+        assertEquals("native_multiple_calls", malformed.repairRule());
+        Map<?, ?> terminal = auditMetadata().get(1);
+        assertEquals("native_tool_call", terminal.get("schemaRule"));
+        assertEquals("malformed_output", terminal.get("parseOutcome"));
+        assertEquals(1, terminal.get("demaskWarnings"));
+    }
+
+    /**
+     * Above the bound every object-shaped call is demasked, whatever the step guard would say.
+     *
+     * <p>The response is refused for its size, so the guard never decides its fate, and it must not
+     * decide which calls are counted either: a placeholder invented beside a call the guard would
+     * refuse still ends the turn. The count is summed across the calls rather than read from one.
+     */
+    @Test
+    void anOverBoundResponseCountsEveryCallsWarningsWithoutConsultingTheStepGuard() {
+        AiNativeToolCompletion.Malformed<?> malformed = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
+                completeNativeTools(
+                        1,
+                        List.of(
+                                new AiToolCall(
+                                        "call_1", "not_a_tool", "{\"query\":\"{{P98}}\"}"),
+                                searchCall("call_2", "{{P99}}"))));
+
+        assertEquals(2, malformed.demaskWarnings());
+        assertEquals(2, auditMetadata().get(1).get("demaskWarnings"));
+    }
+
+    /**
+     * A warning-free response above the bound keeps the cardinality repair, whatever else it holds.
+     *
+     * <p>Demasking first must not turn the size refusal into a validation pass: a call the guard
+     * would refuse, arguments that do not parse, and arguments that are not an object all leave the
+     * refusal exactly the repairable {@code native_multiple_calls} it has always been. A placeholder
+     * inside non-object arguments is not counted, because the admitted path refuses such arguments
+     * before demasking them.
+     */
+    @Test
+    void aWarningFreeResponseAboveTheBoundKeepsTheCardinalityRepairWhateverElseItCarries() {
+        AiNativeToolCompletion.Malformed<?> malformed = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
+                completeNativeTools(
+                        1,
+                        List.of(
+                                searchCall("call_1", "Bellweather"),
+                                new AiToolCall(
+                                        "call_2", "not_a_tool", "{\"query\":\"x\"}"),
+                                new AiToolCall("call_3", "search_records", "not json"),
+                                new AiToolCall(
+                                        "call_4", "search_records", "[\"{{P99}}\"]"))));
+
+        assertEquals("native_multiple_calls", malformed.repairRule());
+        assertEquals(0, malformed.demaskWarnings());
+        Map<?, ?> terminal = auditMetadata().get(1);
+        assertEquals("malformed_output", terminal.get("parseOutcome"));
+        assertFalse(terminal.containsKey("demaskWarnings"));
+    }
+
+    /**
      * A request may not ask for a larger batch than the target it is actually sent to declares.
      *
      * <p>The turn records its bound before its first step, but every invocation re-resolves the
