@@ -173,12 +173,9 @@ export async function configureScriptedAiProvider(
         + "A 400 means the backend is missing CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS=true; a 403 with "
         + "RECENT_AUTHENTICATION_REQUIRED means the session has no fresh passkey step-up, or "
         + "CONNEX_RECENT_AUTHENTICATION_WINDOW no longer matches what the e2e job sets. Neither is "
-        + "a product defect. A backend that saves the row but then answers provider_error is "
-        + "missing the rest of the recipe: SPRING_PROFILES_ACTIVE=dev,ai-scripted-provider, "
-        + "CONNEX_AI_SCRIPTED_PROVIDER_ENABLED=true and CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR "
-        + "pointing at frontend/test/e2e/fixtures/ai-scripted — without the profile the real "
-        + "OpenAI-compatible adapter dials this loopback endpoint instead. See "
-        + "docs/backend/AI_SECURITY.md and frontend/AGENTS.md.",
+        + "a product defect. A backend that saves the row but then refuses or fails the turn is "
+        + "missing part of the browser-stack recipe; the complete list of settings is in "
+        + "docs/backend/AI_SECURITY.md#the-browser-stack-recipe.",
     ).toBe(200);
 }
 
