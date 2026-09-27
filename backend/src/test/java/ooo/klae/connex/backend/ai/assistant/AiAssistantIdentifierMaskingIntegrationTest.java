@@ -202,7 +202,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
             AiInvocation invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, scopeContext,
                     new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog()).assemble(
                             List.of(), new AiAssistantToolResult(Map.of(), List.of()),
-                            List.of(new AiAssistantPromptAssembler.ToolTurn(1, "scope_activities", scope)),
+                            List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "scope_activities", scope)),
                             scopeContext, resources,
                             AiAssistantToolCatalog.ALL), 256, 0.1);
             String scopePayload = mapper.writeValueAsString(firstProviderRequest(invocation, mapper).messages());
@@ -235,7 +235,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
                 AiInvocation capped = new AiInvocation(AiFeature.ASSISTANT_CHAT, context,
                         new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog()).assemble(
                                 List.of(), new AiAssistantToolResult(Map.of(), List.of()),
-                                List.of(new AiAssistantPromptAssembler.ToolTurn(1, "scope_activities", scope)),
+                                List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "scope_activities", scope)),
                                 context, resources,
                                 AiAssistantToolCatalog.ALL), 256, 0.1);
                 String cappedPayload = mapper.writeValueAsString(firstProviderRequest(capped, mapper).messages());
@@ -321,7 +321,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         AiInvocation invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, scopeContext,
                 new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog()).assemble(
                         List.of(), new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(new AiAssistantPromptAssembler.ToolTurn(1, "scope_activities", scope)),
+                        List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "scope_activities", scope)),
                         scopeContext, resources,
                         AiAssistantToolCatalog.ALL), 256, 0.1);
         String scopePayload = mapper.writeValueAsString(firstProviderRequest(invocation, mapper).messages());
@@ -468,7 +468,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         AiInvocation invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, context,
                 new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog()).assemble(
                         List.of(), new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(new AiAssistantPromptAssembler.ToolTurn(1, "scope_activities", scope)),
+                        List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "scope_activities", scope)),
                         context, resources,
                         AiAssistantToolCatalog.ALL), 256, 0.1);
         String payload = mapper.writeValueAsString(firstProviderRequest(invocation, mapper).messages());
@@ -542,7 +542,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         AiInvocation invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, context,
                 new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog()).assemble(
                         List.of(), new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(new AiAssistantPromptAssembler.ToolTurn(1, "scope_activities", result)),
+                        List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "scope_activities", result)),
                         context, resources,
                         AiAssistantToolCatalog.ALL), 256, 0.1);
 
@@ -658,7 +658,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         AiInvocation invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, context,
                 new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog()).assemble(
                         List.of(), new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(new AiAssistantPromptAssembler.ToolTurn(1, "scope_activities", result)),
+                        List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "scope_activities", result)),
                         context, resources,
                         AiAssistantToolCatalog.ALL), 256, 0.1);
 
@@ -941,7 +941,7 @@ class AiAssistantIdentifierMaskingIntegrationTest {
         AiInvocation invocation = new AiInvocation(AiFeature.ASSISTANT_CHAT, context,
                 new AiAssistantPromptAssembler(mapper, new AiAssistantToolCatalog()).assemble(
                         List.of(), new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(new AiAssistantPromptAssembler.ToolTurn(1, "scope_activities", result)),
+                        List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "scope_activities", result)),
                         context, resources,
                         AiAssistantToolCatalog.ALL), 256, 0.1);
 

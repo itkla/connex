@@ -1,5 +1,8 @@
 package ooo.klae.connex.backend.ai.lease;
 
+import java.util.Arrays;
+import java.util.List;
+
 /**
  * The kinds of durable AI run a lease may fence.
  *
@@ -21,12 +24,31 @@ public enum AiRunLeaseSubject {
     /** One durable agent run, reserved for the agentic mission executor. */
     AGENT_RUN("agent_run", false);
 
+    private static final List<String> REAPABLE_WIRE_KEYS = Arrays.stream(values())
+            .filter(AiRunLeaseSubject::isTombstoneReapable)
+            .map(AiRunLeaseSubject::wireKey)
+            .toList();
+
     private final String wireKey;
     private final boolean tombstoneReapable;
 
     AiRunLeaseSubject(String wireKey, boolean tombstoneReapable) {
         this.wireKey = wireKey;
         this.tombstoneReapable = tombstoneReapable;
+    }
+
+    /**
+     * Returns the wire keys of every kind whose tombstones may be deleted.
+     *
+     * <p>The reap's workspace discovery and its delete must agree on this list. When they disagree
+     * — discovery asking for any aged tombstone while the delete removes only reapable kinds — a
+     * workspace whose only aged tombstone belongs to a non-reapable kind is returned by every
+     * cursor cycle forever and deletes nothing on each visit.
+     *
+     * @return the reapable kinds' wire keys, in declaration order
+     */
+    public static List<String> reapableWireKeys() {
+        return REAPABLE_WIRE_KEYS;
     }
 
     /**

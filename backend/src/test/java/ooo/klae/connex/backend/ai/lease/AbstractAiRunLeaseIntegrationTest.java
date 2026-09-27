@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.ai.lease;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
@@ -150,6 +151,23 @@ abstract class AbstractAiRunLeaseIntegrationTest {
     boolean release(AiRunLeaseKey key) {
         return Boolean.TRUE.equals(
                 transactions.execute(status -> leaseService.releaseHeldInCurrentTransaction(key)));
+    }
+
+    /**
+     * Takes a lease over for settlement inside a transaction, as every settler must.
+     *
+     * <p>{@code takeOverForSettlement} declares {@code MANDATORY} propagation so the epoch bump and
+     * the subject's terminal write always commit together. A drill that called it bare would be
+     * exercising a shape production refuses, so the helper opens the transaction the settler would
+     * have opened for its terminal write.
+     *
+     * @param key the lease key
+     * @param expectedEpoch the epoch the settler observed
+     * @return the settler's token, or empty when the lease moved on before the takeover
+     */
+    Optional<AiRunLease> takeOverForSettlement(AiRunLeaseKey key, long expectedEpoch) {
+        return transactions.execute(
+                status -> leaseService.takeOverForSettlement(key, expectedEpoch));
     }
 
     /**

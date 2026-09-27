@@ -84,7 +84,7 @@ class AiChatRestrictionEpochCommitTest extends AbstractServiceTest {
         assertNotNull(persistenceService.markRunning(
                 turn, new AiRunLeaseGuard(aiProperties.getRunLeaseTtl())));
         int toolCallId = persistenceService.proposeTool(
-                turn, 1, "get_record", "{\"handle\":\"r1\"}");
+                turn, 1, 0, "get_record", "{\"handle\":\"r1\"}");
         restrictionEpoch.bump(workspace.getId());
 
         AiAssistantLoopException failure = assertThrows(

@@ -409,6 +409,29 @@ serve a pre-lock answer. It joins the caller's claim transaction and
 own. A claim that rolls back therefore leaves no lease row, and a terminal write that changed no row
 releases nothing.
 
+#### Settlement is one transaction, for every lease subject
+
+For **any** lease subject, the settlement takeover and the subject's terminal write are **one
+transaction**, and it takes its locks in the order subject parent → subject → lease. For a chat turn
+that is `ai_chat_session` → `ai_chat_turn` → `ai_run_lease`; a future `agent_run` subject owes the
+same shape with its own parent. This is the authoritative statement of the rule — the
+`AiRunLeaseSubjectHandler` and `AiChatTurnOrphanSettlementService` Javadoc points here rather than
+restating it.
+
+The reason is that the epoch bump is not the fence. What stops a revived owner is the subject's own
+terminal status: every owner-side write is predicated on the subject still being running, so the
+owner learns it lost only once the settler's terminal status is committed. A settler that committed
+`takeOverForSettlement` in one transaction and the terminal write in a later one would therefore open
+a **revived-owner window** between the two commits, in which the epoch has already moved but the
+subject still reads as running. In that window the owner the settler just fenced out can settle the
+subject itself, and then release the lease by key on its way out — retiring the settler's takeover —
+so the pass that was recovering the run has instead handed it back to a dead owner.
+
+`AiRunLeaseService.takeOverForSettlement` therefore declares `MANDATORY` propagation. A handler that
+calls it without its subject-terminal transaction already open is refused with
+`IllegalTransactionStateException` rather than getting a standalone takeover that commits on its own,
+so the one-transaction requirement fails closed for a subject handler nobody has written yet.
+
 ## Disqualification vocabulary materialization
 
 Disqualification-reason settings mutations and lifecycle transitions into `DISQUALIFIED` share the

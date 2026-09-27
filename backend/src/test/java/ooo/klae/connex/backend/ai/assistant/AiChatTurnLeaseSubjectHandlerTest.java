@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
@@ -13,7 +12,6 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import ooo.klae.connex.backend.ai.lease.AiRunLease;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
@@ -24,12 +22,14 @@ class AiChatTurnLeaseSubjectHandlerTest {
     private static final int TURN_ID = 17;
 
     private AiChatMapper chatMapper;
+    private AiChatTurnOrphanSettlementService settlementService;
     private AiChatTurnLeaseSubjectHandler handler;
 
     @BeforeEach
     void setUp() {
         chatMapper = mock(AiChatMapper.class);
-        handler = new AiChatTurnLeaseSubjectHandler(chatMapper);
+        settlementService = mock(AiChatTurnOrphanSettlementService.class);
+        handler = new AiChatTurnLeaseSubjectHandler(chatMapper, settlementService);
     }
 
     @Test
@@ -68,14 +68,13 @@ class AiChatTurnLeaseSubjectHandlerTest {
     }
 
     @Test
-    void orphanSettlementIsRefusedUntilASweeperCanDispatchIt() {
-        AiRunLease takeover = new AiRunLease(
-                new AiRunLeaseKey(WORKSPACE_ID, AiRunLeaseSubject.CHAT_TURN, TURN_ID),
-                "11111111-2222-3333-4444-555555555555",
-                2L);
+    void orphanSettlementIsDispatchedToTheSettlementServiceWithTheObservedEpoch() {
+        AiRunLeaseKey key =
+                new AiRunLeaseKey(WORKSPACE_ID, AiRunLeaseSubject.CHAT_TURN, TURN_ID);
+        when(settlementService.settleOrphan(key, 4L)).thenReturn(true);
 
-        assertThrows(
-                UnsupportedOperationException.class,
-                () -> handler.settleOrphan(WORKSPACE_ID, TURN_ID, takeover));
+        assertTrue(handler.settleOrphan(key, 4L));
+
+        verify(settlementService).settleOrphan(key, 4L);
     }
 }

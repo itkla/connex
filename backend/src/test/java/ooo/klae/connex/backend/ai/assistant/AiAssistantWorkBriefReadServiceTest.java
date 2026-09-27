@@ -99,7 +99,7 @@ class AiAssistantWorkBriefReadServiceTest {
         String providerInput = mapper.writeValueAsString(new AiAssistantPromptAssembler(
                 mapper, new AiAssistantToolCatalog()).assemble(
                         List.of(), new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(new AiAssistantPromptAssembler.ToolTurn(1, "work_brief", result)),
+                        List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(1, "work_brief", result)),
                         context, resources,
                         AiAssistantToolCatalog.ALL).getMessages());
         assertFalse(providerInput.contains("Johnathan"));

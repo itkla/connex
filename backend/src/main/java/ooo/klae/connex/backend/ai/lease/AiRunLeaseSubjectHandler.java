@@ -33,9 +33,19 @@ public interface AiRunLeaseSubjectHandler {
     /**
      * Settles a subject whose owner stopped heartbeating, in the settler's own transaction.
      *
-     * @param workspaceId tenant key
-     * @param subjectId the subject's identifier within the workspace
-     * @param takeover the settler's fencing token for the subject's lease
+     * <p>The implementation takes the lease over itself rather than being handed a token, because
+     * the fence that stops a revived owner is the subject's own terminal status and that fence
+     * closes at the settler's terminal commit, not at the takeover. Implementations must therefore
+     * call {@link AiRunLeaseService#takeOverForSettlement(AiRunLeaseKey, long)} and write the
+     * subject's terminal state in one transaction, taking the lease last in their lock order. That
+     * rule, what a split commit permits, and the required lock order are recorded in
+     * {@code docs/backend/LOCKING.md} under "AI run leases", which is the authoritative statement;
+     * {@code takeOverForSettlement} declares {@code MANDATORY} propagation so an implementation
+     * that forgets it is refused rather than silently committing a standalone takeover.
+     *
+     * @param key the subject's lease key
+     * @param expectedEpoch the epoch the sweeper observed on the expired lease
+     * @return {@code true} when this call wrote the subject's terminal state
      */
-    void settleOrphan(int workspaceId, long subjectId, AiRunLease takeover);
+    boolean settleOrphan(AiRunLeaseKey key, long expectedEpoch);
 }

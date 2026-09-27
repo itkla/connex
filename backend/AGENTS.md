@@ -109,6 +109,7 @@ Declaring an assistant tool is contract work, not a one-line addition: every `Ai
 - Idempotency, one-use proofs, generation handles, leases, and ownership checks are data-integrity/security mechanisms. Do not simplify them without reading the owning contract and tests.
 - New tables holding workspace/org data must participate in the appropriate tenant/control lifecycle, export, teardown, and residual-verification registries. `../docs/MULTITENANCY_PLAN.md` is authoritative.
 - The fixture-driven scripted AI provider in `ai/provider/scripted` replaces the real OpenAI-compatible adapter under a profile and a flag, and must stay unbootable in any deployed edition. Its activation gates, fixture contract, the dispatch-accounting rule every provider adapter owes, and the end-to-end trajectory harness are in `../docs/backend/AI_SECURITY.md`. The harness runs under `./gradlew scriptedTrajectoryTest`, which is excluded from `test` and named separately by the required Backend CI job.
+- Before adding or changing an agent evaluation golden, or before proposing a live model-evaluation run, read `../docs/AI_EVALUATION.md`: it maps the goldens that exist, the fixture constraints the loader enforces, what the harness cannot reach, and the decision-gated design of the operator-invoked staging runner.
 
 ## Transactions and locking
 

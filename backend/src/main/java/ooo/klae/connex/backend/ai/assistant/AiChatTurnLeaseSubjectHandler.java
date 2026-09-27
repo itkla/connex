@@ -3,7 +3,7 @@ package ooo.klae.connex.backend.ai.assistant;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
-import ooo.klae.connex.backend.ai.lease.AiRunLease;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
 import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubjectHandler;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
@@ -22,6 +22,7 @@ public class AiChatTurnLeaseSubjectHandler implements AiRunLeaseSubjectHandler {
     private static final String RUNNING = "running";
 
     private final AiChatMapper chatMapper;
+    private final AiChatTurnOrphanSettlementService settlementService;
 
     @Override
     public AiRunLeaseSubject subject() {
@@ -46,19 +47,18 @@ public class AiChatTurnLeaseSubjectHandler implements AiRunLeaseSubjectHandler {
     }
 
     /**
-     * Refuses orphan settlement, which no caller reaches yet.
+     * Settles an abandoned turn from an instance that never owned it.
      *
-     * <p>Settling an abandoned turn from another instance needs the lease sweeper that discovers
-     * one, and it arrives with that sweeper. Until then nothing dispatches settlement, so refusing
-     * loudly is preferable to a silent no-op that would look like a settled turn.
+     * <p>The lease is taken over inside the settlement transaction rather than handed in here,
+     * because the fence that stops a revived owner is the turn's own status and that fence closes
+     * at the settler's terminal commit, not at the takeover.
      *
-     * @param workspaceId tenant key
-     * @param subjectId the turn's identifier
-     * @param takeover the settler's fencing token
+     * @param key the turn's lease key
+     * @param expectedEpoch the epoch the sweeper observed on the expired lease
+     * @return true when this call wrote the turn's terminal state
      */
     @Override
-    public void settleOrphan(int workspaceId, long subjectId, AiRunLease takeover) {
-        throw new UnsupportedOperationException(
-                "Assistant turn orphan settlement arrives with the run lease sweeper");
+    public boolean settleOrphan(AiRunLeaseKey key, long expectedEpoch) {
+        return settlementService.settleOrphan(key, expectedEpoch);
     }
 }

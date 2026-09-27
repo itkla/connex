@@ -1,7 +1,6 @@
 package ooo.klae.connex.backend.ai.lease;
 
 import java.time.Duration;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -238,11 +237,27 @@ public class AiRunLeaseService {
      * subject's terminal state. Without the registration that release would find no token, skip the
      * tombstone, and leave a held settlement lease for the next sweep pass to rediscover.
      *
+     * <p>This joins the settler's transaction rather than opening its own, and that is the whole
+     * point. The fence that stops a revived owner is the subject's terminal status, and it closes
+     * when the settler commits that status — not when it bumps the epoch. Committing the takeover
+     * separately would leave a window in which the revived owner still reads the subject as
+     * running, settles it itself, and retires the settler's lease on the way out. Joining makes
+     * the epoch bump and the terminal write one durable step, and it makes a settlement that
+     * throws leave the lease exactly as it found it for the next pass to rediscover.
+     *
+     * <p>The propagation is {@code MANDATORY} rather than {@code REQUIRED} so that requirement
+     * fails closed for every future {@link AiRunLeaseSubjectHandler}. Under {@code REQUIRED} a
+     * handler that forgot to open its subject-terminal transaction would silently get a standalone
+     * takeover that commits on its own, reopening exactly the revived-owner window this method's
+     * contract exists to close; under {@code MANDATORY} it gets an
+     * {@link org.springframework.transaction.IllegalTransactionStateException} instead. The rule is
+     * recorded as the authoritative concurrency contract in {@code docs/backend/LOCKING.md}.
+     *
      * @param key the lease key
      * @param expectedEpoch the epoch the settler observed
      * @return the settler's fencing token, or empty when the lease moved on before the takeover
      */
-    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.MANDATORY)
     public Optional<AiRunLease> takeOverForSettlement(AiRunLeaseKey key, long expectedEpoch) {
         Objects.requireNonNull(key, "key");
         String owner = identity.owner();
@@ -278,10 +293,7 @@ public class AiRunLeaseService {
      */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public int reapTombstones(int workspaceId, int retentionSeconds, int limit) {
-        List<String> reapable = Arrays.stream(AiRunLeaseSubject.values())
-                .filter(AiRunLeaseSubject::isTombstoneReapable)
-                .map(AiRunLeaseSubject::wireKey)
-                .toList();
+        List<String> reapable = AiRunLeaseSubject.reapableWireKeys();
         if (reapable.isEmpty()) {
             return 0;
         }

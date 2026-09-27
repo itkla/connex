@@ -289,7 +289,7 @@ class AiRunLeaseHeartbeatTest {
         }
 
         @Override
-        public void settleOrphan(int workspaceId, long subjectId, AiRunLease takeover) {
+        public boolean settleOrphan(AiRunLeaseKey key, long expectedEpoch) {
             throw new UnsupportedOperationException("Settlement is not exercised by this test");
         }
 

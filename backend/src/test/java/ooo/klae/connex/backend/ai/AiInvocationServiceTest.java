@@ -546,7 +546,8 @@ class AiInvocationServiceTest {
                 List.of(definition),
                 List.of(new AiToolExchange(
                         new AiToolCall("call_1", "get_record", "{}"),
-                        "CRM_DATA_BEGIN\nMASKED_NATIVE_TOOL_RESULT\nCRM_DATA_END")));
+                        "CRM_DATA_BEGIN\nMASKED_NATIVE_TOOL_RESULT\nCRM_DATA_END",
+                        1, 0)));
         AiResponseSchema schema = new AiResponseSchema(
                 "answer", new ObjectMapper().readTree("{\"type\":\"object\"}"));
 
@@ -581,7 +582,8 @@ class AiInvocationServiceTest {
                 List.of(definition),
                 List.of(new AiToolExchange(
                         new AiToolCall("call_1", "get_record", "{}"),
-                        "CRM_DATA_BEGIN\nMASKED_NATIVE_TOOL_RESULT\nCRM_DATA_END")));
+                        "CRM_DATA_BEGIN\nMASKED_NATIVE_TOOL_RESULT\nCRM_DATA_END",
+                        1, 0)));
         AiResponseSchema schema = new AiResponseSchema(
                 "answer", new ObjectMapper().readTree("{\"type\":\"object\"}"));
 
@@ -762,7 +764,7 @@ class AiInvocationServiceTest {
         MaskedPrompt prompt = promptAssembler.assemble(
                 List.of(request),
                 new AiAssistantToolResult(Map.of("records", List.of()), List.of()),
-                List.of(new AiAssistantPromptAssembler.ToolTurn(
+                List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(
                         1,
                         "search_records",
                         new AiAssistantToolResult(
@@ -846,7 +848,7 @@ class AiInvocationServiceTest {
                         "warmth", "cooling"))),
                 List.of());
         List<AiAssistantPromptAssembler.ToolTurn> turns = List.of(
-                new AiAssistantPromptAssembler.ToolTurn(
+                AiAssistantPromptAssembler.ToolTurn.soleCall(
                         1, "search_records", toolResult));
         MaskingContext context = new MaskingContext();
         MaskedPrompt prompt = promptAssembler.assembleNative(
@@ -868,7 +870,7 @@ class AiInvocationServiceTest {
                 promptAssembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL),
                 promptAssembler.nativeReplay(
                         turns,
-                        Map.of(1, call),
+                        Map.of(turns.getFirst().ref(), call),
                         context,
                         budget,
                         null).exchanges());
@@ -882,7 +884,8 @@ class AiInvocationServiceTest {
                 request.definitions(),
                 List.of(new AiToolExchange(
                         new AiToolCall(call.id(), call.name(), call.arguments()),
-                        request.exchanges().getFirst().maskedResult())));
+                        request.exchanges().getFirst().maskedResult(),
+                        1, 0)));
         int unsignedBytes = service.serializedPromptBytes(
                 prompt,
                 stepSchema.finalResponseSchema(),
@@ -922,7 +925,8 @@ class AiInvocationServiceTest {
                                 "call_1", "search_records",
                                 "{\"query\":\"" + placeholder + "\"}",
                                 "sig-opaque-bytes"),
-                        "{\"records\":[]}")));
+                        "{\"records\":[]}",
+                        1, 0)));
         providerReturns(new AiCompletionResult(
                 "", 12, 7, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA, "",
                 AiReasoningMode.NONE,
@@ -2081,7 +2085,8 @@ class AiInvocationServiceTest {
                                 "call_1", "search_records",
                                 "{\"query\":\"" + placeholder + "\"}",
                                 "sig-opaque-bytes"),
-                        "{\"records\":[]}")));
+                        "{\"records\":[]}",
+                        1, 0)));
         providerReturns(new AiCompletionResult(
                 "", 12, 7, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA, "",
                 AiReasoningMode.NONE,

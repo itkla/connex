@@ -993,3 +993,51 @@ creates none.
 **Disposition: false positive.** Tracked on [#1591](https://github.com/itkla/connex/issues/1591)
 (same class); owner Hunter Nakagawa; approver Security Owner role; expiry **2027-02-14**,
 re-review **2027-01-14**. Dismissed on 2026-09-07 with a comment carrying that record.
+
+### `java/csrf-unprotected-request-type` — #186: deal collaborator listing, false positive
+
+Raised on the merge ref of PR [#1792](https://github.com/itkla/connex/pull/1792) (#819, deal
+collaborator control hydration) at `DealController.java:854`
+(`GET /api/deals/{id}/collaborators`), blocking that pull request. Same class as #67
+(`UserController`), #153 / #159 (`ReportController.widgetKpi`) and #164 / #165.
+
+**Runtime trace.** The handler reads only. `DealService.getCollaborators` runs exactly three
+statements, each a `<select>`: `DealMapper.getDealById` (`DealMapper.xml:1027-1031`, flat result
+map, no nested selects), `DealMapper.getCollaboratorIds` (`DealMapper.xml:1326-1332`, pinned
+verbatim by `DealMapperXmlTest.collaboratorLookupReadsOnlyTenantRelationshipIds`) and
+`UserMapper.getActiveWorkspaceMemberProfilesByIds` (`UserMapper.xml:68-82`). Nothing else executes:
+`DealCollaboratorControlAccess.loadProfiles` is `new ArrayList` / `addAll` / `sort` / `stream`, and
+`TenantWorkScope.unrouted` is a `ThreadLocal` override around `work.get()`. Independently checked
+and clean: no aspects; the `@RequirePermission` pointcut does not match this unannotated read;
+`TenantScopeInterceptor` is throw-or-proceed; `ControlCatalogRoutingInterceptor` only switches the
+connection catalog; no `ResponseBodyAdvice`; no mapper cache; no persisted counter, `last_*`
+timestamp or lazily created row. The tenant journal is an SLF4J emission, not a database write.
+
+**Why CodeQL fired.** The sink is `Supplier.get()` at `TenantWorkScope.java:233`. CodeQL resolves
+that functional-interface call context-insensitively to every `Supplier` lambda reaching
+`unrouted`, including `AiBudgetControlAccess`'s, which do write; all four of this result's code
+flows end at `AiBudgetControlOperations` writes. The flow is infeasible here because the supplier
+constructed at `DealCollaboratorControlAccess.java:59` is `() -> loadProfiles(…)`. This is the same
+systemic shape recorded for #164 / #165 above, now measured: **46 results of this rule on the
+current `main` analysis, 33 of them ending at the same four AI-budget writes, none at an in-memory
+call.** The structural follow-up is tracked on
+[#1815](https://github.com/itkla/connex/issues/1815).
+
+**Correction of record.** The first dismissal comment on this alert (2026-09-20, written to unblock
+#1792) attributed the finding to `TransactionTemplate.setPropagationBehavior` and `List.addAll`.
+That attribution was wrong — no in-memory call is a sink in any result of this rule — and the
+independent reproduction required by
+[STATIC_ANALYSIS.md](STATIC_ANALYSIS.md) had not yet been performed when it was written. The alert
+was reopened and re-dismissed on 2026-09-20 with the corrected rationale and a link to its tracking
+issue. Both the pull request comment and the issue carry the correction.
+
+**Note for re-reviewers.** The 100 `relatedLocations` on an alert of this rule are a global, capped,
+result-independent list — byte-identical between #67 and #186. Only `codeFlows` carry per-result
+truth. Cite methods plus a commit sha rather than bare line numbers: #67's record cites
+`UserService (:91)`, which on current `main` is a different method.
+
+**Disposition: false positive.** Tracking issue
+[#1814](https://github.com/itkla/connex/issues/1814); owner Hunter Nakagawa; approver Security
+Owner role ([#1230](https://github.com/itkla/connex/issues/1230)); expiry **2027-02-14**, re-review
+**2027-01-14**. Re-evaluation triggers: any write added to the `getCollaborators` path,
+`DealCollaboratorControlAccess` gaining a mutating statement, or a material update to the query.

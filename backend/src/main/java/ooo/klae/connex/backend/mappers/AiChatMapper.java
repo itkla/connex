@@ -10,6 +10,7 @@ import ooo.klae.connex.backend.beans.AiChatParticipant;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.beans.AiChatTurnRef;
 
 /** Workspace-scoped persistence for assistant sessions, participants, messages, turns, and tools. */
 public interface AiChatMapper {
@@ -63,6 +64,23 @@ public interface AiChatMapper {
     AiChatSession getSessionByIdForUpdate(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,
+        @Param("id") int id);
+
+    /**
+     * Locks one session for background maintenance, with no viewer to project participation for.
+     *
+     * <p>The background settlement passes have no request actor, so they cannot use the
+     * viewer-projected {@link #getSessionByIdForUpdate} lock. They still take the session lock
+     * first, because that is the documented order — {@code ai_chat_session → ai_chat_turn →
+     * ai_run_lease} — and a maintenance pass that skipped it would be the one path able to
+     * deadlock against every request path.
+     *
+     * @param workspaceId active workspace
+     * @param id the session
+     * @return the locked session, or null when this workspace holds no such session
+     */
+    AiChatSession getSessionByIdForMaintenanceUpdate(
+        @Param("workspaceId") int workspaceId,
         @Param("id") int id);
 
     boolean sessionExists(
@@ -251,6 +269,92 @@ public interface AiChatMapper {
     String getTurnStatus(
         @Param("workspaceId") int workspaceId,
         @Param("id") int id);
+
+    /**
+     * Reads one turn's owning session without taking a row lock.
+     *
+     * <p>A lease subject key carries a workspace and a subject id and no session, so the orphan
+     * settlement has to learn the session before it can take the session lock the documented order
+     * puts first. Reading it unlocked is safe because a turn never changes session.
+     *
+     * @param workspaceId active workspace
+     * @param id the turn
+     * @return the owning session id, or null when this workspace holds no such turn
+     */
+    Integer getTurnSessionId(
+        @Param("workspaceId") int workspaceId,
+        @Param("id") int id);
+
+    /**
+     * Enumerates the next page of workspaces holding a stale turn that no lease covers, for
+     * catalog-pinned background fan-out. Returns workspace references only, never tenant content.
+     *
+     * <p>The lifetime boundary is computed by MySQL rather than bound as a JVM instant, because it
+     * is compared against {@code updated_at}, which MySQL writes. An instance whose clock ran ahead
+     * would otherwise expire live turns across every workspace it routes to.
+     *
+     * @param afterWorkspaceId exclusive cursor; {@code 0} starts a pass
+     * @param lifetimeSeconds the absolute turn lifetime, applied by MySQL
+     * @param limit maximum workspace ids returned
+     * @return ascending workspace ids
+     */
+    List<Integer> workspaceIdsWithUnleasedStaleTurns(
+        @Param("afterWorkspaceId") int afterWorkspaceId,
+        @Param("lifetimeSeconds") int lifetimeSeconds,
+        @Param("limit") int limit);
+
+    /**
+     * Lists the session and turn references of non-terminal turns in one workspace that hold no
+     * lease row and are past the absolute lifetime.
+     *
+     * <p>The absence of a lease row is what separates this pass from the lease sweeper, and it is
+     * load-bearing rather than an optimisation. A turn claimed by an instance running a binary
+     * that predates the lease — every turn in flight during a rolling deploy — has no lease and
+     * must settle as today's {@code timed_out}/{@code generation_timeout}, never as an ownership
+     * loss nobody can evidence. A claimed turn always has a lease row, held or tombstoned, so it
+     * is never returned here.
+     *
+     * <p>Only the two keys the pass needs are projected. A background thread has no reason to hold
+     * the model's durable partial answer or a turn's scope JSON for every stale turn in every
+     * workspace it visits, and the settlement re-reads the row it locks anyway.
+     *
+     * @param workspaceId active workspace
+     * @param lifetimeSeconds the absolute turn lifetime, applied by MySQL
+     * @param limit maximum turns returned
+     * @return stale unleased turn references, oldest first
+     */
+    List<AiChatTurnRef> findUnleasedStaleTurnRefs(
+        @Param("workspaceId") int workspaceId,
+        @Param("lifetimeSeconds") int lifetimeSeconds,
+        @Param("limit") int limit);
+
+    /**
+     * Settles one turn that is still in {@code expectedStatus} and whose {@code updated_at} is
+     * older than the absolute lifetime, with the boundary computed by MySQL.
+     *
+     * <p>Separate from {@link #updateTurnTerminal}'s caller-supplied {@code updatedBefore} so the
+     * unattended pass compares one database-written column against that same database's clock. The
+     * reader-triggered expiry keeps its JVM boundary: it settles only the session a member is
+     * looking at, on that member's own request, so a skewed instance can reach only what it is
+     * already serving.
+     *
+     * @param workspaceId active workspace
+     * @param sessionId the owning session
+     * @param id the turn
+     * @param status the terminal status to write
+     * @param terminalReason the stable terminal reason
+     * @param expectedStatus the non-terminal status observed under the row lock
+     * @param lifetimeSeconds the absolute turn lifetime, applied by MySQL
+     * @return rows updated; {@code 0} means the turn moved on or is not yet stale
+     */
+    int expireTurnPastLifetime(
+        @Param("workspaceId") int workspaceId,
+        @Param("sessionId") int sessionId,
+        @Param("id") int id,
+        @Param("status") String status,
+        @Param("terminalReason") String terminalReason,
+        @Param("expectedStatus") String expectedStatus,
+        @Param("lifetimeSeconds") int lifetimeSeconds);
 
     AiChatTurn getTurnById(
         @Param("workspaceId") int workspaceId,

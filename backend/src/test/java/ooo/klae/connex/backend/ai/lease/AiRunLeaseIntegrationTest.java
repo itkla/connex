@@ -19,6 +19,7 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.IllegalTransactionStateException;
 
 import ooo.klae.connex.backend.beans.AiRunLeaseRow;
 
@@ -169,7 +170,8 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
         acquire(liveKey);
         expire(expiredKey);
 
-        List<AiRunLeaseRow> expired = leaseMapper.findExpiredLeases(workspace.getId(), 10);
+        List<AiRunLeaseRow> expired =
+                leaseMapper.findExpiredLeases(workspace.getId(), List.of(CHAT_TURN), 10);
         assertEquals(1, expired.size());
         assertEquals(3005L, expired.get(0).getSubjectId());
         assertEquals(CHAT_TURN, expired.get(0).getSubjectKind());
@@ -181,14 +183,16 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
                         .contains(workspace.getId()),
                 "The discovery cursor must be exclusive so a pass advances");
 
-        assertTrue(leaseService.takeOverForSettlement(expiredKey, expiredLease.epoch() + 7L).isEmpty());
-        AiRunLease takeover = leaseService.takeOverForSettlement(expiredKey, expiredLease.epoch())
-                .orElseThrow();
+        assertTrue(takeOverForSettlement(expiredKey, expiredLease.epoch() + 7L).isEmpty());
+        AiRunLease takeover =
+                takeOverForSettlement(expiredKey, expiredLease.epoch()).orElseThrow();
 
         assertEquals(expiredLease.epoch() + 1L, takeover.epoch());
         assertEquals(AiRunLeaseOutcome.LOST, leaseService.renew(expiredLease));
         assertEquals(AiRunLeaseOutcome.HELD, leaseService.renew(takeover));
-        assertTrue(leaseMapper.findExpiredLeases(workspace.getId(), 10).isEmpty());
+        assertTrue(
+                leaseMapper.findExpiredLeases(workspace.getId(), List.of(CHAT_TURN), 10)
+                        .isEmpty());
     }
 
     @Test
@@ -278,13 +282,15 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
 
         assertEquals(AiRunLeaseOutcome.LOST, leaseService.renew(held));
 
-        assertEquals(1, leaseMapper.findExpiredLeases(workspace.getId(), 10).size());
+        assertEquals(
+                1,
+                leaseMapper.findExpiredLeases(workspace.getId(), List.of(CHAT_TURN), 10).size());
         assertEquals(
                 expiredDeadline,
                 leaseRow(key).get("expires_at"),
                 "A refused renewal must leave the expired deadline exactly where it was");
         assertTrue(
-                leaseService.takeOverForSettlement(key, held.epoch()).isPresent(),
+                takeOverForSettlement(key, held.epoch()).isPresent(),
                 "A settler must still be able to claim the lease the renewal was refused for");
     }
 
@@ -318,9 +324,10 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
     }
 
     /**
-     * A settler releases its takeover through the same entry point an owner uses. An unregistered
-     * takeover token would make that release a silent no-op, leaving a held settlement lease that
-     * every later sweep pass rediscovers as an expired lease on an already-terminal subject.
+     * A settler releases its takeover through the same entry point an owner uses, in the one
+     * transaction the settlement contract requires. An unregistered takeover token would make that
+     * release a silent no-op, leaving a held settlement lease that every later sweep pass
+     * rediscovers as an expired lease on an already-terminal subject.
      */
     @Test
     void aSettlerCanTombstoneTheLeaseItJustTookOver() {
@@ -328,15 +335,22 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
         AiRunLease abandoned = acquire(key);
         expire(key);
 
-        AiRunLease takeover =
-                leaseService.takeOverForSettlement(key, abandoned.epoch()).orElseThrow();
-        assertTrue(release(key));
+        AiRunLease takeover = transactions.execute(status -> {
+            AiRunLease claimed =
+                    leaseService.takeOverForSettlement(key, abandoned.epoch()).orElseThrow();
+            assertTrue(
+                    leaseService.releaseHeldInCurrentTransaction(key),
+                    "A settler must release the takeover it just registered");
+            return claimed;
+        });
 
         Map<String, Object> row = leaseRow(key);
         assertNull(row.get("owner"));
         assertNotNull(row.get("released_at"));
         assertEquals(takeover.epoch(), ((Number) row.get("epoch")).longValue());
-        assertTrue(leaseMapper.findExpiredLeases(workspace.getId(), 10).isEmpty());
+        assertTrue(
+                leaseMapper.findExpiredLeases(workspace.getId(), List.of(CHAT_TURN), 10)
+                        .isEmpty());
     }
 
     /**
@@ -380,5 +394,92 @@ class AiRunLeaseIntegrationTest extends AbstractAiRunLeaseIntegrationTest {
 
         assertTrue(release(key));
         assertNotNull(leaseRow(key).get("released_at"));
+    }
+
+    /**
+     * A settler that never opened its own transaction is refused rather than handed a takeover
+     * that commits on its own.
+     *
+     * <p>The fence that stops a revived owner is the subject's terminal status, and it closes at
+     * the settler's terminal commit — not at the epoch bump. A standalone takeover would therefore
+     * leave a window in which the epoch has already moved while the subject still reads as
+     * running, so the owner the settler just fenced out can settle the subject itself and retire
+     * the settler's lease on the way out. {@code MANDATORY} propagation makes that mistake
+     * impossible to make quietly in a subject handler nobody has written yet.
+     */
+    @Test
+    void aTakeoverOutsideASettlementTransactionIsRefusedAndChangesNothing() {
+        AiRunLeaseKey key = key(AiRunLeaseSubject.CHAT_TURN, 3015L);
+        AiRunLease held = acquire(key);
+        expire(key);
+        Map<String, Object> before = leaseRow(key);
+
+        assertThrows(
+                IllegalTransactionStateException.class,
+                () -> leaseService.takeOverForSettlement(key, held.epoch()));
+
+        Map<String, Object> after = leaseRow(key);
+        assertEquals(before.get("owner"), after.get("owner"));
+        assertEquals(before.get("epoch"), after.get("epoch"));
+        assertEquals(before.get("expires_at"), after.get("expires_at"));
+        assertTrue(leaseRegistry.find(key).isPresent());
+    }
+
+    /**
+     * The reap's workspace discovery must ask for the same subject kinds its delete will touch.
+     * When it does not, a workspace whose only aged tombstone belongs to a kind the delete refuses
+     * is returned by every cursor cycle, for the life of the tenant, and deletes nothing each time.
+     */
+    @Test
+    void theReapDiscoveryIgnoresAWorkspaceWhoseOnlyAgedTombstoneIsNotReapable() {
+        AiRunLeaseKey agentKey = key(AiRunLeaseSubject.AGENT_RUN, 3016L);
+        acquire(agentKey);
+        assertTrue(release(agentKey));
+        ageTombstone(agentKey);
+
+        assertFalse(
+                reapableWorkspaceIds().contains(workspace.getId()),
+                "A workspace holding only an unreapable aged tombstone must not be rediscovered");
+
+        AiRunLeaseKey turnKey = key(AiRunLeaseSubject.CHAT_TURN, 3016L);
+        acquire(turnKey);
+        assertTrue(release(turnKey));
+        ageTombstone(turnKey);
+
+        assertTrue(
+                reapableWorkspaceIds().contains(workspace.getId()),
+                "A workspace holding a reapable aged tombstone must still be discovered");
+        assertEquals(1, leaseService.reapTombstones(workspace.getId(), 3600, 50));
+    }
+
+    /**
+     * The reap's workspace discovery carries a workspace <em>cursor</em>, not a workspace equality,
+     * so an index that leads with {@code workspace_id} cannot bound it: the cursor range consumes
+     * the leading column and the retention predicate degrades to a per-entry condition. In the
+     * steady state nothing is old enough to reap, so the page limit never short-circuits and the
+     * probe reads every retained tombstone above the cursor to prove an empty result — every sweep,
+     * on every instance, for every catalog. Only an index leading with {@code released_at} turns it
+     * back into a range bounded by the retention cutoff.
+     */
+    @Test
+    void theReapDiscoveryHasAReleaseTimeLeadingIndexToBoundIt() {
+        assertEquals(
+                List.of("released_at", "workspace_id", "subject_kind"),
+                indexColumns("idx_ai_run_lease_reapable"),
+                "The reap discovery probe needs an index that leads with released_at");
+    }
+
+    private List<String> indexColumns(String indexName) {
+        return jdbcTemplate.queryForList(
+                "SELECT COLUMN_NAME FROM information_schema.STATISTICS"
+                        + " WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ai_run_lease'"
+                        + " AND INDEX_NAME = ? ORDER BY SEQ_IN_INDEX",
+                String.class,
+                indexName);
+    }
+
+    private List<Integer> reapableWorkspaceIds() {
+        return leaseMapper.workspaceIdsWithReapableTombstones(
+                workspace.getId() - 1, AiRunLeaseSubject.reapableWireKeys(), 3600, 500);
     }
 }
