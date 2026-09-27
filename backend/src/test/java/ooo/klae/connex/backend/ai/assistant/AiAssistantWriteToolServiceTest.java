@@ -980,6 +980,52 @@ class AiAssistantWriteToolServiceTest {
                 TURN.workspaceId(), TURN.sessionId(), 29);
     }
 
+    /**
+     * The entry gates are deliberately asymmetric: executing and approving need workspace AI to be
+     * enabled, while undoing an executed write and rejecting a proposal need only membership, so a
+     * member can still take back or decline what the assistant did after an administrator turns it
+     * off.
+     */
+    @Test
+    void undoAndRejectionStillWorkAfterWorkspaceAiIsDisabled() throws Exception {
+        doAnswer(invocation -> {
+            Task created = invocation.getArgument(0);
+            created.setId(74);
+            created.setStatus("todo");
+            return created;
+        }).when(taskService).create(any(Task.class));
+        AiAssistantPreparedWrite write = prepared(
+                "create_task",
+                "{\"handle\":\"r1\",\"description\":\"Send the renewal deck\"}",
+                "person",
+                31);
+        stored(write, 29);
+        service.executeAuto(TURN, 29, result -> { });
+        storedToolCall.setStatus("executed");
+        storedToolCall.setResultJson(capturedResultJson());
+        when(governanceService.isEnabled(TURN.workspaceId())).thenReturn(false);
+        doAnswer(invocation -> null).when(taskService).deleteIf(eq(74), any());
+
+        assertEquals("undone", service.undo(TURN.sessionId(), 29).status());
+        verify(taskService).deleteIf(eq(74), any());
+
+        AiAssistantPreparedWrite proposal = prepared(
+                "change_deal_stage",
+                "{\"handle\":\"r1\",\"stage\":\"Proposal\"}",
+                "deal",
+                44);
+        stored(proposal, 29);
+        storedToolCall.setStatus("proposed");
+        storedToolCall.setResultJson(null);
+        when(chatMapper.updateToolCall(
+                eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(29),
+                eq("rejected"), any(), eq(TURN.userId()))).thenReturn(1);
+
+        assertEquals("rejected", service.reject(TURN.sessionId(), 29).status());
+        assertThrows(ForbiddenException.class, () -> service.approve(TURN.sessionId(), 29));
+        verify(governanceService, times(2)).isEnabled(TURN.workspaceId());
+    }
+
     private void grantAllExcept(Permission... revoked) {
         EnumSet<Permission> granted = EnumSet.allOf(Permission.class);
         granted.removeAll(List.of(revoked));

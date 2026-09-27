@@ -125,6 +125,33 @@ class AiChatProgressServiceTest {
                 AiChatProgressService.PROGRESS_SOURCES.size());
     }
 
+    /**
+     * Every declared write tool renders as a real milestone with a count.
+     *
+     * <p>Both progress tables fall back silently — an unmapped tool is an uncategorised
+     * {@code other} with no count — and nothing else fails when a new write tool forgets them. This
+     * iterates the catalog's own write-tool list, so declaring a tool without its two progress arms
+     * fails here rather than shipping a blank strip.
+     */
+    @Test
+    void everyDeclaredWriteToolHasAProgressCategoryAndACount() {
+        assertTrue(!AiAssistantToolCatalog.writeToolNames().isEmpty());
+        for (String tool : AiAssistantToolCatalog.writeToolNames()) {
+            String source = AiChatProgressService.sourceForTool(tool);
+            assertTrue(!"other".equals(source), tool + " renders as an uncategorised milestone");
+            assertTrue(
+                    AiChatProgressService.PROGRESS_SOURCES.contains(source),
+                    tool + " maps outside the progress vocabulary: " + source);
+            assertEquals(
+                    1,
+                    AiChatProgressService.resultCount(
+                            tool, JsonMapper.builder().build().createObjectNode()),
+                    tool + " reports no completed-action count");
+        }
+        assertNull(AiChatProgressService.resultCount(
+                "a_future_tool", JsonMapper.builder().build().createObjectNode()));
+    }
+
     @Test
     void onlyTheExecutorsOwnTruncationFlagsBoundTheReportedProgress() {
         when(chatMapper.listToolCallsByTurn(3, 5, "turn-7-step-", ROW_LIMIT))
