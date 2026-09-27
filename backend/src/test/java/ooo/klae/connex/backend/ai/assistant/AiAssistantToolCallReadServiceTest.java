@@ -38,6 +38,9 @@ import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.PipelineMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.services.DealService;
+import ooo.klae.connex.backend.services.PipelineService;
+import ooo.klae.connex.backend.services.TaskService;
 import ooo.klae.connex.backend.services.WorkspaceService;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.ObjectMapper;
@@ -93,8 +96,16 @@ class AiAssistantToolCallReadServiceTest {
         accessibleSession.setStatus("active");
         when(chatMapper.getAccessibleSessionById(
                 WORKSPACE_ID, USER_ID, SESSION_ID)).thenReturn(accessibleSession);
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         service = new AiAssistantToolCallReadService(
-                new AiAssistantToolCatalog(),
+                catalog,
+                new AiAssistantWriteToolRegistry(catalog, List.of(
+                        new AiAssistantCreateTaskWriteTool(
+                                mock(TaskService.class),
+                                mock(AiAssistantDateResolver.class),
+                                JsonMapper.builder().build()),
+                        new AiAssistantChangeDealStageWriteTool(
+                                mock(DealService.class), mock(PipelineService.class)))),
                 chatMapper,
                 workspaceService,
                 personMapper,

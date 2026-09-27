@@ -155,6 +155,9 @@ class AiAssistantWriteToolServiceTest {
                 mock(AiAssistantScopeReadService.class));
         service = new AiAssistantWriteToolService(
                 catalog,
+                new AiAssistantWriteToolRegistry(catalog, List.of(
+                        new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
+                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService))),
                 readExecutor,
                 dateResolver,
                 chatMapper,
@@ -166,7 +169,6 @@ class AiAssistantWriteToolServiceTest {
                 personService,
                 companyService,
                 dealService,
-                pipelineService,
                 restrictionEpoch,
                 governanceService,
                 objectMapper,

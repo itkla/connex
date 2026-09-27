@@ -222,6 +222,21 @@ public class AiAssistantToolCatalog {
     }
 
     /**
+     * Names every declared write-tier tool, the set {@link AiAssistantWriteToolRegistry} must cover.
+     *
+     * <p>The registry orders its index by this list rather than by bean discovery, so the order a
+     * write tool is reached in is the catalog's and never depends on how Spring found its bean.
+     *
+     * @return the declared non-read tool keys, in stable catalog order
+     */
+    public static List<String> writeToolNames() {
+        return TOOLS.values().stream()
+                .filter(spec -> spec.tier() != ToolTier.READ)
+                .map(ToolSpec::name)
+                .toList();
+    }
+
+    /**
      * @param name declared tool key
      * @param loadedToolsets the toolsets the turn currently holds
      * @return whether the key is declared and its toolset is held

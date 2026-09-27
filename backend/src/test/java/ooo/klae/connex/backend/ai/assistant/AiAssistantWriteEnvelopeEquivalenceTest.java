@@ -156,6 +156,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 mock(AiAssistantScopeReadService.class));
         service = new AiAssistantWriteToolService(
                 catalog,
+                new AiAssistantWriteToolRegistry(catalog, List.of(
+                        new AiAssistantCreateTaskWriteTool(taskService, dateResolver, objectMapper),
+                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService))),
                 readExecutor,
                 dateResolver,
                 chatMapper,
@@ -167,7 +170,6 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 personService,
                 companyService,
                 dealService,
-                pipelineService,
                 restrictionEpoch,
                 governanceService,
                 objectMapper,
@@ -426,8 +428,13 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         when(pipelineMapper.getAllStages(TURN.workspaceId())).thenReturn(List.of(
                 stage(5, "Qualified"), stage(6, "Proposal")));
         when(taskMapper.getVisibleIdsIn(TURN.workspaceId(), List.of(74))).thenReturn(List.of(74));
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
         AiAssistantToolCallReadService readService = new AiAssistantToolCallReadService(
-                new AiAssistantToolCatalog(),
+                catalog,
+                new AiAssistantWriteToolRegistry(catalog, List.of(
+                        new AiAssistantCreateTaskWriteTool(
+                                taskService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService))),
                 readChatMapper,
                 readWorkspace,
                 personMapper,
