@@ -61,6 +61,11 @@ const PENDING_STATUSES = new Set(["queued", "running"]);
  * transcript, which `scripted-native` produces just as well as `scripted-native-stream`. The
  * streamed channel exists only while the turn runs, and a frame that already arrived cannot be
  * missed by a late assertion, so capturing frames beats racing the DOM for the live tail.
+ *
+ * Arrival is not ordered against anything the spec reads over HTTP. Each batch is queued for the
+ * requester only after its partial-content transaction commits, and the broker and the browser
+ * deliver it on their own schedule, so a turn can already read `resolved` while its last fragments
+ * are still in flight. Callers therefore poll `fragments` rather than read it once.
  */
 function collectStreamedAnswer(page: Page): {
     connected: () => boolean;
@@ -243,6 +248,8 @@ async function awaitTerminal(
  * The spec reads the turn to a terminal state before it looks at the page, so a refused turn fails
  * on its terminal reason rather than on a missing link. The streamed-fragment assertion is the only
  * one the buffered `scripted-native` class could not satisfy; the rest read the settled transcript.
+ * It polls, because a `resolved` turn says nothing about whether its last frame has reached the
+ * page yet.
  * The citation chip is the strongest thing a member can see: it renders only for a citation the
  * turn registered, so it exists only because `search_records` found the contact, `get_record` read
  * it, and the cited handle was rewritten back into a record the viewer is authorized to open.
@@ -318,12 +325,14 @@ test.describe("Ask Connex scripted trajectory", () => {
                 + JSON.stringify(turn.progress),
             ).toContain("records:complete");
 
-            const fragments = streamed.fragments();
-            expect(
-                fragments.join(""),
-                "the requester's own queue must carry the answer as it is written: "
-                + JSON.stringify(fragments),
-            ).toContain(ANSWER_TAIL);
+            await expect
+                .poll(() => streamed.fragments().join(""), {
+                    timeout: 30_000,
+                    message: "the requester's own queue must carry the answer as it is written; "
+                        + "the received string below is every streamed fragment that did arrive, "
+                        + "concatenated",
+                })
+                .toContain(ANSWER_TAIL);
 
             const chip = page.getByRole("link", { name: ANSWER_LINK_LABEL });
             await expect(chip).toBeVisible({ timeout: 30_000 });
