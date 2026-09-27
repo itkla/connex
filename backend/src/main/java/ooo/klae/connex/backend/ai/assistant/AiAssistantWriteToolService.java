@@ -512,12 +512,22 @@ public class AiAssistantWriteToolService {
     /**
      * Locks the authorization rows this decision rests on, then the session and tool-call rows.
      *
-     * <p>The authority is read once, from rows locked before anything else this transaction
-     * touches: the actor's and any principal's user roots, the workspace root, their memberships
-     * and their custom roles with those roles' permission sets, ascending by user id. Every later
-     * assertion — the tool's own permissions, and the re-assertion after the record lock — reads
-     * that snapshot in memory, so a revocation committed mid-decision cannot be missed by a
-     * non-locking re-read and no assertion can add a lock edge after a tenant record.
+     * <p>The authority is read once, from rows locked before any other row this transaction locks:
+     * the user roots of the actor and of any principal {@code FOR SHARE} ascending by user id, the
+     * active workspace root {@code FOR SHARE}, their memberships {@code FOR UPDATE} ascending by user
+     * id, then the actor's custom role and its permission rows {@code FOR UPDATE} by role id. A
+     * principal carries no requirement, so its role is never locked. Those rows stay locked until
+     * commit, so a revocation that arrives mid-decision waits for it, and this service's own
+     * permission assertions read the snapshot in memory and add no lock edge after a tenant record.
+     *
+     * <p>The snapshot checks the workspace's lifecycle, not the organization's. An organization that
+     * enters teardown after the unlocked entry gate is refused by that gate's {@code isMember} join
+     * and by the domain services' own permission checks, not here; no write path may treat this
+     * snapshot alone as proof that the organization is active.
+     *
+     * <p>A principal is authorized like any locked member, so one whose account deletion is reserved
+     * is refused with {@code User N is not a member of this workspace} even while its membership row
+     * is still active: a record is not handed to an account that is being erased.
      *
      * @param targetUserId a principal the write will name, locked with no requirement of its own
      */
@@ -571,8 +581,12 @@ public class AiAssistantWriteToolService {
      * here would run unlocked selects that the MyBatis first-level cache then replays for every
      * later permission question in this transaction, including the domain service's own
      * {@code @RequirePermission} check, handing each of them a pre-lock answer. Authority comes
-     * from {@link #lockAuthorizedToolCall} instead, and a caller without {@code AI_USE} is refused
-     * there with the same message.
+     * from {@link #lockAuthorizedToolCall} instead.
+     *
+     * <p>A caller without {@code AI_USE} therefore reaches this step before the locked 403. An
+     * unknown or foreign tool call answers 404, a stored proposal that no longer parses answers its
+     * parse error, and an {@code assign_owner} proposal whose owner no longer resolves answers 404
+     * {@code Owner is unavailable or ambiguous}. Each concerns only the caller's own proposal.
      */
     private OwnerAssignment preliminaryOwnerAssignment(
             Actor actor, int sessionId, int toolCallId) {
@@ -662,9 +676,11 @@ public class AiAssistantWriteToolService {
     /**
      * Asserts the tool's permissions against the authority locked before the session row.
      *
-     * <p>It performs no database access, so it may be re-asserted after a record lock without
-     * inverting the repository's membership → record order, and there is no second statement for
-     * the MyBatis first-level cache to answer with a pre-lock result.
+     * <p>It performs no database access, so there is no statement for the MyBatis first-level cache
+     * to answer with a pre-lock result and no lock edge behind a record. The call after the record
+     * lock reads the same immutable snapshot and cannot fail once the first has passed; it is a
+     * structural check, not the protection. The protection is that the snapshot's rows stay locked
+     * until commit.
      */
     private static void requirePermissions(
             LockedPermissionSnapshot authority, int userId, StoredWrite write) {
