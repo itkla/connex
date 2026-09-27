@@ -344,7 +344,12 @@ jobs:
       - name: Boot backend (dev profile, fresh schema)
         working-directory: backend
         env:
-          SPRING_PROFILES_ACTIVE: dev
+          # ai-scripted-provider replaces the real openai_compatible adapter with the fixture-driven
+          # one, so ask-connex-trajectory.spec.ts can drive a whole send -> tools -> answer turn in a
+          # browser with no provider credential and no network. It is refused under every declared
+          # edition; this job declares no CONNEX_DEPLOYMENT_PROFILE, which is the only shape that
+          # admits it (see DeploymentProfileValidator).
+          SPRING_PROFILES_ACTIVE: dev,ai-scripted-provider
           CONNEX_DB_URL: jdbc:mysql://127.0.0.1:3306/connex_seed_e2e?sslMode=DISABLED
           CONNEX_DB_USERNAME: root
           CONNEX_DB_PASSWORD: ci-${{ github.run_id }}-e2e-root
@@ -364,10 +369,24 @@ jobs:
           CONNEX_MAIL_AUTH: "false"
           CONNEX_MAIL_ALLOW_INTERNAL_HOSTS: "true"
           CONNEX_SECURITY_TRUSTED_PROXIES: "127.0.0.1,::1"
-          # AI governance on with no provider configured: the provider-independent surfaces
-          # (watch CRUD, skill directory) are exercisable while every provider-egress path
-          # still refuses honestly, which is exactly the state the e2e specs assert.
+          # AI governance on. Provider readiness stays per organization: the seeded project tenants
+          # have no ai_provider_config row, so every provider-egress path still refuses honestly for
+          # them and the refusal assertions in ask-connex.spec.ts hold even with the scripted
+          # adapter installed. Only the tenant ask-connex-trajectory.spec.ts registers for itself
+          # ever gets a provider row.
           CONNEX_AI_ENABLED: "true"
+          # Second activation gate, forbidden under every deployment profile.
+          CONNEX_AI_SCRIPTED_PROVIDER_ENABLED: "true"
+          # No script ships in the artifact and nothing is read from the classpath: the loader reads
+          # this directory alone and fails the boot when it is unset, unreadable or holds no script.
+          CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR: "${{ github.workspace }}/frontend/test/e2e/fixtures/ai-scripted"
+          # The trajectory spec saves its provider row through the real controller, whose save path
+          # resolves the endpoint address, so its loopback endpoint needs this opt-in. Acceptable
+          # HERE because this job declares no edition: the saas edition forbids the key outright,
+          # and on silo and on-prem it is a deliberate operator posture for an internal model host,
+          # never a way to reach the scripted adapter — that one stays forbidden everywhere
+          # (DeploymentProfileValidator.FORBIDDEN_KEYS_BY_PROFILE).
+          CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS: "true"
         run: |
           set -euo pipefail
           WAR=$(find build/libs -name '*.war' ! -name '*-plain.war' | head -1)

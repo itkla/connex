@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -47,6 +48,8 @@ class ScriptedAiProviderArchTest {
             "backend/src/main/java/ooo/klae/connex/backend/ai/provider/AiProviderRouter.java");
     private static final Path AGENT_GUIDE = Path.of("backend/AGENTS.md");
     private static final Path AI_SECURITY_CONTRACT = Path.of("docs/backend/AI_SECURITY.md");
+    private static final Path FRONTEND_TESTING_CONTRACT = Path.of("docs/FRONTEND_TESTING.md");
+    private static final Path FRONTEND_AGENT_GUIDE = Path.of("frontend/AGENTS.md");
     private static final Path BUILD_SCRIPT = Path.of("backend/build.gradle");
     private static final Path CI_WORKFLOW = Path.of(".github/workflows/ci.yml");
     private static final Path TEST_SOURCE_ROOT = Path.of("backend/src/test/java");
@@ -59,6 +62,33 @@ class ScriptedAiProviderArchTest {
 
     /** A job key line in the CI workflow: exactly two spaces of indentation, then the key. */
     private static final Pattern WORKFLOW_JOB_HEADER = Pattern.compile("^ {2}[A-Za-z0-9_-]+:\\s*$");
+
+    /** The one job whose backend declares no edition and loads the browser suite's fixtures. */
+    private static final String BROWSER_STACK_JOB = "frontend-tests";
+
+    /** The one step in that job permitted to name the seam. */
+    private static final String BROWSER_STACK_BOOT_STEP = "Boot backend (dev profile, fresh schema)";
+
+    /**
+     * The workflow that boots the seam on purpose to watch a declared edition refuse it.
+     *
+     * <p>Its mentions are assertions and one deliberate activation, never a serving stack. The
+     * activation is still checked: it has to carry a declared deployment profile on the same line,
+     * which is what makes it a refusal proof rather than a second place the seam runs.
+     */
+    private static final String REFUSAL_PROOF_WORKFLOW = "deploy-smoke.yml";
+
+    /**
+     * A shell assignment or YAML {@code env:} entry that actually puts the profile into a process
+     * environment.
+     *
+     * <p>The character class deliberately excludes regex metacharacters, so the grep patterns the
+     * refusal-proof workflow uses to search operator templates — {@code
+     * SPRING_PROFILES_ACTIVE=.*ai-scripted-provider} — are not mistaken for activations.
+     */
+    private static final Pattern ACTIVATING_PROFILE_ASSIGNMENT = Pattern.compile(
+            "SPRING_PROFILES_ACTIVE(=|:\\s*)[\"']?[A-Za-z0-9_,.-]*"
+                    + ScriptedAiProviderProfile.NAME);
 
     /** The class-name shape both that task's include and the {@code test} exclude are keyed on. */
     private static final Pattern TRAJECTORY_CLASS_NAME =
@@ -90,6 +120,28 @@ class ScriptedAiProviderArchTest {
             "CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR",
             "expectsNativeDegradation",
             "beforeSend");
+
+    /** The browser spec that needs the recipe; the frontend testing contract must route to it. */
+    private static final String TRAJECTORY_SPEC = "ask-connex-trajectory.spec.ts";
+
+    /** The heading of the one block in the AI security contract that states the recipe. */
+    private static final String BROWSER_RECIPE_HEADING = "### The browser-stack recipe";
+
+    /** The link, relative to {@code docs/}, that routes a reader to that heading. */
+    private static final String BROWSER_RECIPE_LINK =
+            "backend/AI_SECURITY.md#the-browser-stack-recipe";
+
+    /**
+     * An assignment of one of the seam's own environment variables, as a stated recipe writes it.
+     *
+     * <p>Prose that merely names a setting carries no {@code =}, so explaining a gate does not
+     * count as a copy of the recipe; writing the gate down as something to set does.
+     */
+    private static final Pattern SCRIPTED_SETTING_ASSIGNMENT =
+            Pattern.compile("CONNEX_AI_SCRIPTED_PROVIDER_[A-Z_]+=");
+
+    /** A Markdown block: the text between two blank lines, which keeps a fenced block whole. */
+    private static final Pattern MARKDOWN_BLOCK_BREAK = Pattern.compile("\\R[ \\t]*\\R");
 
     /**
      * Startup refusals, by the validator field that must carry each one.
@@ -390,6 +442,73 @@ class ScriptedAiProviderArchTest {
     }
 
     @Test
+    void onlyTheBrowserStackStepInCiActivatesTheScriptedSeam() throws IOException {
+        List<String> violations = new ArrayList<>();
+        for (Path workflow : workflows()) {
+            String file = workflow.getFileName().toString();
+            String step = "";
+            String job = "";
+            int number = 0;
+            for (String line : read(workflow).split("\\R")) {
+                number++;
+                String stripped = line.strip();
+                if (WORKFLOW_JOB_HEADER.matcher(line).matches()) {
+                    job = stripped.substring(0, stripped.length() - 1);
+                    step = "";
+                }
+                if (stripped.startsWith("- name: ")) {
+                    step = stripped.substring("- name: ".length()).strip();
+                }
+                if (stripped.startsWith("#") || !mentionsScriptedSeam(stripped)) {
+                    continue;
+                }
+                if (REFUSAL_PROOF_WORKFLOW.equals(file)) {
+                    if (ACTIVATING_PROFILE_ASSIGNMENT.matcher(stripped).find()
+                            && !stripped.contains("CONNEX_DEPLOYMENT_PROFILE=")) {
+                        violations.add(file + ":" + number + " activates the seam without the "
+                                + "declared edition that makes it a refusal proof: " + stripped);
+                    }
+                    continue;
+                }
+                if (!CI_WORKFLOW.getFileName().toString().equals(file)
+                        || !BROWSER_STACK_JOB.equals(job)
+                        || !BROWSER_STACK_BOOT_STEP.equals(step)) {
+                    violations.add(file + ":" + number + " (job " + job + ", step \"" + step
+                            + "\") names the scripted seam: " + stripped);
+                }
+            }
+        }
+
+        assertTrue(violations.isEmpty(),
+                "the scripted seam is admissible only where the stack declares no edition and "
+                        + "loads the one fixture directory the browser suite owns — job "
+                        + BROWSER_STACK_JOB + ", step \"" + BROWSER_STACK_BOOT_STEP + "\" of "
+                        + CI_WORKFLOW + ". Nothing else in .github/workflows may name it, because "
+                        + "a second stack booting this recipe would run the fixture adapter and "
+                        + "the loosened AI egress opt-in with every existing gate still green: "
+                        + violations);
+    }
+
+    @Test
+    void theBrowserStackStepStillCarriesTheWholeActivationRecipe() throws IOException {
+        List<String> settings = browserStackBootSettings(read(CI_WORKFLOW));
+
+        assertTrue(settings.stream().anyMatch(setting ->
+                        setting.startsWith("SPRING_PROFILES_ACTIVE:")
+                                && setting.contains(ScriptedAiProviderProfile.NAME)),
+                "the browser stack must still activate the profile, or the rule above passes "
+                        + "vacuously while the trajectory spec fails on an honest refusal: "
+                        + settings);
+        for (String required : List.of(
+                "CONNEX_AI_SCRIPTED_PROVIDER_ENABLED:",
+                "CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR:",
+                "CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS:")) {
+            assertTrue(settings.stream().anyMatch(setting -> setting.startsWith(required)),
+                    "the browser stack boot step must still set " + required + ": " + settings);
+        }
+    }
+
+    @Test
     void theScriptedContractLivesInTheAuthoritativeDocumentNotTheAgentGuide() throws IOException {
         String contract = read(AI_SECURITY_CONTRACT);
         String guide = read(AGENT_GUIDE);
@@ -410,6 +529,203 @@ class ScriptedAiProviderArchTest {
         assertTrue(guide.contains("ai/provider/scripted")
                         && guide.contains("docs/backend/AI_SECURITY.md"),
                 "backend/AGENTS.md must still route the scripted package to its contract");
+    }
+
+    @Test
+    void everyStatedBrowserRecipeCarriesEveryAiSettingTheStepSets() throws IOException {
+        Map<String, String> required = browserStackAiSettings(read(CI_WORKFLOW));
+        assertFalse(required.isEmpty(),
+                "the browser stack boot step sets no CONNEX_AI_* setting, so there is no recipe "
+                        + "to hold a document to");
+        List<Map.Entry<Path, String>> recipes = statedBrowserRecipes();
+
+        List<String> incomplete = new ArrayList<>();
+        for (Map.Entry<Path, String> recipe : recipes) {
+            String block = recipe.getValue();
+            List<String> missing = new ArrayList<>();
+            if (!ACTIVATING_PROFILE_ASSIGNMENT.matcher(block).find()) {
+                missing.add("SPRING_PROFILES_ACTIVE=…" + ScriptedAiProviderProfile.NAME);
+            }
+            required.forEach((key, value) -> {
+                if (!block.contains(key + "=" + value)) {
+                    missing.add(key + "=" + value);
+                }
+            });
+            if (!missing.isEmpty()) {
+                incomplete.add(recipe.getKey() + " omits " + missing + " from: "
+                        + block.strip().lines().findFirst().orElse(""));
+            }
+        }
+
+        assertTrue(incomplete.isEmpty(),
+                "a stated recipe must carry the profile and every CONNEX_AI_* setting the browser "
+                        + "stack boot step of " + CI_WORKFLOW + " sets, with the value it sets; a "
+                        + "stack booted from an incomplete copy refuses every turn or never saves "
+                        + "its provider row: " + incomplete);
+        assertTrue(recipes.stream()
+                        .anyMatch(recipe -> recipe.getKey().equals(AI_SECURITY_CONTRACT))
+                        && read(AI_SECURITY_CONTRACT).contains(BROWSER_RECIPE_HEADING),
+                AI_SECURITY_CONTRACT + " must state the recipe under \"" + BROWSER_RECIPE_HEADING
+                        + "\", the heading every other document links to");
+    }
+
+    @Test
+    void theBrowserRecipeIsWrittenDownOnlyInTheAiSecurityContract() throws IOException {
+        List<Path> copies = statedBrowserRecipes().stream().map(Map.Entry::getKey).toList();
+
+        assertEquals(List.of(AI_SECURITY_CONTRACT), copies,
+                "the browser-stack recipe is written down exactly once, under \""
+                        + BROWSER_RECIPE_HEADING + "\" in " + AI_SECURITY_CONTRACT
+                        + "; every other document points there, because a second copy is the one "
+                        + "that stops agreeing with CI. Copies found: " + copies);
+    }
+
+    @Test
+    void theFrontendTestingContractRoutesTheTrajectorySpecToTheRecipe() throws IOException {
+        String contract = read(FRONTEND_TESTING_CONTRACT);
+        String guide = read(FRONTEND_AGENT_GUIDE);
+
+        assertTrue(contract.contains("| `" + TRAJECTORY_SPEC + "` |"),
+                FRONTEND_TESTING_CONTRACT + " is the routed frontend testing contract and must "
+                        + "list " + TRAJECTORY_SPEC + " in its flow inventory");
+        assertTrue(contract.contains("](" + BROWSER_RECIPE_LINK + ")"),
+                FRONTEND_TESTING_CONTRACT + " must route a reader booting the e2e stack to "
+                        + BROWSER_RECIPE_LINK + ", or " + TRAJECTORY_SPEC + " is run against a "
+                        + "backend that cannot answer it");
+        assertTrue(guide.contains(TRAJECTORY_SPEC)
+                        && guide.contains("docs/backend/AI_SECURITY.md"),
+                FRONTEND_AGENT_GUIDE + " must still point " + TRAJECTORY_SPEC
+                        + " at the recipe it does not repeat");
+    }
+
+    /**
+     * Tests whether one Markdown block writes the browser-stack recipe down as settings to apply.
+     *
+     * @param block one blank-line-delimited Markdown block
+     * @return true when the block assigns the profile or one of the seam's own variables
+     */
+    private static boolean statesBrowserRecipe(String block) {
+        return ACTIVATING_PROFILE_ASSIGNMENT.matcher(block).find()
+                || SCRIPTED_SETTING_ASSIGNMENT.matcher(block).find();
+    }
+
+    /**
+     * Returns the AI settings the browser stack's backend boot step applies, keyed by name.
+     *
+     * <p>A literal boolean is returned as that value, so a copy that writes the right name with
+     * the wrong value still counts as incomplete. Any other value — the fixture directory, which a
+     * reader substitutes with their own checkout — is returned empty, so only its name is required.
+     *
+     * @param workflow the CI workflow source
+     * @return each {@code CONNEX_AI_*} setting of that step, mapped to the value a copy must carry
+     */
+    private static Map<String, String> browserStackAiSettings(String workflow) {
+        Map<String, String> settings = new LinkedHashMap<>();
+        for (String setting : browserStackBootSettings(workflow)) {
+            int separator = setting.indexOf(':');
+            String key = setting.substring(0, separator).strip();
+            if (!key.startsWith("CONNEX_AI_")) {
+                continue;
+            }
+            String value = setting.substring(separator + 1).strip().replace("\"", "");
+            settings.put(key, "true".equals(value) || "false".equals(value) ? value : "");
+        }
+        return settings;
+    }
+
+    /**
+     * Returns every Markdown block that writes the browser-stack recipe down, with its document.
+     *
+     * @return each stating block keyed by its repository-relative document path, in path order
+     * @throws IOException if a document cannot be read
+     */
+    private static List<Map.Entry<Path, String>> statedBrowserRecipes() throws IOException {
+        List<Map.Entry<Path, String>> recipes = new ArrayList<>();
+        for (Path document : recipeDocuments()) {
+            Path name = repoRoot().relativize(document);
+            for (String block : MARKDOWN_BLOCK_BREAK.split(
+                    Files.readString(document, StandardCharsets.UTF_8))) {
+                if (statesBrowserRecipe(block)) {
+                    recipes.add(Map.entry(name, block));
+                }
+            }
+        }
+        return recipes;
+    }
+
+    /**
+     * Returns every document a reader could take the recipe from.
+     *
+     * @return every Markdown file under {@code docs/} and every agent guide at the repository root
+     *     or one directory below it
+     * @throws IOException if a directory cannot be listed
+     */
+    private static List<Path> recipeDocuments() throws IOException {
+        Path root = repoRoot();
+        List<Path> documents = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(root.resolve("docs"))) {
+            files.filter(path -> path.getFileName().toString().endsWith(".md"))
+                    .forEach(documents::add);
+        }
+        try (Stream<Path> directories = Files.list(root)) {
+            Stream.concat(Stream.of(root), directories.filter(Files::isDirectory))
+                    .map(directory -> directory.resolve("AGENTS.md"))
+                    .filter(Files::isRegularFile)
+                    .forEach(documents::add);
+        }
+        documents.sort(Comparator.comparing(Path::toString));
+        return documents;
+    }
+
+    /**
+     * Tests whether one workflow line names the scripted seam in any of its spellings.
+     *
+     * @param line a stripped workflow line
+     * @return true when the line names the profile or one of its environment variables
+     */
+    private static boolean mentionsScriptedSeam(String line) {
+        return line.contains(ScriptedAiProviderProfile.NAME)
+                || line.contains("CONNEX_AI_SCRIPTED_PROVIDER_");
+    }
+
+    /**
+     * Returns every environment setting declared by the browser stack's backend boot step.
+     *
+     * @param workflow the CI workflow source
+     * @return the stripped {@code KEY: value} lines of that step's {@code env:} block
+     */
+    private static List<String> browserStackBootSettings(String workflow) {
+        List<String> settings = new ArrayList<>();
+        boolean inJob = false;
+        boolean inStep = false;
+        for (String line : workflow.split("\\R")) {
+            String stripped = line.strip();
+            if (WORKFLOW_JOB_HEADER.matcher(line).matches()) {
+                inJob = stripped.equals(BROWSER_STACK_JOB + ":");
+                inStep = false;
+                continue;
+            }
+            if (stripped.startsWith("- name: ")) {
+                inStep = inJob
+                        && stripped.substring("- name: ".length()).strip()
+                                .equals(BROWSER_STACK_BOOT_STEP);
+                continue;
+            }
+            if (inStep && !stripped.startsWith("#") && stripped.contains(": ")) {
+                settings.add(stripped);
+            }
+        }
+        return settings;
+    }
+
+    private static List<Path> workflows() throws IOException {
+        try (Stream<Path> files = Files.list(repoRoot().resolve(".github/workflows"))) {
+            return files
+                    .filter(path -> path.getFileName().toString().endsWith(".yml")
+                            || path.getFileName().toString().endsWith(".yaml"))
+                    .sorted(Comparator.comparing(Path::toString))
+                    .toList();
+        }
     }
 
     private static List<Path> operatorTemplates() throws IOException {

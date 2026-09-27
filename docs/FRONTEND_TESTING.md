@@ -3,7 +3,7 @@
 The frontend has two test layers, both living in `frontend/`:
 
 - **Unit tests** — [vitest](https://vitest.dev), `frontend/test/unit/`, covering pure logic (analytics bucketing, URL list-state helpers, formatters/parsers, segment validation, shortcut normalization, locale resolution) plus the toolchain's declared Node floor. Node environment, no DOM, no snapshots — behavioral assertions only.
-- **E2E tests** — [`@playwright/test`](https://playwright.dev), `frontend/test/e2e/`, driving fifteen critical flows through a real browser against a running full stack. The harness provides project-isolated desktop/phone tenants and EN/JA locale control; individual specs opt into the additional quadrants they prove.
+- **E2E tests** — [`@playwright/test`](https://playwright.dev), `frontend/test/e2e/`, driving sixteen critical flows through a real browser against a running full stack. The harness provides project-isolated desktop/phone tenants and EN/JA locale control; individual specs opt into the additional quadrants they prove.
 
 ## Running locally
 
@@ -27,7 +27,7 @@ node_modules/.bin/playwright show-report      # inspect the last failure's trace
 The e2e suite expects the frontend at `http://localhost:3000` (override with `E2E_BASE_URL`) with its `/api` proxy reaching a backend on `:8080`:
 
 1. MySQL — `sudo docker compose -f backend/docker-compose.yml up -d db` (or any MySQL 8.4 with a fresh schema).
-2. Backend — from `backend/`: `SPRING_PROFILES_ACTIVE=dev CONNEX_DB_URL=... CONNEX_DB_USERNAME=... CONNEX_DB_PASSWORD=... bash gradlew bootRun`. The **dev profile is required**: it disables the `Secure` cookie flags (so cookies work over plain-HTTP localhost) and allows self-service workspace creation, which the auth bootstrap depends on. A fresh schema takes several minutes of Flyway migrations before `/api/version` responds.
+2. Backend — from `backend/`: `SPRING_PROFILES_ACTIVE=dev CONNEX_DB_URL=... CONNEX_DB_USERNAME=... CONNEX_DB_PASSWORD=... bash gradlew bootRun`. The **dev profile is required**: it disables the `Secure` cookie flags (so cookies work over plain-HTTP localhost) and allows self-service workspace creation, which the auth bootstrap depends on. A fresh schema takes several minutes of Flyway migrations before `/api/version` responds. `ask-connex-trajectory.spec.ts` needs this boot extended with the `ai-scripted-provider` profile and four `CONNEX_AI_*` settings, the AI master switch among them; they are listed once, in [the browser-stack recipe](backend/AI_SECURITY.md#the-browser-stack-recipe), exactly as CI's backend boot step sets them.
 3. Frontend — from `frontend/`: `pnpm dev` (or `next build && next start`).
 
 First run only: `node_modules/.bin/playwright install chromium` — Chromium is the only browser the suite needs, desktop and phone projects alike.
@@ -110,7 +110,7 @@ bash gradlew seedData -PseederProfile=small -PseederSeed=853 -PseederWorkspaces=
 
 Then boot the backend against that same schema. Every seeded user's password is `seeder-password`; treat any schema the seeder touched as compromised for authentication.
 
-## The fifteen flows
+## The sixteen flows
 
 | Spec | Flow |
 | --- | --- |
@@ -129,6 +129,7 @@ Then boot the backend against that same schema. Every seeded user's password is 
 | `archive-records.spec.ts` | contact/company archive visibility and restore round trips through the record browser |
 | `mobile-record-lists.spec.ts` | Pixel-width contacts/companies/deals/tasks use list rows, mobile sheets filter/sort, and the stored desktop mode survives the forced phone presentation |
 | `ask-connex.spec.ts` | EN/JA drawer open/close, page-context correction and pinning, drawer width states, drawer → full workspace handoff, session rail banding/search, deep links, and the phone bottom-bar entry |
+| `ask-connex-trajectory.spec.ts` | a self-registered tenant, pointed at the scripted AI provider, sends a question from the composer; the answer streams to the requester's own socket, the read tool calls reach the turn's progress rows, and the settled answer renders a citation chip that opens the cited contact |
 
 Three further specs exist to keep the harness itself honest rather than to cover a product flow:
 
@@ -141,7 +142,11 @@ Three further specs exist to keep the harness itself honest rather than to cover
 
 The suite runs on `http://localhost:3000`, so the proxy emits `report-uri` without `report-to`/`Reporting-Endpoints` (Chromium accepts only HTTPS reporting endpoints) and the violation report is a synchronous, page-initiated POST that `page.waitForRequest` can observe; a script inserted with `document.createElement` is *not* a usable probe because `'strict-dynamic'` deliberately trusts non-parser-inserted scripts.
 
-Known scope cut: **Ask Connex specs stop short of asking a question.** The e2e stack boots the backend with no AI provider configured, and `AiFeatureGate` fails closed on provider readiness — but only at *turn start*. Session create/list/read, presence, and participants need `AI_USE` and workspace membership alone, which the registered owner has. So every surface, context, navigation, width, rail, deep-link, and locale assertion runs against the real stack unchanged, while send → answer → evidence peek → tool-call approval cannot run at all. Those need a provider or a test-only provider stub, and no such stub exists server-side; do not fake one client-side, because the retention, masking, and citation behaviour under test *is* the provider round trip. `ask-connex.spec.ts` therefore needs no feature-gate enablement in CI.
+Ask Connex coverage splits by tenant, because provider readiness is per organization. The seeded project tenants have no `ai_provider_config` row, so `AiFeatureGate` refuses every turn for them — but only at *turn start*. Session create/list/read, presence, and participants need `AI_USE` and workspace membership alone, which the registered owner has. `ask-connex.spec.ts` and `ask-connex-command-center.spec.ts` therefore run every surface, context, navigation, width, rail, deep-link, locale, and provider-less refusal assertion against those tenants and never ask a question.
+
+`ask-connex-trajectory.spec.ts` is the one spec that asks. CI boots the backend with the `ai-scripted-provider` test seam, which replaces the `openai_compatible` adapter with a server-side, fixture-driven provider reading `frontend/test/e2e/fixtures/ai-scripted/`. The spec registers its own tenant in its own browser context, enrols a passkey (saving a provider needs recent authentication), saves that organization's provider row through `PUT /api/ai/provider`, and drives send → tools → answer. It never touches a project tenant, so the seeded tenants keep refusing, and the provider-less assertions in the other two specs passing in the same run is this mode's merge gate. The seam's activation gates, fixture format, and settings are in [`backend/AI_SECURITY.md`](backend/AI_SECURITY.md#scripted-provider-test-seam); how the browser mode relates to the backend trajectory goldens is in [`AI_EVALUATION.md`](AI_EVALUATION.md#the-browser-mode).
+
+Known scope cut: evidence peek and write-tool approval are still not driven from a browser. Extend the scripted fixture for them rather than faking a provider client-side, because the masking and citation behaviour under test *is* the server round trip.
 
 Known scope cut: the notifications flow asserts the inbox/read-state surface but does not exercise *mark as read on a real notification* — generating one deterministically requires a second workspace member (mention flow), which is deferred until the volume-seeder workstream lands. Documented here so nobody mistakes it for coverage.
 

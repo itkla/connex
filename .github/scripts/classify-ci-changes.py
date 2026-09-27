@@ -85,6 +85,10 @@ BACKEND_API_LEDGERS = {
     "docs/backend/api-surface-policy.txt",
 }
 
+BACKEND_VALIDATED_FRONTEND_PREFIXES = (
+    "frontend/test/e2e/fixtures/ai-scripted/",
+)
+
 SECURITY_REGRESSION_DOCUMENTS = {
     "docs/DEPLOYMENT.md",
     "docs/SAST_TRIAGE_LOG.md",
@@ -194,6 +198,8 @@ def classify_paths(paths: list[str], event_name: str = "pull_request") -> tuple[
             categories["cross_stack"] = True
             if path in FRONTEND_DEPENDENCY_FILES:
                 categories["frontend_audit"] = True
+            if path.startswith(BACKEND_VALIDATED_FRONTEND_PREFIXES):
+                categories["backend"] = True
             continue
 
         if path.startswith("ocr/"):

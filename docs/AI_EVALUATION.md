@@ -48,6 +48,10 @@ One fixture serves two goldens (`confirm_proposal` backs both the proposal golde
 
 **Run them with `./gradlew scriptedTrajectoryTest`, never `./gradlew test`.** The pattern `**/*ScriptedTrajectory*Test.class` is excluded from `test` so this context key does not evict a hot one out of the shared ten-slot cache; the task has its own fork with a two-slot cache, `check` depends on it, and the required `Backend — build & test` CI job names `test scriptedTrajectoryTest` explicitly. `ScriptedAiProviderArchTest` asserts both that the workflow still names the task and that every class extending the harness matches the include pattern, so a golden CI would silently skip fails the build instead of passing quietly.
 
+### The browser mode
+
+The same provider also runs in the `Frontend — unit & e2e` CI stack, where `ask-connex-trajectory.spec.ts` drives one streamed turn from a real browser against the single fixture in `frontend/test/e2e/fixtures/ai-scripted/`. Readiness is per organization, so the spec registers its own tenant and saves its provider row through the real controller; the seeded project tenants keep no row and keep refusing, which is why the untouched refusal assertions in `ask-connex.spec.ts` are this mode's merge gate. The stack's settings are written down once, in [the browser-stack recipe](backend/AI_SECURITY.md#the-browser-stack-recipe); `ScriptedAiProviderArchTest` pins it to that one CI step and `ScriptedAiScriptLoaderTest` loads the directory the workflow names, so a bad browser fixture fails the backend suite rather than the browser job's boot. `classify-ci-changes.py` selects that suite for a change confined to the fixture directory, which otherwise classifies as frontend-only.
+
 ## Constraints a golden author would otherwise rediscover
 
 Each of these was paid for once. Every one is decided by code named beside it.
