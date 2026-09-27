@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -54,6 +55,7 @@ import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
 import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 @ExtendWith(MockitoExtension.class)
 class OpenAiCompatibleAdapterTest {
@@ -256,6 +258,116 @@ class OpenAiCompatibleAdapterTest {
 
         assertTrue(adapter.supportsStreaming(
                 target(endpoint, false, "google/gemini-3.6-flash")));
+    }
+
+    private static AiProperties.ModelOverride parallelOverride(
+            String modelId, String endpoint, Integer parallelReadCalls) {
+        AiProperties.ModelOverride override = new AiProperties.ModelOverride();
+        override.setProvider("openai_compatible");
+        override.setModelId(modelId);
+        override.setEndpoint(endpoint);
+        override.setParallelReadCalls(parallelReadCalls);
+        return override;
+    }
+
+    /**
+     * Whether an endpoint really emits several calls in one message cannot be discovered by asking.
+     *
+     * <p>Unlike streaming, the request field itself is safe — {@code parallel_tool_calls} already
+     * rides on every request — so what an operator has to probe is behavioural, and an endpoint
+     * nobody probed keeps the single-call behaviour this adapter has always had.
+     */
+    @Test
+    void theParallelCallLimitIsDeclaredByAnOperatorRatherThanAssumed() {
+        String endpoint = "https://api.example.test/v1";
+        AiProviderTarget target = target(endpoint, false, "gemini-3.6-flash");
+
+        assertEquals(1, adapter.parallelToolCallLimit(target));
+
+        aiProperties.setModelOverrides(List.of(
+                parallelOverride("gemini-3.6-flash", endpoint, 4)));
+
+        assertEquals(4, adapter.parallelToolCallLimit(target));
+        assertEquals(1, adapter.parallelToolCallLimit(
+                target(endpoint, false, "some-other-model")));
+    }
+
+    /**
+     * The same model id behind two gateways is two different answers to whether a batch works, so
+     * one probed endpoint must never speak for another.
+     */
+    @Test
+    void aParallelCallDeclarationNeverEscapesTheEndpointItNames() {
+        aiProperties.setModelOverrides(List.of(
+                parallelOverride("gemini-3.6-flash", "https://verified.example.test/v1", 4)));
+
+        assertEquals(4, adapter.parallelToolCallLimit(
+                target("https://verified.example.test/v1", false, "gemini-3.6-flash")));
+        assertEquals(1, adapter.parallelToolCallLimit(
+                target("https://other.example.test/v1", false, "gemini-3.6-flash")));
+        assertEquals(1, adapter.parallelToolCallLimit(
+                target("https://verified.example.test/V1", false, "gemini-3.6-flash")));
+    }
+
+    /**
+     * A parallel-call declaration names one upstream model, namespace included.
+     *
+     * <p>A router endpoint may serve the same bare model name from several upstreams, and whether
+     * a batch carries distinct ids and per-call replay state is a property of the one upstream the
+     * operator probed. Streaming survives the family's namespace stripping because it is a property
+     * of the wire; this declaration must not, so it covers exactly the configured id it names.
+     */
+    @Test
+    void aParallelCallDeclarationCoversOnlyTheNamespaceItNames() {
+        String endpoint = "https://router.example.test/v1";
+        aiProperties.setModelOverrides(List.of(
+                parallelOverride("google/gemini-3.6-flash", endpoint, 4)));
+
+        assertEquals(4, adapter.parallelToolCallLimit(
+                target(endpoint, false, "google/gemini-3.6-flash")));
+        assertEquals(4, adapter.parallelToolCallLimit(
+                target(endpoint, false, "Google/Gemini-3.6-Flash")));
+        assertEquals(1, adapter.parallelToolCallLimit(
+                target(endpoint, false, "somemirror/gemini-3.6-flash")));
+        assertEquals(1, adapter.parallelToolCallLimit(
+                target(endpoint, false, "gemini-3.6-flash")));
+
+        aiProperties.setModelOverrides(List.of(
+                parallelOverride("gemini-3.6-flash", endpoint, 4)));
+
+        assertEquals(4, adapter.parallelToolCallLimit(
+                target(endpoint, false, "gemini-3.6-flash")));
+        assertEquals(1, adapter.parallelToolCallLimit(
+                target(endpoint, false, "google/gemini-3.6-flash")));
+    }
+
+    /** Each endpoint declaration answers its own question and disturbs neither of the others. */
+    @Test
+    void declaringParallelCallsDisturbsNeitherStreamingNorThoughts() {
+        String endpoint = "https://api.example.test/v1";
+        AiProviderTarget target = target(endpoint, false, "gemini-3.6-flash");
+        AiProperties.ModelOverride override = parallelOverride("gemini-3.6-flash", endpoint, 4);
+        override.setStreaming(true);
+        aiProperties.setModelOverrides(List.of(override));
+
+        assertEquals(4, adapter.parallelToolCallLimit(target));
+        assertTrue(adapter.supportsStreaming(target));
+        assertEquals(AiReasoningMode.NONE, adapter.nativeToolReasoningCapability(target));
+    }
+
+    /** A later declaration supersedes an earlier one, exactly as every other override does. */
+    @Test
+    void parallelCallDeclarationsResolveLikeEveryOtherOverride() {
+        String endpoint = "https://api.example.test/v1";
+        AiProviderTarget target = target(endpoint, false, "gemini-3.6-flash");
+
+        List<AiProperties.ModelOverride> overrides = new java.util.ArrayList<>();
+        overrides.add(null);
+        overrides.add(parallelOverride("gemini-3.6-flash", endpoint, 4));
+        overrides.add(parallelOverride("gemini-3.6-flash", endpoint, 2));
+        aiProperties.setModelOverrides(overrides);
+
+        assertEquals(2, adapter.parallelToolCallLimit(target));
     }
 
     private static AiProperties.ModelOverride thoughtsOverride(
@@ -846,6 +958,58 @@ class OpenAiCompatibleAdapterTest {
                         messages.path(5).path("tool_call_id").asString()));
         assertEquals("tool", messages.path(3).path("role").asString());
         assertEquals("tool", messages.path(5).path("role").asString());
+    }
+
+    /**
+     * The wire field flips only for a step that may really carry more than one call.
+     *
+     * <p>{@code parallel_tool_calls} has always travelled as the literal {@code false}, so a step
+     * bounded to one call keeps sending exactly that: the flip is the whole observable difference
+     * an operator's endpoint declaration makes to the request bytes.
+     */
+    @Test
+    void complete_parallelToolCallsFlipsOnlyForAStepThatMayCarryABatch() throws Exception {
+        providerAnswers();
+        List<AiToolDefinition> definitions = List.of(new AiToolDefinition(
+                "get_record",
+                "Load one visible CRM record.",
+                objectMapper.readTree("{\"type\":\"object\"}")));
+
+        JsonNode singleCallBody = nativeBody(
+                new AiNativeToolRequest(definitions, List.of(), null, false, 1));
+
+        assertEquals(
+                "{\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_record\","
+                        + "\"description\":\"Load one visible CRM record.\",\"strict\":true,"
+                        + "\"parameters\":{\"type\":\"object\"}}}],"
+                        + "\"tool_choice\":\"auto\",\"parallel_tool_calls\":false}",
+                toolEnvelope(singleCallBody),
+                "an undeclared endpoint's tool envelope must stay byte-identical, with the literal "
+                        + "boolean false rather than null, a string or a number");
+
+        reset(openAiCompatibleClient);
+        providerAnswers();
+
+        JsonNode batchedBody = nativeBody(
+                new AiNativeToolRequest(definitions, List.of(), null, false, 4));
+
+        assertEquals("true", batchedBody.get("parallel_tool_calls").toString());
+    }
+
+    /**
+     * The three top-level fields a native request adds, in the order they are serialized.
+     *
+     * @param body one parsed request body
+     * @return compact JSON of {@code tools}, {@code tool_choice} and {@code parallel_tool_calls}
+     */
+    private String toolEnvelope(JsonNode body) {
+        ObjectNode envelope = objectMapper.createObjectNode();
+        for (String field : List.of("tools", "tool_choice", "parallel_tool_calls")) {
+            if (body.has(field)) {
+                envelope.set(field, body.get(field));
+            }
+        }
+        return envelope.toString();
     }
 
     /**

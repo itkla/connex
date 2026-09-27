@@ -367,7 +367,9 @@ class AiChatMemoryServiceTest {
                         AiAssistantPromptBudget.ASSISTANT_MIN_CONTEXT_TOKENS,
                         8_192,
                         AiToolCallingMode.NATIVE_FUNCTIONS,
-                        AiReasoningMode.NATIVE));
+                        AiReasoningMode.NATIVE,
+                        false,
+                        4));
         when(invocationService.serializedPromptBytes(
                 any(MaskedPrompt.class),
                 same(stepSchema.finalResponseSchema()),
@@ -381,6 +383,10 @@ class AiChatMemoryServiceTest {
                 turn, new MaskingContext(), now.plusSeconds(70), NO_STOP);
 
         assertTrue(memory.nativeTools());
+        assertEquals(
+                4,
+                memory.parallelToolCalls(),
+                "the turn snapshots the adapter's declared per-step call bound once");
         ArgumentCaptor<AiNativeToolRequest> nativeTools =
                 ArgumentCaptor.forClass(AiNativeToolRequest.class);
         verify(invocationService).serializedPromptBytes(

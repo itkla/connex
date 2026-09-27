@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantToolCatalog.ToolTier;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -62,10 +63,12 @@ public class AiAssistantToolCallReadService {
     /**
      * One turn's tool-call idempotency key, with the optional ordinal a shared step renders.
      *
-     * <p>Anchored and still strict: a malformed key is rejected exactly as before and the step
-     * number stays bounded by the loop's own backstop. The optional suffix group is forward-looking
-     * only — a write is always the sole call of its step, so no row this service reads today
-     * carries one — and it exists so a suffixed row parses instead of being dropped silently.
+     * <p>Anchored and still strict: a malformed key is rejected exactly as before, the step number
+     * stays bounded by the loop's own backstop and the ordinal by the per-step call ceiling, so a
+     * key claiming a position no step could have produced is refused rather than read. The optional
+     * suffix group is forward-looking only — a write is always the sole call of its step, so no row
+     * this service reads today carries one — and it exists so a suffixed row parses instead of
+     * being dropped silently.
      */
     private static final Pattern TURN_STEP_KEY = Pattern.compile(
             "^turn-([1-9][0-9]*)-step-([1-9][0-9]*)(?:-call-([1-9][0-9]*))?$");
@@ -894,7 +897,11 @@ public class AiAssistantToolCallReadService {
         }
         int turnId = Integer.parseInt(matcher.group(1));
         int stepNumber = Integer.parseInt(matcher.group(2));
-        if (stepNumber > AiChatAgentLoopService.HARD_MAX_STEPS) {
+        String callOrdinal = matcher.group(3);
+        if (stepNumber > AiChatAgentLoopService.HARD_MAX_STEPS
+                || (callOrdinal != null
+                        && Integer.parseInt(callOrdinal)
+                                > AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS)) {
             throw new IllegalArgumentException("Assistant tool association is invalid");
         }
         return turnId;

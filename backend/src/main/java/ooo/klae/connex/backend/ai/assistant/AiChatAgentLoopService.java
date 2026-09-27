@@ -45,6 +45,7 @@ import ooo.klae.connex.backend.ai.provider.AiImageInputUnsupportedException;
 import ooo.klae.connex.backend.ai.provider.AiInvocationProtocol;
 import ooo.klae.connex.backend.ai.provider.AiNativeToolRequest;
 import ooo.klae.connex.backend.ai.provider.AiProviderCallerDeadlineExceededException;
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiProviderException;
 import ooo.klae.connex.backend.ai.provider.AiProviderIdleTimeoutException;
 import ooo.klae.connex.backend.ai.provider.AiProviderRequestRejectedException;
@@ -76,6 +77,39 @@ import tools.jackson.databind.node.ObjectNode;
 @RequiredArgsConstructor
 public class AiChatAgentLoopService {
     static final int HARD_MAX_STEPS = 64;
+
+    /**
+     * The most {@code ai_chat_tool_call} rows one turn can leave behind.
+     *
+     * <p>A projection bound, not a guard. The step loop already refuses past {@link #HARD_MAX_STEPS}
+     * and a step carries at most {@link AiProviderCapabilities#MAX_PARALLEL_TOOL_CALLS} calls, so a
+     * check against this number could never fire; what it is for is the row limit the progress
+     * projection passes to {@code listToolCallsByTurn}. That limit used to be the step ceiling
+     * itself, which was exact only while one step wrote one row. A turn whose steps may write
+     * several rows would silently lose real milestones under the old limit while every suffixed key
+     * it wrote still parsed and looked healthy.
+     */
+    static final int MAX_TOOL_CALL_ROWS_PER_TURN =
+            HARD_MAX_STEPS * AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS;
+
+    /**
+     * The most calls this loop asks the provider for in one native step, whatever the endpoint
+     * declares.
+     *
+     * <p>The turn's declared bound is an upper limit on what the endpoint may send; this is the
+     * number this loop can actually execute. It cannot yet execute a batch under per-call
+     * ownership, deadline, authorization and budget admission, so it asks for one call per step and
+     * a declared endpoint keeps the literal {@code parallel_tool_calls: false} it has always been
+     * sent. Asking for more would invite a batch only to refuse it — the model, told it may batch,
+     * batches again on the repair, and the turn loses its investigation — and the parse boundary
+     * would audit as parsed a response the server then discarded. With the request bounded here, an
+     * over-delivering endpoint is refused at the parse boundary under {@code native_multiple_calls}
+     * and audited as malformed, as before the declaration existed — unless one of its calls invented
+     * a placeholder, which the boundary counts before refusing the response and which ends the turn
+     * as malformed output rather than earning the repair.
+     */
+    static final int MAX_EXECUTABLE_CALLS_PER_STEP = 1;
+
     private static final int MAX_CONSECUTIVE_NO_PROGRESS_STEPS = 2;
     /**
      * The whole-turn narration budget. Each segment is already bounded to a status sentence; this
@@ -407,6 +441,7 @@ public class AiChatAgentLoopService {
                             && state.toolTurns.isEmpty()
                             && state.nativeCalls.isEmpty();
                     boolean nativeMalformed = false;
+                    boolean nativeDemaskRefused = false;
                     Optional<String> stepNarration = Optional.empty();
                     try (AiInvocationAdmissionService.DirectAdmission admission =
                             invocationAdmissionService.acquireDirect()) {
@@ -419,7 +454,10 @@ public class AiChatAgentLoopService {
                                     nativeDefinitions,
                                     nativeReplay.exchanges(),
                                     nativeReplay.repairMessage(),
-                                    closing);
+                                    closing,
+                                    Math.min(
+                                            memory.parallelToolCalls(),
+                                            MAX_EXECUTABLE_CALLS_PER_STEP));
                             nativeProviderAttempts++;
                             NativeStepAttempt nativeAttempt = nativeStepAttempt(
                                     invocationService.completeNativeToolsRepairable(
@@ -437,6 +475,7 @@ public class AiChatAgentLoopService {
                             attempt = nativeAttempt.attempt();
                             nativeProviderCall = nativeAttempt.providerCall();
                             nativeMalformed = nativeAttempt.malformed();
+                            nativeDemaskRefused = nativeAttempt.demaskRefused();
                             stepNarration = nativeAttempt.narration();
                         } else {
                             attempt = invocationService.completeStructuredRepairable(
@@ -490,6 +529,10 @@ public class AiChatAgentLoopService {
                     }
                     if (deadlineReached(deadline)) {
                         return AiGenerationTaskResult.timedOut("turn_deadline_exceeded");
+                    }
+                    if (nativeDemaskRefused) {
+                        resetMalformedStream(streamingProgress, streamingObserver);
+                        return AiGenerationTaskResult.failed("malformed_output");
                     }
                     if (nativeMalformed) {
                         resetMalformedStream(streamingProgress, streamingObserver);
@@ -1472,9 +1515,57 @@ public class AiChatAgentLoopService {
         }
     }
 
+    /**
+     * Translates one native completion into the step attempt the loop's single path consumes.
+     *
+     * <p>A response carrying several calls is refused here, under the same
+     * {@code native_multiple_calls} repair rule the parse boundary raises for it. The loop bounds
+     * its own requests by {@link #MAX_EXECUTABLE_CALLS_PER_STEP}, so the parse boundary already
+     * refuses a batch before it arrives; this is the defence behind that, because this loop cannot
+     * yet execute a batch under one per-call authorization, ownership, deadline and budget
+     * admission, and executing the first call of a decision the model made as four is never the
+     * right answer.
+     *
+     * <p>The demask rule is enforced before the cardinality rule, not after it. A response whose
+     * calls invented a placeholder fails the turn as malformed output when it carries one call, and
+     * it must not be laundered into a repairable cardinality refusal because it carried two. The
+     * parse boundary holds a response above the request's bound to the same rule: it demasks the
+     * response before refusing it for its size and carries the count on the refusal, and a refusal
+     * carrying a non-zero count settles here exactly as a demasked batch does — as malformed
+     * output with no repair — whichever repair rule the envelope broke. That is the only path an
+     * over-delivered batch takes while the request is bounded to one call; the batch case below
+     * stays as the defence behind the boundary for a batch within the request's bound.
+     */
     private static NativeStepAttempt nativeStepAttempt(
             AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion) {
         return switch (completion) {
+            case AiNativeToolCompletion.Tool<AiAssistantStep.FinalAnswer> tool
+                    when tool.providerCalls().size() > 1 && tool.demaskWarnings() != 0 ->
+                    new NativeStepAttempt(
+                            new AiStructuredRepairAttempt<>(
+                                    new AiStructuredOutcome.Malformed<>(
+                                            AiStructuredOutcome.REASON_MALFORMED,
+                                            tool.inputTokens(),
+                                            tool.outputTokens(),
+                                            tool.stopReason()),
+                                    Optional.empty(),
+                                    tool.reasoning()),
+                            Optional.empty(),
+                            false,
+                            Optional.empty(),
+                            true);
+            case AiNativeToolCompletion.Tool<AiAssistantStep.FinalAnswer> tool
+                    when tool.providerCalls().size() > 1 -> new NativeStepAttempt(
+                    new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Malformed<>(
+                                    AiStructuredOutcome.REASON_MALFORMED,
+                                    tool.inputTokens(),
+                                    tool.outputTokens(),
+                                    tool.stopReason()),
+                            Optional.of(AiStructuredRepair.from("native_multiple_calls", "")),
+                            tool.reasoning()),
+                    Optional.empty(),
+                    true);
             case AiNativeToolCompletion.Tool<AiAssistantStep.FinalAnswer> tool -> {
                 AiAssistantStep step = new AiAssistantStep(
                         new AiAssistantStep.Tool(
@@ -1517,6 +1608,20 @@ public class AiChatAgentLoopService {
                         Optional.empty(),
                         false);
             }
+            case AiNativeToolCompletion.Malformed<AiAssistantStep.FinalAnswer> malformed
+                    when malformed.demaskWarnings() != 0 -> new NativeStepAttempt(
+                    new AiStructuredRepairAttempt<>(
+                            new AiStructuredOutcome.Malformed<>(
+                                    AiStructuredOutcome.REASON_MALFORMED,
+                                    malformed.inputTokens(),
+                                    malformed.outputTokens(),
+                                    malformed.stopReason()),
+                            Optional.empty(),
+                            malformed.reasoning()),
+                    Optional.empty(),
+                    false,
+                    Optional.empty(),
+                    true);
             case AiNativeToolCompletion.Malformed<AiAssistantStep.FinalAnswer> malformed -> {
                 AiStructuredOutcome<AiAssistantStep> outcome =
                         new AiStructuredOutcome.Malformed<>(
@@ -1610,13 +1715,22 @@ public class AiChatAgentLoopService {
             AiStructuredRepairAttempt<AiAssistantStep> attempt,
             Optional<AiToolCall> providerCall,
             boolean malformed,
-            Optional<String> narration) {
+            Optional<String> narration,
+            boolean demaskRefused) {
 
         private NativeStepAttempt(
                 AiStructuredRepairAttempt<AiAssistantStep> attempt,
                 Optional<AiToolCall> providerCall,
                 boolean malformed) {
             this(attempt, providerCall, malformed, Optional.empty());
+        }
+
+        private NativeStepAttempt(
+                AiStructuredRepairAttempt<AiAssistantStep> attempt,
+                Optional<AiToolCall> providerCall,
+                boolean malformed,
+                Optional<String> narration) {
+            this(attempt, providerCall, malformed, narration, false);
         }
 
         private NativeStepAttempt {

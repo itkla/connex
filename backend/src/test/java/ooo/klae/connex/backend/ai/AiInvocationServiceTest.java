@@ -186,6 +186,7 @@ class AiInvocationServiceTest {
                 .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
         when(aiProvider.nativeToolReasoningCapability(resolved.target()))
                 .thenReturn(AiReasoningMode.NATIVE);
+        when(aiProvider.parallelToolCallLimit(resolved.target())).thenReturn(4);
 
         AiProviderCapabilities capabilities =
                 service.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT);
@@ -196,7 +197,49 @@ class AiInvocationServiceTest {
         assertEquals(65_536, capabilities.maxOutputTokens());
         assertEquals(AiToolCallingMode.NATIVE_FUNCTIONS, capabilities.toolCalling());
         assertEquals(AiReasoningMode.NATIVE, capabilities.nativeToolReasoning());
+        assertEquals(4, capabilities.parallelToolCalls());
         verify(aiProvider, never()).complete(any());
+    }
+
+    /**
+     * An adapter answering outside the ceiling gets single-call behaviour, not a failed feature.
+     *
+     * <p>The per-step call ceiling is the one capability an adapter answers with a number rather
+     * than a closed type, and this seam feeds every AI feature in the organization. Refusing here
+     * would turn one adapter's arithmetic mistake into a dead assistant, a dead deal brief and a
+     * dead report narrative. Reading the answer as the ceiling would be worse: a value above it
+     * would enable the widest batch on a target nobody probed. Every out-of-range answer — below
+     * one, one past the ceiling, or absurd — reads as the one call every undeclared endpoint gets.
+     */
+    @Test
+    void anAdapterAnsweringOutsideTheCallCeilingIsClampedToOneCallPerStep() {
+        when(aiProvider.structuredOutputCapability(resolved.target()))
+                .thenReturn(AiStructuredOutputEnforcement.PROMPT_ONLY);
+        when(aiProvider.reasoningCapability(resolved.target()))
+                .thenReturn(AiReasoningMode.TAGGED);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(200_000);
+        when(aiProvider.maxOutputTokens(resolved.target())).thenReturn(65_536);
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.nativeToolReasoningCapability(resolved.target()))
+                .thenReturn(AiReasoningMode.TAGGED);
+        when(aiProvider.parallelToolCallLimit(resolved.target())).thenReturn(0);
+
+        assertEquals(
+                1,
+                service.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)
+                        .parallelToolCalls());
+
+        for (int outOfRange : List.of(
+                -1, AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS + 1, Integer.MAX_VALUE)) {
+            when(aiProvider.parallelToolCallLimit(resolved.target())).thenReturn(outOfRange);
+
+            assertEquals(
+                    1,
+                    service.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)
+                            .parallelToolCalls(),
+                    "adapter answer " + outOfRange + " must read as one call per step");
+        }
     }
 
     @Test
@@ -531,6 +574,361 @@ class AiInvocationServiceTest {
         assertEquals("native_tool_call", terminal.get("schemaRule"));
         assertEquals("malformed_output", terminal.get("parseOutcome"));
         assertNoContent(terminal);
+    }
+
+    /**
+     * A response carrying more calls than the request permitted stays a repairable envelope fault.
+     *
+     * <p>The bound is the request's own {@code maxParallelCalls} rather than the literal one, so an
+     * endpoint nobody declared behaves exactly as it always has, and a declared endpoint that
+     * over-delivers is corrected under the same repair rule rather than crashing its turn.
+     */
+    @Test
+    void aResponseAboveTheRequestedCallBoundIsRepairableAsMultipleCalls() {
+        assertEquals(
+                "native_multiple_calls",
+                nativeParseRefusal(
+                        1,
+                        List.of(
+                                searchCall("call_1", "{{P1}}"),
+                                searchCall("call_2", "Bellweather"))));
+        Map<?, ?> terminal = auditMetadata().get(1);
+        assertEquals("native_tool_call", terminal.get("schemaRule"));
+        assertEquals("malformed_output", terminal.get("parseOutcome"));
+    }
+
+    /**
+     * A response above the requested bound is demasked before it is refused for its size.
+     *
+     * <p>The cardinality refusal is repairable and an invented placeholder is not. While the loop
+     * bounds every request to one call, this refusal is the only path an over-delivered batch
+     * takes, so checking cardinality first would hand a response that invented a placeholder a
+     * repair merely because the call had a sibling. The refusal carries the count, and its audit
+     * row records it beside the malformed native-call diagnostic.
+     */
+    @Test
+    void aResponseAboveTheRequestedCallBoundThatInventsAPlaceholderCarriesItsWarnings() {
+        AiNativeToolCompletion.Malformed<?> malformed = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
+                completeNativeTools(
+                        1,
+                        List.of(
+                                searchCall("call_1", "{{P1}}"),
+                                searchCall("call_2", "{{P99}}"))));
+
+        assertEquals(1, malformed.demaskWarnings());
+        assertEquals("native_multiple_calls", malformed.repairRule());
+        Map<?, ?> terminal = auditMetadata().get(1);
+        assertEquals("native_tool_call", terminal.get("schemaRule"));
+        assertEquals("malformed_output", terminal.get("parseOutcome"));
+        assertEquals(1, terminal.get("demaskWarnings"));
+    }
+
+    /**
+     * Above the bound every object-shaped call is demasked, whatever the step guard would say.
+     *
+     * <p>The response is refused for its size, so the guard never decides its fate, and it must not
+     * decide which calls are counted either: a placeholder invented beside a call the guard would
+     * refuse still ends the turn. The count is summed across the calls rather than read from one.
+     */
+    @Test
+    void anOverBoundResponseCountsEveryCallsWarningsWithoutConsultingTheStepGuard() {
+        AiNativeToolCompletion.Malformed<?> malformed = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
+                completeNativeTools(
+                        1,
+                        List.of(
+                                new AiToolCall(
+                                        "call_1", "not_a_tool", "{\"query\":\"{{P98}}\"}"),
+                                searchCall("call_2", "{{P99}}"))));
+
+        assertEquals(2, malformed.demaskWarnings());
+        assertEquals(2, auditMetadata().get(1).get("demaskWarnings"));
+    }
+
+    /**
+     * A warning-free response above the bound keeps the cardinality repair, whatever else it holds.
+     *
+     * <p>Demasking first must not turn the size refusal into a validation pass: a call the guard
+     * would refuse, arguments that do not parse, and arguments that are not an object all leave the
+     * refusal exactly the repairable {@code native_multiple_calls} it has always been. A placeholder
+     * inside non-object arguments is not counted, because the admitted path refuses such arguments
+     * before demasking them.
+     */
+    @Test
+    void aWarningFreeResponseAboveTheBoundKeepsTheCardinalityRepairWhateverElseItCarries() {
+        AiNativeToolCompletion.Malformed<?> malformed = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
+                completeNativeTools(
+                        1,
+                        List.of(
+                                searchCall("call_1", "Bellweather"),
+                                new AiToolCall(
+                                        "call_2", "not_a_tool", "{\"query\":\"x\"}"),
+                                new AiToolCall("call_3", "search_records", "not json"),
+                                new AiToolCall(
+                                        "call_4", "search_records", "[\"{{P99}}\"]"))));
+
+        assertEquals("native_multiple_calls", malformed.repairRule());
+        assertEquals(0, malformed.demaskWarnings());
+        Map<?, ?> terminal = auditMetadata().get(1);
+        assertEquals("malformed_output", terminal.get("parseOutcome"));
+        assertFalse(terminal.containsKey("demaskWarnings"));
+    }
+
+    /**
+     * A request may not ask for a larger batch than the target it is actually sent to declares.
+     *
+     * <p>The turn records its bound before its first step, but every invocation re-resolves the
+     * organization's provider, and an admin may switch it mid-turn to a model or endpoint nobody
+     * declared. The request is refused before egress, exactly as a streamed request to a target that
+     * no longer streams is, so {@code parallel_tool_calls: true} never reaches an undeclared target
+     * and the parser never admits a batch from one.
+     */
+    @Test
+    void aRequestAboveTheCurrentTargetsDeclaredBoundIsRefusedBeforeEgress() {
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.parallelToolCallLimit(resolved.target())).thenReturn(1);
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
+        AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+
+        assertThrows(
+                AiProviderException.class,
+                () -> service.completeNativeToolsRepairable(
+                        nativeInvocation("Find the relationship"),
+                        AiAssistantStep.FinalAnswer.class,
+                        guard.forStep(AiAssistantToolCatalog.ALL, Set.of("{{P1}}")),
+                        guard.finalAnswerForIssuedPlaceholders(Set.of("{{P1}}")),
+                        schema.finalResponseSchema(),
+                        new AiNativeToolRequest(
+                                catalog.nativeDefinitions(
+                                        new ObjectMapper(), AiAssistantToolCatalog.ALL),
+                                List.of(),
+                                null,
+                                false,
+                                4),
+                        directAdmission,
+                        providerAttemptGuard));
+
+        verify(aiProvider, never()).complete(any());
+        verify(aiProvider, never()).completeStreaming(any(), any());
+        Map<?, ?> blocked = singleAuditMetadata();
+        assertEquals("blocked", blocked.get("outcome"));
+        assertEquals("provider_capability", blocked.get("reason"));
+    }
+
+    /**
+     * A target whose declaration drops between admission and egress is refused at egress.
+     *
+     * <p>The egress checkpoint already refuses a provider snapshot that moved; it re-reads the
+     * call bound too, so the request field is never sent under a declaration that stopped holding.
+     */
+    @Test
+    void aCallBoundThatStopsHoldingBeforeEgressIsRefusedAtTheCheckpoint() {
+        when(aiProvider.parallelToolCallLimit(resolved.target())).thenReturn(4, 1);
+
+        assertThrows(
+                AiProviderException.class,
+                () -> invokeNativeTools(
+                        4,
+                        List.of(
+                                searchCall("call_1", "{{P1}}"),
+                                searchCall("call_2", "Bellweather"))));
+
+        verify(providerTransport, never()).run();
+    }
+
+    /** The bound is the declared one, not a constant, so three calls survive a request for four. */
+    @Test
+    void aResponseAtTheRequestedCallBoundIsNotRefusedForItsCardinality() {
+        AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion = completeNativeTools(
+                4,
+                List.of(
+                        searchCall("call_1", "{{P1}}"),
+                        searchCall("call_2", "Bellweather"),
+                        searchCall("call_3", "Ashcombe")));
+
+        AiNativeToolCompletion.Tool<?> tool =
+                assertInstanceOf(AiNativeToolCompletion.Tool.class, completion);
+        assertEquals(3, tool.providerCalls().size());
+    }
+
+    /** A declared endpoint's batch parses every call, and still costs exactly one audit row. */
+    @Test
+    void aBatchWithinTheRequestedBoundParsesEveryCallAndAuditsOnce() {
+        AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion = completeNativeTools(
+                4,
+                List.of(
+                        searchCall("call_1", "{{P1}}"),
+                        searchCall("call_2", "Bellweather")));
+
+        AiNativeToolCompletion.Tool<?> tool =
+                assertInstanceOf(AiNativeToolCompletion.Tool.class, completion);
+        assertEquals(
+                List.of("call_1", "call_2"),
+                tool.providerCalls().stream().map(AiToolCall::id).toList());
+        assertEquals(
+                List.of("Mina Patel", "Bellweather"),
+                tool.callArguments().stream()
+                        .map(arguments -> arguments.path("query").asString())
+                        .toList());
+        assertEquals(0, tool.demaskWarnings());
+        assertEquals("parsed", auditMetadata().get(1).get("parseOutcome"));
+    }
+
+    /**
+     * Demask warnings are summed over every call, not read from one of them.
+     *
+     * <p>A non-zero total fails the turn, so a count that read only the first call would let a
+     * later call's invented placeholder through, and one that kept only the last would let an
+     * earlier call's through. Each shape is pinned separately.
+     */
+    @Test
+    void demaskWarningsAreSummedAcrossEveryCallOfABatch() {
+        AiNativeToolCompletion.Tool<?> secondOnly = assertInstanceOf(
+                AiNativeToolCompletion.Tool.class,
+                completeNativeTools(
+                        4,
+                        List.of(
+                                searchCall("call_1", "{{P1}}"),
+                                searchCall("call_2", "{{P99}}"))));
+        assertEquals(1, secondOnly.demaskWarnings());
+        assertEquals(1, auditMetadata().get(1).get("demaskWarnings"));
+    }
+
+    /** Warnings from calls on both sides of a batch add up rather than overwrite each other. */
+    @Test
+    void demaskWarningsFromEveryCallOfABatchAddUp() {
+        AiNativeToolCompletion.Tool<?> both = assertInstanceOf(
+                AiNativeToolCompletion.Tool.class,
+                completeNativeTools(
+                        4,
+                        List.of(
+                                searchCall("call_1", "{{P98}}"),
+                                searchCall("call_2", "{{P1}}"),
+                                searchCall("call_3", "{{P99}}"))));
+        assertEquals(2, both.demaskWarnings());
+        assertEquals(2, auditMetadata().get(1).get("demaskWarnings"));
+    }
+
+    /**
+     * Two calls of one response may no more share an identifier than a call may reuse a replayed
+     * one, because the replayed {@code tool} messages are correlated by exactly that identifier.
+     */
+    @Test
+    void twoCallsOfOneResponseSharingAnIdentifierAreRepairable() {
+        assertEquals(
+                "native_duplicate_call_id",
+                nativeParseRefusal(
+                        4,
+                        List.of(
+                                searchCall("call_1", "{{P1}}"),
+                                searchCall("call_1", "Bellweather"))));
+    }
+
+    /**
+     * One rejected call makes the whole response malformed rather than half of it executable.
+     *
+     * <p>The guard a step passes is the server's statement about the whole model decision, so
+     * keeping the calls that happened to be valid would execute part of a decision it refused.
+     */
+    @Test
+    void oneCallFailingTheStepGuardRefusesTheWholeResponse() {
+        assertEquals(
+                "native_invalid_arguments",
+                nativeParseRefusal(
+                        4,
+                        List.of(
+                                searchCall("call_1", "{{P1}}"),
+                                new AiToolCall("call_2", "search_records", "{\"query\":7}"))));
+        assertEquals(
+                "native_unknown_tool",
+                nativeParseRefusal(
+                        4,
+                        List.of(
+                                searchCall("call_1", "{{P1}}"),
+                                new AiToolCall(
+                                        "call_2", "not_a_tool", "{\"query\":\"x\"}"))));
+    }
+
+    private static AiToolCall searchCall(String id, String query) {
+        return new AiToolCall(
+                id, "search_records",
+                "{\"query\":\"" + query + "\",\"kinds\":[\"person\"]}");
+    }
+
+    /**
+     * Runs one native completion whose request permits the given number of calls per step.
+     *
+     * @param maxParallelCalls the per-step call bound the request declares
+     * @param calls the calls the provider returns
+     * @return the parsed completion
+     */
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completeNativeTools(
+            int maxParallelCalls, List<AiToolCall> calls) {
+        if (maxParallelCalls > 1) {
+            when(aiProvider.parallelToolCallLimit(resolved.target()))
+                    .thenReturn(maxParallelCalls);
+        }
+        return invokeNativeTools(maxParallelCalls, calls);
+    }
+
+    /**
+     * Runs one native completion without declaring the target's call bound, so a test can.
+     *
+     * @param maxParallelCalls the per-step call bound the request declares
+     * @param calls the calls the provider returns
+     * @return the parsed completion
+     */
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> invokeNativeTools(
+            int maxParallelCalls, List<AiToolCall> calls) {
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
+        AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        providerReturns(new AiCompletionResult(
+                "",
+                12,
+                7,
+                "tool_calls",
+                AiStructuredOutputEnforcement.JSON_SCHEMA,
+                "",
+                AiReasoningMode.NONE,
+                calls));
+        return service.completeNativeToolsRepairable(
+                nativeInvocation("Find the relationship"),
+                AiAssistantStep.FinalAnswer.class,
+                guard.forStep(AiAssistantToolCatalog.ALL, Set.of("{{P1}}")),
+                guard.finalAnswerForIssuedPlaceholders(Set.of("{{P1}}")),
+                schema.finalResponseSchema(),
+                new AiNativeToolRequest(
+                        catalog.nativeDefinitions(
+                                new ObjectMapper(), AiAssistantToolCatalog.ALL),
+                        List.of(),
+                        null,
+                        false,
+                        maxParallelCalls),
+                directAdmission,
+                providerAttemptGuard);
+    }
+
+    /**
+     * Runs one native completion and returns the repair rule its refusal named.
+     *
+     * @param maxParallelCalls the per-step call bound the request declares
+     * @param calls the calls the provider returns
+     * @return the stable repair rule the refusal named
+     */
+    private String nativeParseRefusal(int maxParallelCalls, List<AiToolCall> calls) {
+        AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completion =
+                completeNativeTools(maxParallelCalls, calls);
+        AiNativeToolCompletion.Malformed<?> malformed =
+                assertInstanceOf(AiNativeToolCompletion.Malformed.class, completion);
+        return malformed.repairRule();
     }
 
     @Test

@@ -1,0 +1,52 @@
+{
+  "id": "parallel_calls_refused",
+  "selector": "connex_script_parallel_calls_refused",
+  "capabilityClass": "scripted-native-parallel",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "closing": false,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_calls",
+        "calls": [
+          {
+            "toolName": "search_records",
+            "arguments": "{\"query\":\"Thornwood\",\"kinds\":[\"person\"]}"
+          },
+          {
+            "toolName": "search_records",
+            "arguments": "{\"query\":\"Thornwood\",\"kinds\":[\"company\"]}"
+          }
+        ]
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "onRepair": true,
+      "protocol": "native",
+      "emit": {
+        "kind": "tool_calls",
+        "calls": [
+          {
+            "toolName": "search_records",
+            "arguments": "{\"query\":\"Thornwood\",\"kinds\":[\"person\"]}"
+          },
+          {
+            "toolName": "search_records",
+            "arguments": "{\"query\":\"Thornwood\",\"kinds\":[\"company\"]}"
+          }
+        ]
+      }
+    },
+    {
+      "afterToolCalls": 0,
+      "closing": true,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"I could not gather anything for this request.\",\"citations\":[],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

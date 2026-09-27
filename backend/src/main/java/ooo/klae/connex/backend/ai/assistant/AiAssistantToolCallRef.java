@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.ai.assistant;
 
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
+
 /**
  * Names one tool call within a turn by the model step it belongs to and its place in that step.
  *
@@ -33,8 +35,10 @@ public record AiAssistantToolCallRef(int stepNumber, int callOrdinal) {
         if (stepNumber <= 0) {
             throw new IllegalArgumentException("Assistant tool call step must be positive");
         }
-        if (callOrdinal < 0) {
-            throw new IllegalArgumentException("Assistant tool call ordinal must not be negative");
+        if (callOrdinal < 0 || callOrdinal > AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS) {
+            throw new IllegalArgumentException(
+                    "Assistant tool call ordinal must be between 0 and "
+                            + AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS);
         }
     }
 

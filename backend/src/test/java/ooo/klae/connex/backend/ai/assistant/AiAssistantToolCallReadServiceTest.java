@@ -19,6 +19,7 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
@@ -151,10 +152,12 @@ class AiAssistantToolCallReadServiceTest {
      *
      * <p>A write is always the only call of its step, so no row this service reads carries a call
      * ordinal today; parsing one anyway keeps the widening forward-looking rather than a landmine,
-     * and the anchored pattern still refuses anything else outright.
+     * and the anchored pattern still refuses anything else outright. The ordinal is bounded by the
+     * per-step call ceiling for the same reason the step number is bounded by the loop's backstop:
+     * a position no step could have produced names no call this service should attribute.
      */
     @Test
-    void aKeyNamingACallOrdinalResolvesItsTurnWhileAMalformedKeyIsStillDropped() {
+    void aKeyNamingACallOrdinalResolvesItsTurnWhileAnImpossibleOneIsStillDropped() {
         AiChatToolCall suffixed = toolCall(
                 29, USER_ID, "create_note", "auto", "executed", "person", 31, 19,
                 "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}");
@@ -163,9 +166,14 @@ class AiAssistantToolCallReadServiceTest {
                 31, USER_ID, "create_note", "auto", "executed", "person", 31, 19,
                 "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}");
         malformedKey.setIdempotencyKey("turn-19-step-2-call-");
+        AiChatToolCall impossibleOrdinal = toolCall(
+                33, USER_ID, "create_note", "auto", "executed", "person", 31, 19,
+                "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}");
+        impossibleOrdinal.setIdempotencyKey("turn-19-step-2-call-"
+                + (AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS + 1));
         when(chatMapper.listToolCallsBySession(
                 WORKSPACE_ID, SESSION_ID, false, 100))
-                .thenReturn(List.of(suffixed, malformedKey));
+                .thenReturn(List.of(suffixed, malformedKey, impossibleOrdinal));
         when(chatMapper.listAssistantMessagesBySessionAndTurnIds(
                 WORKSPACE_ID, SESSION_ID, List.of(19), 100))
                 .thenReturn(List.of(assistantMessage(91, 19)));
