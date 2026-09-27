@@ -98,6 +98,9 @@ Read the relevant contract before editing that subsystem:
 Inspect the owning package, nearest implementation, and tests in addition to the contract. Do not copy a subsystem's full protocol back into this guide.
 
 Declaring an assistant tool is contract work, not a one-line addition: every `AiAssistantToolCatalog` tool must name a `Toolset` (a declaration without one fails at class initialisation), an Ask Connex turn starts from `core` and widens itself with `find_tools` under the single `MAX_ACTIVE_TOOLSETS_PER_TURN` cap that seeded and loaded sets share, and the one per-turn prompt budget is reserved from that cap rather than from the whole catalog. Read `../docs/backend/AI_SECURITY.md` before adding, moving, or renaming one.
+Read `../docs/backend/AI_SECURITY.md` before adding, moving, or renaming one.
+
+Adding an assistant write tool is one `AiAssistantWriteTool` bean, its catalog line and `description` arm, its record in the sealed `AiAssistantWriteToolRequest`, its two `AiChatProgressService` arms (`sourceForTool` and `resultCount`, forced by `AiChatProgressServiceTest`), and its trajectory golden. `AiAssistantWriteToolService` is the framework: it owns the lock order, the locked-row RBAC assertion, proposal freshness for confirm-tier tools, the owner-scope target gate, verify-after-write, undo bookkeeping and the envelope bytes, and `AiAssistantWriteToolRegistry` refuses to start on a declaration that disagrees with the catalog. A tool takes no lock, reaches no mapper and never re-resolves a member (`AiAssistantWriteToolSpiArchTest`); the order is in `../docs/backend/LOCKING.md`. `AiAssistantWriteToolRegistry.LEGACY_TOOLS` only shrinks.
 
 ## Security boundaries
 
