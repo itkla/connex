@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
 import {
@@ -263,7 +264,7 @@ test.describe("Ask Connex scripted trajectory", () => {
         let removeVirtualAuthenticator: (() => Promise<void>) | null = null;
         try {
             const api = context.request;
-            const runId = `${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+            const runId = randomUUID().replace(/-/g, "").slice(0, 12);
             const password = `E2eHarness!${runId}A1`;
             await registerUser(api, {
                 username: `e2e_ai_${runId}`,
