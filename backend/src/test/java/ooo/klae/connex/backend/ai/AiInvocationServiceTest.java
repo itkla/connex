@@ -207,7 +207,9 @@ class AiInvocationServiceTest {
      * <p>The per-step call ceiling is the one capability an adapter answers with a number rather
      * than a closed type, and this seam feeds every AI feature in the organization. Refusing here
      * would turn one adapter's arithmetic mistake into a dead assistant, a dead deal brief and a
-     * dead report narrative; clamping gives the behaviour every undeclared endpoint already has.
+     * dead report narrative. Reading the answer as the ceiling would be worse: a value above it
+     * would enable the widest batch on a target nobody probed. Every out-of-range answer — below
+     * one, one past the ceiling, or absurd — reads as the one call every undeclared endpoint gets.
      */
     @Test
     void anAdapterAnsweringOutsideTheCallCeilingIsClampedToOneCallPerStep() {
@@ -228,13 +230,16 @@ class AiInvocationServiceTest {
                 service.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)
                         .parallelToolCalls());
 
-        when(aiProvider.parallelToolCallLimit(resolved.target()))
-                .thenReturn(AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS + 1);
+        for (int outOfRange : List.of(
+                -1, AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS + 1, Integer.MAX_VALUE)) {
+            when(aiProvider.parallelToolCallLimit(resolved.target())).thenReturn(outOfRange);
 
-        assertEquals(
-                AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS,
-                service.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)
-                        .parallelToolCalls());
+            assertEquals(
+                    1,
+                    service.currentProviderCapabilities(AiFeature.ASSISTANT_CHAT)
+                            .parallelToolCalls(),
+                    "adapter answer " + outOfRange + " must read as one call per step");
+        }
     }
 
     @Test
@@ -587,6 +592,73 @@ class AiInvocationServiceTest {
                         List.of(
                                 searchCall("call_1", "{{P1}}"),
                                 searchCall("call_2", "Bellweather"))));
+        Map<?, ?> terminal = auditMetadata().get(1);
+        assertEquals("native_tool_call", terminal.get("schemaRule"));
+        assertEquals("malformed_output", terminal.get("parseOutcome"));
+    }
+
+    /**
+     * A request may not ask for a larger batch than the target it is actually sent to declares.
+     *
+     * <p>The turn records its bound before its first step, but every invocation re-resolves the
+     * organization's provider, and an admin may switch it mid-turn to a model or endpoint nobody
+     * declared. The request is refused before egress, exactly as a streamed request to a target that
+     * no longer streams is, so {@code parallel_tool_calls: true} never reaches an undeclared target
+     * and the parser never admits a batch from one.
+     */
+    @Test
+    void aRequestAboveTheCurrentTargetsDeclaredBoundIsRefusedBeforeEgress() {
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.parallelToolCallLimit(resolved.target())).thenReturn(1);
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
+        AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+
+        assertThrows(
+                AiProviderException.class,
+                () -> service.completeNativeToolsRepairable(
+                        nativeInvocation("Find the relationship"),
+                        AiAssistantStep.FinalAnswer.class,
+                        guard.forStep(AiAssistantToolCatalog.ALL, Set.of("{{P1}}")),
+                        guard.finalAnswerForIssuedPlaceholders(Set.of("{{P1}}")),
+                        schema.finalResponseSchema(),
+                        new AiNativeToolRequest(
+                                catalog.nativeDefinitions(
+                                        new ObjectMapper(), AiAssistantToolCatalog.ALL),
+                                List.of(),
+                                null,
+                                false,
+                                4),
+                        directAdmission,
+                        providerAttemptGuard));
+
+        verify(aiProvider, never()).complete(any());
+        verify(aiProvider, never()).completeStreaming(any(), any());
+        Map<?, ?> blocked = singleAuditMetadata();
+        assertEquals("blocked", blocked.get("outcome"));
+        assertEquals("provider_capability", blocked.get("reason"));
+    }
+
+    /**
+     * A target whose declaration drops between admission and egress is refused at egress.
+     *
+     * <p>The egress checkpoint already refuses a provider snapshot that moved; it re-reads the
+     * call bound too, so the request field is never sent under a declaration that stopped holding.
+     */
+    @Test
+    void aCallBoundThatStopsHoldingBeforeEgressIsRefusedAtTheCheckpoint() {
+        when(aiProvider.parallelToolCallLimit(resolved.target())).thenReturn(4, 1);
+
+        assertThrows(
+                AiProviderException.class,
+                () -> invokeNativeTools(
+                        4,
+                        List.of(
+                                searchCall("call_1", "{{P1}}"),
+                                searchCall("call_2", "Bellweather"))));
+
+        verify(providerTransport, never()).run();
     }
 
     /** The bound is the declared one, not a constant, so three calls survive a request for four. */
@@ -625,6 +697,41 @@ class AiInvocationServiceTest {
                         .toList());
         assertEquals(0, tool.demaskWarnings());
         assertEquals("parsed", auditMetadata().get(1).get("parseOutcome"));
+    }
+
+    /**
+     * Demask warnings are summed over every call, not read from one of them.
+     *
+     * <p>A non-zero total fails the turn, so a count that read only the first call would let a
+     * later call's invented placeholder through, and one that kept only the last would let an
+     * earlier call's through. Each shape is pinned separately.
+     */
+    @Test
+    void demaskWarningsAreSummedAcrossEveryCallOfABatch() {
+        AiNativeToolCompletion.Tool<?> secondOnly = assertInstanceOf(
+                AiNativeToolCompletion.Tool.class,
+                completeNativeTools(
+                        4,
+                        List.of(
+                                searchCall("call_1", "{{P1}}"),
+                                searchCall("call_2", "{{P99}}"))));
+        assertEquals(1, secondOnly.demaskWarnings());
+        assertEquals(1, auditMetadata().get(1).get("demaskWarnings"));
+    }
+
+    /** Warnings from calls on both sides of a batch add up rather than overwrite each other. */
+    @Test
+    void demaskWarningsFromEveryCallOfABatchAddUp() {
+        AiNativeToolCompletion.Tool<?> both = assertInstanceOf(
+                AiNativeToolCompletion.Tool.class,
+                completeNativeTools(
+                        4,
+                        List.of(
+                                searchCall("call_1", "{{P98}}"),
+                                searchCall("call_2", "{{P1}}"),
+                                searchCall("call_3", "{{P99}}"))));
+        assertEquals(2, both.demaskWarnings());
+        assertEquals(2, auditMetadata().get(1).get("demaskWarnings"));
     }
 
     /**
@@ -681,6 +788,22 @@ class AiInvocationServiceTest {
      * @return the parsed completion
      */
     private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> completeNativeTools(
+            int maxParallelCalls, List<AiToolCall> calls) {
+        if (maxParallelCalls > 1) {
+            when(aiProvider.parallelToolCallLimit(resolved.target()))
+                    .thenReturn(maxParallelCalls);
+        }
+        return invokeNativeTools(maxParallelCalls, calls);
+    }
+
+    /**
+     * Runs one native completion without declaring the target's call bound, so a test can.
+     *
+     * @param maxParallelCalls the per-step call bound the request declares
+     * @param calls the calls the provider returns
+     * @return the parsed completion
+     */
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> invokeNativeTools(
             int maxParallelCalls, List<AiToolCall> calls) {
         when(aiProvider.toolCallingCapability(resolved.target()))
                 .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);

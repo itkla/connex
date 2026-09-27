@@ -14,8 +14,10 @@ import ooo.klae.connex.backend.beans.AiChatMessage;
  * @param inputTokens prompt tokens this turn's compaction already spent
  * @param outputTokens generated tokens this turn's compaction already spent
  * @param nativeTools whether the configured provider answers under the native-tool protocol
- * @param parallelToolCalls how many calls one model step of this turn may carry, snapshotted once
- *     before the first step so a configuration change cannot move the bound under a running turn
+ * @param parallelToolCalls how many calls one model step of this turn may carry, as the configured
+ *     target declared it before the first step; an upper bound only, because every invocation
+ *     re-resolves the organization's provider and refuses a request above what the target it is
+ *     actually sent to declares
  */
 public record AiChatMemory(
         List<AiChatMessage> history,

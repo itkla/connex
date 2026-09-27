@@ -46,6 +46,7 @@ import ooo.klae.connex.backend.ai.provider.AiProvider;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiProviderRouter;
 import ooo.klae.connex.backend.ai.provider.AiProviderStreamObserver;
+import ooo.klae.connex.backend.ai.provider.AiProviderTarget;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiResponseSchema;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
@@ -106,11 +107,13 @@ public class AiInvocationService {
     /**
      * Resolves adapter-declared capabilities for the current organization provider configuration.
      *
-     * <p>The per-step call ceiling is clamped rather than trusted. It is the one capability an
-     * adapter answers with a number instead of a closed type, and the safe direction is unambiguous
-     * — an adapter answering nonsense gets the single-call behaviour every undeclared endpoint
-     * has — so clamping here keeps a future adapter's arithmetic mistake from failing every AI
-     * feature in the organization at the capability seam.
+     * <p>The per-step call ceiling is read fail-closed rather than trusted. It is the one
+     * capability an adapter answers with a number instead of a closed type, and the safe direction
+     * is unambiguous — an adapter answering anything outside 1..{@link
+     * AiProviderCapabilities#MAX_PARALLEL_TOOL_CALLS} gets the single-call behaviour every
+     * undeclared endpoint has, never the ceiling — so a future adapter's arithmetic mistake neither
+     * fails every AI feature in the organization at the capability seam nor enables a batch on a
+     * target nobody probed.
      *
      * @param feature feature whose provider gate must be satisfied
      * @return exact configured-target capabilities without performing provider egress
@@ -130,10 +133,19 @@ public class AiInvocationService {
                 adapter.toolCallingCapability(resolved.target()),
                 adapter.nativeToolReasoningCapability(resolved.target()),
                 adapter.supportsStreaming(resolved.target()),
-                Math.clamp(
-                        adapter.parallelToolCallLimit(resolved.target()),
-                        1,
-                        AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS));
+                currentParallelToolCallLimit(adapter, resolved.target()));
+    }
+
+    /**
+     * The per-step call ceiling one adapter answers for one target, read fail-closed.
+     *
+     * @param adapter the adapter serving the target
+     * @param target the configured provider target
+     * @return the adapter's answer when it lies within the declaration ceiling, otherwise 1
+     */
+    private static int currentParallelToolCallLimit(AiProvider adapter, AiProviderTarget target) {
+        return AiProviderCapabilities.parallelToolCallsOrSingle(
+                adapter.parallelToolCallLimit(target));
     }
 
     /**
@@ -777,6 +789,14 @@ public class AiInvocationService {
                     null, null, null, null, "provider_capability", structured, null);
             throw new AiProviderException("AI provider does not support native function tools");
         }
+        if (nativeTools != null && nativeTools.maxParallelCalls() > 1
+                && nativeTools.maxParallelCalls()
+                        > currentParallelToolCallLimit(adapter, resolved.target())) {
+            emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
+                    null, null, null, null, "provider_capability", structured, null);
+            throw new AiProviderException(
+                    "AI provider parallel tool-call bound is not declared for this target");
+        }
         AiReasoningMode reasoningMode = invocation.reasoningRequested()
                 ? nativeTools == null
                         ? adapter.reasoningCapability(resolved.target())
@@ -847,7 +867,8 @@ public class AiInvocationService {
         ProviderAttemptTracker attemptTracker = new ProviderAttemptTracker(
                 workspaceId, orgId, userId, resolved, effectiveInvocation, correlationId,
                 structured, invocationCommitment, providerAttemptGuard,
-                serializedPrompt, budgetLease, outputTokensClamped);
+                serializedPrompt, budgetLease, outputTokensClamped,
+                nativeTools == null ? 1 : nativeTools.maxParallelCalls());
         try {
             if (!effectiveInvocation.images().isEmpty()) {
                 mediaLease = MediaLeaseGuard.of(acquireMedia(
@@ -1329,6 +1350,7 @@ public class AiInvocationService {
         private final Runnable providerAttemptGuard;
         private final String serializedPrompt;
         private final boolean outputTokensClamped;
+        private final int maxParallelCalls;
         private AiOrganizationBudgetCoordinator.Lease budgetLease;
         private final AiRequestDeadline providerDeadline;
         private boolean firstAttempt = true;
@@ -1346,7 +1368,8 @@ public class AiInvocationService {
                 Runnable providerAttemptGuard,
                 String serializedPrompt,
                 AiOrganizationBudgetCoordinator.Lease budgetLease,
-                boolean outputTokensClamped) {
+                boolean outputTokensClamped,
+                int maxParallelCalls) {
             this.workspaceId = workspaceId;
             this.orgId = orgId;
             this.userId = userId;
@@ -1361,6 +1384,7 @@ public class AiInvocationService {
             this.budgetLease = Objects.requireNonNull(budgetLease, "budgetLease");
             this.providerDeadline = Objects.requireNonNull(budgetLease.deadline(), "providerDeadline");
             this.outputTokensClamped = outputTokensClamped;
+            this.maxParallelCalls = maxParallelCalls;
         }
 
         @Override
@@ -1473,6 +1497,11 @@ public class AiInvocationService {
                             != AiToolCallingMode.NATIVE_FUNCTIONS) {
                 throw new AiProviderException(
                         "AI provider native function capability changed before egress");
+            }
+            if (maxParallelCalls > 1 && maxParallelCalls > currentParallelToolCallLimit(
+                    aiProviderRouter.adapterFor(current.provider()), current.target())) {
+                throw new AiProviderException(
+                        "AI provider parallel tool-call bound changed before egress");
             }
         }
 

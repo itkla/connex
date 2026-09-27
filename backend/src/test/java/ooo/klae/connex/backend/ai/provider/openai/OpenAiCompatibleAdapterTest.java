@@ -55,6 +55,7 @@ import ooo.klae.connex.backend.ai.provider.AiToolDefinition;
 import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 @ExtendWith(MockitoExtension.class)
 class OpenAiCompatibleAdapterTest {
@@ -306,6 +307,38 @@ class OpenAiCompatibleAdapterTest {
                 target("https://other.example.test/v1", false, "gemini-3.6-flash")));
         assertEquals(1, adapter.parallelToolCallLimit(
                 target("https://verified.example.test/V1", false, "gemini-3.6-flash")));
+    }
+
+    /**
+     * A parallel-call declaration names one upstream model, namespace included.
+     *
+     * <p>A router endpoint may serve the same bare model name from several upstreams, and whether
+     * a batch carries distinct ids and per-call replay state is a property of the one upstream the
+     * operator probed. Streaming survives the family's namespace stripping because it is a property
+     * of the wire; this declaration must not, so it covers exactly the configured id it names.
+     */
+    @Test
+    void aParallelCallDeclarationCoversOnlyTheNamespaceItNames() {
+        String endpoint = "https://router.example.test/v1";
+        aiProperties.setModelOverrides(List.of(
+                parallelOverride("google/gemini-3.6-flash", endpoint, 4)));
+
+        assertEquals(4, adapter.parallelToolCallLimit(
+                target(endpoint, false, "google/gemini-3.6-flash")));
+        assertEquals(4, adapter.parallelToolCallLimit(
+                target(endpoint, false, "Google/Gemini-3.6-Flash")));
+        assertEquals(1, adapter.parallelToolCallLimit(
+                target(endpoint, false, "somemirror/gemini-3.6-flash")));
+        assertEquals(1, adapter.parallelToolCallLimit(
+                target(endpoint, false, "gemini-3.6-flash")));
+
+        aiProperties.setModelOverrides(List.of(
+                parallelOverride("gemini-3.6-flash", endpoint, 4)));
+
+        assertEquals(4, adapter.parallelToolCallLimit(
+                target(endpoint, false, "gemini-3.6-flash")));
+        assertEquals(1, adapter.parallelToolCallLimit(
+                target(endpoint, false, "google/gemini-3.6-flash")));
     }
 
     /** Each endpoint declaration answers its own question and disturbs neither of the others. */
@@ -945,8 +978,14 @@ class OpenAiCompatibleAdapterTest {
         JsonNode singleCallBody = nativeBody(
                 new AiNativeToolRequest(definitions, List.of(), null, false, 1));
 
-        assertTrue(singleCallBody.has("parallel_tool_calls"));
-        assertFalse(singleCallBody.path("parallel_tool_calls").asBoolean());
+        assertEquals(
+                "{\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_record\","
+                        + "\"description\":\"Load one visible CRM record.\",\"strict\":true,"
+                        + "\"parameters\":{\"type\":\"object\"}}}],"
+                        + "\"tool_choice\":\"auto\",\"parallel_tool_calls\":false}",
+                toolEnvelope(singleCallBody),
+                "an undeclared endpoint's tool envelope must stay byte-identical, with the literal "
+                        + "boolean false rather than null, a string or a number");
 
         reset(openAiCompatibleClient);
         providerAnswers();
@@ -954,7 +993,23 @@ class OpenAiCompatibleAdapterTest {
         JsonNode batchedBody = nativeBody(
                 new AiNativeToolRequest(definitions, List.of(), null, false, 4));
 
-        assertTrue(batchedBody.path("parallel_tool_calls").asBoolean());
+        assertEquals("true", batchedBody.get("parallel_tool_calls").toString());
+    }
+
+    /**
+     * The three top-level fields a native request adds, in the order they are serialized.
+     *
+     * @param body one parsed request body
+     * @return compact JSON of {@code tools}, {@code tool_choice} and {@code parallel_tool_calls}
+     */
+    private String toolEnvelope(JsonNode body) {
+        ObjectNode envelope = objectMapper.createObjectNode();
+        for (String field : List.of("tools", "tool_choice", "parallel_tool_calls")) {
+            if (body.has(field)) {
+                envelope.set(field, body.get(field));
+            }
+        }
+        return envelope.toString();
     }
 
     /**

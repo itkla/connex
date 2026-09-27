@@ -284,6 +284,10 @@ public class AiProperties {
          *
          * <p>Only honoured together with {@link #endpoint}, on the same reasoning as
          * {@link #streaming}: the same model id served by two gateways is two different answers.
+         * Unlike streaming, {@link #modelId} must also name the configured model id exactly,
+         * namespace included — {@code google/gemini-2.5-pro} covers neither the bare
+         * {@code gemini-2.5-pro} nor {@code somemirror/gemini-2.5-pro} on the same router, because
+         * the probe answered for one upstream model only.
          */
         @Min(1)
         @Max(AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS)
@@ -346,7 +350,8 @@ public class AiProperties {
          * How many parallel calls this override declares for one exact configured endpoint.
          *
          * @param candidateProvider configured provider id
-         * @param normalizedModelId family-normalized configured model id
+         * @param normalizedModelId configured model id, trimmed and lower-cased with its namespace
+         *     kept, because this declaration speaks for one probed upstream model only
          * @param candidateEndpoint configured provider endpoint
          * @return the declared ceiling, or {@code null} when the override says nothing
          */

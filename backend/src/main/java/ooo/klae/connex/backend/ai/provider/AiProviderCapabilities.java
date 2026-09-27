@@ -37,6 +37,22 @@ public record AiProviderCapabilities(
 
     private static final int ESTIMATED_UTF8_BYTES_PER_TOKEN = 4;
 
+    /**
+     * Reads a per-step call ceiling someone other than this record answered, failing closed.
+     *
+     * <p>An operator declaration and an adapter's answer are both plain integers, and the only
+     * safe reading of one outside 1..{@link #MAX_PARALLEL_TOOL_CALLS} is the single-call behaviour
+     * every undeclared endpoint already has. Clamping a value above the ceiling down to the ceiling
+     * would be the opposite: a declaration mistake or an adapter's arithmetic error would enable the
+     * widest batch on a target nobody probed.
+     *
+     * @param answered the declared or adapter-answered ceiling
+     * @return {@code answered} when it lies within 1..{@link #MAX_PARALLEL_TOOL_CALLS}, otherwise 1
+     */
+    public static int parallelToolCallsOrSingle(int answered) {
+        return answered < 1 || answered > MAX_PARALLEL_TOOL_CALLS ? 1 : answered;
+    }
+
     public AiProviderCapabilities {
         Objects.requireNonNull(structuredOutput, "structuredOutput");
         Objects.requireNonNull(reasoning, "reasoning");

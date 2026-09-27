@@ -451,11 +451,20 @@ public final class AiModelCatalog {
     /**
      * How many function calls an operator has declared this exact endpoint may emit in one step.
      *
-     * <p>Answered from declaration alone, on the same terms as {@link #streamingDeclared}, and
-     * clamped to {@link AiProviderCapabilities#MAX_PARALLEL_TOOL_CALLS} so a configuration mistake
-     * widens nothing past the ceiling the loop and the durable key shape were sized for. An
-     * undeclared endpoint — which is every endpoint until an operator records a probe — answers 1,
-     * which is exactly today's behaviour at every layer below.
+     * <p>Answered from declaration alone, on the same endpoint terms as
+     * {@link #streamingDeclared}, with one deliberate narrowing: the model id must match the
+     * configured one <em>including its namespace</em>. Streaming and thoughts are properties of the
+     * wire protocol and survive the OpenAI-compatible family's namespace stripping, but whether a
+     * batch really carries distinct ids and per-call replay state is a property of the one upstream
+     * model the operator probed. A router endpoint serving {@code google/gemini-2.5-pro} and
+     * {@code somemirror/gemini-2.5-pro} serves two different answers, so a declaration names the
+     * configured id exactly, case-insensitively.
+     *
+     * <p>A declared value outside 1..{@link AiProviderCapabilities#MAX_PARALLEL_TOOL_CALLS} — which
+     * bean validation refuses at binding but a programmatic override could still carry — reads as
+     * 1, never as the ceiling, so a configuration mistake enables nothing. An undeclared endpoint —
+     * which is every endpoint until an operator records a probe — answers 1, which is exactly
+     * today's behaviour at every layer below.
      *
      * @param family provider family owning the target
      * @param target configured provider target, may be {@code null}
@@ -465,9 +474,15 @@ public final class AiModelCatalog {
      */
     public static int parallelReadCalls(
             Family family, AiProviderTarget target, List<AiProperties.ModelOverride> overrides) {
+        String modelId = modelIdOf(target);
         int declared = endpointDeclared(
-                family, target, overrides, AiProperties.ModelOverride::parallelReadCallsFor, 1);
-        return Math.clamp(declared, 1, AiProviderCapabilities.MAX_PARALLEL_TOOL_CALLS);
+                family,
+                modelId == null ? null : modelId.trim().toLowerCase(Locale.ROOT),
+                target,
+                overrides,
+                AiProperties.ModelOverride::parallelReadCallsFor,
+                1);
+        return AiProviderCapabilities.parallelToolCallsOrSingle(declared);
     }
 
     private static <T> T endpointDeclared(
@@ -476,11 +491,26 @@ public final class AiModelCatalog {
             List<AiProperties.ModelOverride> overrides,
             EndpointDeclaration<T> declaration,
             T undeclared) {
+        return endpointDeclared(
+                family,
+                family.normalize(modelIdOf(target)),
+                target,
+                overrides,
+                declaration,
+                undeclared);
+    }
+
+    private static <T> T endpointDeclared(
+            Family family,
+            String candidateModelId,
+            AiProviderTarget target,
+            List<AiProperties.ModelOverride> overrides,
+            EndpointDeclaration<T> declaration,
+            T undeclared) {
         if (overrides == null || overrides.isEmpty() || target == null) {
             return undeclared;
         }
-        String normalizedModelId = family.normalize(modelIdOf(target));
-        if (normalizedModelId == null || normalizedModelId.isBlank()) {
+        if (candidateModelId == null || candidateModelId.isBlank()) {
             return undeclared;
         }
         T declared = undeclared;
@@ -489,7 +519,7 @@ public final class AiModelCatalog {
                 continue;
             }
             T value = declaration.resolve(
-                    override, family.providerId(), normalizedModelId, target.endpoint());
+                    override, family.providerId(), candidateModelId, target.endpoint());
             if (value != null) {
                 declared = value;
             }
