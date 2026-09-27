@@ -32,7 +32,6 @@ import ooo.klae.connex.backend.dto.WorkflowNode;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.exceptions.WorkflowDefinitionValidationException;
-import ooo.klae.connex.backend.services.WorkspaceService.Role;
 import ooo.klae.connex.backend.tenant.Permission;
 
 @ExtendWith(MockitoExtension.class)
@@ -91,7 +90,48 @@ class RuleDefinitionValidatorTest {
 
         verify(segmentService).validate("company", condition);
         verify(workspaceService).requirePermission(Permission.COMPANY_UPDATE);
-        verify(workspaceService, never()).requireRole(Role.ADMIN);
+        verify(workspaceService, never()).requireBuiltInAdministrator();
+    }
+
+    @Test
+    void manualSystemDispatchRejectsLockedOverlayEvenWithManagementAndActionPermissions() {
+        doThrow(new ForbiddenException("Requires built-in administrator"))
+            .when(workspaceService).requireLockedBuiltInAdministrator(false);
+
+        assertThrows(ForbiddenException.class, () -> validator.validateWorkflowNodesForManualDispatch(
+            "company", new WorkflowNode.Trigger("trigger", entityChange("company.updated")),
+            List.of(), List.of(new WorkflowNode.Action("action", action("add_tag"))), "system",
+            false, Set.of(Permission.RULE_MANAGE, Permission.COMPANY_UPDATE)));
+
+        verify(workspaceService).requireLockedBuiltInAdministrator(false);
+        verify(workspaceService, never()).requireBuiltInAdministrator();
+        verify(workspaceService, never()).requirePermission(any(Permission.class));
+    }
+
+    @Test
+    void manualSystemDispatchAcceptsLockedAdministratorWithoutRereadingAuthority() {
+        assertDoesNotThrow(() -> validator.validateWorkflowNodesForManualDispatch(
+            "company", new WorkflowNode.Trigger("trigger", entityChange("company.updated")),
+            List.of(), List.of(new WorkflowNode.Action("action", action("add_tag"))), "system",
+            true, Permission.grantableSet()));
+
+        verify(workspaceService).requireLockedBuiltInAdministrator(true);
+        verify(workspaceService, never()).requireBuiltInAdministrator();
+        verify(workspaceService, never()).requirePermission(any(Permission.class));
+    }
+
+    @Test
+    void manualUserDispatchRejectsMissingLockedManagementOrActionPermission() {
+        for (Set<Permission> permissions : List.of(
+                Set.of(Permission.COMPANY_UPDATE), Set.of(Permission.RULE_MANAGE))) {
+            assertThrows(ForbiddenException.class, () -> validator.validateWorkflowNodesForManualDispatch(
+                "company", new WorkflowNode.Trigger("trigger", entityChange("company.updated")),
+                List.of(), List.of(new WorkflowNode.Action("action", action("add_tag"))), "user",
+                false, permissions));
+        }
+
+        verify(workspaceService, never()).requireLockedBuiltInAdministrator(false);
+        verify(workspaceService, never()).requirePermission(any(Permission.class));
     }
 
     @Test
@@ -150,13 +190,13 @@ class RuleDefinitionValidatorTest {
     void systemModeRequiresAdminBeforeDefinitionIsAccepted() {
         RuleRequest request = request("deal", entityChange("deal.won"), "system", action("notify"));
         doThrow(new ForbiddenException("Requires admin role"))
-            .when(workspaceService).requireRole(Role.ADMIN);
+            .when(workspaceService).requireBuiltInAdministrator();
 
         ForbiddenException exception = assertThrows(ForbiddenException.class,
             () -> validator.validate(request));
 
         assertEquals("Requires admin role", exception.getMessage());
-        verify(workspaceService).requireRole(Role.ADMIN);
+        verify(workspaceService).requireBuiltInAdministrator();
     }
 
     @Test
@@ -180,7 +220,7 @@ class RuleDefinitionValidatorTest {
         Set<Permission> required = validator.validateForMutation(request);
 
         assertEquals(Set.of(Permission.TASK_CREATE), required);
-        verify(workspaceService, never()).requireRole(any());
+        verify(workspaceService, never()).requireBuiltInAdministrator();
         verify(workspaceService, never()).requirePermission(any());
     }
 

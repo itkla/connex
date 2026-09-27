@@ -13,6 +13,7 @@ import java.util.Set;
 import java.util.TreeMap;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import lombok.RequiredArgsConstructor;
@@ -95,7 +96,7 @@ public class WorkflowRecipeService {
         return preview(material, request.exampleRecordId());
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @RequirePermission(Permission.RULE_MANAGE)
     public WorkflowRecipeInstallDto install(
             String recipeKey,
@@ -128,7 +129,7 @@ public class WorkflowRecipeService {
             create, material.actorUserId());
         WorkflowPublishRequest publish = new WorkflowPublishRequest();
         publish.setExpectedRevision(0);
-        WorkflowDto installed = workflowService.publish(created.id(), publish);
+        WorkflowDto installed = workflowService.publishForRecipe(created.id(), publish);
         WorkflowRecipeOrigin origin = new WorkflowRecipeOrigin();
         origin.setWorkspaceId(workspaceService.getCurrentWorkspaceId());
         origin.setWorkflowId(installed.id());

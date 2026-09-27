@@ -69,10 +69,12 @@ independently enforces the same contracts:
 
 | Route class | Edge ceiling | Application contract |
 |---|---:|---|
+| `/api/launch-signups` | 4 KiB | Next.js launch signup handler; fixed 4,096-byte ceiling, 3-second body deadline, same-origin JSON only |
 | `/api/imports` and descendants | 64 MiB | `CONNEX_IMPORT_MAX_BODY_BYTES=67108864` |
 | Attachment, assistant-attachment, user/person image, and company-logo upload routes | 27 MiB | A 27 MiB multipart envelope around `ObjectStorageProperties.maxUploadBytes`, whose default stored object maximum is 25 MiB |
 | `/api/business-cards` and descendants | 12 MiB | `CONNEX_BUSINESS_CARD_MAX_BODY_BYTES=12582912`; decoded card bytes remain separately limited to 8 MiB |
 | `/api/client-errors` | 16 KiB | `CONNEX_CLIENT_ERRORS_MAX_BODY_BYTES=16384` |
+| `/api/csp-reports` | 16 KiB | `CONNEX_CSP_REPORTS_MAX_BODY_BYTES=16384` |
 | `/api/auth/webauthn` and descendants | 64 KiB | `CONNEX_WEBAUTHN_MAX_BODY_BYTES=65536` |
 | `/api/workflows` and descendants | 96 KiB | `CONNEX_WORKFLOW_MAX_BODY_BYTES=98304` |
 | Other `/api` routes | 10 MiB | `CONNEX_API_MAX_BODY_BYTES=10485760` |
@@ -191,6 +193,12 @@ owner must reproduce in the dashboard for both SaaS hosts and export for review 
 - Select Business or a contract with equivalent features; confirm all five rate rules are available
   before DNS cutover. Set the zone maximum upload size to at least 100 MB so the 64 MiB import
   contract survives. Do not create an unproxied upload hostname.
+- `www.connexcrm.jp` is bound to the prelaunch landing Worker, which answers every page and API request to it
+  with a `308` to `https://connexcrm.jp` before any application code runs; only the same public,
+  immutable build assets the apex serves are returned directly (see
+  [DEPLOYMENT.md](DEPLOYMENT.md#the-public-prelaunch-site-connexcrmjp-on-cloudflare-workers)). It renders no
+  page and serves no API, so the host sets below intentionally omit it. If the alias ever serves anything
+  other than that redirect, add it to every host set and to the evidence tooling before traffic.
 - Proxy `connexcrm.jp` and `preview.connexcrm.jp`; use Full (strict) TLS. Enable WebSockets. Do not
   enable HSTS yet: first validate Cloudflare-to-origin certificate authentication and every
   compatibility flow over HTTPS.
@@ -227,7 +235,7 @@ non-GET methods are not silently rewritten, and preserve the path and query stri
 |---|---|---|
 | `CF-CUSTOM-01-METHODS` | Intended host and method is `TRACE` or `CONNECT` | Block. Connex exposes neither method. |
 | `CF-EX-01-WEBSOCKET` | Host is `connexcrm.jp` or `preview.connexcrm.jp`, and path is exactly `/api/ws` | Skip Super Bot Fight Mode. Keep managed WAF inspection of the initial handshake; the generic rate expression excludes this path. Logging may remain enabled because this path carries no credential. |
-| `CF-EX-02-TOKEN-CALLBACKS` | Intended host and path starts with `/api/delivery/webhooks/`, `/api/delivery/unsubscribe/`, `/document-acceptance/`, or `/api/document-acceptance/` | Skip Super Bot Fight Mode, rate limiting, and managed WAF. Disable Skip-rule logging because the path contains a credential. Application webhook signature/token verification, idempotent unsubscribe handling, and acceptance-token admission remain authoritative. |
+| `CF-EX-02-TOKEN-CALLBACKS` | Intended host and path starts with `/api/delivery/webhooks/`, `/api/delivery/unsubscribe`, `/document-acceptance/`, or `/api/document-acceptance` | Skip Super Bot Fight Mode, rate limiting, and managed WAF. Disable Skip-rule logging because the webhook path and the retired `/document-acceptance/{token}` frontend prefix both contain a credential; the acceptance and unsubscribe API prefixes are credential-free in the URL but keep the same treatment so a stale emailed link cannot be logged. Application webhook signature/token verification, idempotent unsubscribe handling, and acceptance-token admission remain authoritative. |
 | `CF-EX-03-SAML` | Intended host, method `POST`, and path starts with `/api/login/saml2/sso/` | Skip Super Bot Fight Mode and interactive challenges. Preserve the form body, cookies, and redirect response unchanged. Keep managed WAF inspection unless one rule ID is proven incompatible. |
 | `CF-EX-04-UPLOADS` | Intended host and an upload path listed in the Caddy table, including `/api/imports/*` and `/api/business-cards/*` | Skip Super Bot Fight Mode so multipart/binary clients are not challenged mid-transfer. Do not skip the dedicated upload rate rule, the origin body cap, or all managed WAF rules. |
 
@@ -241,7 +249,7 @@ CF-EX-01-WEBSOCKET
 (http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and http.request.uri.path eq "/api/ws")
 
 CF-EX-02-TOKEN-CALLBACKS
-(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/") or starts_with(http.request.uri.path, "/document-acceptance/") or starts_with(http.request.uri.path, "/api/document-acceptance/")))
+(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe") or starts_with(http.request.uri.path, "/document-acceptance/") or starts_with(http.request.uri.path, "/api/document-acceptance")))
 
 CF-EX-03-SAML
 (http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and http.request.method eq "POST" and starts_with(http.request.uri.path, "/api/login/saml2/sso/"))
@@ -249,6 +257,16 @@ CF-EX-03-SAML
 CF-EX-04-UPLOADS
 (http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))
 ```
+
+`/document-acceptance/` is the **retired** frontend link shape. Current mail carries the bearer in a
+fragment, which no browser sends, so the current routes are credential-free. Emailed
+`/document-acceptance/{token}` links issued before the V203/V204 cutover are still in recipients'
+inboxes, still arrive at the edge, and still carry a live bearer that remains redeemable at
+`POST /api/document-acceptance/exchange`. Keeping the prefix in `CF-EX-02-TOKEN-CALLBACKS` and
+`CF-CONFIG-01-COMPATIBILITY` is what keeps those bearers out of edge logs even though Next answers
+the path with a 404. Remove the prefix only after every outstanding document delivery has been
+re-sent or invalidated, per the
+[V203/V204 emailed-link fragment cutover](UPGRADING.md#v203v204-emailed-link-fragment-cutover-document-acceptance-campaign-unsubscribe).
 
 Add configuration rule `CF-CONFIG-01-COMPATIBILITY` with the expression below. Set Browser
 Integrity Check to Off and Security Level to Essentially Off. This prevents the independent Browser
@@ -258,7 +276,7 @@ active.
 
 ```text
 CF-CONFIG-01-COMPATIBILITY
-(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (http.request.uri.path eq "/api/ws" or starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/") or starts_with(http.request.uri.path, "/document-acceptance/") or starts_with(http.request.uri.path, "/api/document-acceptance/") or (http.request.method eq "POST" and starts_with(http.request.uri.path, "/api/login/saml2/sso/")) or (http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))))
+(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and (http.request.uri.path eq "/api/ws" or starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe") or starts_with(http.request.uri.path, "/document-acceptance/") or starts_with(http.request.uri.path, "/api/document-acceptance") or (http.request.method eq "POST" and starts_with(http.request.uri.path, "/api/login/saml2/sso/")) or (http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))))
 ```
 
 Configure Super Bot Fight Mode according to the recorded origin-lock design:
@@ -286,7 +304,7 @@ above. Deploy on staging first. These are coarse abuse ceilings, not user entitl
 | `CF-RL-02-ACCOUNT-LIFECYCLE` | `POST /api/auth/register`, `/api/auth/forgot-password`, `/api/auth/reset-password`, `/api/auth/verify-email/confirm`, `/api/users/me/verify-email/resend`, and `POST` paths ending in `/accept` below `/api/invites/` or `/api/invite-links/` | 20 requests / 60 seconds / IP | Block 300 seconds |
 | `CF-RL-03-AI` | `POST /api/ai/*`, `POST /api/deals/*/brief`, `POST /api/deals/*/rationale`, `POST /api/introductions/suggestions/rationale`, and `POST /api/reports/*/generate` | 60 requests / 60 seconds / IP | Block 60 seconds |
 | `CF-RL-04-UPLOADS` | Multipart/import/business-card routes listed in `CF-EX-04-UPLOADS` | 30 requests / 60 seconds / IP | Block 60 seconds |
-| `CF-RL-05-API-VOLUME` | All `/api/*` requests except `/api/ws`, `/api/delivery/webhooks/*`, `/api/delivery/unsubscribe/*`, `/api/document-acceptance/*`, and `POST`/`PUT` requests counted by the dedicated upload rule | 1,200 requests / 60 seconds / IP | Block 60 seconds |
+| `CF-RL-05-API-VOLUME` | All `/api/*` requests except `/api/ws`, `/api/delivery/webhooks/*`, `/api/delivery/unsubscribe*`, `/api/document-acceptance*`, and `POST`/`PUT` requests counted by the dedicated upload rule | 1,200 requests / 60 seconds / IP | Block 60 seconds |
 
 Use these rate-rule expressions exactly. `CF-RL-04-UPLOADS` intentionally repeats the upload
 expression because its exception skips only the bot phase, not the rate phase. `CF-RL-05` excludes
@@ -308,7 +326,7 @@ CF-RL-04-UPLOADS
 (http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))
 
 CF-RL-05-API-VOLUME
-(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and starts_with(http.request.uri.path, "/api/") and not (http.request.uri.path eq "/api/ws" or starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe/") or starts_with(http.request.uri.path, "/api/document-acceptance/") or (http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))))
+(http.host in {"connexcrm.jp" "preview.connexcrm.jp"} and starts_with(http.request.uri.path, "/api/") and not (http.request.uri.path eq "/api/ws" or starts_with(http.request.uri.path, "/api/delivery/webhooks/") or starts_with(http.request.uri.path, "/api/delivery/unsubscribe") or starts_with(http.request.uri.path, "/api/document-acceptance") or (http.request.method in {"POST" "PUT"} and (http.request.uri.path eq "/api/attachments/upload" or (starts_with(http.request.uri.path, "/api/ai/assistant/sessions/") and ends_with(http.request.uri.path, "/attachments")) or http.request.uri.path eq "/api/users/me/profile-picture" or (starts_with(http.request.uri.path, "/api/persons/") and ends_with(http.request.uri.path, "/profile-picture")) or (starts_with(http.request.uri.path, "/api/companies/") and ends_with(http.request.uri.path, "/logo")) or starts_with(http.request.uri.path, "/api/imports/") or starts_with(http.request.uri.path, "/api/business-cards/")))))
 
 ```
 
@@ -336,11 +354,17 @@ count look comprehensive.
 - **Webhook delivery:** `/api/delivery/webhooks/{provider}/{token}` remains an unchallenged POST.
   Its application signature/token verification remains authoritative; the path token must not be
   exported in edge logs.
-- **Unsubscribe:** GET/POST `/api/delivery/unsubscribe/{token}` remains unchallenged and idempotent;
-  the token is redacted from exported paths.
-- **Document acceptance:** GET `/document-acceptance/{token}` and GET/POST
-  `/api/document-acceptance/{token}/*` remain unchallenged; API requests are application-throttled,
-  and the path-embedded bearer is redacted from exported paths.
+- **Unsubscribe:** POST `/api/delivery/unsubscribe/exchange` and the token-free GET/POST
+  `/api/delivery/unsubscribe` remain unchallenged and idempotent; the emailed bearer travels in the
+  fragment and then in the exchange body, so it never appears in an exported path.
+- **Document acceptance:** POST `/api/document-acceptance/exchange` and the token-free
+  `/api/document-acceptance*` endpoints remain unchallenged; API requests are application-throttled
+  (the exchange by the shared per-source one-time-link budget before its body is read, then by the
+  per-token and per-source acceptance limiter; every other request by the grant-keyed admission
+  filter), and no bearer appears in any exported path. The retired `/document-acceptance/{token}`
+  frontend prefix stays in the skip and configuration rules until the outstanding deliveries that
+  still name it have been re-sent or invalidated: it 404s, but its logged path would still be a
+  redeemable bearer.
 - **File upload/download:** the 27 MiB multipart envelope preserves the 25 MiB stored-object limit,
   imports retain 64 MiB, and Business-plan upload capacity exceeds both. Downloads are not body
   capped and authenticated responses are not cached.
@@ -349,6 +373,12 @@ count look comprehensive.
   inspected by managed WAF rules.
 - **AI:** only request-starting POSTs are coarsely rate limited. Generation polling remains under the
   generic high ceiling; application organization budgets and authorization stay authoritative.
+
+## Reproducible evidence tooling
+
+[EDGE_EVIDENCE.md](EDGE_EVIDENCE.md) provides the read-only zone exporter, tested fail-closed
+event sanitizer, account-owner capture procedure, live HSTS findings and pending approval checklist.
+Tooling availability does not establish account deployment or approve native-event processing.
 
 ## Privacy-safe observability
 
@@ -372,8 +402,10 @@ CSRF headers, SAML assertions, webhook signatures, invite/unsubscribe/document-a
 tokens, AI content,
 uploaded filenames, and custom request headers. Business does not include Logpush; until an
 approved contract and sanitizer are operating, retain only manually reviewed aggregate rule counts
-and do not export native events. Any future exporter is a separate security/privacy-reviewed change
-with credentials in the secret store and encrypted output in an approved Japan-region sink.
+and do not export native events. The exporter and sanitizer in [EDGE_EVIDENCE.md](EDGE_EVIDENCE.md) require operational
+Security/Privacy approval before use, with credentials in the secret store and encrypted output in
+an approved Japan-region sink. Until that approval and operation are recorded, the aggregate-only
+restriction above remains in force.
 
 Cloudflare is a subprocessor and possible cross-border-processing decision, not merely a DNS
 toggle. Before cutover, complete vendor/privacy review, update the signed DPA subprocessor annex and

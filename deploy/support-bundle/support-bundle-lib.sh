@@ -245,11 +245,16 @@ support_bundle_urlencode() {
 # tests/run-tests.sh, which re-run the Java test vectors against this function.
 support_bundle_redact_path() {
     local path="$1"
-    # The path is passed as an awk variable rather than on stdin: a path containing a newline
-    # would otherwise be split into separate records, and only the first would be redacted while
-    # the rest were emitted verbatim. Journal-sourced paths are attacker-influenced, so that
+    # The path is handed to awk whole rather than on stdin: a path containing a newline would
+    # otherwise be split into separate records, and only the first would be redacted while the
+    # rest were emitted verbatim. Journal-sourced paths are attacker-influenced, so that
     # divergence from the Java redactor — which treats the whole string as one value — matters.
-    awk -v raw="$path" '
+    #
+    # It travels through the environment, not `awk -v raw=...`: awk applies escape processing to
+    # a -v assignment, so every awk rewrote `\t` and `\\`, and GNU awk also dropped the backslash
+    # from an undefined escape, turning a Spring route template such as `{id:\d+}` into `{id:d+}`.
+    # ENVIRON values are taken verbatim by every awk.
+    SUPPORT_BUNDLE_RAW_PATH="$path" awk '
         function is_numeric_id(segment) {
             return segment ~ /^[0-9]+$/
         }
@@ -272,6 +277,7 @@ support_bundle_redact_path() {
                 || parent == "logo" || parent == "profile-picture"
         }
         BEGIN {
+            raw = ENVIRON["SUPPORT_BUNDLE_RAW_PATH"]
             sub(/[?#].*$/, "", raw)
             count = split(raw, segments, "/")
             previous = ""

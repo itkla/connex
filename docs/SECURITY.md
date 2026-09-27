@@ -20,6 +20,7 @@ APPI groups these into four categories plus external-environment. This is our cu
 ### 2.1 Organizational (組織的)
 - **Tenant isolation as an enforced invariant.** A fail-closed MyBatis interceptor (`TenantScopeInterceptor`) rejects workspace-scoped queries that run without a resolved tenant context; `TenantResolutionInterceptor` resolves and re-validates org/workspace membership per request. Backed by a CI architecture test (`TenantScopeArchTest`).
 - **Append-only audit log.** `audit_log` (Flyway `V1`, workspace-scoped since `V10`) records `action`, `entity_type`/`entity_id`, `actor_id`, `ip_address`, `user_agent`, hashed `session_id`, `request_id`, field-level `changes`, and `created_at`. Row `UPDATE`/`DELETE` are blocked by DB triggers; writes are insert-only. Surfaced to admins in-app.
+- **Threat analysis.** The [architecture and data-flow threat model](THREAT_MODEL.md) records verified implementation controls, residual risks and review records. Initial source analysis is dated 2026-09-08; owner review and operational evidence remain pending.
 - **Incident response.** Documented breach-response runbook (APPI Art. 26): [APPI_BREACH_RESPONSE_RUNBOOK.md](APPI_BREACH_RESPONSE_RUNBOOK.md), [#223].
 - **Vulnerability remediation.** Findings across application code, dependencies, images, infrastructure, GitHub Actions, and third-party services follow the severity-adjusted deadlines, emergency release path, ownership, and fixed-term exception rules in [VULNERABILITY_MANAGEMENT.md](VULNERABILITY_MANAGEMENT.md).
 - **Static analysis.** Pull requests, `main`, merge groups, and weekly scans run fail-closed GitHub CodeQL analysis for backend Java and frontend TypeScript. Critical/High and error-severity findings fail the selected workflow job, but the check is not yet required by `main` branch protection and therefore does not itself prevent merge; current enforcement and self-modification limitations are documented in [STATIC_ANALYSIS.md](STATIC_ANALYSIS.md).
@@ -35,11 +36,12 @@ APPI groups these into four categories plus external-environment. This is our cu
 ### 2.4 Technical (技術的)
 - **Authentication:** WebAuthn / passkeys; password fallback hashed with BCrypt. **CSRF** enabled (session-token model); **session rotation** on login. The session cookie is `HttpOnly`, `Secure` by default, and `SameSite=Lax` by default; deployments can set stricter or SAML-compatible cookie flags via env. The frontend-readable workspace selector cookie contains only the active workspace id, is `Secure` by default, and is always revalidated against server-side membership.
 - **Authorization / RBAC:** custom per-workspace roles (`owner`/`admin`/`member` + custom `workspace_role`, `V13`) over a catalog of fine-grained permissions, enforced on a single path via `@RequirePermission` → `AuthorizationManager`. Destructive/structural ops are permission-gated and CI-backstopped (`RbacEnforcementArchTest`).
-- **Transport:** HSTS (1y, `includeSubDomains`), `Referrer-Policy: strict-origin-when-cross-origin`, and a restrictive backend Content-Security-Policy (`default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`) in `SecurityConfig`. The single-origin edge and standalone Next.js runtime extend clickjacking, MIME-sniffing, and referrer protection to frontend HTML, static assets, downloads, and error responses; see [DEPLOYMENT.md](DEPLOYMENT.md#topology).
+- **Transport:** HSTS (1y, `includeSubDomains`), `Referrer-Policy: strict-origin-when-cross-origin`, and a restrictive backend Content-Security-Policy (`default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`) in `SecurityConfig`. Frontend HTML carries an **enforced** per-request nonce-based policy (`script-src 'self' 'nonce-…' 'strict-dynamic'`, no `unsafe-eval` outside development, no wildcards) with violations reported to `/api/csp-reports` and logged as `csp.violation`; `report-only` is the single documented rollback value — see [CONTENT_SECURITY_POLICY.md](CONTENT_SECURITY_POLICY.md). The single-origin edge and standalone Next.js runtime extend clickjacking, MIME-sniffing, and referrer protection to frontend HTML, static assets, downloads, and error responses; see [DEPLOYMENT.md](DEPLOYMENT.md#topology).
 - **Public edge defence:** Cloudflare is the adopted managed WAF for `connexcrm.jp` and `preview.connexcrm.jp`; repository-side Caddy limits, the exact Cloudflare rules, origin-bypass prevention, edition-specific risk decisions, privacy-safe observability, false-positive handling, emergency disable, and the still-manual account-owner cutover are defined in [EDGE_DEFENCE.md](EDGE_DEFENCE.md). A repository change alone does not prove the public control is active.
 - **Secrets:** externalized to environment (`CONNEX_DB_*`, bootstrap credentials); local Docker passwords are kept in untracked `backend/.env`. Never-searched integration secrets are stored through the central envelope-encrypted secret store with key IDs, keyring rotation, disabled-key fail-closed behavior, metadata-only diagnostics, and audited use/rewrap operations ([runbook](SECRET_STORE_KEY_LIFECYCLE_RUNBOOK.md), [#372]).
 - **Database transport:** non-dev startup requires `CONNEX_DB_URL` to use MySQL Connector/J verified TLS (`sslMode=VERIFY_CA` or `sslMode=VERIFY_IDENTITY`). Local `dev` and `test` profiles may explicitly use plaintext Docker MySQL. A systemd invocation from the local staging checkout at `/opt/connex-staging/backend` has a narrow local-only exception for explicit loopback MySQL URLs with `sslMode=DISABLED`; remote plaintext URLs still fail closed.
 - **Business-card reading:** uploaded cards are globally admission-limited, size/signature/full-decode/dimension/frame bounded, and local PaddleOCR is preferred through a private bearer-authenticated CPU-only sidecar. The sidecar has no ingress route, outbound network access, remote-image fetch, runtime model download, content logging, or unbounded queue. Before external fallback, a scan waits up to the bounded local-first interval for an in-flight or fresh Paddle readiness decision. If Paddle is unavailable, a member with `AI_USE` may use the organization's enabled, no-training-attested provider; only the metadata-free canonical JPEG is embedded in the provider request, under a 3.5 MB/4096-pixel shared bound, and image URLs are never fetched. Image pixels can contain direct or special-care identifiers and cannot be masked like text, so this path is disclosed separately and returns bounded review-only fields. Image readiness accepts only verified multimodal model families and the exact resolved provider snapshot is rechecked before egress. Global, per-organization, and exact estimated-memory leases remain held through provider response parsing; OpenAI-compatible, Bedrock, Vertex, and Google OAuth production transports hard-cancel under one wall-clock deadline covering bounded final DNS resolution and the HTTP exchange, with the validated address pinned for the connection. Unknown models and provider failures fail closed to manual entry. Neither raw OCR output, provider output, nor card pixels are logged or persisted by the scan operation. Confirmed imports use owner-bound workspace-scoped UUID idempotency claims plus SHA-256 request fingerprints; fingerprints and request bodies are never logged, and key reuse with different card bytes or reviewed fields fails closed.
+- **Upload content inspection:** every uploaded byte passes one gate (`UploadContentInspector`) that proves the real format against the server-selected purpose, refuses extension/MIME spoofing, polyglots, active content, and package members that cannot be inspected, and fails closed on parse error, ambiguity, or timeout. The boundary contract that future ingress pipelines must reuse — entry points, artifact invariants, per-purpose format allowlist, package member policy, bounds, and known residuals — is in [UPLOAD_CONTENT_INSPECTION.md](UPLOAD_CONTENT_INSPECTION.md).
 - **Encryption guarantees:** customer-facing encryption, key custody, revocation, backup/export, and plaintext-access claims are governed by the canonical [Encryption Guarantee Matrix](ENCRYPTION_GUARANTEE_MATRIX.md), [#369]. Hosted Connex is not E2EE or zero-knowledge: the backend processes customer CRM content in plaintext to provide the service. SaaS production storage-encryption launch/evidence requirements are in [SAAS_STORAGE_ENCRYPTION_RUNBOOK.md](SAAS_STORAGE_ENCRYPTION_RUNBOOK.md), [#371]. Customer-operated/on-prem encryption default-on guidance is in [ON_PREM_ENCRYPTION_RUNBOOK.md](ON_PREM_ENCRYPTION_RUNBOOK.md), [#373]. Dedicated SaaS CMK claims are limited by [DEDICATED_SAAS_CMK_FEASIBILITY.md](DEDICATED_SAAS_CMK_FEASIBILITY.md), [#376].
 - *In progress:* broader at-rest encryption roadmap — [#92]; dedicated database provisioning/routing — [#313]; operational rotation of any database credentials that reused old committed local defaults — [#88]; brute-force/rate-limit protection — [#80].
 
@@ -142,6 +144,40 @@ Record the non-secret transfer status, access-test results, outgoing-owner revoc
 rotations, and unresolved gaps in the CHK-001 control issue [#1230]. Never record credentials or key
 material in GitHub.
 
+### Operator verification procedure
+
+**Not yet executed or passed.** Hunter Nakagawa owns recording these checks in [#249], with a
+non-secret summary in [#1230]. Run at the six-month review, after contact/provider/recovery changes,
+and during planned handover. Use synthetic content; keep recovery factors and private contact
+registers out of issues and Git.
+
+1. From an independently operated external mailbox, send a synthetic `[VULNERABILITY]` message to
+   privacy@connexcrm.jp with a unique non-secret exercise identifier and UTC send time. Confirm it
+   appears in the monitored inbox, record receipt time, and reply from the designated mailbox.
+   Confirm that the external sender receives the reply. Record elapsed acknowledgement time and
+   pass/fail separately for delivery, monitored receipt and return receipt. A sent-mail entry or
+   lack of bounce alone does not pass. If incident alerts are configured, separately exercise a
+   clearly labelled `[ACTIVE INCIDENT]` test and record actual alert receipt; do not infer alerts
+   from inbox receipt or claim 24/7 coverage from a daytime test.
+2. In a separate browser session, use the provider's documented non-destructive recovery exercise
+   or an approved test account with equivalent recovery policy. Verify the authorized custodian
+   can locate the recovery procedure, satisfy MFA/recovery requirements, access mailbox
+   administration and restore access. Retain the current working administrator session. If the
+   provider cannot demonstrate real-account recovery safely, record the test-account limitation
+   and leave real administrative recovery unverified. Record provider, policy parity, actor,
+   UTC date, result and private evidence location; never attach recovery codes or credentials.
+3. Emergency succession cannot currently be executed: no independent detector, appointment
+   authority or custody recipient is named. First record those actual appointments and achievable
+   detection/handover deadlines. Then run a tabletop with the owner treated as unavailable: the
+   independent actor detects absence, invokes the documented authority and demonstrates authorized
+   custody/recovery using the same safe procedure. Record failures and elapsed times; a tabletop
+   alone does not prove live credential recovery. The existing no-deputy acceptance is not an
+   appointment or successful drill.
+4. For each check, record expected/observed outcome, actor, timestamp, evidence location, unresolved
+   gap, accountable owner and next review date. Only update the specific operational claim that
+   the evidence supports. Escalate failures through the incident/risk process; do not mark the
+   control operational solely because this checklist exists.
+
 ### Time-bounded risk acceptance: no deputy
 
 No deputy is designated. This creates a single point of accountability and availability that may
@@ -191,3 +227,8 @@ Tracked under the security roadmap [#87] and the APPI pathway [#224]. Key open i
 [#249]: https://github.com/itkla/connex/issues/249
 [#1230]: https://github.com/itkla/connex/issues/1230
 [#1286]: https://github.com/itkla/connex/issues/1286
+
+## API inventory and retirement
+
+The generated HTTP surface, authorization-change ledger, anonymous perimeter guard and EOL process
+are documented in [API surface and retirement](backend/API_SURFACE.md) (CHK-054 / SEC-60).

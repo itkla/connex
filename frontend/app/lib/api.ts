@@ -4,6 +4,12 @@ const API_BASE =
         : "";
 
 import { clearAllDrafts } from "@/app/lib/formDrafts";
+import {
+    adoptBrowserAccount,
+    invalidateAccountStorage,
+    reconcileBrowserAccount,
+    resetBrowserAccount,
+} from "@/app/lib/browserAccountStorage";
 import { resolveAiGeneration } from '@/app/lib/aiGeneration';
 import { isProtectedPath } from "@/app/lib/protectedRoutes";
 import { isProtectedMediaPath } from "@/app/lib/protectedMedia";
@@ -18,6 +24,8 @@ import type {
 
 import * as Types from '@/app/lib/types';
 import { localeFromCookieHeader } from '@/i18n/config';
+export { subscribeToLaunch, type LaunchSignupResult } from "@/app/lib/launchSignup";
+
 // Types
 
 function requestLocale(init: RequestInit): string {
@@ -89,20 +97,23 @@ const clientRequestIdentityInvalidationListeners = new Set<() => void>();
 
 if (typeof window !== "undefined") {
     window.addEventListener("storage", (event) => {
-        if (event.key === CLIENT_IDENTITY_EVENT_KEY) {
-            invalidateClientRequestIdentity();
-            if (event.newValue?.startsWith("logout:")) {
-                clearAllDrafts();
-                window.location.reload();
-            } else if (event.newValue?.startsWith("workspace:")) {
-                if (isProtectedPath(window.location.pathname)) {
-                    window.location.replace("/dashboard");
-                } else {
-                    window.location.reload();
-                }
-            } else if (event.newValue?.startsWith("refresh:")) {
+        if (event.key !== CLIENT_IDENTITY_EVENT_KEY) return;
+        const action = event.newValue?.split(":")[0];
+        if (action === "logout") resetBrowserAccount();
+        else if (action === "account") invalidateAccountStorage();
+        else if (action === "refresh") reconcileBrowserAccount();
+        invalidateClientRequestIdentity();
+        if (action === "logout") {
+            clearAllDrafts();
+            window.location.reload();
+        } else if (action === "workspace") {
+            if (isProtectedPath(window.location.pathname)) {
+                window.location.replace("/dashboard");
+            } else {
                 window.location.reload();
             }
+        } else if (action === "refresh") {
+            window.location.reload();
         }
     });
 }
@@ -202,7 +213,7 @@ export function fetchProtectedMediaResponse(
     });
 }
 
-type ClientIdentityTransition = "invalidate" | "refresh" | "logout" | "workspace";
+type ClientIdentityTransition = "invalidate" | "account" | "refresh" | "logout" | "workspace";
 
 function broadcastClientRequestIdentityTransition(action: ClientIdentityTransition) {
     if (typeof window === "undefined") return;
@@ -217,8 +228,22 @@ function broadcastClientRequestIdentityTransition(action: ClientIdentityTransiti
 }
 
 function signalClientRequestIdentityTransition(action: ClientIdentityTransition) {
+    if (action === "account") invalidateAccountStorage();
+    if (action === "logout") resetBrowserAccount();
     invalidateClientRequestIdentity();
     broadcastClientRequestIdentityTransition(action);
+}
+
+/**
+ * Synchronizes storage after server-rendered authentication. Only a different account discards the
+ * previous account's browser data; re-authenticating the same user keeps that user's own data.
+ * @param userId the account the server authenticated for this document
+ */
+export function synchronizeBrowserAccount(userId: number): void {
+    if (adoptBrowserAccount(userId) !== "replaced") return;
+    clearAllDrafts();
+    invalidateClientRequestIdentity();
+    broadcastClientRequestIdentityTransition("refresh");
 }
 
 async function resolveClientRequestIdentity(): Promise<ResolvedClientRequestIdentity | null> {
@@ -1306,28 +1331,42 @@ async function getAuthenticatedApiError(res: Response): Promise<ApiError> {
 }
 
 /**
- * Calls a public, unauthenticated endpoint without the workspace header, CSRF token, or credentials
- * the tenant-scoped helpers attach. Used for links a recipient opens with no Connex session.
+ * Calls a token-free recipient endpoint whose only credential is its purpose-bound HttpOnly flow
+ * cookie, obtained beforehand by exchanging the emailed fragment bearer. Sends credentials and a
+ * CSRF header on mutations, and deliberately omits the workspace header so a signed-in member's
+ * active workspace can never be mistaken for the link's tenant.
  * @param path the API path to request
  * @param method the HTTP method
- * @param init optional fetch overrides
  * @param parse validates and returns the endpoint-specific response
+ * @param init optional fetch overrides
  * @returns the validated JSON body
  * @throws ApiError when the response status is not ok
  */
-async function publicJson<T>(
+async function linkFlowJson<T>(
     path: string,
     method: "GET" | "POST",
     parse: (value: unknown) => T,
     init: RequestInit = {},
 ): Promise<T> {
-    const res = await fetch(`${API_BASE}${path}`, {
-        cache: "no-store",
-        ...init,
-        method,
-        credentials: "omit",
-        headers: { Accept: "application/json", ...init.headers },
-    });
+    const send = async (forceRefresh: boolean) => {
+        const headers = new Headers({
+            Accept: "application/json",
+            "Accept-Language": requestLocale(init),
+            ...(method === "POST" ? await csrfHeader(forceRefresh) : {}),
+        });
+        new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+        return fetch(`${API_BASE}${path}`, {
+            cache: "no-store",
+            ...init,
+            method,
+            credentials: "include",
+            headers,
+        });
+    };
+    let res = await send(false);
+    if (method === "POST" && res.status === 403) {
+        res = await send(true);
+    }
     if (!res.ok) {
         throw await getApiError(res);
     }
@@ -1429,15 +1468,41 @@ function isDocumentBodyMark(value: unknown): value is Types.DocumentBodyMark {
         && (value.attrs === undefined || isObjectRecord(value.attrs));
 }
 
-function isDocumentBodyNode(value: unknown): value is Types.DocumentBodyNode {
-    return isObjectRecord(value)
-        && typeof value.type === "string"
-        && (value.attrs === undefined || isObjectRecord(value.attrs))
-        && (value.content === undefined
-            || (Array.isArray(value.content) && value.content.every(isDocumentBodyNode)))
-        && (value.marks === undefined
-            || (Array.isArray(value.marks) && value.marks.every(isDocumentBodyMark)))
-        && (value.text === undefined || typeof value.text === "string");
+function isDocumentBodyNode(
+    value: unknown,
+    parent = "root",
+    depth = 0,
+    budget = { nodes: 0 },
+): value is Types.DocumentBodyNode {
+    if (depth > 50 || ++budget.nodes > 5000 || !isObjectRecord(value)
+            || typeof value.type !== "string"
+            || (value.attrs !== undefined && !isObjectRecord(value.attrs))
+            || (value.content !== undefined && !Array.isArray(value.content))
+            || (value.marks !== undefined
+                && (!Array.isArray(value.marks) || !value.marks.every(isDocumentBodyMark)))
+            || (value.text !== undefined && typeof value.text !== "string")) {
+        return false;
+    }
+    const blocks = [
+        "paragraph", "heading", "bulletList", "orderedList", "blockquote", "codeBlock",
+        "horizontalRule", "lineItems",
+    ];
+    const allowed = parent === "root" ? ["doc"]
+        : ["doc", "blockquote", "listItem"].includes(parent) ? blocks
+        : ["bulletList", "orderedList"].includes(parent) ? ["listItem"]
+        : ["paragraph", "heading"].includes(parent) ? ["text", "hardBreak", "mergeToken"]
+        : parent === "codeBlock" ? ["text"] : [];
+    if (!allowed.includes(value.type)
+            || (value.type === "text" && typeof value.text !== "string")) {
+        return false;
+    }
+    const content = Array.isArray(value.content) ? value.content : [];
+    if (value.type === "listItem"
+            && (!isObjectRecord(content[0]) || content[0].type !== "paragraph")) {
+        return false;
+    }
+    const type = value.type;
+    return content.every((child: unknown) => isDocumentBodyNode(child, type, depth + 1, budget));
 }
 
 function isDealLineItem(value: unknown): value is Types.DealLineItem {
@@ -1508,6 +1573,8 @@ function isDocumentAcceptancePreview(
     value: unknown,
 ): value is Types.DocumentAcceptancePreview {
     return isObjectRecord(value)
+        && typeof value.flowId === "string"
+        && /^[0-9a-f]{64}$/.test(value.flowId)
         && isDocumentContent(value.content)
         && typeof value.dealName === "string"
         && typeof value.workspaceName === "string"
@@ -1553,12 +1620,15 @@ function parseDocumentAcceptanceDecision(value: unknown): Types.DocumentAcceptan
 
 function parseDeliveryUnsubscribeInfo(value: unknown): Types.DeliveryUnsubscribeInfo {
     if (!isObjectRecord(value)
+            || typeof value.flowId !== "string"
+            || !/^[0-9a-f]{64}$/.test(value.flowId)
             || typeof value.channel !== "string"
             || typeof value.address !== "string"
             || typeof value.unsubscribed !== "boolean") {
         throw invalidPublicResponse();
     }
     return {
+        flowId: value.flowId,
         channel: value.channel,
         address: value.address,
         unsubscribed: value.unsubscribed,
@@ -1674,6 +1744,7 @@ export async function getPublicPageUserFromCookie(cookie: string | null): Promis
 }
 
 export function logout() {
+    signalClientRequestIdentityTransition("account");
     clearAllDrafts();
     return withClientRequestIdentityReset(() => postJson<void>("/api/auth/logout"), "logout");
 }
@@ -1787,10 +1858,10 @@ export function validateEmailChangeToken(init: RequestInit = {}) {
 
 /**
  * Applies a pending email change behind a valid confirmation token.
- * @returns A promise resolving to the confirmation message
+ * @returns The confirmation message and pending workspace invitations revoked by the change
  */
 export function confirmEmailChange() {
-    return postJson<Types.AuthResponse>("/api/auth/email-change/confirm", {});
+    return postJson<Types.EmailChangeConfirmation>("/api/auth/email-change/confirm", {});
 }
 
 export function getPasskeys(init: RequestInit = {}) {
@@ -2227,8 +2298,12 @@ export function getUserActivities(id: number, init: RequestInit = {}) {
     return getJson<Types.Activity[]>(`/api/users/${id}/activities`, init);
 }
 
-export function getUserNotes(id: number, init: RequestInit = {}) {
-    return getJson<Types.Note[]>(`/api/users/${id}/notes`, init);
+export function getUserNotes(id: number, params: Types.NotePageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Note[]>(`/api/users/${id}/notes${buildQuery(params)}`, init);
+}
+
+export function getUserNotesPage(id: number, params: Types.PageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Page<Types.Note>>(`/api/users/${id}/notes/page${buildQuery(params)}`, init);
 }
 
 export function getUserTasksFromCookie(id: number, cookie: string | null) {
@@ -2239,8 +2314,18 @@ export function getUserActivitiesFromCookie(id: number, cookie: string | null) {
     return safeReadWithCookie<Types.Activity>((init) => getUserActivities(id, init), cookie);
 }
 
-export function getUserNotesFromCookie(id: number, cookie: string | null) {
-    return safeReadWithCookie<Types.Note>((init) => getUserNotes(id, init), cookie);
+export function getUserNotesFromCookie(id: number, cookie: string | null, params: Types.PageParams = {}) {
+    return safeReadWithCookie<Types.Note>((init) => getUserNotes(id, params, init), cookie);
+}
+
+/** Reads the complete visible 84-day note activity aggregate independently of timeline pages. */
+export function getUserNoteActivityResultFromCookie(id: number, cookie: string | null) {
+    return resultWithCookie<Types.NoteActivityDay[]>(
+        (init) => getJson<Types.NoteActivityDay[]>(`/api/users/${id}/notes/pulse`, init), cookie);
+}
+
+export function getUserNotesPageResultFromCookie(id: number, cookie: string | null) {
+    return resultWithCookie<Types.Page<Types.Note>>((init) => getUserNotesPage(id, {}, init), cookie);
 }
 
 /*
@@ -2388,9 +2473,11 @@ export function getNoteById(id: number, init: RequestInit = {}) {
     return getJson<Types.Note>(`/api/notes/${id}`, init);
 }
 
-export function getNotesReferencing(refType: string, refId: number, init: RequestInit = {}) {
+export function getNotesReferencing(
+    refType: string, refId: number, params: Types.PageParams = {}, init: RequestInit = {},
+) {
     return getJson<Types.Note[]>(
-        `/api/notes/referencing?refType=${encodeURIComponent(refType)}&refId=${refId}`,
+        `/api/notes/referencing?refType=${encodeURIComponent(refType)}&refId=${refId}&page=${params.page ?? 1}&size=${params.size ?? 25}`,
         init,
     );
 }
@@ -3887,8 +3974,12 @@ export function getActivitiesForDeal(id: number, init: RequestInit = {}) {
     return getJson<Types.Activity[]>(`/api/deals/${id}/activities`, init);
 }
 
-export function getNotesForDeal(id: number, init: RequestInit = {}) {
-    return getJson<Types.Note[]>(`/api/deals/${id}/notes`, init);
+export function getNotesForPerson(id: number, params: Types.NotePageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Note[]>(`/api/persons/${id}/notes${buildQuery({ page: 1, size: 25, ...params })}`, init);
+}
+
+export function getNotesForDeal(id: number, params: Types.NotePageParams = {}, init: RequestInit = {}) {
+    return getJson<Types.Note[]>(`/api/deals/${id}/notes${buildQuery({ page: 1, size: 25, ...params })}`, init);
 }
 
 export function getTasksForDeal(id: number, init: RequestInit = {}) {
@@ -6617,15 +6708,23 @@ export function reconcileCampaignRecipient(
 }
 
 /**
- * Fetches the public unsubscribe preview for a delivery token. Deliberately bypasses the workspace
- * and CSRF machinery: the route is unauthenticated and resolves the tenant from the token alone.
- * @param token the 64-character hex delivery token from the unsubscribe link
- * @param init optional fetch overrides (used by SSR to disable caching)
+ * Exchanges an emailed unsubscribe fragment bearer for its purpose-bound browser flow, so the raw
+ * token travels once in a request body and never in a URL.
+ * @param token the 64-character hex delivery token from the unsubscribe link fragment
+ */
+export function exchangeUnsubscribeToken(token: string) {
+    return exchangeOneTimeLink("/api/delivery/unsubscribe/exchange", token);
+}
+
+/**
+ * Fetches the unsubscribe preview through the exchanged flow cookie. Deliberately bypasses the
+ * workspace machinery: the route is unauthenticated and resolves the tenant from the flow alone.
+ * @param init optional fetch overrides
  * @returns the masked address, channel, and current suppression state
  */
-export function getUnsubscribeInfo(token: string, init: RequestInit = {}) {
-    return publicJson(
-        `/api/delivery/unsubscribe/${token}`,
+export function getUnsubscribeInfo(init: RequestInit = {}) {
+    return linkFlowJson(
+        "/api/delivery/unsubscribe",
         "GET",
         parseDeliveryUnsubscribeInfo,
         init,
@@ -6633,16 +6732,20 @@ export function getUnsubscribeInfo(token: string, init: RequestInit = {}) {
 }
 
 /**
- * Confirms an unsubscribe for a delivery token, suppressing the resolved address. Public and
- * idempotent: repeat confirmations return the already-unsubscribed state without error.
- * @param token the 64-character hex delivery token from the unsubscribe link
+ * Confirms the unsubscribe the flow cookie authorizes, suppressing the resolved address.
+ * Idempotent: repeat confirmations return the already-unsubscribed state without error.
+ * @param payload the flow identity of the preview being confirmed
  * @returns the masked address, channel, and resulting suppression state
  */
-export function confirmUnsubscribe(token: string) {
-    return publicJson(
-        `/api/delivery/unsubscribe/${token}`,
+export function confirmUnsubscribe(payload: Types.ConfirmUnsubscribePayload) {
+    return linkFlowJson(
+        "/api/delivery/unsubscribe",
         "POST",
         parseDeliveryUnsubscribeInfo,
+        {
+            body: JSON.stringify(payload),
+            headers: { "Content-Type": "application/json" },
+        },
     );
 }
 
@@ -6740,29 +6843,38 @@ export function getVersion(init: RequestInit = {}) {
     return getJson<Types.ProductVersion>("/api/version", { cache: "no-store", ...init });
 }
 
-/** Fetches a frozen document through its session-less recipient bearer. */
-export function getDocumentAcceptancePreview(token: string, init: RequestInit = {}) {
-    return publicJson(
-        `/api/document-acceptance/${encodeURIComponent(token)}`,
+/**
+ * Exchanges an emailed document-acceptance fragment bearer for its purpose-bound browser flow, so
+ * the raw token travels once in a request body and never in a URL.
+ * @param token the raw recipient bearer from the acceptance link fragment
+ */
+export function exchangeDocumentAcceptanceToken(token: string) {
+    return exchangeOneTimeLink("/api/document-acceptance/exchange", token);
+}
+
+/** Fetches a frozen document through the exchanged session-less recipient flow. */
+export function getDocumentAcceptancePreview(init: RequestInit = {}) {
+    return linkFlowJson(
+        "/api/document-acceptance",
         "GET",
         parseDocumentAcceptancePreview,
         init,
     );
 }
 
-/** Records one rendered view through the session-less recipient bearer. */
-export function markDocumentAcceptanceViewed(token: string) {
-    return publicJson(
-        `/api/document-acceptance/${encodeURIComponent(token)}/viewed`,
+/** Records one rendered view through the exchanged session-less recipient flow. */
+export function markDocumentAcceptanceViewed() {
+    return linkFlowJson(
+        "/api/document-acceptance/viewed",
         "POST",
         parseDocumentAcceptancePreview,
     );
 }
 
-/** Records a typed-name acceptance through the session-less recipient bearer. */
-export function acceptDocument(token: string, payload: Types.AcceptDocumentPayload) {
-    return publicJson(
-        `/api/document-acceptance/${encodeURIComponent(token)}/accept`,
+/** Records a typed-name acceptance through the exchanged session-less recipient flow. */
+export function acceptDocument(payload: Types.AcceptDocumentPayload) {
+    return linkFlowJson(
+        "/api/document-acceptance/accept",
         "POST",
         parseDocumentAcceptanceDecision,
         {
@@ -6772,10 +6884,10 @@ export function acceptDocument(token: string, payload: Types.AcceptDocumentPaylo
     );
 }
 
-/** Records a reasoned decline through the session-less recipient bearer. */
-export function declineDocument(token: string, payload: Types.DeclineDocumentPayload) {
-    return publicJson(
-        `/api/document-acceptance/${encodeURIComponent(token)}/decline`,
+/** Records a reasoned decline through the exchanged session-less recipient flow. */
+export function declineDocument(payload: Types.DeclineDocumentPayload) {
+    return linkFlowJson(
+        "/api/document-acceptance/decline",
         "POST",
         parseDocumentAcceptanceDecision,
         {
@@ -6791,6 +6903,7 @@ export function documentAcceptanceFailureKind(
 ): Types.DocumentAcceptanceFailureKind | null {
     if (!(error instanceof ApiError)) return null;
     if (error.code === INVALID_PUBLIC_RESPONSE_CODE) return "service-unavailable";
+    if (error.status === 400) return "unavailable";
     if (error.status === 404) return "unavailable";
     if (error.status === 429) return "throttled";
     if (error.status === 503) return "service-unavailable";

@@ -9,6 +9,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -22,8 +26,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import ooo.klae.connex.backend.beans.DocumentDelivery;
 import ooo.klae.connex.backend.beans.DocumentDeliveryArtifact;
 import ooo.klae.connex.backend.beans.DocumentDeliveryRecipient;
-import ooo.klae.connex.backend.dto.AcceptDocumentRequest;
-import ooo.klae.connex.backend.dto.DeclineDocumentRequest;
 import ooo.klae.connex.backend.dto.DocumentAcceptanceDecisionDto;
 import ooo.klae.connex.backend.dto.DocumentAcceptancePreviewDto;
 import ooo.klae.connex.backend.dto.DocumentDeliveryDto;
@@ -53,20 +55,18 @@ class DocumentAcceptanceCommittedFixtureTest
         String token = installToken(viewerRecipientId);
 
         DocumentAcceptancePreviewDto preview =
-            acceptanceService.preview(token, "192.0.2.17");
+            acceptanceService.preview(link(token), "192.0.2.17");
         DocumentAcceptancePreviewDto viewed =
-            acceptanceService.markViewed(token, "192.0.2.17");
+            acceptanceService.markViewed(link(token), "192.0.2.17");
 
         assertFalse(preview.actionable());
         assertFalse(viewed.actionable());
-        assertThrows(ResourceNotFoundException.class, () -> acceptanceService.accept(
-            token,
-            new AcceptDocumentRequest("Viewer"),
+        assertThrows(ResourceNotFoundException.class, () -> acceptanceService.accept(link(token),
+            acceptRequest(token, "Viewer"),
             "192.0.2.17",
             "viewer-agent"));
-        assertThrows(ResourceNotFoundException.class, () -> acceptanceService.decline(
-            token,
-            new DeclineDocumentRequest("Viewer cannot decide"),
+        assertThrows(ResourceNotFoundException.class, () -> acceptanceService.decline(link(token),
+            declineRequest(token, "Viewer cannot decide"),
             "192.0.2.17",
             "viewer-agent"));
         assertEquals(1, countEvents(delivery.id(), "viewed"));
@@ -78,14 +78,12 @@ class DocumentAcceptanceCommittedFixtureTest
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
 
-        DocumentAcceptanceDecisionDto first = acceptanceService.decline(
-            token,
-            new DeclineDocumentRequest("Commercial terms were not accepted"),
+        DocumentAcceptanceDecisionDto first = acceptanceService.decline(link(token),
+            declineRequest(token, "Commercial terms were not accepted"),
             "192.0.2.18",
             "decline-agent");
-        DocumentAcceptanceDecisionDto second = acceptanceService.decline(
-            token,
-            new DeclineDocumentRequest("Changed reason"),
+        DocumentAcceptanceDecisionDto second = acceptanceService.decline(link(token),
+            declineRequest(token, "Changed reason"),
             "198.51.100.18",
             "changed-agent");
 
@@ -106,11 +104,9 @@ class DocumentAcceptanceCommittedFixtureTest
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
 
-        DocumentAcceptancePreviewDto first = acceptanceService.markViewed(
-            token,
+        DocumentAcceptancePreviewDto first = acceptanceService.markViewed(link(token),
             "192.0.2.19");
-        DocumentAcceptancePreviewDto second = acceptanceService.markViewed(
-            token,
+        DocumentAcceptancePreviewDto second = acceptanceService.markViewed(link(token),
             "198.51.100.19");
 
         assertEquals(first, second);
@@ -129,14 +125,12 @@ class DocumentAcceptanceCommittedFixtureTest
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
 
-        DocumentAcceptanceDecisionDto first = acceptanceService.accept(
-            token,
-            new AcceptDocumentRequest("Committed Signer"),
+        DocumentAcceptanceDecisionDto first = acceptanceService.accept(link(token),
+            acceptRequest(token, "Committed Signer"),
             "192.0.2.20",
             "accept-agent");
-        DocumentAcceptanceDecisionDto second = acceptanceService.accept(
-            token,
-            new AcceptDocumentRequest("Changed Signer"),
+        DocumentAcceptanceDecisionDto second = acceptanceService.accept(link(token),
+            acceptRequest(token, "Changed Signer"),
             "198.51.100.20",
             "changed-agent");
 
@@ -156,6 +150,11 @@ class DocumentAcceptanceCommittedFixtureTest
         DocumentFixture fixture = finalDocument();
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
+        jdbcTemplate.update(
+            "UPDATE document_delivery SET sent_at = ? WHERE workspace_id = ? AND id = ?",
+            LocalDateTime.now(ZoneOffset.UTC).truncatedTo(ChronoUnit.MINUTES).minusMinutes(1),
+            workspace.getId(),
+            delivery.id());
         String frozenContent = jdbcTemplate.queryForObject(
             "SELECT content FROM deal_document WHERE workspace_id = ? AND id = ?",
             String.class,
@@ -165,11 +164,10 @@ class DocumentAcceptanceCommittedFixtureTest
             .getBytes(StandardCharsets.UTF_8);
         String expectedSignedDocumentSha256 = sha256(frozenContent);
 
-        acceptanceService.preview(token, "192.0.2.30");
-        acceptanceService.markViewed(token, "192.0.2.30");
-        acceptanceService.accept(
-            token,
-            new AcceptDocumentRequest("External Signer"),
+        acceptanceService.preview(link(token), "192.0.2.30");
+        acceptanceService.markViewed(link(token), "192.0.2.30");
+        acceptanceService.accept(link(token),
+            acceptRequest(token, "External Signer"),
             "192.0.2.30",
             "artifact-preservation-agent");
 
@@ -217,12 +215,12 @@ class DocumentAcceptanceCommittedFixtureTest
         replacements.put("{{providerEnvelopeId}}", "in_app:" + workspace.getId()
             + ":" + delivery.getId());
         replacements.put("{{deliveryId}}", Integer.toString(delivery.getId()));
-        replacements.put("{{sentAt}}", delivery.getSentAt().toString());
-        replacements.put("{{completedAt}}", delivery.getCompletedAt().toString());
+        replacements.put("{{sentAt}}", certificateTimestamp(delivery.getSentAt()));
+        replacements.put("{{completedAt}}", certificateTimestamp(delivery.getCompletedAt()));
         replacements.put("{{signedDocumentSha256}}", signedDocumentSha256);
         replacements.put("{{recipientId}}", Integer.toString(recipient.getId()));
-        replacements.put("{{firstViewedAt}}", recipient.getFirstViewedAt().toString());
-        replacements.put("{{decidedAt}}", recipient.getDecidedAt().toString());
+        replacements.put("{{firstViewedAt}}", certificateTimestamp(recipient.getFirstViewedAt()));
+        replacements.put("{{decidedAt}}", certificateTimestamp(recipient.getDecidedAt()));
         String evidenceScope = workspace.getId() + ":" + delivery.getId()
             + ":" + recipient.getId();
         String tokenHash = sha256(token);
@@ -234,6 +232,15 @@ class DocumentAcceptanceCommittedFixtureTest
             expected = expected.replace(replacement.getKey(), replacement.getValue());
         }
         return expected.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Renders a certificate timestamp in the ISO-8601 form the certificate contract
+     * uses, which always carries seconds; {@link LocalDateTime#toString()} drops
+     * {@code :00} seconds from second-precision values.
+     */
+    private static String certificateTimestamp(LocalDateTime value) {
+        return DateTimeFormatter.ISO_LOCAL_DATE_TIME.format(value);
     }
 
     private static String expectedEvidenceHash(String key, String purpose, String value) {

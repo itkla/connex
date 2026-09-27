@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.services;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.List;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -10,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 
 import ooo.klae.connex.backend.beans.Deal;
+import ooo.klae.connex.backend.dto.DealLineItemDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.DealLineItemMapper;
 import ooo.klae.connex.backend.mappers.DealMapper;
@@ -22,6 +24,8 @@ public class DealValueService {
     private static final String LINE_ITEMS = "line_items";
     private static final String LINE_ITEM_VALUE_CONFLICT =
         "Cannot manually edit the deal value while line items exist; update or remove the line items first";
+    private static final String LINE_ITEM_CURRENCY_CONFLICT =
+        "Cannot reconcile a deal whose line items are denominated in another currency";
 
     private final DealMapper dealMapper;
     private final DealLineItemMapper dealLineItemMapper;
@@ -30,6 +34,7 @@ public class DealValueService {
     @Transactional(readOnly = true)
     public BigDecimal canonicalValue(int workspaceId, Deal deal) {
         if (LINE_ITEMS.equals(deal.getValueSource())) {
+            requireConsistentLineCurrency(workspaceId, deal);
             return money(dealLineItemMapper.sumLineTotals(workspaceId, deal.getId()));
         }
         return money(deal.getValue());
@@ -53,6 +58,7 @@ public class DealValueService {
     /** Reconciles the locked deal after a line-item mutation. */
     @Transactional(propagation = Propagation.MANDATORY)
     public BigDecimal reconcileLineItems(int workspaceId, Deal lockedDeal) {
+        requireConsistentLineCurrency(workspaceId, lockedDeal);
         if (dealLineItemMapper.countByDealId(workspaceId, lockedDeal.getId()) > 0) {
             BigDecimal total = money(dealLineItemMapper.sumLineTotals(workspaceId, lockedDeal.getId()));
             dealMapper.updateValueAndSource(workspaceId, lockedDeal.getId(), total, LINE_ITEMS);
@@ -114,7 +120,8 @@ public class DealValueService {
      *       reason the reconciliation is centralized: {@code deal_metrics.closed_revenue} sums
      *       {@code actual_value} across every closed deal, so a won-to-lost transition that kept the
      *       won figure would inflate reported revenue by the full value of a deal the business
-     *       failed to win.</li>
+     *       failed to win. Zeroing reads no line total, so it is also the one case that does not
+     *       consult line currency — refusing it would strand a deal at its won figure.</li>
      *   <li><b>Freshly won</b> — derives from the line-item total, or records the submitted amount
      *       when the deal has no line items. The stored figure is never inherited, so winning a deal
      *       lands on the same value however often it was won and lost before.</li>
@@ -136,6 +143,7 @@ public class DealValueService {
         if (Boolean.FALSE.equals(lockedDeal.getWon())) {
             return persistRealizedValue(workspaceId, lockedDeal, money(null));
         }
+        requireConsistentLineCurrency(workspaceId, lockedDeal);
         if (Boolean.TRUE.equals(lockedDeal.getWon()) && !Boolean.TRUE.equals(previousOutcome)) {
             return persistRealizedValue(workspaceId, lockedDeal,
                 resolveRealizedValueForFreshWin(workspaceId, lockedDeal, requestedActualValue));
@@ -192,6 +200,31 @@ public class DealValueService {
         }
         lockedDeal.setActualValue(realized);
         return realized;
+    }
+
+    /**
+     * Refuses a deal whose line totals are denominated in another currency. A deal has exactly one
+     * currency and there is no FX anywhere, so summing such lines would book a foreign nominal as
+     * the deal currency. Outcome writers assert this before the row write, not only before the
+     * roll-up, so a refusal cannot leave a half-applied transition behind.
+     * @param workspaceId tenant scope
+     * @param deal the deal whose currency governs its lines
+     */
+    @Transactional(propagation = Propagation.SUPPORTS, readOnly = true)
+    public void requireConsistentLineCurrency(int workspaceId, Deal deal) {
+        if (dealLineItemMapper.hasCurrencyMismatch(workspaceId, deal.getId(), deal.getCurrency())) {
+            throw new ConflictException(LINE_ITEM_CURRENCY_CONFLICT);
+        }
+    }
+
+    /** Refuses foreign lines in the exact snapshot being frozen under the parent deal lock. */
+    void requireConsistentLineCurrency(Deal deal, List<DealLineItemDto> lines) {
+        for (DealLineItemDto line : lines) {
+            if (deal.getCurrency() == null || deal.getCurrency().isBlank() || line.getCurrency() == null
+                    || !deal.getCurrency().equalsIgnoreCase(line.getCurrency())) {
+                throw new ConflictException(LINE_ITEM_CURRENCY_CONFLICT);
+            }
+        }
     }
 
     private static BigDecimal money(BigDecimal value) {

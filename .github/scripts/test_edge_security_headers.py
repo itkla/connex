@@ -151,9 +151,9 @@ def effective_referrer_policy(path: str) -> str:
         for operation in site_operations
         if operation[0].lstrip("+?->") == "Referrer-Policy"
     )
-    if path.startswith("/document-acceptance/"):
+    if path == "/document-acceptance" or path.startswith("/document-acceptance/"):
         acceptance_operations = direct_child_header_operations(
-            "handle /document-acceptance/* {",
+            "handle @document_acceptance {",
             2,
         )
         return next(
@@ -240,7 +240,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
 
     def test_referrer_policy_is_route_specific_after_proxying(self) -> None:
         acceptance_operations = direct_child_header_operations(
-            "handle /document-acceptance/* {",
+            "handle @document_acceptance {",
             2,
         )
 
@@ -250,7 +250,7 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
         )
         self.assertEqual(
             "no-referrer",
-            effective_referrer_policy("/document-acceptance/w42-secret"),
+            effective_referrer_policy("/document-acceptance"),
         )
         self.assertEqual(
             "strict-origin-when-cross-origin",
@@ -302,34 +302,38 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
         caddyfile = CADDYFILE_PATH.read_text(encoding="utf-8")
         self.assertEqual(
             [
+                "@launch_signups",
                 "@imports",
                 "@uploads",
                 "@business_cards",
                 "@client_errors",
+                "@csp_reports",
                 "@webauthn",
                 "@workflows",
                 "@saml",
                 "/api/*",
-                "/document-acceptance/*",
+                "@document_acceptance",
                 None,
             ],
             direct_route_handles(),
         )
         expected_limits = {
+            "@launch_signups": "4096",
             "@imports": "{$CONNEX_IMPORT_MAX_BODY_BYTES:67108864}",
             "@uploads": "{$CONNEX_UPLOAD_MAX_BODY_BYTES:28311552}",
             "@business_cards": "{$CONNEX_BUSINESS_CARD_MAX_BODY_BYTES:12582912}",
             "@client_errors": "{$CONNEX_CLIENT_ERRORS_MAX_BODY_BYTES:16384}",
+            "@csp_reports": "{$CONNEX_CSP_REPORTS_MAX_BODY_BYTES:16384}",
             "@webauthn": "{$CONNEX_WEBAUTHN_MAX_BODY_BYTES:65536}",
             "@workflows": "{$CONNEX_WORKFLOW_MAX_BODY_BYTES:98304}",
             "@saml": "{$CONNEX_FORM_MAX_BODY_BYTES:1048576}",
             "/api/*": "{$CONNEX_API_MAX_BODY_BYTES:10485760}",
-            "/document-acceptance/*": "{$CONNEX_FORM_MAX_BODY_BYTES:1048576}",
+            "@document_acceptance": "{$CONNEX_FORM_MAX_BODY_BYTES:1048576}",
         }
         for matcher, limit in expected_limits.items():
             with self.subTest(matcher=matcher):
                 self.assertEqual(limit, request_body_limit_for_handle(matcher))
-                if matcher not in ("/api/*", "/document-acceptance/*"):
+                if matcher not in ("/api/*", "@document_acceptance"):
                     self.assertLess(
                         caddyfile.index(f"handle {matcher} {{"),
                         caddyfile.index("handle /api/* {"),
@@ -349,7 +353,17 @@ class EdgeSecurityHeadersTest(unittest.TestCase):
         lines = tokenized_caddyfile()
         self.assertIn(["header_up", "X-Forwarded-For", "{client_ip}"], lines)
         self.assertIn(["header_up", "-CF-Connecting-IP"], lines)
-        self.assertEqual(8, lines.count(["import", "backend_proxy"]))
+        self.assertEqual(9, lines.count(["import", "backend_proxy"]))
+
+    def test_launch_signups_use_frontend_without_application_credentials(self) -> None:
+        caddyfile = CADDYFILE_PATH.read_text(encoding="utf-8")
+        block = caddyfile.split("handle @launch_signups {", 1)[1].split("@imports path", 1)[0]
+        self.assertIn("@launch_signups path /api/launch-signups", caddyfile)
+        self.assertIn("reverse_proxy frontend:3000", block)
+        self.assertIn("header_up X-Connex-Client-IP {client_ip}", block)
+        self.assertIn("header_up -Cookie", block)
+        self.assertIn("header_up -Authorization", block)
+        self.assertNotIn("import backend_proxy", block)
 
     def test_authoritative_cloudflare_rate_rules_and_exclusions_are_documented(self) -> None:
         edge_defence = EDGE_DEFENCE_PATH.read_text(encoding="utf-8")

@@ -11,16 +11,26 @@ public interface OneTimeLinkFlowMapper {
         @Param("exchangeOwnerHash") String exchangeOwnerHash,
         @Param("purpose") String purpose);
 
-    /** Creates or renews the deterministic grant for one browser, source, and purpose. */
+    /**
+     * Creates or renews the deterministic grant for one browser, source, and purpose. The routing
+     * hint is null for control-plane sources and a workspace id for tenant-plane sources.
+     */
     void upsert(
         @Param("grantHash") String grantHash,
         @Param("exchangeOwnerHash") String exchangeOwnerHash,
         @Param("purpose") String purpose,
         @Param("sourceTokenHash") String sourceTokenHash,
+        @Param("routingWorkspaceId") Integer routingWorkspaceId,
         @Param("lifetimeSeconds") long lifetimeSeconds);
 
     /** Returns the source digest only for an unexpired grant owned by the session lineage. */
     String findValidSourceTokenHash(
+        @Param("grantHash") String grantHash,
+        @Param("exchangeOwnerHash") String exchangeOwnerHash,
+        @Param("purpose") String purpose);
+
+    /** Returns the tenant routing hint only for an unexpired grant owned by the session lineage. */
+    Integer findValidRoutingWorkspaceId(
         @Param("grantHash") String grantHash,
         @Param("exchangeOwnerHash") String exchangeOwnerHash,
         @Param("purpose") String purpose);

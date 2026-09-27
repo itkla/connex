@@ -2,7 +2,6 @@ package ooo.klae.connex.backend.ai;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -13,7 +12,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import org.springframework.stereotype.Service;
@@ -759,6 +757,7 @@ public class AiInvocationService {
         AiInvocation effectiveInvocation = invocationOutputTokensClamped
                 ? withMaxTokens(invocation, providerMaxOutputTokens)
                 : invocation;
+        registerEnvelopeAuthoredText(effectiveInvocation.context(), reasoningMode, nativeTools);
 
         String serializedPrompt;
         try {
@@ -780,7 +779,7 @@ public class AiInvocationService {
         }
 
         try {
-            OutboundLeakScan.assertNoLeak(serializedPrompt, effectiveInvocation.context(), objectMapper);
+            OutboundLeakScan.assertNoLeakInServerEnvelope(serializedPrompt, effectiveInvocation.context(), objectMapper);
         } catch (MaskingLeakException exception) {
             emitAudit(workspaceId, orgId, resolved, effectiveInvocation, correlationId, "blocked",
                     null, null, null, null, "leak", structured, null, exception,
@@ -1001,6 +1000,36 @@ public class AiInvocationService {
                         normalized.rejectionReason() == null
                                 ? "narration_shape"
                                 : normalized.rejectionReason()));
+    }
+
+    /**
+     * Registers the server-authored text this method appends to the envelope after the prompt was
+     * assembled.
+     *
+     * <p>{@link PromptAssembly} registers the system prompt a feature wrote, but the tagged
+     * reasoning directive and the native tool catalogue are attached here, later, and would
+     * otherwise be scanned as tenant text nobody vouched for — a record named after a word only
+     * those carry ({@code Thinking}, a tool description's {@code Pipeline}) would refuse every
+     * request that seeded it. Both are static, provider-neutral and contain no tenant data.
+     *
+     * @param ctx request-local masking context
+     * @param reasoningMode resolved provider reasoning protocol
+     * @param nativeTools resolved native tool request, or {@code null}
+     */
+    private static void registerEnvelopeAuthoredText(
+            MaskingContext ctx,
+            AiReasoningMode reasoningMode,
+            AiNativeToolRequest nativeTools) {
+        if (reasoningMode == AiReasoningMode.TAGGED) {
+            ctx.addTrustedStaticText(TAGGED_REASONING_INSTRUCTION);
+        }
+        if (nativeTools == null) {
+            return;
+        }
+        for (AiToolDefinition definition : nativeTools.definitions()) {
+            ctx.addTrustedStaticText(definition.name());
+            ctx.addTrustedStaticText(definition.description());
+        }
     }
 
     private String serializeProviderInput(
@@ -1264,7 +1293,7 @@ public class AiInvocationService {
         private final String serializedPrompt;
         private final boolean outputTokensClamped;
         private AiOrganizationBudgetCoordinator.Lease budgetLease;
-        private AiRequestDeadline providerDeadline;
+        private final AiRequestDeadline providerDeadline;
         private boolean firstAttempt = true;
         private boolean failureAudited;
 
@@ -1293,27 +1322,12 @@ public class AiInvocationService {
             this.serializedPrompt = Objects.requireNonNull(
                     serializedPrompt, "serializedPrompt");
             this.budgetLease = Objects.requireNonNull(budgetLease, "budgetLease");
+            this.providerDeadline = Objects.requireNonNull(budgetLease.deadline(), "providerDeadline");
             this.outputTokensClamped = outputTokensClamped;
         }
 
         @Override
         public synchronized AiRequestDeadline deadline(long requestTimeoutMillis) {
-            if (providerDeadline != null) {
-                return providerDeadline;
-            }
-            long timeoutNanos = TimeUnit.MILLISECONDS.toNanos(requestTimeoutMillis);
-            if (timeoutNanos <= 0) {
-                throw new IllegalStateException("AI request timeout must be positive");
-            }
-            Instant callerDeadline = invocation.callerDeadline();
-            if (callerDeadline != null) {
-                Duration remaining = Duration.between(clock.instant(), callerDeadline);
-                if (remaining.isZero() || remaining.isNegative()) {
-                    throw new AiProviderCallerDeadlineExceededException();
-                }
-                timeoutNanos = Math.min(timeoutNanos, remaining.toNanos());
-            }
-            providerDeadline = AiRequestDeadline.afterNanos(timeoutNanos);
             return providerDeadline;
         }
 
@@ -1395,6 +1409,12 @@ public class AiInvocationService {
         }
 
         @Override
+        public synchronized void beforeSend() {
+            checkpoint();
+            Objects.requireNonNull(budgetLease, "budgetLease").markDispatched();
+        }
+
+        @Override
         public void checkpoint() {
             aiRestrictionEpoch.invokeAtEgress(workspaceId, () -> {
                 requireCurrentProviderSnapshot();
@@ -1423,7 +1443,7 @@ public class AiInvocationService {
             closeBudget();
             try {
                 budgetLease = budgetCoordinator.reserve(
-                        orgId, invocation, serializedPrompt);
+                        orgId, invocation, serializedPrompt, providerDeadline);
             } catch (AiBudgetExhaustedException exception) {
                 failureAudited = true;
                 emitAudit(workspaceId, orgId, resolved, invocation, correlationId, "blocked",
@@ -1435,18 +1455,18 @@ public class AiInvocationService {
 
         private synchronized void settleBudget(int inputTokens, int outputTokens) {
             AiOrganizationBudgetCoordinator.Lease activeLease = budgetLease;
-            budgetLease = null;
             if (activeLease == null) {
                 throw new IllegalStateException("Provider attempt completed without a budget reservation");
             }
             activeLease.settle(inputTokens, outputTokens);
+            budgetLease = null;
         }
 
         private synchronized void closeBudget() {
             AiOrganizationBudgetCoordinator.Lease activeLease = budgetLease;
-            budgetLease = null;
             if (activeLease != null) {
                 activeLease.close();
+                budgetLease = null;
             }
         }
 

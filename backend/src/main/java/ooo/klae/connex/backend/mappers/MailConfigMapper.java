@@ -17,6 +17,9 @@ public interface MailConfigMapper {
 
     WorkspaceMailConfig findByWorkspace(int workspaceId);
 
+    /** Reads the current config after the workspace mutation mutex, bypassing older snapshots. */
+    WorkspaceMailConfig findByWorkspaceForUpdate(int workspaceId);
+
     List<WorkspaceMailConfig> listLegacySecretConfigs();
 
     int upsert(WorkspaceMailConfig config);

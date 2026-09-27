@@ -111,6 +111,17 @@ public class DeliveryProperties {
         return audienceExportLeaseDuration();
     }
 
+    /**
+     * Returns how long past an unleased delivery's frequency reservation a recovery sweep waits
+     * before treating the attempt as abandoned. The reservation already ends at the hard provider
+     * deadline, so the grace is the same safety margin that separates that deadline from a leased
+     * claim's expiry; it covers database-clock adjustment and the post-return terminal write.
+     * @return the validated grace beyond an expired reservation
+     */
+    public Duration providerCallReservationGrace() {
+        return providerCallLeaseDuration().minus(providerCallDeadline());
+    }
+
     @PostConstruct
     void validateAudienceExportTransportBounds() {
         audienceExportLeaseDuration();

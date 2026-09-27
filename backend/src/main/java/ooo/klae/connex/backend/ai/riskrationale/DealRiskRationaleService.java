@@ -10,6 +10,7 @@ import org.springframework.context.i18n.LocaleContextHolder;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
+import ooo.klae.connex.backend.ai.AiCancellation;
 import ooo.klae.connex.backend.ai.AiFeature;
 import ooo.klae.connex.backend.ai.AiFeatureGate;
 import ooo.klae.connex.backend.ai.AiGenerationProfile;
@@ -19,6 +20,7 @@ import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Admission;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.CacheIdentity;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Decision;
 import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.LeaderOutcome;
+import ooo.klae.connex.backend.ai.AiInvocationAdmissionService.Rejection;
 import ooo.klae.connex.backend.ai.AiInvocationService;
 import ooo.klae.connex.backend.ai.AiOutputCacheStore;
 import ooo.klae.connex.backend.ai.AiStructuredOutcome;
@@ -66,10 +68,15 @@ public class DealRiskRationaleService {
     }
 
     /**
-     * Generates or reuses a rationale for a workspace-scoped at-risk deal.
+     * Generates or reuses a rationale for a workspace-scoped at-risk deal. The deterministic risk
+     * assessment runs first, because it decides whether there is anything to explain, and the
+     * admission precheck runs after it but before the rationale context is assembled and masked.
+     * An interrupted worker stops after the assessment instead of loading context for a discarded
+     * generation.
      * @param dealId deal whose deterministic risk signals should be explained
      * @param refresh when true, bypass any stored output and force a fresh generation
      * @return available rationale or a graceful unavailability response
+     * @throws java.util.concurrent.CancellationException when the current thread is interrupted
      */
     public DealRationaleDto generate(int dealId, boolean refresh) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
@@ -80,16 +87,22 @@ public class DealRiskRationaleService {
         }
 
         DealRiskDto risk = dealRiskService.assessDeal(workspaceId, dealId);
+        AiCancellation.throwIfInterrupted();
         if (risk == null || "none".equals(risk.getLevel())
                 || risk.getFactors() == null || risk.getFactors().isEmpty()) {
             return DealRationaleDto.unavailable(dealId, NOT_AT_RISK);
         }
 
+        String cacheFeature = cacheFeature();
+        CacheIdentity identity = CacheIdentity.forSubject(
+                workspaceId, AiFeature.DEAL_RISK_RATIONALE, dealId, LocaleContextHolder.getLocale());
+        if (refusedBeforeAssembly(workspaceId, cacheFeature, dealId, identity, refresh)) {
+            return DealRationaleDto.unavailable(dealId, RATE_LIMITED);
+        }
         RationaleAssembly assembly = dealRiskRationaleAssembler.assemble(workspaceId, dealId, risk);
         if (!assembly.atRisk()) {
             return DealRationaleDto.unavailable(dealId, NOT_AT_RISK);
         }
-        String cacheFeature = cacheFeature();
         String contentHash = aiOutputCacheStore.contentHash(
                 profile.get(), assembly.prompt(), assembly.context());
         if (!refresh) {
@@ -100,8 +113,6 @@ public class DealRiskRationaleService {
             }
         }
 
-        CacheIdentity identity = CacheIdentity.forSubject(
-                workspaceId, AiFeature.DEAL_RISK_RATIONALE, dealId, LocaleContextHolder.getLocale());
         boolean admissionRefresh = refresh;
         while (true) {
             try (Admission admission = aiInvocationAdmissionService.acquire(
@@ -165,6 +176,37 @@ public class DealRiskRationaleService {
                 }
             }
         }
+    }
+
+    /**
+     * Refuses, before the rationale context is assembled and masked, a request that admission
+     * would currently reject. A stored rationale can only be validated against a fresh assembly,
+     * so a non-forced request with a stored row always proceeds and a valid cache hit is never
+     * refused for quota; a forced refresh, or a request with no stored row, can only end in a new
+     * provider attempt. A concurrent caller can publish a rationale and release its flight between
+     * the first probe and the precheck, and its completed attempt may be what fills the quota, so
+     * a refused non-forced request probes again and proceeds to the hash-validated cache read when
+     * a row now exists. Generation runs outside any transaction, so each probe reads committed rows
+     * in its own session rather than a session-cached empty result.
+     */
+    private boolean refusedBeforeAssembly(
+            int workspaceId,
+            String cacheFeature,
+            int dealId,
+            CacheIdentity identity,
+            boolean refresh) {
+        if (!refresh && hasStoredRationale(workspaceId, cacheFeature, dealId)) {
+            return false;
+        }
+        if (aiInvocationAdmissionService.precheck(identity, refresh) == Rejection.NONE) {
+            return false;
+        }
+        return refresh || !hasStoredRationale(workspaceId, cacheFeature, dealId);
+    }
+
+    private boolean hasStoredRationale(int workspaceId, String cacheFeature, int dealId) {
+        return aiOutputCacheStore.find(
+                workspaceId, cacheFeature, dealId, AiOutputCacheStore.NO_SUBJECT).isPresent();
     }
 
     private DealRationaleDto cached(

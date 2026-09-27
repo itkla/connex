@@ -42,6 +42,7 @@ public class ApprovalPolicyDto {
 
     @DecimalMin(value = "0")
     @Digits(integer = 13, fraction = 2)
+    @DecimalMax(value = "9999999999999.99")
     private BigDecimal minTotal;
 
     @DecimalMin(value = "0")

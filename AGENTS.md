@@ -11,6 +11,7 @@ Connex is a multi-tenant relationship-intelligence CRM:
 - `frontend/` — Next.js 16, React 19, strict TypeScript, Tailwind v4; Node `^22.13.0 || >=24.0.0`.
 - `backend/` — Spring Boot 4, Java 26, MyBatis, Flyway/MySQL, Spring Security.
 - `ocr/` — private CPU-only business-card OCR sidecar.
+- `landing/` — prelaunch site for `connexcrm.jp` on Cloudflare Workers; vendors its UI from `frontend/`.
 
 Tenant isolation, RBAC, authenticated workspace context, and protection of secrets/PII are load-bearing invariants. Never weaken them to make a feature easier to implement.
 
@@ -88,3 +89,6 @@ Mechanical low-risk changes do not need reviewer fan-out merely to satisfy a rit
 ## Local development
 
 Use the package guides for commands and verification. The full local stack and deployment procedures live in `docs/DEPLOYMENT.md` and package documentation. In brief: the frontend serves on `:3000`, the backend on `:8080`, local MySQL on `:3306`, and the optional OCR sidecar on `127.0.0.1:8090`.
+
+For Compose network changes, run the rendered guards and disposable runtime reachability smoke
+documented in `docs/DEPLOYMENT.md`; static membership checks alone do not prove traffic isolation.

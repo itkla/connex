@@ -11,6 +11,7 @@ const BEARER_PATH_PATTERNS = [
     /\/invite-link\/[^/?#\s]+/g,
     /\/sso\/link\/[^/?#\s]+/g,
 ] as const;
+const BEARER_FRAGMENT_PATTERN = /#token=[^\s]*/g;
 
 const reportedKeys = new Set<string>();
 let reportCount = 0;
@@ -31,11 +32,12 @@ export function redactClientErrorPath(pathname: string): string {
 }
 
 function redactBearerPaths(value: string): string {
-    return BEARER_PATH_PATTERNS.reduce(
+    const withoutPathBearers = BEARER_PATH_PATTERNS.reduce(
         (redacted, pattern) => redacted.replace(pattern, (match) =>
             `${match.slice(0, match.lastIndexOf('/'))}/[token]`),
         value,
     );
+    return withoutPathBearers.replace(BEARER_FRAGMENT_PATTERN, '#token=[token]');
 }
 
 /** Clones a boundary error with every path-embedded credential removed from console-safe fields. */

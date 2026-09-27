@@ -4,13 +4,13 @@ import java.util.Locale;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.mappers.LegacyControlUploadMigrationMapper;
 import ooo.klae.connex.backend.mappers.LegacyTenantUploadMigrationMapper;
 import ooo.klae.connex.backend.storage.ImageUploadValidator.ValidatedImage;
-import ooo.klae.connex.backend.storage.ManagedObjectService.StoredBinary;
 import ooo.klae.connex.backend.storage.ManagedObjectService.StoredMigratedImage;
 import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
 
@@ -25,6 +25,8 @@ public class LegacyUploadMigrationTransaction {
     private final ManagedObjectService managedObjectService;
     private final UploadContentInspector uploadContentInspector;
     private final ImageUploadValidator imageUploadValidator;
+    private final UploadMalwareScanner malwareScanner;
+    private final LegacyAttachmentMigrationWriter attachmentWriter;
 
     /**
      * Validates a legacy attachment without mutating storage or metadata.
@@ -102,31 +104,18 @@ public class LegacyUploadMigrationTransaction {
     }
 
     /**
-     * Migrates one tenant attachment and its quota reservation in one metadata transaction.
+     * Scans outside metadata transactions, then atomically migrates one tenant attachment.
      *
      * @param record attachment reference
      * @param resolved bounded local source
      */
-    @Transactional
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void migrateAttachment(LegacyUploadRecord record, ResolvedLegacyUpload resolved) {
         int workspaceId = workspaceId(record);
         InspectedUpload upload = uploadContentInspector.inspectLegacyAttachment(
             attachmentSource(record, resolved));
-        StoredBinary stored = managedObjectService.storeMigratedAttachment(
-            workspaceId,
-            record.getId(),
-            record.getUrl(),
-            upload);
-        managedObjectService.verifyAttachment(workspaceId, stored.url(), upload.content());
-        int updated = tenantMapper.updateAttachment(
-            workspaceId,
-            record.getId(),
-            record.getUrl(),
-            stored.url(),
-            stored.fileName(),
-            stored.contentType(),
-            stored.size());
-        requireUpdated(updated);
+        ScannedUpload scanned = malwareScanner.scanInWorkspace(upload, workspaceId);
+        attachmentWriter.migrate(record, scanned);
     }
 
     /**

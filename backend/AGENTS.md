@@ -29,12 +29,57 @@ Primary layers:
 
 Before touching tenancy, routing, lifecycle, catalog/control planes, or organization-wide data access, read `../docs/MULTITENANCY_PLAN.md` and the relevant architecture tests.
 
+### Unauthenticated ingest endpoints
+
+An endpoint that a browser or third party posts to without a session (`/api/csp-reports` is the
+reference implementation) is only correct once **every** layer knows about it. Work the list:
+
+1. Its **own** `SecurityFilterChain`, `@Order`ed ahead of the public-API and application chains and
+   scoped with `securityMatcher(HttpMethod.POST, "/api/…")` — not a `permitAll()` hole punched in
+   the application chain. Make it `STATELESS` and disable `csrf`, `requestCache` and `logout`; all
+   three defaults reach for the session. Every other method on the path then falls through to the
+   application chain and stays 401. See `CspReportSecurityConfig`.
+2. A cookie-hiding filter when the endpoint is browser-reachable, registered **immediately ahead
+   of Spring Session's own registration** and built with the *same* matcher as the chain. A chain
+   is not enough: `AnonymousAuthenticationFilter` and the `DispatcherServlet` call
+   `getSession(false)` outside every chain's reach, and merely resolving the session makes Spring
+   Session rewrite its last-accessed time — a page posting repeatedly would keep an idle login
+   alive past the idle timeout. With no cookies there is no session for them to resolve. See
+   `CspReportCookieFilter`. Derive the order from the `sessionRepositoryFilterRegistration` bean,
+   not from `SessionRepositoryFilter.DEFAULT_ORDER`: `spring.session.servlet.filter-order` moves
+   that registration, and a deployment that lowers it would otherwise leave Spring Session first
+   and the guarantee silently gone. Assert the ordering against the registrations too, and cover
+   the lowered property with its own context.
+3. `WebConfig` — add the path to `excludePathPatterns`. MVC interceptors run in the
+   `DispatcherServlet`, after whichever chain served the request, so no security chain can exclude
+   `TenantResolutionInterceptor`; only this list can.
+4. `RequestBodySizeProperties` + `ApiRequestBodySizeFilter.limitFor` + `application.yml` — a
+   dedicated, small route ceiling. Never let it fall through to the 10 MiB default.
+5. A per-client throttle keyed on `ClientIpResolver.resolveWithProvenance`, and a fixed response
+   status for every bounded body so the caller learns nothing from the response. Bound the key map,
+   and bound it *fairly* — evict to admit a newcomer rather than refusing it, or one source
+   rotating through addresses silences every other client. Keep the eviction constant-time: an
+   access-ordered `LinkedHashMap` behind one lock yields the least recently used entry directly,
+   whereas scanning the map for the oldest entry sells an unauthenticated rotating source a pass
+   over every tracked key for the price of one request. See `CspReportRateLimiter`.
+6. `deploy/Caddyfile` — a `handle` with the same ceiling, placed **before** `handle /api/*` — plus
+   the matching entries in `.github/scripts/test_edge_security_headers.py`, both
+   `deploy/docker-compose.yml` service environments, and the body-limit table in
+   `../docs/EDGE_DEFENCE.md`.
+7. Read only allowlisted fields, strip control characters, bound every string, map any reported
+   page path through `RequestPathRedactor` before it is logged or stored (paths carry bearer tokens),
+   and persist nothing without a retention plan.
+
+`../docs/CONTENT_SECURITY_POLICY.md` carries the collector's full description, request/response
+table and verification steps.
+
 ## Task routing
 
 Read the relevant contract before editing that subsystem:
 
 | Work | Required reading |
 |---|---|
+| API mappings, anonymous access, deprecation or retirement | `../docs/backend/API_SURFACE.md` |
 | Security/auth/provider/upload boundary | `../docs/backend/SECURITY_BOUNDARIES.md` |
 | AI, masking, assistant, model-provider egress | `../docs/backend/AI_SECURITY.md` |
 | Business-card upload/OCR/fallback/import | `../docs/backend/BUSINESS_CARD_SCANNING.md`, `../ocr/AGENTS.md` |
@@ -52,14 +97,19 @@ Read the relevant contract before editing that subsystem:
 
 Inspect the owning package, nearest implementation, and tests in addition to the contract. Do not copy a subsystem's full protocol back into this guide.
 
+Declaring an assistant tool is contract work, not a one-line addition: every `AiAssistantToolCatalog` tool must name a `Toolset` (a declaration without one fails at class initialisation), an Ask Connex turn starts from `core` and widens itself with `find_tools` under the single `MAX_ACTIVE_TOOLSETS_PER_TURN` cap that seeded and loaded sets share, and the one per-turn prompt budget is reserved from that cap rather than from the whole catalog. Read `../docs/backend/AI_SECURITY.md` before adding, moving, or renaming one.
+
 ## Security boundaries
 
 - Auth/WebAuthn, CSRF, session rotation, tenant routing, RBAC/sharing, provider egress, secrets/crypto, and destructive data movement are high-risk work. Preserve fail-closed behavior and require the root security-focused review.
 - Authentication methods establish sessions through the existing `AuthService` path; do not expose principal IDs or servlet session IDs merely for client correlation.
 - Provider and network egress must use the established bounded/fixed-host/address-validation adapters for that subsystem. Do not add arbitrary redirects, remote URL fetching, or network I/O inside database transactions.
 - Upload/image paths must preserve the existing bounded decode/admission and metadata-stripping boundaries. Never add unbounded multipart/image processing or log recognized/uploaded content.
+- `UploadContentInspector` is the sole ingress for uploaded bytes: every new upload surface must call it with a server-selected purpose and store only the resulting artifact. The contract, package member policy, and MUST/MUST NOT list for new pipelines are in `../docs/UPLOAD_CONTENT_INSPECTION.md`, pinned by `UploadContentInspectionBoundaryArchTest`.
 - Idempotency, one-use proofs, generation handles, leases, and ownership checks are data-integrity/security mechanisms. Do not simplify them without reading the owning contract and tests.
 - New tables holding workspace/org data must participate in the appropriate tenant/control lifecycle, export, teardown, and residual-verification registries. `../docs/MULTITENANCY_PLAN.md` is authoritative.
+- The fixture-driven scripted AI provider in `ai/provider/scripted` replaces the real OpenAI-compatible adapter under a profile and a flag, and must stay unbootable in any deployed edition. Its activation gates, fixture contract, the dispatch-accounting rule every provider adapter owes, and the end-to-end trajectory harness are in `../docs/backend/AI_SECURITY.md`. The harness runs under `./gradlew scriptedTrajectoryTest`, which is excluded from `test` and named separately by the required Backend CI job.
+- Before adding or changing an agent evaluation golden, or before proposing a live model-evaluation run, read `../docs/AI_EVALUATION.md`: it maps the goldens that exist, the fixture constraints the loader enforces, what the harness cannot reach, and the decision-gated design of the operator-invoked staging runner.
 
 ## Transactions and locking
 

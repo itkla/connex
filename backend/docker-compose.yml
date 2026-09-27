@@ -80,14 +80,22 @@ services:
     ports:
       - 127.0.0.1:3306:3306
       - 127.0.0.1:33060:33060
+    networks:
+      - db
 
   adminer:
     image: adminer:5.4.2@sha256:983261ecc40a4aaf11e25aeda8ef821f5a43a9f024b3967c81cbcc0e6ce43ba3
     restart: always
     ports:
       - 127.0.0.1:9001:8080
+    networks:
+      - db
 
 networks:
+  # Preserve the normal development bridge: Docker suppresses host publications when every
+  # attached network is internal. bootRun and the local browser use the loopback ports above.
+  db:
+    driver: bridge
   ocr_internal:
     driver: bridge
     internal: true

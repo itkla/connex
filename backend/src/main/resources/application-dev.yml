@@ -45,6 +45,7 @@ connex:
         enabled: ${CONNEX_MALWARE_SCANNING_ENABLED:false}
     security:
         privileged-mfa:
+            change-actor: ${CONNEX_PRIVILEGED_MFA_CHANGE_ACTOR:local-development}
             bootstrap-confirmation:
                 # Local dev has no SMTP, so a fail-closed emailed confirmation would leave every
                 # privileged account unable to enroll its first passkey. Never enable dev in prod.

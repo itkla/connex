@@ -1,6 +1,7 @@
 {
     "DocumentAcceptance": {
         "metaTitle": "ドキュメントの確認",
+        "loading": "ドキュメントを開いています…",
         "pageLabel": "ドキュメントの確認",
         "detailsTitle": "送付情報",
         "workspaceLabel": "送信元",

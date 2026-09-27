@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -319,6 +322,22 @@ describe("failed-answer recovery", () => {
         }
     });
 
+    /**
+     * An answer that stopped part-way may already have saved a task, note, activity or tag, and
+     * nothing on this client can say whether it did. Retry sends the original question straight
+     * back as a new request, so offering it here would be offering to make a second copy. Picking
+     * up from the retained words only fills the composer, so it survives.
+     */
+    it("withholds the one-press repeat when the answer stopped part-way through", () => {
+        expect(askConnexRecovery("failed", "owner_lost", true, true)).toEqual({
+            retry: false,
+            continueFromPartial: true,
+            narrowScope: false,
+            narrowScopeFirst: false,
+        });
+        expect(isAskConnexAuthorizationWithdrawal("owner_lost")).toBe(false);
+    });
+
     it("does not tell a synthesis failure to cover less, because retrieval succeeded", () => {
         expect(askConnexRecovery("failed", "skill_budget_exceeded", true, true)).toEqual({
             retry: true,
@@ -389,6 +408,7 @@ describe("the terminal reason vocabulary", () => {
         "malformed_output",
         "no_progress",
         "org_invocation_quota_exhausted",
+        "owner_lost",
         "provider_error",
         "provider_idle_timeout",
         "quota_exhausted",
@@ -424,6 +444,7 @@ describe("the terminal reason vocabulary", () => {
             ["malformed_output", { category: "transient", message: "unreadable" }],
             ["no_progress", { category: "transient", message: "stalled" }],
             ["org_invocation_quota_exhausted", { category: "capacity", message: "capacity" }],
+            ["owner_lost", { category: "interrupted", message: "ownerLost" }],
             ["provider_error", { category: "transient", message: "provider" }],
             ["provider_idle_timeout", { category: "transient", message: "timeout" }],
             ["quota_exhausted", { category: "capacity", message: "capacity" }],
@@ -444,5 +465,42 @@ describe("the terminal reason vocabulary", () => {
         expect(askConnexTerminalKind("a_reason_from_a_later_release"))
             .toEqual({ category: "generic", message: "generic" });
         expect(askConnexTerminalKind(null)).toEqual({ category: "generic", message: "generic" });
+    });
+});
+
+describe("what a stopped answer says, in both languages", () => {
+    /**
+     * A reader in either language reads one sentence and sees one set of buttons, so the two have
+     * to say the same thing. This client withholds the one-press repeat for an answer that stopped
+     * part-way because it may already have saved a task, note, activity or tag and nothing here
+     * can tell. The sentence therefore may not reassure the member that asking again costs
+     * nothing, and it has to say both that what was saved is kept and that it is worth looking at
+     * before asking again.
+     */
+    const RETIRED_REASSURANCE: Record<string, readonly string[]> = {
+        en: ["asking again is safe", "safe to ask again"],
+        ja: ["問題ありません"],
+    };
+    const REQUIRED: Record<string, readonly string[]> = {
+        en: ["already saved", "before you ask again"],
+        ja: ["保存", "確認"],
+    };
+
+    function ownerLostCopy(locale: string): string {
+        const catalog = JSON.parse(
+            readFileSync(join(process.cwd(), "messages", locale, "common.json"), "utf8"),
+        ) as { AskConnex: { turnOwnerLost: string } };
+        return catalog.AskConnex.turnOwnerLost;
+    }
+
+    it.each(["en", "ja"])("never tells a %s reader that asking again is free of consequence", (locale) => {
+        expect(askConnexRecovery("failed", "owner_lost", true, true).retry).toBe(false);
+        const copy = ownerLostCopy(locale);
+        for (const reassurance of RETIRED_REASSURANCE[locale] ?? []) {
+            expect(copy).not.toContain(reassurance);
+        }
+        for (const phrase of REQUIRED[locale] ?? []) {
+            expect(copy).toContain(phrase);
+        }
     });
 });

@@ -45,12 +45,15 @@ public class InviteService {
     private final SessionSecurityService sessionSecurityService;
     private final NotificationStateVersionService notificationStateVersionService;
     private final FreshMembershipTransaction freshMembershipTransaction;
+    private final RegistrationVerificationService registrationVerificationService;
 
     /**
-     * Invites someone to a workspace by email. An address that already belongs to
-     * a Connex user is added as a pending member and notified in-app (they accept
-     * from Settings); any other address gets an emailed token invite. Either way,
-     * an earlier pending invite for the same email is superseded.
+     * Invites someone to a workspace by email. An address that already belongs to a Connex user
+     * whose mailbox ownership is settled is added as a pending member and notified in-app (they
+     * accept from Settings); any other address — including one held by an account that still owes
+     * verification while the instance runs it — gets an emailed token invite instead. Redemption
+     * requires that invitation's token and a matching current address; it does not verify global
+     * mailbox ownership. Either way, an earlier pending invite for the same email is superseded.
      */
     public InviteResultDto createInvite(int workspaceId, User actor, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actor.getId(), Permission.MEMBER_MANAGE);
@@ -75,14 +78,16 @@ public class InviteService {
             existing == null ? null : existing.getId(),
             role);
         if (existing != null) {
-            User lockedExisting = userMapper.getUserById(existing.getId());
+            User lockedExisting = userMapper.getUserByIdForShare(existing.getId());
             if (lockedExisting == null || !email.equalsIgnoreCase(lockedExisting.getEmail())) {
                 throw new ConflictException("Invite recipient changed; refresh and retry");
             }
-            inviteMapper.revokePendingForEmail(workspaceId, email);
-            MemberDto member = workspaceService.addPendingMember(
-                workspaceId, actor, lockedExisting, role);
-            return new InviteResultDto(null, member);
+            if (!registrationVerificationService.requiresMailboxProof(lockedExisting)) {
+                inviteMapper.revokePendingForEmail(workspaceId, email);
+                MemberDto member = workspaceService.addPendingMember(
+                    workspaceId, actor, lockedExisting, role);
+                return new InviteResultDto(null, member);
+            }
         }
 
         inviteMapper.revokePendingForEmail(workspaceId, email);
@@ -233,6 +238,12 @@ public class InviteService {
         return acceptResolvedInvite(invite, user, token, false);
     }
 
+    /**
+     * Completes a token-backed invitation for the account the invitation addressed. The creator
+     * receives the token and can control the workspace SMTP sender, so possession authorizes only
+     * this invitation and cannot establish global mailbox ownership. Registration verification
+     * requires the separate token delivered through instance-controlled mail.
+     */
     private WorkspaceMembershipDto acceptResolvedInvite(
             WorkspaceInvite invite, User user, String credential, boolean exchanged) {
         int workspaceId = invite.getWorkspaceId();
@@ -242,11 +253,11 @@ public class InviteService {
         }
         workspaceService.lockPersistedInviteGrantAuthorization(
             workspaceId, inviterId, user.getId(), invite.getRole());
-        int orgId = requireOrgDomainAllowed(workspaceId, user.getEmail());
         User lockedUser = userMapper.getUserByIdForShare(user.getId());
         if (lockedUser == null) {
             throw new ResourceNotFoundException("User not found: " + user.getId());
         }
+        int orgId = requireOrgDomainAllowed(workspaceId, lockedUser.getEmail());
         if (!lockedUser.getEmail().equalsIgnoreCase(invite.getEmail())) {
             throw new ForbiddenException("This invite was sent to a different email address");
         }
@@ -277,7 +288,11 @@ public class InviteService {
         return membership(lockedUser.getId(), workspaceId);
     }
 
-    /** Invites an existing Connex user to the workspace by email; they join after accepting. */
+    /**
+     * Invites an existing Connex user to the workspace by email; they join after accepting.
+     * Refuses an account that still owes mailbox proof under the instance's verification policy,
+     * which can instead join through an invitation-specific token without gaining global proof.
+     */
     public MemberDto addExistingMember(int workspaceId, int actorId, String emailRaw, String roleRaw) {
         workspaceService.requirePermission(workspaceId, actorId, Permission.MEMBER_MANAGE);
         sessionSecurityService.requireRecentAuthentication(actorId);
@@ -300,9 +315,12 @@ public class InviteService {
         }
         workspaceService.lockInviteGrantAuthorization(
             workspaceId, actorId, user.getId(), role);
-        User lockedUser = userMapper.getUserById(user.getId());
+        User lockedUser = userMapper.getUserByIdForShare(user.getId());
         if (lockedUser == null || !email.equalsIgnoreCase(lockedUser.getEmail())) {
             throw new ConflictException("Invite recipient changed; refresh and retry");
+        }
+        if (registrationVerificationService.requiresMailboxProof(lockedUser)) {
+            throw new BadRequestException("This account's email is unverified; send an invite instead");
         }
         User actor = userMapper.getUserById(actorId);
         return workspaceService.addPendingMember(workspaceId, actor, lockedUser, role);

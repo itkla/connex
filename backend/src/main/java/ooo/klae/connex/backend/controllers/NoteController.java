@@ -37,23 +37,23 @@ public class NoteController {
     private final NoteService noteService;
 
     /**
-     * GET endpoint to retrieve notes, with optional filtering by personId or dealId.
-     * @param personId
-     * @param dealId
-     * @param authorId
-     * @return
+     * Returns a bounded page of note previews, filtered by person, deal, or author.
+     * Preserves the list response and applies filters in that precedence order.
      */
     @GetMapping
     public List<NoteDto> getNotes(
         @RequestParam(required = false) Integer personId,
         @RequestParam(required = false) Integer dealId,
-        @RequestParam(required = false) Integer authorId
+        @RequestParam(required = false) Integer authorId,
+        @RequestParam(defaultValue = "1") int page,
+        @RequestParam(defaultValue = "25") int size
     ) {
-        List<Note> notes;
-        if (personId != null) notes = noteService.getNotesByPersonId(personId);
-        else if (dealId != null) notes = noteService.getNotesByDealId(dealId);
-        else if (authorId != null) notes = noteService.getNotesByAuthorId(authorId);
-        else throw new BadRequestException("A filter is required; use /api/notes/page for workspace-wide lists");
+        if (personId == null && dealId == null && authorId == null) {
+            throw new BadRequestException("A filter is required; use /api/notes/page for workspace-wide lists");
+        }
+        PageBounds bounds = PageBounds.of(page, size);
+        List<Note> notes = noteService.getFilteredNotesPage(
+            personId, dealId, authorId, bounds.size(), bounds.offset());
         return notes.stream().map(NoteDto::from).toList();
     }
 
@@ -92,8 +92,14 @@ public class NoteController {
      * given entity — the note-source backlinks for {@code refType}:{@code refId}.
      */
     @GetMapping("/referencing")
-    public List<NoteDto> getNotesReferencing(@RequestParam String refType, @RequestParam int refId) {
-        return noteService.getNotesReferencing(refType, refId).stream().map(NoteDto::from).toList();
+    public List<NoteDto> getNotesReferencing(
+            @RequestParam String refType,
+            @RequestParam int refId,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "25") int size) {
+        PageBounds bounds = PageBounds.of(page, size);
+        return noteService.getNotesReferencing(refType, refId, bounds.size(), bounds.offset())
+            .stream().map(NoteDto::from).toList();
     }
 
     /**

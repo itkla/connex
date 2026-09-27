@@ -1991,6 +1991,58 @@ class ImportServiceTest extends AbstractServiceTest {
     }
 
     @Test
+    void dealImportBoundsDecimalExponentAndMagnitudeInPreviewAndCommit() {
+        Pipeline pipeline = newPipeline();
+        Stage stage = newStage(pipeline, 0);
+        List<String> unpersistable = List.of(
+            "1E100000000",
+            "1E-100000000",
+            "1E2147483647",
+            "1E-2147483647",
+            "10000000000000",
+            "9999999999999.995",
+            "-9999999999999.995",
+            "not-a-number",
+            "invalid".repeat(10),
+            "9".repeat(129));
+        ImportRequest request = req(
+            List.of(
+                map("Deal", "name"),
+                map("Value", "value"),
+                map("Pipeline", "pipeline"),
+                map("Stage", "stage")),
+            unpersistable.stream()
+                .map(value -> Map.of(
+                    "Deal", "Bounded value " + unique(),
+                    "Value", value,
+                    "Pipeline", pipeline.getName(),
+                    "Stage", stage.getName()))
+                .toList(),
+            "skip");
+
+        assertTimeout(Duration.ofSeconds(30), () -> {
+            ImportPreviewResult preview = importService.previewDeals(request);
+            assertEquals(unpersistable.size(), preview.getInvalid());
+            assertEquals(0, preview.getToCreate());
+            request.setDuplicateReviewProof(preview.getDuplicateReviewProof());
+            ImportResult committed = importService.commitDeals(request);
+            assertEquals(0, committed.getCreated());
+            assertEquals(unpersistable.size(), committed.getFailed().size());
+            for (int index = 0; index < unpersistable.size(); index++) {
+                String value = unpersistable.get(index);
+                String cell = value.length() > 40 ? value.substring(0, 40) + "..." : value;
+                String prefix = value.startsWith("not-a-number") || value.startsWith("invalid")
+                    ? "Invalid deal value: " : "Deal value is out of range: ";
+                assertEquals(List.of(prefix + cell), preview.getRows().get(index).getErrors());
+                assertEquals(prefix + cell, committed.getFailed().get(index).getReason());
+            }
+        });
+
+        assertTrue(dealMapper.getAllDeals(workspace.getId()).stream()
+            .noneMatch(deal -> deal.getName().startsWith("Bounded value ")));
+    }
+
+    @Test
     void dealImportReplayUsesPersistedMoneyPrecision() {
         Pipeline pipeline = newPipeline();
         Stage stage = newStage(pipeline, 0);

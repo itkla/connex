@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { DocumentTextIcon } from "@heroicons/react/24/outline";
-import type { Note, NoteReferenceType } from "@/app/lib/types";
+import type { NoteReferenceType } from "@/app/lib/types";
 import { getNotesReferencing } from "@/app/lib/api";
 import { deriveNoteTitle, noteSnippet } from "@/app/lib/noteText";
+import { useWorkspace } from "@/app/hooks/useWorkspace";
+import { NOTE_PAGE_SIZE, useNotePages } from "@/app/hooks/useNotePages";
+import NotePageControl from "./NotePageControl";
 import SectionHeader from "@/app/components/dashboard/SectionHeader";
 
 type Props = {
@@ -20,27 +23,20 @@ type Props = {
  * given entity. Private source notes are already filtered server-side, so this
  * never surfaces a private note to a non-author. Renders nothing when empty.
  */
-export default function BacklinksPanel({ refType, refId, excludeNoteId }: Props) {
+export default function BacklinksPanel(props: Props) {
+    const { activeWorkspaceId, switching } = useWorkspace();
+    if (switching) return null;
+    return <ScopedBacklinksPanel key={`${activeWorkspaceId}:${props.refType}:${props.refId}:${props.excludeNoteId}`} {...props} />;
+}
+
+function ScopedBacklinksPanel({ refType, refId, excludeNoteId }: Props) {
     const t = useTranslations("ActivityNotesEditor");
-    const [notes, setNotes] = useState<Note[] | null>(null);
+    const loadPage = useCallback((page: number, init: RequestInit) =>
+        getNotesReferencing(refType, refId, { page, size: NOTE_PAGE_SIZE }, init), [refType, refId]);
+    const { notes: loaded, loading, hasMore, failed, loadMore } = useNotePages(loadPage);
+    const notes = loaded.filter((note) => note.id !== excludeNoteId);
 
-    useEffect(() => {
-        let active = true;
-        getNotesReferencing(refType, refId)
-            .then((result) => {
-                if (active) setNotes(result.filter((note) => note.id !== excludeNoteId));
-            })
-            .catch(() => {
-                if (active) setNotes([]);
-            });
-        return () => {
-            active = false;
-        };
-    }, [refType, refId, excludeNoteId]);
-
-    if (notes === null || notes.length === 0) {
-        return null;
-    }
+    if (notes.length === 0 && !hasMore) return null;
 
     return (
         <section className="mt-8">
@@ -67,6 +63,7 @@ export default function BacklinksPanel({ refType, refId, excludeNoteId }: Props)
                     </li>
                 ))}
             </ul>
+            {hasMore && <NotePageControl loading={loading} failed={failed} onLoadMore={loadMore} />}
         </section>
     );
 }

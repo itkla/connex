@@ -39,6 +39,11 @@ public interface AiProviderAttemptExecutor {
         return Objects.requireNonNull(result.get(), "streamed completion");
     }
 
+    /** Commits durable accounting after preparation and final checks, immediately before model send. */
+    default void beforeSend() {
+        checkpoint();
+    }
+
     /** Revalidates the current invocation gates immediately before a nested provider send. */
     default void checkpoint() {
     }

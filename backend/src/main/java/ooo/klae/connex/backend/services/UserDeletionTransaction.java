@@ -52,9 +52,14 @@ public class UserDeletionTransaction {
         }
     }
 
-    /** Extends the owner-bound deletion lease between catalog fan-out phases. */
+    /** Extends the deletion lease while workspace roots fence recovery checks through commit. */
     @Transactional
     public void renew(int id, String owner) {
+        if (userMapper.lockById(id) == null) {
+            throw new ResourceNotFoundException("User not found with id: " + id);
+        }
+        List<Integer> ownedWorkspaceIds = workspaceService.discoverOwnedWorkspaceIds(id);
+        workspaceService.lockAccountWorkspaceRoots(ownedWorkspaceIds, List.of());
         if (userMapper.renewAccountDeletionReservation(id, owner) != 1) {
             throw new ConflictException("Account deletion reservation expired");
         }
@@ -159,7 +164,7 @@ public class UserDeletionTransaction {
         }
         workspaceService.lockAccountWorkspaceRoots(
             ownedWorkspaceIds, new ArrayList<>(sharedWorkspaceIds));
-        workspaceService.assertNotSoleOwnerOfWorkspaces(ownedWorkspaceIds);
+        workspaceService.assertNotSoleOwnerOfWorkspaces(id, ownedWorkspaceIds);
         orgMemberService.assertNotSoleOwnerOfAnyOrg(id, new ArrayList<>(sharedOrgIds));
         User before = userMapper.getUserById(id);
         if (before == null) {

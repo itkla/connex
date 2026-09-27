@@ -24,6 +24,7 @@ import ooo.klae.connex.backend.beans.Product;
 import ooo.klae.connex.backend.dto.MemberScope;
 import ooo.klae.connex.backend.dto.WarmthFilter;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
 import ooo.klae.connex.backend.mappers.CustomFieldDefinitionMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
@@ -43,6 +44,7 @@ import ooo.klae.connex.backend.util.CsvFormulaGuard;
 @RequiredArgsConstructor
 public class ExportService {
 
+    private final SessionSecurityService sessionSecurityService;
     private final WorkspaceService workspaceService;
     private final DealService dealService;
     private final PersonMapper personMapper;
@@ -53,6 +55,7 @@ public class ExportService {
     private final CustomFieldDefinitionMapper customFieldDefinitionMapper;
     private final CustomFieldValueService customFieldValueService;
     private final DisqualificationReasonService disqualificationReasonService;
+    private final AuditService auditService;
 
     /**
      * CSV of contacts matching the given list filters and member scope (all contacts when
@@ -63,6 +66,7 @@ public class ExportService {
             List<PersonLeadSource> leadSources, boolean noLeadSource,
             List<PersonFirstResponseState> firstResponseStates, boolean noFirstResponse,
             WarmthFilter warmth) {
+        requireExportStepUp();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Person> people = personMapper.getPersonsFiltered(
             workspaceId, query, companies, titles, noCompany, memberScope,
@@ -111,6 +115,7 @@ public class ExportService {
      */
     public String exportCompanies(String query, List<String> industry, boolean noIndustry, List<Integer> ids,
             MemberScope memberScope, WarmthFilter warmth) {
+        requireExportStepUp();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Company> companies = companyMapper.getCompaniesFiltered(
             workspaceId, query, industry, noIndustry, ids, memberScope, false, warmth);
@@ -138,6 +143,7 @@ public class ExportService {
 
     /** CSV of products matching the current catalog search (all products when unfiltered). */
     public String exportProducts(String query) {
+        requireExportStepUp();
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         List<Product> products = productMapper.getFiltered(workspaceId, query);
 
@@ -170,6 +176,7 @@ public class ExportService {
             List<Integer> companyIds, List<Integer> personIds, boolean noCompany,
             List<String> statuses, List<String> risks,
             MemberScope memberScope) {
+        requireExportStepUp();
         List<Deal> deals = dealService.queryDealsForExport(
             query, currency, pipelineIds, stageIds, companyIds, personIds,
             noCompany, statuses, risks, memberScope);
@@ -181,10 +188,20 @@ public class ExportService {
             List<Integer> pipelineIds, List<Integer> stageIds, List<Integer> companyIds,
             List<Integer> personIds, boolean noCompany, List<String> statuses,
             List<String> risks, MemberScope memberScope) {
+        requireExportStepUp();
         List<Deal> deals = dealService.querySegmentDealsForExport(
             definition, query, currency, pipelineIds, stageIds, companyIds, personIds,
             noCompany, statuses, risks, memberScope);
         return renderDeals(deals);
+    }
+
+    private void requireExportStepUp() {
+        try {
+            sessionSecurityService.requireExportStepUp();
+        } catch (RecentAuthenticationRequiredException exception) {
+            auditService.recordExportStepUpRefused();
+            throw exception;
+        }
     }
 
     private String renderDeals(List<Deal> deals) {

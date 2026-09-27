@@ -75,6 +75,87 @@ class DeploymentProfileEnvironmentPostProcessorTest {
             exception.getMessage());
     }
 
+    /**
+     * The scripted AI adapter must be unreachable in a deployed edition, not merely unused.
+     *
+     * <p>Refusing here rather than from an {@code ApplicationRunner} is what makes that true: the
+     * check runs after ConfigData and before the application context exists, so no scripted bean
+     * can be constructed even transiently.
+     */
+    @Test
+    void refusesTheScriptedAiProviderProfileBeforeTheContextExists() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("ai-scripted-provider", "dev");
+        environment.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+            "deploymentProfileEnvironment",
+            Map.of(
+                "CONNEX_DEPLOYMENT_PROFILE", "saas",
+                "CONNEX_AI_SCRIPTED_PROVIDER_ENABLED", "true"
+            )
+        ));
+
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> new DeploymentProfileEnvironmentPostProcessor()
+                .postProcessEnvironment(environment, new SpringApplication(ProbeApplication.class))
+        );
+
+        assertEquals("connex.deployment.profile=saas forbids the ai-scripted-provider "
+            + "Spring profile", exception.getMessage());
+    }
+
+    @Test
+    void refusesTheScriptedAiProviderFlagWithoutItsProfileBeforeTheContextExists() {
+        MockEnvironment environment = new MockEnvironment();
+        environment.setActiveProfiles("dev");
+        environment.getPropertySources().addFirst(new SystemEnvironmentPropertySource(
+            "deploymentProfileEnvironment",
+            Map.of("CONNEX_AI_SCRIPTED_PROVIDER_ENABLED", "true")
+        ));
+
+        IllegalStateException exception = assertThrows(
+            IllegalStateException.class,
+            () -> new DeploymentProfileEnvironmentPostProcessor()
+                .postProcessEnvironment(environment, new SpringApplication(ProbeApplication.class))
+        );
+
+        assertEquals("connex.ai.scripted-provider.enabled requires the ai-scripted-provider "
+            + "Spring profile", exception.getMessage());
+    }
+
+    /**
+     * The same refusal through the registered processor, with real ConfigData supplying the keys.
+     *
+     * <p>The Spring profiles are passed as arguments rather than declared in the loaded file
+     * because an ambient {@code SPRING_PROFILES_ACTIVE} outranks a config-data declaration, and a
+     * startup refusal must not depend on the developer's shell.
+     */
+    @Test
+    void refusesTheScriptedAiProviderProfileFromConfigDataBeforeWebServerCreation(
+            @TempDir Path temporaryDirectory) throws IOException {
+        Path configFile = temporaryDirectory.resolve("application.yml");
+        Files.writeString(configFile, """
+            connex:
+              deployment:
+                profile: silo
+              ai:
+                scripted-provider:
+                  enabled: true
+            """);
+
+        RuntimeException exception = assertThrows(
+            RuntimeException.class,
+            () -> runApplication(
+                "--spring.profiles.active=test,ai-scripted-provider",
+                "--spring.config.additional-location=" + configFile.toUri()
+            )
+        );
+
+        assertEquals("connex.deployment.profile=silo forbids the ai-scripted-provider "
+            + "Spring profile", refusalMessage(exception));
+        assertEquals(0, WEB_SERVER_CREATIONS.get());
+    }
+
     @Test
     void registeredProcessorSeesConfigDataAndRefusesBeforeWebServerCreation(
             @TempDir Path temporaryDirectory) throws IOException {

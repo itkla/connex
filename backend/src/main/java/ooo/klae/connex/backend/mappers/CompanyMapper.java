@@ -35,6 +35,12 @@ public interface CompanyMapper {
             @Param("workspaceId") int workspaceId,
             @Param("reference") LocalDateTime reference,
             @Param("model") SqlParameters model);
+    /** Returns full-corpus aggregates scoped to the requested visible records. */
+    List<RelationshipScoreAggregateDto> getRelationshipScoreAggregatesByIds(
+            @Param("workspaceId") int workspaceId,
+            @Param("reference") LocalDateTime reference,
+            @Param("model") SqlParameters model,
+            @Param("ids") List<Integer> ids);
     RelationshipEvidenceTotalsDto getRelationshipEvidenceTotals(
             @Param("workspaceId") int workspaceId,
             @Param("companyId") int companyId,
@@ -148,10 +154,6 @@ public interface CompanyMapper {
     /** True only when the workspace owns the company AND it is archived; for restore write scoping. */
     boolean existsOwnedArchived(@Param("workspaceId") int workspaceId, @Param("id") int id);
     Integer lockById(@Param("workspaceId") int workspaceId, @Param("id") int id);
-    List<Company> findMentionedRecords(
-            @Param("workspaceId") int workspaceId,
-            @Param("text") String text,
-            @Param("limit") int limit);
     int insert(Company company);
     /** Bulk-insert companies in one statement (CSV import); generated ids are written back to each bean. */
     int insertBatch(List<Company> companies);

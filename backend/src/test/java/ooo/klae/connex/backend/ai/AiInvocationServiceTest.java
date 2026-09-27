@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.ai;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -88,6 +89,8 @@ import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.services.AiProviderConfigService;
 import ooo.klae.connex.backend.services.AuditService;
 import ooo.klae.connex.backend.services.WorkspaceService;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.JsonToken;
 import tools.jackson.databind.ObjectMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -146,7 +149,11 @@ class AiInvocationServiceTest {
         lenient().when(aiMediaAdmissionService.acquire(anyInt(), anyList())).thenReturn(mediaLease);
         lenient().when(budgetCoordinator.reserve(
                 eq(ORG_ID), any(AiInvocation.class), anyString()))
-                .thenReturn(budgetLease, fallbackBudgetLease);
+                .thenReturn(budgetLease);
+        lenient().when(budgetCoordinator.reserve(
+                eq(ORG_ID), any(AiInvocation.class), anyString(), any(AiRequestDeadline.class)))
+                .thenReturn(fallbackBudgetLease);
+        lenient().when(budgetLease.deadline()).thenAnswer(call -> AiRequestDeadline.afterMillis(60_000));
     }
 
     @Test
@@ -201,6 +208,7 @@ class AiInvocationServiceTest {
                 .thenAnswer(call -> {
                     AiCompletionRequest request = call.getArgument(0);
                     return request.providerAttemptExecutor().executeStream(() -> {
+                        request.providerAttemptExecutor().beforeSend();
                         providerTransport.run();
                         return new AiCompletionResult("{{P1}}", 12, 4, "end_turn");
                     });
@@ -254,6 +262,7 @@ class AiInvocationServiceTest {
                 .thenAnswer(call -> {
                     AiCompletionRequest request = call.getArgument(0);
                     return request.providerAttemptExecutor().executeStream(() -> {
+                        request.providerAttemptExecutor().beforeSend();
                         providerTransport.run();
                         return new AiCompletionResult("unused", 1, 1, "end_turn");
                     });
@@ -279,6 +288,7 @@ class AiInvocationServiceTest {
                     AiCompletionRequest request = call.getArgument(0);
                     return request.providerAttemptExecutor().executeStream(() -> {
                         request.providerAttemptExecutor().checkpoint();
+                        request.providerAttemptExecutor().beforeSend();
                         providerTransport.run();
                         return new AiCompletionResult("unused", 1, 1, "end_turn");
                     });
@@ -297,7 +307,7 @@ class AiInvocationServiceTest {
     void completeRejectsAProviderConfigurationChangedDuringTheRequest() {
         ResolvedAiProvider changed = unmaskedResolved();
         when(aiProviderConfigService.resolveForOrg(ORG_ID, ACTOR_ID))
-                .thenReturn(resolved, resolved, changed);
+                .thenReturn(resolved, resolved, resolved, changed);
         providerReturns(new AiCompletionResult("unused", 12, 4, "end_turn"));
 
         AiProviderException exception = assertThrows(
@@ -312,7 +322,7 @@ class AiInvocationServiceTest {
 
     @Test
     void completeRejectsPermissionLossDuringTheRequest() {
-        doNothing().doThrow(new ForbiddenException("AI access changed"))
+        doNothing().doNothing().doThrow(new ForbiddenException("AI access changed"))
                 .when(providerAttemptGuard).run();
         providerReturns(new AiCompletionResult(
                 "{\"rationale\":\"unused\",\"evidence\":[]}",
@@ -328,10 +338,39 @@ class AiInvocationServiceTest {
                         restrictionEpoch.current(WORKSPACE_ID),
                         providerAttemptGuard));
 
-        verify(providerAttemptGuard, times(2)).run();
-        verify(providerTransport).run();
-        verify(budgetLease).settle(12, 4);
+        InOrder order = inOrder(providerAttemptGuard, directAdmission, budgetLease, providerTransport);
+        order.verify(providerAttemptGuard).run();
+        order.verify(directAdmission).commitInvocation();
+        order.verify(providerAttemptGuard).run();
+        order.verify(budgetLease).markDispatched();
+        order.verify(providerTransport).run();
+        order.verify(budgetLease).settle(12, 4);
+        order.verify(providerAttemptGuard).run();
         verify(budgetLease, never()).close();
+    }
+
+    @Test
+    void completeRejectsPermissionLossBeforeTransportWithoutMarkingDispatch() {
+        doNothing().doThrow(new ForbiddenException("AI access changed"))
+                .when(providerAttemptGuard).run();
+        providerReturns(new AiCompletionResult("unused", 12, 4, "end_turn"));
+
+        assertThrows(
+                ForbiddenException.class,
+                () -> service.complete(
+                        invocation("Summarize relationship state"),
+                        directAdmission,
+                        restrictionEpoch.current(WORKSPACE_ID),
+                        providerAttemptGuard));
+
+        InOrder order = inOrder(providerAttemptGuard, directAdmission, budgetLease);
+        order.verify(providerAttemptGuard).run();
+        order.verify(directAdmission).commitInvocation();
+        order.verify(providerAttemptGuard).run();
+        order.verify(budgetLease).close();
+        verify(budgetLease, never()).markDispatched();
+        verify(providerTransport, never()).run();
+        verify(budgetLease, never()).settle(12, 4);
     }
 
     @Test
@@ -344,7 +383,7 @@ class AiInvocationServiceTest {
         AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
         AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
         AiNativeToolRequest nativeTools = new AiNativeToolRequest(
-                catalog.nativeDefinitions(new ObjectMapper()), List.of());
+                catalog.nativeDefinitions(new ObjectMapper(), AiAssistantToolCatalog.ALL), List.of());
         providerReturns(new AiCompletionResult(
                 "",
                 12,
@@ -362,14 +401,14 @@ class AiInvocationServiceTest {
                 service.completeNativeToolsRepairable(
                         invocation,
                         AiAssistantStep.FinalAnswer.class,
-                        guard.forIssuedPlaceholders(Set.of("{{P1}}")),
+                        guard.forStep(AiAssistantToolCatalog.ALL, Set.of("{{P1}}")),
                         guard.finalAnswerForIssuedPlaceholders(Set.of("{{P1}}")),
                         schema.finalResponseSchema(),
                         nativeTools,
                         directAdmission,
                         providerAttemptGuard);
 
-        AiNativeToolCompletion.Tool<AiAssistantStep.FinalAnswer> tool =
+        AiNativeToolCompletion.Tool<?> tool =
                 assertInstanceOf(AiNativeToolCompletion.Tool.class, completion);
         assertEquals("Mina Patel", tool.arguments().path("query").asString());
         assertEquals("{{P1}}", new ObjectMapper().readTree(
@@ -479,11 +518,11 @@ class AiInvocationServiceTest {
                 service.completeNativeToolsRepairable(
                         invocation,
                         AiAssistantStep.FinalAnswer.class,
-                        guard.forIssuedPlaceholders(Set.of("{{P1}}")),
+                        guard.forStep(AiAssistantToolCatalog.ALL, Set.of("{{P1}}")),
                         guard.finalAnswerForIssuedPlaceholders(Set.of("{{P1}}")),
                         schema.finalResponseSchema(),
                         new AiNativeToolRequest(
-                                catalog.nativeDefinitions(new ObjectMapper()), List.of()),
+                                catalog.nativeDefinitions(new ObjectMapper(), AiAssistantToolCatalog.ALL), List.of()),
                         directAdmission,
                         providerAttemptGuard);
 
@@ -507,7 +546,8 @@ class AiInvocationServiceTest {
                 List.of(definition),
                 List.of(new AiToolExchange(
                         new AiToolCall("call_1", "get_record", "{}"),
-                        "CRM_DATA_BEGIN\nMASKED_NATIVE_TOOL_RESULT\nCRM_DATA_END")));
+                        "CRM_DATA_BEGIN\nMASKED_NATIVE_TOOL_RESULT\nCRM_DATA_END",
+                        1, 0)));
         AiResponseSchema schema = new AiResponseSchema(
                 "answer", new ObjectMapper().readTree("{\"type\":\"object\"}"));
 
@@ -542,7 +582,8 @@ class AiInvocationServiceTest {
                 List.of(definition),
                 List.of(new AiToolExchange(
                         new AiToolCall("call_1", "get_record", "{}"),
-                        "CRM_DATA_BEGIN\nMASKED_NATIVE_TOOL_RESULT\nCRM_DATA_END")));
+                        "CRM_DATA_BEGIN\nMASKED_NATIVE_TOOL_RESULT\nCRM_DATA_END",
+                        1, 0)));
         AiResponseSchema schema = new AiResponseSchema(
                 "answer", new ObjectMapper().readTree("{\"type\":\"object\"}"));
 
@@ -662,8 +703,8 @@ class AiInvocationServiceTest {
         var promptAssembler = new AiAssistantPromptAssembler(new ObjectMapper(), catalog);
         var stepSchema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
         int fixedEnvelopeBytes = service.serializedPromptBytes(
-                promptAssembler.fixedPrompt(),
-                stepSchema.responseSchema(),
+                promptAssembler.fixedPrompt(AiAssistantToolCatalog.ALL),
+                stepSchema.responseSchema(AiAssistantToolCatalog.ALL),
                 AiReasoningMode.TAGGED);
 
         AiAssistantLoopException refused = assertThrows(
@@ -705,8 +746,8 @@ class AiInvocationServiceTest {
         var promptAssembler = new AiAssistantPromptAssembler(new ObjectMapper(), catalog);
         var stepSchema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
         int fixedEnvelopeBytes = service.serializedPromptBytes(
-                promptAssembler.fixedPrompt(),
-                stepSchema.responseSchema(),
+                promptAssembler.fixedPrompt(AiAssistantToolCatalog.ALL),
+                stepSchema.responseSchema(AiAssistantToolCatalog.ALL),
                 AiReasoningMode.TAGGED);
         AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
                 new AiProviderCapabilities(
@@ -723,7 +764,7 @@ class AiInvocationServiceTest {
         MaskedPrompt prompt = promptAssembler.assemble(
                 List.of(request),
                 new AiAssistantToolResult(Map.of("records", List.of()), List.of()),
-                List.of(new AiAssistantPromptAssembler.ToolTurn(
+                List.of(AiAssistantPromptAssembler.ToolTurn.soleCall(
                         1,
                         "search_records",
                         new AiAssistantToolResult(
@@ -735,7 +776,8 @@ class AiInvocationServiceTest {
                 context,
                 new AiChatResourceRegistry(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         providerReturns(new AiCompletionResult(
                 "{\"tool\":null,\"final\":{\"text\":\"One relationship is cooling.\","
                         + "\"citations\":[],\"suggestions\":[],\"title\":null}}",
@@ -757,13 +799,14 @@ class AiInvocationServiceTest {
                 service.completeStructuredRepairable(
                         invocation,
                         AiAssistantStep.class,
-                        new AiAssistantStepGuard(catalog),
-                        stepSchema.responseSchema(),
+                        new AiAssistantStepGuard(catalog)
+                                .forStep(AiAssistantToolCatalog.ALL, Set.of()),
+                        stepSchema.responseSchema(AiAssistantToolCatalog.ALL),
                         directAdmission);
 
         assertInstanceOf(AiStructuredOutcome.Parsed.class, attempt.outcome());
         assertTrue(service.serializedPromptBytes(
-                prompt, stepSchema.responseSchema(), AiReasoningMode.TAGGED)
+                prompt, stepSchema.responseSchema(AiAssistantToolCatalog.ALL), AiReasoningMode.TAGGED)
                 <= AiProviderCapabilities.conservativeInputByteCeiling(
                         ASSISTANT_FLOOR, budget.maxOutputTokens()),
                 "The floor must admit the real first-tool-result prompt with dense-input room,"
@@ -786,9 +829,9 @@ class AiInvocationServiceTest {
                 AiToolCallingMode.NATIVE_FUNCTIONS,
                 AiReasoningMode.NATIVE);
         AiNativeToolRequest fixedTools = new AiNativeToolRequest(
-                promptAssembler.nativeToolDefinitions(), List.of());
+                promptAssembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL), List.of());
         int fixedEnvelopeBytes = service.serializedPromptBytes(
-                promptAssembler.fixedNativePrompt(),
+                promptAssembler.fixedNativePrompt(AiAssistantToolCatalog.ALL),
                 stepSchema.finalResponseSchema(),
                 AiReasoningMode.NATIVE,
                 fixedTools);
@@ -805,7 +848,7 @@ class AiInvocationServiceTest {
                         "warmth", "cooling"))),
                 List.of());
         List<AiAssistantPromptAssembler.ToolTurn> turns = List.of(
-                new AiAssistantPromptAssembler.ToolTurn(
+                AiAssistantPromptAssembler.ToolTurn.soleCall(
                         1, "search_records", toolResult));
         MaskingContext context = new MaskingContext();
         MaskedPrompt prompt = promptAssembler.assembleNative(
@@ -815,7 +858,8 @@ class AiInvocationServiceTest {
                 context,
                 new AiChatResourceRegistry(),
                 List.of(),
-                budget);
+                budget,
+                AiAssistantToolCatalog.ALL);
         AiToolCall call = new AiToolCall(
                 "call_1",
                 "search_records",
@@ -823,10 +867,10 @@ class AiInvocationServiceTest {
                         + "\"kinds\":[\"person\"]}",
                 "opaque-signature /+==");
         AiNativeToolRequest request = new AiNativeToolRequest(
-                promptAssembler.nativeToolDefinitions(),
+                promptAssembler.nativeToolDefinitions(AiAssistantToolCatalog.ALL),
                 promptAssembler.nativeReplay(
                         turns,
-                        Map.of(1, call),
+                        Map.of(turns.getFirst().ref(), call),
                         context,
                         budget,
                         null).exchanges());
@@ -840,7 +884,8 @@ class AiInvocationServiceTest {
                 request.definitions(),
                 List.of(new AiToolExchange(
                         new AiToolCall(call.id(), call.name(), call.arguments()),
-                        request.exchanges().getFirst().maskedResult())));
+                        request.exchanges().getFirst().maskedResult(),
+                        1, 0)));
         int unsignedBytes = service.serializedPromptBytes(
                 prompt,
                 stepSchema.finalResponseSchema(),
@@ -861,7 +906,7 @@ class AiInvocationServiceTest {
         when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
         MaskingContext context = new MaskingContext();
         String placeholder = MaskingEngine.maskField(EntityKind.COMPANY, "Google", context);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use concise analysis")
                 .userTurn("Summarize " + placeholder)
                 .build();
@@ -874,13 +919,14 @@ class AiInvocationServiceTest {
         AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
         AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
         AiNativeToolRequest nativeTools = new AiNativeToolRequest(
-                catalog.nativeDefinitions(new ObjectMapper()),
+                catalog.nativeDefinitions(new ObjectMapper(), AiAssistantToolCatalog.ALL),
                 List.of(new AiToolExchange(
                         new AiToolCall(
                                 "call_1", "search_records",
                                 "{\"query\":\"" + placeholder + "\"}",
                                 "sig-opaque-bytes"),
-                        "{\"records\":[]}")));
+                        "{\"records\":[]}",
+                        1, 0)));
         providerReturns(new AiCompletionResult(
                 "", 12, 7, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA, "",
                 AiReasoningMode.NONE,
@@ -891,7 +937,7 @@ class AiInvocationServiceTest {
                 service.completeNativeToolsRepairable(
                         invocation,
                         AiAssistantStep.FinalAnswer.class,
-                        guard.forIssuedPlaceholders(Set.of(placeholder)),
+                        guard.forStep(AiAssistantToolCatalog.ALL, Set.of(placeholder)),
                         guard.finalAnswerForIssuedPlaceholders(Set.of(placeholder)),
                         schema.finalResponseSchema(),
                         nativeTools,
@@ -906,7 +952,7 @@ class AiInvocationServiceTest {
         MaskingContext context = new MaskingContext();
         MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", context);
         MaskingEngine.maskField(EntityKind.COMPANY, "Acme Holdings", context);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use concise analysis")
                 .userTurn("Summarize Mina Patel at Acme Holdings")
                 .build();
@@ -1124,7 +1170,7 @@ class AiInvocationServiceTest {
 
         service.complete(invocation);
 
-        verify(aiFeatureGate, times(3)).requireAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION);
+        verify(aiFeatureGate, times(4)).requireAiUsable(AiFeature.BUSINESS_CARD_EXTRACTION);
         ArgumentCaptor<AiCompletionRequest> requestCaptor = ArgumentCaptor.forClass(AiCompletionRequest.class);
         verify(aiProvider).complete(requestCaptor.capture());
         assertEquals(1, requestCaptor.getValue().images().size());
@@ -1562,6 +1608,7 @@ class AiInvocationServiceTest {
             AiCompletionRequest request = call.getArgument(0);
             try {
                 request.providerAttemptExecutor().execute(() -> {
+                    request.providerAttemptExecutor().beforeSend();
                     providerTransport.run();
                     throw new AiProviderRequestRejectedException("provider", 400);
                 });
@@ -1569,6 +1616,7 @@ class AiInvocationServiceTest {
                 assertEquals("provider invocation failed with status 400", exception.getMessage());
             }
             request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
                 return "fallback response";
             });
@@ -1588,9 +1636,11 @@ class AiInvocationServiceTest {
                 providerAttemptGuard, directAdmission, fallbackAdmission, providerTransport);
         order.verify(providerAttemptGuard).run();
         order.verify(directAdmission).commitInvocation();
+        order.verify(providerAttemptGuard).run();
         order.verify(providerTransport).run();
         order.verify(providerAttemptGuard).run();
         order.verify(fallbackAdmission).commitInvocation();
+        order.verify(providerAttemptGuard).run();
         order.verify(providerTransport).run();
     }
 
@@ -1598,12 +1648,15 @@ class AiInvocationServiceTest {
     void providerDeadlineIsBoundedByCallerBudgetAndSharedAcrossFallbacks() {
         AiInvocation invocation = invocation(
                 "Summarize relationship state", NOW.plusMillis(250));
+        AiRequestDeadline reservedDeadline = AiRequestDeadline.afterMillis(250);
+        when(budgetLease.deadline()).thenReturn(reservedDeadline);
         AtomicReference<AiRequestDeadline> firstDeadline = new AtomicReference<>();
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
             AiCompletionRequest request = call.getArgument(0);
             AiRequestDeadline first = request.providerAttemptExecutor().deadline(60_000);
             AiRequestDeadline fallback = request.providerAttemptExecutor().deadline(60_000);
             firstDeadline.set(first);
+            assertSame(reservedDeadline, first);
             assertSame(first, fallback);
             request.providerAttemptExecutor().execute(() -> "provider response");
             return new AiCompletionResult("Done", 20, 8, "end_turn");
@@ -1625,6 +1678,7 @@ class AiInvocationServiceTest {
                 Clock.systemUTC());
         AiInvocation invocation = invocation(
                 "Summarize relationship state", Instant.now().plusMillis(100));
+        when(budgetLease.deadline()).thenReturn(AiRequestDeadline.afterMillis(100));
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
             AiCompletionRequest request = call.getArgument(0);
             AiRequestDeadline deadline = request.providerAttemptExecutor().deadline(60_000);
@@ -1666,16 +1720,47 @@ class AiInvocationServiceTest {
 
         assertEquals("AI provider configuration changed before egress", exception.getMessage());
         verify(providerTransport, never()).run();
+        verify(budgetLease, never()).markDispatched();
+        verify(budgetLease).close();
+    }
+
+    @Test
+    void dispatchIsMarkedBeforeProviderTransportAndRetainedOnAbort() {
+        providerThrows(new AiProviderException("cancelled"));
+
+        assertThrows(AiProviderException.class, () -> service.complete(invocation("Summarize")));
+
+        InOrder order = inOrder(budgetLease, providerTransport);
+        order.verify(budgetLease).markDispatched();
+        order.verify(providerTransport).run();
+        order.verify(budgetLease).close();
+    }
+
+    @Test
+    void failedUsageSettlementRetainsLeaseForCloseRetry() {
+        providerReturns(new AiCompletionResult("done", 12, 4, "end_turn"));
+        doThrow(new IllegalStateException("temporary database failure"))
+                .when(budgetLease).settle(12, 4);
+
+        assertThrows(IllegalStateException.class, () -> service.complete(invocation("Summarize")));
+
+        InOrder order = inOrder(budgetLease);
+        order.verify(budgetLease).markDispatched();
+        order.verify(budgetLease).settle(12, 4);
+        order.verify(budgetLease).close();
     }
 
     @Test
     void structuredFallbackGetsItsOwnQuotaCommitAuditAndEgressChecks() {
         AiInvocation invocation = invocation("Summarize relationship state");
+        AiRequestDeadline originalDeadline = AiRequestDeadline.afterMillis(60_000);
+        when(budgetLease.deadline()).thenReturn(originalDeadline);
         when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
             AiCompletionRequest request = call.getArgument(0);
             try {
                 request.providerAttemptExecutor().execute(() -> {
+                    request.providerAttemptExecutor().beforeSend();
                     providerTransport.run();
                     throw new AiProviderRequestRejectedException("provider", 400);
                 });
@@ -1683,6 +1768,7 @@ class AiInvocationServiceTest {
                 assertEquals("provider invocation failed with status 400", exception.getMessage());
             }
             request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
                 return "fallback response";
             });
@@ -1698,9 +1784,12 @@ class AiInvocationServiceTest {
         verify(fallbackAdmission).commitInvocation();
         verify(fallbackAdmission).close();
         verify(providerTransport, times(2)).run();
-        verify(budgetCoordinator, times(2)).reserve(
-                eq(ORG_ID), same(invocation), anyString());
+        verify(budgetCoordinator).reserve(eq(ORG_ID), same(invocation), anyString());
+        verify(budgetCoordinator).reserve(
+                eq(ORG_ID), same(invocation), anyString(), same(originalDeadline));
         verify(budgetLease).close();
+        verify(budgetLease).markDispatched();
+        verify(fallbackBudgetLease).markDispatched();
         verify(fallbackBudgetLease).settle(20, 8);
         verify(auditService, times(2)).recordStrictIndependentScoped(
                 eq("ai.llm.call"), eq("ai_call"), isNull(), eq(WORKSPACE_ID), eq(ORG_ID),
@@ -1719,6 +1808,7 @@ class AiInvocationServiceTest {
             AiCompletionRequest request = call.getArgument(0);
             try {
                 request.providerAttemptExecutor().execute(() -> {
+                    request.providerAttemptExecutor().beforeSend();
                     providerTransport.run();
                     throw new AiProviderRequestRejectedException("provider", 400);
                 });
@@ -1727,6 +1817,7 @@ class AiInvocationServiceTest {
             }
             restrictionEpoch.bump(WORKSPACE_ID);
             request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
                 return "forbidden fallback";
             });
@@ -1750,13 +1841,14 @@ class AiInvocationServiceTest {
     void featureGateIsRecheckedBeforeFallbackProviderEgress() {
         AiInvocation invocation = invocation("Summarize relationship state");
         ForbiddenException disabled = new ForbiddenException("AI features are not available");
-        doNothing().doNothing().doThrow(disabled)
+        doNothing().doNothing().doNothing().doThrow(disabled)
                 .when(aiFeatureGate).requireAiUsable(FEATURE);
         when(aiInvocationAdmissionService.acquireDirect()).thenReturn(fallbackAdmission);
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(call -> {
             AiCompletionRequest request = call.getArgument(0);
             try {
                 request.providerAttemptExecutor().execute(() -> {
+                    request.providerAttemptExecutor().beforeSend();
                     providerTransport.run();
                     throw new AiProviderRequestRejectedException("provider", 400);
                 });
@@ -1764,6 +1856,7 @@ class AiInvocationServiceTest {
                 assertEquals("provider invocation failed with status 400", exception.getMessage());
             }
             request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
                 return "forbidden fallback";
             });
@@ -1796,6 +1889,7 @@ class AiInvocationServiceTest {
             AiCompletionRequest request = call.getArgument(0);
             try {
                 request.providerAttemptExecutor().execute(() -> {
+                    request.providerAttemptExecutor().beforeSend();
                     providerTransport.run();
                     throw new AiProviderRequestRejectedException("provider", 400);
                 });
@@ -1803,6 +1897,7 @@ class AiInvocationServiceTest {
                 assertEquals("provider invocation failed with status 400", exception.getMessage());
             }
             request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
                 return "fallback response";
             });
@@ -1838,6 +1933,7 @@ class AiInvocationServiceTest {
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(invocation -> {
             AiCompletionRequest request = invocation.getArgument(0);
             request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
                 return "provider response";
             });
@@ -1849,6 +1945,7 @@ class AiInvocationServiceTest {
         when(aiProvider.complete(any(AiCompletionRequest.class))).thenAnswer(invocation -> {
             AiCompletionRequest request = invocation.getArgument(0);
             request.providerAttemptExecutor().execute(() -> {
+                request.providerAttemptExecutor().beforeSend();
                 providerTransport.run();
                 throw failure;
             });
@@ -1870,10 +1967,178 @@ class AiInvocationServiceTest {
         throw new AssertionError("Expected a malformed structured outcome but was " + outcome);
     }
 
+    /**
+     * The outbound leak scan skips the envelope's property names because this service writes every
+     * one of them from a literal. Pinning the key set keeps that premise true: a field that carried
+     * tenant text into a key position would change this set, and the scan would stop covering it.
+     */
+    @Test
+    void theSerializedEnvelopeNamesEveryPropertyFromAServerAuthoredLiteral() {
+        AiInvocation invocation = invocation("Summarize relationship state");
+        providerReturns(new AiCompletionResult("{{P1}} is ready.", 12, 7, "end_turn"));
+
+        service.complete(invocation);
+
+        ArgumentCaptor<String> serialized = ArgumentCaptor.forClass(String.class);
+        verify(budgetCoordinator).reserve(eq(ORG_ID), same(invocation), serialized.capture());
+
+        assertEquals(
+                Set.of("system", "messages", "role", "content"),
+                propertyNames(serialized.getValue()));
+    }
+
+    /**
+     * The tagged reasoning directive joins the envelope after the prompt is assembled, so nothing
+     * the feature registered covers it. A company named {@code Thinking} — a word only that
+     * directive carries — must not refuse every Ask Connex turn that seeds it.
+     */
+    @Test
+    void theTaggedReasoningDirectiveIsServerAuthoredTextRatherThanScannedTenantText() {
+        when(aiProvider.reasoningCapability(resolved.target())).thenReturn(AiReasoningMode.TAGGED);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
+        MaskingContext context = new MaskingContext();
+        String placeholder = MaskingEngine.maskField(EntityKind.COMPANY, "Thinking", context);
+        MaskedPrompt prompt = PromptAssembly.builder(context)
+                .system("Use concise analysis")
+                .userTurn("Summarize " + placeholder)
+                .build();
+        AiInvocation base = new AiInvocation(FEATURE, context, prompt, 64, 0.2);
+        AiInvocation invocation = new AiInvocation(
+                base.feature(), base.context(), base.prompt(), base.images(), base.maxTokens(),
+                base.temperature(), true, base.callerDeadline());
+        providerReturns(new AiCompletionResult("Ready.", 12, 7, "end_turn"));
+
+        assertDoesNotThrow(() -> service.complete(invocation));
+    }
+
+    /**
+     * Native tool definitions ride the envelope as scanned values and the native system prompt does
+     * not repeat them, so the catalogue registers itself. A company named after a word only a tool
+     * description carries must not refuse every native-tools request that seeds it.
+     */
+    @Test
+    void theNativeToolCatalogueIsServerAuthoredTextRatherThanScannedTenantText() {
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
+        MaskingContext context = new MaskingContext();
+        String placeholder = MaskingEngine.maskField(EntityKind.COMPANY, "Pipeline", context);
+        MaskedPrompt prompt = PromptAssembly.builder(context)
+                .system("Use concise analysis")
+                .userTurn("Summarize " + placeholder)
+                .build();
+        AiInvocation base = new AiInvocation(FEATURE, context, prompt, 64, 0.2);
+        AiInvocation invocation = new AiInvocation(
+                base.feature(), base.context(), base.prompt(), base.images(), base.maxTokens(),
+                base.temperature(), base.reasoningRequested(), base.callerDeadline(),
+                AiInvocationProtocol.NATIVE_TOOLS);
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
+        AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        AiNativeToolRequest nativeTools = new AiNativeToolRequest(
+                catalog.nativeDefinitions(new ObjectMapper(), AiAssistantToolCatalog.ALL), List.of());
+        providerReturns(new AiCompletionResult(
+                "", 12, 7, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA, "",
+                AiReasoningMode.NONE,
+                List.of(new AiToolCall("call_1", "search_records", "{\"query\":\"x\"}"))));
+
+        assertDoesNotThrow(() -> service.completeNativeToolsRepairable(
+                invocation,
+                AiAssistantStep.FinalAnswer.class,
+                guard.forStep(AiAssistantToolCatalog.ALL, Set.of(placeholder)),
+                guard.finalAnswerForIssuedPlaceholders(Set.of(placeholder)),
+                schema.finalResponseSchema(),
+                nativeTools,
+                directAdmission,
+                providerAttemptGuard));
+    }
+
+    /**
+     * The richest envelope — response schema and native tool definitions — nests two JSON trees
+     * whose keys this service does not write itself. They are still server-authored: they come
+     * from the declared schema and the tool catalog. This asserts exactly that, so a key entering
+     * the envelope from anywhere else fails rather than quietly landing in a skipped position.
+     */
+    @Test
+    void aSchemaAndToolBearingEnvelopeDrawsEveryPropertyFromServerAuthoredStructure() {
+        when(aiProvider.toolCallingCapability(resolved.target()))
+                .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
+        when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
+        MaskingContext context = new MaskingContext();
+        String placeholder = MaskingEngine.maskField(EntityKind.COMPANY, "Google", context);
+        MaskedPrompt prompt = PromptAssembly.builder(context)
+                .system("Use concise analysis")
+                .userTurn("Summarize " + placeholder)
+                .build();
+        AiInvocation base = new AiInvocation(FEATURE, context, prompt, 64, 0.2);
+        AiInvocation invocation = new AiInvocation(
+                base.feature(), base.context(), base.prompt(), base.images(), base.maxTokens(),
+                base.temperature(), base.reasoningRequested(), base.callerDeadline(),
+                AiInvocationProtocol.NATIVE_TOOLS);
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
+        AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
+        AiNativeToolRequest nativeTools = new AiNativeToolRequest(
+                catalog.nativeDefinitions(new ObjectMapper(), AiAssistantToolCatalog.ALL),
+                List.of(new AiToolExchange(
+                        new AiToolCall(
+                                "call_1", "search_records",
+                                "{\"query\":\"" + placeholder + "\"}",
+                                "sig-opaque-bytes"),
+                        "{\"records\":[]}",
+                        1, 0)));
+        providerReturns(new AiCompletionResult(
+                "", 12, 7, "tool_calls", AiStructuredOutputEnforcement.JSON_SCHEMA, "",
+                AiReasoningMode.NONE,
+                List.of(new AiToolCall(
+                        "call_2", "search_records", "{\"query\":\"" + placeholder + "\"}"))));
+
+        service.completeNativeToolsRepairable(
+                invocation,
+                AiAssistantStep.FinalAnswer.class,
+                guard.forStep(AiAssistantToolCatalog.ALL, Set.of(placeholder)),
+                guard.finalAnswerForIssuedPlaceholders(Set.of(placeholder)),
+                schema.finalResponseSchema(),
+                nativeTools,
+                directAdmission,
+                providerAttemptGuard);
+
+        ArgumentCaptor<String> serialized = ArgumentCaptor.forClass(String.class);
+        verify(budgetCoordinator).reserve(eq(ORG_ID), same(invocation), serialized.capture());
+
+        Set<String> serverAuthored = new java.util.LinkedHashSet<>(ENVELOPE_PROPERTY_NAMES);
+        serverAuthored.addAll(propertyNames(schema.finalResponseSchema().schema().toString()));
+        for (AiToolDefinition definition : nativeTools.definitions()) {
+            serverAuthored.addAll(propertyNames(definition.parametersSchema().toString()));
+        }
+        Set<String> unexplained = new java.util.LinkedHashSet<>(
+                propertyNames(serialized.getValue()));
+        unexplained.removeAll(serverAuthored);
+
+        assertEquals(Set.of(), unexplained);
+    }
+
+    private static final Set<String> ENVELOPE_PROPERTY_NAMES = Set.of(
+            "system", "messages", "role", "content", "responseSchema", "tools", "name",
+            "description", "parameters", "toolExchanges", "call", "id", "arguments",
+            "thoughtSignature", "result", "repairMessage");
+
+    private Set<String> propertyNames(String payload) {
+        Set<String> names = new java.util.LinkedHashSet<>();
+        try (JsonParser parser = new ObjectMapper().createParser(payload)) {
+            for (JsonToken token = parser.nextToken(); token != null; token = parser.nextToken()) {
+                if (token == JsonToken.PROPERTY_NAME) {
+                    names.add(parser.getString());
+                }
+            }
+        }
+        return names;
+    }
+
     private AiInvocation invocation(String maskedPromptText) {
         MaskingContext context = new MaskingContext();
         String person = MaskingEngine.maskField(EntityKind.PERSON, "Mina Patel", context);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use concise analysis")
                 .userTurn(maskedPromptText + " for " + person)
                 .build();
@@ -1882,7 +2147,7 @@ class AiInvocationServiceTest {
 
     private AiInvocation unmaskedStreamingInvocation() {
         MaskingContext context = new MaskingContext(AiPrivacyMode.UNMASKED);
-        MaskedPrompt prompt = PromptAssembly.builder()
+        MaskedPrompt prompt = PromptAssembly.builder(context)
                 .system("Use concise analysis")
                 .userTurn("Summarize relationship state")
                 .build();

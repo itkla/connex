@@ -11,8 +11,10 @@ import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AttachmentFacets;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.ConflictException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
+import ooo.klae.connex.backend.mappers.AttachmentScanMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.TagMapper;
 import ooo.klae.connex.backend.storage.ManagedObjectService;
@@ -27,6 +29,7 @@ import ooo.klae.connex.backend.tenant.Permission;
 import ooo.klae.connex.backend.tenant.RequirePermission;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 import lombok.RequiredArgsConstructor;
@@ -38,7 +41,6 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class AttachmentService {
-    private static final String MANAGED_URL_PREFIX = "/api/attachments/content/";
     private static final String ASSISTANT_SESSION = "ai_chat_session";
 
     private final AttachmentMapper attachmentMapper;
@@ -52,6 +54,8 @@ public class AttachmentService {
     private final ManagedObjectService managedObjectService;
     private final UploadContentInspector uploadContentInspector;
     private final UploadMalwareScanner uploadMalwareScanner;
+    private final AttachmentScanMapper attachmentScanMapper;
+    private final AttachmentQuarantineService attachmentQuarantineService;
 
     private static final Set<String> AUDIT_FIELDS =
         Set.of("fileName", "entityType", "entityId", "url", "contentType", "size");
@@ -228,9 +232,6 @@ public class AttachmentService {
     @RequirePermission(Permission.ATTACHMENT_CREATE)
     public Attachment create(Attachment attachment) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (attachment.getUrl() != null && attachment.getUrl().startsWith(MANAGED_URL_PREFIX)) {
-            throw new BadRequestException("Managed attachment references cannot be submitted directly");
-        }
         UserDisplayNameDto targetLabel = prepareTarget(workspaceId, attachment);
         Attachment created = attachmentWriteOperations.createExternal(workspaceId, attachment);
         return attachmentReadService.hydrateKnown(
@@ -246,7 +247,7 @@ public class AttachmentService {
     @RequirePermission(Permission.ATTACHMENT_CREATE)
     public Attachment createManaged(Attachment attachment) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
-        if (attachment.getUrl() == null || !attachment.getUrl().startsWith(MANAGED_URL_PREFIX)) {
+        if (!ManagedObjectService.hasManagedAttachmentPrefix(attachment.getUrl())) {
             throw new BadRequestException("Managed attachment reference is invalid");
         }
         UserDisplayNameDto targetLabel = prepareTarget(workspaceId, attachment);
@@ -327,6 +328,15 @@ public class AttachmentService {
 
     /**
      * Deletes an attachment by ID.
+     *
+     * <p>A managed object whose scan state is not ordinary, as decided by
+     * {@link AttachmentQuarantineService#requiresQuarantineAuthority}, is quarantine administration:
+     * it is delegated, before any attachment row lock, to
+     * {@link AttachmentQuarantineService#delete(int)}, which requires
+     * {@code ATTACHMENT_QUARANTINE_MANAGE} and a strict audit. Ordinary deletion re-reads the exact
+     * row under lock and refuses with a conflict when its security state changed after discovery,
+     * because delegating while holding attachment rows would invert the quarantine path's
+     * membership-before-attachment lock order.
      * @param id
      */
     @RequirePermission(Permission.ATTACHMENT_DELETE)
@@ -337,9 +347,20 @@ public class AttachmentService {
         if (before == null) throw new ResourceNotFoundException("Attachment not found with id: " + id);
         requireGenericAttachmentType(before.getEntityType());
         requireVisibleNoteTarget(workspaceId, before.getEntityType(), before.getEntityId());
+        if (AttachmentQuarantineService.requiresQuarantineAuthority(before, managedObjectService)) {
+            attachmentQuarantineService.delete(id);
+            return;
+        }
         List<Integer> referenceIds = attachmentMapper.lockIdsByUrl(workspaceId, before.getUrl());
         if (!referenceIds.contains(id)) {
             throw new ResourceNotFoundException("Attachment not found with id: " + id);
+        }
+        Attachment locked = attachmentScanMapper.lockById(workspaceId, id);
+        if (locked == null || !Objects.equals(locked.getUrl(), before.getUrl())) {
+            throw new ResourceNotFoundException("Attachment not found with id: " + id);
+        }
+        if (AttachmentQuarantineService.requiresQuarantineAuthority(locked, managedObjectService)) {
+            throw new ConflictException("Attachment security state changed; retry");
         }
         if (referenceIds.size() == 1) {
             managedObjectService.deleteAttachmentAfterCommit(workspaceId, before.getUrl());

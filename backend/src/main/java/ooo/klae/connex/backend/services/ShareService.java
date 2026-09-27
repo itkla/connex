@@ -1,6 +1,8 @@
 package ooo.klae.connex.backend.services;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -16,6 +18,7 @@ import ooo.klae.connex.backend.exceptions.ShareBlockedPrivacyHoldException;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.notifications.NotificationChangePublisher;
+import ooo.klae.connex.backend.services.WorkspaceService.LockedPermissionSnapshot;
 import ooo.klae.connex.backend.tenant.Permission;
 
 /**
@@ -57,10 +60,11 @@ public class ShareService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = authService.getCurrentUser().getId();
         workspaceService.requirePermission(workspaceId, actorId, Permission.SHARE_MANAGE);
-        if (type != Type.PIPELINE) {
-            duplicateDecisionLockService.lockCurrentOrganizationWithMemberWorkspace(
-                targetWorkspaceId);
-        }
+        LockedPermissionSnapshot authority = type == Type.PIPELINE
+            ? workspaceService.lockAndRequirePermissionsSnapshot(
+                workspaceId, Map.of(actorId, Set.of(Permission.SHARE_MANAGE)))
+            : duplicateDecisionLockService.lockCurrentOrganizationWithMemberWorkspace(
+                targetWorkspaceId, Permission.SHARE_MANAGE).authority();
         requireOwned(type, workspaceId, entityId);
         if (type == Type.PERSON) {
             requirePersonProvisionAllowed(workspaceId, entityId);
@@ -76,6 +80,7 @@ public class ShareService {
                     "A record cannot be shared across organizations");
             }
         }
+        authority.revalidate();
         int granted = switch (type) {
             case COMPANY -> shareMapper.shareCompany(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
             case PERSON -> shareMapper.sharePerson(entityId, workspaceId, targetWorkspaceId, actorId, canEdit);
@@ -97,11 +102,13 @@ public class ShareService {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
         int actorId = authService.getCurrentUser().getId();
         workspaceService.requirePermission(workspaceId, actorId, Permission.SHARE_MANAGE);
-        if (type != Type.PIPELINE) {
-            duplicateDecisionLockService.lockCurrentOrganizationWithWorkspace(
-                targetWorkspaceId);
-        }
+        LockedPermissionSnapshot authority = type == Type.PIPELINE
+            ? workspaceService.lockAndRequirePermissionsSnapshot(
+                workspaceId, Map.of(actorId, Set.of(Permission.SHARE_MANAGE)))
+            : duplicateDecisionLockService.lockCurrentOrganizationWithWorkspace(
+                targetWorkspaceId, Permission.SHARE_MANAGE).authority();
         requireOwned(type, workspaceId, entityId);
+        authority.revalidate();
         switch (type) {
             case COMPANY -> shareMapper.unshareCompany(entityId, workspaceId, targetWorkspaceId);
             case PERSON -> shareMapper.unsharePerson(entityId, workspaceId, targetWorkspaceId);

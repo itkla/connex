@@ -182,8 +182,8 @@ class DataSubjectRequestMapperTest extends AbstractMapperTest {
             ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).getFirst().getDataClassification());
         assertEquals(List.of(subjectActivity.getId()), dataSubjectDisclosureMapper.findActivities(
             ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(ActivityDto::getId).toList());
-        assertEquals(List.of(subjectNote.getId()), dataSubjectDisclosureMapper.findNotes(
-            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds).stream().map(row -> row.getId()).toList());
+        assertEquals(List.of(subjectNote.getId()), dataSubjectDisclosureMapper.findNoteIds(
+            ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds));
         var disclosedCommentThreads = dataSubjectDisclosureMapper.findRecordCommentThreads(
             ownerWorkspace.getId(), subject.getId(), orgWorkspaceIds);
         assertEquals(List.of(subjectCommentThread.getId()), disclosedCommentThreads.stream()

@@ -15,6 +15,9 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.storage.ManagedObjectService;
+import ooo.klae.connex.backend.storage.LegacyUploadMigrationTransaction;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import ooo.klae.connex.backend.storage.ScannedUpload;
 import ooo.klae.connex.backend.storage.UploadContentInspector.InspectedUpload;
 
@@ -54,29 +57,18 @@ class UploadScanBoundaryArchTest {
     }
 
     @Test
-    void inspectedUploadRemainsLimitedToTheLegacyMigrationWriter() throws IOException {
+    void allAttachmentWritersRejectUnscannedInspectionProofs() throws NoSuchMethodException {
         List<Method> methods = java.util.Arrays.stream(
                         ManagedObjectService.class.getDeclaredMethods())
                 .filter(method -> java.util.Arrays.asList(method.getParameterTypes())
                         .contains(InspectedUpload.class))
                 .toList();
-        assertEquals(1, methods.size());
-        Method migration = methods.getFirst();
-        assertEquals("storeMigratedAttachment", migration.getName());
+        assertTrue(methods.isEmpty(), "No attachment writer may accept inspection without scanning");
+        Method migration = ManagedObjectService.class.getDeclaredMethod(
+                "storeMigratedAttachment", int.class, int.class, String.class, ScannedUpload.class);
         assertFalse(Modifier.isPublic(migration.getModifiers()));
         assertFalse(Modifier.isProtected(migration.getModifiers()));
         assertFalse(Modifier.isPrivate(migration.getModifiers()));
-
-        List<Path> callers;
-        try (var sources = Files.walk(SOURCE_ROOT)) {
-            callers = sources
-                    .filter(path -> path.toString().endsWith(".java"))
-                    .filter(path -> !path.endsWith("ManagedObjectService.java"))
-                    .filter(path -> read(path).contains("storeMigratedAttachment("))
-                    .toList();
-        }
-        assertEquals(1, callers.size());
-        assertTrue(callers.getFirst().endsWith("LegacyUploadMigrationTransaction.java"));
     }
 
     @Test
@@ -86,6 +78,15 @@ class UploadScanBoundaryArchTest {
 
         assertTrue(Modifier.isPublic(method.getModifiers()));
         assertEquals(ScannedUpload.class, method.getParameterTypes()[1]);
+    }
+
+    @Test
+    void legacyScanEntrySuspendsMetadataTransactions() {
+        Method migration = java.util.Arrays.stream(LegacyUploadMigrationTransaction.class.getDeclaredMethods())
+            .filter(method -> method.getName().equals("migrateAttachment")).findFirst().orElseThrow();
+        Transactional transaction = migration.getAnnotation(Transactional.class);
+        org.junit.jupiter.api.Assertions.assertNotNull(transaction);
+        assertEquals(Propagation.NOT_SUPPORTED, transaction.propagation());
     }
 
     private static String read(Path path) {

@@ -32,10 +32,21 @@ public class SsoProperties {
     private String secretKey;
 
     /**
-     * Whether an OIDC issuer may resolve to a loopback or private (RFC1918/CGNAT/ULA/link-local)
-     * address. Defaults to false so the server-side discovery fetch cannot be pointed at internal
-     * services or the cloud metadata endpoint (SSRF). Enable only on trusted deployments whose IdP
-     * is genuinely on-premises on a private network.
+     * Whether an enterprise OIDC issuer and the endpoints discovered for it may resolve to a
+     * loopback or private (RFC1918/CGNAT/ULA/link-local) address. Defaults to false so the
+     * server-side discovery fetch cannot be pointed at internal services or the cloud metadata
+     * endpoint (SSRF). Enable only on trusted deployments whose IdP is genuinely on-premises on a
+     * private network.
+     *
+     * <p>The exemption is scoped to per-organization enterprise registrations. Consumer social
+     * login (Google / Microsoft) always keeps the strict destination policy, so turning this on
+     * cannot redirect a social provider fetch at an internal service.
+     *
+     * <p>Every guarded OIDC fetch pins the validated addresses for the destination host, so an
+     * HTTP proxy configured through the JVM {@code http.proxyHost} / {@code https.proxyHost}
+     * system properties is deliberately not honoured: routing through a proxy would replace the
+     * pinned destination with the proxy's own address and defeat the check. Deployments that must
+     * egress through a proxy need a transparent one at the network layer.
      */
     private boolean allowPrivateIssuerHosts = false;
 }

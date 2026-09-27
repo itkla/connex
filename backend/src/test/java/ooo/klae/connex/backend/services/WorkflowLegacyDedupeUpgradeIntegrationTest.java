@@ -1,6 +1,9 @@
 package ooo.klae.connex.backend.services;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -12,6 +15,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -22,16 +27,23 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import ooo.klae.connex.backend.beans.Company;
+import ooo.klae.connex.backend.beans.Organization;
 import ooo.klae.connex.backend.beans.RuleExecution;
 import ooo.klae.connex.backend.beans.Workflow;
+import ooo.klae.connex.backend.beans.Workspace;
+import ooo.klae.connex.backend.beans.WorkspaceRole;
 import ooo.klae.connex.backend.dto.RuleAction;
 import ooo.klae.connex.backend.dto.RuleDto;
 import ooo.klae.connex.backend.dto.RuleRequest;
 import ooo.klae.connex.backend.dto.RuleTrigger;
 import ooo.klae.connex.backend.dto.SegmentCondition;
 import ooo.klae.connex.backend.dto.SegmentDefinition;
+import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.RoleMapper;
 import ooo.klae.connex.backend.mappers.RuleMapper;
 import ooo.klae.connex.backend.mappers.WorkflowMapper;
+import ooo.klae.connex.backend.tenant.Permission;
 
 @Import(WorkflowLegacyDedupeUpgradeIntegrationTest.FixedDedupeConfiguration.class)
 class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
@@ -42,14 +54,78 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
     @Autowired private WorkflowRuntimeOwnershipService ownershipService;
     @Autowired private RuleMapper ruleMapper;
     @Autowired private WorkflowMapper workflowMapper;
+    @Autowired private OrganizationMapper organizationMapper;
+    @Autowired private RoleMapper roleMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @MockitoBean private WorkflowRuntimeProperties runtimeProperties;
     @MockitoBean private AuditService auditService;
     @MockitoSpyBean private RuleActionExecutor actionExecutor;
 
+    @Override
+    @BeforeEach
+    protected void setUpWorkspaceAndAuthentication() {
+        String suffix = unique();
+        Organization organization = new Organization();
+        organization.setName("Legacy dedupe " + suffix);
+        organization.setSlug("legacy-dedupe-org-" + suffix);
+        organizationMapper.insert(organization);
+        workspace = new Workspace();
+        workspace.setOrgId(organization.getId());
+        workspace.setName("Legacy dedupe " + suffix);
+        workspace.setSlug("legacy-dedupe-" + suffix);
+        workspaceMapper.insert(workspace);
+        currentUser = newUser();
+        WorkspaceRole role = new WorkspaceRole();
+        role.setWorkspaceId(workspace.getId());
+        role.setName("Legacy rule author");
+        roleMapper.insertRole(role);
+        roleMapper.insertPermissions(workspace.getId(), role.getId(),
+            List.of(Permission.RULE_MANAGE.name(), Permission.COMPANY_UPDATE.name()));
+        workspaceMapper.setMemberCustomRole(workspace.getId(), currentUser.getId(), role.getId());
+        authenticateAs(currentUser, workspace.getId());
+    }
+
     @BeforeEach
     void enableCanonicalRuntime() {
         when(runtimeProperties.enabled()).thenReturn(true);
+        when(runtimeProperties.maxTriggerFanout()).thenReturn(128);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void zeroCapacityFixtureRejectsLegacyCreationBeforePersistence(boolean scheduled) {
+        when(runtimeProperties.maxTriggerFanout()).thenReturn(0);
+        int tagId = newTag().getId();
+
+        ConflictException failure = assertThrows(ConflictException.class, () -> {
+            if (scheduled) {
+                scheduleRule(tagId);
+            } else {
+                throttledRule(tagId);
+            }
+        });
+
+        assertEquals("Workflow trigger capacity is exhausted", failure.getMessage());
+        assertEquals(0, ruleMapper.countByWorkspace(workspace.getId()));
+        assertTrue(workflowMapper.listByWorkspace(workspace.getId(), false).isEmpty());
+    }
+
+    @Test
+    void scheduleRuleCreationKeepsLegacyRuntimeOwnership() {
+        RuleDto rule = scheduleRule(newTag().getId());
+
+        assertLegacyOwnedWorkflow(rule);
+        assertEquals("schedule", rule.getTrigger().getType());
+        assertEquals("daily", rule.getTrigger().getCadence());
+    }
+
+    @Test
+    void throttledRuleCreationKeepsLegacyRuntimeOwnership() {
+        RuleDto rule = throttledRule(newTag().getId());
+
+        assertLegacyOwnedWorkflow(rule);
+        assertEquals("entity_change", rule.getTrigger().getType());
+        assertEquals(60, rule.getTrigger().getThrottleMinutes());
     }
 
     @Test
@@ -176,6 +252,18 @@ class WorkflowLegacyDedupeUpgradeIntegrationTest extends AbstractServiceTest {
         Workflow workflow = workflowMapper.getByLegacyRuleId(workspace.getId(), ruleId);
         ownershipService.cutOverToCanonical(
             workflow.getId(), workflow.getActiveVersionId());
+    }
+
+    private void assertLegacyOwnedWorkflow(RuleDto rule) {
+        assertTrue(rule.isEnabled());
+        Workflow workflow = workflowMapper.getByLegacyRuleId(workspace.getId(), rule.getId());
+        assertNotNull(workflow);
+        assertEquals(workspace.getId(), workflow.getWorkspaceId());
+        assertEquals(rule.getId(), workflow.getLegacyRuleId());
+        assertEquals("legacy", workflow.getRuntimeOwner());
+        assertTrue(workflow.isEnabled());
+        assertNotNull(workflow.getActiveVersionId());
+        assertEquals(1, workflow.getDraftRevision());
     }
 
     private void seedLegacyExecution(int ruleId, int recordId, String dedupeKey) {

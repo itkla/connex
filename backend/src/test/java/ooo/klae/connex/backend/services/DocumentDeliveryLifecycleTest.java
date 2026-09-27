@@ -32,7 +32,6 @@ import tools.jackson.databind.ObjectMapper;
 import ooo.klae.connex.backend.beans.DealDocument;
 import ooo.klae.connex.backend.beans.DocumentDelivery;
 import ooo.klae.connex.backend.beans.DocumentDeliveryRecipient;
-import ooo.klae.connex.backend.dto.AcceptDocumentRequest;
 import ooo.klae.connex.backend.dto.DocumentDeliveryDto;
 import ooo.klae.connex.backend.dto.SendDeliveryRecipientRequest;
 import ooo.klae.connex.backend.dto.SendDeliveryRequest;
@@ -582,9 +581,8 @@ class DocumentDeliveryLifecycleTest extends AbstractDocumentDeliveryServiceTest 
         DocumentFixture fixture = finalDocument();
         DocumentDeliveryDto delivery = send(fixture, signer("signer@example.test", 1));
         String token = installToken(delivery.recipients().getFirst().id());
-        acceptanceService.accept(
-            token,
-            new AcceptDocumentRequest("Signer"),
+        acceptanceService.accept(link(token),
+            acceptRequest(token, "Signer"),
             "192.0.2.20",
             "lifecycle-agent");
         List<String> artifactKeys = jdbcTemplate.queryForList(

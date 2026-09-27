@@ -52,6 +52,20 @@
     FOR UPDATE
   </select>
 
+  <select id="hasCurrencyMismatch" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1 FROM deal_line_item
+      WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
+        AND NOT (currency &lt;=> #{currency})
+    )
+  </select>
+
+  <select id="countCurrencyMismatches" resultType="int">
+    SELECT COUNT(*) FROM deal_line_item
+    WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}
+      AND NOT (currency &lt;=> #{currency})
+  </select>
+
   <select id="sumLineTotals" resultType="java.math.BigDecimal">
     SELECT COALESCE(SUM(line_total), 0) FROM deal_line_item
     WHERE workspace_id = #{workspaceId} AND deal_id = #{dealId}

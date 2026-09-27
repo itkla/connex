@@ -42,6 +42,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.mappers.WorkspaceMapper;
 import ooo.klae.connex.backend.services.AuthService;
@@ -56,13 +57,16 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
 @SpringBootTest
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class NeverEnrolledBreakGlassIntegrationTest {
-    private static final String RECOVERY_TOKEN = "never-enrolled-break-glass-token";
     private static final String PASSWORD = "correct-horse-battery-staple";
 
+    /**
+     * Startup needs a complete recovery configuration; each test then issues its own
+     * account-bound token through {@link #issueRecoveryToken(User)}.
+     */
     @DynamicPropertySource
     static void recoveryProperties(DynamicPropertyRegistry registry) {
         registry.add("connex.security.privileged-mfa.recovery-token-sha256",
-                () -> sha256Hex(RECOVERY_TOKEN));
+                () -> sha256Hex("unused-startup-recovery-token"));
         registry.add("connex.security.privileged-mfa.recovery-expires-at",
                 () -> Instant.now().plus(Duration.ofMinutes(55)).toString());
         registry.add("connex.security.privileged-mfa.recovery-actor",
@@ -78,18 +82,22 @@ class NeverEnrolledBreakGlassIntegrationTest {
     @Autowired private PasswordEncoder passwordEncoder;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private SessionRepository<? extends Session> sessionRepository;
+    @Autowired private PrivilegedMfaProperties privilegedMfaProperties;
 
     private MockMvc mockMvc;
+    private String startupDigest;
 
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
+        startupDigest = privilegedMfaProperties.getRecoveryTokenSha256();
     }
 
     @AfterEach
     void clearSecurityContext() {
+        privilegedMfaProperties.setRecoveryTokenSha256(startupDigest);
         SecurityContextHolder.clearContext();
     }
 
@@ -102,13 +110,14 @@ class NeverEnrolledBreakGlassIntegrationTest {
         User admin = privilegedPasswordAccount();
         assertFalse(webAuthnService.hasPasskey(admin.getId()));
         MockHttpSession session = authenticatedSession(admin);
+        String recoveryToken = issueRecoveryToken(admin);
 
         mockMvc.perform(post("/api/auth/webauthn/recover")
                         .session(session)
                         .with(csrf().asHeader())
                         .contentType("application/json")
                         .content("{\"currentPassword\":\"" + PASSWORD + "\",\"recoveryToken\":\""
-                                + RECOVERY_TOKEN + "\"}"))
+                                + recoveryToken + "\"}"))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/auth/webauthn/register/options")
@@ -125,6 +134,7 @@ class NeverEnrolledBreakGlassIntegrationTest {
     @Test
     void breakGlassStillRequiresTheOperatorToken() throws Exception {
         User admin = privilegedPasswordAccount();
+        issueRecoveryToken(admin);
 
         mockMvc.perform(post("/api/auth/webauthn/recover")
                         .session(authenticatedSession(admin))
@@ -132,6 +142,19 @@ class NeverEnrolledBreakGlassIntegrationTest {
                         .contentType("application/json")
                         .content("{\"currentPassword\":\"" + PASSWORD + "\",\"recoveryToken\":\"wrong\"}"))
                 .andExpect(status().isForbidden());
+    }
+
+    /**
+     * Issues a fresh token bound to one account, as the operator runbook does.
+     *
+     * @param account the account the token may recover
+     * @return the raw token handed to the account holder
+     */
+    private String issueRecoveryToken(User account) {
+        String token = UUID.randomUUID().toString();
+        privilegedMfaProperties.setRecoveryTokenSha256(
+                sha256Hex("connex-privileged-mfa-recovery:v1:" + account.getId() + ":" + token));
+        return token;
     }
 
     private MockHttpSession authenticatedSession(User account) {

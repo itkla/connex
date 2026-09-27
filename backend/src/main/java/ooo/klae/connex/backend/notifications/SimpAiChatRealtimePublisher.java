@@ -28,14 +28,16 @@ public class SimpAiChatRealtimePublisher implements AiChatRealtimePublisher {
     private final UserMapper userMapper;
     private final TenantWorkScope tenantWorkScope;
     private final AiChatRealtimeRecipientReader recipientReader;
+    private final RealtimeRoutingIdentityResolver routingIdentities;
 
     @Override
     public void sendUser(int userId, AiChatStepFrameDto frame) {
         User recipient = userMapper.getUserById(userId);
-        if (recipient == null || recipient.getUsername() == null) {
+        if (recipient == null) {
             return;
         }
-        messagingTemplate.convertAndSendToUser(recipient.getUsername(), AI_CHAT_QUEUE, frame);
+        messagingTemplate.convertAndSendToUser(
+                routingIdentities.destinationFor(recipient.getId()), AI_CHAT_QUEUE, frame);
     }
 
     @Override
@@ -47,9 +49,8 @@ public class SimpAiChatRealtimePublisher implements AiChatRealtimePublisher {
             return;
         }
         userMapper.getActiveAiChatRealtimeRecipientsByIds(workspaceId, recipientIds).stream()
-                .map(AiChatRealtimeRecipientDto::username)
-                .filter(username -> username != null && !username.isBlank())
-                .forEach(username -> messagingTemplate.convertAndSendToUser(
-                        username, AI_CHAT_QUEUE, frame));
+                .map(AiChatRealtimeRecipientDto::id)
+                .forEach(userId -> messagingTemplate.convertAndSendToUser(
+                        routingIdentities.destinationFor(userId), AI_CHAT_QUEUE, frame));
     }
 }

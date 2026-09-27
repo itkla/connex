@@ -523,7 +523,8 @@ class DataSubjectRequestLifecycleConcurrencyIntegrationTest {
                     owner.getEmail(),
                     true,
                     organization.getId(),
-                    owner.getDisplayName()));
+                    owner.getDisplayName(),
+                    "client"));
             assertTrue(loginLocked.await(10, TimeUnit.SECONDS));
             Future<?> teardown = executor.submit(() ->
                 lifecycleOperations.markOrganizationTearingDown(
@@ -581,7 +582,8 @@ class DataSubjectRequestLifecycleConcurrencyIntegrationTest {
                     owner.getEmail(),
                     true,
                     organization.getId(),
-                    owner.getDisplayName()));
+                    owner.getDisplayName(),
+                    "client"));
             assertTrue(loginEntered.await(10, TimeUnit.SECONDS));
             assertFalse(loginAcquired.await(500, TimeUnit.MILLISECONDS));
 
@@ -650,7 +652,8 @@ class DataSubjectRequestLifecycleConcurrencyIntegrationTest {
                     email,
                     true,
                     organization.getId(),
-                    "New JIT User"));
+                    "New JIT User",
+                    "client"));
             assertTrue(loginEntered.await(10, TimeUnit.SECONDS));
             assertFalse(loginAcquired.await(500, TimeUnit.MILLISECONDS));
 
@@ -717,7 +720,8 @@ class DataSubjectRequestLifecycleConcurrencyIntegrationTest {
                     email,
                     true,
                     organization.getId(),
-                    "New JIT Winner"));
+                    "New JIT Winner",
+                    "client"));
             assertTrue(loginLocked.await(10, TimeUnit.SECONDS));
             Future<AcquiredWorkspace> teardown = executor.submit(() ->
                 lifecycleOperations.acquireWorkspaceTeardown(
@@ -935,6 +939,16 @@ class DataSubjectRequestLifecycleConcurrencyIntegrationTest {
     }
 
     private FederatedIdentity identity(String subject) {
+        SsoConnection connection = new SsoConnection();
+        connection.setOrgId(organization.getId());
+        connection.setProtocol("oidc");
+        connection.setEnabled(true);
+        connection.setJitWorkspaceId(workspace.getId());
+        connection.setDefaultRole("member");
+        connection.setOidcIssuer("https://issuer.example");
+        connection.setOidcClientId("client");
+        connection.setOidcScopes("openid,email,profile");
+        ssoConnectionMapper.upsert(connection);
         FederatedIdentity identity = new FederatedIdentity();
         identity.setUserId(owner.getId());
         identity.setOrgId(organization.getId());

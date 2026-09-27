@@ -5,6 +5,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -16,6 +17,11 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
+import ooo.klae.connex.backend.ai.lease.AiRunLease;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
 import ooo.klae.connex.backend.ai.masking.SpecialCareTextScreen;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -69,6 +75,7 @@ public class AiChatTurnPersistenceService {
     private final Clock clock;
     private final AiChatRealtimeDispatcher realtimeDispatcher;
     private final ObjectMapper objectMapper;
+    private final AiRunLeaseService runLeaseService;
 
     /** Commits the user message and queued turn under the session sequence mutex. */
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -195,6 +202,15 @@ public class AiChatTurnPersistenceService {
      * <p>Written before the plan executes so a turn that later fails still names the declaration
      * that produced it, which is what makes a failure attributable to a specific skill version.
      *
+     * <p><strong>The returned flag cannot be false for a caller that got here.</strong> The update
+     * is predicated on the turn still being {@code running}, and this same transaction takes the
+     * turn's row lock through {@code lockAuthorizedTurn(turn, RUNNING)} first, so the predicate
+     * cannot then miss. The agent loop relies on that: it seeds the turn's loaded toolsets beside
+     * this call without branching on the result, and a zero-row update would leave a turn running a
+     * seeded vocabulary while {@code ai_chat_turn.skill_key} stayed null — a set no reader could
+     * reconstruct. A caller that reaches this method without holding that lock breaks the
+     * invariant and must consume the flag instead.
+     *
      * @param turn running turn
      * @param skillKey stable catalog key
      * @param skillVersion semantic version of the declaration
@@ -260,13 +276,39 @@ public class AiChatTurnPersistenceService {
         }
     }
 
-    /** Marks a queued turn running after re-locking membership and session authorization. */
+    /**
+     * Marks a queued turn running after re-locking membership and session authorization, and
+     * claims its run lease in the same transaction.
+     *
+     * <p>The claim and the lease share one transaction so that a claim which rolls back leaves no
+     * lease row, and a committed claim always leaves one. That is the half of the coverage
+     * invariant this method owns: from here until a durable terminal write tombstones it, the turn
+     * has a lease row whose expiry bounds how long an abandoned turn can sit running.
+     *
+     * <p>The compare-and-set cannot lose: {@code lockAuthorizedTurn} holds the turn's row lock and
+     * already refuses a turn whose stored status is not queued, so a second claimant serializes
+     * behind it and throws before reaching the update. A zero row count is therefore an invariant
+     * violation rather than a contended claim, and it fails loudly.
+     *
+     * <p>The caller's ownership flag travels in because the lease claim is where its self-fence
+     * has to be anchored: this method waits behind the membership and turn row locks before the
+     * lease row is written at all, so the fence must start when MySQL starts counting the
+     * lifetime — not before that wait, and not whenever the worker next gets scheduled after it.
+     *
+     * @param turn the committed queued turn
+     * @param ownership the caller's ownership flag, anchored on the instant the lease is written
+     * @return the fencing token this instance now holds for the turn
+     */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
-    public boolean markRunning(AiChatQueuedTurn turn) {
+    public AiRunLease markRunning(AiChatQueuedTurn turn, AiRunLeaseGuard ownership) {
         requireCurrentActor(turn);
         lockAuthorizedTurn(turn, QUEUED);
-        return chatMapper.markTurnRunning(
-                turn.workspaceId(), turn.sessionId(), turn.turnId()) == 1;
+        if (chatMapper.markTurnRunning(
+                turn.workspaceId(), turn.sessionId(), turn.turnId()) != 1) {
+            throw new IllegalStateException("Assistant turn claim lost its durable state");
+        }
+        return runLeaseService.acquireInCurrentTransaction(
+                leaseKey(turn.workspaceId(), turn.turnId()), ownership);
     }
 
     /** Loads the bounded most-recent transcript after current access revalidation. */
@@ -423,21 +465,42 @@ public class AiChatTurnPersistenceService {
         return attachments;
     }
 
-    /** Persists a demasked read-tool proposal before execution. */
+    /**
+     * Persists a demasked read-tool proposal before execution.
+     *
+     * @param turn the running turn
+     * @param stepNumber the durable model-step number
+     * @param callOrdinal the call's position in its step, 0 when it is the step's only call
+     * @param toolName the declared tool the call named
+     * @param argumentsJson the demasked arguments the model proposed
+     * @return the durable tool-call row id
+     */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public int proposeTool(
             AiChatQueuedTurn turn,
             int stepNumber,
+            int callOrdinal,
             String toolName,
             String argumentsJson) {
-        return proposeTool(turn, stepNumber, toolName, argumentsJson, null);
+        return proposeTool(turn, stepNumber, callOrdinal, toolName, argumentsJson, null);
     }
 
-    /** Persists a demasked read-tool proposal with optional opaque provider replay state. */
+    /**
+     * Persists a demasked read-tool proposal with optional opaque provider replay state.
+     *
+     * @param turn the running turn
+     * @param stepNumber the durable model-step number
+     * @param callOrdinal the call's position in its step, 0 when it is the step's only call
+     * @param toolName the declared tool the call named
+     * @param argumentsJson the demasked arguments the model proposed
+     * @param thoughtSignature opaque provider replay state, or null
+     * @return the durable tool-call row id
+     */
     @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
     public int proposeTool(
             AiChatQueuedTurn turn,
             int stepNumber,
+            int callOrdinal,
             String toolName,
             String argumentsJson,
             String thoughtSignature) {
@@ -450,7 +513,7 @@ public class AiChatTurnPersistenceService {
         toolCall.setStatus(PROPOSED);
         toolCall.setArgumentsJson(argumentsJson);
         toolCall.setThoughtSignature(thoughtSignature);
-        toolCall.setIdempotencyKey("turn-" + turn.turnId() + "-step-" + stepNumber);
+        toolCall.setIdempotencyKey(turnStepKey(turn.turnId(), stepNumber, callOrdinal));
         chatMapper.insertToolCall(toolCall);
         return toolCall.getId();
     }
@@ -473,7 +536,8 @@ public class AiChatTurnPersistenceService {
             String thoughtSignature) {
         requireCurrentActor(turn);
         lockAuthorizedTurn(turn, RUNNING);
-        String idempotencyKey = turnStepKey(turn.turnId(), stepNumber);
+        String idempotencyKey = turnStepKey(
+                turn.turnId(), stepNumber, AiAssistantToolCallRef.SOLE_CALL);
         AiChatToolCall existing = chatMapper.getToolCallByIdempotencyKey(
                 turn.workspaceId(), idempotencyKey);
         if (existing != null) {
@@ -498,13 +562,28 @@ public class AiChatTurnPersistenceService {
         return new AiAssistantToolProposal(toolCall.getId(), PROPOSED, null, true);
     }
 
-    private static String turnStepKey(int turnId, int stepNumber) {
+    /**
+     * Renders the durable idempotency key one tool call owns.
+     *
+     * <p>A call that was the only one its step made keeps the exact key this service has always
+     * written — no suffix at all — so every write, every {@code find_tools}, every unbatched read
+     * and every server-side skill plan step stays byte-identical, along with the {@code
+     * turn-N-step-} prefix scan that reads them back. Only a call that shared its step renders the
+     * {@code -call-k} suffix, which fits the existing column and its uniqueness constraint.
+     *
+     * @param turnId the durable turn id
+     * @param stepNumber the durable model-step number
+     * @param callOrdinal the call's position in its step, 0 when it is the step's only call
+     * @return the durable idempotency key
+     */
+    private static String turnStepKey(int turnId, int stepNumber, int callOrdinal) {
         if (turnId <= 0
                 || stepNumber <= 0
                 || stepNumber > AiChatAgentLoopService.HARD_MAX_STEPS) {
             throw new IllegalArgumentException("Assistant tool turn and step must be positive");
         }
-        return "turn-" + turnId + "-step-" + stepNumber;
+        return "turn-" + turnId + "-step-" + stepNumber
+                + new AiAssistantToolCallRef(stepNumber, callOrdinal).keySuffix();
     }
 
     private String userMessageMetadata(
@@ -628,6 +707,7 @@ public class AiChatTurnPersistenceService {
         if (chatMapper.cancelTurn(workspaceId, sessionId, turnId) != 1) {
             throw new ConflictException("Assistant turn is already terminal");
         }
+        releaseRunLease(workspaceId, turnId);
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
@@ -724,6 +804,7 @@ public class AiChatTurnPersistenceService {
                 RUNNING, null) != 1) {
             throw new IllegalStateException("Assistant turn resolution lost its durable state");
         }
+        releaseRunLease(turn.workspaceId(), turn.turnId());
         chatMapper.updateLastMessageAt(turn.workspaceId(), turn.sessionId());
         return true;
     }
@@ -772,18 +853,114 @@ public class AiChatTurnPersistenceService {
             String status,
             String reason) {
         AiChatTurn stored = lockGenerationOwnedTurn(turn);
+        screenTerminalPartial(stored, reason);
+        if (chatMapper.updateTurnTerminal(
+                turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                status, reason, null, null) != 1) {
+            return false;
+        }
+        releaseRunLease(turn.workspaceId(), turn.turnId());
+        return true;
+    }
+
+    /**
+     * Settles one abandoned turn from an instance that never owned it, inside the settler's
+     * transaction.
+     *
+     * <p>Declared {@link Propagation#MANDATORY} deliberately. The fence that stops a revived owner
+     * is the turn's own status, and it closes when the settler commits that status — not when it
+     * takes the lease over. Letting this open its own transaction would split the takeover from
+     * the terminal write and reopen exactly that window, so the caller must already hold the
+     * transaction, the session lock, and the turn lock.
+     *
+     * <p>The partial answer passes the same special-care screen {@link #markTerminal} applies,
+     * through the shared helper, so an ownership loss cannot retain text a generation-owned
+     * failure would have purged.
+     *
+     * @param stored the turn, already locked by the caller
+     * @param status the terminal status to write
+     * @param reason the stable terminal reason
+     * @return the durable terminal projection, or empty when the turn was already terminal
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<AiChatDurableTerminal> settleOrphanedTurn(
+            AiChatTurn stored,
+            String status,
+            String reason) {
+        screenTerminalPartial(stored, reason);
+        if (chatMapper.updateTurnTerminal(
+                stored.getWorkspaceId(), stored.getSessionId(), stored.getId(),
+                status, reason, null, null) != 1) {
+            return Optional.empty();
+        }
+        releaseRunLease(stored.getWorkspaceId(), stored.getId());
+        AiChatTurn settled = chatMapper.getTurnByIdForUpdate(
+                stored.getWorkspaceId(), stored.getSessionId(), stored.getId());
+        if (settled == null) {
+            throw new IllegalStateException("Settled assistant turn is unavailable");
+        }
+        return Optional.of(new AiChatDurableTerminal(
+                settled.getStatus(),
+                settled.getTerminalReason(),
+                settled.isStreamed() ? settled.getPartialContentUtf16Offset() : 0));
+    }
+
+    /**
+     * Expires one turn that no lease covers and that has outlived the absolute turn lifetime.
+     *
+     * <p>This is the instance-independent form of the reader-triggered expiry, for the turns no
+     * lease sweeper may touch: a queued turn whose instance died before it was ever claimed, and
+     * every turn claimed by a binary that predates the lease. Both settle as today's
+     * {@code timed_out}/{@code generation_timeout}, never as an ownership loss, because no
+     * instance ever recorded ownership of them.
+     *
+     * <p>The staleness boundary is the database's, not this JVM's. The reader-triggered expiry can
+     * bind its own clock because it only ever reaches the one session its caller is reading; this
+     * pass runs unattended against every workspace the instance routes to, so a clock running ahead
+     * of MySQL would settle live turns across the estate. {@code updated_at} is written by MySQL,
+     * so MySQL is the only clock that can be compared against it safely.
+     *
+     * @param workspaceId tenant key
+     * @param sessionId the owning session
+     * @param turnId the turn
+     * @param lifetimeSeconds the absolute turn lifetime, applied by MySQL
+     * @return true when this call wrote the turn's terminal state
+     */
+    @Transactional(isolation = Isolation.READ_COMMITTED, propagation = Propagation.REQUIRES_NEW)
+    public boolean expireUnleasedTurn(
+            int workspaceId,
+            int sessionId,
+            int turnId,
+            int lifetimeSeconds) {
+        if (chatMapper.getSessionByIdForMaintenanceUpdate(workspaceId, sessionId) == null) {
+            return false;
+        }
+        AiChatTurn stored = chatMapper.getTurnByIdForUpdate(workspaceId, sessionId, turnId);
+        if (stored == null) {
+            return false;
+        }
+        if (!QUEUED.equals(stored.getStatus()) && !RUNNING.equals(stored.getStatus())) {
+            return false;
+        }
+        if (chatMapper.expireTurnPastLifetime(
+                workspaceId, sessionId, turnId,
+                TIMED_OUT, GENERATION_TIMEOUT, stored.getStatus(), lifetimeSeconds) != 1) {
+            return false;
+        }
+        releaseRunLease(workspaceId, turnId);
+        return true;
+    }
+
+    private void screenTerminalPartial(AiChatTurn stored, String reason) {
         if (RUNNING.equals(stored.getStatus())
                 && stored.isStreamed() && stored.getPartialContentUtf16Offset() > 0
                 && (AiAssistantTerminalReasons.withdrawsAuthorization(reason)
                         || SpecialCareTextScreen.screen(stored.getPartialContent()).excluded())
                 && chatMapper.resetTurnPartialContent(
-                        turn.workspaceId(), turn.sessionId(), turn.turnId(),
+                        stored.getWorkspaceId(), stored.getSessionId(), stored.getId(),
                         stored.getPartialContentUtf16Offset()) != 1) {
             throw new IllegalStateException("Assistant terminal stream reset lost its durable state");
         }
-        return chatMapper.updateTurnTerminal(
-                turn.workspaceId(), turn.sessionId(), turn.turnId(),
-                status, reason, null, null) == 1;
     }
 
     /** Returns the durable terminal projection after a generation callback settles. */
@@ -908,13 +1085,7 @@ public class AiChatTurnPersistenceService {
     }
 
     private AiChatTurn expireIfStale(AiChatTurn turn, LocalDateTime cutoff) {
-        if (!QUEUED.equals(turn.getStatus()) && !RUNNING.equals(turn.getStatus())) {
-            return turn;
-        }
-        int changed = chatMapper.updateTurnTerminal(
-                turn.getWorkspaceId(), turn.getSessionId(), turn.getId(),
-                TIMED_OUT, GENERATION_TIMEOUT, turn.getStatus(), cutoff);
-        if (changed == 0) {
+        if (!expireStaleTurn(turn, cutoff)) {
             return turn;
         }
         AiChatTurn expired = chatMapper.getTurnByIdForUpdate(
@@ -923,6 +1094,48 @@ public class AiChatTurnPersistenceService {
             throw new IllegalStateException("Expired assistant turn is unavailable");
         }
         return expired;
+    }
+
+    private boolean expireStaleTurn(AiChatTurn turn, LocalDateTime cutoff) {
+        if (!QUEUED.equals(turn.getStatus()) && !RUNNING.equals(turn.getStatus())) {
+            return false;
+        }
+        if (chatMapper.updateTurnTerminal(
+                turn.getWorkspaceId(), turn.getSessionId(), turn.getId(),
+                TIMED_OUT, GENERATION_TIMEOUT, turn.getStatus(), cutoff) != 1) {
+            return false;
+        }
+        releaseRunLease(turn.getWorkspaceId(), turn.getId());
+        return true;
+    }
+
+    /**
+     * Releases the turn's run lease inside the terminal transaction that just changed its row.
+     *
+     * <p>Releasing here rather than where the generation loop ends is what keeps the coverage
+     * invariant true: a process killed between the loop returning and this write leaves a held,
+     * expiring lease that a settler can find, not an unleased running turn nobody is bounded to.
+     *
+     * <p>Every caller has already changed the turn's terminal row under a predicate that only a
+     * non-terminal turn matches, so reaching here is proof that no owner may act on the turn any
+     * further — including when the write landed on an instance that never held the lease, which a
+     * cancel or a turn poll behind a load balancer routinely does. The release therefore retires
+     * the row whether or not this instance holds a token; only when it does is the release also
+     * fenced on {@code (owner, epoch)}.
+     *
+     * <p>The fence this leaves is the turn's status, and it closes when a settler commits the
+     * turn's terminal state — not when it takes the lease over. A settler that bumps the epoch in
+     * one transaction and writes the turn's terminal status in a later one leaves a window in
+     * which a revived owner still reads {@code running} and can settle the turn itself, retiring
+     * the settler's lease. Orphan settlement must therefore take the lease over and write the
+     * terminal status in a single transaction.
+     */
+    private void releaseRunLease(int workspaceId, int turnId) {
+        runLeaseService.releaseHeldInCurrentTransaction(leaseKey(workspaceId, turnId));
+    }
+
+    private static AiRunLeaseKey leaseKey(int workspaceId, int turnId) {
+        return new AiRunLeaseKey(workspaceId, AiRunLeaseSubject.CHAT_TURN, turnId);
     }
 
     private LocalDateTime expiryCutoff() {

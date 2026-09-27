@@ -18,6 +18,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
@@ -70,6 +72,9 @@ class BusinessCardImportAdmissionFilterTest {
             .when(workspaceRequestResolver.resolve(
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(9)))
             .thenReturn(7);
+        org.mockito.Mockito.lenient()
+            .when(workspaceService.getRole(7, 9))
+            .thenReturn("member");
         SecurityContextHolder.getContext().setAuthentication(
             new TestingAuthenticationToken(user, null, "ROLE_USER"));
     }
@@ -96,9 +101,12 @@ class BusinessCardImportAdmissionFilterTest {
         assertFalse(request.bodyAccessed());
     }
 
-    @Test
-    void rejectsPrincipalThrottleBeforeMultipartOrChainAccess() throws Exception {
-        TrackingMultipartRequest request = request(IDEMPOTENCY_KEY);
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/business-cards/import", "/%61pi/business-cards/%69mport",
+            "//api/business-cards/import;x"})
+    void rejectsPrincipalThrottleBeforeMultipartOrChainAccess(String path) throws Exception {
+        TrackingMultipartRequest request = request("POST", "/connex" + path, IDEMPOTENCY_KEY);
+        request.setContextPath("/connex");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
         doThrow(new TooManyRequestsException("limited"))
@@ -149,10 +157,12 @@ class BusinessCardImportAdmissionFilterTest {
         verify(rateLimiter, never()).requireImportAdmissionAllowed(9);
     }
 
-    @Test
-    void scanThrottleRunsBeforeMultipartAccess() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/business-cards/scan", "/api/business-cards/%73can"})
+    void scanThrottleRunsBeforeMultipartAccess(String path) throws Exception {
         TrackingMultipartRequest request = request(
-            "POST", "/api/business-cards/scan", null);
+            "POST", "/connex" + path, null);
+        request.setContextPath("/connex");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
         doThrow(new TooManyRequestsException("limited"))
@@ -256,10 +266,12 @@ class BusinessCardImportAdmissionFilterTest {
         verify(rateLimiter, never()).requireScanAdmissionAllowed(9);
     }
 
-    @Test
-    void reservationThrottleRunsBeforeTheControllerAndDatabasePath() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/business-cards/import/reservation", "/api/business-cards/import/%72eservation"})
+    void reservationThrottleRunsBeforeTheControllerAndDatabasePath(String path) throws Exception {
         TrackingMultipartRequest request = request(
-            "POST", "/api/business-cards/import/reservation", IDEMPOTENCY_KEY);
+            "POST", "/connex" + path, IDEMPOTENCY_KEY);
+        request.setContextPath("/connex");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
         doThrow(new TooManyRequestsException("limited"))
@@ -276,10 +288,12 @@ class BusinessCardImportAdmissionFilterTest {
         assertFalse(request.bodyAccessed());
     }
 
-    @Test
-    void statusThrottleRunsBeforeTheControllerAndDatabasePath() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"/api/business-cards/import", "/api/business-cards/%69mport"})
+    void statusThrottleRunsBeforeTheControllerAndDatabasePath(String path) throws Exception {
         TrackingMultipartRequest request = request(
-            "GET", "/api/business-cards/import", IDEMPOTENCY_KEY);
+            "GET", "/connex" + path, IDEMPOTENCY_KEY);
+        request.setContextPath("/connex");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
         doThrow(new TooManyRequestsException("limited"))
@@ -294,6 +308,48 @@ class BusinessCardImportAdmissionFilterTest {
             "Too many business-card requests");
         assertNull(chain.getRequest());
         assertFalse(request.bodyAccessed());
+    }
+
+    /**
+     * The resolver hands back the caller's raw remembered selection, so a member removed from that
+     * workspace must not have the safe status read refused before the interceptor can heal it.
+     */
+    @Test
+    void statusReadHealsARevokedRememberedWorkspaceInsteadOfRejectingIt() throws Exception {
+        when(workspaceService.getRole(7, 9)).thenReturn(null);
+        when(workspaceService.defaultWorkspaceIdFor(9)).thenReturn(19);
+        TrackingMultipartRequest request = request(
+            "GET", "/api/business-cards/import", IDEMPOTENCY_KEY);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(200, response.getStatus());
+        assertNotNull(chain.getRequest());
+        verify(workspaceService).requirePermission(19, 9, Permission.PERSON_CREATE);
+        verify(workspaceService).requirePermission(19, 9, Permission.ATTACHMENT_CREATE);
+        verify(rateLimiter).requireStatusAllowed(9);
+    }
+
+    @Test
+    void unsafeOperationsStillFailClosedOnARevokedRememberedWorkspace() throws Exception {
+        doThrow(new ForbiddenException("denied"))
+            .when(workspaceService).requirePermission(7, 9, Permission.PERSON_CREATE);
+        TrackingMultipartRequest request = request(
+            "POST", "/api/business-cards/scan", null);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(403, response.getStatus());
+        assertJsonRejection(
+            response,
+            "BUSINESS_CARD_PERMISSION_DENIED",
+            "Business-card permission is required");
+        assertNull(chain.getRequest());
+        verify(workspaceService, never()).defaultWorkspaceIdFor(9);
     }
 
     private static TrackingMultipartRequest request(String idempotencyKey) {

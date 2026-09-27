@@ -53,7 +53,8 @@ class AuditIntegrityLockOrderTest {
                 organizationMapper,
                 properties,
                 new ObjectMapper(),
-                Clock.fixed(Instant.parse("2026-07-21T12:00:00Z"), ZoneOffset.UTC));
+                Clock.fixed(Instant.parse("2026-07-21T12:00:00Z"), ZoneOffset.UTC),
+                org.mockito.Mockito.mock(ooo.klae.connex.backend.observability.SecuritySignalMetrics.class));
     }
 
     @Test

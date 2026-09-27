@@ -194,7 +194,27 @@ class HttpEspDeliveryProviderTest {
                     espTarget("http://esp-provider.example.test/send", "apiKey", API_KEY), expired);
 
             assertEquals(DispatchStatus.REJECTED, receipt.status());
+            assertTrue(receipt.provenBeforeEgress());
             assertFalse(resolutionAttempted.get());
+        } finally {
+            provider.shutdown();
+        }
+    }
+
+    @Test
+    void dispatch_marksEveryRefusalTakenBeforeTheRequestAsProvenBeforeEgress() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        HttpEspDeliveryProvider provider = new HttpEspDeliveryProvider(builder.build(), 1024, objectMapper);
+
+        try (MockedStatic<AiEgressGuard> ignored = mockStatic(AiEgressGuard.class)) {
+            for (DispatchReceipt refused : List.of(
+                    provider.dispatch(espTarget(null, "apiKey", API_KEY), request()),
+                    provider.dispatch(espTarget(ENDPOINT, "apiKey", " "), request()))) {
+                assertEquals(DispatchStatus.REJECTED, refused.status());
+                assertTrue(refused.provenBeforeEgress());
+            }
+            server.verify();
         } finally {
             provider.shutdown();
         }
@@ -214,6 +234,7 @@ class HttpEspDeliveryProviderTest {
 
             assertEquals(DispatchStatus.REJECTED, receipt.status());
             assertNull(receipt.providerMessageId());
+            assertFalse(receipt.provenBeforeEgress());
             server.verify();
         }
     }

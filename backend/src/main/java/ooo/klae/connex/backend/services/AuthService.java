@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.services;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -19,7 +20,6 @@ import ooo.klae.connex.backend.dto.LoginDto;
 import ooo.klae.connex.backend.dto.RegisterDto;
 import ooo.klae.connex.backend.exceptions.DuplicateResourceException;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
-import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.SsoEnforcedException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.UserMapper;
@@ -52,6 +52,7 @@ public class AuthService {
     private final LoginRateLimiter loginRateLimiter;
     private final ClientIpResolver clientIpResolver;
     private final RegistrationVerificationService registrationVerificationService;
+    private final AccountCreationRateLimiter accountCreationRateLimiter;
     private final SsoConnectionService ssoConnectionService;
     private final SessionSecurityService sessionSecurityService;
     private final OneTimeLinkFlowService oneTimeLinkFlowService;
@@ -84,15 +85,31 @@ public class AuthService {
     }
 
     /**
-     * Registers a new user with the provided registration data.
+     * Registers an account created by a workspace member manager under the instance's email
+     * verification policy. Workspace authority cannot assert global mailbox ownership: while
+     * verification is enabled the account starts unverified and is emailed a link to the address
+     * the creator supplied, so only that mailbox's holder can complete it.
+     *
+     * <p>That link is operator-paid outbound mail to a creator-chosen address, so it is bounded per
+     * creating actor by {@link AccountCreationRateLimiter}, and the creating request's IP is
+     * recorded on the issued token. The creating actor is already attributed on the
+     * {@code auth.register} audit entry through the authenticated principal.
      * @param request the registration details
-     * @param emailVerified whether the account starts email-verified — true for trusted callers
-     *     (admin create), false for self-serve accounts that must prove control of their address
+     * @param requestIp the creating client IP, recorded on the verification token for abuse audit
      * @return the created user
      */
     @Transactional
-    public User register(RegisterDto request, boolean emailVerified) {
-        return register(request, emailVerified, PasswordScreeningFlow.ADMIN_ACCOUNT_CREATION);
+    public User register(RegisterDto request, String requestIp) {
+        boolean verificationEnabled = registrationVerificationService.isEnabled();
+        if (verificationEnabled && !accountCreationRateLimiter.tryAcquire(getCurrentUser().getId())) {
+            throw new TooManyRequestsException(
+                "Too many accounts created recently. Please try again later.");
+        }
+        User user = register(request, !verificationEnabled, PasswordScreeningFlow.ADMIN_ACCOUNT_CREATION);
+        if (verificationEnabled) {
+            registrationVerificationService.issue(user, requestIp);
+        }
+        return user;
     }
 
     private User register(RegisterDto request, boolean emailVerified, PasswordScreeningFlow flow) {
@@ -310,7 +327,16 @@ public void downgradeToUnauthenticatedSession(
     }
 
     /**
-     * Confirms the current password with provenance-aware per-client throttling.
+     * Confirms the current password with immutable-account, username, and provenance-aware
+     * per-client throttling. Account failures persist for the configured login window.
+     *
+     * <p>This method writes no audit event of its own. It is a shared confirmation step that
+     * callers reach while already holding the account row exclusively — {@code MfaRecoveryService}
+     * takes {@code app_user FOR UPDATE} before the passkey-recovery bootstrap check — and audit
+     * appends run in an independent transaction that locks the actor's {@code app_user} row shared.
+     * Emitting from here would make the inner append wait on the caller's own exclusive lock until
+     * the InnoDB lock-wait timeout, losing the event and pinning two pooled connections per failed
+     * attempt. Callers that are not holding the account lock record their own outcome instead.
      *
      * @param userId the account whose password is being confirmed
      * @param password the submitted current password
@@ -323,11 +349,11 @@ public void downgradeToUnauthenticatedSession(
         }
         long now = System.currentTimeMillis();
         String username = user.getUsername();
-        if (loginRateLimiter.isBlockedForClient(clientIp, username, now)) {
+        if (loginRateLimiter.isPasswordConfirmationBlocked(userId, clientIp, username, now)) {
             throw new TooManyRequestsException("Too many login attempts. Please try again later.");
         }
         if (password == null || user.getPassword() == null || !passwordEncoder.matches(password, user.getPassword())) {
-            loginRateLimiter.recordFailureForClient(clientIp, username, now);
+            loginRateLimiter.recordPasswordConfirmationFailure(userId, clientIp, username, now);
             throw new BadCredentialsException("Incorrect password");
         }
         loginRateLimiter.recordSuccess(username);
@@ -362,7 +388,7 @@ public void downgradeToUnauthenticatedSession(
     public boolean hasPasswordCredential(int userId) {
         User user = userMapper.getUserById(userId);
         if (user == null) {
-            throw new ResourceNotFoundException("Not authenticated");
+            throw new AuthenticationCredentialsNotFoundException("Not authenticated");
         }
         return user.getPassword() != null;
     }
@@ -371,28 +397,33 @@ public void downgradeToUnauthenticatedSession(
      * Retrieves the authenticated session principal without refreshing it from persistence.
      *
      * @return the authenticated user principal
+     * @throws AuthenticationException when the security context holds no authenticated user
      */
     public User getCurrentPrincipal() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || !authentication.isAuthenticated()
                 || !(authentication.getPrincipal() instanceof User principal)) {
-            throw new ResourceNotFoundException("Not authenticated");
+            throw new AuthenticationCredentialsNotFoundException("Not authenticated");
         }
         return principal;
     }
 
     /**
-     * Retrieves the currently authenticated user based on the security context. Throws {@code ResourceNotFoundException} if no user is currently authenticated.
-     * @return
+     * Retrieves the currently authenticated user, refreshed from persistence.
+     *
+     * <p>A principal that no longer resolves — the session is real but the account row is gone —
+     * is an authentication failure, not a missing resource, so it answers 401 like every other
+     * signed-out state. Answering 404 left a browser holding a valid cookie stuck on a retryable
+     * "unavailable" screen that re-read the same rejection forever.
+     *
+     * @return the authenticated user as persisted
+     * @throws AuthenticationException when no authenticated principal resolves
      */
     public User getCurrentUser() {
         User principal = getCurrentPrincipal();
-
-        // handles cases where the user updates their info but is not returned
-        // reduntant if the user is not updated; just returns the same value
         User fresh = userMapper.getUserById(principal.getId());
         if (fresh == null) {
-            throw new ResourceNotFoundException("Not authenticated");
+            throw new AuthenticationCredentialsNotFoundException("Not authenticated");
         }
         return fresh;
     }

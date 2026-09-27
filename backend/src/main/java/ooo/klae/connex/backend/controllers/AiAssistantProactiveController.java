@@ -25,6 +25,8 @@ import ooo.klae.connex.backend.dto.AiCommandCenterDto;
 import ooo.klae.connex.backend.dto.AiWatchCreateRequest;
 import ooo.klae.connex.backend.dto.AiWatchDto;
 import ooo.klae.connex.backend.dto.AiWatchStatusRequest;
+import ooo.klae.connex.backend.tenant.TenantJournalAttributable;
+import ooo.klae.connex.backend.tenant.TenantJournalClientDriven;
 
 /**
  * The calling member's own proactive Ask Connex state: their brief schedule and their watches.
@@ -37,19 +39,35 @@ import ooo.klae.connex.backend.dto.AiWatchStatusRequest;
 @RestController
 @RequestMapping("/api/ai/assistant")
 @RequiredArgsConstructor
+@TenantJournalAttributable
 public class AiAssistantProactiveController {
 
     private final AiBriefScheduleService briefScheduleService;
     private final AiWatchService watchService;
     private final AiCommandCenterService commandCenterService;
 
-    /** Returns the schedule, last delivered brief, and watches the command centre renders. */
+    /**
+     * Returns the schedule, last delivered brief, and watches the command centre renders.
+     *
+     * <p>A client-scheduled read: it is fetched once per mount and per reload token rather than on
+     * a member action, and it answers no operator question its failures do not.
+     */
+    @TenantJournalClientDriven
     @GetMapping("/command-center")
     public AiCommandCenterDto commandCenter() {
         return commandCenterService.get();
     }
 
-    /** Returns the calling member's brief schedule. */
+    /**
+     * Returns the calling member's brief schedule.
+     *
+     * <p>No shipped client reads this route — {@code getAiCommandCenter} already serves the
+     * schedule inline — so there is no cadence to cite. It is marked anyway, so the structural rule
+     * that every assistant read is client-driven keeps no exception a future author has to reason
+     * about. Its failures are retained, because nothing re-drives it; the member action that
+     * changes a schedule is the {@code PUT}, which stays fully journaled.
+     */
+    @TenantJournalClientDriven
     @GetMapping("/brief-schedule")
     public AiBriefScheduleDto briefSchedule() {
         return briefScheduleService.get();
@@ -62,7 +80,16 @@ public class AiAssistantProactiveController {
         return briefScheduleService.replace(request);
     }
 
-    /** Lists the calling member's watches. */
+    /**
+     * Lists the calling member's watches.
+     *
+     * <p>No shipped client reads this route — {@code getAiCommandCenter} already serves the watches
+     * inline — so there is no cadence to cite. It is marked anyway, so the structural rule that
+     * every assistant read is client-driven keeps no exception a future author has to reason about.
+     * Its failures are retained, because nothing re-drives it; the member actions that change a
+     * watch are the {@code POST}, {@code PATCH} and {@code DELETE}, which stay fully journaled.
+     */
+    @TenantJournalClientDriven
     @GetMapping("/watches")
     public List<AiWatchDto> watches() {
         return watchService.list();

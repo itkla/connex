@@ -213,6 +213,7 @@ class AiAssistantSkillControllerTest {
                 Set.of(),
                 Set.of(),
                 Set.of(),
+                Set.of(),
                 true,
                 permissions,
                 AiFeature.ASSISTANT_CHAT,

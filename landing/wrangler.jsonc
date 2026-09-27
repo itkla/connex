@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "connex-landing",
+  "main": "./custom-worker.ts",
+  "compatibility_date": "2026-09-01",
+  // OpenNext runs Next.js on the Node.js runtime rather than the edge runtime.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  // esbuild keepNames wraps functions in __name(); next-themes serialises its theme script with
+  // Function.toString(), so the helper call would ship into an inline <script> that has no __name.
+  "keep_names": false,
+  // Only the custom domains serve this Worker. A workers.dev or preview URL would sit outside the
+  // connexcrm.jp zone's WAF and bot controls while reaching the same signup endpoint.
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "connexcrm.jp", "custom_domain": true },
+    { "pattern": "www.connexcrm.jp", "custom_domain": true }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SIGNUP_LIMITER",
+        "class_name": "SignupLimiter"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SignupLimiter"]
+    }
+  ]
+}

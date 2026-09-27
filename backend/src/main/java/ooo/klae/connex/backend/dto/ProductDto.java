@@ -3,7 +3,9 @@ package ooo.klae.connex.backend.dto;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
+import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -39,12 +41,16 @@ public class ProductDto {
     private String unit;
 
     @DecimalMin(value = "0", message = "unitPrice must not be negative")
+    @Digits(integer = 13, fraction = 2)
+    @DecimalMax("9999999999999.99")
     private BigDecimal unitPrice;
 
     @Size(max = 8)
     private String currency;
 
     @DecimalMin(value = "0", message = "taxRate must not be negative")
+    @Digits(integer = 3, fraction = 3)
+    @DecimalMax("999.999")
     private BigDecimal taxRate;
 
     @Pattern(regexp = "one_time|recurring", message = "billingFrequency must be one_time or recurring")

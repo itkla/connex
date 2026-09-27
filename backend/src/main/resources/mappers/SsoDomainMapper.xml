@@ -20,6 +20,36 @@
     ORDER BY domain
   </select>
 
+  <select id="hasVerifiedEmailOutsideOrg" resultType="boolean">
+    SELECT EXISTS (
+      SELECT 1 FROM app_user u
+      WHERE u.email_verified = TRUE
+        AND LOWER(TRIM(SUBSTRING_INDEX(u.email, '@', -1))) = #{domain}
+        AND (
+          (
+            NOT EXISTS (
+              SELECT 1 FROM workspace_member wm
+              JOIN workspace w ON w.id = wm.workspace_id
+              WHERE wm.user_id = u.id AND w.org_id = #{orgId} AND wm.status = 'active'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM org_member om
+              WHERE om.user_id = u.id AND om.org_id = #{orgId}
+            )
+          )
+          OR EXISTS (
+            SELECT 1 FROM workspace_member wm
+            JOIN workspace w ON w.id = wm.workspace_id
+            WHERE wm.user_id = u.id AND w.org_id &lt;&gt; #{orgId} AND wm.status = 'active'
+          )
+          OR EXISTS (
+            SELECT 1 FROM org_member om
+            WHERE om.user_id = u.id AND om.org_id &lt;&gt; #{orgId}
+          )
+        )
+    )
+  </select>
+
   <insert id="insert">
     INSERT INTO sso_domain (domain, org_id)
     VALUES (#{domain}, #{orgId})

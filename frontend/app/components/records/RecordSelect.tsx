@@ -82,7 +82,7 @@ export default function RecordSelect({
                         <ComboboxItem key={item.id} value={item}>
                             {!item.isNone ? (
                                 <Avatar>
-                                    <AvatarImage src={item.imageUrl ?? undefined} />
+                                    <AvatarImage src={item.imageUrl ?? undefined} alt="" />
                                     <AvatarFallback>
                                         <UserIcon className="size-4" />
                                     </AvatarFallback>

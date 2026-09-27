@@ -1,6 +1,7 @@
 package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
@@ -181,6 +182,20 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
             .andExpect(request().asyncStarted())
             .andReturn();
 
+        assertExportStreamed(downloadResult);
+    }
+
+    /**
+     * Dispatches a started export and fails with the throwable its body raised, instead of leaving
+     * an opaque status mismatch. The streamed task returns null on success and the throwable on
+     * failure, and the wait is bounded by the route's own deadline rather than a second limit.
+     *
+     * @param downloadResult the started export request
+     * @throws Exception when the async dispatch fails
+     */
+    private void assertExportStreamed(MvcResult downloadResult) throws Exception {
+        Object outcome = downloadResult.getAsyncResult();
+        assertNull(outcome, () -> "Tenant export body failed after the response committed: " + outcome);
         mockMvc.perform(asyncDispatch(downloadResult))
             .andExpect(status().isOk());
     }
@@ -202,8 +217,7 @@ class TenantLifecycleHttpAuthorizationIntegrationTest {
                 .session(session))
             .andExpect(request().asyncStarted())
             .andReturn();
-        mockMvc.perform(asyncDispatch(firstDownload))
-            .andExpect(status().isOk());
+        assertExportStreamed(firstDownload);
 
         assertTrue(sessionSecurityService.hasFreshRecentAuthentication(session, admin.getId()));
         mockMvc.perform(get(exportPath(orgId, workspace.getId()))

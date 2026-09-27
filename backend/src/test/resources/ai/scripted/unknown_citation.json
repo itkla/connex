@@ -1,0 +1,15 @@
+{
+  "id": "unknown_citation",
+  "selector": "connex_script_unknown_citation",
+  "capabilityClass": "scripted-native",
+  "steps": [
+    {
+      "afterToolCalls": 0,
+      "protocol": "native",
+      "emit": {
+        "kind": "final",
+        "text": "{\"text\":\"Everything looks settled on the account I reviewed.\",\"citations\":[\"r9\"],\"suggestions\":[],\"title\":null}"
+      }
+    }
+  ]
+}

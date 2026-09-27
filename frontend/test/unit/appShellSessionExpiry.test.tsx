@@ -1,7 +1,8 @@
-import { isValidElement } from "react";
+import { createElement, Fragment, isValidElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import AppLayout from "@/app/(app)/layout";
+import BrowserAccountBridge from "@/app/components/BrowserAccountBridge";
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
 
 const { redirectMock } = vi.hoisted(() => ({
@@ -33,17 +34,22 @@ function json(body: unknown): Response {
     });
 }
 
-function stubShellReads(workspacesStatus: number) {
-    vi.stubGlobal("fetch", vi.fn((input: string | URL | Request) => {
+function stubShellReads(workspacesStatus: number, authenticationStatus: number = 200) {
+    const fetch = vi.fn((input: string | URL | Request) => {
         const url = String(input);
         if (url.endsWith("/api/auth/me")) {
+            if (authenticationStatus !== 200) {
+                return Promise.resolve(new Response("", { status: authenticationStatus }));
+            }
             return Promise.resolve(json({ id: 9, email: "member@connex.test", locale: "en" }));
         }
         if (url.endsWith("/api/workspaces")) {
             return Promise.resolve(new Response("", { status: workspacesStatus }));
         }
         return Promise.resolve(new Response("", { status: 503 }));
-    }));
+    });
+    vi.stubGlobal("fetch", fetch);
+    return fetch;
 }
 
 function actionHrefs(node: unknown): string[] {
@@ -75,12 +81,29 @@ describe("the app shell distinguishes a rejected session from an unavailable wor
     });
 
     it("keeps the retryable unavailable state for a backend fault", async () => {
-        stubShellReads(503);
+        const fetch = stubShellReads(503, 503);
 
         const rendered = await AppLayout({ children: null });
 
         expect(isValidElement(rendered) ? rendered.type : null).toBe(WorkspaceUnavailablePage);
         expect(redirectMock).not.toHaveBeenCalled();
+        expect(fetch.mock.calls.some(([input]) => String(input).endsWith("/api/workspaces")))
+            .toBe(false);
+    });
+
+    it("synchronizes the resolved account when the workspace read is unavailable", async () => {
+        const fetch = stubShellReads(503);
+        const workspaceScopedContent = createElement("div", { "data-workspace-scoped": true }, "Workspace data");
+
+        const rendered = await AppLayout({ children: workspaceScopedContent });
+
+        expect(rendered).toEqual(createElement(Fragment, null,
+            createElement(BrowserAccountBridge, { userId: 9 }),
+            createElement(WorkspaceUnavailablePage),
+        ));
+        expect(redirectMock).not.toHaveBeenCalled();
+        expect(fetch.mock.calls.some(([input]) => String(input).endsWith("/api/permissions/effective")))
+            .toBe(false);
     });
 });
 

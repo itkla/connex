@@ -67,6 +67,7 @@ import ooo.klae.connex.backend.dto.ReportWidgetConfig;
 import ooo.klae.connex.backend.dto.ReportWidgetDataDto;
 import ooo.klae.connex.backend.dto.RelationshipTemperatureDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.exceptions.TooManyRequestsException;
 import ooo.klae.connex.backend.mappers.GoalMapper;
@@ -183,6 +184,7 @@ public class ReportService {
             "forecasting", "quota-attainment", "activity-team", "network-warm-intros", "employment-moves",
             "commercial-documents", "lead-lifecycle");
 
+    private final SessionSecurityService sessionSecurityService;
     private final ReportMapper reportMapper;
     private final ScheduleMapper scheduleMapper;
     private final GoalMapper goalMapper;
@@ -400,17 +402,19 @@ public class ReportService {
     @RequirePermission(Permission.REPORT_DELETE)
     public void delete(int id) {
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        int currentUserId = workspaceService.getCurrentUserId();
+        boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministrator(
+            workspaceId, currentUserId);
         reportMapper.lockDefinitions(workspaceId);
         ReportDefinition definition = reportMapper.getDefinition(workspaceId, id);
         if (definition == null) {
             throw new ResourceNotFoundException("Report not found with id: " + id);
         }
-        deletionPolicy.requireDeletable(definition.getCreatedBy());
-        int currentUserId = workspaceService.getCurrentUserId();
+        deletionPolicy.requireDeletable(definition.getCreatedBy(), builtInAdministrator);
         int destroyedSnapshotCount = reportMapper.countSnapshots(workspaceId, id);
         if (reportMapper.countSnapshotsNotGeneratedBy(workspaceId, id, currentUserId) > 0
                 || reportMapper.countScheduledSnapshots(workspaceId, id) > 0) {
-            workspaceService.requireRole(WorkspaceService.Role.ADMIN);
+            workspaceService.requireLockedBuiltInAdministrator(builtInAdministrator);
         }
         if (reportMapper.deleteDefinition(workspaceId, id) == 0) {
             throw new ResourceNotFoundException("Report not found with id: " + id);
@@ -742,11 +746,13 @@ public class ReportService {
     public void deleteSnapshot(int reportId, int snapshotId) {
         requireDefinition(reportId);
         int workspaceId = workspaceService.getCurrentWorkspaceId();
+        boolean builtInAdministrator = workspaceService.isLockedBuiltInAdministrator(
+            workspaceId, workspaceService.getCurrentUserId());
         ReportSnapshot snapshot = reportMapper.getSnapshot(workspaceId, reportId, snapshotId);
         if (snapshot == null) {
             throw new ResourceNotFoundException("Report snapshot not found with id: " + snapshotId);
         }
-        deletionPolicy.requireDeletable(snapshot.getGeneratedBy());
+        deletionPolicy.requireDeletable(snapshot.getGeneratedBy(), builtInAdministrator);
         if (reportMapper.deleteSnapshot(workspaceId, reportId, snapshotId) == 0) {
             throw new ResourceNotFoundException("Report snapshot not found with id: " + snapshotId);
         }
@@ -757,13 +763,24 @@ public class ReportService {
     /** Exports a live report appendix as RFC-4180 CSV. */
     @RequirePermission(Permission.REPORT_READ)
     public String exportCsv(int id, ReportGenerateRequest request) {
+        requireExportStepUp();
         return appendixCsv(generateInternal(id, request, NarrativeMode.NONE));
     }
 
     /** Exports a frozen report appendix as RFC-4180 CSV. */
     @RequirePermission(Permission.REPORT_READ)
     public String exportSnapshotCsv(int reportId, int snapshotId) {
+        requireExportStepUp();
         return appendixCsv(getSnapshot(reportId, snapshotId).computedResult());
+    }
+
+    private void requireExportStepUp() {
+        try {
+            sessionSecurityService.requireExportStepUp();
+        } catch (RecentAuthenticationRequiredException exception) {
+            auditService.recordExportStepUpRefused();
+            throw exception;
+        }
     }
 
     private ReportDocumentDto generateInternal(int id, ReportGenerateRequest request, NarrativeMode mode) {

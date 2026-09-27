@@ -1,8 +1,7 @@
 /** @vitest-environment jsdom */
-import { isValidElement, StrictMode, type ReactNode } from "react";
+import { StrictMode } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,55 +20,19 @@ declare global {
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const api = vi.hoisted(() => ({
-    markViewed: vi.fn<(token: string) => Promise<DocumentAcceptancePreview>>(),
-    accept: vi.fn<(token: string, payload: { typedName: string }) => Promise<unknown>>(),
-    decline: vi.fn<(token: string, payload: { reason: string }) => Promise<unknown>>(),
-}));
-const serverTranslations = vi.hoisted(() => vi.fn());
-const requestHeaders = vi.hoisted(() => vi.fn<() => Promise<Headers>>());
-const reactCacheState = vi.hoisted(() => {
-    const clearers: Array<() => void> = [];
-    return {
-        register(clear: () => void) {
-            clearers.push(clear);
-        },
-        clear() {
-            for (const clear of clearers) clear();
-        },
-    };
-});
-
-vi.mock("react", async () => {
-    const React = await vi.importActual<typeof import("react")>("react");
-    return {
-        ...React,
-        cache: function cache<Args extends unknown[], Result>(callback: (...args: Args) => Result) {
-            const results = new Map<string, { value: Result }>();
-            reactCacheState.register(() => results.clear());
-            return (...args: Args): Result => {
-                const key = JSON.stringify(args) ?? "[]";
-                const cached = results.get(key);
-                if (cached) return cached.value;
-                const value = callback(...args);
-                results.set(key, { value });
-                return value;
-            };
-        },
-    };
-});
-
-vi.mock("next/headers", () => ({
-    headers: requestHeaders,
-}));
-
-vi.mock("next-intl/server", () => ({
-    getTranslations: serverTranslations,
+    exchange: vi.fn<(token: string) => Promise<void>>(),
+    preview: vi.fn<() => Promise<DocumentAcceptancePreview>>(),
+    markViewed: vi.fn<() => Promise<DocumentAcceptancePreview>>(),
+    accept: vi.fn<(payload: { flowId: string; typedName: string }) => Promise<unknown>>(),
+    decline: vi.fn<(payload: { flowId: string; reason: string }) => Promise<unknown>>(),
 }));
 
 vi.mock("@/app/lib/api", async () => {
     const actual = await vi.importActual<typeof import("@/app/lib/api")>("@/app/lib/api");
     return {
         ...actual,
+        exchangeDocumentAcceptanceToken: api.exchange,
+        getDocumentAcceptancePreview: api.preview,
         markDocumentAcceptanceViewed: api.markViewed,
         acceptDocument: api.accept,
         declineDocument: api.decline,
@@ -77,18 +40,12 @@ vi.mock("@/app/lib/api", async () => {
 });
 
 import DocumentAcceptance from "@/app/components/marketing/campaigns/DocumentAcceptance";
+import DocumentAcceptanceEntry from "@/app/components/marketing/campaigns/DocumentAcceptanceEntry";
 import { documentAcceptanceViewFailure } from "@/app/components/marketing/campaigns/documentAcceptance";
-import DocumentAcceptanceUnavailable from "@/app/components/marketing/campaigns/DocumentAcceptanceUnavailable";
-import DocumentAcceptancePage, {
-    generateMetadata,
-} from "@/app/document-acceptance/[token]/page";
 import { ApiError } from "@/app/lib/api";
 
 const TOKEN = `w12-${"a".repeat(64)}`;
-const UNAVAILABLE_BODY = JSON.stringify({
-    code: "RESOURCE_NOT_FOUND",
-    message: "Document link is no longer available",
-});
+const FLOW_ID = "c".repeat(64);
 const MESSAGES = {
     ...acceptanceMessages,
     DealsDocuments: dealsMessages.DealsDocuments,
@@ -96,6 +53,7 @@ const MESSAGES = {
 
 function preview(overrides: Partial<DocumentAcceptancePreview> = {}): DocumentAcceptancePreview {
     return {
+        flowId: FLOW_ID,
         content: {
             generatedAt: "2026-09-01T10:30:00",
             workspace: { name: "Hikari Systems", address: "Tokyo" },
@@ -140,12 +98,6 @@ function jsonResponse(body: unknown, status = 200): Response {
     });
 }
 
-function stubPreview(body = preview()): ReturnType<typeof vi.fn> {
-    const fetchMock = vi.fn().mockImplementation(async () => jsonResponse(body));
-    vi.stubGlobal("fetch", fetchMock);
-    return fetchMock;
-}
-
 function deferred<T>() {
     let callbacks: {
         resolve: (value: T) => void;
@@ -156,6 +108,43 @@ function deferred<T>() {
     });
     if (!callbacks) throw new Error("Deferred promise callbacks were not initialized");
     return { promise, resolve: callbacks.resolve, reject: callbacks.reject };
+}
+
+let restoreLocation: (() => void) | null = null;
+
+function stubLocation(): { replace: ReturnType<typeof vi.fn>; reload: ReturnType<typeof vi.fn> } {
+    const real = window.location;
+    const replace = vi.fn();
+    const reload = vi.fn();
+    Object.defineProperty(window, "location", {
+        configurable: true,
+        value: {
+            get href() { return real.href; },
+            get origin() { return real.origin; },
+            get pathname() { return real.pathname; },
+            get search() { return real.search; },
+            get hash() { return real.hash; },
+            replace,
+            reload,
+        },
+    });
+    restoreLocation = () => Object.defineProperty(window, "location", {
+        configurable: true,
+        value: real,
+    });
+    return { replace, reload };
+}
+
+async function renderEntry() {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container, { onCaughtError: vi.fn() });
+    await act(async () => {
+        root.render(<DocumentAcceptanceEntry />);
+        await Promise.resolve();
+        await Promise.resolve();
+    });
+    return { container, root };
 }
 
 async function renderAcceptance(initialPreview = preview()) {
@@ -225,18 +214,10 @@ async function enterValue(element: HTMLInputElement | HTMLTextAreaElement, value
 
 beforeEach(() => {
     vi.clearAllMocks();
-    reactCacheState.clear();
-    requestHeaders.mockResolvedValue(new Headers());
-    serverTranslations.mockImplementation(async (
-        options: string | { locale?: string; namespace?: string },
-    ) => {
-        const catalog = typeof options === "object" && options.locale === "ja"
-            ? jaAcceptanceMessages.DocumentAcceptance
-            : acceptanceMessages.DocumentAcceptance;
-        return (key: keyof typeof acceptanceMessages.DocumentAcceptance) => catalog[key];
-    });
-    window.history.replaceState({}, "", `/document-acceptance/${TOKEN}`);
-    stubPreview();
+    vi.restoreAllMocks();
+    window.history.replaceState({}, "", "/document-acceptance");
+    api.exchange.mockResolvedValue(undefined);
+    api.preview.mockImplementation(async () => preview());
     api.markViewed.mockImplementation(async () => preview({
         deliveryStatus: "viewed",
         recipientStatus: "viewed",
@@ -255,193 +236,202 @@ beforeEach(() => {
 
 afterEach(() => {
     document.body.replaceChildren();
+    restoreLocation?.();
+    restoreLocation = null;
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
 });
 
-describe("document acceptance", () => {
-    it("sends a malformed path token through the same backend round trip", async () => {
-        const fetchMock = stubPreview();
-        fetchMock.mockResolvedValueOnce(new Response(UNAVAILABLE_BODY, {
-            status: 404,
-            headers: { "Content-Type": "application/json" },
-        }));
-        const page = await DocumentAcceptancePage({
-            params: Promise.resolve({ token: "not-a-bearer" }),
-        });
+describe("document acceptance entry", () => {
+    it("strips the fragment before the exchange request", async () => {
+        window.history.replaceState({}, "", `/document-acceptance#token=${TOKEN}`);
+        const { replace } = stubLocation();
 
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-        expect(String(fetchMock.mock.calls[0]?.[0])).toContain("not-a-bearer");
-        expect(isValidElement(page) && page.type).toBe(DocumentAcceptanceUnavailable);
-        expect(api.markViewed).not.toHaveBeenCalled();
+        const rendered = await renderEntry();
+
+        expect(api.exchange).toHaveBeenCalledWith(TOKEN);
+        expect(window.location.hash).toBe("");
+        expect(window.location.pathname).toBe("/document-acceptance");
+        expect(replace).toHaveBeenCalledWith("/document-acceptance");
+        expect(api.preview).not.toHaveBeenCalled();
+
+        await unmount(rendered.root);
     });
 
-    it("forwards the incoming client address and shares one preview across metadata and page", async () => {
-        requestHeaders.mockResolvedValue(new Headers({
-            "X-Forwarded-For": "203.0.113.44",
-        }));
-        const fetchMock = stubPreview(preview({ documentLocale: "ja" }));
+    it("re-opens a second emailed link that lands in the same tab", async () => {
+        const { reload } = stubLocation();
+        const rendered = await renderEntry();
+        expect(reload).not.toHaveBeenCalled();
 
-        const metadata = await generateMetadata({
-            params: Promise.resolve({ token: TOKEN }),
-        });
-        const page = await DocumentAcceptancePage({
-            params: Promise.resolve({ token: TOKEN }),
+        await act(async () => {
+            window.history.replaceState({}, "", `/document-acceptance#token=${TOKEN}`);
+            window.dispatchEvent(new HashChangeEvent("hashchange"));
+            await Promise.resolve();
         });
 
-        expect(metadata.title).toBe("ドキュメントの確認 | Connex");
-        expect(isValidElement(page)).toBe(true);
-        expect(fetchMock).toHaveBeenCalledTimes(1);
-        const init = fetchMock.mock.calls[0]?.[1];
-        expect(new Headers(init?.headers).get("x-forwarded-for"))
-            .toBe("203.0.113.44");
+        expect(reload).toHaveBeenCalledTimes(1);
+
+        await unmount(rendered.root);
     });
 
-    it("does not forward a multi-hop address from a recipient request", async () => {
-        requestHeaders.mockResolvedValue(new Headers({
-            "X-Forwarded-For": "198.51.100.91, 10.0.0.2",
-        }));
-        const fetchMock = stubPreview();
+    it("loads the preview from the grant without a token", async () => {
+        const rendered = await renderEntry();
 
-        await DocumentAcceptancePage({
-            params: Promise.resolve({ token: TOKEN }),
-        });
+        expect(api.exchange).not.toHaveBeenCalled();
+        expect(api.preview).toHaveBeenCalledWith();
+        expect(rendered.container.textContent).toContain("Frozen document title");
+        expect(rendered.container.textContent).toContain("Hikari Systems");
 
-        const init = fetchMock.mock.calls[0]?.[1];
-        expect(new Headers(init?.headers).get("x-forwarded-for")).toBeNull();
+        await unmount(rendered.root);
     });
 
-    it("renders byte-identical server-only copy for distinct preview 404 responses", async () => {
-        const causes = [
-            "unknown token",
-            "wrong hash",
-            "inactive workspace",
-            "expired",
-            "voided",
-            "completed or declined",
-        ];
-        const renderedCopy: string[] = [];
+    it("keeps the grant's session alive while the preview stays open, and stops on unmount", async () => {
+        vi.useFakeTimers();
+        try {
+            const rendered = await renderEntry();
+            expect(api.preview).toHaveBeenCalledTimes(1);
 
-        for (const [index, cause] of causes.entries()) {
-            const candidateToken = `w${20 + index}-${String(index + 1).repeat(64)}`;
-            const fetchMock = vi.fn().mockResolvedValueOnce(new Response(UNAVAILABLE_BODY, {
-                status: 404,
-                headers: { "Content-Type": "application/json" },
-            }));
-            vi.stubGlobal("fetch", fetchMock);
-            const page = await DocumentAcceptancePage({
-                params: Promise.resolve({ token: candidateToken }),
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+            });
+            expect(api.preview).toHaveBeenCalledTimes(2);
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+            });
+            expect(api.preview).toHaveBeenCalledTimes(3);
+
+            await unmount(rendered.root);
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+            });
+            expect(api.preview).toHaveBeenCalledTimes(3);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("surfaces the unavailable state when the keep-alive loses the grant", async () => {
+        vi.useFakeTimers();
+        try {
+            const rendered = await renderEntry();
+            expect(rendered.container.textContent).toContain("Frozen document title");
+            api.preview.mockRejectedValue(new ApiError("gone", 404));
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
             });
 
-            expect(fetchMock, cause).toHaveBeenCalledTimes(1);
-            expect(String(fetchMock.mock.calls[0]?.[0]), cause).toContain(candidateToken);
-            expect(isValidElement(page) && page.type, cause).toBe(DocumentAcceptanceUnavailable);
-            renderedCopy.push(renderToStaticMarkup(page));
-        }
+            expect(rendered.container.textContent).toContain("Link unavailable");
 
-        expect(new Set(renderedCopy)).toEqual(new Set([renderedCopy[0]]));
-        expect(renderedCopy[0]).toContain("Link unavailable");
-        expect(api.markViewed).not.toHaveBeenCalled();
+            await unmount(rendered.root);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("stops the keep-alive once the recipient records a decision", async () => {
+        vi.useFakeTimers();
+        try {
+            const rendered = await renderEntry();
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+            });
+            expect(api.preview).toHaveBeenCalledTimes(2);
+
+            await click(button(rendered.container, "Accept"));
+            const input = rendered.container
+                .querySelector<HTMLInputElement>("#document-acceptance-name");
+            if (!input) throw new Error("Typed-name field not found");
+            await enterValue(input, "Rina Sato");
+            await click(button(rendered.container, "Confirm acceptance"));
+            expect(rendered.container.textContent).toContain("Document accepted");
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+            });
+
+            expect(api.preview).toHaveBeenCalledTimes(2);
+            expect(rendered.container.textContent).toContain("Document accepted");
+            expect(rendered.container.textContent).not.toContain("Link unavailable");
+
+            await unmount(rendered.root);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("never polls a preview that has no open decision", async () => {
+        vi.useFakeTimers();
+        try {
+            api.preview.mockImplementation(async () => preview({ actionable: false }));
+            const rendered = await renderEntry();
+            expect(api.preview).toHaveBeenCalledTimes(1);
+
+            await act(async () => {
+                await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+            });
+
+            expect(api.preview).toHaveBeenCalledTimes(1);
+
+            await unmount(rendered.root);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it.each([
-        [429, "Too many document-link requests", "Try again shortly"],
-        [503, "This deployment cannot serve the request", "Document review is unavailable"],
-    ])("keeps a preview GET %s server-only and inert", async (status, body, title) => {
-        const fetchMock = vi.fn().mockResolvedValueOnce(new Response(body, {
-            status,
-            headers: { "Content-Type": "text/plain" },
-        }));
-        vi.stubGlobal("fetch", fetchMock);
+        [400, "Link unavailable"],
+        [404, "Link unavailable"],
+        [429, "Try again shortly"],
+        [503, "Document review is unavailable"],
+    ])("maps a preview %i into non-diagnostic copy", async (status, title) => {
+        api.preview.mockRejectedValue(new ApiError("nope", status));
 
-        const page = await DocumentAcceptancePage({
-            params: Promise.resolve({ token: TOKEN }),
-        });
+        const rendered = await renderEntry();
 
-        expect(isValidElement(page) && page.type).toBe(DocumentAcceptanceUnavailable);
-        expect(renderToStaticMarkup(page)).toContain(title);
+        expect(rendered.container.textContent).toContain(title);
         expect(api.markViewed).not.toHaveBeenCalled();
+
+        await unmount(rendered.root);
     });
 
-    it("scopes the public page and document renderer to the frozen document locale", async () => {
-        stubPreview(preview({ documentLocale: "ja" }));
+    it("renders byte-identical copy for distinct grant failures", async () => {
+        const causes = [
+            new ApiError("Document link is no longer available", 404),
+            new ApiError("This link is invalid or has expired", 400),
+            new ApiError("nothing", 404, "RESOURCE_NOT_FOUND"),
+        ];
+        const rendered: string[] = [];
 
-        const page = await DocumentAcceptancePage({
-            params: Promise.resolve({ token: TOKEN }),
-        });
+        for (const cause of causes) {
+            api.preview.mockRejectedValue(cause);
+            const view = await renderEntry();
+            rendered.push(view.container.innerHTML);
+            await unmount(view.root);
+        }
 
-        if (!isValidElement<{
-            locale: string;
-            messages: { DocumentAcceptance: { pageLabel: string } };
-            children: ReactNode;
-        }>(page)) {
-            throw new Error("Locale provider not rendered");
-        }
-        expect(page.props.locale).toBe("ja");
-        expect(page.props.messages.DocumentAcceptance.pageLabel).toBe("ドキュメントの確認");
-        if (!isValidElement<{ lang: string }>(page.props.children)) {
-            throw new Error("Language boundary not rendered");
-        }
-        expect(page.props.children.props.lang).toBe("ja");
-        expect(api.markViewed).not.toHaveBeenCalled();
+        expect(new Set(rendered)).toEqual(new Set([rendered[0]]));
+        expect(rendered[0]).toContain("Link unavailable");
     });
 
-    it("resolves metadata from the frozen document locale", async () => {
-        stubPreview(preview({ documentLocale: "ja" }));
+    it("sets the Japanese document title after a ja preview", async () => {
+        api.preview.mockImplementation(async () => preview({ documentLocale: "ja" }));
 
-        const metadata = await generateMetadata({
-            params: Promise.resolve({ token: TOKEN }),
-        });
+        const rendered = await renderEntry();
 
-        expect(metadata.title).toBe("ドキュメントの確認 | Connex");
-        expect(metadata.robots).toEqual({ index: false, follow: false });
-        expect(JSON.stringify(metadata)).not.toContain(TOKEN);
+        expect(document.title).toBe(
+            `${jaAcceptanceMessages.DocumentAcceptance.metaTitle} | Connex`,
+        );
+        expect(rendered.container.querySelector("[lang]")?.getAttribute("lang")).toBe("ja");
+        expect(rendered.container.textContent)
+            .toContain(jaAcceptanceMessages.DocumentAcceptance.pageLabel);
+
+        await unmount(rendered.root);
     });
+});
 
-    it.each([404, 429, 503])("keeps preview GET %s metadata out of search indexes", async (status) => {
-        const fetchMock = vi.fn().mockResolvedValueOnce(new Response(
-            status === 404 ? UNAVAILABLE_BODY : "Temporarily unavailable",
-            {
-                status,
-                headers: {
-                    "Content-Type": status === 404 ? "application/json" : "text/plain",
-                },
-            },
-        ));
-        vi.stubGlobal("fetch", fetchMock);
-
-        const metadata = await generateMetadata({
-            params: Promise.resolve({ token: TOKEN }),
-        });
-
-        expect(metadata.robots).toEqual({ index: false, follow: false });
-        expect(JSON.stringify(metadata)).not.toContain(TOKEN);
-        expect(api.markViewed).not.toHaveBeenCalled();
-    });
-
-    it("does not echo the route bearer into page-owned props, metadata, or body markup", async () => {
-        const page = await DocumentAcceptancePage({
-            params: Promise.resolve({ token: TOKEN }),
-        });
-        if (!isValidElement<{ children: ReactNode }>(page)) {
-            throw new Error("Locale provider not rendered");
-        }
-        const languageBoundary = page.props.children;
-        if (!isValidElement<{ children: ReactNode }>(languageBoundary)) {
-            throw new Error("Language boundary not rendered");
-        }
-        const client = languageBoundary.props.children;
-        if (!isValidElement<{ initialPreview: DocumentAcceptancePreview }>(client)) {
-            throw new Error("Acceptance client not rendered");
-        }
-
-        expect(client.type).toBe(DocumentAcceptance);
-        expect(client.key).toBeNull();
-        expect(client.props).not.toHaveProperty("token");
-        expect(JSON.stringify(client.props)).not.toContain(TOKEN);
-        expect(renderToStaticMarkup(page)).not.toContain(TOKEN);
-    });
-
+describe("document acceptance", () => {
     it("renders the frozen title and records one view under React strict effects", async () => {
         const initial = preview();
         api.markViewed.mockResolvedValueOnce({
@@ -461,7 +451,7 @@ describe("document acceptance", () => {
         expect(button(rendered.container, "Accept").disabled).toBe(false);
         expect(button(rendered.container, "Decline").disabled).toBe(false);
         expect(api.markViewed).toHaveBeenCalledTimes(1);
-        expect(api.markViewed).toHaveBeenCalledWith(TOKEN);
+        expect(api.markViewed).toHaveBeenCalledWith();
 
         await unmount(rendered.root);
     });
@@ -511,7 +501,7 @@ describe("document acceptance", () => {
             failure = documentAcceptanceViewFailure(terminalReceipt, error);
         });
 
-        await api.accept(TOKEN, { typedName: "Rina Sato" });
+        await api.accept({ flowId: FLOW_ID, typedName: "Rina Sato" });
         terminalReceipt = true;
         viewed.reject(new ApiError("Document link is no longer available", 404));
         await observedView;
@@ -544,9 +534,46 @@ describe("document acceptance", () => {
         await enterValue(input, "  Rina Sato  ");
         await click(button(rendered.container, "Confirm acceptance"));
 
-        expect(api.accept).toHaveBeenCalledWith(TOKEN, { typedName: "Rina Sato" });
+        expect(api.accept).toHaveBeenCalledWith({ flowId: FLOW_ID, typedName: "Rina Sato" });
         expect(rendered.container.textContent).toContain("Document accepted");
         expect(rendered.container.textContent).not.toContain("Confirm acceptance");
+
+        await unmount(rendered.root);
+    });
+
+    it("refuses a viewed receipt rendered from another tab's grant", async () => {
+        const initial = preview();
+        api.markViewed.mockResolvedValueOnce({
+            ...initial,
+            flowId: "e".repeat(64),
+            dealName: "Another deal",
+            deliveryStatus: "viewed",
+            recipientStatus: "viewed",
+        });
+        const rendered = await renderAcceptance(initial);
+
+        expect(rendered.container.textContent).toContain("Link unavailable");
+        expect(rendered.container.textContent).not.toContain("Another deal");
+        expect(rendered.container.textContent).not.toContain("Confirm acceptance");
+        expect(api.accept).not.toHaveBeenCalled();
+
+        await unmount(rendered.root);
+    });
+
+    it("shows the unavailable state when the grant no longer matches the rendered flow", async () => {
+        api.accept.mockRejectedValueOnce(
+            new ApiError("Document link is no longer available", 404),
+        );
+        const rendered = await renderAcceptance();
+        await click(button(rendered.container, "Accept"));
+        const input = rendered.container.querySelector<HTMLInputElement>("#document-acceptance-name");
+        if (!input) throw new Error("Typed-name field not found");
+        await enterValue(input, "Rina Sato");
+        await click(button(rendered.container, "Confirm acceptance"));
+
+        expect(api.accept).toHaveBeenCalledWith({ flowId: FLOW_ID, typedName: "Rina Sato" });
+        expect(rendered.container.textContent).toContain("Link unavailable");
+        expect(rendered.container.textContent).not.toContain("Document accepted");
 
         await unmount(rendered.root);
     });
@@ -560,7 +587,8 @@ describe("document acceptance", () => {
         await enterValue(textarea, "  Commercial terms do not work  ");
         await click(button(rendered.container, "Confirm decline"));
 
-        expect(api.decline).toHaveBeenCalledWith(TOKEN, {
+        expect(api.decline).toHaveBeenCalledWith({
+            flowId: FLOW_ID,
             reason: "Commercial terms do not work",
         });
         expect(rendered.container.textContent).toContain("Document declined");
@@ -568,12 +596,15 @@ describe("document acceptance", () => {
         await unmount(rendered.root);
     });
 
-    it("omits credentials, workspace context, and CSRF headers from every public call", async () => {
+    it("names no bearer in any request URL and sends no workspace context", async () => {
         const fetchMock = vi.fn<(
             input: RequestInfo | URL,
             init?: RequestInit,
         ) => Promise<Response>>().mockImplementation(async (input) => {
             const url = String(input);
+            if (url.endsWith("/api/auth/csrf")) {
+                return jsonResponse({ headerName: "X-CSRF-TOKEN", token: "csrf-token" });
+            }
             if (url.endsWith("/accept")) {
                 return jsonResponse({
                     deliveryStatus: "completed",
@@ -591,23 +622,29 @@ describe("document acceptance", () => {
             return jsonResponse(preview());
         });
         vi.stubGlobal("fetch", fetchMock);
+        document.cookie = `connex_workspace=12; path=/`;
         const actual = await vi.importActual<typeof import("@/app/lib/api")>("@/app/lib/api");
 
-        await actual.getDocumentAcceptancePreview(TOKEN);
-        await actual.markDocumentAcceptanceViewed(TOKEN);
-        await actual.acceptDocument(TOKEN, { typedName: "Rina Sato" });
-        await actual.declineDocument(TOKEN, { reason: "Commercial terms" });
+        await actual.getDocumentAcceptancePreview();
+        await actual.markDocumentAcceptanceViewed();
+        await actual.acceptDocument({ flowId: FLOW_ID, typedName: "Rina Sato" });
+        await actual.declineDocument({ flowId: FLOW_ID, reason: "Commercial terms" });
 
-        expect(fetchMock).toHaveBeenCalledTimes(4);
-        for (const call of fetchMock.mock.calls) {
+        const linkCalls = fetchMock.mock.calls
+            .filter((call) => !String(call[0]).endsWith("/api/auth/csrf"));
+        expect(linkCalls).toHaveLength(4);
+        for (const call of linkCalls) {
             const init = call[1];
-            if (!init) throw new Error("Public request options were not provided");
+            if (!init) throw new Error("Link-flow request options were not provided");
             const headers = new Headers(init.headers);
-            expect(init.credentials).toBe("omit");
-            expect(headers.has("Authorization")).toBe(false);
-            expect(headers.has("Cookie")).toBe(false);
+            expect(String(call[0])).not.toContain(TOKEN);
+            expect(String(call[0])).not.toMatch(/[a-f0-9]{64}/);
+            expect(init.credentials).toBe("include");
             expect(headers.has("X-Workspace-Id")).toBe(false);
-            expect([...headers.keys()].some((key) => key.toLowerCase().includes("csrf"))).toBe(false);
+            expect(headers.has("Authorization")).toBe(false);
+        }
+        for (const call of linkCalls.filter((entry) => entry[1]?.method === "POST")) {
+            expect(new Headers(call[1]?.headers).get("X-CSRF-TOKEN")).toBe("csrf-token");
         }
     });
 });

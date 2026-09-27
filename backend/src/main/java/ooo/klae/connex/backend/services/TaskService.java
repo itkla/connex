@@ -18,8 +18,11 @@ import java.util.function.Predicate;
 import tools.jackson.databind.ObjectMapper;
 
 import ooo.klae.connex.backend.mappers.DealMapper;
+import ooo.klae.connex.backend.mappers.PersonMapper;
+import ooo.klae.connex.backend.mappers.ShareMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
 import ooo.klae.connex.backend.beans.Notification;
+import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.BoardPositionUpdate;
@@ -41,6 +44,7 @@ import ooo.klae.connex.backend.work.WorkItemStateHash;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import lombok.RequiredArgsConstructor;
@@ -58,6 +62,8 @@ import lombok.RequiredArgsConstructor;
 public class TaskService {
     private final TaskMapper taskMapper;
     private final DealMapper dealMapper;
+    private final PersonMapper personMapper;
+    private final ShareMapper shareMapper;
     private final AuditService auditService;
     private final WorkspaceService workspaceService;
     private final AuthService authService;
@@ -174,11 +180,12 @@ public class TaskService {
         User actor = currentActorOrNull();
         task.setWorkspaceId(workspaceId);
         lockAssignee(task, workspaceId);
-        validateLinkedRecords(task, workspaceId);
         lockTaskBoard(workspaceId);
         task.setStatus(task.isCompleted() ? STATUS_DONE : STATUS_TODO);
         task.setPosition(taskMapper.nextTaskPosition(workspaceId, task.getStatus()));
         task.setCreatedAt(null);
+        validateLinkedRecords(task, workspaceId);
+        workspaceService.requirePermission(Permission.TASK_CREATE);
         taskMapper.insert(task);
         auditService.record("task.create", "task", task.getId(), task.getDescription(),
             "Created task " + task.getDescription(),
@@ -209,7 +216,6 @@ public class TaskService {
         User actor = currentActorOrNull();
         task.setId(id);
         task.setWorkspaceId(workspaceId);
-        validateLinkedRecords(task, workspaceId);
         String beforeStatus = before.getStatus() != null ? before.getStatus() : STATUS_TODO;
         String resolved = task.isCompleted() ? STATUS_DONE
             : (STATUS_DONE.equals(beforeStatus) ? STATUS_TODO : beforeStatus);
@@ -218,6 +224,8 @@ public class TaskService {
         task.setPosition(resolved.equals(beforeStatus)
             ? before.getPosition()
             : taskMapper.nextTaskPosition(workspaceId, resolved));
+        validateLinkedRecords(task, workspaceId);
+        workspaceService.requirePermission(Permission.TASK_UPDATE);
         if (taskMapper.update(task) != 1) {
             throw new ResourceNotFoundException("Task not found with id: " + id);
         }
@@ -448,6 +456,16 @@ public class TaskService {
         return lockedTasks;
     }
 
+    /** Retains the board before an enclosing assistant task creation locks its record target. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    @RequirePermission(Permission.TASK_CREATE)
+    public void lockBoardForCreation() {
+        int workspaceId = workspaceService.getCurrentWorkspaceId();
+        workspaceService.lockAndRequireMember(workspaceId, workspaceService.getCurrentUserId());
+        lockTaskBoard(workspaceId);
+        workspaceService.requirePermission(Permission.TASK_CREATE);
+    }
+
     private void lockTaskBoard(int workspaceId) {
         Integer isolation = TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
         if (TransactionSynchronizationManager.isActualTransactionActive()
@@ -527,7 +545,15 @@ public class TaskService {
         return task.getAssignedTo().getId();
     }
 
+    /** Retains the person and its exact visibility grant after the board lock until commit. */
     private void validateLinkedRecords(Task task, int workspaceId) {
+        if (task.getPerson() != null) {
+            Person person = personMapper.getVisiblePersonByIdForShare(workspaceId, task.getPerson().getId());
+            if (person == null || (person.getWorkspaceId() != workspaceId
+                    && shareMapper.lockPersonShareForWorkspace(person.getId(), workspaceId) == null)) {
+                throw new ResourceNotFoundException("Contact not found");
+            }
+        }
         if (task.getDeal() != null && !dealMapper.exists(workspaceId, task.getDeal().getId())) {
             throw new BadRequestException("Task deal must belong to the current workspace");
         }

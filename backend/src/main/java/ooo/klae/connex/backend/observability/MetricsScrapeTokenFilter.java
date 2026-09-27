@@ -17,6 +17,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import ooo.klae.connex.backend.config.RequestPathNormalizer;
 
 /**
  * Authenticates only the metrics scrape route with the operator-configured bearer token.
@@ -45,7 +46,7 @@ public class MetricsScrapeTokenFilter extends OncePerRequestFilter {
     protected boolean shouldNotFilter(HttpServletRequest request) {
         return configuredToken == null
                 || !"GET".equals(request.getMethod())
-                || !METRICS_PATH.equals(requestPath(request));
+                || !METRICS_PATH.equals(RequestPathNormalizer.apiPath(request));
     }
 
     @Override
@@ -86,12 +87,4 @@ public class MetricsScrapeTokenFilter extends OncePerRequestFilter {
         return MessageDigest.isEqual(configuredToken, presentedToken);
     }
 
-    private static String requestPath(HttpServletRequest request) {
-        String path = request.getRequestURI();
-        String contextPath = request.getContextPath();
-        if (contextPath != null && !contextPath.isBlank() && path.startsWith(contextPath)) {
-            return path.substring(contextPath.length());
-        }
-        return path;
-    }
 }

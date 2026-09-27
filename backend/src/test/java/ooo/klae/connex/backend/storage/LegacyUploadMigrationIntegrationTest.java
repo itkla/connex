@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.verify;
 
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
@@ -26,6 +29,11 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.test.context.transaction.TestTransaction;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.User;
@@ -52,7 +60,13 @@ class LegacyUploadMigrationIntegrationTest {
     @Autowired private ObjectStorageQuotaMapper quotaMapper;
     @Autowired private LegacyUploadFileReader fileReader;
     @Autowired private LegacyUploadMigrationTransaction migration;
+    @MockitoSpyBean private UploadMalwareScanner malwareScanner;
     @Autowired private ManagedObjectService managedObjectService;
+    @Autowired private WorkspaceObjectStorageQuotaService quotaService;
+    @Autowired private PlatformTransactionManager transactionManager;
+    private Integer committedAttachmentId;
+    private Integer committedWorkspaceId;
+    private Integer committedUserId;
 
     @DynamicPropertySource
     static void storageProperties(DynamicPropertyRegistry registry) {
@@ -74,7 +88,26 @@ class LegacyUploadMigrationIntegrationTest {
 
     @AfterEach
     void clearAuthentication() {
-        SecurityContextHolder.clearContext();
+        try {
+            if (committedAttachmentId != null && committedWorkspaceId != null && committedUserId != null) {
+                if (TestTransaction.isActive()) {
+                    TestTransaction.flagForRollback();
+                    TestTransaction.end();
+                }
+                new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    Attachment stored = attachmentMapper.getById(committedWorkspaceId, committedAttachmentId);
+                    if (stored != null && stored.getUrl().startsWith("/api/attachments/content/")) {
+                        String token = stored.getUrl().substring(stored.getUrl().lastIndexOf('/') + 1);
+                        quotaService.release(committedWorkspaceId,
+                            "workspaces/" + committedWorkspaceId + "/attachments/" + token);
+                    }
+                    attachmentMapper.delete(committedWorkspaceId, committedAttachmentId);
+                    userMapper.delete(committedUserId);
+                });
+            }
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
     }
 
     @Test
@@ -113,10 +146,25 @@ class LegacyUploadMigrationIntegrationTest {
         fileReader.validateOwnership(attachmentRecord, "/attachments/");
         ResolvedLegacyUpload resolvedAttachment = fileReader.read(
             attachment.getUrl(), "/attachments/");
+        committedAttachmentId = attachment.getId();
+        committedWorkspaceId = workspace.getId();
+        committedUserId = user.getId();
+        TestTransaction.flagForCommit();
+        TestTransaction.end();
+        doAnswer(invocation -> {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+            return invocation.callRealMethod();
+        }).when(malwareScanner).scanInWorkspace(any(UploadContentInspector.InspectedUpload.class), org.mockito.ArgumentMatchers.eq(workspace.getId()));
         migration.migrateAttachment(attachmentRecord, resolvedAttachment);
+        TestTransaction.start();
 
         Attachment storedAttachment = attachmentMapper.getById(
             workspace.getId(), attachment.getId());
+        assertEquals("clean", storedAttachment.getScanState());
+        assertNotNull(storedAttachment.getScanDatabaseVersion());
+        assertNotNull(storedAttachment.getScannedAt());
+        assertEquals(1, storedAttachment.getScanAttempts());
+        verify(malwareScanner).scanInWorkspace(any(UploadContentInspector.InspectedUpload.class), org.mockito.ArgumentMatchers.eq(workspace.getId()));
         byte[] storedAttachmentBytes;
         try (ManagedContent content = managedObjectService.openAttachment(
                 workspace.getId(), storedAttachment)) {

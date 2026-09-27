@@ -114,6 +114,50 @@ jobs:
             and (.services.backend.environment.CONNEX_DEPLOYMENT_PROFILE // "") == ""
           ' /tmp/eval.env.example.json >/dev/null
 
+          # No shipped template may carry the AI scripting test seam, which replaces the real
+          # OpenAI-compatible adapter with fixture scripts the image does not contain. The eval
+          # template is the reason this gate exists: it is the one bundle that runs
+          # SPRING_PROFILES_ACTIVE=dev with no declared edition, which is the only profile shape
+          # the backend would accept the seam under.
+          #
+          # The authority is the RENDERED backend environment, not the template text. env_file
+          # entries do reach the rendered config: SPRING_PROFILES_ACTIVE is asserted above from
+          # /tmp/eval.env.example.json and appears nowhere in docker-compose.yml, arriving only
+          # through `env_file: - .env`. Asserting the rendered environment therefore also covers a
+          # variable added to the backend service's own `environment:` block, which a template
+          # grep would miss entirely. The template list is a glob so a fourth bundle cannot slip
+          # in unchecked, and any template not already rendered above is rendered here. The
+          # comment-excluding grep is kept as a supplement — the templates are required to WARN
+          # operators about the seam by name, so their comments must be ignored.
+          for TEMPLATE in *.env.example; do
+            SETTINGS="$(grep -v '^[[:space:]]*#' "$TEMPLATE" || true)"
+            if printf '%s\n' "$SETTINGS" | grep -qE '^SPRING_PROFILES_ACTIVE=.*ai-scripted-provider'; then
+              echo "::error::${TEMPLATE} activates the scripted AI provider Spring profile"
+              exit 1
+            fi
+            if printf '%s\n' "$SETTINGS" | grep -qE '^CONNEX_AI_SCRIPTED_PROVIDER_'; then
+              echo "::error::${TEMPLATE} sets a scripted AI provider variable"
+              exit 1
+            fi
+            if [ ! -f "/tmp/${TEMPLATE}.json" ]; then
+              cp "$TEMPLATE" .env
+              docker compose --env-file .env --env-file source-build.env \
+                -f docker-compose.yml -f docker-compose.build.yml config --format json \
+                > "/tmp/${TEMPLATE}.json"
+            fi
+            if ! jq -e '
+              ((.services.backend.environment.SPRING_PROFILES_ACTIVE // "")
+                | contains("ai-scripted-provider") | not)
+              and (.services.backend.environment
+                | has("CONNEX_AI_SCRIPTED_PROVIDER_ENABLED") | not)
+              and (.services.backend.environment
+                | has("CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR") | not)
+            ' "/tmp/${TEMPLATE}.json" >/dev/null; then
+              echo "::error::${TEMPLATE} renders a backend environment carrying the scripted AI seam"
+              exit 1
+            fi
+          done
+
           # A real edition must refuse a published-image install that has not pinned the
           # sidecar's digest, exactly as it already does for the backend and frontend.
           for TEMPLATE in silo.env.example onprem.env.example; do
@@ -158,9 +202,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Lint staging deploy shell tooling
-        run: shellcheck -x deploy/staging/*.sh deploy/staging/tests/run-tests.sh
+        run: shellcheck -x deploy/staging/*.sh deploy/staging/tests/*.sh
       - name: Release-unit, rollback, smoke, recovery, and alert regression tests
         run: bash deploy/staging/tests/run-tests.sh
+      - name: Quarantine prune regression tests
+        run: bash deploy/staging/tests/prune-tests.sh
 
   profile-boot:
     name: Boot every deployment profile
@@ -286,6 +332,49 @@ jobs:
           fi
           echo "on-prem correctly refused instance-managed mail at startup"
 
+          echo "=== a real edition must REFUSE the scripted AI provider profile ==="
+          # The refusals live in DeploymentProfileEnvironmentPostProcessor, which Boot loads from
+          # META-INF/spring.factories. Unit tests exercise the validator against a MockEnvironment;
+          # only this packaged boot proves the registration survives packaging. If it were lost,
+          # DeploymentProfileValidator would still run -- but as an ApplicationRunner, after the
+          # context refreshed and the servlet container started, so a saas instance would serve AI
+          # turns through the fixture adapter (the real one is excluded by its profile negation)
+          # for the whole window before the runner threw. Hence both assertions: the process dies,
+          # and no web server was ever created.
+          CONNEX_DEPLOYMENT_PROFILE=saas SPRING_PROFILES_ACTIVE=dev,ai-scripted-provider \
+            CONNEX_AI_SCRIPTED_PROVIDER_ENABLED=true CONNEX_MAIL_MANAGED=true \
+            java -jar "$WAR" > /tmp/boot-saas-scripted.log 2>&1 &
+          PID=$!
+          REFUSED=0
+          for _ in $(seq 1 90); do
+            if ! kill -0 "$PID" 2>/dev/null; then REFUSED=1; break; fi
+            sleep 2
+          done
+          if [ "$REFUSED" != 1 ]; then
+            echo "::error::saas booted with the ai-scripted-provider profile; it must fail startup"
+            tail -60 /tmp/boot-saas-scripted.log
+            kill "$PID" 2>/dev/null || true
+            exit 1
+          fi
+          if ! grep -q "forbids the ai-scripted-provider Spring profile" \
+              /tmp/boot-saas-scripted.log; then
+            echo "::error::saas refused to boot but not for the scripted-provider reason"
+            tail -60 /tmp/boot-saas-scripted.log
+            exit 1
+          fi
+          # Positive control first, so the absence assertion below cannot pass vacuously if the
+          # container's startup line is ever reworded: the successful saas boot above must carry it.
+          if ! grep -q "Tomcat started on port" /tmp/boot-saas.log; then
+            echo "::error::the web-server startup marker changed; the assertion below is vacuous"
+            exit 1
+          fi
+          if grep -q "Tomcat started on port" /tmp/boot-saas-scripted.log; then
+            echo "::error::the scripted-provider refusal happened after the web server started"
+            tail -60 /tmp/boot-saas-scripted.log
+            exit 1
+          fi
+          echo "saas correctly refused the scripted AI provider profile before any web server"
+
           echo "=== every edition must REFUSE to run without malware scanning ==="
           # This is the control CHK-062 exists for. DeploymentProfileValidator's posture keys are
           # structurally one-directional -- they can forbid a key an operator sets true, but
@@ -385,6 +474,24 @@ jobs:
             fi
           }
 
+          # Proxied HTML carries the frontend's enforced nonce-based policy (CONNEX_CSP_MODE defaults
+          # to enforce), whose nonce changes per response, so those routes assert a shape rather
+          # than an exact value: exactly one Content-Security-Policy header, nonce-bearing
+          # script-src with 'strict-dynamic', frame-ancestors 'none' still present, and the
+          # report-uri that feeds the violation collector.
+          ENFORCED_HTML_CSP_PATTERN="^content-security-policy: *default-src 'self'; script-src 'self' 'nonce-[A-Za-z0-9+/=]+' 'strict-dynamic'; .*frame-ancestors 'none'; .*report-uri /api/csp-reports"
+
+          require_edge_csp_pattern() {
+            local pattern="$1"
+            local count
+            count=$(awk '{ line = $0; sub(/\r$/, "", line); if (tolower(substr(line, 1, 24)) == "content-security-policy:") n++ } END { print n + 0 }' "$EDGE_HEADERS_FILE")
+            if [ "$count" != "1" ] || ! grep -qiE "$pattern" "$EDGE_HEADERS_FILE"; then
+              echo "::error::expected exactly one enforced Content-Security-Policy header matching: $pattern"
+              sed -n '1,40p' "$EDGE_HEADERS_FILE"
+              exit 1
+            fi
+          }
+
           # nosniff only helps when the declared Content-Type is already correct; a mislabelled
           # script would make the browser refuse it, so CHK-040 requires asserting the type too.
           require_edge_content_type() {
@@ -412,7 +519,11 @@ jobs:
             require_edge_header_once 'X-Content-Type-Options: nosniff'
             require_edge_header_once "Referrer-Policy: $expected_referrer_policy"
             require_edge_header_once 'X-Frame-Options: DENY'
-            require_edge_header_once "Content-Security-Policy: $expected_csp"
+            if [ "$expected_csp" = "ENFORCED_HTML" ]; then
+              require_edge_csp_pattern "$ENFORCED_HTML_CSP_PATTERN"
+            else
+              require_edge_header_once "Content-Security-Policy: $expected_csp"
+            fi
             if [ -n "$expected_content_type" ]; then
               require_edge_content_type "$expected_content_type"
             fi
@@ -426,18 +537,18 @@ jobs:
           probe_edge_headers \
             http://localhost:18099/auth/login \
             200 \
-            "frame-ancestors 'none'" \
+            ENFORCED_HTML \
             'text/html'
           probe_edge_headers \
-            http://localhost:18099/document-acceptance/not-a-bearer \
+            http://localhost:18099/document-acceptance \
             200 \
-            "frame-ancestors 'none'" \
+            ENFORCED_HTML \
             'text/html' \
             'no-referrer'
           probe_edge_headers \
             http://localhost:18099/does-not-exist \
             404 \
-            "frame-ancestors 'none'"
+            ENFORCED_HTML
           probe_edge_headers \
             http://localhost:18099/attachments/x \
             404 \

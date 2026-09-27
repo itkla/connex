@@ -3,15 +3,18 @@ package ooo.klae.connex.backend.services;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -24,6 +27,8 @@ import java.util.Set;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.ai.AiGenerationService;
@@ -38,6 +43,7 @@ import ooo.klae.connex.backend.dto.ReportNarrativeClaimDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeDto;
 import ooo.klae.connex.backend.dto.ReportNarrativeSectionDto;
 import ooo.klae.connex.backend.dto.ReportWidgetConfig;
+import ooo.klae.connex.backend.exceptions.RecentAuthenticationRequiredException;
 import ooo.klae.connex.backend.mappers.GoalMapper;
 import ooo.klae.connex.backend.mappers.ReportMapper;
 import ooo.klae.connex.backend.mappers.ScheduleMapper;
@@ -50,17 +56,20 @@ class ReportServiceTest {
     private static final Clock CLOCK =
             Clock.fixed(Instant.parse("2026-07-12T12:00:00Z"), ZoneOffset.UTC);
 
+    private final SessionSecurityService sessionSecurityService = mock(SessionSecurityService.class);
     private final ReportMapper reportMapper = mock(ReportMapper.class);
     private final WorkspaceService workspaceService = mock(WorkspaceService.class);
     private final DealRiskService dealRiskService = mock(DealRiskService.class);
     private final AiReportNarrativeService aiReportNarrativeService = mock(AiReportNarrativeService.class);
     private final AiRestrictionEpoch aiRestrictionEpoch = mock(AiRestrictionEpoch.class);
     private final ReportPermissionPolicy reportPermissionPolicy = mock(ReportPermissionPolicy.class);
+    private final AuditService auditService = mock(AuditService.class);
     private ReportService service;
 
     @BeforeEach
     void setUp() {
         service = new ReportService(
+                sessionSecurityService,
                 reportMapper,
                 mock(ScheduleMapper.class),
                 mock(GoalMapper.class),
@@ -73,7 +82,7 @@ class ReportServiceTest {
                 mock(AiGenerationService.class),
                 aiRestrictionEpoch,
                 reportPermissionPolicy,
-                mock(AuditService.class),
+                auditService,
                 mock(DeletionPolicy.class),
                 new ObjectMapper(),
                 CLOCK,
@@ -82,6 +91,23 @@ class ReportServiceTest {
         when(workspaceService.getCurrentAnalyticsTimezone()).thenReturn("UTC");
         when(reportPermissionPolicy.requiredFor(any(ReportDefinition.class)))
                 .thenReturn(Set.of(Permission.REPORT_READ));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void reportExportsRequireStepUpBeforeGeneratingOrLoadingSnapshots(boolean snapshot) {
+        doThrow(new RecentAuthenticationRequiredException())
+                .when(sessionSecurityService).requireExportStepUp();
+        assertThrows(
+                RecentAuthenticationRequiredException.class, () -> {
+                    if (snapshot) {
+                        service.exportSnapshotCsv(REPORT_ID, 1);
+                    } else {
+                        service.exportCsv(REPORT_ID, null);
+                    }
+                });
+        verify(auditService).recordExportStepUpRefused();
+        verifyNoInteractions(reportMapper);
     }
 
     @Test

@@ -123,6 +123,8 @@ public class AiAssistantToolExecutor {
                 case "list_scope_activities" -> listScopeActivities(args, resources, scope);
                 case "aggregate_metric" -> aggregateMetric(args);
                 case "find_schedule_conflicts" -> findScheduleConflicts(args, resources);
+                case AiAssistantToolCatalog.FIND_TOOLS -> throw AiAssistantLoopException.malformed(
+                        "find_tools_requires_turn_state");
                 default -> throw AiAssistantLoopException.malformed("unknown_tool");
             };
         } catch (ResourceNotFoundException exception) {

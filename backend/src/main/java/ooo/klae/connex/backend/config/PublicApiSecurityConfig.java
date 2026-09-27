@@ -153,11 +153,7 @@ public class PublicApiSecurityConfig {
     }
 
     private static String requestPath(HttpServletRequest request) {
-        String path = request.getRequestURI();
-        String contextPath = request.getContextPath();
-        return contextPath == null || contextPath.isEmpty() || !path.startsWith(contextPath)
-            ? path
-            : path.substring(contextPath.length());
+        return RequestPathNormalizer.apiPath(request);
     }
 
     /** One exact public controller mapping, required authority, and transaction mode. */

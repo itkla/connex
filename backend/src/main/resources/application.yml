@@ -156,7 +156,8 @@ connex:
             # `enforced` above, because a first enrollment stamps step-up either way.
             # An instance that leaves email-enabled false CANNOT enroll a privileged,
             # password-backed account at all; configure instance SMTP (connex.mail.*) and set
-            # email-enabled, or disable this as a documented staged-rollout exception.
+            # email-enabled, or disable this as an attributed staged-rollout exception. Disabling
+            # confirmation requires change-actor and is included in the strict startup policy audit.
             bootstrap-confirmation:
                 enabled: ${CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_ENABLED:true}
                 email-enabled: ${CONNEX_PRIVILEGED_MFA_BOOTSTRAP_CONFIRMATION_EMAIL_ENABLED:false}
@@ -180,6 +181,7 @@ connex:
         upload-max-body-bytes: ${CONNEX_UPLOAD_MAX_BODY_BYTES:28311552}
         business-card-max-body-bytes: ${CONNEX_BUSINESS_CARD_MAX_BODY_BYTES:12582912}
         client-errors-max-body-bytes: ${CONNEX_CLIENT_ERRORS_MAX_BODY_BYTES:16384}
+        csp-reports-max-body-bytes: ${CONNEX_CSP_REPORTS_MAX_BODY_BYTES:16384}
         webauthn-max-body-bytes: ${CONNEX_WEBAUTHN_MAX_BODY_BYTES:65536}
         workflow-max-body-bytes: ${CONNEX_WORKFLOW_MAX_BODY_BYTES:98304}
         form-max-body-bytes: ${CONNEX_FORM_MAX_BODY_BYTES:1048576}
@@ -274,6 +276,13 @@ connex:
         max-reports-per-window: ${CONNEX_CLIENT_ERRORS_MAX_REPORTS_PER_WINDOW:20}
         window-seconds: ${CONNEX_CLIENT_ERRORS_WINDOW_SECONDS:300}
         eviction-delay-ms: ${CONNEX_CLIENT_ERRORS_EVICTION_DELAY_MS:300000}
+    csp-reports:
+        max-reports-per-window: ${CONNEX_CSP_REPORTS_MAX_REPORTS_PER_WINDOW:60}
+        window-seconds: ${CONNEX_CSP_REPORTS_WINDOW_SECONDS:60}
+        # Upper bound on distinct client addresses the throttle remembers between evictions; the
+        # key space is unauthenticated, so this is what keeps a rotating-address source off the heap.
+        max-tracked-clients: ${CONNEX_CSP_REPORTS_MAX_TRACKED_CLIENTS:10000}
+        eviction-delay-ms: ${CONNEX_CSP_REPORTS_EVICTION_DELAY_MS:300000}
     webauthn:
         # Passkey / WebAuthn relying-party config (#295). rp-id is the site's registrable domain
         # (no scheme/port); allowed-origins (CSV) must list every origin the SPA is served from.
@@ -391,6 +400,20 @@ connex:
         generation-max-lifetime: ${CONNEX_AI_GENERATION_MAX_LIFETIME:190s}
         generation-poll-window: ${CONNEX_AI_GENERATION_POLL_WINDOW:4m}
         generation-poll-interval: ${CONNEX_AI_GENERATION_POLL_INTERVAL:2s}
+        # Run-lease timings are validated against each other at startup: the heartbeat interval must
+        # not exceed half the TTL, the heartbeat pool must cover generation-worker-threads, the TTL
+        # must stay under generation-max-lifetime, and the tombstone retention must exceed it.
+        run-lease-ttl: ${CONNEX_AI_RUN_LEASE_TTL:45s}
+        run-lease-heartbeat-interval: ${CONNEX_AI_RUN_LEASE_HEARTBEAT_INTERVAL:15s}
+        run-lease-heartbeat-threads: ${CONNEX_AI_RUN_LEASE_HEARTBEAT_THREADS:4}
+        run-lease-sweep-enabled: ${CONNEX_AI_RUN_LEASE_SWEEP_ENABLED:true}
+        run-lease-sweep-delay: ${CONNEX_AI_RUN_LEASE_SWEEP_DELAY:30s}
+        run-lease-sweep-initial-delay: ${CONNEX_AI_RUN_LEASE_SWEEP_INITIAL_DELAY:60s}
+        run-lease-sweep-max-workspaces: ${CONNEX_AI_RUN_LEASE_SWEEP_MAX_WORKSPACES:50}
+        run-lease-sweep-batch: ${CONNEX_AI_RUN_LEASE_SWEEP_BATCH:50}
+        run-lease-sweep-max-settlements: ${CONNEX_AI_RUN_LEASE_SWEEP_MAX_SETTLEMENTS:200}
+        run-lease-settlement-ttl: ${CONNEX_AI_RUN_LEASE_SETTLEMENT_TTL:30s}
+        run-lease-tombstone-retention: ${CONNEX_AI_RUN_LEASE_TOMBSTONE_RETENTION:1h}
     sharing:
         # Gates the cross-workspace share/unshare API. The owned-or-shared read predicate is always
         # applied (harmless when no shares exist).

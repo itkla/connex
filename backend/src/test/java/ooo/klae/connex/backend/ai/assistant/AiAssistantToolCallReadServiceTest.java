@@ -146,6 +146,40 @@ class AiAssistantToolCallReadServiceTest {
         assertFalse(result.outcomeSummary().contains("private"));
     }
 
+    /**
+     * Both key shapes resolve a row to its turn, and a malformed key still drops it.
+     *
+     * <p>A write is always the only call of its step, so no row this service reads carries a call
+     * ordinal today; parsing one anyway keeps the widening forward-looking rather than a landmine,
+     * and the anchored pattern still refuses anything else outright.
+     */
+    @Test
+    void aKeyNamingACallOrdinalResolvesItsTurnWhileAMalformedKeyIsStillDropped() {
+        AiChatToolCall suffixed = toolCall(
+                29, USER_ID, "create_note", "auto", "executed", "person", 31, 19,
+                "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}");
+        suffixed.setIdempotencyKey("turn-19-step-2-call-3");
+        AiChatToolCall malformedKey = toolCall(
+                31, USER_ID, "create_note", "auto", "executed", "person", 31, 19,
+                "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}");
+        malformedKey.setIdempotencyKey("turn-19-step-2-call-");
+        when(chatMapper.listToolCallsBySession(
+                WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(suffixed, malformedKey));
+        when(chatMapper.listAssistantMessagesBySessionAndTurnIds(
+                WORKSPACE_ID, SESSION_ID, List.of(19), 100))
+                .thenReturn(List.of(assistantMessage(91, 19)));
+        when(personMapper.getByIds(WORKSPACE_ID, List.of(31)))
+                .thenReturn(List.of(person(31, "Ada Lovelace")));
+
+        List<AiAssistantToolCallReadDto> result = service.list(SESSION_ID, false);
+
+        assertEquals(1, result.size());
+        assertEquals(29, result.getFirst().id());
+        assertEquals(19, result.getFirst().turnId());
+        assertEquals(91, result.getFirst().messageId());
+    }
+
     @Test
     void sharedViewerGetsKindOnlyTargetAndCannotUndoAnotherParticipantsCall() {
         AiChatToolCall toolCall = toolCall(

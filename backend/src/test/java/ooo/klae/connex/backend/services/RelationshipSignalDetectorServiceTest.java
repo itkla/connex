@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -43,6 +44,7 @@ import ooo.klae.connex.backend.mappers.IntroductionMapper;
 import ooo.klae.connex.backend.mappers.NoteMapper;
 import ooo.klae.connex.backend.mappers.PersonMapper;
 import ooo.klae.connex.backend.mappers.TaskMapper;
+import ooo.klae.connex.backend.warmth.RelationshipWarmthModel;
 
 class RelationshipSignalDetectorServiceTest {
     private static final int WORKSPACE_ID = 7;
@@ -569,12 +571,14 @@ class RelationshipSignalDetectorServiceTest {
         NoteMapper noteMapper = mock(NoteMapper.class);
         TaskMapper taskMapper = mock(TaskMapper.class);
         when(personMapper.getProcessablePersons(WORKSPACE_ID)).thenReturn(people);
+        when(personMapper.getRelationshipScoreAggregates(eq(WORKSPACE_ID), any(), any()))
+            .thenAnswer(invocation -> activityAggregates(people, activities, invocation.getArgument(1)));
         when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenReturn(people);
         when(companyMapper.getRelationshipScoreAggregates(eq(WORKSPACE_ID), any(), any()))
             .thenReturn(List.of());
         when(companyMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenReturn(List.of());
         when(activityMapper.getAllActivities(WORKSPACE_ID)).thenReturn(activities);
-        when(noteMapper.getAllNotes(WORKSPACE_ID)).thenReturn(List.of());
+        when(noteMapper.getWorkspaceNoteMetadataPage(WORKSPACE_ID, 0, 100)).thenReturn(List.of());
         when(taskMapper.getAllTasks(WORKSPACE_ID)).thenReturn(List.of());
         return new SourceScoringFixture(
             personMapper,
@@ -583,6 +587,39 @@ class RelationshipSignalDetectorServiceTest {
             activityMapper,
             noteMapper,
             taskMapper);
+    }
+
+    private static List<RelationshipScoreAggregateDto> activityAggregates(
+            List<Person> people, List<Activity> activities, LocalDateTime reference) {
+        RelationshipWarmthModel model = RelationshipWarmthModel.current();
+        List<RelationshipScoreAggregateDto> aggregates = new ArrayList<>();
+        for (Person person : people) {
+            double raw = 0.0;
+            double recent = 0.0;
+            double prior = 0.0;
+            int recentCount = 0;
+            String lastTouch = null;
+            for (Activity activity : activities) {
+                if (activity.getPerson() == null || activity.getPerson().getId() != person.getId()
+                        || activity.getTimestamp() == null) continue;
+                LocalDateTime timestamp = LocalDateTime.parse(activity.getTimestamp().replace(' ', 'T'));
+                if (timestamp.isAfter(reference)) continue;
+                double age = model.ageDays(reference.toInstant(ZoneOffset.UTC).toEpochMilli(),
+                    timestamp.toInstant(ZoneOffset.UTC).toEpochMilli());
+                double weight = model.activityWeight(activity.getType());
+                raw += model.decayedContribution(weight, age);
+                if (model.isRecent(age)) {
+                    recent += weight;
+                    recentCount++;
+                }
+                if (model.isPrior(age)) prior += weight;
+                if (lastTouch == null || activity.getTimestamp().compareTo(lastTouch) > 0) {
+                    lastTouch = activity.getTimestamp();
+                }
+            }
+            aggregates.add(new RelationshipScoreAggregateDto(person.getId(), raw, recent, prior, lastTouch, recentCount));
+        }
+        return aggregates;
     }
 
     private RelationshipSignalDetectorService detectorFor(

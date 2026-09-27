@@ -9,6 +9,7 @@ import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.beans.WorkspaceMember;
 import ooo.klae.connex.backend.dto.MemberDto;
 import ooo.klae.connex.backend.dto.OrganizationLayoutWorkspaceMemberDto;
+import ooo.klae.connex.backend.dto.RevokedInvitationDto;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 
 /**
@@ -36,6 +37,10 @@ public interface WorkspaceMapper {
     WorkspaceMember lockAuthorizationMembership(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
+    /** Retains exact membership authority without excluding other authorized readers. */
+    WorkspaceMember lockAuthorizationMembershipForShare(
+        @Param("workspaceId") int workspaceId,
+        @Param("userId") int userId);
     WorkspaceMember getAuthorizationMembership(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId);
@@ -56,20 +61,22 @@ public interface WorkspaceMapper {
     List<MemberDto> getMembersWithRoles(int workspaceId);
     MemberDto getMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getMemberRoleId(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
-    boolean hasMembersWithCustomRole(
+    /** Locks the workspace's active owner rows without waiting, before acquiring role roots. */
+    List<WorkspaceMember> lockActiveOwnerMembers(@Param("workspaceId") int workspaceId);
+    /** Locks every membership currently overlaid by the role without waiting. */
+    List<WorkspaceMember> lockRoleAssignees(
         @Param("workspaceId") int workspaceId,
         @Param("roleId") int roleId);
     int setMemberCustomRole(@Param("workspaceId") int workspaceId, @Param("userId") int userId, @Param("roleId") int roleId);
-    int countOwners(int workspaceId);
     java.util.List<Integer> workspaceIdsOwnedBy(@Param("userId") int userId);
     Integer lockWorkspace(@Param("workspaceId") int workspaceId);
     Integer lockWorkspaceForShare(@Param("workspaceId") int workspaceId);
-    java.util.List<Integer> lockOwnerIds(@Param("workspaceId") int workspaceId);
     Integer lockActiveWorkspaceForShare(@Param("workspaceId") int workspaceId);
     Integer lockWorkspaceOrgIdForShare(@Param("workspaceId") int workspaceId);
     int removeMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     Integer getLastActiveWorkspaceId(int userId);
     int setLastActiveWorkspaceId(@Param("userId") int userId, @Param("workspaceId") int workspaceId);
+    int clearLastActiveWorkspaceId(int userId);
     int insert(Workspace workspace);
     int updateIdentity(
         @Param("workspaceId") int workspaceId,
@@ -104,6 +111,12 @@ public interface WorkspaceMapper {
     );
     int activateMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     List<WorkspaceMembershipDto> getPendingMemberships(int userId);
+    /**
+     * Finds all of a user's pending grants in ascending workspace id, including grants in inactive
+     * workspaces and organizations, so revocation cannot leave one behind.
+     */
+    List<RevokedInvitationDto> findPendingGrants(int userId);
+    int removePendingMember(@Param("workspaceId") int workspaceId, @Param("userId") int userId);
     int updateMemberRole(
         @Param("workspaceId") int workspaceId,
         @Param("userId") int userId,

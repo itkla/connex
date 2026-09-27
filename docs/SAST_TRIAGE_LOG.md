@@ -932,3 +932,112 @@ replay:
 (277 characters; the API cap is 280. Verified after the dismissal with
 `gh api repos/itkla/connex/code-scanning/alerts/153 --jq '{state,dismissed_at,dismissed_reason,dismissed_comment}'`
 → `dismissed`, `2026-09-05T01:43:26Z`, `false positive`, the comment above.)
+
+### `java/csrf-unprotected-request-type` — #164, #165: acceptance and unsubscribe preview `GET`s, false positive
+
+Raised on the merge ref of PR #1597 (CHK-050 residual) by the base-vs-merge gate from PR #1592 —
+the first live block of that gate — at `DeliveryUnsubscribeController.java:53`
+(`GET /api/delivery/unsubscribe`, #164) and `DocumentAcceptanceController.java:65`
+(`GET /api/document-acceptance`, #165).
+
+**Runtime trace.** Both handlers read only. `DocumentAcceptanceController.preview` →
+`DocumentAcceptanceService.admitGrant` → `OneTimeLinkFlowService.requireRoutedFlow` → `requireFlow`
+→ `flowMapper.findValidSourceTokenHash` / `findValidRoutingWorkspaceId` (`<select>`s) →
+`DocumentAcceptanceService.preview` → `transactionTemplate.execute(status -> previewInTransaction(…))`,
+which returns the frozen document and records nothing (view evidence is written only by
+`POST /viewed`, so scanners and prefetchers cannot forge it). `DeliveryUnsubscribeController.preview`
+→ `requireFlow` (`<select>`) → `DeliveryUnsubscribeService.preview` → `requireSend` and
+`campaignDeliveryMapper.hasEvent` (`<select>`). `insertEvent`, `markRecipientViewed` and the audit
+writes are reachable only from the `POST` decisions, which are CSRF-protected and `flowId`-bound.
+
+**Why CodeQL fired.** The sinks are the sibling write lambdas of the same service classes, linked
+through `viableCallable` dispatch over `TransactionTemplate.execute(TransactionCallback)` and the
+`Supplier` passed to `inDeliveryWorkspace`; the same class as #153 / #159 and #111 / #114 / #151 /
+#152. The repository's `AutomationExecutor.runAs` + `TransactionTemplate` idiom reproduces this for
+every read-only `GET` that shares a class with a writer; a model-pack or read-path split is recorded
+as a systemic follow-up on the tracking issue.
+
+**Regression coverage.** `DocumentAcceptanceLinkExchangeIntegrationTest` (preview leaves the
+recipient `pending` with no `viewed` / `completed` event) and
+`DeliveryUnsubscribeIntegrationTest.previewAndUnsubscribeIdempotentThroughTheGrant` (no
+`unsubscribed` event after the `GET`).
+
+**Disposition: false positive.** Tracking issue
+[#1599](https://github.com/itkla/connex/issues/1599); owner Hunter Nakagawa; approver Security
+Owner role ([#1230](https://github.com/itkla/connex/issues/1230)); expiry **2027-02-14**, re-review
+**2027-01-14**. Both dismissed on 2026-09-07 with:
+
+> False positive: GET preview runs only SELECTs (requireFlow, previewInTransaction / hasEvent); no
+> event, audit or status write. CodeQL linked sibling write lambdas via TransactionTemplate/Supplier
+> dispatch. Owner Hunter Nakagawa. Expiry 2027-02-14, re-review 2027-01-14. #1599
+
+(275 characters.) The alert numbers are repository-wide, so the dismissals carry over to
+`refs/heads/main` when #1597 merges.
+
+### `java/spring-disabled-csrf-protection` — #166: dedicated CSP report chain, false positive
+
+Raised on the merge ref of PR #1601 (the collector hardening follow-up to #1596) at
+`CspReportSecurityConfig.java:79`, where the dedicated `@Order(0)` chain that serves
+`POST /api/csp-reports` disables CSRF. Same class as #156 (`PublicApiSecurityConfig`, #1591).
+
+**Why it is not a vulnerability.** The chain matches exactly `POST /api/csp-reports`, runs
+`SessionCreationPolicy.STATELESS` with the request cache disabled, and `permitAll`s the one
+route; `CspReportCookieFilter`, registered just before Spring Session's `SessionRepositoryFilter`,
+hides every cookie from that request, so no session and no cookie-borne authority exists for a
+cross-site request to ride. The endpoint records nothing but a bounded log line and always
+answers 204. The cookie-authorised `/api/**` chain keeps its CSRF protection.
+`CspReportEndpointSecurityTest.reportsNeverTouchTheSessionTheyCarry` proves through the real
+filter chain that a report carrying a valid session cookie leaves the session untouched and
+creates none.
+
+**Disposition: false positive.** Tracked on [#1591](https://github.com/itkla/connex/issues/1591)
+(same class); owner Hunter Nakagawa; approver Security Owner role; expiry **2027-02-14**,
+re-review **2027-01-14**. Dismissed on 2026-09-07 with a comment carrying that record.
+
+### `java/csrf-unprotected-request-type` — #186: deal collaborator listing, false positive
+
+Raised on the merge ref of PR [#1792](https://github.com/itkla/connex/pull/1792) (#819, deal
+collaborator control hydration) at `DealController.java:854`
+(`GET /api/deals/{id}/collaborators`), blocking that pull request. Same class as #67
+(`UserController`), #153 / #159 (`ReportController.widgetKpi`) and #164 / #165.
+
+**Runtime trace.** The handler reads only. `DealService.getCollaborators` runs exactly three
+statements, each a `<select>`: `DealMapper.getDealById` (`DealMapper.xml:1027-1031`, flat result
+map, no nested selects), `DealMapper.getCollaboratorIds` (`DealMapper.xml:1326-1332`, pinned
+verbatim by `DealMapperXmlTest.collaboratorLookupReadsOnlyTenantRelationshipIds`) and
+`UserMapper.getActiveWorkspaceMemberProfilesByIds` (`UserMapper.xml:68-82`). Nothing else executes:
+`DealCollaboratorControlAccess.loadProfiles` is `new ArrayList` / `addAll` / `sort` / `stream`, and
+`TenantWorkScope.unrouted` is a `ThreadLocal` override around `work.get()`. Independently checked
+and clean: no aspects; the `@RequirePermission` pointcut does not match this unannotated read;
+`TenantScopeInterceptor` is throw-or-proceed; `ControlCatalogRoutingInterceptor` only switches the
+connection catalog; no `ResponseBodyAdvice`; no mapper cache; no persisted counter, `last_*`
+timestamp or lazily created row. The tenant journal is an SLF4J emission, not a database write.
+
+**Why CodeQL fired.** The sink is `Supplier.get()` at `TenantWorkScope.java:233`. CodeQL resolves
+that functional-interface call context-insensitively to every `Supplier` lambda reaching
+`unrouted`, including `AiBudgetControlAccess`'s, which do write; all four of this result's code
+flows end at `AiBudgetControlOperations` writes. The flow is infeasible here because the supplier
+constructed at `DealCollaboratorControlAccess.java:59` is `() -> loadProfiles(…)`. This is the same
+systemic shape recorded for #164 / #165 above, now measured: **46 results of this rule on the
+current `main` analysis, 33 of them ending at the same four AI-budget writes, none at an in-memory
+call.** The structural follow-up is tracked on
+[#1815](https://github.com/itkla/connex/issues/1815).
+
+**Correction of record.** The first dismissal comment on this alert (2026-09-20, written to unblock
+#1792) attributed the finding to `TransactionTemplate.setPropagationBehavior` and `List.addAll`.
+That attribution was wrong — no in-memory call is a sink in any result of this rule — and the
+independent reproduction required by
+[STATIC_ANALYSIS.md](STATIC_ANALYSIS.md) had not yet been performed when it was written. The alert
+was reopened and re-dismissed on 2026-09-20 with the corrected rationale and a link to its tracking
+issue. Both the pull request comment and the issue carry the correction.
+
+**Note for re-reviewers.** The 100 `relatedLocations` on an alert of this rule are a global, capped,
+result-independent list — byte-identical between #67 and #186. Only `codeFlows` carry per-result
+truth. Cite methods plus a commit sha rather than bare line numbers: #67's record cites
+`UserService (:91)`, which on current `main` is a different method.
+
+**Disposition: false positive.** Tracking issue
+[#1814](https://github.com/itkla/connex/issues/1814); owner Hunter Nakagawa; approver Security
+Owner role ([#1230](https://github.com/itkla/connex/issues/1230)); expiry **2027-02-14**, re-review
+**2027-01-14**. Re-evaluation triggers: any write added to the `getCollaborators` path,
+`DealCollaboratorControlAccess` gaining a mutating statement, or a material update to the query.

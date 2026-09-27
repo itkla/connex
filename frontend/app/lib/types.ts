@@ -7,6 +7,13 @@ export type Page<T> = {
     total: number;
 };
 
+/** Body-free authored-note count for one UTC calendar day. */
+export type NoteActivityDay = { date: string; count: number };
+
+/** The last update timestamp and id returned by a timeline note page. */
+export type NotePageCursor = { beforeAt: string; beforeId: number };
+export type NotePageParams = PageParams & Partial<NotePageCursor>;
+
 export type PageParams = {
     page?: number;
     size?: number;
@@ -871,6 +878,18 @@ export type EmailChangePayload = {
     currentPassword: string;
 };
 
+/** A pending workspace invitation revoked when the account's email address changed. */
+export type RevokedInvitation = {
+    workspaceId: number;
+    orgId: number | null;
+    workspaceName: string;
+};
+
+/** Email-change confirmation and the pending invitations that need to be sent again. */
+export type EmailChangeConfirmation = AuthResponse & {
+    revokedInvitations: RevokedInvitation[];
+};
+
 export type ResetTokenValidation = {
     valid: boolean;
 };
@@ -1705,7 +1724,8 @@ export type DealLineItemTotals = {
 
 export type DealLineItemsResponse = {
     items: DealLineItem[];
-    totals: DealLineItemTotals;
+    /** Unavailable until every remaining line uses the deal currency. */
+    totals: DealLineItemTotals | null;
 };
 
 export type DealLineItemPayload = {
@@ -2671,10 +2691,20 @@ export type CampaignAudienceExportReconciliationPayload = {
 };
 
 /** Public confirmation payload for an unsubscribe link; the address is masked by the backend. */
+/**
+ * A live unsubscribe preview. The flow identity names the grant the preview was rendered from and
+ * must be echoed by the confirmation.
+ */
 export type DeliveryUnsubscribeInfo = {
+    flowId: string;
     channel: string;
     address: string;
     unsubscribed: boolean;
+};
+
+/** Body for a public unsubscribe confirmation, bound to the previewed flow identity. */
+export type ConfirmUnsubscribePayload = {
+    flowId: string;
 };
 
 export type ContactChannelConsent = {
@@ -5142,9 +5172,10 @@ export type WorkspaceInvite = {
 
 /**
  * The outcome of inviting someone by email. Exactly one field is set: `invite`
- * for an emailed token invite (a new address), or `member` when the address
- * belongs to an existing Connex user, who is added as a pending member and
- * notified in-app instead.
+ * for an emailed token invite (a new address, or one whose account still owes
+ * email verification), or `member` when the address belongs to an existing
+ * account whose mailbox ownership is settled, which is added as a pending member
+ * and notified in-app instead.
  */
 export type InviteResult = {
     invite: WorkspaceInvite | null;
@@ -5220,6 +5251,7 @@ export type MailConfig = {
     starttls: boolean;
     ssl: boolean;
     auth: boolean;
+    defaultPort: number;
     hasPassword: boolean;
     configured: boolean;
     updatedAt: string | null;
@@ -5944,8 +5976,12 @@ export type AiCommandCenter = {
     watchLimit: number;
 };
 
-/** A successful, live recipient-link preview. Terminal recipient states are intentionally absent. */
+/**
+ * A successful, live recipient-link preview. Terminal recipient states are intentionally absent.
+ * The flow identity names the grant the preview was rendered from and must be echoed by decisions.
+ */
 export type DocumentAcceptancePreview = {
+    flowId: string;
     content: DocumentContent;
     dealName: string;
     workspaceName: string;
@@ -5967,13 +6003,15 @@ export type DocumentAcceptanceDecision = {
     completed: boolean;
 };
 
-/** Body for a public typed-name acceptance. */
+/** Body for a public typed-name acceptance, bound to the previewed flow identity. */
 export type AcceptDocumentPayload = {
+    flowId: string;
     typedName: string;
 };
 
-/** Body for a public reasoned decline. */
+/** Body for a public reasoned decline, bound to the previewed flow identity. */
 export type DeclineDocumentPayload = {
+    flowId: string;
     reason: string;
 };
 

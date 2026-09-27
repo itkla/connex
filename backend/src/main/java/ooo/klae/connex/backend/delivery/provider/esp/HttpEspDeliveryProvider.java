@@ -162,21 +162,21 @@ public class HttpEspDeliveryProvider implements MessageDispatcher, ProviderEvent
     @Override
     public DispatchReceipt dispatch(ResolvedDeliveryProvider target, DeliveryRequest request) {
         if (transport != null && request.providerDeadlineNanos() == null) {
-            return DispatchReceipt.rejected("ESP request has no provider deadline");
+            return DispatchReceipt.rejectedBeforeEgress("ESP request has no provider deadline");
         }
         URI endpoint = parseEndpoint(target.endpoint(), requireHttps);
         if (endpoint == null) {
-            return DispatchReceipt.rejected("No usable ESP endpoint is configured");
+            return DispatchReceipt.rejectedBeforeEgress("No usable ESP endpoint is configured");
         }
         String apiKey = target.credentials().get(CREDENTIAL_KEY_API);
         if (apiKey == null || apiKey.isBlank()) {
-            return DispatchReceipt.rejected("No usable ESP credential is configured");
+            return DispatchReceipt.rejectedBeforeEgress("No usable ESP credential is configured");
         }
         byte[] body;
         try {
             body = objectMapper.writeValueAsBytes(sendPayload(target, request));
         } catch (RuntimeException exception) {
-            return DispatchReceipt.rejected("Could not encode the ESP send request");
+            return DispatchReceipt.rejectedBeforeEgress("Could not encode the ESP send request");
         }
         EspResponse response;
         try {
@@ -185,7 +185,7 @@ public class HttpEspDeliveryProvider implements MessageDispatcher, ProviderEvent
         } catch (TransportException exception) {
             return exception.ambiguous()
                     ? DispatchReceipt.ambiguous(bounded(exception.getMessage()))
-                    : DispatchReceipt.rejected(bounded(exception.getMessage()));
+                    : DispatchReceipt.rejectedBeforeEgress(bounded(exception.getMessage()));
         } catch (RuntimeException exception) {
             return DispatchReceipt.rejected(bounded(exception.getMessage()));
         }

@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useAccountStorageGeneration } from "@/app/hooks/useAccountStorageGeneration";
 
 import { useActions } from "@/app/hooks/useActions";
 import { useWorkspace } from "@/app/hooks/useWorkspace";
@@ -37,7 +38,14 @@ export function RecentRecordsProvider({ children }: { children: ReactNode }) {
     const [recents, setRecents] = useState<RecentRecord[]>([]);
     const recentsRef = useRef<RecentRecord[]>(recents);
 
+    const clearRecents = useCallback(() => {
+        recentsRef.current = [];
+        setRecents([]);
+    }, []);
+    const canPersist = useAccountStorageGeneration(clearRecents);
+
     useEffect(() => {
+        if (!canPersist()) return;
         let raw: string | null = null;
         try {
             raw = window.localStorage.getItem(key);
@@ -48,10 +56,14 @@ export function RecentRecordsProvider({ children }: { children: ReactNode }) {
         recentsRef.current = next;
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setRecents(next);
-    }, [key]);
+    }, [canPersist, key]);
 
     const record = useCallback(
         (input: RecentRecordInput) => {
+            if (!canPersist()) {
+                clearRecents();
+                return;
+            }
             const label = input.label.trim();
             if (label.length === 0) return;
             const next = upsertRecent(recentsRef.current, { t: input.type, id: input.id, label, ts: Date.now() });
@@ -61,7 +73,7 @@ export function RecentRecordsProvider({ children }: { children: ReactNode }) {
                 window.localStorage.setItem(key, serializeRecents(next));
             } catch {}
         },
-        [key],
+        [canPersist, clearRecents, key],
     );
 
     const value = useMemo<RecentRecordsContextValue>(() => ({ recents, record }), [recents, record]);

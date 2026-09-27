@@ -6,21 +6,49 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doAnswer;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.mybatis.spring.SqlSessionTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
+import org.springframework.security.oauth2.core.oidc.OidcIdToken;
+import org.springframework.security.oauth2.core.oidc.user.DefaultOidcUser;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.context.transaction.TestTransaction;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import ooo.klae.connex.backend.beans.FederatedIdentity;
 import ooo.klae.connex.backend.beans.SsoConnection;
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.beans.Organization;
+import ooo.klae.connex.backend.beans.Workspace;
 import ooo.klae.connex.backend.dto.WorkspaceMembershipDto;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.FederatedIdentityMapper;
 import ooo.klae.connex.backend.mappers.OrgAllowedDomainMapper;
 import ooo.klae.connex.backend.mappers.SsoConnectionMapper;
 import ooo.klae.connex.backend.mappers.SsoDomainMapper;
+import ooo.klae.connex.backend.mappers.OrganizationMapper;
+import ooo.klae.connex.backend.mappers.TenantLifecycleControlMapper;
+import ooo.klae.connex.backend.sso.SsoAuthenticationSuccessHandler;
+import ooo.klae.connex.backend.mail.MailProperties;
 
 /**
  * Exercises the SSO federation core against real mappers, with emphasis on the tenant-isolation
@@ -44,6 +72,12 @@ class SsoLoginServiceTest extends AbstractServiceTest {
     @Autowired private WorkspaceService workspaceService;
     @Autowired private AuditService auditService;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private OrganizationMapper organizationMapper;
+    @Autowired private SsoAuthenticationSuccessHandler successHandler;
+    @Autowired private MailProperties mailProperties;
+    @Autowired private TransactionTemplate transactionTemplate;
+    @Autowired private SqlSessionTemplate sqlSessionTemplate;
+    @MockitoSpyBean private TenantLifecycleControlMapper lifecycleMapper;
 
     private int orgId;
 
@@ -82,7 +116,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
 
         assertThrows(ForbiddenException.class,
                 () -> ssoLoginService.resolve(PROVIDER, ISSUER, "sub-ceiling",
-                        "newcomer@" + OWNED_DOMAIN, true, orgId, "Newcomer"),
+                        "newcomer@" + OWNED_DOMAIN, true, orgId, "Newcomer", "client-abc"),
                 "SSO must not provision a member the org's own domain ceiling forbids, "
                         + "even though the domain is in the sso_domain routing list");
         assertNull(userMapper.getUserByEmail("newcomer@" + OWNED_DOMAIN),
@@ -94,7 +128,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
         orgAllowedDomainMapper.add(orgId, OWNED_DOMAIN);
 
         SsoLoginResult result = ssoLoginService.resolve(PROVIDER, ISSUER, "sub-allowed",
-                "welcome@" + OWNED_DOMAIN, true, orgId, "Welcome");
+                "welcome@" + OWNED_DOMAIN, true, orgId, "Welcome", "client-abc");
 
         assertInstanceOf(SsoLoginResult.Login.class, result);
         assertTrue(workspaceMapper.isMember(workspace.getId(),
@@ -116,7 +150,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
                 "no-jit-workspace@" + OWNED_DOMAIN,
                 true,
                 orgId,
-                "No JIT Workspace"));
+                "No JIT Workspace", "client-abc"));
         assertNull(userMapper.getUserByEmail("no-jit-workspace@" + OWNED_DOMAIN));
     }
 
@@ -135,7 +169,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
                 "tearing-down@" + OWNED_DOMAIN,
                 true,
                 orgId,
-                "Tearing Down"));
+                "Tearing Down", "client-abc"));
         assertNull(userMapper.getUserByEmail("tearing-down@" + OWNED_DOMAIN));
         assertNull(federatedIdentityMapper.findByProviderIssuerSubject(
             PROVIDER,
@@ -167,7 +201,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
                 linked.getEmail(),
                 true,
                 orgId,
-                "Existing Fenced"));
+                "Existing Fenced", "client-abc"));
 
         assertNull(jdbcTemplate.queryForObject(
             "SELECT last_login_at FROM federated_identity WHERE id = ?",
@@ -187,7 +221,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
         federatedIdentityMapper.insert(seed);
 
         SsoLoginResult result = ssoLoginService.resolve(PROVIDER, ISSUER, "sub-existing",
-                linked.getEmail(), true, orgId, "Linked User");
+                linked.getEmail(), true, orgId, "Linked User", "client-abc");
 
         SsoLoginResult.Login login = assertInstanceOf(SsoLoginResult.Login.class, result);
         assertEquals(linked.getId(), login.user().getId());
@@ -211,7 +245,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
         federatedIdentityMapper.insert(seed);
 
         assertThrows(ForbiddenException.class, () -> ssoLoginService.resolve(PROVIDER, ISSUER, "sub-foreign",
-                "outsider@notowned.example.org", true, orgId, "Outsider"),
+                "outsider@notowned.example.org", true, orgId, "Outsider", "client-abc"),
                 "an identity minted for another org must not sign in through this org, and the "
                         + "foreign email domain is refused");
     }
@@ -222,7 +256,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
         assertNotNull(password.getPassword(), "the fixture account must have a password");
 
         SsoLoginResult result = ssoLoginService.resolve(PROVIDER, ISSUER, "sub-collision",
-                password.getEmail(), true, orgId, "Password User");
+                password.getEmail(), true, orgId, "Password User", "client-abc");
 
         SsoLoginResult.LinkRequired link = assertInstanceOf(SsoLoginResult.LinkRequired.class, result);
         assertEquals(password.getId(), link.existingUserId());
@@ -235,7 +269,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
         String email = "newcomer@" + OWNED_DOMAIN;
 
         SsoLoginResult result = ssoLoginService.resolve(PROVIDER, ISSUER, "sub-newcomer",
-                email, true, orgId, "New Comer");
+                email, true, orgId, "New Comer", "client-abc");
 
         SsoLoginResult.Login login = assertInstanceOf(SsoLoginResult.Login.class, result);
         User created = userMapper.getUserByEmail(email);
@@ -271,7 +305,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
         String email = "intruder@blocked.example.com";
 
         assertThrows(ForbiddenException.class, () ->
-                ssoLoginService.resolve(PROVIDER, ISSUER, "sub-intruder", email, true, orgId, "Intruder"));
+                ssoLoginService.resolve(PROVIDER, ISSUER, "sub-intruder", email, true, orgId, "Intruder", "client-abc"));
 
         assertNull(userMapper.getUserByEmail(email),
                 "a domain the org does not own must not provision an account");
@@ -284,7 +318,7 @@ class SsoLoginServiceTest extends AbstractServiceTest {
         String email = "unverified@" + OWNED_DOMAIN;
 
         assertThrows(ForbiddenException.class, () ->
-                ssoLoginService.resolve(PROVIDER, ISSUER, "sub-unverified", email, false, orgId, "Unverified"));
+                ssoLoginService.resolve(PROVIDER, ISSUER, "sub-unverified", email, false, orgId, "Unverified", "client-abc"));
 
         assertNull(userMapper.getUserByEmail(email),
                 "an unverified IdP email must never provision an account");
@@ -307,9 +341,171 @@ class SsoLoginServiceTest extends AbstractServiceTest {
         federatedIdentityMapper.insert(foreignLink);
 
         assertThrows(ForbiddenException.class, () -> ssoLoginService.resolve(PROVIDER, ISSUER, "sub-victim-claim",
-                victim.getEmail(), true, orgId, "Victim"),
+                victim.getEmail(), true, orgId, "Victim", "client-abc"),
                 "a passwordless account already federated to another organization must not be claimed");
         assertNull(federatedIdentityMapper.findByProviderIssuerSubject(PROVIDER, ISSUER, "sub-victim-claim"),
                 "no identity may be minted when refusing a cross-org claim");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"disabled,false", "disabled,true", "issuer,false", "issuer,true",
+            "client,false", "client,true", "protocol,false", "protocol,true",
+            "unchanged,false", "unchanged,true"})
+    void completionRevalidatesConnectionBeforeSessionOrProvisioning(String change, boolean returning) throws Exception {
+        CompletionFixture fixture = completionFixture(returning);
+        OAuth2AuthenticationToken authentication = completionAuthentication(fixture);
+        changeConnection(fixture.orgId(), change);
+
+        completeAndAssert(fixture, authentication, "unchanged".equals(change));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"disabled,false", "disabled,true", "issuer,false", "issuer,true"})
+    void completionReadsCommittedConnectionAfterWaitingOnOrganizationLock(String change, boolean returning)
+            throws Exception {
+        CompletionFixture fixture = completionFixture(returning);
+        OAuth2AuthenticationToken authentication = completionAuthentication(fixture);
+        CountDownLatch updateLocked = new CountDownLatch(1);
+        CountDownLatch releaseUpdate = new CountDownLatch(1);
+        CountDownLatch callbackAttemptedLock = new CountDownLatch(1);
+        TenantLifecycleControlMapper realLifecycle = sqlSessionTemplate.getMapper(TenantLifecycleControlMapper.class);
+        doAnswer(invocation -> {
+            callbackAttemptedLock.countDown();
+            return realLifecycle.lockActiveOrganizationForShare(fixture.orgId());
+        }).when(lifecycleMapper).lockActiveOrganizationForShare(fixture.orgId());
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var update = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                assertNotNull(realLifecycle.lockOrganization(fixture.orgId()));
+                assertNotNull(ssoConnectionMapper.findByOrgForUpdate(fixture.orgId()));
+                changeConnection(fixture.orgId(), change);
+                updateLocked.countDown();
+                awaitCompletionLatch(releaseUpdate);
+            }));
+            try {
+                assertTrue(updateLocked.await(15, TimeUnit.SECONDS));
+                var callback = executor.submit(() -> {
+                    completeAndAssert(fixture, authentication, false);
+                    return Boolean.TRUE;
+                });
+                assertTrue(callbackAttemptedLock.await(15, TimeUnit.SECONDS));
+                releaseUpdate.countDown();
+                update.get(15, TimeUnit.SECONDS);
+                assertTrue(callback.get(15, TimeUnit.SECONDS));
+            } finally {
+                releaseUpdate.countDown();
+            }
+        }
+    }
+
+    private CompletionFixture completionFixture(boolean returning) {
+        TestTransaction.end();
+        SecurityContextHolder.clearContext();
+        tenantContext.clear();
+        String unique = UUID.randomUUID().toString();
+        Organization organization = new Organization();
+        organization.setName("Callback completion");
+        organization.setSlug("callback-" + unique);
+        organizationMapper.insert(organization);
+        Workspace target = new Workspace();
+        target.setOrgId(organization.getId());
+        target.setName("Callback completion");
+        target.setSlug("callback-" + unique);
+        workspaceMapper.insert(target);
+        String domain = unique + ".example.test";
+        String email = "callback@" + domain;
+        SsoConnection connection = new SsoConnection();
+        connection.setOrgId(organization.getId());
+        connection.setProtocol(PROVIDER);
+        connection.setEnabled(true);
+        connection.setJitWorkspaceId(target.getId());
+        connection.setDefaultRole("member");
+        connection.setOidcIssuer(ISSUER);
+        connection.setOidcClientId("client-abc");
+        connection.setOidcScopes("openid,email,profile");
+        ssoConnectionMapper.upsert(connection);
+        ssoDomainMapper.insert(domain, organization.getId());
+        if (returning) {
+            User linked = provisionlessUser(email);
+            workspaceMapper.addMember(target.getId(), linked.getId(), "member");
+            FederatedIdentity identity = new FederatedIdentity();
+            identity.setOrgId(organization.getId());
+            identity.setUserId(linked.getId());
+            identity.setProvider(PROVIDER);
+            identity.setIssuer(ISSUER);
+            identity.setExternalSubject(unique);
+            federatedIdentityMapper.insert(identity);
+        }
+        return new CompletionFixture(organization.getId(), email, unique, returning);
+    }
+
+    private static OAuth2AuthenticationToken completionAuthentication(CompletionFixture fixture) {
+        Instant now = Instant.now();
+        OidcIdToken token = new OidcIdToken("verified-token", now, now.plusSeconds(300), Map.of(
+                "iss", ISSUER, "sub", fixture.subject(), "aud", List.of("client-abc"),
+                "email", fixture.email(), "email_verified", true, "name", "Callback user"));
+        DefaultOidcUser user = new DefaultOidcUser(List.of(), token);
+        return new OAuth2AuthenticationToken(user, user.getAuthorities(), "org-" + fixture.orgId());
+    }
+
+    private void changeConnection(int organizationId, String change) {
+        SsoConnection connection = ssoConnectionMapper.findByOrg(organizationId);
+        assertNotNull(connection);
+        switch (change) {
+            case "disabled" -> connection.setEnabled(false);
+            case "issuer" -> connection.setOidcIssuer(ISSUER + "/replacement");
+            case "client" -> connection.setOidcClientId("replacement-client");
+            case "protocol" -> connection.setProtocol("saml");
+            case "unchanged" -> { }
+            default -> throw new IllegalArgumentException(change);
+        }
+        ssoConnectionMapper.upsert(connection);
+    }
+
+    private void completeAndAssert(CompletionFixture fixture, OAuth2AuthenticationToken authentication,
+            boolean accepted) throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        var context = SecurityContextHolder.createEmptyContext();
+        context.setAuthentication(authentication);
+        SecurityContextHolder.setContext(context);
+        request.getSession().setAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY, context);
+        try {
+            successHandler.onAuthenticationSuccess(request, response, authentication);
+            FederatedIdentity identity = federatedIdentityMapper.findByOrgProviderIssuerSubject(
+                    fixture.orgId(), PROVIDER, ISSUER, fixture.subject());
+            if (accepted) {
+                assertEquals(mailProperties.getAppBaseUrl() + "/dashboard", response.getRedirectedUrl());
+                assertInstanceOf(User.class, SecurityContextHolder.getContext().getAuthentication().getPrincipal());
+                assertNotNull(userMapper.getUserByEmail(fixture.email()));
+                assertNotNull(identity);
+            } else {
+                assertEquals(mailProperties.getAppBaseUrl() + "/auth/login?sso_error=1", response.getRedirectedUrl());
+                assertNull(SecurityContextHolder.getContext().getAuthentication());
+                assertNull(request.getSession().getAttribute(
+                        HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY));
+                if (fixture.returning()) {
+                    assertNotNull(identity);
+                    assertNull(identity.getLastLoginAt());
+                } else {
+                    assertNull(userMapper.getUserByEmail(fixture.email()));
+                    assertNull(identity);
+                }
+            }
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
+    }
+
+    private static void awaitCompletionLatch(CountDownLatch latch) {
+        try {
+            assertTrue(latch.await(15, TimeUnit.SECONDS));
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private record CompletionFixture(int orgId, String email, String subject, boolean returning) {
     }
 }

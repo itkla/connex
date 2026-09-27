@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import WorkspaceUnavailablePage from "@/app/components/WorkspaceUnavailablePage";
+import BrowserAccountBridge from "@/app/components/BrowserAccountBridge";
 import { getCurrentUserResultFromCookie, getMyWorkspacesResultFromCookie } from "@/app/lib/api";
 import OnboardingForm from "@/app/onboarding/OnboardingForm";
 
@@ -21,11 +22,11 @@ export default async function OnboardingPage() {
     }
     const workspacesResult = await getMyWorkspacesResultFromCookie(cookie);
     if (!workspacesResult.ok) {
-        return <WorkspaceUnavailablePage />;
+        return <><BrowserAccountBridge userId={userResult.data.id} /><WorkspaceUnavailablePage /></>;
     }
     const { workspaces } = workspacesResult.data;
     if (workspaces.length > 0) {
         redirect("/dashboard");
     }
-    return <OnboardingForm />;
+    return <><BrowserAccountBridge userId={userResult.data.id} /><OnboardingForm /></>;
 }

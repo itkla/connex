@@ -129,6 +129,106 @@ class AiPropertiesTest {
     }
 
     @Test
+    void runLeaseDefaultsAreBoundAndDocumentedInApplicationYaml() throws IOException {
+        ClassPathResource applicationConfig = new ClassPathResource("application.yml");
+        String yaml = new String(applicationConfig.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        AiProperties defaults = new AiProperties();
+
+        assertEquals(Duration.ofSeconds(45), defaults.getRunLeaseTtl());
+        assertEquals(Duration.ofSeconds(15), defaults.getRunLeaseHeartbeatInterval());
+        assertEquals(4, defaults.getRunLeaseHeartbeatThreads());
+        assertTrue(defaults.isRunLeaseSweepEnabled());
+        assertEquals(Duration.ofSeconds(30), defaults.getRunLeaseSweepDelay());
+        assertEquals(Duration.ofSeconds(60), defaults.getRunLeaseSweepInitialDelay());
+        assertEquals(50, defaults.getRunLeaseSweepMaxWorkspaces());
+        assertEquals(50, defaults.getRunLeaseSweepBatch());
+        assertEquals(200, defaults.getRunLeaseSweepMaxSettlements());
+        assertEquals(Duration.ofSeconds(30), defaults.getRunLeaseSettlementTtl());
+        assertEquals(Duration.ofHours(1), defaults.getRunLeaseTombstoneRetention());
+        assertTrue(yaml.contains("run-lease-ttl: ${CONNEX_AI_RUN_LEASE_TTL:45s}"));
+        assertTrue(yaml.contains(
+                "run-lease-heartbeat-interval: ${CONNEX_AI_RUN_LEASE_HEARTBEAT_INTERVAL:15s}"));
+        assertTrue(yaml.contains(
+                "run-lease-heartbeat-threads: ${CONNEX_AI_RUN_LEASE_HEARTBEAT_THREADS:4}"));
+        assertTrue(yaml.contains("run-lease-sweep-enabled: ${CONNEX_AI_RUN_LEASE_SWEEP_ENABLED:true}"));
+        assertTrue(yaml.contains("run-lease-sweep-delay: ${CONNEX_AI_RUN_LEASE_SWEEP_DELAY:30s}"));
+        assertTrue(yaml.contains(
+                "run-lease-sweep-initial-delay: ${CONNEX_AI_RUN_LEASE_SWEEP_INITIAL_DELAY:60s}"));
+        assertTrue(yaml.contains(
+                "run-lease-sweep-max-workspaces: ${CONNEX_AI_RUN_LEASE_SWEEP_MAX_WORKSPACES:50}"));
+        assertTrue(yaml.contains("run-lease-sweep-batch: ${CONNEX_AI_RUN_LEASE_SWEEP_BATCH:50}"));
+        assertTrue(yaml.contains(
+                "run-lease-sweep-max-settlements: ${CONNEX_AI_RUN_LEASE_SWEEP_MAX_SETTLEMENTS:200}"));
+        assertTrue(yaml.contains(
+                "run-lease-settlement-ttl: ${CONNEX_AI_RUN_LEASE_SETTLEMENT_TTL:30s}"));
+        assertTrue(yaml.contains(
+                "run-lease-tombstone-retention: ${CONNEX_AI_RUN_LEASE_TOMBSTONE_RETENTION:1h}"));
+    }
+
+    @Test
+    void runLeaseTimingsThatCouldStrandOrStarveARunAreRefusedAtStartup() {
+        contextRunner.run(context -> assertNull(context.getStartupFailure()));
+        contextRunner
+                .withPropertyValues("connex.ai.run-lease-heartbeat-interval=22s")
+                .run(context -> assertNull(context.getStartupFailure()));
+        for (String invalid : List.of(
+                "connex.ai.run-lease-heartbeat-interval=23s",
+                "connex.ai.run-lease-heartbeat-threads=3",
+                "connex.ai.run-lease-ttl=190s",
+                "connex.ai.run-lease-tombstone-retention=190s")) {
+            contextRunner
+                    .withPropertyValues(invalid)
+                    .run(context -> assertNotNull(
+                            context.getStartupFailure(),
+                            "Expected startup failure for run-lease setting " + invalid));
+        }
+    }
+
+    /**
+     * Lease deadlines are computed by MySQL as {@code INTERVAL n SECOND}, so a sub-second or
+     * fractional lifetime truncates to zero or drops its remainder on the way into SQL. A lease
+     * minted with a zero interval expires the instant it is written: the next claimant takes it
+     * over silently and a settler treats a run that has not executed a step as an orphan.
+     */
+    @Test
+    void subSecondOrFractionalRunLeaseLifetimesAreRefusedAtStartup() {
+        for (String invalid : List.of(
+                "connex.ai.run-lease-ttl=900ms",
+                "connex.ai.run-lease-ttl=45500ms",
+                "connex.ai.run-lease-settlement-ttl=500ms",
+                "connex.ai.run-lease-tombstone-retention=900ms",
+                "connex.ai.run-lease-heartbeat-interval=0s",
+                "connex.ai.run-lease-heartbeat-interval=PT0.0005S")) {
+            contextRunner
+                    .withPropertyValues(invalid)
+                    .run(context -> assertNotNull(
+                            context.getStartupFailure(),
+                            "Expected startup failure for run-lease setting " + invalid));
+        }
+    }
+
+    /**
+     * Each sweep budget bounds a pass of the detection loop. Zero would silently disable the pass it
+     * bounds — {@code LIMIT 0} returns nothing on every sweep, so no orphaned run is ever settled
+     * and the advertised dead-owner bound becomes unbounded with no error and a green job run.
+     */
+    @Test
+    void nonPositiveRunLeaseSweepBudgetsAreRefusedAtStartup() {
+        for (String knob : List.of(
+                "connex.ai.run-lease-sweep-max-workspaces",
+                "connex.ai.run-lease-sweep-batch",
+                "connex.ai.run-lease-sweep-max-settlements")) {
+            for (String invalid : List.of("0", "-1")) {
+                contextRunner
+                        .withPropertyValues(knob + "=" + invalid)
+                        .run(context -> assertNotNull(
+                                context.getStartupFailure(),
+                                "Expected startup failure for " + knob + "=" + invalid));
+            }
+        }
+    }
+
+    @Test
     void nonPositiveAssistantOutputTokenLimitsFailAtStartup() {
         contextRunner.run(context -> assertNull(context.getStartupFailure()));
         contextRunner

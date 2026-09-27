@@ -170,6 +170,118 @@ case_installer_migrates_retired_database_network() {
     assert_equals custom_network_silent '' "$(cat "$log")" || return 1
 }
 
+initialize_installer_fixture() {
+    INSTALL_FIXTURE_ROOT="$(mktemp -d "$SANDBOX/install-upgrade.XXXXXX")"
+    mkdir -p "$INSTALL_FIXTURE_ROOT/config" "$INSTALL_FIXTURE_ROOT/systemd"
+    cat > "$INSTALL_FIXTURE_ROOT/config/backup.env" <<EOF
+CONNEX_BACKUP_ROOT=$INSTALL_FIXTURE_ROOT/backups
+CONNEX_BACKUP_LOCK_DIR=$INSTALL_FIXTURE_ROOT/locks
+CONNEX_BACKUP_DB_HOST=localhost
+CONNEX_BACKUP_VERIFY_DB_HOST=127.0.0.1
+CONNEX_BACKUP_RESTORE_DB_HOST=::1
+CONNEX_BACKUP_SOURCE_DEFAULTS_FILE=$INSTALL_FIXTURE_ROOT/config/source.cnf
+CONNEX_BACKUP_DOCKER_CLIENT_MODE=exec
+CONNEX_BACKUP_DOCKER_NETWORK=auto
+CONNEX_BACKUP_DOCKER_BINLOG_IMAGE=
+EOF
+    printf '[client]\npassword=synthetic-upgrade-secret\n' > "$INSTALL_FIXTURE_ROOT/config/source.cnf"
+    chmod 0600 "$INSTALL_FIXTURE_ROOT/config/backup.env" "$INSTALL_FIXTURE_ROOT/config/source.cnf"
+}
+
+run_installer_fixture() {
+    : > "$INSTALL_FIXTURE_ROOT/systemctl.log"
+    env -i PATH="$PATH" bash -s -- "$SANDBOX" "$BACKUP_DIR" "$INSTALL_FIXTURE_ROOT" \
+        > "$INSTALL_FIXTURE_ROOT/output.log" 2>&1 <<'EOF'
+set -euo pipefail
+# shellcheck source=deploy/backup/install.sh
+source "$1/install-lib.sh"
+SCRIPT_DIR="$2"
+CONFIG_ROOT="$3/config"
+INSTALL_ROOT="$3/programs"
+SYSTEMD_ROOT="$3/systemd"
+install_require_root() { :; }
+systemctl() { printf '%s\n' "$*" >> "$CONFIG_ROOT/../systemctl.log"; }
+main
+EOF
+}
+
+assert_installer_refused() {
+    local expected_message="$1" status=0
+    run_installer_fixture || status=$?
+    assert_status install_refused 64 "$status" || return 1
+    assert_contains actionable_message "$expected_message" "$INSTALL_FIXTURE_ROOT/output.log" || return 1
+    assert_contains rerun_instruction 'rerun install.sh' "$INSTALL_FIXTURE_ROOT/output.log" || return 1
+    assert_equals timers_untouched '' "$(cat "$INSTALL_FIXTURE_ROOT/systemctl.log")" || return 1
+    assert_file_missing programs_untouched "$INSTALL_FIXTURE_ROOT/programs" || return 1
+    assert_absent credentials_not_logged synthetic-upgrade-secret "$INSTALL_FIXTURE_ROOT/output.log" || return 1
+}
+
+assert_installer_accepted() {
+    local status=0
+    cp "$INSTALL_FIXTURE_ROOT/config/backup.env" "$INSTALL_FIXTURE_ROOT/expected.env"
+    run_installer_fixture || status=$?
+    assert_status install_accepted 0 "$status" || return 1
+    assert_contains timers_enabled \
+        'enable --now connex-backup.timer connex-binlog-archive.timer connex-backup-prune.timer' \
+        "$INSTALL_FIXTURE_ROOT/systemctl.log" || return 1
+    cmp -s "$INSTALL_FIXTURE_ROOT/expected.env" "$INSTALL_FIXTURE_ROOT/config/backup.env" || return 1
+}
+
+case_installer_requires_profile_tls_migration() {
+    initialize_installer_fixture
+    local profile
+    for profile in SOURCE VERIFY RESTORE; do
+        assert_installer_refused "CONNEX_BACKUP_${profile}_ALLOW_LOOPBACK_PLAINTEXT=true" || return 1
+        printf 'CONNEX_BACKUP_%s_ALLOW_LOOPBACK_PLAINTEXT=true\n' "$profile" \
+            >> "$INSTALL_FIXTURE_ROOT/config/backup.env"
+    done
+    assert_installer_accepted
+}
+
+case_installer_requires_ca_in_each_defaults_file() {
+    initialize_installer_fixture
+    local profile
+    for profile in verify restore; do
+        cp "$INSTALL_FIXTURE_ROOT/config/source.cnf" "$INSTALL_FIXTURE_ROOT/config/$profile.cnf"
+        printf 'CONNEX_BACKUP_%s_DEFAULTS_FILE=%s/config/%s.cnf\n' "${profile^^}" "$INSTALL_FIXTURE_ROOT" "$profile" \
+            >> "$INSTALL_FIXTURE_ROOT/config/backup.env"
+    done
+    printf 'ssl-ca=/container/mysql-ca.pem\n' >> "$INSTALL_FIXTURE_ROOT/config/source.cnf"
+    assert_installer_refused "$INSTALL_FIXTURE_ROOT/config/verify.cnf" || return 1
+    printf 'ssl-capath=/container/certs\n' >> "$INSTALL_FIXTURE_ROOT/config/verify.cnf"
+    printf '# ssl-ca=/ignored.pem\nssl-ca=""\n[mysqldump]\nssl-ca=/wrong-group.pem\n' \
+        >> "$INSTALL_FIXTURE_ROOT/config/restore.cnf"
+    assert_installer_refused "$INSTALL_FIXTURE_ROOT/config/restore.cnf" || return 1
+    printf '[client]\nssl_ca="/container/mysql-ca.pem"\n' >> "$INSTALL_FIXTURE_ROOT/config/restore.cnf"
+    assert_installer_accepted
+}
+
+case_installer_refuses_nonloopback_exception() {
+    local profile host_key
+    for profile in SOURCE VERIFY RESTORE; do
+        initialize_installer_fixture
+        printf 'CONNEX_BACKUP_%s_ALLOW_LOOPBACK_PLAINTEXT=true\n' SOURCE VERIFY RESTORE \
+            >> "$INSTALL_FIXTURE_ROOT/config/backup.env"
+        host_key="CONNEX_BACKUP_${profile}_DB_HOST"
+        [ "$profile" != SOURCE ] || host_key=CONNEX_BACKUP_DB_HOST
+        printf '%s=db\n' "$host_key" >> "$INSTALL_FIXTURE_ROOT/config/backup.env"
+        assert_installer_refused "CONNEX_BACKUP_${profile}_ALLOW_LOOPBACK_PLAINTEXT" || return 1
+    done
+}
+
+case_installer_requires_binlog_digest_migration() {
+    initialize_installer_fixture
+    printf 'ssl-ca=/container/mysql-ca.pem\n' >> "$INSTALL_FIXTURE_ROOT/config/source.cnf"
+    printf 'CONNEX_BACKUP_DOCKER_BINLOG_IMAGE=percona/percona-server:8.4\n' \
+        >> "$INSTALL_FIXTURE_ROOT/config/backup.env"
+    assert_installer_refused 'CONNEX_BACKUP_DOCKER_BINLOG_IMAGE' || return 1
+    assert_contains approval_required 'independently approved' "$INSTALL_FIXTURE_ROOT/output.log" || return 1
+    assert_contains migration_example 'percona/percona-server@sha256:' "$INSTALL_FIXTURE_ROOT/output.log" || return 1
+    printf 'CONNEX_BACKUP_DOCKER_BINLOG_IMAGE=percona/percona-server@sha256:%s\n' \
+        "$(printf 'a%.0s' {1..64})" >> "$INSTALL_FIXTURE_ROOT/config/backup.env"
+    assert_installer_accepted
+}
+
 case_docker_client_resolves_and_validates_database_network() {
     set +e
     # shellcheck source=deploy/backup/shims/docker-client-lib.sh
@@ -885,6 +997,388 @@ case_interrupted_publication_recovery() {
     assert_contains symlink_pending_logged 'reason=interrupted_binlog_publication' "$log" || return 1
 }
 
+write_recording_docker() {
+    cat > "$SANDBOX/recording-docker" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$@" >> "$RECORDING_DOCKER_LOG"
+case "$1" in
+    inspect) printf 'fixture-network\n' ;;
+    network)
+        if [ "${4:-}" = '{{.Name}}' ]; then
+            printf 'fixture_db\n'
+        else
+            printf 'db\n'
+        fi
+        ;;
+    run)
+        if [ -n "${RECORDING_DOCKER_OUTPUT:-}" ]; then
+            cat "$RECORDING_DOCKER_OUTPUT"
+        fi
+        ;;
+esac
+EOF
+    chmod 0700 "$SANDBOX/recording-docker"
+    export RECORDING_DOCKER_LOG="$SANDBOX/recording-docker.log"
+    : > "$RECORDING_DOCKER_LOG"
+}
+
+write_binlog_shim_environment() {
+    local image="$1"
+    cat > "$SANDBOX/binlog.env" <<EOF
+CONNEX_BACKUP_DOCKER_BINLOG_IMAGE=$image
+CONNEX_BACKUP_DOCKER_BIN=$SANDBOX/recording-docker
+CONNEX_BACKUP_ROOT=$SANDBOX/binlog-inputs
+CONNEX_BACKUP_DEFAULTS_DIR=$SANDBOX/credentials
+CONNEX_BACKUP_DOCKER_MOUNTS=$SANDBOX/credentials:/credentials
+EOF
+}
+
+case_binlog_shim_refuses_mutable_images_before_docker() {
+    write_recording_docker
+    local image status
+    for image in percona/percona-server:8.4 'client@sha256:abcd' "client@sha256:$(printf 'a%.0s' {1..65})"; do
+        write_binlog_shim_environment "$image"
+        status=0
+        CONNEX_BACKUP_ENV_FILE="$SANDBOX/binlog.env" bash "$BACKUP_DIR/shims/mysqlbinlog" --version > "$SANDBOX/binlog-output" 2>&1 || status=$?
+        assert_status unpinned_refused 64 "$status" || return 1
+        assert_equals docker_not_executed '' "$(cat "$RECORDING_DOCKER_LOG")" || return 1
+    done
+}
+
+# shellcheck disable=SC2317
+case_binlog_shim_only_mounts_readonly_binlog_inputs() {
+    write_recording_docker
+    local input="$SANDBOX/binlog-inputs/mysql-bin.000001"
+    local image status
+    image="client@sha256:$(printf 'a%.0s' {1..64})"
+    mkdir -p "$SANDBOX/binlog-inputs" "$SANDBOX/credentials"
+    write_fake_binlog "$input"
+    printf '[client]\npassword=synthetic-secret\n' > "$SANDBOX/credentials/source.cnf"
+    cp "$SANDBOX/credentials/source.cnf" "$SANDBOX/binlog-inputs/source.cnf"
+    printf 'retained\n' > "$SANDBOX/binlog-inputs/sentinel"
+    write_binlog_shim_environment "$image"
+    CONNEX_BACKUP_ENV_FILE="$SANDBOX/binlog.env" bash "$BACKUP_DIR/shims/mysqlbinlog" --version || return 1
+    if grep -qxF -- -v "$RECORDING_DOCKER_LOG"; then return 1; fi
+    : > "$RECORDING_DOCKER_LOG"
+    CONNEX_BACKUP_ENV_FILE="$SANDBOX/binlog.env" bash "$BACKUP_DIR/shims/mysqlbinlog" --verify-binlog-checksum "$input" || return 1
+    assert_contains immutable_image "$image" "$RECORDING_DOCKER_LOG" || return 1
+    assert_contains isolated_network 'none' "$RECORDING_DOCKER_LOG" || return 1
+    assert_contains read_only_container '--read-only' "$RECORDING_DOCKER_LOG" || return 1
+    assert_contains read_only_input "$input:$input:ro" "$RECORDING_DOCKER_LOG" || return 1
+    assert_contains no_client_configuration '--no-defaults' "$RECORDING_DOCKER_LOG" || return 1
+    assert_absent no_credentials "$SANDBOX/credentials" "$RECORDING_DOCKER_LOG" || return 1
+    assert_absent no_backup_tree "$SANDBOX/binlog-inputs:$SANDBOX/binlog-inputs" "$RECORDING_DOCKER_LOG" || return 1
+    for input in "$SANDBOX/binlog-inputs/source.cnf" "$SANDBOX/binlog-inputs/sentinel" --read-from-remote-server --defaults-extra-file=source.cnf; do
+        : > "$RECORDING_DOCKER_LOG"
+        status=0
+        CONNEX_BACKUP_ENV_FILE="$SANDBOX/binlog.env" bash "$BACKUP_DIR/shims/mysqlbinlog" "$input" > "$SANDBOX/binlog-output" 2>&1 || status=$?
+        assert_status non_binlog_refused 64 "$status" || return 1
+        assert_equals docker_not_executed '' "$(cat "$RECORDING_DOCKER_LOG")" || return 1
+    done
+}
+
+initialize_pitr_shim_fixture() {
+    backup_set_defaults
+    write_recording_docker
+    write_binlog_shim_environment "client@sha256:$(printf 'a%.0s' {1..64})"
+    mkdir -p "$SANDBOX/binlog-inputs"
+    PITR_BINLOG_FILES=("$SANDBOX/binlog-inputs/mysql-bin.000001" "$SANDBOX/binlog-inputs/mysql-bin.000002")
+    write_fake_binlog "${PITR_BINLOG_FILES[0]}"
+    write_fake_binlog "${PITR_BINLOG_FILES[1]}"
+    PITR_RUN_DIR="$SANDBOX/full/20260101T000000Z"
+    export CONNEX_BACKUP_ENV_FILE="$SANDBOX/binlog.env"
+    export RECORDING_DOCKER_OUTPUT="$SANDBOX/replay.decode"
+    printf "BINLOG '\nY29ubmV4\n'/*!*/;\n" > "$RECORDING_DOCKER_OUTPUT"
+    printf 'existing target\n' > "$SANDBOX/restore-target"
+    : > "$SANDBOX/restore-effects"
+    : > "$SANDBOX/replay-sql"
+    export PITR_TEST_SHIM="$BACKUP_DIR/shims/mysqlbinlog"
+    export PITR_TEST_FOREIGN_OPTION='' PITR_TEST_REWRITE=''
+    cat > "$SANDBOX/replay-client" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+arguments=()
+for argument in "$@"; do
+    case "$argument" in
+        --require-row-format)
+            arguments+=("$argument")
+            if [ -n "$PITR_TEST_FOREIGN_OPTION" ]; then
+                arguments+=("$PITR_TEST_FOREIGN_OPTION")
+            fi
+            ;;
+        --rewrite-db=*) arguments+=("--rewrite-db=${PITR_TEST_REWRITE:-${argument#*=}}") ;;
+        *) arguments+=("$argument") ;;
+    esac
+done
+exec bash "$PITR_TEST_SHIM" "${arguments[@]}"
+EOF
+    MYSQLBINLOG="bash $SANDBOX/replay-client"
+
+    backup_load_environment() { :; }
+    backup_validate_common() { :; }
+    backup_validate_restore_profile() { :; }
+    backup_prepare_directories() { :; }
+    backup_acquire_lock() { :; }
+    pitr_select_run() { :; }
+    pitr_validate_sequence() { :; }
+    pitr_verify_no_coverage_gap() { :; }
+    backup_probe_binlog_suppression() { :; }
+    backup_manifest_schema_field() {
+        case "$3" in
+            binlog_file) printf 'mysql-bin.000001\n' ;;
+            binlog_position) printf '4\n' ;;
+            *) return 1 ;;
+        esac
+    }
+    backup_restore_artifact() {
+        assert_equals forced_restore true "$4" || return 1
+        cp "$RECORDING_DOCKER_LOG" "$SANDBOX/decoder-before-restore.log"
+        printf 'restore\n' >> "$SANDBOX/restore-effects"
+        printf 'restored target\n' > "$SANDBOX/restore-target"
+    }
+    backup_mysql() {
+        printf 'replay\n' >> "$SANDBOX/restore-effects"
+        cat > "$SANDBOX/replay-sql"
+    }
+    backup_schema_row_summary() { printf '1\t1\n'; }
+}
+
+assert_pitr_shim_replays() {
+    local source_schema="$1" target_schema="$2" status=0 argument
+    initialize_pitr_shim_fixture
+    pitr_run --target-time 2026-01-01T13:00:00Z --source-schema "$source_schema" --target-schema "$target_schema" --force-overwrite \
+        > "$SANDBOX/pitr-output" 2>&1 || status=$?
+    assert_status replay_accepted 0 "$status" || return 1
+    assert_equals restore_and_replay "$(printf 'restore\nreplay')" "$(cat "$SANDBOX/restore-effects")" || return 1
+    assert_equals restored_target 'restored target' "$(cat "$SANDBOX/restore-target")" || return 1
+    for argument in --verify-binlog-checksum --require-row-format --start-position=4 '--stop-datetime=2026-01-01 13:00:00' \
+        "--rewrite-db=$source_schema->$target_schema" "--database=$target_schema" "${PITR_BINLOG_FILES[@]}"; do
+        assert_contains replay_argument_validated_before_restore "$argument" "$SANDBOX/decoder-before-restore.log" || return 1
+    done
+    assert_equals dry_decode_once 1 "$(grep -cxF -- --require-row-format "$SANDBOX/decoder-before-restore.log")" || return 1
+    assert_equals same_decoder_used_for_replay 2 "$(grep -cxF -- --require-row-format "$RECORDING_DOCKER_LOG")" || return 1
+    assert_contains row_event_applied "BINLOG '" "$SANDBOX/replay-sql" || return 1
+    assert_equals applied_event_count 1 "$PITR_APPLIED_EVENTS" || return 1
+}
+
+case_pitr_shim_accepts_actual_replay_arguments() {
+    # shellcheck source=deploy/backup/connex-restore-pitr.sh
+    source "$SANDBOX/pitr-lib.sh"
+    assert_pitr_shim_replays src_1-db target_2-db
+}
+
+case_pitr_shim_accepts_dollar_in_source_schema() {
+    # shellcheck source=deploy/backup/connex-restore-pitr.sh
+    source "$SANDBOX/pitr-lib.sh"
+    assert_pitr_shim_replays "tenant\$1" target_2-db
+}
+
+case_pitr_shim_accepts_dollar_in_target_schema() {
+    # shellcheck source=deploy/backup/connex-restore-pitr.sh
+    source "$SANDBOX/pitr-lib.sh"
+    assert_pitr_shim_replays src_1-db "target\$name"
+}
+
+assert_pitr_shim_refused_before_restore() {
+    local status=0
+    : > "$RECORDING_DOCKER_LOG"
+    pitr_run --target-time 2026-01-01T13:00:00Z --source-schema src --target-schema target --force-overwrite \
+        > "$SANDBOX/pitr-output" 2>&1 || status=$?
+    assert_status replay_options_refused 64 "$status" || return 1
+    assert_contains refused_during_preflight 'event=pitr_preflight_failed reason=replay_decode' "$SANDBOX/pitr-output" || return 1
+    assert_equals target_preserved 'existing target' "$(cat "$SANDBOX/restore-target")" || return 1
+    assert_equals no_restore_or_replay '' "$(cat "$SANDBOX/restore-effects")" || return 1
+    assert_absent invalid_replay_never_reaches_docker --require-row-format "$RECORDING_DOCKER_LOG" || return 1
+    pitr_cleanup
+}
+
+case_pitr_shim_refuses_foreign_option_before_restore() {
+    # shellcheck source=deploy/backup/connex-restore-pitr.sh
+    source "$SANDBOX/pitr-lib.sh"
+    initialize_pitr_shim_fixture
+    local option
+    for option in --read-from-remote-server --result-file=/output --defaults-extra-file=/credentials/source.cnf --force-read --; do
+        PITR_TEST_FOREIGN_OPTION="$option"
+        assert_pitr_shim_refused_before_restore || return 1
+    done
+}
+
+case_pitr_shim_refuses_malformed_rewrite_before_restore() {
+    # shellcheck source=deploy/backup/connex-restore-pitr.sh
+    source "$SANDBOX/pitr-lib.sh"
+    initialize_pitr_shim_fixture
+    local rewrite
+    for rewrite in 'src->' '->target' 'src=>target' 'src->target->other' 'src ->target' 'src->target;id' \
+        "src->\$(id)" "src->\`id\`" "src->\${name}" "\$(id)->target" 'src;id->target' 'src->target|id' 'src->target&' 'src->target/name' \
+        'src->target.name' 'src->target*' $'src->target\n' "src->$(printf 'a%.0s' {1..65})" \
+        "$(printf 'a%.0s' {1..65})->target"; do
+        PITR_TEST_REWRITE="$rewrite"
+        assert_pitr_shim_refused_before_restore || return 1
+    done
+}
+
+initialize_tls_fixture() {
+    backup_set_defaults
+    local client="$SANDBOX/tls-client"
+    cat > "$client" <<'EOF'
+#!/bin/bash
+set -eu
+mode=DISABLED
+query=false
+print_defaults=false
+for argument in "$@"; do
+    case "$argument" in
+        --ssl-mode=*) mode="${argument#*=}" ;;
+        --execute=*) query=true ;;
+        --print-defaults) print_defaults=true ;;
+    esac
+done
+if [ "$print_defaults" = true ]; then
+    [ "${TLS_DEFAULTS_FAIL:-false}" = false ] || exit 1
+    printf '%s\n' "--password=synthetic-secret ${TLS_EFFECTIVE_OPTIONS:-}"
+    exit 0
+fi
+printf '%s\n' "$*" >> "$TLS_CLIENT_LOG"
+if [ "$mode" = VERIFY_IDENTITY ] && [ "$TLS_FIXTURE" != trusted ]; then
+    exit 1
+fi
+if [ "$query" = false ]; then
+    printf 'transfer\n' >> "$TLS_TRANSFER_LOG"
+fi
+EOF
+    chmod 0700 "$client"
+    MYSQL_COMMAND=("$client")
+    MYSQLDUMP_COMMAND=("$client")
+    MYSQLBINLOG_COMMAND=("$client")
+    export TLS_CLIENT_LOG="$SANDBOX/tls-client.log" TLS_TRANSFER_LOG="$SANDBOX/tls-transfer.log"
+    printf '[client]\nssl-mode=DISABLED\n' > "$SANDBOX/tls.cnf"
+    chmod 0600 "$SANDBOX/tls.cnf"
+    CONNEX_BACKUP_SOURCE_DEFAULTS_FILE="$SANDBOX/tls.cnf"
+    CONNEX_BACKUP_VERIFY_DEFAULTS_FILE="$SANDBOX/tls.cnf"
+    CONNEX_BACKUP_RESTORE_DEFAULTS_FILE="$SANDBOX/tls.cnf"
+    CONNEX_BACKUP_DB_HOST=db.example.test
+    CONNEX_BACKUP_VERIFY_DB_HOST=verify.example.test
+    CONNEX_BACKUP_RESTORE_DB_HOST=restore.example.test
+    CONNEX_BACKUP_SOURCE_ALLOW_LOOPBACK_PLAINTEXT=false
+    CONNEX_BACKUP_VERIFY_ALLOW_LOOPBACK_PLAINTEXT=false
+    CONNEX_BACKUP_RESTORE_ALLOW_LOOPBACK_PLAINTEXT=false
+    : > "$TLS_CLIENT_LOG"
+    : > "$TLS_TRANSFER_LOG"
+}
+
+case_remote_tls_refuses_unverified_transfers() {
+    # shellcheck source=deploy/backup/connex-backup-lib.sh
+    source "$SANDBOX/connex-backup-lib.sh"
+    initialize_tls_fixture
+    local fixture profile status command
+    for fixture in plaintext untrusted mismatched_identity; do
+        export TLS_FIXTURE="$fixture"
+        for profile in source verify restore; do
+            for command in backup_mysql backup_mysqldump backup_mysqlbinlog_remote; do
+                status=0
+                "$command" "$profile" --ssl-mode=DISABLED < /dev/null || status=$?
+                if [ "$status" -eq 0 ]; then
+                    printf '%s %s transferred with %s transport\n' "$command" "$profile" "$fixture"
+                    return 1
+                fi
+                assert_equals no_data_transfer '' "$(cat "$TLS_TRANSFER_LOG")" || return 1
+            done
+        done
+    done
+}
+
+case_remote_tls_enforces_identity_on_every_client() {
+    # shellcheck source=deploy/backup/connex-backup-lib.sh
+    source "$SANDBOX/connex-backup-lib.sh"
+    initialize_tls_fixture
+    export TLS_FIXTURE=trusted
+    local profile command
+    for profile in source verify restore; do
+        for command in backup_mysql backup_mysqldump backup_mysqlbinlog_remote; do
+            : > "$TLS_CLIENT_LOG"
+            "$command" "$profile" --ssl-mode=DISABLED < /dev/null || return 1
+            assert_contains identity_enforced '--ssl-mode=VERIFY_IDENTITY' "$TLS_CLIENT_LOG" || return 1
+            assert_equals last_option_enforces_identity '--ssl-mode=VERIFY_IDENTITY' "$(tail -1 "$TLS_CLIENT_LOG" | awk '{print $NF}')" || return 1
+        done
+    done
+    assert_equals all_transfers_allowed 9 "$(wc -l < "$TLS_TRANSFER_LOG")" || return 1
+}
+
+case_tls_plaintext_exception_is_explicit_and_profile_scoped() {
+    # shellcheck source=deploy/backup/connex-backup-lib.sh
+    source "$SANDBOX/connex-backup-lib.sh"
+    initialize_tls_fixture
+    export TLS_FIXTURE=plaintext
+    local host status
+    CONNEX_BACKUP_DB_HOST=127.0.0.1
+    status=0
+    backup_mysql source < /dev/null || status=$?
+    assert_status loopback_secure_by_default 1 "$status" || return 1
+    CONNEX_BACKUP_SOURCE_ALLOW_LOOPBACK_PLAINTEXT=true
+    backup_mysql source < /dev/null || return 1
+    for host in db localhost.example.test 127.0.0.2 192.168.1.10; do
+        CONNEX_BACKUP_DB_HOST="$host"
+        : > "$TLS_CLIENT_LOG"
+        status=0
+        backup_mysql source < /dev/null 2> "$SANDBOX/tls-error" || status=$?
+        assert_status remote_exception_refused 64 "$status" || return 1
+        assert_equals refused_before_client '' "$(cat "$TLS_CLIENT_LOG")" || return 1
+    done
+    CONNEX_BACKUP_VERIFY_DB_HOST=127.0.0.1
+    CONNEX_BACKUP_RESTORE_DB_HOST=127.0.0.1
+    for host in verify restore; do
+        status=0
+        backup_mysql "$host" < /dev/null || status=$?
+        assert_status source_exception_not_inherited 1 "$status" || return 1
+    done
+}
+
+case_tls_option_terminator_refused_before_client() {
+    # shellcheck source=deploy/backup/connex-backup-lib.sh
+    source "$SANDBOX/connex-backup-lib.sh"
+    initialize_tls_fixture
+    export TLS_FIXTURE=trusted
+    local command status
+    for command in backup_mysql backup_mysqldump backup_mysqlbinlog_remote; do
+        status=0
+        "$command" source -- < /dev/null 2> "$SANDBOX/tls-error" || status=$?
+        assert_status option_terminator_refused 64 "$status" || return 1
+        assert_equals refused_before_client '' "$(cat "$TLS_CLIENT_LOG")" || return 1
+    done
+}
+
+case_tls_plaintext_refuses_effective_endpoint_overrides() {
+    # shellcheck source=deploy/backup/connex-backup-lib.sh
+    source "$SANDBOX/connex-backup-lib.sh"
+    initialize_tls_fixture
+    export TLS_FIXTURE=plaintext
+    CONNEX_BACKUP_DB_HOST=127.0.0.1
+    CONNEX_BACKUP_SOURCE_ALLOW_LOOPBACK_PLAINTEXT=true
+    local command option status
+    for command in backup_mysql backup_mysqldump backup_mysqlbinlog_remote; do
+        for option in --dns-srv-name --dns_srv_name --loose-dns-srv-name --loose_dns_srv_name --dns; do
+            export TLS_EFFECTIVE_OPTIONS="$option=remote.example.test"
+            status=0
+            "$command" source < /dev/null > "$SANDBOX/tls-output" 2>&1 || status=$?
+            assert_status effective_endpoint_override_refused 64 "$status" || return 1
+            assert_equals no_data_transfer '' "$(cat "$TLS_TRANSFER_LOG")" || return 1
+            assert_absent defaults_not_logged synthetic-secret "$SANDBOX/tls-output" || return 1
+
+            export TLS_EFFECTIVE_OPTIONS=
+            status=0
+            "$command" source "$option=remote.example.test" < /dev/null > "$SANDBOX/tls-output" 2>&1 || status=$?
+            assert_status argument_endpoint_override_refused 64 "$status" || return 1
+            assert_equals no_data_transfer '' "$(cat "$TLS_TRANSFER_LOG")" || return 1
+        done
+        export TLS_DEFAULTS_FAIL=true
+        status=0
+        "$command" source < /dev/null > "$SANDBOX/tls-output" 2>&1 || status=$?
+        assert_status unverifiable_defaults_refused 64 "$status" || return 1
+        assert_equals no_data_transfer '' "$(cat "$TLS_TRANSFER_LOG")" || return 1
+        export TLS_DEFAULTS_FAIL=false
+    done
+}
+
 run_case() {
     local name="$1"
     local output status=0
@@ -898,7 +1392,23 @@ run_case() {
 }
 
 run_case case_installer_migrates_retired_database_network
+run_case case_installer_requires_profile_tls_migration
+run_case case_installer_requires_ca_in_each_defaults_file
+run_case case_installer_refuses_nonloopback_exception
+run_case case_installer_requires_binlog_digest_migration
 run_case case_docker_client_resolves_and_validates_database_network
+run_case case_binlog_shim_refuses_mutable_images_before_docker
+run_case case_binlog_shim_only_mounts_readonly_binlog_inputs
+run_case case_pitr_shim_accepts_actual_replay_arguments
+run_case case_pitr_shim_accepts_dollar_in_source_schema
+run_case case_pitr_shim_accepts_dollar_in_target_schema
+run_case case_pitr_shim_refuses_foreign_option_before_restore
+run_case case_pitr_shim_refuses_malformed_rewrite_before_restore
+run_case case_remote_tls_refuses_unverified_transfers
+run_case case_remote_tls_enforces_identity_on_every_client
+run_case case_tls_plaintext_exception_is_explicit_and_profile_scoped
+run_case case_tls_option_terminator_refused_before_client
+run_case case_tls_plaintext_refuses_effective_endpoint_overrides
 run_case case_schema_selection
 run_case case_pitr_filtered_statements
 run_case case_pitr_coverage_gap_guard

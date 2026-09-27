@@ -1,0 +1,14 @@
+host=preview.connexcrm.jp policy=max-age=31536000;includeSubDomains;no-preload
+app status=200 hsts_count=0 max_age_31536000=false policy=FAIL result=FAIL
+edge_observation cloudflare_server=True cf_ray_present=True cache_dynamic=True waf_proven=false
+root status=200 hsts_count=0 max_age_31536000=false policy=FAIL result=FAIL
+api-bare status=401 hsts_count=1 max_age_31536000=true policy=PASS result=PASS
+api status=200 hsts_count=1 max_age_31536000=true policy=PASS result=PASS
+static status=200 hsts_count=0 max_age_31536000=false policy=FAIL result=FAIL
+https-redirect status=308 hsts_count=0 max_age_31536000=false policy=FAIL result=FAIL
+app-error status=404 hsts_count=0 max_age_31536000=false policy=FAIL result=FAIL
+api-error status=401 hsts_count=1 max_age_31536000=true policy=PASS result=PASS
+static-error status=404 hsts_count=0 max_age_31536000=false policy=FAIL result=FAIL
+http-redirect status=200 same_host_https_308=FAIL
+coverage=representative GET responses; edge-generated challenges/5xx and authenticated flows UNVERIFIED
+RESULT=FAIL

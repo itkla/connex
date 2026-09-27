@@ -194,6 +194,23 @@ class RecordCreationDtoValidationTest {
     }
 
     @Test
+    void guidedDealRejectsValueWhoseExponentOverflowsDigitsIntegerCount() throws Exception {
+        for (String extreme : List.of("1E2147483647", "123456789E2147483639")) {
+            GuidedDealCreateRequestDto request = objectMapper.readValue("""
+                {"record":{"name":"Renewal","value":%s,"currency":"USD","pipeline":2,"stage":3},
+                 "templateUse":{"templateId":"system:deal:standard","templateVersion":1,
+                  "templateSetRevision":0,"entryPoint":"calendar","context":{"relatedCompanyId":null}},
+                 "customFields":{},"tagIds":[]}
+                """.formatted(extreme), GuidedDealCreateRequestDto.class);
+
+            assertEquals(new BigDecimal(extreme), request.record().value());
+            assertEquals(List.of("record.value"), validator.validate(request).stream()
+                .map(violation -> violation.getPropertyPath().toString())
+                .toList(), extreme);
+        }
+    }
+
+    @Test
     void guidedDealAcceptsClientSubmittedVisibleSystemPresetDefaults() {
         GuidedDealCreateRequestDto request = new GuidedDealCreateRequestDto(
             new GuidedDealRecordDto(

@@ -15,8 +15,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -209,6 +211,81 @@ class UploadContentInspectorTest {
         assertEquals(UploadFormat.DOCX, inspector.inspect(
             UploadPurpose.ATTACHMENT,
             UploadSource.from("fields.docx", docxContentType(), simpleFields)).format());
+    }
+
+    /**
+     * Verifies that real LibreOffice packages carrying pictures, thumbnails, and metadata
+     * manifests still upload once every package member is inspected, and that their raster
+     * members are walked structurally rather than handed to the decoding image validator, which
+     * is what keeps photo-heavy documents inside the five-second deadline.
+     */
+    @Test
+    void acceptsRealLibreOfficePicturePackages() throws Exception {
+        byte[] odt = fixture("libreoffice-picture-source.odt");
+        byte[] docx = fixture("libreoffice-picture-source.docx");
+        byte[] pptx = fixture("libreoffice-picture-source.pptx");
+        UploadPolicy policy = new UploadPolicy(properties);
+        ImageUploadValidator refusingValidator = new ImageUploadValidator(
+                properties,
+                policy,
+                new ImageDecodeAdmissionService(properties),
+                imageValidationExecutor) {
+            @Override
+            public ValidatedImage validate(UploadSource source) {
+                throw new AssertionError("Package members must be walked, never decoded");
+            }
+
+            @Override
+            public ValidatedImage validate(UploadSource source, UploadPurpose purpose) {
+                throw new AssertionError("Package members must be walked, never decoded");
+            }
+
+            @Override
+            public ValidatedAiImage validateForAi(UploadSource source) {
+                throw new AssertionError("Package members must be walked, never decoded");
+            }
+
+            @Override
+            public ValidatedAiImage validateStoredForAi(UploadSource source) {
+                throw new AssertionError("Package members must be walked, never decoded");
+            }
+        };
+
+        try (UploadContentInspector packageInspector =
+                new UploadContentInspector(policy, refusingValidator, new ObjectMapper())) {
+            assertEquals(UploadFormat.ODT, packageInspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from(
+                    "picture.odt", "application/vnd.oasis.opendocument.text", odt)).format());
+            assertEquals(UploadFormat.DOCX, packageInspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from("picture.docx", docxContentType(), docx)).format());
+            assertEquals(UploadFormat.PPTX, packageInspector.inspect(
+                UploadPurpose.ATTACHMENT,
+                UploadSource.from("picture.pptx", pptxContentType(), pptx)).format());
+        }
+
+        assertTrue(contains(odt, "Thumbnails/thumbnail.png"
+            .getBytes(StandardCharsets.US_ASCII)));
+        assertTrue(contains(odt, "manifest.rdf".getBytes(StandardCharsets.US_ASCII)));
+        assertTrue(contains(docx, "word/media/image1.png"
+            .getBytes(StandardCharsets.US_ASCII)));
+        assertTrue(contains(pptx, "ppt/media/image1.png".getBytes(StandardCharsets.US_ASCII)));
+    }
+
+    /** Verifies the legacy migration path inspects package members the same way. */
+    @Test
+    void acceptsLegacyInspectionOfRealLibreOfficePicturePackages() throws Exception {
+        assertEquals(UploadFormat.ODT, inspector.inspectLegacyAttachment(
+            UploadSource.from(
+                "picture.odt",
+                "application/octet-stream",
+                fixture("libreoffice-picture-source.odt"))).format());
+        assertEquals(UploadFormat.DOCX, inspector.inspectLegacyAttachment(
+            UploadSource.from(
+                "picture.docx",
+                "application/octet-stream",
+                fixture("libreoffice-picture-source.docx"))).format());
     }
 
     @ParameterizedTest
@@ -523,11 +600,11 @@ class UploadContentInspectorTest {
     @Test
     void validatesEveryNestedOfficeRelationshipTarget() throws Exception {
         byte[] safeNestedRelationship = packageWithNestedRelationship(
-            "media/pixel.dat", "", true);
+            "media/pixel.png", "", true);
         byte[] implicitExternalRelationship = packageWithNestedRelationship(
             "https://example.invalid/payload", "", false);
         byte[] disguisedOleRelationship = packageWithNestedRelationship(
-            "media/payload.dat", "", true, "oleObject");
+            "media/payload.png", "", true, "oleObject");
 
         InspectedUpload accepted = inspector.inspect(
             UploadPurpose.ATTACHMENT,
@@ -553,10 +630,9 @@ class UploadContentInspectorTest {
         String content = "<office:document-content xmlns:office=\""
             + "urn:oasis:names:tc:opendocument:xmlns:office:1.0\" "
             + "xmlns:xlink=\"http://www.w3.org/1999/xlink\">"
-            + "<office:body xlink:href=\"Pictures/padding.dat\"/>"
+            + "<office:body xlink:href=\"Pictures/padding.png\"/>"
             + "</office:document-content>";
-        byte[] resolved = officePackage(
-            UploadFormat.ODT, content, "safe".getBytes(StandardCharsets.UTF_8));
+        byte[] resolved = officePackage(UploadFormat.ODT, content, image("png"));
         byte[] missing = officePackage(UploadFormat.ODT, content, null);
 
         assertEquals(UploadFormat.ODT, inspector.inspect(
@@ -644,6 +720,98 @@ class UploadContentInspectorTest {
                 "math.docx",
                 docxContentType(),
                 staticMathFraction)).format());
+    }
+
+    /**
+     * Verifies that a real LibreOffice Calc workbook, which always writes the inert
+     * {@code sheetView@showFormulas} view flag, uploads as XLSX, in both the transitional and the
+     * strict SpreadsheetML namespaces.
+     *
+     * <p>The fixture was converted from the committed {@code libreoffice-calc-source.csv} and
+     * can be rebuilt with {@code soffice --headless --convert-to xlsx libreoffice-calc-source.csv}.
+     */
+    @Test
+    void acceptsRealLibreOfficeCalcWorkbook() throws Exception {
+        byte[] xlsx = fixture("libreoffice-calc-source.xlsx");
+        String sheet = new String(
+            zipEntry(xlsx, "xl/worksheets/sheet1.xml"), StandardCharsets.UTF_8);
+        assertTrue(sheet.contains("<sheetView showFormulas=\"false\""));
+
+        assertEquals(UploadFormat.XLSX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("calc.xlsx", xlsxContentType(), xlsx)).format());
+        assertEquals(UploadFormat.XLSX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("calc-numeric.xlsx", xlsxContentType(), calcSheetVariant(
+                "<sheetView showFormulas=\"false\"",
+                "<sheetView showFormulas=\"1\""))).format());
+        assertEquals(UploadFormat.XLSX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("calc-custom.xlsx", xlsxContentType(), calcSheetVariant(
+                "</sheetViews>",
+                "</sheetViews><customSheetViews><customSheetView "
+                    + "guid=\"{00000000-0000-0000-0000-000000000001}\" "
+                    + "showFormulas=\" true \"/></customSheetViews>"))).format());
+        assertEquals(UploadFormat.XLSX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("calc-strict.xlsx", xlsxContentType(), calcSheetVariant(Map.of(
+                "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"",
+                "<worksheet xmlns=\"http://purl.oclc.org/ooxml/spreadsheetml/main\"",
+                "<sheetView showFormulas=\"false\"",
+                "<sheetView showFormulas=\"1\"")))).format());
+    }
+
+    /**
+     * Verifies that the {@code showFormulas} exemption stays narrow: any other element,
+     * namespace, value, or formula-named attribute, and any real formula cell alongside the flag,
+     * is still refused.
+     */
+    @Test
+    void rejectsFormulaVocabularyOutsideInertSpreadsheetViewFlag() throws Exception {
+        String flag = "<sheetView showFormulas=\"false\"";
+        byte[] nonBooleanValue = calcSheetVariant(
+            flag, "<sheetView showFormulas=\"=WEBSERVICE(A1)\"");
+        byte[] wrongCaseBoolean = calcSheetVariant(flag, "<sheetView showFormulas=\"TRUE\"");
+        byte[] nonViewElement = calcSheetVariant(
+            "<selection pane=", "<selection showFormulas=\"false\" pane=");
+        byte[] namespacedAttribute = calcSheetVariant(
+            flag, "<sheetView x14:showFormulas=\"false\"");
+        byte[] otherFormulaAttribute = calcSheetVariant(
+            flag, "<sheetView showFormulaBar=\"false\"");
+        byte[] extraFormulaAttribute = calcSheetVariant(
+            flag, flag + " formula=\"false\"");
+        byte[] realFormulaCell = calcSheetVariant(
+            "<c r=\"C2\" s=\"0\" t=\"n\"><v>42</v></c>",
+            "<c r=\"C2\" s=\"0\" t=\"n\"><f>WEBSERVICE(\"https://example.invalid\")</f>"
+                + "<v>42</v></c>");
+        String foreignView = "<o:sheetView xmlns:o=\"urn:example:not-spreadsheetml\"";
+        byte[] foreignNamespaceElement = calcSheetVariant(
+            "</sheetViews>", "</sheetViews>" + foreignView + " showFormulas=\"false\"/>");
+        byte[] rebuiltControl = calcSheetVariant(flag, flag);
+        byte[] foreignNamespaceControl = calcSheetVariant(
+            "</sheetViews>", "</sheetViews>" + foreignView + "/>");
+
+        assertEquals(UploadFormat.XLSX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from("control.xlsx", xlsxContentType(), rebuiltControl)).format());
+        assertEquals(UploadFormat.XLSX, inspector.inspect(
+            UploadPurpose.ATTACHMENT,
+            UploadSource.from(
+                "foreign-control.xlsx", xlsxContentType(), foreignNamespaceControl)).format());
+        Map<String, byte[]> refused = new LinkedHashMap<>();
+        refused.put("nonBooleanValue", nonBooleanValue);
+        refused.put("wrongCaseBoolean", wrongCaseBoolean);
+        refused.put("nonViewElement", nonViewElement);
+        refused.put("foreignNamespaceElement", foreignNamespaceElement);
+        refused.put("namespacedAttribute", namespacedAttribute);
+        refused.put("otherFormulaAttribute", otherFormulaAttribute);
+        refused.put("extraFormulaAttribute", extraFormulaAttribute);
+        refused.put("realFormulaCell", realFormulaCell);
+        refused.forEach((name, content) -> assertThrows(
+            UnsupportedUploadMediaTypeException.class,
+            () -> inspector.inspect(UploadPurpose.ATTACHMENT,
+                UploadSource.from(name + ".xlsx", xlsxContentType(), content)),
+            name));
     }
 
     @Test
@@ -1040,6 +1208,39 @@ class UploadContentInspectorTest {
         }
     }
 
+    private static byte[] calcSheetVariant(String target, String replacement)
+            throws IOException {
+        return calcSheetVariant(Map.of(target, replacement));
+    }
+
+    private static byte[] calcSheetVariant(Map<String, String> replacements)
+            throws IOException {
+        byte[] source = fixture("libreoffice-calc-source.xlsx");
+        String sheetName = "xl/worksheets/sheet1.xml";
+        String original = new String(zipEntry(source, sheetName), StandardCharsets.UTF_8);
+        String sheet = original;
+        for (Map.Entry<String, String> replacement : replacements.entrySet()) {
+            if (!original.contains(replacement.getKey())) {
+                throw new IOException("Missing fixture text: " + replacement.getKey());
+            }
+            sheet = sheet.replace(replacement.getKey(), replacement.getValue());
+        }
+        String rewritten = sheet;
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (ZipInputStream input = new ZipInputStream(
+                    new ByteArrayInputStream(source), StandardCharsets.UTF_8);
+                ZipOutputStream zip = new ZipOutputStream(output, StandardCharsets.UTF_8)) {
+            ZipEntry entry;
+            while ((entry = input.getNextEntry()) != null) {
+                byte[] content = sheetName.equals(entry.getName())
+                    ? rewritten.getBytes(StandardCharsets.UTF_8)
+                    : input.readAllBytes();
+                put(zip, entry.getName(), content);
+            }
+        }
+        return output.toByteArray();
+    }
+
     private static byte[] zipEntry(byte[] content, String expectedName) throws IOException {
         try (ZipInputStream zip = new ZipInputStream(
                 new ByteArrayInputStream(content), StandardCharsets.UTF_8)) {
@@ -1172,7 +1373,7 @@ class UploadContentInspectorTest {
             put(zip, "word/_rels/document.xml.rels",
                 relationships.getBytes(StandardCharsets.UTF_8));
             if (includeTarget) {
-                put(zip, "word/" + target, "safe".getBytes(StandardCharsets.UTF_8));
+                put(zip, "word/" + target, image("png"));
             }
         }
         return output.toByteArray();
@@ -1196,14 +1397,26 @@ class UploadContentInspectorTest {
             zip.write(mimeType);
             zip.closeEntry();
             put(zip, "content.xml", mainXml.getBytes(StandardCharsets.UTF_8));
-            put(zip, "META-INF/manifest.xml", ("<manifest:manifest xmlns:manifest=\""
-                + "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\"/>")
+            put(zip, "META-INF/manifest.xml", odfManifestXml(padding != null)
                 .getBytes(StandardCharsets.UTF_8));
             if (padding != null) {
-                put(zip, "Pictures/padding.dat", padding);
+                put(zip, "Pictures/padding.png", padding);
             }
         }
         return output.toByteArray();
+    }
+
+    /** Builds the ODF package manifest, which must list every non-META-INF member. */
+    private static String odfManifestXml(boolean picture) {
+        return "<manifest:manifest xmlns:manifest=\""
+            + "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\">"
+            + "<manifest:file-entry manifest:full-path=\"content.xml\" "
+            + "manifest:media-type=\"text/xml\"/>"
+            + (picture
+                ? "<manifest:file-entry manifest:full-path=\"Pictures/padding.png\" "
+                    + "manifest:media-type=\"image/png\"/>"
+                : "")
+            + "</manifest:manifest>";
     }
 
     /** Builds an ODT package carrying one additional named XML part. */
@@ -1225,8 +1438,7 @@ class UploadContentInspectorTest {
             zip.closeEntry();
             put(zip, "content.xml",
                 defaultMainXml(UploadFormat.ODT).getBytes(StandardCharsets.UTF_8));
-            put(zip, "META-INF/manifest.xml", ("<manifest:manifest xmlns:manifest=\""
-                + "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0\"/>")
+            put(zip, "META-INF/manifest.xml", odfManifestXml(false)
                 .getBytes(StandardCharsets.UTF_8));
             put(zip, partName, partXml.getBytes(StandardCharsets.UTF_8));
         }
@@ -1255,6 +1467,7 @@ class UploadContentInspectorTest {
 
     private static String contentTypesXml(UploadFormat format) {
         return "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">"
+            + "<Default Extension=\"png\" ContentType=\"image/png\"/>"
             + "<Override PartName=\"/" + mainPart(format)
             + "\" ContentType=\"" + mainContentType(format) + "\"/></Types>";
     }

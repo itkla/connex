@@ -27,6 +27,17 @@ class CiChangeClassificationTest(unittest.TestCase):
         categories = self.classify("README.md", "docs/CI_POLICY.md", "frontend/AGENTS.md")
         self.assertFalse(any(categories.values()))
 
+    def test_each_api_ledger_alone_runs_backend(self) -> None:
+        for path in (
+            "docs/backend/api-surface.tsv",
+            "docs/backend/api-lifecycle.tsv",
+            "docs/backend/api-surface-policy.txt",
+        ):
+            with self.subTest(path=path):
+                categories = self.classify(path)
+                self.assertTrue(categories["backend"])
+                self.assertFalse(categories["full"])
+
     def test_runtime_mdx_is_frontend_code_not_documentation(self) -> None:
         categories = self.classify("frontend/app/help/page.mdx")
         self.assertTrue(categories["frontend"])
@@ -65,6 +76,35 @@ class CiChangeClassificationTest(unittest.TestCase):
         self.assertTrue(categories["cross_stack"])
         self.assertTrue(categories["frontend_audit"])
         self.assertFalse(categories["backend"])
+
+    def test_every_file_that_configures_a_pnpm_workspace_adds_the_audit(self) -> None:
+        for path in (
+            "frontend/pnpm-workspace.yaml",
+            "frontend/.pnpmfile.cjs",
+            "frontend/.pnpmfile.mjs",
+            "frontend/emails/pnpm-workspace.yaml",
+            "frontend/emails/.pnpmfile.cjs",
+            "frontend/emails/.pnpmfile.mjs",
+            "frontend/emails/.npmrc",
+            "frontend/emails/package.json",
+            "landing/pnpm-workspace.yaml",
+            "landing/.pnpmfile.cjs",
+            "landing/.pnpmfile.mjs",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(self.classify(path)["frontend_audit"])
+
+    def test_a_pnpm_project_file_anywhere_adds_the_audit_that_discovers_it(self) -> None:
+        for path in (
+            "pnpm-workspace.yaml",
+            "frontend/tools/pnpm-lock.yaml",
+            "frontend/tools/package.json",
+            "frontend/tools/.pnpmfile.mjs",
+            "backend/src/test/resources/fixture/pnpm-lock.yaml",
+            "tools/codegen/package.json",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(self.classify(path)["frontend_audit"])
 
     def test_ocr_dependencies_add_the_ocr_audit_only(self) -> None:
         categories = self.classify("ocr/requirements.lock")
@@ -113,6 +153,11 @@ class CiChangeClassificationTest(unittest.TestCase):
         self.assertTrue(categories["compose"])
         self.assertTrue(categories["profile_boot"])
         self.assertTrue(categories["action_pins"])
+
+    def test_development_topology_change_runs_network_regressions(self) -> None:
+        categories = self.classify("backend/docker-compose.yml")
+        self.assertTrue(categories["action_pins"])
+        self.assertTrue(categories["backend"])
 
     def test_deployment_documentation_runs_security_regressions(self) -> None:
         categories = self.classify("deploy/backup/README.md")

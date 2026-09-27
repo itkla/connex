@@ -14,8 +14,10 @@ import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.eq;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -30,6 +32,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import ooo.klae.connex.backend.ai.AiRestrictionEpoch;
 import ooo.klae.connex.backend.ai.AiPrivacyMode;
+import ooo.klae.connex.backend.ai.lease.AiRunLease;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseGuard;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseKey;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseService;
+import ooo.klae.connex.backend.ai.lease.AiRunLeaseSubject;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
@@ -52,6 +59,8 @@ class AiChatTurnPersistenceServiceTest {
     private static final AiChatQueuedTurn TURN = new AiChatQueuedTurn(
             7, 11, 13, 17, 19, 1, 23L, false, List.of(), List.of());
     private static final Instant NOW = Instant.parse("2026-08-12T00:00:00Z");
+    private static final AiRunLeaseKey LEASE_KEY = new AiRunLeaseKey(
+            TURN.workspaceId(), AiRunLeaseSubject.CHAT_TURN, TURN.turnId());
 
     private AiAssistantSessionReadAudit sessionReadAudit;
     private AiChatSession auditedSession;
@@ -64,6 +73,7 @@ class AiChatTurnPersistenceServiceTest {
     private AiAssistantToolExecutor toolExecutor;
     private AiChatTurn storedTurn;
     private AiChatRealtimeDispatcher realtimeDispatcher;
+    private AiRunLeaseService runLeaseService;
     private AiChatTurnPersistenceService service;
 
     @BeforeEach
@@ -77,6 +87,7 @@ class AiChatTurnPersistenceServiceTest {
         toolExecutor = mock(AiAssistantToolExecutor.class);
         realtimeDispatcher = mock(AiChatRealtimeDispatcher.class);
         sessionReadAudit = mock(AiAssistantSessionReadAudit.class);
+        runLeaseService = mock(AiRunLeaseService.class);
         service = new AiChatTurnPersistenceService(
                 chatMapper,
                 attachmentMapper,
@@ -88,7 +99,8 @@ class AiChatTurnPersistenceServiceTest {
                 sessionReadAudit,
                 Clock.fixed(NOW, ZoneOffset.UTC),
                 realtimeDispatcher,
-                JsonMapper.builder().build());
+                JsonMapper.builder().build(),
+                runLeaseService);
         AiChatSession session = new AiChatSession();
         auditedSession = session;
         session.setId(TURN.sessionId());
@@ -433,7 +445,8 @@ class AiChatTurnPersistenceServiceTest {
                 mock(AiAssistantSessionReadAudit.class),
                 Clock.systemUTC(),
                 dispatcher,
-                JsonMapper.builder().build());
+                JsonMapper.builder().build(),
+                mock(AiRunLeaseService.class));
         User owner = new User();
         owner.setId(TURN.userId());
         AiChatSession session = new AiChatSession();
@@ -754,12 +767,73 @@ class AiChatTurnPersistenceServiceTest {
                 "turn-18-step-1".equals(toolCall.getIdempotencyKey())));
     }
 
+    /**
+     * The key a step's only call writes has not changed, and a batched one suffixes it.
+     *
+     * <p>Ordinal 0 means "the sole call of its step" and has to render the exact legacy key: every
+     * write, every {@code find_tools}, every unbatched read and every server-side plan step writes
+     * it, the write-proposal replay looks it up verbatim, and the progress projection scans rows by
+     * the {@code turn-N-step-} prefix. Only a call that shared its step renders {@code -call-k},
+     * which fits the existing column and its uniqueness constraint without any schema change.
+     */
+    @Test
+    void theSoleCallOfAStepKeepsItsLegacyKeyWhileBatchedCallsSuffixTheirOrdinal() {
+        service.proposeTool(TURN, 4, 0, "search_records", "{}");
+        service.proposeTool(TURN, 5, 1, "search_records", "{}");
+        service.proposeTool(TURN, 5, 2, "list_tasks", "{}");
+
+        ArgumentCaptor<AiChatToolCall> persisted =
+                ArgumentCaptor.forClass(AiChatToolCall.class);
+        verify(chatMapper, times(3)).insertToolCall(persisted.capture());
+        assertEquals(
+                List.of(
+                        "turn-" + TURN.turnId() + "-step-4",
+                        "turn-" + TURN.turnId() + "-step-5-call-1",
+                        "turn-" + TURN.turnId() + "-step-5-call-2"),
+                persisted.getAllValues().stream()
+                        .map(AiChatToolCall::getIdempotencyKey)
+                        .toList());
+        assertTrue(persisted.getAllValues().getFirst().getIdempotencyKey().length() <= 64);
+        assertTrue(persisted.getAllValues().getLast().getIdempotencyKey().length() <= 64);
+    }
+
+    @Test
+    void aNegativeCallOrdinalIsRefusedBeforeAnyRowIsWritten() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.proposeTool(TURN, 4, -1, "search_records", "{}"));
+
+        verify(chatMapper, never()).insertToolCall(org.mockito.ArgumentMatchers.any());
+    }
+
+    /**
+     * A read proposal is now refused above the hard step ceiling, exactly as a write already was.
+     *
+     * <p>A deliberate tightening this change brings with it: read and write proposals share one
+     * key renderer, so the bound the write path has always enforced now covers reads too. The loop
+     * cannot reach it — it stops at {@code HARD_MAX_STEPS} before proposing — so this pins the
+     * refusal rather than a behaviour the running system relies on, and keeps a future skill plan
+     * longer than the ceiling from silently writing a key no reader's anchored pattern accepts.
+     */
+    @Test
+    void aStepNumberAboveTheHardCeilingIsRefusedForAReadProposalAsItAlreadyWasForAWrite() {
+        int beyondCeiling = AiChatAgentLoopService.HARD_MAX_STEPS + 1;
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.proposeTool(
+                        TURN, beyondCeiling, AiAssistantToolCallRef.SOLE_CALL,
+                        "search_records", "{}"));
+
+        verify(chatMapper, never()).insertToolCall(org.mockito.ArgumentMatchers.any());
+    }
+
     @Test
     void nativeThoughtSignatureSurvivesReadAndWriteProposalPersistence() {
         String thoughtSignature = "opaque /+==\nline two";
 
         service.proposeTool(
-                TURN, 1, "search_records", "{\"query\":\"pipeline\"}",
+                TURN, 1, 0, "search_records", "{\"query\":\"pipeline\"}",
                 thoughtSignature);
         AiAssistantPreparedWrite write = new AiAssistantPreparedWrite(
                 "create_note",
@@ -800,6 +874,110 @@ class AiChatTurnPersistenceServiceTest {
                 TURN.sessionId(),
                 new AiChatTurnCreateRequest("Summarize", tenRecords),
                 TURN.restrictionEpoch()));
+    }
+
+    @Test
+    void claimingAQueuedTurnTakesItsRunLeaseAfterTheDurableClaim() {
+        storedTurn.setStatus("queued");
+        when(chatMapper.markTurnRunning(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(1);
+        AiRunLease claimed = lease(3L);
+        when(runLeaseService.acquireInCurrentTransaction(eq(LEASE_KEY), any(AiRunLeaseGuard.class)))
+                .thenReturn(claimed);
+
+        AiRunLeaseGuard ownership = new AiRunLeaseGuard(Duration.ofSeconds(45));
+
+        assertEquals(claimed, service.markRunning(TURN, ownership));
+
+        InOrder order = inOrder(chatMapper, runLeaseService);
+        order.verify(chatMapper).markTurnRunning(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId());
+        order.verify(runLeaseService).acquireInCurrentTransaction(LEASE_KEY, ownership);
+    }
+
+    @Test
+    void aClaimRefusedBeforeItsDurableWriteTakesNoRunLease() {
+        storedTurn.setStatus("running");
+
+        assertThrows(
+                ConflictException.class,
+                () -> service.markRunning(TURN, new AiRunLeaseGuard(Duration.ofSeconds(45))));
+
+        verify(chatMapper, never()).markTurnRunning(anyInt(), anyInt(), anyInt());
+        verify(runLeaseService, never()).acquireInCurrentTransaction(any(), any());
+    }
+
+    @Test
+    void aClaimWhoseDurableWriteMatchesNothingFailsLoudlyAndTakesNoRunLease() {
+        storedTurn.setStatus("queued");
+        when(chatMapper.markTurnRunning(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(0);
+
+        assertThrows(
+                IllegalStateException.class,
+                () -> service.markRunning(TURN, new AiRunLeaseGuard(Duration.ofSeconds(45))));
+
+        verify(runLeaseService, never()).acquireInCurrentTransaction(any(), any());
+    }
+
+    @Test
+    void everyDurableTerminalWriteTombstonesTheRunLeaseInItsOwnTransaction() {
+        when(chatMapper.updateTurnTerminal(
+                anyInt(), anyInt(), anyInt(), any(), any(), any(), any())).thenReturn(1);
+        when(chatMapper.nextMessageSequence(
+                TURN.workspaceId(), TURN.sessionId())).thenReturn(2);
+        when(chatMapper.cancelTurn(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId())).thenReturn(1);
+
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            assertTrue(service.markTerminal(TURN, "failed", "owner_lost"));
+            assertTrue(service.resolve(TURN, "Answer", null, 5, 3));
+            service.cancel(TURN.sessionId(), TURN.turnId());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+
+        verify(runLeaseService, times(3)).releaseHeldInCurrentTransaction(LEASE_KEY);
+    }
+
+    @Test
+    void aTerminalWriteThatChangedNothingTombstonesNoRunLease() {
+        when(chatMapper.updateTurnTerminal(
+                anyInt(), anyInt(), anyInt(), any(), any(), any(), any())).thenReturn(0);
+
+        assertFalse(service.markTerminal(TURN, "failed", "owner_lost"));
+
+        verify(runLeaseService, never()).releaseHeldInCurrentTransaction(any());
+    }
+
+    @Test
+    void aLazilyExpiredTurnTombstonesItsRunLeaseWithTheSameTerminalWrite() {
+        LocalDateTime cutoff = LocalDateTime.ofInstant(
+                NOW.minus(AiAssistantTurnBudget.DURABLE_LIFETIME), ZoneOffset.UTC);
+        AiChatTurn expired = new AiChatTurn();
+        expired.setId(TURN.turnId());
+        expired.setWorkspaceId(TURN.workspaceId());
+        expired.setSessionId(TURN.sessionId());
+        expired.setRequestedByUserId(TURN.userId());
+        expired.setStatus("timed_out");
+        expired.setTerminalReason("generation_timeout");
+        when(chatMapper.getTurnByIdForUpdate(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId()))
+                .thenReturn(storedTurn, expired);
+        when(chatMapper.updateTurnTerminal(
+                TURN.workspaceId(), TURN.sessionId(), TURN.turnId(),
+                "timed_out", "generation_timeout", "running", cutoff)).thenReturn(1);
+
+        assertEquals("timed_out", service.readTurn(TURN.sessionId(), TURN.turnId()).getStatus());
+
+        verify(runLeaseService).releaseHeldInCurrentTransaction(LEASE_KEY);
+    }
+
+    private static AiRunLease lease(long epoch) {
+        return new AiRunLease(LEASE_KEY, "11111111-2222-3333-4444-555555555555", epoch);
     }
 
     private static Attachment attachment(int id) {

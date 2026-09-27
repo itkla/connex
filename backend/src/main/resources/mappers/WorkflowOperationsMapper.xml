@@ -238,12 +238,15 @@
       (workspace_id, workflow_id, workflow_version_id, requested_by_id,
        scope_kind, resolved_scope_kind, source_surface, record_type,
        scope_token_hash, scope_hash, confirmation_key, scope_contract_json,
-       exact_count, ready_count, skipped_count, status, expires_at)
+       exact_count, ready_count, skipped_count, status, expires_at, created_at)
+    <!-- created_at is written from the application clock because chk_workflow_invocation_timing
+         compares it with the application-supplied expires_at, confirmed_at, and completed_at. -->
     VALUES
       (#{workspaceId}, #{workflowId}, #{workflowVersionId}, #{requestedById},
        #{scopeKind}, #{resolvedScopeKind}, #{sourceSurface}, #{recordType},
        #{scopeTokenHash}, #{scopeHash}, #{confirmationKey}, #{scopeContractJson},
-       #{exactCount}, #{readyCount}, #{skippedCount}, #{status}, #{expiresAt})
+       #{exactCount}, #{readyCount}, #{skippedCount}, #{status}, #{expiresAt},
+       #{createdAt})
   </insert>
 
   <insert id="insertInvocationRecords">

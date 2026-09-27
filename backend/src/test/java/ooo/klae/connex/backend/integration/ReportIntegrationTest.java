@@ -891,10 +891,19 @@ class ReportIntegrationTest {
     @Test
     void onlyCreatorOrAdminCanDeleteReportsAndSnapshots() throws Exception {
         RequestContextHolder.resetRequestAttributes();
-        Workspace workspace = newWorkspace();
+        Workspace workspace = newWorkspaceInOrg(newOrganization().getId());
         User creator = newMember(workspace, "member");
         User otherMember = newMember(workspace, "member");
         User admin = newMember(workspace, "admin");
+        User formerAdmin = newMember(workspace, "admin");
+        WorkspaceRole restricted = new WorkspaceRole();
+        restricted.setWorkspaceId(workspace.getId());
+        restricted.setName("Report deletion only");
+        roleMapper.insertRole(restricted);
+        roleMapper.insertPermissions(workspace.getId(), restricted.getId(), List.of("REPORT_DELETE"));
+        workspaceMapper.setMemberCustomRole(workspace.getId(), otherMember.getId(), restricted.getId());
+        workspaceMapper.setMemberCustomRole(workspace.getId(), formerAdmin.getId(), restricted.getId());
+        MockHttpSession formerAdminSession = login(formerAdmin.getUsername());
         MockHttpSession creatorSession = login(creator.getUsername());
         MockHttpSession memberSession = login(otherMember.getUsername());
         MockHttpSession adminSession = login(admin.getUsername());
@@ -908,6 +917,17 @@ class ReportIntegrationTest {
             .andExpect(status().isCreated())
             .andReturn();
         int snapshotId = responseId(snapshotResult);
+
+        mockMvc.perform(delete("/api/reports/{id}/snapshots/{snapshotId}", reportId, snapshotId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(formerAdminSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/reports/{id}", reportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(formerAdminSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isForbidden());
 
         mockMvc.perform(delete("/api/reports/{id}/snapshots/{snapshotId}", reportId, snapshotId)
                 .header("X-Workspace-Id", workspace.getId())
@@ -928,6 +948,13 @@ class ReportIntegrationTest {
         mockMvc.perform(delete("/api/reports/{id}", reportId)
                 .header("X-Workspace-Id", workspace.getId())
                 .session(adminSession)
+                .with(csrf().asHeader()))
+            .andExpect(status().isNoContent());
+
+        int ownReportId = createReport(creatorSession, workspace);
+        mockMvc.perform(delete("/api/reports/{id}", ownReportId)
+                .header("X-Workspace-Id", workspace.getId())
+                .session(creatorSession)
                 .with(csrf().asHeader()))
             .andExpect(status().isNoContent());
     }

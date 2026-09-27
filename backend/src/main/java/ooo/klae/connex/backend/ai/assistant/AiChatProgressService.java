@@ -25,7 +25,16 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 @RequiredArgsConstructor
 public class AiChatProgressService {
-    private static final Pattern TURN_STEP = Pattern.compile("turn-([1-9][0-9]*)-step-([1-9][0-9]*)");
+    /**
+     * One turn's tool-call idempotency key, with the optional ordinal a shared step renders.
+     *
+     * <p>The suffix group is optional because a call that was the only one its step made still
+     * writes the unsuffixed key. Without the group a suffixed row would not match at all and would
+     * fall through to the {@code HARD_MAX_STEPS} placeholder, sorting a real milestone to the very
+     * end of the turn.
+     */
+    private static final Pattern TURN_STEP = Pattern.compile(
+            "turn-([1-9][0-9]*)-step-([1-9][0-9]*)(?:-call-([1-9][0-9]*))?");
     private static final int MAX_PROGRESS_COUNT = 1_000;
     private static final String SCOPE = "scope";
     private static final String ANSWER = "answer";
@@ -48,7 +57,20 @@ public class AiChatProgressService {
         return project(turn.getWorkspaceId(), turn.getSessionId(), turn.getId(), turn.getStatus());
     }
 
-    /** Returns a safe milestone snapshot with an explicit terminal status for final persistence. */
+    /**
+     * Returns a safe milestone snapshot with an explicit terminal status for final persistence.
+     *
+     * <p>A {@code find_tools} row is skipped rather than mapped: the loop publishes no step frame
+     * for it, so projecting one would raise an {@code other} milestone that appeared live and
+     * vanished on reload. It reads nothing, so there is no coverage for it to claim.
+     *
+     * <p>The row limit is {@link AiChatAgentLoopService#HARD_MAX_STEPS} because a turn writes at
+     * most one {@code ai_chat_tool_call} row per model step: each step takes exactly one of the
+     * read- or write-proposal paths, so the step ceiling is an exact bound on the rows. The
+     * moment a step may propose more than one call, that equality breaks and this limit has to
+     * rise with it, or a turn past the ceiling silently loses real milestones here while the
+     * suffixed keys it wrote still parse and look healthy.
+     */
     public List<AiChatProgressItemDto> project(
             int workspaceId, int sessionId, int turnId, String turnStatus) {
         Map<String, ProgressAccumulator> milestones = new LinkedHashMap<>();
@@ -57,6 +79,9 @@ public class AiChatProgressService {
         String prefix = "turn-" + turnId + "-step-";
         for (AiChatToolCall toolCall : chatMapper.listToolCallsByTurn(
                 workspaceId, sessionId, prefix, AiChatAgentLoopService.HARD_MAX_STEPS)) {
+            if (AiAssistantToolCatalog.FIND_TOOLS.equals(toolCall.getToolName())) {
+                continue;
+            }
             String source = sourceForTool(toolCall.getToolName());
             int seq = step(toolCall.getIdempotencyKey(), turnId);
             ProgressAccumulator current = milestones.get(source);

@@ -35,6 +35,19 @@ describe("client error path redaction", () => {
         expect(JSON.stringify(report.mock.calls)).not.toContain(pathname);
     });
 
+    it("redacts a fragment bearer embedded in an error message and stack", () => {
+        const href = `https://connex.example/document-acceptance#token=w12-${"a".repeat(64)}`;
+        const error = new Error(`Boundary at ${href}`);
+        error.stack = `Error: Boundary at ${href}\n    at ${href}:1:1`;
+
+        reportBoundaryError(error);
+
+        expect(redactClientErrorPath(href))
+            .toBe("https://connex.example/document-acceptance#token=[token]");
+        expect(JSON.stringify(report.mock.calls)).not.toContain("a".repeat(64));
+        expect(JSON.stringify(report.mock.calls)).toContain("#token=[token]");
+    });
+
     it.each([
         ["/invite/future-path-bearer", "/invite/[token]"],
         ["/invite-link/future-path-bearer", "/invite-link/[token]"],

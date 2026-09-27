@@ -3,8 +3,10 @@ package ooo.klae.connex.backend.ai;
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -14,6 +16,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -261,6 +264,29 @@ class AiRelationshipContextTest {
         assertTrue(prompt.toString().contains("Employment: unavailable"));
         assertTrue(prompt.toString().contains("Connection: {{P2}}"));
         assertFalse(prompt.toString().contains("Connection: unavailable"));
+    }
+
+    /**
+     * The employment fetch absorbs failures, so an interrupt that lands during it must still stop
+     * the stakeholder's connection graph from being loaded.
+     */
+    @Test
+    void appendStakeholderBackground_interruptDuringEmploymentLoadStopsBeforeConnectionsAreLoaded() {
+        MaskingContext ctx = new MaskingContext();
+        String stakeholderToken = MaskingEngine.maskField(EntityKind.PERSON, "Champion Person", ctx);
+        when(personService.getEmploymentHistory(PERSON_ID)).thenAnswer(invocation -> {
+            Thread.currentThread().interrupt();
+            return List.of();
+        });
+
+        try {
+            assertThrows(CancellationException.class, () -> context.appendStakeholderBackground(
+                    new StringBuilder(), PERSON_ID, stakeholderToken, ctx, (kind, id) -> ""));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+        verify(connectionService, never()).getTopConnections(anyInt(), anyInt());
     }
 
     @Test

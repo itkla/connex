@@ -8,13 +8,13 @@ import { useLocale, useTranslations } from 'next-intl';
 import { toastSuccess } from '@/app/lib/toast';
 import { CheckIcon, EllipsisVerticalIcon, PencilIcon, TrashIcon, UserIcon } from '@heroicons/react/24/outline';
 
-import { type Contact, type ContactLifecycleStage, type Deal, type UserReference } from '@/app/lib/types';
+import { type Contact, type ContactLifecycleStage, type Deal, type Note, type UserReference } from '@/app/lib/types';
 import { formatShortDate } from '@/app/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { IconButton } from '@/components/ui/icon-button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { deleteActivity, deleteNote, deleteTask } from '@/app/lib/api';
+import { deleteActivity, deleteNote, deleteTask, getNoteById } from '@/app/lib/api';
 import { ACTIVITY_URL_KEY, COMMENT_URL_KEY, NOTE_URL_KEY, TASK_URL_KEY } from '@/app/hooks/listStateUrl';
 import { useApiErrorToast } from '@/app/hooks/useApiErrorToast';
 import { type TimelineEntry } from '@/app/components/me/timelineEntries';
@@ -141,6 +141,9 @@ export default function TimelineRow({
     const router = useRouter();
     const pathname = usePathname();
     const [editOpen, setEditOpen] = useState(false);
+    const [editingNote, setEditingNote] = useState<Note | null>(null);
+    const [loadingNote, setLoadingNote] = useState(false);
+    const noteRequest = useRef<AbortController | null>(null);
     const rowRef = useRef<HTMLLIElement>(null);
     const searchParams = useSearchParams();
     const reduceMotion = useReducedMotion();
@@ -166,6 +169,30 @@ export default function TimelineRow({
         }
     }, [isHighlighted, reduceMotion]);
 
+    useEffect(() => () => noteRequest.current?.abort(), []);
+
+    const handleEdit = async () => {
+        if (entry.kind !== 'note') {
+            setEditOpen(true);
+            return;
+        }
+        if (noteRequest.current) return;
+        const controller = new AbortController();
+        noteRequest.current = controller;
+        setLoadingNote(true);
+        try {
+            const fullNote = await getNoteById(entry.note.id, { signal: controller.signal });
+            if (controller.signal.aborted) return;
+            setEditingNote(fullNote);
+            setEditOpen(true);
+        } catch (error) {
+            if (!controller.signal.aborted) showApiError(error);
+        } finally {
+            noteRequest.current = null;
+            setLoadingNote(false);
+        }
+    };
+
     const handleDelete = async () => {
         try {
             if (entry.kind === 'task') {
@@ -188,7 +215,7 @@ export default function TimelineRow({
     const chipLabel = t(CHIP_LABEL_KEY[entry.kind]);
     const commentAuthor = entry.kind === 'comment' ? entry.comment.author : null;
     const avatarUrl = commentAuthor?.profilePictureUrl ?? author?.profilePictureUrl;
-    const avatarName = commentAuthor?.displayName ?? author?.displayName ?? author?.username ?? '';
+    const avatarName = commentAuthor?.displayName || author?.displayName || author?.username || t('unknownAuthor');
 
     let title: React.ReactNode;
     let subtitle: React.ReactNode = null;
@@ -330,7 +357,7 @@ export default function TimelineRow({
             <Tooltip>
                 <TooltipTrigger asChild>
                     <Avatar size="default">
-                        <AvatarImage src={avatarUrl} />
+                        <AvatarImage src={avatarUrl} alt={avatarName} />
                         <AvatarFallback>
                             <UserIcon className="size-3 text-muted-foreground" />
                         </AvatarFallback>
@@ -357,12 +384,12 @@ export default function TimelineRow({
             {!readOnlyEntry && (entry.kind !== 'activity' || !isProviderOwnedActivity(entry.activity)) ? (
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <IconButton variant="ghost" size="icon-inline" label={t('actionsAria')}>
+                        <IconButton variant="ghost" size="icon-inline" label={t('actionsAria')} aria-busy={loadingNote}>
                             <EllipsisVerticalIcon className="text-muted-foreground" />
                         </IconButton>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setEditOpen(true)}>
+                        <DropdownMenuItem disabled={loadingNote} onClick={handleEdit}>
                             <PencilIcon className="size-4 text-muted-foreground" />
                             {t('edit')}
                         </DropdownMenuItem>
@@ -396,10 +423,10 @@ export default function TimelineRow({
                     originWorkspaceId={originWorkspaceId}
                 />
             )}
-            {entry.kind === 'note' && currentUserId != null && (
+            {entry.kind === 'note' && editingNote !== null && currentUserId != null && (
                 <NoteDialog
                     key={entry.note.id}
-                    note={entry.note}
+                    note={editingNote}
                     open={editOpen}
                     onOpenChange={setEditOpen}
                     persons={personSearch.contacts}

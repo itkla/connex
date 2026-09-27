@@ -6,8 +6,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import ooo.klae.connex.backend.config.DocumentAcceptanceAdmissionFilter;
-import ooo.klae.connex.backend.services.DocumentAcceptanceAdmissionService;
 import ooo.klae.connex.backend.util.ClientIpResolver;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Registers the public acceptance admission filter beside the collaborators it needs.
@@ -26,13 +26,10 @@ public class DocumentAcceptanceAdmissionConfiguration {
     FilterRegistrationBean<DocumentAcceptanceAdmissionFilter> documentAcceptanceAdmissionFilterRegistration(
             DocumentAcceptanceRateLimiter rateLimiter,
             ClientIpResolver clientIpResolver,
-            DocumentAcceptanceAdmissionService admissionService) {
+            ObjectMapper objectMapper) {
         FilterRegistrationBean<DocumentAcceptanceAdmissionFilter> registration =
             new FilterRegistrationBean<>(
-                new DocumentAcceptanceAdmissionFilter(
-                    rateLimiter,
-                    clientIpResolver,
-                    admissionService));
+                new DocumentAcceptanceAdmissionFilter(rateLimiter, clientIpResolver, objectMapper));
         registration.setOrder(OrderedFormContentFilter.DEFAULT_ORDER - 3);
         return registration;
     }

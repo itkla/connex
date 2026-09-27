@@ -62,7 +62,6 @@ public class RecordCommentService {
     private static final int MAX_PAGE_LIMIT = 100;
     private static final int MAX_INDICATOR_TARGETS = 100;
     private static final int EDIT_WINDOW_MINUTES = 15;
-    private static final int SNIPPET_LENGTH = 140;
     private static final String MENTION_TYPE = "comment.mention";
     private static final String REPLY_TYPE = "comment.reply";
     private static final String CATEGORY = "comment";
@@ -571,7 +570,6 @@ public class RecordCommentService {
             notification.setActorLabel(actor.getDisplayName());
             notification.setSourceType(ReferenceService.SOURCE_COMMENT);
             notification.setSourceId(commentSourceId(comment.getId()));
-            notification.setSourceLabel(snippet(comment.getContent()));
             notification.setContextType(thread.getTargetType());
             notification.setContextId(thread.getTargetId());
             notification.setActionUrl(actionUrl(thread, comment.getId()));
@@ -911,11 +909,6 @@ public class RecordCommentService {
             case DEAL -> "deals";
         };
         return "/records/" + segment + "/" + thread.getTargetId() + "?comment=" + commentId;
-    }
-
-    private static String snippet(String content) {
-        String plain = ReferenceService.toPlainText(content).strip();
-        return plain.length() > SNIPPET_LENGTH ? plain.substring(0, SNIPPET_LENGTH) : plain;
     }
 
     private String json(Object value) {

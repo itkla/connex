@@ -137,6 +137,9 @@ Three further specs exist to keep the harness itself honest rather than to cover
 | `locale-ja.spec.ts` | the `NEXT_LOCALE` helper actually switches server-rendered copy, logged out and signed in, and that the same page stays English without it (one test tagged `@mobile`) |
 | `mobile-shell.spec.ts` | the phone-viewport project really is mobile: the bottom bar and the sidebar toggle that `md:hidden` removes on desktop are both rendered (`@mobile-only`) |
 | `seeded-persona.spec.ts` | the identities derived from the seeder log are real: the Japanese persona signs in with the seeded password |
+| `csp-enforcement.spec.ts` | the shipped Content Security Policy is actually *enforced*: authenticated dashboard/analytics/records/library/Ask Connex journeys, an upload and its same-origin preview, the dark theme, a passkey enrollment plus passkey sign-in through a CDP virtual authenticator, and the logged-out login/register/document-acceptance pages all raise zero `securitypolicyviolation` events, while an injected inline event handler (`<img onerror>`, the markup-injection shape `'strict-dynamic'` does not trust) is blocked with `script-src-attr` and its `report-uri` report is delivered to `/api/csp-reports` as a 204 |
+
+The suite runs on `http://localhost:3000`, so the proxy emits `report-uri` without `report-to`/`Reporting-Endpoints` (Chromium accepts only HTTPS reporting endpoints) and the violation report is a synchronous, page-initiated POST that `page.waitForRequest` can observe; a script inserted with `document.createElement` is *not* a usable probe because `'strict-dynamic'` deliberately trusts non-parser-inserted scripts.
 
 Known scope cut: **Ask Connex specs stop short of asking a question.** The e2e stack boots the backend with no AI provider configured, and `AiFeatureGate` fails closed on provider readiness — but only at *turn start*. Session create/list/read, presence, and participants need `AI_USE` and workspace membership alone, which the registered owner has. So every surface, context, navigation, width, rail, deep-link, and locale assertion runs against the real stack unchanged, while send → answer → evidence peek → tool-call approval cannot run at all. Those need a provider or a test-only provider stub, and no such stub exists server-side; do not fake one client-side, because the retention, masking, and citation behaviour under test *is* the provider round trip. `ask-connex.spec.ts` therefore needs no feature-gate enablement in CI.
 
@@ -145,14 +148,19 @@ Known scope cut: the notifications flow asserts the inbox/read-state surface but
 The document-acceptance spec creates frozen documents both without and with a real deal line item,
 then sends their deliveries with the authenticated request context. CI configures the backend's
 instance SMTP transport on loopback port 2525, where the spec's dependency-free SMTP capture
-obtains the only supported bearer surface exposed by `InAppAcceptanceProvider`. Playwright opens
-those links in a new context with no storage state, inspects every bearer-route request for absent
-session/workspace credentials, and drives preview, viewed, and accept through the running frontend
-and backend without interception before verifying the committed delivery receipt. CI enables
-signature delivery, permits the loopback SMTP destination, and trusts only loopback as the
-sanitizing proxy for this dev-profile test process. The separate bounded preview fixture remains
-responsible for viewer presentation, themes, responsive layout, reduced motion, and Japanese-document
-rendering; it does not stand in for persistence proof.
+obtains the `/document-acceptance#token=…` fragment link `InAppAcceptanceProvider` emits. Playwright
+opens those links in a new context with no storage state and asserts the cutover contract: the address
+bar settles on the bare `/document-acceptance`, no request URL ever contains the bearer, exactly one
+`POST /api/document-acceptance/exchange` carries it in its body, and the resulting
+`connex_document_acceptance_flow` cookie is `HttpOnly`, `SameSite=Strict`, and scoped to
+`/api/document-acceptance`. It then drives preview, viewed, and accept through the running frontend
+and backend without interception, verifies the committed delivery receipt, and re-opens the same link
+in a fresh context to prove a decided link can no longer be exchanged. CI enables signature delivery,
+permits the loopback SMTP destination, and trusts only loopback as the sanitizing proxy for this
+dev-profile test process. The presentation cases in the same file route the CSRF bootstrap, exchange,
+and the three token-free endpoints in the browser, so viewer presentation, themes, responsive layout,
+reduced motion, and Japanese-document rendering no longer need a second Next server; they do not stand
+in for persistence proof.
 
 ## Flake policy
 

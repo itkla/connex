@@ -270,6 +270,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("workflow_run", 196));
         raw.add(direct("workflow_trigger_outbox", 197));
         raw.add(direct("workflow_runtime_workspace", 198));
+        raw.add(direct("workflow_trigger_admission", 199));
         raw.add(direct("rule_execution", 200));
         raw.add(direct("job_run", 201));
         raw.add(direct("workflow_version", 210));
@@ -323,6 +324,7 @@ public final class TenantLifecycleRegistry {
         raw.add(direct("ai_workspace_governance", 466));
         raw.add(direct("ai_brief_schedule", 467));
         raw.add(direct("ai_watch", 468));
+        raw.add(direct("ai_run_lease", 469));
         raw.add(direct("ai_output_cache", 470));
         raw.add(direct("approval_policy_step_approver", 476));
         raw.add(direct("approval_policy_step", 478));

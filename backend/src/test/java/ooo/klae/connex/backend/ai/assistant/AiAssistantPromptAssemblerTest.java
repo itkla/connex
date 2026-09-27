@@ -19,11 +19,13 @@ import ooo.klae.connex.backend.ai.masking.EntityKind;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingContext;
+import ooo.klae.connex.backend.ai.masking.MaskingLeakException;
 import ooo.klae.connex.backend.ai.masking.OutboundLeakScan;
 import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
 import ooo.klae.connex.backend.ai.provider.AiReasoningMode;
 import ooo.klae.connex.backend.ai.provider.AiStructuredOutputEnforcement;
 import ooo.klae.connex.backend.ai.provider.AiToolCall;
+import ooo.klae.connex.backend.ai.provider.AiToolExchange;
 import ooo.klae.connex.backend.beans.AiChatMessage;
 import ooo.klae.connex.backend.dto.AiChatPageContextDto;
 import ooo.klae.connex.backend.dto.MemberScope;
@@ -34,6 +36,36 @@ class AiAssistantPromptAssemblerTest {
     private final JsonMapper objectMapper = JsonMapper.builder().build();
     private final AiAssistantPromptAssembler assembler = new AiAssistantPromptAssembler(
             objectMapper, new AiAssistantToolCatalog());
+
+    @Test
+    void unsafeStoredNamesAreLocallyRedactedInPageAndToolDataWhileHistoryStillRefuses() throws Exception {
+        String raw = "[".repeat(17) + "John O'Connor" + "](person:1)".repeat(17);
+        AiAssistantToolResult data = new AiAssistantToolResult(
+                Map.of("records", List.of(Map.of("handle", "r1", "name", raw, "status", "active"))),
+                List.of(new Identifier("person", raw)));
+        MaskingContext context = new MaskingContext();
+        AiChatResourceRegistry resources = new AiChatResourceRegistry(context);
+        AiChatMessage request = new AiChatMessage();
+        request.setAuthorKind("user");
+        request.setContent("An unrelated turn");
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(request), data, List.of(ToolTurn.soleCall(1, "get_records", data)), context, resources,
+                AiAssistantToolCatalog.ALL);
+
+        String payload = objectMapper.writeValueAsString(prompt.getMessages());
+        assertTrue(payload.contains("An unrelated turn"));
+        assertTrue(payload.contains("[redacted]"));
+        assertTrue(payload.contains("active"));
+        assertFalse(payload.contains("John"));
+        assertFalse(payload.contains("Connor"));
+        OutboundLeakScan.assertNoLeakStrict(payload, context, objectMapper);
+
+        request.setContent(raw);
+        assertThrows(MaskingLeakException.class, () -> assembler.assemble(
+                List.of(request), data, List.of(ToolTurn.soleCall(1, "get_records", data)), context, resources,
+                AiAssistantToolCatalog.ALL));
+    }
 
     @Test
     void promptIncludesWorkedStepsCostDisciplineAndBoundedRepairData() {
@@ -49,7 +81,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(),
                 AiStructuredRepair.from(
                         "exclusive_step", "{\"tool\":null,\"final\":null,"
-                                + "\"contact\":\"ada@example.com +1 (415) 555-0100\"}"));
+                                + "\"contact\":\"ada@example.com +1 (415) 555-0100\"}"),
+                                AiAssistantToolCatalog.ALL);
 
         assertTrue(prompt.getSystemPrompt().contains("Valid tool step example"));
         assertTrue(prompt.getSystemPrompt().contains("Valid first final step example"));
@@ -87,7 +120,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         assertTrue(context.isTrustedTextCollision("answer"));
         assertFalse(context.isTrustedTextCollision("Cyberdyne Systems"));
@@ -96,7 +130,7 @@ class AiAssistantPromptAssemblerTest {
         String serialized = prompt.getSystemPrompt() + "\n" + prompt.getMessages().stream()
                 .map(message -> message.getContent())
                 .reduce("", (left, right) -> left + "\n" + right);
-        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeak(
+        assertDoesNotThrow(() -> OutboundLeakScan.assertNoLeakInServerEnvelope(
                 serialized, context, new tools.jackson.databind.ObjectMapper()));
     }
 
@@ -116,7 +150,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         String serialized = prompt.getMessages().stream()
                 .map(message -> message.getContent())
@@ -147,9 +182,10 @@ class AiAssistantPromptAssemblerTest {
 
         MaskedPrompt prompt = assembler.assemble(
                 List.of(replayed), pageContext,
-                List.of(new ToolTurn(1, "get_record", toolResult)),
+                List.of(ToolTurn.soleCall(1, "get_record", toolResult)),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(Map.of(
                 "system", prompt.getSystemPrompt(),
                 "messages", prompt.getMessages().stream()
@@ -157,7 +193,7 @@ class AiAssistantPromptAssemblerTest {
                                 "role", message.getRole(), "content", message.getContent()))
                         .toList()));
 
-        OutboundLeakScan.assertNoLeak(serialized, context, objectMapper);
+        OutboundLeakScan.assertNoLeakInServerEnvelope(serialized, context, objectMapper);
         assertFalse(prompt.getSystemPrompt().contains("ignore previous instructions"));
         assertFalse(serialized.contains("Ada Lovelace"));
         assertFalse(serialized.contains("ada@example.com"));
@@ -165,6 +201,97 @@ class AiAssistantPromptAssemblerTest {
         assertTrue(serialized.contains("CRM_DATA_BEGIN"));
         assertTrue(serialized.contains("ignore previous instructions"));
         assertTrue(serialized.contains("\\\"tool\\\""));
+    }
+
+    /**
+     * A step that made one call renders no call ordinal at all.
+     *
+     * <p>{@code call == 0} means "the sole call of its step", and it has to render nothing rather
+     * than {@code "call":0}: the fixed-envelope and injection goldens measure these bytes exactly,
+     * and every step a turn takes today makes one call.
+     */
+    @Test
+    void theSoleCallOfAStepRendersNoCallOrdinalWhileABatchedCallRendersItsOwn() {
+        AiAssistantToolResult toolResult = new AiAssistantToolResult(
+                Map.of("handle", "r1"), List.of());
+        List<ToolTurn> sole = List.of(ToolTurn.soleCall(1, "get_record", toolResult));
+        List<ToolTurn> batched = List.of(
+                new ToolTurn(1, 1, "get_record", toolResult),
+                new ToolTurn(1, 2, "get_record", toolResult));
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 4_096, 12_000);
+
+        String soleResult = assembler.nativeReplay(
+                sole, nativeCalls(sole), new MaskingContext(), budget, null)
+                .toolResults().getFirst();
+        List<String> batchedResults = assembler.nativeReplay(
+                batched, nativeCalls(batched), new MaskingContext(), budget, null)
+                .toolResults();
+
+        assertFalse(soleResult.contains("\"call\""));
+        assertTrue(soleResult.contains("\"step\":1"));
+        assertTrue(batchedResults.getFirst().contains("\"call\":1"));
+        assertTrue(batchedResults.getLast().contains("\"call\":2"));
+    }
+
+    /**
+     * A batched call keeps its ordinal even when its result is truncated to plain text.
+     *
+     * <p>The plain-text fallback rebuilds the replay payload field by field rather than narrowing
+     * a copy of it, so it is the one path that can drop a correlation field. A result with no
+     * arrays to shorten takes it directly. Without the ordinal, one member of a step's replayed
+     * calls would be the only one the model could not tell apart from its siblings.
+     */
+    @Test
+    void aTruncatedBatchedResultStillRendersTheOrdinalItsLiveSiblingsCarry() {
+        AiAssistantToolResult small = new AiAssistantToolResult(
+                Map.of("handle", "r1"), List.of());
+        AiAssistantToolResult oversized = new AiAssistantToolResult(
+                Map.of("summary", "relationship narrative ".repeat(80)), List.of());
+        List<ToolTurn> batched = List.of(
+                new ToolTurn(2, 1, "get_record", small),
+                new ToolTurn(2, 2, "get_record", oversized));
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 900, 12_000);
+
+        List<String> results = assembler.nativeReplay(
+                batched, nativeCalls(batched), new MaskingContext(), budget, null)
+                .toolResults();
+
+        assertTrue(results.getLast().contains("[truncated"));
+        assertTrue(results.getFirst().contains("\"call\":1"));
+        assertTrue(results.getLast().contains("\"call\":2"));
+        assertTrue(results.getLast().contains("\"step\":2"));
+    }
+
+    /**
+     * Two calls of one step no longer collide, because the replay resolves them by (step, call).
+     *
+     * <p>Before the correlation key named the call, {@code orderedNativeCalls} looked a turn up by
+     * its step number alone and two turns sharing a step raised an internal error instead of
+     * replaying as the two calls they were.
+     */
+    @Test
+    void twoCallsOfOneStepReplayAsTwoExchangesStampedWithTheirOwnOrdinals() {
+        AiAssistantToolResult toolResult = new AiAssistantToolResult(
+                Map.of("handle", "r1"), List.of());
+        List<ToolTurn> batched = List.of(
+                new ToolTurn(3, 1, "get_record", toolResult),
+                new ToolTurn(3, 2, "list_tasks", toolResult));
+        AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
+                64, 4_096, 256, 256, 4_096, 12_000);
+
+        List<AiToolExchange> exchanges = assembler.nativeReplay(
+                batched, nativeCalls(batched), new MaskingContext(), budget, null)
+                .exchanges();
+
+        assertEquals(2, exchanges.size());
+        assertEquals(3, exchanges.getFirst().step());
+        assertEquals(1, exchanges.getFirst().callOrdinal());
+        assertEquals(3, exchanges.getLast().step());
+        assertEquals(2, exchanges.getLast().callOrdinal());
+        assertEquals("call_3_1", exchanges.getFirst().call().id());
+        assertEquals("call_3_2", exchanges.getLast().call().id());
     }
 
     @Test
@@ -175,7 +302,7 @@ class AiAssistantPromptAssemblerTest {
                         "name", "Ada Lovelace",
                         "email", "ada@example.com"),
                 List.of(new Identifier("person", "Ada Lovelace")));
-        List<ToolTurn> turns = List.of(new ToolTurn(1, "get_record", toolResult));
+        List<ToolTurn> turns = List.of(ToolTurn.soleCall(1, "get_record", toolResult));
         AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
                 64, 4_096, 256, 256, 4_096, 12_000);
         MaskedPrompt jsonReact = assembler.assemble(
@@ -186,13 +313,15 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(),
                 List.of(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         MaskedPrompt unbounded = assembler.assemble(
                 List.of(),
                 new AiAssistantToolResult(Map.of(), List.of()),
                 turns,
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         AiAssistantPromptAssembler.NativeReplay nativeReplay = assembler.nativeReplay(
                 turns,
@@ -213,7 +342,7 @@ class AiAssistantPromptAssemblerTest {
         assertTrue(nativeResult.startsWith("CRM_DATA_BEGIN"));
         assertEquals("{}", nativeReplay.exchanges().getFirst().call().arguments());
         assertEquals(AiAssistantPromptAssembler.ToolBudgetAudit.NONE, nativeReplay.audit());
-        assertTrue(assembler.fixedNativePrompt().getSystemPrompt()
+        assertTrue(assembler.fixedNativePrompt(AiAssistantToolCatalog.ALL).getSystemPrompt()
                 .contains("List-style tool results are capped"));
     }
 
@@ -227,7 +356,7 @@ class AiAssistantPromptAssemblerTest {
                 .toList();
         AiAssistantToolResult result = new AiAssistantToolResult(
                 Map.of("records", records), List.of());
-        ToolTurn turn = new ToolTurn(1, "search_records", result);
+        ToolTurn turn = ToolTurn.soleCall(1, "search_records", result);
         AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
                 64, 4_096, 256, 256, 2_048, 8_000);
         MaskedPrompt prompt = assembler.assemble(
@@ -238,7 +367,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(),
                 List.of(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
 
         String content = prompt.getMessages().getLast().getContent();
         JsonNode payload = toolPayload(content);
@@ -277,12 +407,13 @@ class AiAssistantPromptAssemblerTest {
         MaskedPrompt prompt = assembler.assemble(
                 List.of(),
                 new AiAssistantToolResult(Map.of(), List.of()),
-                List.of(new ToolTurn(1, "search_records", result)),
+                List.of(ToolTurn.soleCall(1, "search_records", result)),
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 List.of(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
 
         String content = prompt.getMessages().getLast().getContent();
         JsonNode payload = toolPayload(content);
@@ -314,12 +445,13 @@ class AiAssistantPromptAssemblerTest {
         MaskedPrompt prompt = assembler.assemble(
                 List.of(priorReceipt),
                 new AiAssistantToolResult(Map.of(), List.of()),
-                List.of(new ToolTurn(1, "search_records", result)),
+                List.of(ToolTurn.soleCall(1, "search_records", result)),
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 List.of(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
 
         assertTrue(prompt.getMessages().getFirst().getContent()
                 .contains("PRIOR_COMMITTED_RECEIPT"));
@@ -328,17 +460,17 @@ class AiAssistantPromptAssemblerTest {
 
     @Test
     void oldestExchangeEvictsBeforeLatestTruncationInBothProtocols() {
-        ToolTurn oldest = new ToolTurn(
+        ToolTurn oldest = ToolTurn.soleCall(
                 1,
                 "search_records",
                 new AiAssistantToolResult(
                         Map.of("records", "OLDEST_EVICTED_".repeat(120)), List.of()));
-        ToolTurn retained = new ToolTurn(
+        ToolTurn retained = ToolTurn.soleCall(
                 2,
                 "list_activities",
                 new AiAssistantToolResult(
                         Map.of("activities", "SECOND_RETAINED_".repeat(120)), List.of()));
-        ToolTurn latest = new ToolTurn(
+        ToolTurn latest = ToolTurn.soleCall(
                 3,
                 "list_tasks",
                 new AiAssistantToolResult(
@@ -362,7 +494,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(),
                 List.of(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         List<String> reactResults = react.getMessages().stream()
                 .map(message -> message.getContent())
                 .toList();
@@ -389,17 +522,17 @@ class AiAssistantPromptAssemblerTest {
 
     @Test
     void evictionSkipsCompactResultsAndMeasuresSavingsFromTheLargeExchange() {
-        ToolTurn compact = new ToolTurn(
+        ToolTurn compact = ToolTurn.soleCall(
                 1,
                 "aggregate_metric",
                 new AiAssistantToolResult(Map.of("value", 1), List.of()));
-        ToolTurn large = new ToolTurn(
+        ToolTurn large = ToolTurn.soleCall(
                 2,
                 "search_records",
                 new AiAssistantToolResult(
                         Map.of("records", "LARGE_PRIOR_EXCHANGE_".repeat(220)),
                         List.of()));
-        ToolTurn latest = new ToolTurn(
+        ToolTurn latest = ToolTurn.soleCall(
                 3,
                 "list_tasks",
                 new AiAssistantToolResult(
@@ -416,7 +549,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(),
                 List.of(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         List<String> results = prompt.getMessages().stream()
                 .map(message -> message.getContent())
                 .toList();
@@ -434,29 +568,29 @@ class AiAssistantPromptAssemblerTest {
 
     @Test
     void nativeReplayBudgetsArgumentsAndRetainsCompactResultsDuringEviction() {
-        ToolTurn oldest = new ToolTurn(
+        ToolTurn oldest = ToolTurn.soleCall(
                 1,
                 "search_records",
                 new AiAssistantToolResult(Map.of("count", 1), List.of()));
-        ToolTurn retained = new ToolTurn(
+        ToolTurn retained = ToolTurn.soleCall(
                 2,
                 "list_tasks",
                 new AiAssistantToolResult(Map.of("count", 2), List.of()));
-        ToolTurn latest = new ToolTurn(
+        ToolTurn latest = ToolTurn.soleCall(
                 3,
                 "aggregate_metric",
                 new AiAssistantToolResult(Map.of("value", 3), List.of()));
         List<ToolTurn> turns = List.of(oldest, retained, latest);
-        Map<Integer, AiToolCall> calls = Map.of(
-                1, new AiToolCall(
+        Map<AiAssistantToolCallRef, AiToolCall> calls = Map.of(
+                oldest.ref(), new AiToolCall(
                         "call_1", oldest.tool(),
                         "{\"query\":\"" + "A".repeat(700) + "\"}",
                         "oldest-signature /+=="),
-                2, new AiToolCall(
+                retained.ref(), new AiToolCall(
                         "call_2", retained.tool(),
                         "{\"query\":\"" + "B".repeat(700) + "\"}",
                         "retained-signature /+=="),
-                3, new AiToolCall(
+                latest.ref(), new AiToolCall(
                         "call_3", latest.tool(),
                         "{\"metric\":\"" + "C".repeat(700) + "\"}",
                         "latest-signature /+=="));
@@ -468,14 +602,14 @@ class AiAssistantPromptAssemblerTest {
 
         assertEquals("{\"evicted\":true}",
                 replay.exchanges().getFirst().call().arguments());
-        assertEquals(calls.get(1).thoughtSignature(),
+        assertEquals(calls.get(oldest.ref()).thoughtSignature(),
                 replay.exchanges().getFirst().call().thoughtSignature());
         assertTrue(replay.exchanges().getFirst().maskedResult().contains("\"count\":1"));
         assertFalse(replay.exchanges().getFirst().maskedResult()
                 .contains("evicted to free context"));
-        assertEquals(calls.get(3).arguments(),
+        assertEquals(calls.get(latest.ref()).arguments(),
                 replay.exchanges().getLast().call().arguments());
-        assertEquals(calls.get(3).thoughtSignature(),
+        assertEquals(calls.get(latest.ref()).thoughtSignature(),
                 replay.exchanges().getLast().call().thoughtSignature());
         assertTrue(replay.exchanges().stream()
                 .mapToLong(exchange -> budget.utf8Bytes(exchange.call().arguments())
@@ -492,10 +626,10 @@ class AiAssistantPromptAssemblerTest {
         ToolTurn prospective = nativeBudgetTurn(3, "C");
         String firstSignature = "first-/+=" + "S".repeat(2_391);
         String secondSignature = "second-日本語-" + "T".repeat(2_382);
-        Map<Integer, AiToolCall> calls = Map.of(
-                first.seq(), nativeBudgetCall(first, "A", firstSignature),
-                second.seq(), nativeBudgetCall(second, "B", secondSignature),
-                prospective.seq(), nativeBudgetCall(
+        Map<AiAssistantToolCallRef, AiToolCall> calls = Map.of(
+                first.ref(), nativeBudgetCall(first, "A", firstSignature),
+                second.ref(), nativeBudgetCall(second, "B", secondSignature),
+                prospective.ref(), nativeBudgetCall(
                         prospective, "C", "prospective-" + "U".repeat(2_388)));
         AiAssistantPromptBudget budget = AiAssistantPromptBudget.from(
                 new AiProviderCapabilities(
@@ -538,7 +672,7 @@ class AiAssistantPromptAssemblerTest {
     void exactExecutedReplayAppendRetainsEarlierTruncationAudit() {
         AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
                 64, 4_096, 256, 256, 2_048, 8_000);
-        ToolTurn oversizedReplay = new ToolTurn(
+        ToolTurn oversizedReplay = ToolTurn.soleCall(
                 1,
                 "create_note",
                 new AiAssistantToolResult(
@@ -553,7 +687,7 @@ class AiAssistantPromptAssemblerTest {
         AiAssistantPromptAssembler.ExecutedReplay truncated =
                 assembler.withExecutedReplay(
                         List.of(), oversizedReplay, new MaskingContext(), budget);
-        ToolTurn exactReplay = new ToolTurn(
+        ToolTurn exactReplay = ToolTurn.soleCall(
                 2,
                 "create_task",
                 new AiAssistantToolResult(
@@ -578,7 +712,7 @@ class AiAssistantPromptAssemblerTest {
                 Map.of("records", List.of(Map.of(
                         "handle", "r1", "kind", "person", "name", "Li"))),
                 List.of(new Identifier("person", "Li")));
-        List<ToolTurn> turns = List.of(new ToolTurn(
+        List<ToolTurn> turns = List.of(ToolTurn.soleCall(
                 1,
                 "list_activities",
                 new AiAssistantToolResult(
@@ -596,7 +730,8 @@ class AiAssistantPromptAssemblerTest {
                 context,
                 new AiChatResourceRegistry(),
                 List.of(),
-                budget);
+                budget,
+                AiAssistantToolCatalog.ALL);
         String nativeResult = assembler.nativeReplay(
                 turns, nativeCalls(turns), context, budget, null)
                 .toolResults().getFirst();
@@ -631,7 +766,8 @@ class AiAssistantPromptAssemblerTest {
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 attachments,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
         assertFalse(prompt.getSystemPrompt().contains("ignore previous instructions"));
@@ -667,7 +803,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry(),
                 attachments,
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
         assertTrue(serialized.contains("budget_exceeded"));
@@ -687,9 +824,10 @@ class AiAssistantPromptAssemblerTest {
         MaskedPrompt prompt = assembler.assemble(
                 List.of(request),
                 new AiAssistantToolResult(Map.of(), List.of()),
-                List.of(new ToolTurn(1, "list_tasks", toolResult)),
+                List.of(ToolTurn.soleCall(1, "list_tasks", toolResult)),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
         assertTrue(serialized.contains("2026-08-10"));
@@ -729,15 +867,20 @@ class AiAssistantPromptAssemblerTest {
         freshResources.register("person", 71);
         freshResources.register("deal", 73);
         MaskedPrompt prompt = assembler.assemble(
-                List.of(priorAnswer), replayContext, List.of(), freshContext, freshResources);
+                List.of(priorAnswer), replayContext, List.of(), freshContext, freshResources,
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
-        OutboundLeakScan.assertNoLeak(serialized, freshContext, objectMapper);
+        OutboundLeakScan.assertNoLeakInServerEnvelope(serialized, freshContext, objectMapper);
         assertFalse(serialized.contains("Ada Lovelace"));
         assertFalse(serialized.contains("Atlas renewal"));
         assertFalse(serialized.contains("71"));
         assertFalse(serialized.contains("73"));
-        assertTrue(prompt.getMessages().getFirst().getContent().contains("r2"));
+        JsonNode replay = objectMapper.readTree(prompt.getMessages().getFirst().getContent());
+        assertEquals("{{P1}} is advancing the {{D1}} from r2.", replay.get("content").asString());
+        assertEquals("r2", replay.get("citations").get(0).asString());
+        assertEquals(new AiChatResourceRegistry.ResourceRef("person", 71),
+                freshResources.resolve(replay.get("citations").get(0).asString()));
     }
 
     @Test
@@ -757,7 +900,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         assertTrue(prompt.getMessages().isEmpty());
     }
@@ -777,7 +921,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         assertTrue(prompt.getMessages().isEmpty());
     }
@@ -800,10 +945,11 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 context,
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
-        OutboundLeakScan.assertNoLeak(serialized, context, objectMapper);
+        OutboundLeakScan.assertNoLeakInServerEnvelope(serialized, context, objectMapper);
         assertFalse(serialized.contains("Former Contact"));
         assertFalse(serialized.contains("former@example.com"));
         assertTrue(serialized.contains("{{P1}}"));
@@ -829,10 +975,11 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 context,
-                resources);
+                resources,
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
-        OutboundLeakScan.assertNoLeak(serialized, context, objectMapper);
+        OutboundLeakScan.assertNoLeakInServerEnvelope(serialized, context, objectMapper);
         assertFalse(serialized.contains("Kenji Sato"));
         assertTrue(serialized.contains("{{P1}}"));
     }
@@ -853,7 +1000,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         assertTrue(prompt.getMessages().isEmpty());
     }
@@ -873,7 +1021,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
         assertFalse(serialized.contains("diagnosis"));
@@ -895,7 +1044,8 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantToolResult(Map.of(), List.of()),
                 List.of(),
                 new MaskingContext(),
-                new AiChatResourceRegistry());
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
 
         assertTrue(prompt.getMessages().isEmpty());
     }
@@ -1016,11 +1166,12 @@ class AiAssistantPromptAssemblerTest {
         MaskedPrompt prompt = assembler.assemble(
                 List.of(earlyRequest, priorAnswer),
                 pageContext,
-                List.of(new ToolTurn(1, "search_records", toolResult)),
+                List.of(ToolTurn.soleCall(1, "search_records", toolResult)),
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         String replay = prompt.getMessages().stream()
                 .map(message -> message.getContent())
                 .reduce("", (left, right) -> left + "\n" + right);
@@ -1050,16 +1201,17 @@ class AiAssistantPromptAssemblerTest {
                         List.of(request),
                         new AiAssistantToolResult(Map.of(), List.of()),
                         List.of(
-                                new ToolTurn(
+                                ToolTurn.soleCall(
                                         1,
                                         "aggregate_metric",
                                         new AiAssistantToolResult(
                                                 Map.of("value", 1), List.of())),
-                                new ToolTurn(2, "search_records", oversizedToolResult)),
+                                ToolTurn.soleCall(2, "search_records", oversizedToolResult)),
                         new MaskingContext(),
                         new AiChatResourceRegistry(),
                         budget,
-                        null));
+                        null,
+                        AiAssistantToolCatalog.ALL));
 
         assertEquals("tool_result_budget_exhausted", exception.terminalReason());
     }
@@ -1079,19 +1231,21 @@ class AiAssistantPromptAssemblerTest {
         MaskedPrompt withoutRepair = assembler.assemble(
                 List.of(request),
                 new AiAssistantToolResult(Map.of(), List.of()),
-                List.of(new ToolTurn(1, "search_records", toolResult)),
+                List.of(ToolTurn.soleCall(1, "search_records", toolResult)),
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 budget,
-                null);
+                null,
+                AiAssistantToolCatalog.ALL);
         MaskedPrompt withRepair = assembler.assemble(
                 List.of(request),
                 new AiAssistantToolResult(Map.of(), List.of()),
-                List.of(new ToolTurn(1, "search_records", toolResult)),
+                List.of(ToolTurn.soleCall(1, "search_records", toolResult)),
                 new MaskingContext(),
                 new AiChatResourceRegistry(),
                 budget,
-                repair);
+                repair,
+                AiAssistantToolCatalog.ALL);
 
         assertEquals(
                 withoutRepair.getMessages().getLast().getContent(),
@@ -1101,15 +1255,15 @@ class AiAssistantPromptAssemblerTest {
 
     @Test
     void nativeRepairKeepsTheCompleteIndependentlyBudgetedExchangeReplay() {
-        ToolTurn turn = new ToolTurn(
+        ToolTurn turn = ToolTurn.soleCall(
                 1,
                 "search_records",
                 new AiAssistantToolResult(
                         Map.of("result", "TOOL_RESULT_MUST_SURVIVE".repeat(12)), List.of()));
         AiAssistantPromptBudget budget = new AiAssistantPromptBudget(
                 64, 1_000, 1_000, 1_000, 500, 2_000, 1_000);
-        Map<Integer, AiToolCall> calls = Map.of(
-                1, new AiToolCall("call_1", "search_records", "{}"));
+        Map<AiAssistantToolCallRef, AiToolCall> calls = Map.of(
+                turn.ref(), new AiToolCall("call_1", "search_records", "{}"));
 
         AiAssistantPromptAssembler.NativeReplay withoutRepair = assembler.nativeReplay(
                 List.of(turn), calls, new MaskingContext(), budget, null);
@@ -1138,7 +1292,7 @@ class AiAssistantPromptAssemblerTest {
                 () -> assembler.assemble(
                         List.of(request),
                         new AiAssistantToolResult(Map.of(), List.of()),
-                        List.of(new ToolTurn(
+                        List.of(ToolTurn.soleCall(
                                 1,
                                 "search_records",
                                 new AiAssistantToolResult(
@@ -1147,7 +1301,8 @@ class AiAssistantPromptAssemblerTest {
                         new MaskingContext(),
                         new AiChatResourceRegistry(),
                         budget,
-                        AiStructuredRepair.from("exclusive_step", "x".repeat(200))));
+                        AiStructuredRepair.from("exclusive_step", "x".repeat(200)),
+                        AiAssistantToolCatalog.ALL));
 
         assertEquals("prompt_budget_exceeded", exception.terminalReason());
     }
@@ -1158,17 +1313,20 @@ class AiAssistantPromptAssemblerTest {
         return objectMapper.readTree(content.substring(firstNewline + 1, lastNewline));
     }
 
-    private static Map<Integer, AiToolCall> nativeCalls(List<ToolTurn> turns) {
-        Map<Integer, AiToolCall> calls = new LinkedHashMap<>();
+    private static Map<AiAssistantToolCallRef, AiToolCall> nativeCalls(List<ToolTurn> turns) {
+        Map<AiAssistantToolCallRef, AiToolCall> calls = new LinkedHashMap<>();
         for (ToolTurn turn : turns) {
-            calls.put(turn.seq(), new AiToolCall(
-                    "call_" + turn.seq(), turn.tool(), "{}"));
+            calls.put(turn.ref(), new AiToolCall(
+                    turn.call() == 0
+                            ? "call_" + turn.seq()
+                            : "call_" + turn.seq() + "_" + turn.call(),
+                    turn.tool(), "{}"));
         }
         return Map.copyOf(calls);
     }
 
     private static ToolTurn nativeBudgetTurn(int sequence, String marker) {
-        return new ToolTurn(
+        return ToolTurn.soleCall(
                 sequence,
                 "search_records",
                 new AiAssistantToolResult(
@@ -1221,7 +1379,8 @@ class AiAssistantPromptAssemblerTest {
                 List.of(),
                 budget,
                 null,
-                skill);
+                skill,
+                AiAssistantToolCatalog.ALL);
         String serialized = objectMapper.writeValueAsString(prompt.getMessages());
 
         assertTrue(serialized.contains("FIRST_ROW_MUST_SURVIVE"));
@@ -1253,11 +1412,155 @@ class AiAssistantPromptAssemblerTest {
                 new AiAssistantPromptBudget(512, 4_000, 1_000, 1_000, 2_048, 8_000),
                 null,
                 AiAssistantPromptAssembler.SkillContext.NONE.withScopeDirective(
-                        AiChatScopedToolPolicy.directive(declared)));
+                        AiChatScopedToolPolicy.directive(declared)),
+                        AiAssistantToolCatalog.ALL);
 
         assertFalse(prompt.getSystemPrompt().contains("server-declared query scope"));
         assertTrue(prompt.getMessages().stream()
                 .anyMatch(message -> message.getContent() != null
                         && message.getContent().contains("server-declared query scope")));
+    }
+
+    /**
+     * A model that cannot see what exists cannot decide what to load, so both system prompts name
+     * find_tools and carry the same constant directory of every loadable toolset.
+     *
+     * <p>The directory lists all five sets on every step, loaded or not, which is what keeps its
+     * byte cost from growing as a turn widens itself and therefore keeps the reservation the one
+     * per-turn budget is measured from an upper bound for this component too. Only the marker per
+     * line moves with the loaded set; the tool declarations themselves stay loaded-set-only.
+     */
+    @Test
+    void bothSystemPromptsCarryTheConstantToolsetDirectoryAndTheFindToolsContract() {
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        java.util.Set<AiAssistantToolCatalog.Toolset> withAnalytics =
+                new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE);
+        withAnalytics.add(AiAssistantToolCatalog.Toolset.ANALYTICS);
+
+        for (String prompt : List.of(
+                assembler.fixedPrompt(AiAssistantToolCatalog.CORE).getSystemPrompt(),
+                assembler.fixedNativePrompt(AiAssistantToolCatalog.CORE).getSystemPrompt())) {
+            assertTrue(prompt.contains("call find_tools with the key of one more toolset"));
+            assertTrue(
+                    prompt.contains(AiAssistantToolCatalog.capSentence()),
+                    "the directive must state the cap the loader enforces");
+            assertTrue(prompt.contains("at most "
+                    + AiAssistantToolCatalog.MAX_ACTIVE_TOOLSETS_PER_TURN
+                    + " sets beyond the core set"));
+            for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+                assertTrue(
+                        prompt.contains(toolset.key() + " - " + toolset.summary() + " - available"),
+                        toolset.key() + " is missing from the core-step toolset directory");
+            }
+            assertFalse(prompt.contains("core - "),
+                    "core is always held and is never a legal find_tools argument");
+        }
+
+        String widenedReact = assembler.fixedPrompt(withAnalytics).getSystemPrompt();
+        String widenedNative = assembler.fixedNativePrompt(withAnalytics).getSystemPrompt();
+        for (String prompt : List.of(widenedReact, widenedNative)) {
+            assertTrue(prompt.contains("analytics - "
+                    + AiAssistantToolCatalog.Toolset.ANALYTICS.summary() + " - loaded"));
+            assertTrue(prompt.contains("schedule - "
+                    + AiAssistantToolCatalog.Toolset.SCHEDULE.summary() + " - available"));
+        }
+        assertFalse(
+                assembler.fixedPrompt(AiAssistantToolCatalog.CORE).getSystemPrompt()
+                        .contains("aggregate_metric"),
+                "declarations stay loaded-set-only even though the directory is constant");
+        assertTrue(widenedReact.contains("aggregate_metric"));
+        assertEquals(
+                AiAssistantToolCatalog.LOADABLE.size(), catalog.directory().size());
+    }
+
+    /**
+     * The find_tools result is the server's own statement of what the turn now holds, so it is
+     * replayed verbatim rather than through the tenant-data replacer.
+     *
+     * <p>A workspace record named after a toolset key seeds that word into the turn's masking
+     * context. Running the server-authored result through the replacer would hand the model
+     * {@code {"loaded":"[redacted]","active":["core","{{P1}}"]}} — a set it can never name again,
+     * so it re-issues find_tools with a placeholder, is refused by the closed enum, and burns its
+     * no-progress budget. Ordinary tool results still mask, and the outbound leak scan still
+     * passes, because the key is server text the system prompt emits on every step.
+     */
+    @Test
+    void theServerAuthoredFindToolsResultSurvivesARecordNamedAfterAToolsetKey() throws Exception {
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        java.util.Set<AiAssistantToolCatalog.Toolset> loaded =
+                new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE);
+        loaded.add(AiAssistantToolCatalog.Toolset.ANALYTICS);
+        AiAssistantToolResult findToolsResult = new AiAssistantToolsetLoader(catalog)
+                .load(
+                        objectMapper.readTree("{\"toolset\":\"analytics\"}"),
+                        new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE))
+                .result();
+        AiAssistantToolResult companyRead = new AiAssistantToolResult(
+                Map.of("handle", "r1", "name", "Analytics"),
+                List.of(new Identifier("company", "Analytics")));
+        MaskingContext context = new MaskingContext();
+
+        MaskedPrompt prompt = assembler.assemble(
+                List.of(),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(
+                        ToolTurn.soleCall(1, "get_record", companyRead),
+                        ToolTurn.soleCall(2, AiAssistantToolCatalog.FIND_TOOLS, findToolsResult)),
+                context,
+                new AiChatResourceRegistry(),
+                loaded);
+
+        String replayedRead = prompt.getMessages().get(prompt.getMessages().size() - 2)
+                .getContent();
+        String replayedLoad = prompt.getMessages().getLast().getContent();
+        assertFalse(replayedRead.contains("Analytics"),
+                "an ordinary tool result still masks a record's own name");
+        assertTrue(replayedLoad.contains("\"loaded\":\"analytics\""));
+        assertTrue(replayedLoad.contains("[\"core\",\"analytics\"]"));
+        assertTrue(replayedLoad.contains("\"aggregate_metric\""));
+        assertFalse(replayedLoad.contains("redacted"));
+        assertFalse(replayedLoad.contains("{{P"));
+        String payload = objectMapper.writeValueAsString(Map.of(
+                "system", prompt.getSystemPrompt(),
+                "messages", prompt.getMessages().stream()
+                        .map(message -> Map.of(
+                                "role", message.getRole(), "content", message.getContent()))
+                        .toList()));
+        OutboundLeakScan.assertNoLeakInServerEnvelope(payload, context, objectMapper);
+    }
+
+    /**
+     * The verbatim path is guarded rather than trusted: a find_tools result that states the active
+     * set and carries anything the catalog did not author fails closed instead of egressing
+     * unmasked. A refused find_tools step states no set and keeps the ordinary masked path.
+     */
+    @Test
+    void aFindToolsResultCarryingUnauthoredTextFailsClosedRatherThanEgressing() throws Exception {
+        AiAssistantToolResult forged = new AiAssistantToolResult(
+                Map.of("loaded", "analytics", "active", List.of("core", "Ada Lovelace")),
+                List.of());
+
+        assertThrows(IllegalStateException.class, () -> assembler.assemble(
+                List.of(),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(ToolTurn.soleCall(1, AiAssistantToolCatalog.FIND_TOOLS, forged)),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL));
+
+        MaskedPrompt refused = assembler.assemble(
+                List.of(),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(ToolTurn.soleCall(
+                        1,
+                        AiAssistantToolCatalog.FIND_TOOLS,
+                        new AiAssistantToolResult(
+                                Map.of("error", "toolset_already_loaded"), List.of()))),
+                new MaskingContext(),
+                new AiChatResourceRegistry(),
+                AiAssistantToolCatalog.ALL);
+
+        assertTrue(refused.getMessages().getLast().getContent()
+                .contains("\"error\":\"toolset_already_loaded\""));
     }
 }

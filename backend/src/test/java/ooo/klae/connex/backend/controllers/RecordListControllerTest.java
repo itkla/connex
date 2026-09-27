@@ -911,7 +911,7 @@ class RecordListControllerTest {
     void notesWithoutFilterRequirePageEndpoint() {
         NoteController controller = new NoteController(noteService);
 
-        assertThrows(BadRequestException.class, () -> controller.getNotes(null, null, null));
+        assertThrows(BadRequestException.class, () -> controller.getNotes(null, null, null, 1, 25));
 
         verify(noteService, never()).getAllNotes();
     }

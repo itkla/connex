@@ -1,6 +1,7 @@
 {
     "DocumentAcceptance": {
         "metaTitle": "Review document",
+        "loading": "Opening your document…",
         "pageLabel": "Document review",
         "detailsTitle": "Delivery details",
         "workspaceLabel": "From",

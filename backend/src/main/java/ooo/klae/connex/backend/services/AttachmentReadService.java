@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.function.Function;
 
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -16,7 +17,6 @@ import lombok.RequiredArgsConstructor;
 import ooo.klae.connex.backend.beans.Attachment;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.UserDisplayNameDto;
-import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.AttachmentMapper;
 import ooo.klae.connex.backend.mappers.UserMapper;
 import ooo.klae.connex.backend.tenant.TenantWorkScope;
@@ -189,7 +189,7 @@ public class AttachmentReadService {
         User principal;
         try {
             principal = authService.getCurrentPrincipal();
-        } catch (ResourceNotFoundException exception) {
+        } catch (AuthenticationException exception) {
             throw new IllegalStateException(
                 "Attachment labels cannot be resolved inside an unauthenticated transaction",
                 exception);

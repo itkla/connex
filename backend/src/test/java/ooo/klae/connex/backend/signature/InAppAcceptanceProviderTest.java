@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -46,14 +47,36 @@ class InAppAcceptanceProviderTest {
         assertEquals(sha256(secondToken),
             outcome.recipients().getLast().deliveryLink().orElseThrow().tokenHash());
         assertTrue(outcome.recipients().getFirst().deliveryLink().orElseThrow().url()
-            .startsWith("https://connex.example/document-acceptance/"));
+            .startsWith("https://connex.example/document-acceptance#token=w42-"));
         assertFalse(outcome.recipients().getFirst().deliveryLink().orElseThrow().url()
-            .contains("/api/document-acceptance/"));
+            .contains("/api/document-acceptance"));
         assertFalse(provider.parseWebhook("in_app", Map.of(), new byte[0]).isPresent());
     }
 
+    @Test
+    void linkCarriesTheBearerOnlyInTheFragment() {
+        MailProperties properties = new MailProperties();
+        properties.setAppBaseUrl("https://connex.example");
+        InAppAcceptanceProvider provider = new InAppAcceptanceProvider(properties);
+
+        SendOutcome outcome = provider.send(new SendCommand(
+            42,
+            91,
+            null,
+            LocalDateTime.now().plusDays(1),
+            List.of(new SendRecipient(11, "One", "one@example.test", "signer", 1))));
+
+        RecipientDeliveryLink link = outcome.recipients().getFirst().deliveryLink().orElseThrow();
+        URI uri = URI.create(link.url());
+        assertEquals("/document-acceptance", uri.getRawPath());
+        assertEquals(null, uri.getRawQuery());
+        assertTrue(uri.getRawFragment().matches("token=w42-[a-f0-9]{64}"));
+        assertFalse(link.url().substring(0, link.url().indexOf('#')).matches(".*[a-f0-9]{64}.*"));
+        assertEquals(sha256(token(link.url())), link.tokenHash());
+    }
+
     private static String token(String url) {
-        return url.substring(url.lastIndexOf('/') + 1);
+        return url.substring(url.indexOf("#token=") + "#token=".length());
     }
 
     private static String sha256(String value) {

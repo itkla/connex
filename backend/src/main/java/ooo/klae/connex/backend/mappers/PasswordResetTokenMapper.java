@@ -11,14 +11,20 @@ import ooo.klae.connex.backend.beans.PasswordResetToken;
  */
 public interface PasswordResetTokenMapper {
     int insert(@Param("userId") int userId, @Param("tokenHash") String tokenHash,
-            @Param("requestedIp") String requestedIp, @Param("expiryMinutes") int expiryMinutes);
+            @Param("requestedIp") String requestedIp, @Param("expiryMinutes") int expiryMinutes,
+            @Param("credentialGeneration") Integer credentialGeneration);
 
     boolean existsRedeemableByHash(String tokenHash);
+
+    /** Reads a token's persisted lifecycle state, including consumed or expired tokens. */
+    PasswordResetToken findByHash(String tokenHash);
+
+    PasswordResetToken findRedeemableByHash(String tokenHash);
 
     int claimExchange(@Param("tokenHash") String tokenHash,
         @Param("exchangeOwnerHash") String exchangeOwnerHash);
 
-    boolean isExchangeOwnedBy(@Param("tokenHash") String tokenHash,
+    Integer lockExchangeOwnedBy(@Param("tokenHash") String tokenHash,
         @Param("exchangeOwnerHash") String exchangeOwnerHash);
 
     boolean existsExchangedRedeemableByHash(String tokenHash);

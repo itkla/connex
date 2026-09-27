@@ -35,6 +35,24 @@ including customer-operated on-prem. Do not describe hosted SaaS or a Connex-ope
 end-to-end encrypted, zero-knowledge, or customer-only-key encrypted, and do not tell a partner
 that Connex "cannot see" their data.
 
+## Completion rules for each engagement copy
+
+Copy this checklist into the engagement issue and substitute all partner, owner and date markers
+in that copy. These are reusable template parameters, not unassigned global execution roles.
+Before admitting partner data, the completed copy must record:
+
+- The signed agreement's legal entity and a named, authorized privacy/incident representative
+  with a verified notice route.
+- A real named admission owner with admission authority, a verified business contact and the
+  engagement issue. Escalate stop conditions to that owner.
+- The actual dated approval/refusal, deciding actor and evidence links, plus the associated
+  teardown interval and deadline. Never infer the admission date from this template's revision.
+
+Missing identity, authority, contacts or decision evidence blocks admission. Until an admission
+owner exists, refer security stop conditions to the Security Owner via [SECURITY.md](SECURITY.md);
+this does not appoint the Security Owner as the engagement's admission owner. Record decisions and
+any pending appointments in the engagement issue, not in this reusable template.
+
 ## Admission checklist
 
 ### 1. Commercial and legal

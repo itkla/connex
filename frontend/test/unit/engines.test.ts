@@ -6,7 +6,7 @@ const LOCKED_TOOLCHAIN_ENGINES = {
     "eslint-visitor-keys@5.0.1": "^20.19.0 || ^22.13.0 || >=24",
     "rolldown@1.1.5": "^20.19.0 || >=22.12.0",
     "vite@8.1.5": "^20.19.0 || >=22.12.0",
-    "vitest@4.1.10": "^20.0.0 || ^22.0.0 || >=24.0.0",
+    "vitest@4.1.11": "^20.0.0 || ^22.0.0 || >=24.0.0",
 } as const;
 
 const PINNED_PACKAGE_MANAGER = {

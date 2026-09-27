@@ -54,6 +54,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import ooo.klae.connex.backend.beans.User;
+import ooo.klae.connex.backend.config.PrivilegedMfaProperties;
 import ooo.klae.connex.backend.dto.PasskeyRecoveryRequest;
 import ooo.klae.connex.backend.exceptions.ForbiddenException;
 import ooo.klae.connex.backend.mappers.SpringSessionMapper;
@@ -73,18 +74,19 @@ import ooo.klae.connex.backend.webauthn.WebauthnUserEntityRow;
 @SpringBootTest
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class MfaRecoveryPasskeyRaceIntegrationTest {
-    private static final String RECOVERY_TOKEN = "mfa-recovery-race-token";
     private static final Duration RECOVERY_WINDOW = Duration.ofMinutes(55);
 
     /**
      * Resolves the operator recovery window when the context starts rather than when this class is
      * loaded. The break-glass token is rejected once its expiry has passed, and a cold schema
      * migration can put a load-time constant well behind the clock before the context refreshes.
+     * The startup digest only completes the configuration; every ceremony issues its own
+     * account-bound token through {@link #issueRecoveryToken(User)}.
      */
     @DynamicPropertySource
     static void recoveryProperties(DynamicPropertyRegistry registry) {
         registry.add("connex.security.privileged-mfa.recovery-token-sha256",
-                () -> sha256Hex(RECOVERY_TOKEN));
+                () -> sha256Hex("unused-startup-recovery-token"));
         registry.add("connex.security.privileged-mfa.recovery-expires-at",
                 () -> Instant.now().plus(RECOVERY_WINDOW).toString());
         registry.add("connex.security.privileged-mfa.recovery-actor",
@@ -103,19 +105,23 @@ class MfaRecoveryPasskeyRaceIntegrationTest {
     @Autowired private UserCredentialRepository userCredentials;
     @Autowired private SessionRepository<? extends Session> sessionRepository;
     @Autowired private SessionRegistry sessionRegistry;
+    @Autowired private PrivilegedMfaProperties privilegedMfaProperties;
     @MockitoSpyBean private SpringSessionMapper springSessionMapper;
 
     private MockMvc mockMvc;
+    private String startupDigest;
 
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .addFilters(springSecurityFilterChain)
                 .build();
+        startupDigest = privilegedMfaProperties.getRecoveryTokenSha256();
     }
 
     @AfterEach
     void clearSecurityContext() {
+        privilegedMfaProperties.setRecoveryTokenSha256(startupDigest);
         SecurityContextHolder.clearContext();
     }
 
@@ -232,7 +238,7 @@ class MfaRecoveryPasskeyRaceIntegrationTest {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(account, null, account.getAuthorities()));
         PasskeyRecoveryRequest request = new PasskeyRecoveryRequest();
-        request.setRecoveryToken(RECOVERY_TOKEN);
+        request.setRecoveryToken(issueRecoveryToken(account));
 
         assertThrows(ForbiddenException.class,
                 () -> mfaRecoveryService.recover(request, ceremonyRequest));
@@ -315,11 +321,24 @@ class MfaRecoveryPasskeyRaceIntegrationTest {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(account, null, account.getAuthorities()));
         PasskeyRecoveryRequest request = new PasskeyRecoveryRequest();
-        request.setRecoveryToken(RECOVERY_TOKEN);
+        request.setRecoveryToken(issueRecoveryToken(account));
         int epoch = mfaRecoveryService.recover(request, ceremonyRequest);
         sessionSecurityService.completeRecoveryStamp(ceremonyRequest, epoch);
         assertFalse(credentialMapper.existsByUserId(account.getId()));
         return epoch;
+    }
+
+    /**
+     * Issues a fresh token bound to one account, so each ceremony spends its own token.
+     *
+     * @param account the account the token may recover
+     * @return the raw token handed to the account holder
+     */
+    private String issueRecoveryToken(User account) {
+        String token = UUID.randomUUID().toString();
+        privilegedMfaProperties.setRecoveryTokenSha256(
+                sha256Hex("connex-privileged-mfa-recovery:v1:" + account.getId() + ":" + token));
+        return token;
     }
 
     /**

@@ -3,12 +3,17 @@ package ooo.klae.connex.backend.ai.brief;
 import java.math.BigDecimal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -20,15 +25,24 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.stubbing.Answer;
 import org.springframework.context.i18n.LocaleContextHolder;
 
 import ooo.klae.connex.backend.ai.AiRelationshipContext;
+import ooo.klae.connex.backend.ai.masking.Demasker;
 import ooo.klae.connex.backend.ai.masking.MaskedMessage;
 import ooo.klae.connex.backend.ai.masking.MaskedPrompt;
 import ooo.klae.connex.backend.ai.masking.MaskingEngine;
@@ -78,6 +92,277 @@ class DealBriefAssemblerTest {
             }
             return people;
         });
+    }
+
+    /**
+     * Four workers hold the whole pool while they screen five 50 000-character notes each against a
+     * seeded identifier; a fifth submission is queued behind them, not run concurrently, so the
+     * assertion is that screening releases its worker soon enough for the queued assembly to
+     * finish inside the deadline.
+     */
+    @Test
+    void longUnicodeNoteAssembliesReleaseTheirWorkersForAQueuedAssembly() throws Exception {
+        CountDownLatch notesLoaded = new CountDownLatch(4);
+        CountDownLatch startScreening = new CountDownLatch(1);
+        List<Note> notes = new ArrayList<>();
+        List<String> fillers = List.of("\u03a3", "\u0130", "\u03a3", "\u0130", "\u03a3");
+        for (int index = 0; index < fillers.size(); index++) {
+            Note note = new Note();
+            note.setId(301 + index);
+            note.setContent("Note " + fillers.get(index).repeat(50_000) + " end");
+            notes.add(note);
+        }
+        for (int id = DEAL_ID; id < DEAL_ID + 4; id++) {
+            Deal deal = deal();
+            deal.setId(id);
+            when(dealService.getDealById(id)).thenReturn(deal);
+            lenient().when(dealService.getDealSummary(id)).thenReturn(new DealSummaryDto(
+                    id, "Acme expansion", new BigDecimal("125000.00"), new BigDecimal("0.00"),
+                    "USD", "open", "2026-08-31", "Evaluation", "Enterprise",
+                    "Northwind Partners", "Owner Name"));
+            lenient().when(dealService.getNotesByDealId(id)).thenAnswer(invocation -> {
+                notesLoaded.countDown();
+                assertTrue(startScreening.await(20, TimeUnit.SECONDS));
+                return notes;
+            });
+        }
+        Deal otherWorkspaceDeal = deal();
+        otherWorkspaceDeal.setId(99);
+        when(dealService.getDealById(99)).thenReturn(otherWorkspaceDeal);
+        var workers = Executors.newFixedThreadPool(4);
+        List<Future<BriefAssembly>> longNoteBriefs = new ArrayList<>();
+        try {
+            for (int id = DEAL_ID; id < DEAL_ID + 4; id++) {
+                int dealId = id;
+                longNoteBriefs.add(workers.submit(() -> assembler.assemble(WORKSPACE_ID, dealId)));
+            }
+            assertTrue(notesLoaded.await(20, TimeUnit.SECONDS));
+            Future<BriefAssembly> otherWorkspace = workers.submit(() -> assembler.assemble(14, 99));
+            startScreening.countDown();
+
+            assertTrue(serialized(otherWorkspace.get(20, TimeUnit.SECONDS).prompt())
+                    .contains("CRM_CONTEXT_END"));
+            for (Future<BriefAssembly> longNoteBrief : longNoteBriefs) {
+                BriefAssembly assembly = longNoteBrief.get(20, TimeUnit.SECONDS);
+                assertEquals(5, assembly.sourceRegistry().values().stream()
+                        .filter(source -> "note".equals(source.kind())).count());
+            }
+        } finally {
+            startScreening.countDown();
+            workers.shutdownNow();
+        }
+    }
+
+    /**
+     * The company-profile helper stands in for any best-effort phase that swallows a failure and
+     * reports the context as degraded: the interrupt it absorbed must still stop assembly at the
+     * next phase boundary, before another stakeholder or account-history load is paid for.
+     */
+    @Test
+    void interruptAbsorbedByADegradingPhaseCancelsAssemblyAtTheNextPhaseBoundary() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(new DealPerson(person(), null)));
+        when(aiRelationshipContext.appendCompanyProfile(any(StringBuilder.class), anyInt(), any()))
+                .thenAnswer(invocation -> {
+                    Thread.currentThread().interrupt();
+                    return true;
+                });
+
+        try {
+            assertThrows(CancellationException.class, () -> assembler.assemble(WORKSPACE_ID, DEAL_ID));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+        verify(aiRelationshipContext, never()).appendStakeholderBackground(
+                any(StringBuilder.class), anyInt(), any(), any(), any());
+        verify(aiRelationshipContext, never()).appendAccountHistory(
+                any(StringBuilder.class), anyInt(), anyInt(), any(),
+                any(AiRelationshipContext.SourceIdProvider.class));
+    }
+
+    @Test
+    void interruptDuringDealLoadStopsAssemblyBeforeTheSummaryIsLoaded() {
+        when(dealService.getDealById(DEAL_ID)).thenAnswer(interruptingWith(deal()));
+
+        assertAssemblyCancelled();
+        verify(dealService, never()).getDealSummary(anyInt());
+    }
+
+    @Test
+    void interruptDuringSummaryLoadStopsAssemblyBeforeStageHistoryIsLoaded() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getDealSummary(DEAL_ID)).thenAnswer(interruptingWith(null));
+
+        assertAssemblyCancelled();
+        verify(dealService, never()).getStageHistory(anyInt());
+    }
+
+    @Test
+    void interruptDuringStageHistoryLoadStopsAssemblyBeforeStakeholdersAreLoaded() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getStageHistory(DEAL_ID)).thenAnswer(interruptingWith(List.of()));
+
+        assertAssemblyCancelled();
+        verify(dealService, never()).getPeopleByDealId(anyInt());
+    }
+
+    @Test
+    void interruptDuringStakeholderLoadStopsAssemblyBeforeActivitiesAreLoaded() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenAnswer(interruptingWith(List.of()));
+
+        assertAssemblyCancelled();
+        verify(dealService, never()).getActivitiesByDealId(anyInt());
+    }
+
+    @Test
+    void interruptDuringActivityLoadStopsAssemblyBeforeNotesAreLoaded() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getActivitiesByDealId(DEAL_ID)).thenAnswer(interruptingWith(List.of()));
+
+        assertAssemblyCancelled();
+        verify(dealService, never()).getNotesByDealId(anyInt());
+    }
+
+    @Test
+    void interruptDuringNoteLoadStopsAssemblyBeforeTasksAreLoaded() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getNotesByDealId(DEAL_ID)).thenAnswer(interruptingWith(List.of()));
+
+        assertAssemblyCancelled();
+        verify(dealService, never()).getTasksByDealId(anyInt());
+    }
+
+    @Test
+    void interruptDuringTaskLoadStopsAssemblyBeforeAnyPersonLookup() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(new DealPerson(person(), null)));
+        when(dealService.getTasksByDealId(DEAL_ID)).thenAnswer(interruptingWith(List.of()));
+
+        assertAssemblyCancelled();
+        verify(personMapper, never()).getByIds(anyInt(), anyList());
+    }
+
+    @Test
+    void interruptDuringOnePersonLookupBatchStopsAssemblyBeforeTheNextBatch() {
+        List<DealPerson> people = new ArrayList<>();
+        for (int id = 1; id <= DealBriefAssembler.MAX_PERSON_LOOKUP_BATCH + 1; id++) {
+            people.add(new DealPerson(person(id, "Contact " + id), null));
+        }
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(people);
+        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenAnswer(interruptingWith(List.of()));
+
+        assertAssemblyCancelled();
+        verify(personMapper, times(1)).getByIds(anyInt(), anyList());
+    }
+
+    @Test
+    void interruptDuringTheLastPersonLookupStopsAssemblyBeforeWarmthIsScored() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(new DealPerson(person(), null)));
+        when(personMapper.getByIds(eq(WORKSPACE_ID), anyList())).thenAnswer(interruptingWith(List.of(person())));
+
+        assertAssemblyCancelled();
+        verify(scoringService, never()).scoreContacts(anyInt(), anySet());
+    }
+
+    @Test
+    void interruptDuringWarmthScoringStopsAssemblyBeforeRiskIsAssessed() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(scoringService.scoreContacts(eq(WORKSPACE_ID), anySet())).thenAnswer(interruptingWith(List.of()));
+
+        assertAssemblyCancelled();
+        verify(dealRiskService, never()).assessDeal(anyInt(), anyInt());
+    }
+
+    @Test
+    void interruptDuringRiskAssessmentStopsAssemblyBeforeTheCompanyProfileIsLoaded() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealRiskService.assessDeal(WORKSPACE_ID, DEAL_ID)).thenAnswer(interruptingWith(null));
+
+        assertAssemblyCancelled();
+        verify(aiRelationshipContext, never()).appendCompanyProfile(any(StringBuilder.class), anyInt(), any());
+    }
+
+    /**
+     * The enrichment helper absorbs failures and reports degraded context, so the per-stakeholder
+     * checkpoint is what stops the loop from loading background for every remaining stakeholder.
+     */
+    @Test
+    void interruptAbsorbedByOneStakeholderEnrichmentStopsBeforeTheNextStakeholder() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(
+                new DealPerson(person(PERSON_ID, "Mina Patel"), null),
+                new DealPerson(person(PERSON_ID + 1, "Ken Ito"), null)));
+        when(aiRelationshipContext.appendStakeholderBackground(
+                any(StringBuilder.class), anyInt(), any(), any(), any()))
+                .thenAnswer(interruptingWith(true));
+
+        assertAssemblyCancelled();
+        verify(aiRelationshipContext, times(1)).appendStakeholderBackground(
+                any(StringBuilder.class), anyInt(), any(), any(), any());
+        verify(aiRelationshipContext, never()).appendAccountHistory(
+                any(StringBuilder.class), anyInt(), anyInt(), any(),
+                any(AiRelationshipContext.SourceIdProvider.class));
+    }
+
+    @Test
+    void interruptAbsorbedByTheLastStakeholderEnrichmentStopsBeforeAccountHistory() {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(new DealPerson(person(), null)));
+        when(aiRelationshipContext.appendStakeholderBackground(
+                any(StringBuilder.class), anyInt(), any(), any(), any()))
+                .thenAnswer(interruptingWith(true));
+
+        assertAssemblyCancelled();
+        verify(aiRelationshipContext, never()).appendAccountHistory(
+                any(StringBuilder.class), anyInt(), anyInt(), any(),
+                any(AiRelationshipContext.SourceIdProvider.class));
+    }
+
+    @Test
+    void interruptAbsorbedByAccountHistoryStopsBeforeAnyActivityIsDigested() {
+        Activity activity = mock(Activity.class);
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        when(dealService.getActivitiesByDealId(DEAL_ID)).thenReturn(List.of(activity));
+        when(aiRelationshipContext.appendAccountHistory(
+                any(StringBuilder.class), anyInt(), anyInt(), any(),
+                any(AiRelationshipContext.SourceIdProvider.class)))
+                .thenAnswer(interruptingWith(true));
+
+        assertAssemblyCancelled();
+        verify(activity, never()).getSubject();
+    }
+
+    /**
+     * No identifier is registered, so the masking engine's own per-identifier checkpoint never
+     * runs and only the per-digest checkpoint can stop the next item from being read and masked.
+     */
+    @Test
+    void interruptWhileReadingOneDigestItemStopsBeforeTheNextItem() {
+        Activity first = mock(Activity.class);
+        Activity second = mock(Activity.class);
+        when(first.getSubject()).thenAnswer(interruptingWith("Kickoff call"));
+        when(dealService.getDealById(DEAL_ID)).thenReturn(bareDeal());
+        when(dealService.getActivitiesByDealId(DEAL_ID)).thenReturn(List.of(first, second));
+
+        assertAssemblyCancelled();
+        verify(second, never()).getSubject();
+    }
+
+    @Test
+    void interruptAfterTheLastDigestStillCancelsInsteadOfReturningTheAssembly() {
+        Task task = mock(Task.class);
+        when(task.getId()).thenReturn(401);
+        when(task.getDescription()).thenReturn("Send the revised proposal");
+        when(task.getDueDate()).thenAnswer(interruptingWith("2026-07-10"));
+        when(dealService.getDealById(DEAL_ID)).thenReturn(bareDeal());
+        when(dealService.getTasksByDealId(DEAL_ID)).thenReturn(List.of(task));
+
+        assertAssemblyCancelled();
+        verify(task).getDueDate();
     }
 
     @Test
@@ -175,6 +460,36 @@ class DealBriefAssemblerTest {
         assertEquals(new DealBriefSource("task", 401), assembly.sourceRegistry().get("task.0"));
         verify(scoringService).scoreContacts(WORKSPACE_ID, Set.of(PERSON_ID));
         verify(dealRiskService).assessDeal(WORKSPACE_ID, DEAL_ID);
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "John {Smith}|John Smith",
+            "John \uFF33mith|John Smith",
+            "Cafe\u0301 Smith|Caf\u00e9 Smith"
+    })
+    void assemble_preservesDistinctStakeholderIdentitiesDespiteMatchingCollisions(
+            String first, String second) {
+        when(dealService.getDealById(DEAL_ID)).thenReturn(deal());
+        for (List<String> names : List.of(List.of(first, second), List.of(second, first))) {
+            when(dealService.getPeopleByDealId(DEAL_ID)).thenReturn(List.of(
+                    new DealPerson(person(PERSON_ID, names.getFirst()), "Champion"),
+                    new DealPerson(person(PERSON_ID + 1, names.getLast()), "Decision maker")));
+
+            BriefAssembly assembly = assembler.assemble(WORKSPACE_ID, DEAL_ID);
+            String prompt = serialized(assembly.prompt());
+
+            assertTrue(prompt.contains("- Name: {{P1}}; Role: Champion; Source: person.0"));
+            assertTrue(prompt.contains("- Name: {{P2}}; Role: Decision maker; Source: person.1"));
+            assertFalse(prompt.contains(first));
+            assertFalse(prompt.contains(second));
+            assertEquals(new DealBriefSource("person", PERSON_ID), assembly.sourceRegistry().get("person.0"));
+            assertEquals(new DealBriefSource("person", PERSON_ID + 1), assembly.sourceRegistry().get("person.1"));
+            Demasker.DemaskResult demasked = Demasker.demask(prompt, assembly.context());
+            assertEquals(0, demasked.warnings());
+            assertTrue(demasked.text().contains("- Name: " + names.getFirst() + "; Role: Champion; Source: person.0"));
+            assertTrue(demasked.text().contains("- Name: " + names.getLast() + "; Role: Decision maker; Source: person.1"));
+        }
     }
 
     @Test
@@ -382,6 +697,28 @@ class DealBriefAssemblerTest {
         assertTrue(prompt.contains("TIMELINE\n- none"));
         assertFalse(assembly.sourceRegistry().containsValue(new DealBriefSource("deal", DEAL_ID)));
         assertEquals(new DealBriefSource("person", PERSON_ID), assembly.sourceRegistry().get("person.0"));
+    }
+
+    private void assertAssemblyCancelled() {
+        try {
+            assertThrows(CancellationException.class, () -> assembler.assemble(WORKSPACE_ID, DEAL_ID));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    private static <T> Answer<T> interruptingWith(T result) {
+        return invocation -> {
+            Thread.currentThread().interrupt();
+            return result;
+        };
+    }
+
+    private static Deal bareDeal() {
+        Deal deal = new Deal();
+        deal.setId(DEAL_ID);
+        return deal;
     }
 
     private static Deal deal() {

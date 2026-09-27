@@ -21,6 +21,10 @@ import ooo.klae.connex.backend.webauthn.WebAuthnService;
 
 /**
  * Confines unenrolled privileged accounts and applies WebAuthn step-up to uncovered export paths.
+ *
+ * <p>Emailed-link recipient surfaces are exempt from the enrollment confinement: their authority is
+ * the purpose-bound grant cookie, the session only supplies exchange lineage, and a signed-in
+ * signer who has not yet enrolled a passkey must still be able to countersign or opt out.
  */
 public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     public static final String ENROLLMENT_REQUIRED_CODE = "PRIVILEGED_MFA_ENROLLMENT_REQUIRED";
@@ -41,6 +45,9 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             "/api/auth/webauthn/recover");
     private static final Set<String> EXACT_EXPORT_PATHS = Set.of(
             "/api/audit/export");
+    private static final Set<String> LINK_FLOW_PATHS = Set.of(
+            "/api/document-acceptance",
+            "/api/delivery/unsubscribe");
     private static final String IDENTIFIER_SEGMENT = "[^/]+";
     private static final Pattern ORG_AUDIT_EXPORT = Pattern.compile(
             "/api/orgs/" + IDENTIFIER_SEGMENT + "/audit/export");
@@ -49,7 +56,6 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     private static final Pattern REPORT_EXPORT = Pattern.compile(
             "/api/reports/" + IDENTIFIER_SEGMENT + "/(?:export\\.csv|snapshots/"
                     + IDENTIFIER_SEGMENT + "/export\\.csv)");
-    private static final Pattern PATH_PARAMETER_MARKER = Pattern.compile("(?i)(?:;|%(?:25)*3b)");
 
     private final PrivilegedMfaProperties properties;
     private final PrivilegedAccountService privilegedAccountService;
@@ -74,14 +80,16 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
             FilterChain filterChain) throws ServletException, IOException {
         User user = currentUser();
-        if (user == null || !properties.isEnforced()) {
+        if (user == null) {
             filterChain.doFilter(request, response);
             return;
         }
-        String path = stripPathParameters(request.getRequestURI());
-        if (privilegedAccountService.isPrivileged(user.getId())
+        String path = RequestPathNormalizer.apiPath(request);
+        if (properties.isEnforced()
+                && privilegedAccountService.isPrivileged(user.getId())
                 && !webAuthnService.hasPasskey(user.getId())
-                && !isEnrollmentPath(request.getMethod(), path)) {
+                && !isEnrollmentPath(request.getMethod(), path)
+                && !isLinkFlowPath(path)) {
             auditService.recordFailureScoped("auth.mfa.policy.denied", "user", user.getId(), null, null,
                     user.getDisplayName(), "Privileged account confined pending MFA enrollment",
                     "enrollment_required");
@@ -90,9 +98,10 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
             return;
         }
         if (requiresExportStepUp(request.getMethod(), path)
-                && !sessionSecurityService.hasFreshRecentAuthentication(request.getSession(false), user.getId())) {
-            auditService.recordFailureScoped("auth.mfa.step_up.required", "user", user.getId(), null, null,
-                    user.getDisplayName(), "Recent MFA required for data export", "step_up_required");
+                && !sessionSecurityService.isExportStepUpSatisfied(request.getSession(false), user.getId())) {
+            auditService.recordFailureScoped(AuditService.EXPORT_STEP_UP_ACTION, "user", user.getId(),
+                    null, null, user.getDisplayName(), AuditService.EXPORT_STEP_UP_SUMMARY,
+                    "step_up_required");
             deny(response, RECENT_AUTHENTICATION_REQUIRED_CODE,
                     "Recent passkey verification is required");
             return;
@@ -134,25 +143,10 @@ public class PrivilegedMfaEnforcementFilter extends OncePerRequestFilter {
                 || REPORT_EXPORT.matcher(path).matches();
     }
 
-    static String stripPathParameters(String path) {
-        java.util.regex.Matcher marker = PATH_PARAMETER_MARKER.matcher(path);
-        if (!marker.find()) {
-            return path;
-        }
-        StringBuilder normalized = new StringBuilder(path.length());
-        int segmentStart = 0;
-        do {
-            normalized.append(path, segmentStart, marker.start());
-            int nextSegment = path.indexOf('/', marker.end());
-            if (nextSegment < 0) {
-                return normalized.toString();
-            }
-            normalized.append('/');
-            segmentStart = nextSegment + 1;
-            marker.region(segmentStart, path.length());
-        } while (marker.find());
-        normalized.append(path, segmentStart, path.length());
-        return normalized.toString();
+    /** Whether the request is a grant-cookie recipient surface rather than a session-authorized one. */
+    static boolean isLinkFlowPath(String path) {
+        return LINK_FLOW_PATHS.stream()
+                .anyMatch(prefix -> path.equals(prefix) || path.startsWith(prefix + "/"));
     }
 
     private static boolean isEnrollmentPath(String method, String path) {
