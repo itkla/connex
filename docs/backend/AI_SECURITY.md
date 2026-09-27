@@ -99,7 +99,25 @@ Do not remove one because another looks sufficient; `ScriptedAiProviderArchTest`
 
 Scripts live on test trees only — `backend/src/test/resources/ai/scripted/` for backend trajectories and `frontend/test/e2e/fixtures/ai-scripted/` for the CI browser stack. Never add one under `src/main`.
 
-Activate it locally with `SPRING_PROFILES_ACTIVE=dev,ai-scripted-provider`, `CONNEX_AI_SCRIPTED_PROVIDER_ENABLED=true` and `CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR=<absolute path>`; in a test, `@ActiveProfiles({"test", ScriptedAiProviderProfile.NAME})` plus the same two properties.
+In a test, activate it with `@ActiveProfiles({"test", ScriptedAiProviderProfile.NAME})` plus `connex.ai.scripted-provider.enabled=true` and `connex.ai.scripted-provider.fixture-dir`; `AbstractScriptedTrajectoryTest` already sets both, together with the AI master switch.
+
+### The browser-stack recipe
+
+This is the only copy of the recipe; [`FRONTEND_TESTING.md`](../FRONTEND_TESTING.md) and `frontend/AGENTS.md` point here rather than repeat it. A backend that `ask-connex-trajectory.spec.ts` can drive is the root guide's `dev` boot with the profile added and four more settings, exactly as the `Frontend — unit & e2e` CI job's backend boot step sets them:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev,ai-scripted-provider
+CONNEX_AI_ENABLED=true
+CONNEX_AI_SCRIPTED_PROVIDER_ENABLED=true
+CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR=<absolute path to the checkout>/frontend/test/e2e/fixtures/ai-scripted
+CONNEX_AI_ALLOW_INTERNAL_ENDPOINTS=true
+```
+
+- **The profile, the flag and the fixture directory** install the seam. Leave the profile and the flag out and the real `openai_compatible` adapter dials the spec's loopback endpoint, so the turn settles `provider_error`; set one without the other, or both without a readable fixture directory, and the boot refuses (layers 3 and 5 above).
+- **The AI master switch** defaults to `false` in `application.yml`, and `AiFeatureGate` checks it before provider readiness. Without it the seam boots but every turn is refused, so the spec never reaches send, tools and answer.
+- **The internal-endpoint opt-in** is needed because the spec *saves* its provider row through `PUT /api/ai/provider`. The save path resolves the submitted endpoint's address, so the loopback literal the browser suite configures fails `AiEndpointAddressValidator.isFetchable` with a 400 without it — while the scripted adapter never dials the endpoint at all, whatever it says. That opt-in is part of the browser recipe and nothing wider: it is confined to a job declaring no deployment profile, the saas edition forbids the key outright, and on silo and on-prem it is a deliberate operator posture for an internal model host rather than a route to this seam. The trajectory harness needs none of it, because it inserts its row directly and readiness there is shape-only.
+
+`ScriptedAiProviderArchTest` pins the whole recipe to that one CI job and step, so a second workflow booting a stack this way fails the backend suite, and it requires this block to carry every `CONNEX_AI_*` setting that step sets and to be the only place the recipe is written down.
 
 ### Contracts to honour near this code
 

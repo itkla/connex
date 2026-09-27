@@ -100,7 +100,7 @@ Minimum frontend loop for a material change:
 1. `pnpm lint`
 2. `pnpm exec tsc --noEmit`
 3. `pnpm test`
-4. Run `pnpm e2e` when the changed flow is covered by the Playwright suite.
+4. Run `pnpm e2e` when the changed flow is covered by the Playwright suite. `ask-connex-trajectory.spec.ts` needs a backend booted with more settings than the root guide's plain `bootRun`, the AI master switch among them. Take them from the one copy of that recipe, *The browser-stack recipe* in `../docs/backend/AI_SECURITY.md`, rather than from memory or this guide.
 5. Run `pnpm dev` and exercise every materially changed path in a real browser with no console errors. Use an isolated Playwright MCP profile when multiple agents share the host; authenticate inside that profile rather than relying on a persisted browser session.
 6. For visual changes, check representative desktop/mobile widths and light/dark. For motion changes, also verify reduced motion and complete the focused animation review.
 7. Self-review the exact diff. Material/high-risk changes receive the root-required independent review; auth, sharing, permissions, cross-workspace state, or other security-sensitive UI also gets security-focused review.

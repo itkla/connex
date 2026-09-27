@@ -36,6 +36,12 @@ import tools.jackson.databind.ObjectMapper;
  */
 class ScriptedAiScriptLoaderTest {
 
+    /** The workflow that names the fixture directory the CI browser stack boots with. */
+    private static final String CI_WORKFLOW = ".github/workflows/ci.yml";
+
+    /** The environment variable that names it there. */
+    private static final String FIXTURE_DIR_SETTING = "CONNEX_AI_SCRIPTED_PROVIDER_FIXTURE_DIR";
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
@@ -615,6 +621,78 @@ class ScriptedAiScriptLoaderTest {
             assertNotNull(loader.bySelector(script.selector()),
                     script.id() + " is not reachable by its own selector");
         }
+    }
+
+    /**
+     * Loads the fixture directory the CI browser stack boots with, resolved from the workflow.
+     *
+     * <p>That directory lives on the frontend test tree, so nothing on the backend classpath sees
+     * it and {@link #loadsEveryFixtureThatShipsWithThisSourceSet} does not reach it. Without this
+     * test a bad edit there — a selector containing another, an unparseable tool argument, a
+     * renamed or emptied directory — fails the WAR at bean creation inside the cross-stack CI job,
+     * which reports {@code backend failed to boot for the e2e suite} and no Playwright spec at
+     * all, while the whole backend suite stays green and names nothing.
+     *
+     * <p>The path is parsed out of the workflow rather than written here, so a rename of either
+     * side fails in this suite instead of at boot.
+     *
+     * @throws IOException if the workflow or the fixture directory cannot be read
+     */
+    @Test
+    void loadsTheFixtureDirectoryTheBrowserStackBootsWith() throws IOException {
+        Path fixtureDir = repoRoot().resolve(browserStackFixtureDirectory());
+        assertTrue(Files.isDirectory(fixtureDir),
+                CI_WORKFLOW + " points " + FIXTURE_DIR_SETTING + " at " + fixtureDir
+                        + ", which is not a readable directory; the e2e backend would refuse to "
+                        + "boot and no browser spec would run");
+
+        ScriptedAiScriptLoader loader = new ScriptedAiScriptLoader(
+                fixtureDir.toString(), objectMapper);
+
+        List<Path> files;
+        try (Stream<Path> listing = Files.list(fixtureDir)) {
+            files = listing
+                    .filter(path -> path.getFileName().toString().endsWith(".json"))
+                    .sorted()
+                    .toList();
+        }
+        assertEquals(files.size(), loader.scripts().size(),
+                "every browser-stack fixture must yield exactly one script: " + files);
+        for (ScriptedAiScript script : loader.scripts()) {
+            assertNotNull(loader.bySelector(script.selector()),
+                    script.id() + " is not reachable by its own selector");
+        }
+    }
+
+    /**
+     * Reads the fixture directory the CI browser stack's backend boot step configures.
+     *
+     * @return the repository-relative fixture directory
+     * @throws IOException if the workflow cannot be read
+     */
+    private static String browserStackFixtureDirectory() throws IOException {
+        String workflow = Files.readString(
+                repoRoot().resolve(CI_WORKFLOW), StandardCharsets.UTF_8);
+        for (String line : workflow.split("\\R")) {
+            String stripped = line.strip();
+            if (stripped.startsWith("#") || !stripped.startsWith(FIXTURE_DIR_SETTING + ":")) {
+                continue;
+            }
+            String value = stripped.substring(FIXTURE_DIR_SETTING.length() + 1).strip()
+                    .replace("\"", "")
+                    .replace("${{ github.workspace }}/", "");
+            assertFalse(value.isBlank(), CI_WORKFLOW + " sets an empty " + FIXTURE_DIR_SETTING);
+            return value;
+        }
+        throw new AssertionError(CI_WORKFLOW + " no longer sets " + FIXTURE_DIR_SETTING
+                + ", so the browser stack cannot load a script and every scripted turn there "
+                + "would settle provider_error");
+    }
+
+    private static Path repoRoot() {
+        Path cwd = Path.of(System.getProperty("user.dir")).toAbsolutePath();
+        Path parent = cwd.getParent();
+        return Files.exists(cwd.resolve("backend")) || parent == null ? cwd : parent;
     }
 
     @FunctionalInterface
