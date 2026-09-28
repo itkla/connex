@@ -20,8 +20,8 @@ import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.apache.ibatis.session.SqlSessionFactoryBuilder;
 import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import com.zaxxer.hikari.HikariDataSource;
@@ -55,8 +55,8 @@ class ProviderCapturePlaneRoutingIntegrationTest {
     private static TenantContext tenantContext;
     private static SqlSessionFactory sqlSessionFactory;
 
-    @BeforeEach
-    void setUp() throws Exception {
+    @BeforeAll
+    static void setUp() throws Exception {
         url = System.getenv().getOrDefault(
             "CONNEX_DB_URL",
             "jdbc:mysql://localhost:3306/connexdb"
@@ -115,8 +115,8 @@ class ProviderCapturePlaneRoutingIntegrationTest {
         sqlSessionFactory = sqlSessionFactory(routing);
     }
 
-    @AfterEach
-    void tearDown() throws SQLException {
+    @AfterAll
+    static void tearDown() throws SQLException {
         if (pool != null) {
             pool.close();
         }
