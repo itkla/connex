@@ -32,6 +32,11 @@ import tools.jackson.databind.JsonNode;
  * keep their exact keys. Every write declares a comparison and a {@code null} on either side is
  * compared like any other value, so no tool can opt out of the check. The mocks here have no
  * {@code SqlSession}, so nothing is claimed about the MyBatis first-level cache.
+ *
+ * <p>The create-activity and create-note cases pin the framework's comparison and its placement
+ * for those tools, not a read-back of stored state: the real {@code ActivityService.create} and
+ * {@code NoteService.create} return the bean the tool built, so in production their link cannot
+ * diverge, and these stubs rewrite it only to prove the framework would record it if it did.
  */
 class AiAssistantWriteReadBackTest extends AbstractAiAssistantWriteToolTest {
 
