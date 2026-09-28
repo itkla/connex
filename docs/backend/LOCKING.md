@@ -392,7 +392,9 @@ The session row is the per-session mutex. Allocate message sequence with the est
 
 Every mutating assistant tool decision — immediate execution, approval, rejection, undo — runs at
 `READ_COMMITTED` in `AiAssistantWriteToolService`, the write framework. A write tool is one
-`AiAssistantWriteTool` bean, and every catalog write tool has exactly one. The tool
+`AiAssistantWriteTool` bean, and every catalog write tool has exactly one —
+`AiAssistantWriteToolRegistry` refuses to start otherwise — so the order below is the only path a
+write takes: the framework keeps no per-tool arm and no fallback lock. The tool
 declares which locks it needs — `Lock(taskBoard, target)` — and the framework takes them; **a write
 tool takes no lock of its own**, reaches no mapper, and never re-resolves a member.
 `AiAssistantWriteToolSpiArchTest` backs all three structurally by holding a tool's injected
