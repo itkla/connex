@@ -170,8 +170,15 @@ class WarmPathServiceTest extends AbstractServiceTest {
 
     @Test
     void foreignWorkspaceGraphNeverLeaksIntoThePaths() {
+        Person localBridge = engagedPerson(newCompany());
+        Person localTarget = newPerson(newCompany());
+        connect(localBridge.getId(), localTarget.getId());
         Workspace other = newWorkspace();
-        Person foreignBridge = foreignPersonIn(other);
+        workspaceMapper.addMember(other.getId(), currentUser.getId(), "member");
+        when(workspaceScopeControlAccess.getForWorkspace(other.getId())).thenReturn(
+            new OrganizationWorkspaceScopeControlOperations.WorkspaceScope(
+                other.getId(), List.of(other.getId()), "[" + other.getId() + "]"));
+        Person foreignBridge = engagedPerson(foreignPersonIn(other), other);
         Person foreignTarget = foreignPersonIn(other);
         PersonEdge edge = new PersonEdge();
         edge.setWorkspaceId(other.getId());
@@ -181,7 +188,21 @@ class WarmPathServiceTest extends AbstractServiceTest {
         edge.setStrength(2);
         personEdgeMapper.upsert(edge);
 
+        authenticateAs(currentUser, other.getId());
+        try {
+            WarmPathDto foreignPath = findTarget(warmPathService.getPaths(50), foreignTarget.getId());
+            assertNotNull(foreignPath);
+            assertEquals(List.of(foreignBridge.getId()), foreignPath.getBridges().stream()
+                .map(bridgeDto -> bridgeDto.getPersonId()).toList());
+        } finally {
+            authenticateAs(currentUser, workspace.getId());
+        }
+
         List<WarmPathDto> paths = warmPathService.getPaths(50);
+        WarmPathDto localPath = findTarget(paths, localTarget.getId());
+        assertNotNull(localPath);
+        assertEquals(List.of(localBridge.getId()), localPath.getBridges().stream()
+            .map(bridgeDto -> bridgeDto.getPersonId()).toList());
         assertTrue(paths.stream().noneMatch(row -> row.getTargetId() == foreignTarget.getId()));
         assertTrue(paths.stream().flatMap(row -> row.getBridges().stream())
             .noneMatch(bridgeDto -> bridgeDto.getPersonId() == foreignBridge.getId()));
@@ -189,9 +210,12 @@ class WarmPathServiceTest extends AbstractServiceTest {
 
     /** A contact touched today, so it scores warm/hot and qualifies as a bridge. */
     private Person engagedPerson(Company company) {
-        Person person = newPerson(company);
+        return engagedPerson(newPerson(company), workspace);
+    }
+
+    private Person engagedPerson(Person person, Workspace personWorkspace) {
         Activity activity = new Activity();
-        activity.setWorkspaceId(workspace.getId());
+        activity.setWorkspaceId(personWorkspace.getId());
         activity.setType("call");
         activity.setSubject("subj_" + unique());
         activity.setNotes("notes_" + unique());
