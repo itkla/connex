@@ -21,8 +21,13 @@ import org.w3c.dom.NodeList;
  * The same-org invariant lives in hand-written SQL — the {@code INSERT..SELECT}
  * grants in {@code ShareMapper.xml} (write path) and the {@code EXISTS} share
  * branches of the owned-or-shared visibility predicates in the entity mappers
- * (read path). Plane-split mappers may receive the same ceiling as a trusted
- * control-derived workspace allowlist instead of joining the control table.
+ * (read path). The two paths express it differently and this test knows which is
+ * which: every write grant now receives a trusted control-derived workspace
+ * allowlist instead of joining the control table (#811), while on the read path
+ * only {@code AiAssistantIdentifierMapper}, {@code IdentityMapper} and
+ * {@code PersonEdgeMapper} bind that allowlist — the remaining five mappers in
+ * {@code SHARE_READERS} still join the control-plane {@code workspace} table and
+ * match {@code ows.org_id = vws.org_id}.
  * The workspace-predicate scan cannot see either model (it only checks
  * {@code #{workspaceId}} is bound). These tests assert both paths carry their
  * reviewed ceiling, so a future shareable entity type copied without it fails
@@ -30,7 +35,16 @@ import org.w3c.dom.NodeList;
  */
 class OrgShareCeilingArchTest {
 
-    private static final Pattern ORG_CEILING = Pattern.compile("tw\\.org_id\\s*=\\s*ow\\.org_id");
+    private static final Pattern OWNER_ALLOWLIST_CEILING = Pattern.compile(
+        "JOIN\\s+JSON_TABLE\\s*\\(\\s*#\\{orgWorkspaceIdsJson}[^)]*\\)[^)]*\\)\\s*owner_workspace\\s*"
+            + "ON\\s+owner_workspace\\.id\\s*=\\s*\\w+\\.workspace_id",
+        Pattern.CASE_INSENSITIVE);
+    private static final Pattern TARGET_ALLOWLIST_CEILING = Pattern.compile(
+        "JOIN\\s+JSON_TABLE\\s*\\(\\s*#\\{orgWorkspaceIdsJson}[^)]*\\)[^)]*\\)\\s*target_workspace\\s*"
+            + "ON\\s+target_workspace\\.id\\s*=\\s*#\\{targetWorkspaceId}",
+        Pattern.CASE_INSENSITIVE);
+    private static final Pattern CONTROL_PLANE_WORKSPACE_TABLE = Pattern.compile(
+        "(?:FROM|JOIN)\\s+workspace\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern READ_CEILING = Pattern.compile("ows\\.org_id\\s*=\\s*vws\\.org_id");
     private static final Pattern CONTROL_DERIVED_READ_CEILING = Pattern.compile(
         "JOIN\\s+JSON_TABLE\\s*\\(\\s*#\\{orgWorkspaceIdsJson}", Pattern.CASE_INSENSITIVE);
@@ -90,6 +104,12 @@ class OrgShareCeilingArchTest {
         }
     }
 
+    /**
+     * The grant ceiling is now the control-derived workspace allowlist rather than a join on
+     * the control-plane {@code workspace} table (#811). Both ends must still be checked: the
+     * owning workspace and the target workspace each have to appear in the allowlist, so an
+     * allowlist assembled for some other organization refuses the grant on the owner side.
+     */
     @Test
     void every_share_grant_enforces_the_same_org_ceiling() throws Exception {
         Document doc = loadShareMapper();
@@ -105,8 +125,11 @@ class OrgShareCeilingArchTest {
             }
             grants++;
             String sql = insert.getTextContent();
-            if (!ORG_CEILING.matcher(sql).find()) {
-                violations.add(id);
+            if (!OWNER_ALLOWLIST_CEILING.matcher(sql).find()) {
+                violations.add(id + " (owning workspace is not allowlist-checked)");
+            }
+            if (!TARGET_ALLOWLIST_CEILING.matcher(sql).find()) {
+                violations.add(id + " (target workspace is not allowlist-checked)");
             }
         }
 
@@ -115,7 +138,25 @@ class OrgShareCeilingArchTest {
                 + "misconfigured and this guard would pass vacuously.");
         assertTrue(violations.isEmpty(),
             "These share-grant statements are missing the same-organization ceiling "
-                + "(JOIN workspace tw ... tw.org_id = ow.org_id): " + violations);
+                + "(JOIN JSON_TABLE(#{orgWorkspaceIdsJson}) on both the owning and the target "
+                + "workspace): " + violations);
+    }
+
+    /**
+     * The share mapper is tenant-scoped, so nothing in it may read the control-plane
+     * {@code workspace} table — not as a grant ceiling and not as name hydration. Those
+     * statements cannot execute once an organization's data lives in its own catalog (#811).
+     */
+    @Test
+    void the_share_mapper_reads_org_data_tables_only() throws Exception {
+        String xml = loadMapperText("mappers/ShareMapper.xml").replaceAll("(?s)<!--.*?-->", "");
+
+        assertTrue(count(CONTROL_PLANE_WORKSPACE_TABLE, xml) == 0,
+            "ShareMapper.xml references the control-plane workspace table; the organization "
+                + "ceiling and the workspace names must come from the service's control snapshot");
+        assertTrue(xml.contains("#{orgWorkspaceIdsJson}"),
+            "ShareMapper.xml no longer binds the control-derived workspace allowlist — the scan "
+                + "looks misconfigured and the ceiling guard above would pass vacuously");
     }
 
     private Document loadShareMapper() throws Exception {

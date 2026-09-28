@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static ooo.klae.connex.backend.services.WorkflowParityTestSupport.assertEffectsParity;
 import static ooo.klae.connex.backend.services.WorkflowParityTestSupport.assertParity;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -973,13 +974,13 @@ class WorkflowEngineParityIntegrationTest extends AbstractServiceTest {
                 ownerWorkspace.getId(),
                 workspace.getId(),
                 currentUser.getId(),
-                false));
+                false, orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId())));
             assertEquals(1, shareMapper.sharePerson(
                 canonicalPerson.getId(),
                 ownerWorkspace.getId(),
                 workspace.getId(),
                 currentUser.getId(),
-                false));
+                false, orgWorkspaceIdsJson(workspaceMapper, ownerWorkspace.getId())));
             RuleDto rule = entityRule(
                 "person", "person.updated", List.of(notifyAction("Shared person")), null,
                 null, null, "user");

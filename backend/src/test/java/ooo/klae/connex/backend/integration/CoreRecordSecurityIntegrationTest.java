@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -274,7 +275,8 @@ class CoreRecordSecurityIntegrationTest {
         }
         int allowedId;
         if ("person".equals(field)) {
-            assertEquals(1, shareMapper.sharePerson(siblingId, sibling.getId(), workspace.getId(), member.getId(), false));
+            assertEquals(1, shareMapper.sharePerson(siblingId, sibling.getId(), workspace.getId(), member.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, sibling.getId())));
             allowedId = siblingId;
         } else {
             allowedId = linkedId(field, workspace);
@@ -741,7 +743,8 @@ class CoreRecordSecurityIntegrationTest {
     void shareRevocationDefeatsTaskCreationWaitingOnBoard() throws Exception {
         Workspace owner = newWorkspace(workspace.getOrgId());
         Person person = newPerson(owner);
-        assertEquals(1, shareMapper.sharePerson(person.getId(), owner.getId(), workspace.getId(), member.getId(), false));
+        assertEquals(1, shareMapper.sharePerson(person.getId(), owner.getId(), workspace.getId(), member.getId(), false,
+            orgWorkspaceIdsJson(workspaceMapper, owner.getId())));
         CountDownLatch boardLocked = new CountDownLatch(1);
         CountDownLatch writeAtBoard = new CountDownLatch(1);
         CountDownLatch releaseRevocation = new CountDownLatch(1);
@@ -783,7 +786,8 @@ class CoreRecordSecurityIntegrationTest {
         int beforeCount = targetCount(resource);
         Workspace owner = newWorkspace(workspace.getOrgId());
         Person person = newPerson(owner);
-        assertEquals(1, shareMapper.sharePerson(person.getId(), owner.getId(), workspace.getId(), member.getId(), false));
+        assertEquals(1, shareMapper.sharePerson(person.getId(), owner.getId(), workspace.getId(), member.getId(), false,
+            orgWorkspaceIdsJson(workspaceMapper, owner.getId())));
         CountDownLatch personLocked = new CountDownLatch(1);
         CountDownLatch writeAtPerson = new CountDownLatch(1);
         CountDownLatch releaseRevocation = new CountDownLatch(1);
