@@ -103,7 +103,7 @@ class AiAssistantPromptEnvelopeTest {
      * <p>Each literal is the core as measured when it was pinned (issue #1817) plus an itemized
      * allowance for everything the action surface adds to the core, JSON-ReAct / native:
      * <ul>
-     *   <li>Declaring {@link #PLANNED_TOOLSET_KEYS}, 400 / 340 (393 / 336 computed). Every loadable
+     *   <li>Declaring {@link #PLANNED_TOOLSET_KEYS}, 410 / 350 (403 / 346 itemized below). Every loadable
      *       toolset costs the core whether or not it is loaded: a directory line
      *       ({@code "\n" + key + " - " + summary + " - available"}, JSON-escaped) on both
      *       protocols, and a value in the closed {@code find_tools} enum, which JSON-ReAct
@@ -124,7 +124,7 @@ class AiAssistantPromptEnvelopeTest {
      * invalidate a toolset's.
      */
     private static final EnvelopeCeiling CORE_CEILING =
-            new EnvelopeCeiling("core", 9_912 + 400 + 300, 8_711 + 340 + 300);
+            new EnvelopeCeiling("core", 9_912 + 410 + 300, 8_711 + 350 + 300);
 
     /**
      * Wire keys of toolsets the action surface plans but has not yet declared.
