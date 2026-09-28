@@ -34,6 +34,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.PrincipalReques
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ReadBack;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Resolution;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Row;
+import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ScheduleConflicts;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Target;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.AddTag;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.AssignOwner;
@@ -434,7 +435,7 @@ public class AiAssistantWriteToolService {
                 principals,
                 mutation.resolution(),
                 new LockedTarget(mutation.targetUpdatedAt(), mutation.stageChange()),
-                readToolExecutor::findScheduleConflicts));
+                scheduleOf(row.target())));
         Inverse inverse = outcome.inverse();
         Map<String, Object> undo = null;
         if (inverse != null) {
@@ -444,6 +445,20 @@ public class AiAssistantWriteToolService {
             undo.putAll(inverse.extra());
         }
         return new ExecutionOutcome(outcome.data(), undo, verification(outcome.readBack()));
+    }
+
+    /**
+     * Binds the schedule read to the row's own locked and gated target, refusing any target that is
+     * not a person, so a tool can never name whose calendar it reads.
+     */
+    private ScheduleConflicts scheduleOf(Target target) {
+        return (startUtc, endUtc) -> {
+            if (!"person".equals(target.kind())) {
+                throw new IllegalStateException(
+                        "Assistant schedule read is bound to a person target");
+            }
+            return readToolExecutor.findScheduleConflicts(target.id(), startUtc, endUtc);
+        };
     }
 
     private static Map<String, Object> verification(ReadBack readBack) {

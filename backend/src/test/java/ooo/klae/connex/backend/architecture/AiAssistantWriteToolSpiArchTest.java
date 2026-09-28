@@ -17,10 +17,12 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -51,8 +53,10 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <p>Behind those, a source scan refuses a tool that names a locking method, a permission read, or
  * a lifecycle, consent, restriction or authorization mutator — as a call or a method reference.
- * The source scan is lexical and a determined author can evade it through an allowlisted
- * dependency; the allowlist is what makes that a reviewed change. Only the framework constructs
+ * Holding an allowlisted domain service grants only its permitted methods: a tool may name the
+ * service only as the receiver of one of them, so its unguarded mutators and its unfiltered
+ * workspace-wide reads stay out of reach. The source scan is lexical; the allowlists are what make
+ * widening it a reviewed change. Only the framework constructs
  * the unit of work a tool applies, the framework asserts permissions from its locked snapshot and
  * nowhere else on the mutating path, and the lock-order document states the framework's order
  * where the assistant chat section ends.
@@ -65,8 +69,11 @@ class AiAssistantWriteToolSpiArchTest {
             ASSISTANT_SOURCES.resolve("AiAssistantWriteToolService.java");
     private static final Path LOCKING = Path.of("docs/backend/LOCKING.md");
 
-    private static final Set<String> ORIGINAL_LEGACY_TOOLS = Set.of(
-            "create_activity", "create_note", "add_tag", "assign_owner");
+    /**
+     * The legacy ledger's current ceiling. It shrinks with the ledger in every slice, so a tool
+     * that moved onto the SPI can never rejoin it.
+     */
+    private static final Set<String> LEGACY_LEDGER_CEILING = Set.of("add_tag", "assign_owner");
 
     private static final List<String> LOCKING_METHODS = List.of(
             "lockBoardForCreation",
@@ -106,6 +113,21 @@ class AiAssistantWriteToolSpiArchTest {
             PipelineService.class,
             AiAssistantDateResolver.class,
             ObjectMapper.class);
+
+    /**
+     * The only methods a write tool may call on each allowlisted domain service. Holding a service
+     * does not grant all of it: its unguarded {@code update} and {@code delete}, and its unfiltered
+     * workspace-wide reads, would bypass the framework's fingerprint-guarded inverse and its
+     * restriction-filtered, target-bound schedule read. A tool must name the service field only as
+     * the receiver of one of these methods, so it cannot hand the service to anything else.
+     * Widening an entry is a reviewed decision.
+     */
+    private static final Map<Class<?>, Set<String>> PERMITTED_SERVICE_METHODS = Map.of(
+            ActivityService.class, Set.of("create", "deleteIf"),
+            NoteService.class, Set.of("create", "deleteIf"),
+            TaskService.class, Set.of("create", "deleteIf"),
+            DealService.class, Set.of("changeStage", "getDealById"),
+            PipelineService.class, Set.of("getAllStages"));
 
     private static final List<String> FORBIDDEN_MUTATORS = List.of(
             "updateLifecycleStage",
@@ -148,7 +170,7 @@ class AiAssistantWriteToolSpiArchTest {
     void theLegacyLedgerOnlyShrinks() {
         Set<String> legacy = legacyTools();
         assertTrue(
-                ORIGINAL_LEGACY_TOOLS.containsAll(legacy),
+                LEGACY_LEDGER_CEILING.containsAll(legacy),
                 "a tool may leave AiAssistantWriteToolRegistry.LEGACY_TOOLS but never join it: "
                         + legacy);
     }
@@ -203,6 +225,49 @@ class AiAssistantWriteToolSpiArchTest {
             }
         }
         assertEquals(List.of(), violations);
+    }
+
+    @Test
+    void everyDomainServiceAToolHoldsIsCalledOnlyThroughItsPermittedMethods() throws Exception {
+        assertEquals(
+                ALLOWED_DEPENDENCIES.stream()
+                        .filter(dependency -> dependency.getName().contains(".services."))
+                        .collect(Collectors.toSet()),
+                PERMITTED_SERVICE_METHODS.keySet(),
+                "every allowlisted domain service needs a permitted-method list");
+        List<String> violations = new ArrayList<>();
+        for (Path tool : toolImplementations()) {
+            Class<?> type = toolClass(tool);
+            String source = read(tool);
+            for (Field field : type.getDeclaredFields()) {
+                Set<String> permitted = PERMITTED_SERVICE_METHODS.get(field.getType());
+                if (permitted != null && !Modifier.isStatic(field.getModifiers())) {
+                    for (String use : unpermittedServiceUses(source, field.getName(), permitted)) {
+                        violations.add(type.getSimpleName() + " " + use);
+                    }
+                }
+            }
+        }
+        assertEquals(List.of(), violations);
+    }
+
+    @Test
+    void thePermittedMethodScanRefusesABypassOfTheFrameworkRead() {
+        Set<String> permitted = PERMITTED_SERVICE_METHODS.get(ActivityService.class);
+        String source = """
+                private final ActivityService activityService;
+                Object a = activityService.create(activity);
+                Object b = activityService.getActivitiesByPersonIdInWindow(31, s, e, 101);
+                Runnable c = () -> activityService.delete(73);
+                Object d = helper(activityService);
+                """;
+
+        assertEquals(
+                List.of(
+                        "calls activityService.getActivitiesByPersonIdInWindow",
+                        "calls activityService.delete",
+                        "passes activityService on"),
+                unpermittedServiceUses(source, "activityService", permitted));
     }
 
     @Test
@@ -286,6 +351,35 @@ class AiAssistantWriteToolSpiArchTest {
             assertTrue(section.contains(statement),
                     "LOCKING.md's assistant write-tool section must state: " + statement);
         }
+    }
+
+    /**
+     * Every use of a service field in a tool's source that is neither its declaration nor a call of
+     * one of its permitted methods.
+     */
+    private static List<String> unpermittedServiceUses(
+            String source, String field, Set<String> permitted) {
+        List<String> uses = new ArrayList<>();
+        Matcher use = Pattern.compile(
+                "\\b" + Pattern.quote(field) + "\\b(\\s*(?:\\.|::)\\s*(\\w+))?")
+                .matcher(source);
+        while (use.find()) {
+            String method = use.group(2);
+            if (method == null) {
+                if (!source.substring(use.end()).stripLeading().startsWith(";")
+                        || !isDeclaration(source, use.start())) {
+                    uses.add("passes " + field + " on");
+                }
+            } else if (!permitted.contains(method)) {
+                uses.add("calls " + field + "." + method);
+            }
+        }
+        return uses;
+    }
+
+    private static boolean isDeclaration(String source, int fieldStart) {
+        int lineStart = source.lastIndexOf('\n', fieldStart) + 1;
+        return source.substring(lineStart, fieldStart).trim().startsWith("private final ");
     }
 
     private static boolean names(String source, String method) {

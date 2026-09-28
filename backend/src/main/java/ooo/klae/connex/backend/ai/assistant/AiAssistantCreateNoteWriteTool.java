@@ -24,9 +24,12 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <p>The framework holds the target {@code FOR UPDATE} before this tool calls
  * {@link NoteService#create}, which settles the visibility the note is stored with; the outcome
- * reports that stored visibility, not the requested one. The write is read back by the record the
- * returned note links to, compared with the target the framework resolved. The inverse deletes the
- * note only while its content, title, visibility and links still match what this write created.
+ * reports that stored visibility, not the requested one. The read-back compares the record the
+ * returned note links to with the target the framework resolved. It is structural:
+ * {@link NoteService#create} returns the very note this tool built, carrying the link this tool
+ * set, so the comparison cannot diverge while that holds and reads nothing back from the database.
+ * The inverse deletes the note only while its content, title, visibility and links still match
+ * what this write created.
  */
 @Component
 @RequiredArgsConstructor

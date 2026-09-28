@@ -28,9 +28,12 @@ import tools.jackson.databind.ObjectMapper;
  * {@link ActivityService#create}. A meeting logged on a person first reads, through the
  * framework's {@link AiAssistantWriteTool.ScheduleConflicts}, the activities already on that
  * person's calendar inside the meeting's window, so the outcome reports them — and the model is
- * told only how many there were and whether the list was cut short. The write is read back by the
- * record the returned activity links to, compared with the target the framework resolved. The
- * inverse deletes the activity only while it still matches the state this write created.
+ * told only how many there were and whether the list was cut short. The read-back compares the
+ * record the returned activity links to with the target the framework resolved. It is structural:
+ * {@link ActivityService#create} returns the very activity this tool built, carrying the link this
+ * tool set, so the comparison cannot diverge while that holds and reads nothing back from the
+ * database. The inverse deletes the activity only while it still matches the state this write
+ * created.
  */
 @Component
 @RequiredArgsConstructor
@@ -102,8 +105,8 @@ public class AiAssistantCreateActivityWriteTool implements AiAssistantWriteTool 
         List<?> conflicts = List.of();
         boolean conflictsTruncated = false;
         if ("meeting".equalsIgnoreCase(request.type()) && "person".equals(target.kind())) {
-            AiAssistantToolResult conflictResult = execution.scheduleConflicts().find(
-                    target.id(), start.utc(), endUtc);
+            AiAssistantToolResult conflictResult =
+                    execution.scheduleConflicts().find(start.utc(), endUtc);
             Object conflictData = conflictResult.data().get("conflicts");
             conflicts = conflictData instanceof List<?> list ? list : List.of();
             conflictsTruncated = Boolean.TRUE.equals(

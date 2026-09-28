@@ -301,24 +301,27 @@ public interface AiAssistantWriteTool {
 
     /**
      * The one read a write may make besides its own domain services: the point-in-time activities
-     * already on a processable person's calendar inside one UTC window.
+     * already on the row's own person target's calendar inside one UTC window.
      *
-     * <p>The framework answers it through the read-tool executor, which refuses a person the
-     * workspace may no longer process and drops every activity linked to one, so a tool reaches
-     * that calendar without holding the mapper or member lookup the executor reads through. A tool
-     * receives it only in {@link Execution}, after every lock the write depends on.
+     * <p>The framework binds it to the row's target before handing it over, so a tool names only a
+     * window and can never read the calendar of a person it did not lock and gate; on a target that
+     * is not a person it refuses. The framework answers it through the read-tool executor, which
+     * refuses a person the workspace may no longer process and drops every activity linked to one,
+     * so a tool reaches that calendar without holding the mapper or member lookup the executor
+     * reads through. A tool receives it only in {@link Execution}, after every lock the write
+     * depends on.
      */
     @FunctionalInterface
     interface ScheduleConflicts {
 
         /**
-         * @param personId the person whose calendar is read
          * @param startUtc the window's start in UTC
          * @param endUtc the window's end in UTC
          * @return the executor's result, carrying its {@code conflicts} list and its
          *     {@code conflictsTruncated} flag
+         * @throws IllegalStateException when the row's target is not a person
          */
-        AiAssistantToolResult find(int personId, LocalDateTime startUtc, LocalDateTime endUtc);
+        AiAssistantToolResult find(LocalDateTime startUtc, LocalDateTime endUtc);
     }
 
     /** What the framework holds locked for the target when it calls {@link #apply}. */

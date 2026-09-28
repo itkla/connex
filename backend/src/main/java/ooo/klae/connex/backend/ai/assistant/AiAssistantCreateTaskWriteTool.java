@@ -26,9 +26,11 @@ import tools.jackson.databind.ObjectMapper;
  *
  * <p>The framework holds the task board root and then the target — the person {@code FOR SHARE},
  * because linking a task does not change it — before this tool calls {@link TaskService#create}.
- * The write is read back by the record the returned task links to, compared with the target the
- * framework resolved. The inverse deletes the task only while it still matches the state this write
- * created.
+ * The read-back compares the record the returned task links to with the target the framework
+ * resolved. It is structural: {@link TaskService#create} returns the very task this tool built,
+ * carrying the link this tool set, so the comparison cannot diverge while that holds and reads
+ * nothing back from the database. The inverse deletes the task only while it still matches the
+ * state this write created.
  */
 @Component
 @RequiredArgsConstructor

@@ -188,7 +188,11 @@ abstract class AbstractAiAssistantWriteToolTest {
         return framework(declared);
     }
 
-    private AiAssistantWriteToolService framework(List<AiAssistantWriteTool> tools) {
+    /**
+     * @param tools exactly the declared tools the framework is built over
+     * @return the framework over those tools
+     */
+    AiAssistantWriteToolService framework(List<AiAssistantWriteTool> tools) {
         return new AiAssistantWriteToolService(
                 catalog,
                 new AiAssistantWriteToolRegistry(catalog, tools),

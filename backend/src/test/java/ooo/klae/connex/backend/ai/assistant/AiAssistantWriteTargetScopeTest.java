@@ -9,6 +9,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 import ooo.klae.connex.backend.beans.Activity;
@@ -129,5 +132,37 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
         verify(noteService, never()).create(any(Note.class));
         verify(chatMapper, never()).updateToolCall(
                 anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    @Test
+    void theScheduleReadAToolIsHandedIsBoundToItsOwnPersonTargetAndRefusesADeal()
+            throws Exception {
+        AiAssistantCreateActivityWriteTool probing = new AiAssistantCreateActivityWriteTool(
+                activityService, dateResolver, objectMapper) {
+            @Override
+            public Outcome apply(Execution execution) {
+                execution.scheduleConflicts().find(
+                        LocalDateTime.of(2026, 3, 12, 13, 0),
+                        LocalDateTime.of(2026, 3, 12, 14, 0));
+                return super.apply(execution);
+            }
+        };
+        AiAssistantWriteToolService service = framework(
+                List.of(createTaskTool(), stageTool(), probing, createNoteTool()));
+        propose(service, "create_activity",
+                "{\"handle\":\"r1\",\"type\":\"call\",\"subject\":\"Renewal\","
+                        + "\"start\":\"9:00am next Thursday\"}",
+                "deal", 44);
+
+        IllegalStateException refused = assertThrows(
+                IllegalStateException.class,
+                () -> service.executeAuto(TURN, TOOL_CALL_ID, result -> { }));
+
+        assertEquals("Assistant schedule read is bound to a person target", refused.getMessage());
+        verify(dealService).getDealById(44);
+        verify(executorPersonMapper, never()).getPersonById(anyInt(), anyInt());
+        verify(activityService, never()).getActivitiesByPersonIdInWindow(
+                anyInt(), any(), any(), anyInt());
+        verify(activityService, never()).create(any(Activity.class));
     }
 }
