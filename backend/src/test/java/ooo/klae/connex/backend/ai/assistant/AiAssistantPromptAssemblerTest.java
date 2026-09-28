@@ -913,7 +913,8 @@ class AiAssistantPromptAssemblerTest {
         summary.setContent("Restricted Person is the key contact.");
         summary.setStructuredJson("""
                 {"kind":"history_summary","sourceFromSeq":1,"throughSeq":4,
-                "resources":[{"handle":"r1","kind":"person","id":71}]}
+                "resources":[{"handle":"r1","kind":"person","id":71}],
+                "identifiers":[{"kind":"person","value":"Restricted Person"}]}
                 """);
 
         MaskedPrompt prompt = assembler.assemble(
@@ -925,6 +926,20 @@ class AiAssistantPromptAssemblerTest {
                 AiAssistantToolCatalog.ALL);
 
         assertTrue(prompt.getMessages().isEmpty());
+
+        AiChatResourceRegistry authorizedResources = new AiChatResourceRegistry();
+        authorizedResources.register("person", 71);
+        MaskedPrompt authorizedPrompt = assembler.assemble(
+                List.of(summary),
+                new AiAssistantToolResult(Map.of(), List.of()),
+                List.of(),
+                new MaskingContext(),
+                authorizedResources,
+                AiAssistantToolCatalog.ALL);
+
+        assertEquals(1, authorizedPrompt.getMessages().size());
+        assertTrue(authorizedPrompt.getMessages().getFirst().getContent()
+                .contains("{{P1}} is the key contact."));
     }
 
     @Test
@@ -1089,10 +1104,11 @@ class AiAssistantPromptAssemblerTest {
     void compactionOmitsUserSourceWhosePageContextIsNoLongerAuthorized() {
         AiChatMessage priorRequest = new AiChatMessage();
         priorRequest.setAuthorKind("user");
-        priorRequest.setContent("What changed on the current record?");
+        priorRequest.setContent("What changed for Restricted Person on the current record?");
         priorRequest.setStructuredJson("""
                 {"kind":"user_message","resources":[
-                {"handle":"r1","kind":"person","id":71}]}
+                {"handle":"r1","kind":"person","id":71}],
+                "identifiers":[{"kind":"person","value":"Restricted Person"}]}
                 """);
 
         MaskedPrompt prompt = assembler.assembleSummary(
@@ -1102,6 +1118,17 @@ class AiAssistantPromptAssemblerTest {
                 new AiChatResourceRegistry());
 
         assertFalse(prompt.getMessages().getFirst().getContent().contains("current record"));
+
+        AiChatResourceRegistry authorizedResources = new AiChatResourceRegistry();
+        authorizedResources.register("person", 71);
+        MaskedPrompt authorizedPrompt = assembler.assembleSummary(
+                null,
+                List.of(priorRequest),
+                new MaskingContext(),
+                authorizedResources);
+
+        assertTrue(authorizedPrompt.getMessages().getFirst().getContent().contains("current record"));
+        assertTrue(authorizedPrompt.getMessages().getFirst().getContent().contains("{{P1}}"));
     }
 
     @Test
