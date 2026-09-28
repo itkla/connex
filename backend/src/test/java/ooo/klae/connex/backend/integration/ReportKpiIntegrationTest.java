@@ -512,6 +512,7 @@ class ReportKpiIntegrationTest {
             .andReturn();
 
         verify(dealRiskService, never()).assessWorkspace(workspace.getId());
+        verify(dealRiskService, never()).assessBoundedWorkspace(workspace.getId());
 
         JsonNode generatedWidget = findWidget(
                 generateDocument(session, workspace, reportId).get("widgets"), "deal-count");
