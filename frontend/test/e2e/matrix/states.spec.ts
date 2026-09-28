@@ -17,10 +17,16 @@
  * denial from a not-found is the heroicon they pass: a closed padlock versus a magnifying glass.
  * Second, these specs deliberately induce failing responses, so unlike the sweep they record
  * response failures as evidence without asserting they are absent.
+ *
+ * The padlock is the grammar of a whole refused surface. A consolidated settings destination is not
+ * refused whole: it stays open and refuses each gated section in place with its own ask-an-admin
+ * notice. Those routes are asserted section by section against the catalogue's refusal copy, so one
+ * refused section cannot vouch for a neighbour that leaks its protected content.
  */
 
 import { test, expect } from '@playwright/test';
 
+import { message } from '../support/messages';
 import { MATRIX_ROUTES } from './routes';
 import {
     blockExternalRequests,
@@ -49,6 +55,35 @@ const EMPTY_STATE_MARKER = '[data-app-main] div.py-20.text-center h2';
 const SKELETON_MARKER = '[data-app-main] [data-slot="skeleton"]';
 const STALE_DISCLOSURE = '[data-app-main] div.rounded-lg.bg-card.px-4.py-3';
 const HARD_FAILURE_CARD = '[data-app-main] div.rounded-lg.bg-card.p-4';
+const SECTION_CONTROLS = 'table, form, input, textarea, select, button, [role="table"], [role="grid"]';
+
+type SectionRefusal = { section: string; heading: string; title: string; body: string };
+
+const ASK_ADMIN = {
+    title: message(DESKTOP.locale, 'settings', 'SettingsAvailability.askAdminTitle'),
+    body: message(DESKTOP.locale, 'settings', 'SettingsAvailability.askAdminBody'),
+};
+
+/** The sections each consolidated destination must refuse in place to a member, keyed by where it lands. */
+const CONSOLIDATED_REFUSALS: ReadonlyMap<string, readonly SectionRefusal[]> = new Map([
+    ['/settings/workspace/audit-diagnostics', [
+        {
+            section: 'audit',
+            heading: message(DESKTOP.locale, 'admin', 'AdminAuditLog.heading'),
+            title: message(DESKTOP.locale, 'admin', 'AdminAuditLog.deniedTitle'),
+            body: message(DESKTOP.locale, 'admin', 'AdminAuditLog.deniedBody'),
+        },
+        {
+            section: 'diagnostics',
+            heading: message(DESKTOP.locale, 'workspace', 'WorkspaceSettings.tabDiagnostics'),
+            ...ASK_ADMIN,
+        },
+    ]],
+    ['/settings/workspace/communications', [
+        { section: 'email', heading: message(DESKTOP.locale, 'workspace', 'WorkspaceEmail.title'), ...ASK_ADMIN },
+        { section: 'delivery', heading: message(DESKTOP.locale, 'workspace', 'WorkspaceDelivery.title'), ...ASK_ADMIN },
+    ]],
+]);
 
 test.describe('loading — a slow source must show its skeleton, not a fabricated empty result', () => {
     test.afterEach(() => {
@@ -188,7 +223,27 @@ test.describe('permission denied — real RBAC, not injected', () => {
                 landing.acceptedPaths.includes(landing.finalPath),
                 `a denied member must not be redirected somewhere undeclared — ${describeLanding(landing)}`,
             ).toBe(true);
-            expect(denied, `${route.path} must present the denial grammar to a member`).toBeGreaterThan(0);
+            const sectionRefusals = CONSOLIDATED_REFUSALS.get(landing.finalPath);
+            if (sectionRefusals === undefined) {
+                expect(denied, `${route.path} must present the denial grammar to a member`).toBeGreaterThan(0);
+            } else {
+                for (const refusal of sectionRefusals) {
+                    const region = page.locator(`[data-app-main] [id="${refusal.section}"]`);
+                    await expect(
+                        region.getByRole('heading', { name: refusal.heading, exact: true }),
+                        `${landing.finalPath} must keep its ${refusal.section} section in place for a member`,
+                    ).toBeVisible();
+                    await expect(
+                        region,
+                        `${landing.finalPath} must refuse its ${refusal.section} section to a member in place`,
+                    ).toContainText(refusal.title);
+                    await expect(region).toContainText(refusal.body);
+                    expect(
+                        await region.locator(SECTION_CONTROLS).count(),
+                        `the refused ${refusal.section} section must not render its protected content`,
+                    ).toBe(0);
+                }
+            }
             expect(notFound, `${route.path} must not disguise a denial as a not-found state`).toBe(0);
             await context.close();
         });
