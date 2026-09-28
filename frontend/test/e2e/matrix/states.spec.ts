@@ -24,7 +24,7 @@
  * refused section cannot vouch for a neighbour that leaks its protected content.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 import { message } from '../support/messages';
 import { MATRIX_ROUTES } from './routes';
@@ -245,6 +245,70 @@ test.describe('permission denied — real RBAC, not injected', () => {
                 }
             }
             expect(notFound, `${route.path} must not disguise a denial as a not-found state`).toBe(0);
+            await context.close();
+        });
+    }
+});
+
+/** What each member-admitted route must render, proving the admission rather than a silent refusal. */
+const MEMBER_ADMISSIONS: ReadonlyMap<string, (page: Page) => Promise<void>> = new Map([
+    ['org-diagnostics', async (page: Page) => {
+        await expect(
+            page.locator('[data-app-main]'),
+            'a member with organization standing must not be shown the organization refusal',
+        ).not.toContainText(message(DESKTOP.locale, 'organization', 'Organization.noAccessTitle'));
+        await expect(page.locator('[data-app-main] [id="audit"]')).toContainText(
+            message(DESKTOP.locale, 'organization', 'OrgAudit.title'),
+        );
+        await expect(
+            page.locator('[data-app-main] [id="diagnostics"]').getByRole('button', {
+                name: message(DESKTOP.locale, 'workspace', 'TenantDiagnostics.refresh'),
+                exact: true,
+            }),
+            'the organization diagnostics panel must load for a member with organization standing',
+        ).toBeVisible();
+    }],
+    ['products', async (page: Page) => {
+        await expect(
+            page.getByRole('heading', { level: 1, name: message(DESKTOP.locale, 'products', 'ProductsBrowser.title'), exact: true }),
+            'the product catalog is readable by every workspace member',
+        ).toBeVisible();
+    }],
+]);
+
+test.describe('permission admitted — gated-looking routes the seeded member legitimately reaches', () => {
+    for (const route of MATRIX_ROUTES.filter((candidate) => candidate.admitsMember)) {
+        test(`${route.id} admits the seeded member`, async ({ browser }) => {
+            const admitted = MEMBER_ADMISSIONS.get(route.id);
+            if (admitted === undefined) throw new Error(`${route.id} declares a member admission without its expected content`);
+            const context = await matrixContext(browser, { ...DESKTOP, role: 'member' });
+            blockExternalRequests(context);
+            const page = await context.newPage();
+            const faults = captureFaults(page);
+            const responses = captureResponseFailures(page);
+
+            const response = await page.goto(route.path, { waitUntil: 'domcontentloaded' });
+            await page.waitForLoadState('networkidle').catch(() => undefined);
+            const landing = await landingOf(page, route.path, route.landsOn);
+            const denied = await page.locator(DENIED_MARKER).count();
+            const notFound = await page.locator(NOT_FOUND_MARKER).count();
+
+            await record(page, {
+                routeId: route.id,
+                path: route.path,
+                state: 'permission-admitted',
+                axes: { ...DESKTOP, role: 'member' },
+                faults: significantFaults(faults),
+                responseFailures: classifyResponseFailures(responses, { role: 'member' }),
+                httpStatus: response?.status() ?? null,
+                finalPath: landing.finalPath,
+                notes: `denial-markers=${denied} not-found-markers=${notFound}`,
+            });
+
+            expect(landing.ok, `an admitted member must land on the route itself — ${describeLanding(landing)}`).toBe(true);
+            expect(denied, `${route.path} must not refuse a member it admits`).toBe(0);
+            expect(notFound, `${route.path} must not read as a missing page`).toBe(0);
+            await admitted(page);
             await context.close();
         });
     }
