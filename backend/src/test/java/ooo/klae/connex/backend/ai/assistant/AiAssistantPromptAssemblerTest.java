@@ -1532,6 +1532,47 @@ class AiAssistantPromptAssemblerTest {
     }
 
     /**
+     * The directory lists only what the turn is offered. A routed read-only skill's prompt drops
+     * the write families it could never call and so only ever shrinks, while the full offer a
+     * generic turn keeps renders byte-for-byte the prompt the envelope budget is measured from.
+     */
+    @Test
+    void theToolsetDirectoryListsOnlyTheOfferedToolsets() {
+        java.util.Set<AiAssistantToolCatalog.Toolset> readOffer = java.util.Set.of(
+                AiAssistantToolCatalog.Toolset.ANALYTICS, AiAssistantToolCatalog.Toolset.SCHEDULE);
+        java.util.Set<AiAssistantToolCatalog.Toolset> fullOffer =
+                java.util.Set.copyOf(AiAssistantToolCatalog.LOADABLE);
+
+        String routedReact = assembler.fixedPrompt(AiAssistantToolCatalog.CORE, readOffer)
+                .getSystemPrompt();
+        String routedNative = assembler.fixedNativePrompt(AiAssistantToolCatalog.CORE, readOffer)
+                .getSystemPrompt();
+        for (String prompt : List.of(routedReact, routedNative)) {
+            for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+                assertEquals(
+                        readOffer.contains(toolset),
+                        prompt.contains(toolset.key() + " - " + toolset.summary() + " - "),
+                        toolset.key() + " must be listed exactly when it is offered");
+            }
+        }
+        assertTrue(routedReact.length()
+                < assembler.fixedPrompt(AiAssistantToolCatalog.CORE).getSystemPrompt().length());
+        assertTrue(routedNative.length()
+                < assembler.fixedNativePrompt(AiAssistantToolCatalog.CORE).getSystemPrompt()
+                        .length());
+
+        assertEquals(
+                assembler.fixedPrompt(AiAssistantToolCatalog.CORE).getSystemPrompt(),
+                assembler.fixedPrompt(AiAssistantToolCatalog.CORE, fullOffer).getSystemPrompt(),
+                "the full offer must leave a generic turn's prompt unchanged");
+        assertEquals(
+                assembler.fixedNativePrompt(AiAssistantToolCatalog.CORE).getSystemPrompt(),
+                assembler.fixedNativePrompt(AiAssistantToolCatalog.CORE, fullOffer)
+                        .getSystemPrompt(),
+                "the full offer must leave a generic turn's prompt unchanged");
+    }
+
+    /**
      * The find_tools result is the server's own statement of what the turn now holds, so it is
      * replayed verbatim rather than through the tenant-data replacer.
      *
@@ -1551,7 +1592,8 @@ class AiAssistantPromptAssemblerTest {
         AiAssistantToolResult findToolsResult = new AiAssistantToolsetLoader(catalog)
                 .load(
                         objectMapper.readTree("{\"toolset\":\"analytics\"}"),
-                        new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE))
+                        new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE),
+                        java.util.Set.copyOf(AiAssistantToolCatalog.LOADABLE))
                 .result();
         AiAssistantToolResult companyRead = new AiAssistantToolResult(
                 Map.of("handle", "r1", "name", "Analytics"),

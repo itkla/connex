@@ -348,11 +348,35 @@ public class AiAssistantPromptAssembler {
             AiStructuredRepair repair,
             SkillContext skill,
             Set<Toolset> loadedToolsets) {
+        return assemble(
+                history, pageContext, toolTurns, context, resources,
+                attachmentData, budget, repair, skill, loadedToolsets,
+                AiAssistantToolCatalog.ALL);
+    }
+
+    /**
+     * Assembles one step whose toolset directory lists only the toolsets the turn is offered.
+     *
+     * @param offeredToolsets the loadable toolsets this turn may hold; the directory renders only
+     *     these, so a routed turn is never shown a family its skill's authority cannot call
+     */
+    public MaskedPrompt assemble(
+            List<AiChatMessage> history,
+            AiAssistantToolResult pageContext,
+            List<ToolTurn> toolTurns,
+            MaskingContext context,
+            AiChatResourceRegistry resources,
+            List<Map<String, Object>> attachmentData,
+            AiAssistantPromptBudget budget,
+            AiStructuredRepair repair,
+            SkillContext skill,
+            Set<Toolset> loadedToolsets,
+            Set<Toolset> offeredToolsets) {
         seedIdentifiers(pageContext.identifiers(), context);
         for (ToolTurn turn : toolTurns) {
             seedIdentifiers(turn.result().identifiers(), context);
         }
-        String system = systemPrompt(loadedToolsets);
+        String system = systemPrompt(loadedToolsets, offeredToolsets);
         PromptAssembly.Builder prompt = PromptAssembly.builder(context).system(system);
         for (AiChatMessage message : history) {
             appendHistory(prompt, message, context, resources);
@@ -408,11 +432,34 @@ public class AiAssistantPromptAssembler {
             AiAssistantPromptBudget budget,
             SkillContext skill,
             Set<Toolset> loadedToolsets) {
+        return assembleNative(
+                history, pageContext, toolTurns, context, resources,
+                attachmentData, budget, skill, loadedToolsets, AiAssistantToolCatalog.ALL);
+    }
+
+    /**
+     * Assembles native-tool input whose toolset directory lists only the toolsets the turn is
+     * offered.
+     *
+     * @param offeredToolsets the loadable toolsets this turn may hold; the directory renders only
+     *     these, so a routed turn is never shown a family its skill's authority cannot call
+     */
+    public MaskedPrompt assembleNative(
+            List<AiChatMessage> history,
+            AiAssistantToolResult pageContext,
+            List<ToolTurn> toolTurns,
+            MaskingContext context,
+            AiChatResourceRegistry resources,
+            List<Map<String, Object>> attachmentData,
+            AiAssistantPromptBudget budget,
+            SkillContext skill,
+            Set<Toolset> loadedToolsets,
+            Set<Toolset> offeredToolsets) {
         seedIdentifiers(pageContext.identifiers(), context);
         for (ToolTurn turn : toolTurns) {
             seedIdentifiers(turn.result().identifiers(), context);
         }
-        String system = nativeSystemPrompt(loadedToolsets);
+        String system = nativeSystemPrompt(loadedToolsets, offeredToolsets);
         PromptAssembly.Builder prompt = PromptAssembly.builder(context).system(system);
         for (AiChatMessage message : history) {
             appendHistory(prompt, message, context, resources);
@@ -725,15 +772,38 @@ public class AiAssistantPromptAssembler {
 
     /** Returns the fixed assistant system prompt for exact serialized-envelope budgeting. */
     public MaskedPrompt fixedPrompt(Set<Toolset> loadedToolsets) {
+        return fixedPrompt(loadedToolsets, AiAssistantToolCatalog.ALL);
+    }
+
+    /**
+     * Returns the fixed assistant system prompt of a turn offered only some toolsets.
+     *
+     * @param loadedToolsets the toolsets the turn currently holds
+     * @param offeredToolsets the loadable toolsets the turn may hold
+     * @return the fixed prompt whose directory lists only the offered toolsets
+     */
+    public MaskedPrompt fixedPrompt(Set<Toolset> loadedToolsets, Set<Toolset> offeredToolsets) {
         return PromptAssembly.builder(new MaskingContext())
-                .system(systemPrompt(loadedToolsets))
+                .system(systemPrompt(loadedToolsets, offeredToolsets))
                 .build();
     }
 
     /** Returns the fixed native-tool prompt for exact serialized-envelope budgeting. */
     public MaskedPrompt fixedNativePrompt(Set<Toolset> loadedToolsets) {
+        return fixedNativePrompt(loadedToolsets, AiAssistantToolCatalog.ALL);
+    }
+
+    /**
+     * Returns the fixed native-tool prompt of a turn offered only some toolsets.
+     *
+     * @param loadedToolsets the toolsets the turn currently holds
+     * @param offeredToolsets the loadable toolsets the turn may hold
+     * @return the fixed prompt whose directory lists only the offered toolsets
+     */
+    public MaskedPrompt fixedNativePrompt(
+            Set<Toolset> loadedToolsets, Set<Toolset> offeredToolsets) {
         return PromptAssembly.builder(new MaskingContext())
-                .system(nativeSystemPrompt(loadedToolsets))
+                .system(nativeSystemPrompt(loadedToolsets, offeredToolsets))
                 .build();
     }
 
@@ -1441,7 +1511,7 @@ public class AiAssistantPromptAssembler {
         return declared.toString();
     }
 
-    private String systemPrompt(Set<Toolset> loadedToolsets) {
+    private String systemPrompt(Set<Toolset> loadedToolsets, Set<Toolset> offeredToolsets) {
         Map<String, Object> catalog = new LinkedHashMap<>();
         catalog.put("tools", declaredToolCatalog(loadedToolsets));
         String serialized;
@@ -1481,7 +1551,7 @@ public class AiAssistantPromptAssembler {
                 %s
                 """.formatted(
                         FIND_TOOLS_DIRECTIVE,
-                        toolsetDirectory(loadedToolsets),
+                        toolsetDirectory(loadedToolsets, offeredToolsets),
                         ANSWER_DOCUMENT_CONTRACT,
                         FIRST_FINAL_EXAMPLE,
                         ENDING_FINAL_EXAMPLE,
@@ -1489,19 +1559,26 @@ public class AiAssistantPromptAssembler {
     }
 
     /**
-     * Renders the constant directory of every loadable toolset with its current state.
+     * Renders the constant directory of every toolset the turn is offered with its current state.
      *
-     * <p>All five loadable sets are listed on every step, loaded or not, so the directory's byte
-     * cost does not grow as sets are loaded and the reservation the turn's one budget is measured
-     * against stays an upper bound for this component too. The keys and summaries are
+     * <p>Every offered set is listed on every step, loaded or not, so the directory's byte cost
+     * does not grow as sets are loaded. A generic turn is offered every loadable set, and a routed
+     * turn only the families its skill may hold, a subset of the same lines; either way the
+     * reservation the turn's one budget is measured against stays an upper bound for this
+     * component too. A set outside the offer is left out rather than marked, because the model
+     * has no use for a key {@code find_tools} will refuse. The keys and summaries are
      * server-authored catalog constants, never model or tenant text.
      *
      * @param loadedToolsets the toolsets the turn currently holds
-     * @return one directory line per loadable toolset
+     * @param offeredToolsets the loadable toolsets the turn may hold
+     * @return one directory line per offered toolset
      */
-    private String toolsetDirectory(Set<Toolset> loadedToolsets) {
+    private String toolsetDirectory(Set<Toolset> loadedToolsets, Set<Toolset> offeredToolsets) {
         StringBuilder directory = new StringBuilder();
         for (Map.Entry<Toolset, String> entry : toolCatalog.directory()) {
+            if (!offeredToolsets.contains(entry.getKey())) {
+                continue;
+            }
             if (!directory.isEmpty()) {
                 directory.append('\n');
             }
@@ -1514,7 +1591,7 @@ public class AiAssistantPromptAssembler {
         return directory.toString();
     }
 
-    private String nativeSystemPrompt(Set<Toolset> loadedToolsets) {
+    private String nativeSystemPrompt(Set<Toolset> loadedToolsets, Set<Toolset> offeredToolsets) {
         return """
                 You are Ask Connex, a thorough relationship-intelligence assistant. Use only the supplied native function tools. When you have enough evidence, return exactly one JSON object matching the final-answer schema. Do not describe or encode a tool call in ordinary content.
 
@@ -1543,7 +1620,7 @@ public class AiAssistantPromptAssembler {
                 Valid conversation-ending final response: %s
                 """.formatted(
                         FIND_TOOLS_DIRECTIVE,
-                        toolsetDirectory(loadedToolsets),
+                        toolsetDirectory(loadedToolsets, offeredToolsets),
                         ANSWER_DOCUMENT_CONTRACT,
                         FIRST_FINAL_EXAMPLE,
                         ENDING_FINAL_EXAMPLE);

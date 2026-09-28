@@ -339,7 +339,8 @@ class AiChatAgentLoopServiceTest {
         AiAssistantToolResult loadResult = new AiAssistantToolsetLoader(
                         new AiAssistantToolCatalog())
                 .load(objectMapper.readTree("{\"toolset\":\"write_content\"}"),
-                        new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE))
+                        new java.util.LinkedHashSet<>(AiAssistantToolCatalog.CORE),
+                        java.util.Set.copyOf(AiAssistantToolCatalog.LOADABLE))
                 .result();
         int bothResultsBytes = sizingAssembler.assemble(
                         List.of(),
@@ -3727,6 +3728,102 @@ class AiChatAgentLoopServiceTest {
         verify(writeToolService, never()).prepare(any(), any(), any(), anyLong());
         verify(persistenceService, never()).proposeTool(
                 eq(TURN), anyInt(), anyInt(), eq("change_deal_stage"), any());
+    }
+
+    /**
+     * A read-only routed skill is offered only the read families, so the directory never invites
+     * a write load and a load the model asks for anyway is refused recoverably: the turn keeps its
+     * step budget and still answers, where holding the family would have ended it at the first
+     * write with {@code tool_outside_skill_authority} and no answer.
+     */
+    @Test
+    void aReadOnlyRoutedSkillIsOfferedNoWriteToolsetAndStillAnswersAfterAskingForOne()
+            throws Exception {
+        routedDigest();
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("write_pipeline")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null,
+                        new AiAssistantStep.FinalAnswer(
+                                "I can summarize the activity, but not move deals.",
+                                List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService).failTool(
+                eq(TURN), eq(29), contains("toolset_unavailable_for_skill"));
+        verify(persistenceService, never()).finishTool(
+                eq(TURN), anyInt(), eq("executed"), any());
+        verify(writeToolService, never()).prepare(any(), any(), any(), anyLong());
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        for (AiInvocation invocation : invocations.getAllValues()) {
+            String systemPrompt = invocation.prompt().getSystemPrompt();
+            for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+                boolean readFamily = AiAssistantToolCatalog.writeToolsOf(toolset).isEmpty();
+                assertEquals(
+                        readFamily,
+                        systemPrompt.contains(toolset.key() + " - " + toolset.summary() + " - "),
+                        () -> "a READ skill's directory lists exactly the read families: "
+                                + toolset.key());
+            }
+            assertFalse(systemPrompt.contains("change_deal_stage"),
+                    "a refused load must not widen the vocabulary it was refused for");
+        }
+        assertTrue(messageText(invocations.getAllValues().getLast())
+                .contains("\"error\":\"toolset_unavailable_for_skill\""));
+    }
+
+    /**
+     * A generic turn keeps the full offer: every loadable family is listed and loadable, and its
+     * system prompt is byte-for-byte the fixed prompt the envelope budget is measured from.
+     */
+    @Test
+    void aGenericTurnIsStillOfferedEveryLoadableToolset() throws Exception {
+        when(invocationService.completeStructuredRepairable(
+                any(AiInvocation.class), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class)))
+                .thenReturn(parsed(loadStep("write_pipeline")))
+                .thenReturn(parsed(new AiAssistantStep(
+                        null, new AiAssistantStep.FinalAnswer("Pipeline is healthy.", List.of()))));
+        when(persistenceService.resolve(
+                eq(TURN), any(), any(), anyInt(), anyInt())).thenReturn(true);
+
+        AiGenerationTaskResult<AiChatTurnGenerationResult> result = service.run(TURN);
+
+        assertEquals(AiGenerationTaskResult.Outcome.RESOLVED, result.outcome(), result.reason());
+        verify(persistenceService).finishTool(
+                eq(TURN), anyInt(), eq("executed"), contains("write_pipeline"));
+        verify(persistenceService, never()).failTool(
+                eq(TURN), anyInt(), contains("toolset_unavailable_for_skill"));
+        ArgumentCaptor<AiInvocation> invocations = ArgumentCaptor.forClass(AiInvocation.class);
+        verify(invocationService, times(2)).completeStructuredRepairable(
+                invocations.capture(), eq(AiAssistantStep.class),
+                any(AiRawOutputGuard.class), any(AiResponseSchema.class),
+                eq(directAdmission), any(Runnable.class));
+        String firstSystemPrompt =
+                invocations.getAllValues().getFirst().prompt().getSystemPrompt();
+        for (AiAssistantToolCatalog.Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+            assertTrue(firstSystemPrompt.contains(
+                    toolset.key() + " - " + toolset.summary() + " - available"),
+                    () -> "a generic turn is offered every loadable family: " + toolset.key());
+        }
+        assertEquals(
+                new AiAssistantPromptAssembler(objectMapper, new AiAssistantToolCatalog())
+                        .fixedPrompt(AiAssistantToolCatalog.CORE)
+                        .getSystemPrompt(),
+                firstSystemPrompt,
+                "a generic turn's envelope is unchanged by the offer");
     }
 
     /**

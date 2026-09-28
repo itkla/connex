@@ -225,6 +225,55 @@ class AiSkillCatalogTest {
                 "a read-only family stays declarable on a READ-authority skill");
     }
 
+    /**
+     * The rule a declaration's seed is validated by and the rule a routed turn's offer is computed
+     * by are one predicate, so a skill can never be offered a family it could not declare, nor
+     * declare one it would not be offered. Every loadable family is probed under a read-only tier,
+     * a write tier naming only some of the family's writes, and a write tier naming all of them.
+     */
+    @Test
+    void seedValidationAndTheRoutedOfferShareMayHold() {
+        for (Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+            List<String> writes = AiAssistantToolCatalog.writeToolsOf(toolset);
+            Set<String> allWrites = Set.copyOf(writes);
+            Set<String> someWrites = writes.isEmpty() ? Set.of() : Set.of(writes.getFirst());
+            for (AiSkillCatalog.Authority authority : AiSkillCatalog.Authority.values()) {
+                for (Set<String> allowed : List.of(Set.<String>of(), someWrites, allWrites)) {
+                    boolean holdable = AiSkillCatalog.mayHold(authority, allowed, toolset);
+                    boolean declarable = declares(Set.of(toolset.key()), authority, allowed);
+                    assertEquals(declarable, holdable,
+                            () -> toolset.key() + " under " + authority + " allowing " + allowed);
+                    boolean expected = writes.isEmpty()
+                            || (authority != AiSkillCatalog.Authority.READ
+                                    && allowed.containsAll(writes));
+                    assertEquals(expected, holdable,
+                            () -> toolset.key() + " under " + authority + " allowing " + allowed);
+                }
+            }
+        }
+        for (SkillSpec shipped : catalog.skills()) {
+            for (Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+                assertEquals(
+                        AiAssistantToolCatalog.writeToolsOf(toolset).isEmpty(),
+                        AiSkillCatalog.mayHold(
+                                shipped.authority(), shipped.allowedTools(), toolset),
+                        () -> "every shipped skill is READ today, so " + shipped.key()
+                                + " may hold exactly the read families and is offered no write"
+                                + " family: " + toolset.key());
+            }
+        }
+    }
+
+    private static boolean declares(
+            Set<String> toolsets, AiSkillCatalog.Authority authority, Set<String> allowedTools) {
+        try {
+            spec(toolsets, authority, allowedTools);
+            return true;
+        } catch (IllegalArgumentException refused) {
+            return false;
+        }
+    }
+
     private static SkillSpec specWithToolsets(Set<String> toolsets) {
         return spec(toolsets, AiSkillCatalog.Authority.READ, Set.of());
     }

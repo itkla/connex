@@ -3,6 +3,8 @@ package ooo.klae.connex.backend.ai.assistant;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -342,6 +344,7 @@ public class AiChatAgentLoopService {
             }
 
             AiSkillCatalog.SkillSpec activeSkill = skillReference == null ? null : routing.skill();
+            state.offeredToolsets = offeredToolsets(activeSkill);
             int consumedSteps = 0;
             int stepCursor = 0;
             boolean closingAttempted = false;
@@ -401,7 +404,8 @@ public class AiChatAgentLoopService {
                                     attachmentContext.data(),
                                     memory.budget(),
                                     stepContext,
-                                    state.loadedToolsets)
+                                    state.loadedToolsets,
+                                    state.offeredToolsets)
                             : promptAssembler.assemble(
                                     history,
                                     pageContext,
@@ -412,7 +416,8 @@ public class AiChatAgentLoopService {
                                     memory.budget(),
                                     stepRepair,
                                     stepContext,
-                                    state.loadedToolsets);
+                                    state.loadedToolsets,
+                                    state.offeredToolsets);
                     AiAssistantPromptAssembler.NativeReplay nativeReplay = nativeTools
                             ? promptAssembler.nativeReplay(
                                     state.toolTurns,
@@ -1212,7 +1217,8 @@ public class AiChatAgentLoopService {
         try {
             requireCurrentToolExecution(turn);
             AiAssistantToolsetLoader.Load load = findTools
-                    ? toolsetLoader.load(call.tool().args(), state.loadedToolsets)
+                    ? toolsetLoader.load(
+                            call.tool().args(), state.loadedToolsets, state.offeredToolsets)
                     : null;
             AiAssistantToolResult toolResult = load != null
                     ? load.result()
@@ -1467,6 +1473,34 @@ public class AiChatAgentLoopService {
     }
 
     /**
+     * Names the loadable toolsets a turn may hold, fixed once before its first model step.
+     *
+     * <p>A generic turn is offered every loadable toolset, exactly as before routing existed. A
+     * routed turn is offered only the families {@link AiSkillCatalog#mayHold} admits for its
+     * skill — the same rule {@code SkillSpec} applies to what a declaration seeds — so a read-only
+     * skill is never shown, and never loads, a write family whose first use
+     * {@link #requireSkillAuthority} would end the turn for with no answer. The offer is computed
+     * from the skill the turn actually runs under: a routed turn whose plan did not execute has no
+     * active skill, keeps the full offer, and is also outside the authority gate.
+     *
+     * <p>Narrowing only. It decides what the directory renders and what {@code find_tools} accepts;
+     * {@code requireSkillAuthority} stays the binding gate for every write, whatever is offered.
+     *
+     * @param skill the skill the turn runs under, or {@code null} for a generic turn
+     * @return the offered loadable toolsets, never including {@code core}
+     */
+    private static Set<Toolset> offeredToolsets(AiSkillCatalog.SkillSpec skill) {
+        Set<Toolset> offered = EnumSet.noneOf(Toolset.class);
+        for (Toolset toolset : AiAssistantToolCatalog.LOADABLE) {
+            if (skill == null
+                    || AiSkillCatalog.mayHold(skill.authority(), skill.allowedTools(), toolset)) {
+                offered.add(toolset);
+            }
+        }
+        return Collections.unmodifiableSet(offered);
+    }
+
+    /**
      * Refuses a synthesis-step tool that would exceed the routed skill's write authority.
      *
      * <p>The invariant this guard exists for is that a routed turn cannot gain WRITE authority its
@@ -1493,8 +1527,8 @@ public class AiChatAgentLoopService {
      * Refuses a declared tool whose toolset this turn has not loaded.
      *
      * <p>Purely narrowing per-turn state, never an authorization decision: every tool in every
-     * loadable toolset is already reachable on a routed or generic turn, so a load restores reach
-     * rather than granting any. {@code requireSkillAuthority} runs first and keeps owning write
+     * toolset the turn is offered is already reachable on it, so a load restores reach rather than
+     * granting any. {@code requireSkillAuthority} runs first and keeps owning write
      * authority, so a write tool that is both unloaded and outside its skill's declaration still
      * settles as {@code tool_outside_skill_authority} rather than being relabelled here.
      *
@@ -1977,6 +2011,7 @@ public class AiChatAgentLoopService {
         private final Set<String> seenToolResults = new HashSet<>();
         private final Set<Toolset> loadedToolsets =
                 new LinkedHashSet<>(AiAssistantToolCatalog.CORE);
+        private Set<Toolset> offeredToolsets = offeredToolsets(null);
         private final List<AiChatTodo> todos = new ArrayList<>();
         private int noProgressSteps;
         private int planPublications;
