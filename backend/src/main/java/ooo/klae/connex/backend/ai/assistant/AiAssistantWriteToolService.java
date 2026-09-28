@@ -675,8 +675,7 @@ public class AiAssistantWriteToolService {
             }
             AiAssistantWriteToolRequest typedRequest = readRequest(tool, request);
             return new StoredWrite(
-                    tool, tier, targetKind, targetId,
-                    expectedRestrictionEpoch, request, typedRequest);
+                    tool, tier, targetKind, targetId, expectedRestrictionEpoch, typedRequest);
         } catch (JacksonException | IllegalArgumentException exception) {
             throw new IllegalStateException("Assistant tool proposal could not be read", exception);
         }
@@ -746,9 +745,11 @@ public class AiAssistantWriteToolService {
     /**
      * The model's view of one stored outcome, projected by the write tool that stored it.
      *
-     * <p>Every write tool the catalog declares is a registered bean, so a missing tool here means
-     * the row names no write tool at all — a read tool's executed row replayed by its id — and such
-     * a row projects no outcome.
+     * <p>Every row that reaches this method names a registered write tool: {@link #proposalResult}
+     * replays only a row whose name the prepared write already resolved, and {@link #executeAuto}
+     * is handed only ids that {@code AiChatTurnPersistenceService.proposeWriteTool} stored or
+     * replayed under that same write tool's name. The empty outcome for a name with no registered
+     * tool is unreachable, fail-closed defence, not a replay path for any other row.
      */
     private Map<String, Object> modelOutcome(String tool, JsonNode outcome) {
         Map<String, Object> result = new LinkedHashMap<>();
@@ -914,7 +915,6 @@ public class AiAssistantWriteToolService {
             String targetKind,
             int targetId,
             long restrictionEpoch,
-            JsonNode request,
             AiAssistantWriteToolRequest typedRequest) {
     }
 
