@@ -32,12 +32,16 @@ import ooo.klae.connex.backend.ai.provider.AiProviderCapabilities;
  */
 class AiAssistantToolCallKeyTest {
     private static final Path MAIN_SOURCES = Path.of("src/main/java");
+    private static final Path MAPPER_SOURCES = Path.of("src/main/resources/mappers");
     private static final String KEY_SOURCE = "AiAssistantToolCallKey.java";
+    private static final String TEXT_BLOCK = "\"\"\"";
     private static final Pattern LEGACY_KEY = Pattern.compile(
             "^turn-([1-9][0-9]*)-step-([1-9][0-9]*)(?:-call-([1-9][0-9]*))?$");
-    private static final Pattern GRAMMAR_LITERAL = Pattern.compile(
-            "\"(?:[^\"\\\\\\n]|\\\\.)*(?:(?<![A-Za-z])turn-|-step-)(?:[^\"\\\\\\n]|\\\\.)*\""
-                    + "|\"-call-");
+    private static final Pattern GRAMMAR_FRAGMENT = Pattern.compile(
+            "(?:(?<![A-Za-z])turn|-step|-call|-row)-(?![A-Za-z])");
+    private static final Pattern SPLIT_JAVA_WORD = Pattern.compile("-?(?:turn|step|call|row)-?");
+    private static final Pattern SPLIT_SQL_WORD = Pattern.compile(
+            "'(?:-?turn-?|-(?:step|call|row)-?|(?:step|call|row)-)'");
 
     @Test
     void theSoleCallOfAStepKeepsTheExactUnsuffixedKey() {
@@ -196,8 +200,12 @@ class AiAssistantToolCallKeyTest {
      *
      * <p>Two readers once held their own regular expression and the producer a third rendering, so
      * a new shape had to be taught to each separately and a reader that missed it dropped the row
-     * silently. Any production string literal spelling the grammar outside the key class is that
-     * divergence starting again.
+     * silently. Any production Java string literal or text block, or any mapper XML statement,
+     * spelling a grammar fragment ({@code turn-}, {@code -step-}, {@code -call-}, {@code -row-})
+     * outside the key class is that divergence starting again, and so is a bare {@code turn},
+     * {@code step}, {@code call} or {@code row} literal concatenated with {@code +} in Java or a
+     * quoted {@code 'turn'} or hyphenated segment word in SQL. A key assembled from characters, or
+     * from data that is not a literal, is beyond what a source scan can see.
      */
     @Test
     void noOtherProductionSourceSpellsTheKeyGrammar() throws IOException {
@@ -207,14 +215,138 @@ class AiAssistantToolCallKeyTest {
                 if (source.getFileName().toString().equals(KEY_SOURCE)) {
                     continue;
                 }
-                Matcher literal = GRAMMAR_LITERAL.matcher(
-                        Files.readString(source, StandardCharsets.UTF_8));
-                while (literal.find()) {
-                    violations.add(source + ": " + literal.group());
+                for (String violation : javaViolations(
+                        Files.readString(source, StandardCharsets.UTF_8))) {
+                    violations.add(source + ": " + violation);
+                }
+            }
+        }
+        try (Stream<Path> mappers = Files.walk(MAPPER_SOURCES)) {
+            for (Path mapper : mappers.filter(path -> path.toString().endsWith(".xml")).toList()) {
+                for (String violation : mapperViolations(
+                        Files.readString(mapper, StandardCharsets.UTF_8))) {
+                    violations.add(mapper + ": " + violation);
                 }
             }
         }
         assertEquals(List.of(), violations);
+    }
+
+    /**
+     * Proves the source scan catches every spelling it claims to, and not the unrelated words that
+     * merely share a fragment.
+     */
+    @Test
+    void theSourceScanSeesEverySpellingOfTheGrammar() {
+        List<String> javaCopies = List.of(
+                "boolean bulk = key.endsWith(\"-row-\" + ordinal);",
+                "boolean batch = key.contains(\"x-call-\");",
+                "String key = \"turn\" + \"-\" + turnId;",
+                "String key = prefix + \"step\";",
+                "Pattern row = Pattern.compile(\"-row-(\\\\d+)$\");",
+                "String sql = \"\"\"\n    LIKE 'turn-%'\n    \"\"\";",
+                "String key = String.format(\"turn-%d-step-%d\", turnId, step);");
+        for (String copy : javaCopies) {
+            assertFalse(javaViolations(copy).isEmpty(), copy);
+        }
+        List<String> mapperCopies = List.of(
+                "WHERE tc.idempotency_key LIKE CONCAT('turn-', #{turnId}, '-step-%')",
+                "WHERE tc.idempotency_key REGEXP '-row-[1-9][0-9]*$'",
+                "WHERE tc.idempotency_key LIKE CONCAT('turn', '-', #{turnId}, '%')");
+        for (String copy : mapperCopies) {
+            assertFalse(mapperViolations(copy).isEmpty(), copy);
+        }
+
+        assertEquals(List.of(), javaViolations(String.join("\n",
+                "case \"native_call_content\" -> \"tool-call-with-content\";",
+                "Objects.requireNonNull(turn, \"turn\");",
+                "record(stepNumber, \"step\", toolName);",
+                "char quote = '\"'; String code = \"return-code\";",
+                "/** Renders {@code \"turn-1-step-2\"}. */",
+                "// \"-row-1\"",
+                "String prose = \"\"\"\n    turn-by-turn\n    \"\"\";")));
+        assertEquals(List.of(), mapperViolations(String.join("\n",
+                "<!-- A turn-side fallback -->",
+                "WHEN 'call' THEN 'call'",
+                "AND ACTION_ORIENTATION = 'ROW'")));
+    }
+
+    private static List<String> javaViolations(String source) {
+        List<String> violations = new ArrayList<>();
+        int index = 0;
+        while (index < source.length()) {
+            if (source.startsWith("//", index)) {
+                int lineEnd = source.indexOf('\n', index);
+                index = lineEnd < 0 ? source.length() : lineEnd;
+            } else if (source.startsWith("/*", index)) {
+                int commentEnd = source.indexOf("*/", index + 2);
+                index = commentEnd < 0 ? source.length() : commentEnd + 2;
+            } else if (source.charAt(index) == '\'') {
+                index = literalEnd(source, index + 1, "'");
+            } else if (source.startsWith(TEXT_BLOCK, index)) {
+                int end = literalEnd(source, index + TEXT_BLOCK.length(), TEXT_BLOCK);
+                checkJavaLiteral(source, index, end, TEXT_BLOCK.length(), violations);
+                index = end;
+            } else if (source.charAt(index) == '"') {
+                int end = literalEnd(source, index + 1, "\"");
+                checkJavaLiteral(source, index, end, 1, violations);
+                index = end;
+            } else {
+                index++;
+            }
+        }
+        return violations;
+    }
+
+    private static int literalEnd(String source, int bodyStart, String closing) {
+        int index = bodyStart;
+        while (index < source.length()) {
+            if (source.charAt(index) == '\\') {
+                index += 2;
+            } else if (source.startsWith(closing, index)) {
+                return index + closing.length();
+            } else {
+                index++;
+            }
+        }
+        return source.length();
+    }
+
+    private static void checkJavaLiteral(
+            String source, int start, int end, int delimiter, List<String> violations) {
+        String body = source.substring(
+                Math.min(start + delimiter, end), Math.max(start + delimiter, end - delimiter));
+        if (GRAMMAR_FRAGMENT.matcher(body).find()
+                || (SPLIT_JAVA_WORD.matcher(body).matches() && concatenated(source, start, end))) {
+            violations.add(source.substring(start, end));
+        }
+    }
+
+    private static boolean concatenated(String source, int start, int end) {
+        int before = start - 1;
+        while (before >= 0 && Character.isWhitespace(source.charAt(before))) {
+            before--;
+        }
+        int after = end;
+        while (after < source.length() && Character.isWhitespace(source.charAt(after))) {
+            after++;
+        }
+        return (before >= 0 && source.charAt(before) == '+')
+                || (after < source.length() && source.charAt(after) == '+');
+    }
+
+    private static List<String> mapperViolations(String source) {
+        List<String> violations = new ArrayList<>();
+        for (Pattern pattern : List.of(GRAMMAR_FRAGMENT, SPLIT_SQL_WORD)) {
+            Matcher fragment = pattern.matcher(source);
+            while (fragment.find()) {
+                int lineStart = source.lastIndexOf('\n', fragment.start()) + 1;
+                int lineEnd = source.indexOf('\n', fragment.end());
+                violations.add(source.substring(
+                        lineStart, lineEnd < 0 ? source.length() : lineEnd).strip());
+            }
+        }
+        return violations;
     }
 
     private static Optional<Integer> legacyTurn(String key) {
