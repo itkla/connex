@@ -139,6 +139,25 @@ public interface AiAssistantWriteTool {
     boolean inverseAvailable();
 
     /**
+     * The stored outcome fields that say only how the write went, which {@link #outcomeSummary}
+     * may read even for a viewer who may not read the details.
+     *
+     * <p>Such a viewer still learns from the card that the write ran, so a summary may also say
+     * whether it changed anything. The framework hands that viewer's review only these fields, and
+     * only those that hold a boolean, so no workspace string or identifier can reach them through a
+     * flag. A boolean can still be record state, so a shared flag must describe only how this write
+     * went — whether it changed anything — and never a property of the record, such as whether it
+     * is archived or restricted, which is exactly what withholding the details exists to keep from
+     * that viewer. Each tool's flags are pinned by a reviewed ledger in
+     * {@code AiAssistantWriteToolRegistryTest}.
+     *
+     * @return the flag fields, none by default
+     */
+    default Set<String> sharedOutcomeFlags() {
+        return Set.of();
+    }
+
+    /**
      * The workspace data this tool's card projection reads besides its own target and request.
      *
      * <p>The read service batches each input once per page of cards, only for cards whose viewer
@@ -162,9 +181,10 @@ public interface AiAssistantWriteTool {
      * The member-visible request summary.
      *
      * <p>For a viewer who may not read the proposal's details the framework passes a review with
-     * no target, request, outcome, members or stages, so the summary can only be generic. A
-     * detailed summary is screened for special-care text and replaced by the generic one when the
-     * screen excludes it.
+     * no target, request, members or stages, and an outcome holding at most the boolean
+     * {@link #sharedOutcomeFlags()}, so the summary can say no more than those flags. A detailed
+     * summary is screened for special-care text and replaced by the generic one when the screen
+     * excludes it.
      *
      * @param review the card's batched, viewer-authorized read state
      * @return the member-visible request summary
@@ -364,6 +384,22 @@ public interface AiAssistantWriteTool {
         public ReadBack {
             Objects.requireNonNull(field, "An assistant read-back names the identifier it compares");
         }
+
+        /**
+         * A read-back that verifies nothing, for a write whose domain service reports no
+         * identifier to compare.
+         *
+         * <p>It compares the resolved identifier with itself, so it can never record a divergence
+         * and is not verification. A tool that uses it states in its own Javadoc why nothing can be
+         * read back, and {@code AiAssistantWriteToolSpiArchTest} pins which tools may.
+         *
+         * @param field the identifier's name
+         * @param resolved the identifier the tool resolved before the write
+         * @return a comparison of that identifier with itself
+         */
+        public static ReadBack structural(String field, Integer resolved) {
+            return new ReadBack(field, resolved, resolved);
+        }
     }
 
     /**
@@ -455,13 +491,15 @@ public interface AiAssistantWriteTool {
      * The batched, viewer-authorized read state one card is projected from.
      *
      * <p>When the viewer may not read the details, the framework withholds every record value:
-     * {@code target}, {@code request} and {@code outcome} are {@code null} and {@code members} and
-     * {@code stages} are empty.
+     * {@code target} and {@code request} are {@code null}, {@code outcome} holds at most the
+     * tool's boolean {@link AiAssistantWriteTool#sharedOutcomeFlags()} of an executed call, and
+     * {@code members} and {@code stages} are empty.
      *
      * @param detailsReadable whether the viewer requested the proposal and can read its target
      * @param target the visible target, or {@code null} when the viewer may not read it
      * @param request the stored request object, or {@code null} when the viewer may not read it
-     * @param outcome the stored outcome of an executed call, or {@code null}
+     * @param outcome the stored outcome of an executed call, only its shared flags when the viewer
+     *     may not read it, or {@code null}
      * @param members the workspace's members when the tool declared {@link ReviewInput#MEMBERS}
      * @param stages the workspace's pipeline stages when the tool declared {@link ReviewInput#STAGES}
      */

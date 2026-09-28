@@ -74,6 +74,7 @@ abstract class AbstractAiAssistantWriteToolTest {
     CompanyService companyService;
     DealService dealService;
     TaskService taskService;
+    TagService tagService;
     PipelineService pipelineService;
     PersonMapper executorPersonMapper;
     AiRestrictionEpoch restrictionEpoch;
@@ -99,6 +100,7 @@ abstract class AbstractAiAssistantWriteToolTest {
         companyService = mock(CompanyService.class);
         dealService = mock(DealService.class);
         taskService = mock(TaskService.class);
+        tagService = mock(TagService.class);
         pipelineService = mock(PipelineService.class);
         executorPersonMapper = mock(PersonMapper.class);
         restrictionEpoch = mock(AiRestrictionEpoch.class);
@@ -179,12 +181,13 @@ abstract class AbstractAiAssistantWriteToolTest {
 
     /**
      * @param tools the task and stage tools under test, possibly overridden
-     * @return the framework over those tools plus the activity and note tools
+     * @return the framework over those tools plus the activity, note and tag tools
      */
     AiAssistantWriteToolService service(List<AiAssistantWriteTool> tools) {
         List<AiAssistantWriteTool> declared = new ArrayList<>(tools);
         declared.add(createActivityTool());
         declared.add(createNoteTool());
+        declared.add(addTagTool());
         return framework(declared);
     }
 
@@ -203,7 +206,7 @@ abstract class AbstractAiAssistantWriteToolTest {
                 activityService,
                 taskService,
                 noteService,
-                mock(TagService.class),
+                tagService,
                 personService,
                 companyService,
                 dealService,
@@ -228,6 +231,11 @@ abstract class AbstractAiAssistantWriteToolTest {
 
     AiAssistantCreateNoteWriteTool createNoteTool() {
         return new AiAssistantCreateNoteWriteTool(noteService, objectMapper);
+    }
+
+    AiAssistantAddTagWriteTool addTagTool() {
+        return new AiAssistantAddTagWriteTool(
+                tagService, personService, companyService, dealService);
     }
 
     /** Prepares and stores one proposal as tool call 29. */

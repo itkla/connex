@@ -34,23 +34,39 @@ import tools.jackson.databind.node.ObjectNode;
  *
  * <p>The registry-wide checks run over every production write-tool bean found on the classpath,
  * so a tool added later is held to them without editing this class: principal resolution touches
- * none of the tool's dependencies, and the model's view of an outcome carries no identifier and no
- * undo, approval or verification metadata.
+ * none of the tool's dependencies, the model's view of an outcome carries no identifier and no
+ * undo, approval or verification metadata, and a tool shares with a viewer who may not read its
+ * details only the outcome flags {@link #SHARED_OUTCOME_FLAGS} has reviewed.
  */
 class AiAssistantWriteToolRegistryTest {
     private static final ObjectMapper JSON = JsonMapper.builder().build();
+
+    /**
+     * The reviewed outcome flags each tool may share with a viewer who may not read its details.
+     *
+     * <p>Such a viewer is a shared participant, or a requester who has since lost sight of the
+     * target, and {@code detailsReadable} exists to withhold record state from them; a shared flag
+     * passes that gate. So a flag may say only how the write went — {@code add_tag}'s
+     * {@code changed}, whether this call created the association — and never a property of the
+     * record, such as whether it is archived or restricted. Adding a flag, or a tool with one, is a
+     * reviewed edit here.
+     */
+    private static final Map<String, Set<String>> SHARED_OUTCOME_FLAGS =
+            Map.of("add_tag", Set.of("changed"));
     private final AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
 
     @Test
     void indexesTheDeclaredToolsInCatalogOrderWhateverOrderTheyWereDiscoveredIn() {
         AiAssistantWriteToolRegistry registry = new AiAssistantWriteToolRegistry(catalog, List.of(
                 tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal")),
+                tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
                 tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
                 tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
                 tool("create_activity", ToolTier.AUTO, Set.of("person", "deal"))));
 
         assertEquals(
-                List.of("create_activity", "create_task", "create_note", "change_deal_stage"),
+                List.of("create_activity", "create_task", "create_note", "add_tag",
+                        "change_deal_stage"),
                 registry.tools().stream().map(AiAssistantWriteTool::name).toList());
         assertTrue(registry.find("create_task").isPresent());
         assertTrue(registry.find("assign_owner").isEmpty());
@@ -63,9 +79,10 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantCreateTaskWriteTool(null, null, null),
                 new AiAssistantChangeDealStageWriteTool(null, null),
                 new AiAssistantCreateActivityWriteTool(null, null, null),
-                new AiAssistantCreateNoteWriteTool(null, null)));
+                new AiAssistantCreateNoteWriteTool(null, null),
+                new AiAssistantAddTagWriteTool(null, null, null, null)));
 
-        assertEquals(4, registry.tools().size());
+        assertEquals(5, registry.tools().size());
     }
 
     @Test
@@ -140,13 +157,15 @@ class AiAssistantWriteToolRegistryTest {
 
     @Test
     void refusesALegacyLedgerEntryForAToolThatNowHasABean() {
-        assertRefused("add_tag has a write-tool bean and must leave the legacy ledger",
+        assertRefused("assign_owner has a write-tool bean and must leave the legacy ledger",
                 List.of(
                         tool("create_activity", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
                         tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal")),
-                        tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal"))));
+                        tool("assign_owner", ToolTier.CONFIRM,
+                                Set.of("person", "company", "deal"))));
     }
 
     @Test
@@ -156,7 +175,15 @@ class AiAssistantWriteToolRegistryTest {
                 List.of(
                         tool("create_activity", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
-                        tool("create_note", ToolTier.AUTO, Set.of("person", "deal"))));
+                        tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal"))));
+        assertRefused(
+                "add_tag is declared in the catalog but has no write-tool bean",
+                List.of(
+                        tool("create_activity", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
+                        tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal"))));
         assertRefused(
                 "create_note is declared in the catalog but has no write-tool bean",
                 List.of(
@@ -226,6 +253,17 @@ class AiAssistantWriteToolRegistryTest {
             assertFalse(model.containsValue(74), tool.name() + " tells the model an identifier");
             assertFalse(
                     model.containsValue("0f1e2d"), tool.name() + " tells the model a fingerprint");
+        }
+    }
+
+    @Test
+    void everyDeclaredToolSharesOnlyItsReviewedOutcomeFlags() {
+        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
+            assertEquals(
+                    SHARED_OUTCOME_FLAGS.getOrDefault(tool.name(), Set.of()),
+                    tool.sharedOutcomeFlags(),
+                    tool.name() + " shares outcome flags nobody reviewed with a viewer who may"
+                            + " not read its details");
         }
     }
 

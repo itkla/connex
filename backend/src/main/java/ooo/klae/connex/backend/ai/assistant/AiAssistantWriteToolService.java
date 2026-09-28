@@ -36,7 +36,6 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Resolution;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Row;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.ScheduleConflicts;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Target;
-import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.AddTag;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.AssignOwner;
 import ooo.klae.connex.backend.ai.assistant.AiChatResourceRegistry.ResourceRef;
 import ooo.klae.connex.backend.beans.AiChatSession;
@@ -45,7 +44,6 @@ import ooo.klae.connex.backend.beans.AiChatTurn;
 import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Person;
-import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallDto;
 import ooo.klae.connex.backend.exceptions.BadRequestException;
@@ -331,23 +329,20 @@ public class AiAssistantWriteToolService {
             throw new ConflictException("Assistant tool undo window has expired");
         }
         requirePermissions(authorized.authority(), actor.userId(), write);
-        Optional<AiAssistantWriteTool> declared = writeToolRegistry.find(write.toolName());
-        if (declared.isPresent()) {
-            if (!declared.get().inverseAvailable()) {
-                throw new ConflictException("Assistant tool has no owned inverse");
-            }
-            declared.get().undo(
-                    new Authority(
-                            actor.workspaceId(), actor.userId(), toolCall.getId(), clock.instant()),
-                    new Inverse(
-                            text(undo, "entityKind"),
-                            integer(undo, "entityId"),
-                            text(undo, "fingerprint"),
-                            true,
-                            storedExtra(undo)));
-        } else {
-            undo(undo);
+        AiAssistantWriteTool tool = writeToolRegistry.find(write.toolName())
+                .orElseThrow(() -> new ConflictException("Assistant tool undo metadata is invalid"));
+        if (!tool.inverseAvailable()) {
+            throw new ConflictException("Assistant tool has no owned inverse");
         }
+        tool.undo(
+                new Authority(
+                        actor.workspaceId(), actor.userId(), toolCall.getId(), clock.instant()),
+                new Inverse(
+                        text(undo, "entityKind"),
+                        integer(undo, "entityId"),
+                        text(undo, "fingerprint"),
+                        true,
+                        storedExtra(undo)));
         undo.put("status", "undone");
         undo.put("undoneAt", clock.instant().toString());
         String resultJson = serialize(envelope);
@@ -379,7 +374,6 @@ public class AiAssistantWriteToolService {
             return apply(declared.get(), write, authority, principals.principals(), mutation);
         }
         return switch (write.toolName()) {
-            case "add_tag" -> addTag(write);
             case "assign_owner" -> assignOwner(write, requireOwnerAssignment(principals.owner()));
             default -> throw new BadRequestException("Unsupported assistant write tool");
         };
@@ -451,21 +445,6 @@ public class AiAssistantWriteToolService {
         }
     }
 
-    private ExecutionOutcome addTag(StoredWrite write) {
-        AddTag request = request(write, AddTag.class);
-        Tag tag = uniqueTag(request.tag());
-        boolean changed = addTag(write, tag.getId());
-        Map<String, Object> outcome = new LinkedHashMap<>();
-        outcome.put("status", EXECUTED);
-        outcome.put("recordType", write.targetKind());
-        outcome.put("tag", tag.getName());
-        outcome.put("changed", changed);
-        Map<String, Object> undo = undoData(
-                "tag", write.targetId(), "present:" + tag.getId(), false);
-        undo.put("tagId", tag.getId());
-        return new ExecutionOutcome(outcome, undo);
-    }
-
     private ExecutionOutcome assignOwner(StoredWrite write, OwnerAssignment owner) {
         switch (write.targetKind()) {
             case "person" -> personService.updateOwner(write.targetId(), owner.userId());
@@ -478,13 +457,6 @@ public class AiAssistantWriteToolService {
         outcome.put("recordType", write.targetKind());
         outcome.put("owner", owner.label());
         return new ExecutionOutcome(outcome, null);
-    }
-
-    private void undo(ObjectNode undo) {
-        switch (text(undo, "entityKind")) {
-            case "tag" -> throw new ConflictException("Assistant tag undo is unavailable");
-            default -> throw new ConflictException("Assistant tool undo metadata is invalid");
-        }
     }
 
     /**
@@ -738,7 +710,7 @@ public class AiAssistantWriteToolService {
             return declared.get().requiredPermissions(write.targetKind());
         }
         return switch (write.toolName()) {
-            case "add_tag", "assign_owner" -> Set.of(updatePermission(write.targetKind()));
+            case "assign_owner" -> Set.of(updatePermission(write.targetKind()));
             default -> throw new BadRequestException("Unsupported assistant write tool");
         };
     }
@@ -787,7 +759,6 @@ public class AiAssistantWriteToolService {
             AiAssistantWriteToolRequest request = declared.isPresent()
                     ? objectMapper.treeToValue(args, declared.get().requestType())
                     : switch (name) {
-                        case "add_tag" -> objectMapper.treeToValue(args, AddTag.class);
                         case "assign_owner" -> objectMapper.treeToValue(args, AssignOwner.class);
                         default -> throw AiAssistantLoopException.malformed("unknown_write_tool");
                     };
@@ -868,17 +839,8 @@ public class AiAssistantWriteToolService {
         if (declared.isPresent()) {
             return declared.get().modelOutcome(outcome);
         }
-        switch (tool) {
-            case "add_tag" -> {
-                copyText(outcome, result, "recordType");
-                copyText(outcome, result, "tag");
-                result.put("changed", outcome.path("changed").asBoolean());
-            }
-            default -> {
-                copyText(outcome, result, "recordType");
-                copyText(outcome, result, "owner");
-            }
-        }
+        copyText(outcome, result, "recordType");
+        copyText(outcome, result, "owner");
         return result;
     }
 
@@ -924,25 +886,6 @@ public class AiAssistantWriteToolService {
         }
     }
 
-    private boolean addTag(StoredWrite write, int tagId) {
-        return switch (write.targetKind()) {
-            case "person" -> personService.addTag(write.targetId(), tagId);
-            case "company" -> companyService.addTag(write.targetId(), tagId);
-            case "deal" -> dealService.addTag(write.targetId(), tagId);
-            default -> throw new BadRequestException("Unsupported tag target");
-        };
-    }
-
-    private Tag uniqueTag(String name) {
-        List<Tag> matches = tagService.getAllTags().stream()
-                .filter(tag -> tag.getName() != null && tag.getName().equalsIgnoreCase(name.trim()))
-                .toList();
-        if (matches.size() != 1) {
-            throw new ResourceNotFoundException("Tag is unavailable or ambiguous");
-        }
-        return matches.getFirst();
-    }
-
     private OwnerAssignment resolveOwnerAssignment(String owner) {
         if ("unassigned".equalsIgnoreCase(owner.trim())) {
             return new OwnerAssignment(null, "unassigned");
@@ -977,7 +920,7 @@ public class AiAssistantWriteToolService {
             return declared.get().acceptedTargetKinds();
         }
         return switch (toolName) {
-            case "add_tag", "assign_owner" -> Set.of("person", "company", "deal");
+            case "assign_owner" -> Set.of("person", "company", "deal");
             default -> Set.of();
         };
     }

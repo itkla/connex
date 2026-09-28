@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.ai.assistant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -25,6 +26,8 @@ import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
 import jakarta.validation.Validation;
@@ -34,15 +37,18 @@ import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.AiChatSession;
 import ooo.klae.connex.backend.beans.AiChatToolCall;
 import ooo.klae.connex.backend.beans.AiChatTurn;
+import ooo.klae.connex.backend.beans.Company;
 import ooo.klae.connex.backend.beans.Deal;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Person;
 import ooo.klae.connex.backend.beans.Pipeline;
 import ooo.klae.connex.backend.beans.Stage;
+import ooo.klae.connex.backend.beans.Tag;
 import ooo.klae.connex.backend.beans.Task;
 import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.dto.AiAssistantToolCallReadDto;
 import ooo.klae.connex.backend.exceptions.ConflictException;
+import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.mappers.ActivityMapper;
 import ooo.klae.connex.backend.mappers.AiChatMapper;
 import ooo.klae.connex.backend.mappers.CompanyMapper;
@@ -73,7 +79,8 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <p>The expected strings were captured from the per-tool switch arms before each tool moved —
  * {@code create_task} and {@code change_deal_stage} first, then {@code create_activity}, with its
- * meeting schedule-conflict enrichment, and {@code create_note} — so
+ * meeting schedule-conflict enrichment, and {@code create_note}, then {@code add_tag} on every record
+ * kind it accepts, both when it adds the tag and when the tag was already present — so
  * a green run after the move is evidence that the move changed none of them: the stored proposal,
  * the stored result envelope with its outcome and inverse key order, the approval, rejection and
  * undo responses, the model's own view of the outcome, and the transcript cards. A key that
@@ -128,11 +135,13 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
     private AiChatMapper chatMapper;
     private WorkspaceService workspaceService;
     private PersonService personService;
+    private CompanyService companyService;
     private DealService dealService;
     private TaskService taskService;
     private PipelineService pipelineService;
     private ActivityService activityService;
     private NoteService noteService;
+    private TagService tagService;
     private PersonMapper executorPersonMapper;
     private WorkspaceService.LockedPermissionSnapshot authority;
     private AiAssistantWriteToolService service;
@@ -153,6 +162,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         pipelineService = mock(PipelineService.class);
         activityService = mock(ActivityService.class);
         noteService = mock(NoteService.class);
+        tagService = mock(TagService.class);
         executorPersonMapper = mock(PersonMapper.class);
         AiRestrictionEpoch restrictionEpoch = mock(AiRestrictionEpoch.class);
         AiWorkspaceGovernanceService governanceService = mock(AiWorkspaceGovernanceService.class);
@@ -173,7 +183,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 TURN.workspaceId(), TURN.restrictionEpoch())).thenReturn(true);
         AiAssistantDateResolver dateResolver = new AiAssistantDateResolver(authService, CLOCK);
         AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
-        CompanyService companyService = mock(CompanyService.class);
+        companyService = mock(CompanyService.class);
         AiAssistantToolExecutor readExecutor = new AiAssistantToolExecutor(
                 catalog,
                 mock(SearchService.class),
@@ -197,7 +207,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, dateResolver, objectMapper),
-                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                        new AiAssistantAddTagWriteTool(
+                                tagService, personService, companyService, dealService))),
                 readExecutor,
                 dateResolver,
                 chatMapper,
@@ -205,7 +217,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 activityService,
                 taskService,
                 noteService,
-                mock(TagService.class),
+                tagService,
                 personService,
                 companyService,
                 dealService,
@@ -470,7 +482,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, mock(AiAssistantDateResolver.class), objectMapper),
-                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                        new AiAssistantAddTagWriteTool(
+                                tagService, personService, companyService, dealService))),
                 readChatMapper,
                 readWorkspace,
                 personMapper,
@@ -883,7 +897,9 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
                         new AiAssistantCreateActivityWriteTool(
                                 activityService, mock(AiAssistantDateResolver.class), objectMapper),
-                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper))),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                        new AiAssistantAddTagWriteTool(
+                                tagService, personService, companyService, dealService))),
                 readChatMapper,
                 readWorkspace,
                 readPersonMapper,
@@ -974,6 +990,221 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         .toList());
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "person, 31, true",
+            "person, 31, false",
+            "company, 52, true",
+            "company, 52, false",
+            "deal, 44, true",
+            "deal, 44, false"})
+    void anImmediateTagKeepsEveryDurableApiAndModelByteOnEveryRecordKind(
+            String kind, int id, boolean changed) throws Exception {
+        when(tagService.getAllTags()).thenReturn(List.of(tag(8, "Churn risk"), tag(9, "Priority")));
+        when(personService.addTag(31, 9)).thenReturn(changed);
+        when(companyService.addTag(52, 9)).thenReturn(changed);
+        when(dealService.addTag(44, 9)).thenReturn(changed);
+        AiAssistantPreparedWrite write = prepared(
+                "add_tag", "{\"handle\":\"r1\",\"tag\":\"priority \"}", kind, id);
+
+        assertEquals(tagArguments(kind, id), write.argumentsJson());
+        stored(write);
+
+        AiAssistantWriteToolService.WriteExecution execution =
+                service.executeAuto(TURN, 29, result -> { });
+
+        String outcome = "{\"status\":\"executed\",\"recordType\":\"" + kind + "\","
+                + "\"tag\":\"Priority\",\"changed\":" + changed + "}";
+        String resultJson = capturedExecutedResult();
+        assertEquals(tagResult(kind, id, changed), resultJson);
+        assertEquals(
+                "{\"id\":29,\"tool\":\"add_tag\",\"tier\":\"auto\","
+                        + "\"status\":\"executed\",\"result\":" + outcome + ","
+                        + "\"undoAvailable\":false,\"undoExpiresAt\":\"2026-03-06T15:10:00Z\"}",
+                objectMapper.writeValueAsString(execution.toolCall()));
+        String modelView = "{\"toolCallId\":29,\"tool\":\"add_tag\",\"tier\":\"auto\","
+                + "\"status\":\"executed\",\"outcome\":{\"recordType\":\"" + kind + "\","
+                + "\"tag\":\"Priority\",\"changed\":" + changed + "}}";
+        assertEquals(modelView, objectMapper.writeValueAsString(execution.toolResult().data()));
+        assertFalse(resultJson.contains("verification"));
+        switch (kind) {
+            case "person" -> {
+                verify(personService).lockProcessablePersonForUpdate(31);
+                verify(personService).addTag(31, 9);
+            }
+            case "company" -> {
+                verify(companyService).lockOwnedCompanyForUpdate(52);
+                verify(companyService).addTag(52, 9);
+            }
+            default -> {
+                verify(dealService).lockDealForUpdate(44);
+                verify(dealService).addTag(44, 9);
+            }
+        }
+
+        storedToolCall.setStatus("executed");
+        storedToolCall.setResultJson(resultJson);
+        assertEquals(
+                modelView,
+                objectMapper.writeValueAsString(
+                        service.executeAuto(TURN, 29, result -> { }).toolResult().data()));
+        assertEquals(
+                modelView,
+                objectMapper.writeValueAsString(service.proposalResult(
+                        write,
+                        new AiAssistantToolProposal(29, "executed", resultJson, true)).data()));
+        ConflictException refused = assertThrows(
+                ConflictException.class, () -> service.undo(TURN.sessionId(), 29));
+        assertEquals("Assistant tool has no owned inverse", refused.getMessage());
+        verify(chatMapper, never()).updateExecutedToolResult(anyInt(), anyInt(), any(), anyInt());
+    }
+
+    @Test
+    void anAmbiguousOrUnknownTagRefusesWithItsMessageAndWritesNothing() throws Exception {
+        stored(prepared("add_tag", "{\"handle\":\"r1\",\"tag\":\"priority\"}", "person", 31));
+        when(tagService.getAllTags()).thenReturn(List.of(tag(9, "Priority"), tag(10, "PRIORITY")));
+
+        ResourceNotFoundException ambiguous = assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.executeAuto(TURN, 29, result -> { }));
+
+        when(tagService.getAllTags()).thenReturn(List.of(tag(8, "Churn risk")));
+
+        ResourceNotFoundException unknown = assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.executeAuto(TURN, 29, result -> { }));
+
+        assertEquals("Tag is unavailable or ambiguous", ambiguous.getMessage());
+        assertEquals("Tag is unavailable or ambiguous", unknown.getMessage());
+        verify(personService, never()).addTag(anyInt(), anyInt());
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    @Test
+    void theTranscriptCardsForTagsKeepEveryByteAndNeverOfferUndo() throws Exception {
+        AiChatMapper readChatMapper = mock(AiChatMapper.class);
+        WorkspaceService readWorkspace = mock(WorkspaceService.class);
+        PersonMapper readPersonMapper = mock(PersonMapper.class);
+        CompanyMapper companyMapper = mock(CompanyMapper.class);
+        DealMapper dealMapper = mock(DealMapper.class);
+        when(readWorkspace.getCurrentWorkspaceId()).thenReturn(TURN.workspaceId());
+        when(readWorkspace.getCurrentUserId()).thenReturn(TURN.userId());
+        when(readWorkspace.permissionsFor(TURN.workspaceId(), TURN.userId()))
+                .thenReturn(EnumSet.allOf(Permission.class));
+        AiChatSession session = new AiChatSession();
+        session.setId(TURN.sessionId());
+        session.setCreatedByUserId(TURN.userId());
+        session.setStatus("active");
+        when(readChatMapper.getAccessibleSessionById(
+                TURN.workspaceId(), TURN.userId(), TURN.sessionId())).thenReturn(session);
+        when(readChatMapper.listToolCallsBySession(
+                TURN.workspaceId(), TURN.sessionId(), false, 100)).thenReturn(List.of(
+                card(51, TURN.userId(), "executed", "add_tag",
+                        tagArguments("person", 31), tagResult("person", 31, true)),
+                card(52, TURN.userId(), "executed", "add_tag",
+                        tagArguments("company", 52), tagResult("company", 52, false)),
+                card(53, TURN.userId(), "executed", "add_tag",
+                        tagArguments("deal", 44), tagResult("deal", 44, true)),
+                card(54, 99, "executed", "add_tag",
+                        tagArguments("person", 31), tagResult("person", 31, false)),
+                card(55, TURN.userId(), "executed", "add_tag", tagArguments("person", 31),
+                        tagResult("person", 31, true)
+                                .replace("\"unavailable\"", "\"available\"")),
+                card(56, TURN.userId(), "executed", "add_tag", tagArguments("person", 31),
+                        "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\"}}"),
+                card(57, TURN.userId(), "failed", "add_tag", tagArguments("person", 31), null)));
+        when(readChatMapper.listAssistantMessagesBySessionAndTurnIds(
+                TURN.workspaceId(), TURN.sessionId(), List.of(TURN.turnId()), 100))
+                .thenReturn(List.of());
+        when(readPersonMapper.getByIds(TURN.workspaceId(), List.of(31)))
+                .thenReturn(List.of(person(31)));
+        Company company = new Company();
+        company.setId(52);
+        company.setName("Acme Holdings");
+        when(companyMapper.getByIds(TURN.workspaceId(), List.of(52)))
+                .thenReturn(List.of(company));
+        when(dealMapper.getByIds(TURN.workspaceId(), List.of(44))).thenReturn(List.of(deal()));
+        AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
+        AiAssistantToolCallReadService readService = new AiAssistantToolCallReadService(
+                catalog,
+                new AiAssistantWriteToolRegistry(catalog, List.of(
+                        new AiAssistantCreateTaskWriteTool(
+                                taskService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantChangeDealStageWriteTool(dealService, pipelineService),
+                        new AiAssistantCreateActivityWriteTool(
+                                activityService, mock(AiAssistantDateResolver.class), objectMapper),
+                        new AiAssistantCreateNoteWriteTool(noteService, objectMapper),
+                        new AiAssistantAddTagWriteTool(
+                                tagService, personService, companyService, dealService))),
+                readChatMapper,
+                readWorkspace,
+                readPersonMapper,
+                companyMapper,
+                dealMapper,
+                mock(PipelineMapper.class),
+                mock(ActivityMapper.class),
+                mock(TaskMapper.class),
+                mock(NoteMapper.class),
+                mock(AiAssistantSessionReadAudit.class),
+                objectMapper,
+                CLOCK);
+        String person31 = "\"target\":{\"kind\":\"person\",\"id\":31,\"label\":\"Ada Lovelace\"},";
+        String company52 =
+                "\"target\":{\"kind\":\"company\",\"id\":52,\"label\":\"Acme Holdings\"},";
+        String deal44 = "\"target\":{\"kind\":\"deal\",\"id\":44,\"label\":\"Acme renewal\"},";
+        String priority = "\"outcomeValues\":[{\"field\":\"tag\",\"value\":\"Priority\"}],";
+        String offered = "\"undoExpiresAt\":\"2026-03-06T15:10:00Z\",\"undoAvailable\":false,";
+
+        assertEquals(
+                "[" + String.join(",", List.of(
+                        "{\"id\":51,\"toolName\":\"add_tag\",\"tier\":\"auto\","
+                                + "\"status\":\"executed\"," + person31
+                                + "\"requestSummary\":\"Add an existing tag\","
+                                + "\"outcomeSummary\":\"Tag added\",\"change\":null,"
+                                + priority + "\"createdRecord\":null,"
+                                + "\"messageId\":null,\"turnId\":17," + offered + TIMES + "}",
+                        "{\"id\":52,\"toolName\":\"add_tag\",\"tier\":\"auto\","
+                                + "\"status\":\"executed\"," + company52
+                                + "\"requestSummary\":\"Add an existing tag\","
+                                + "\"outcomeSummary\":\"Tag was already present\","
+                                + "\"change\":null," + priority + "\"createdRecord\":null,"
+                                + "\"messageId\":null,\"turnId\":17," + offered + TIMES + "}",
+                        "{\"id\":53,\"toolName\":\"add_tag\",\"tier\":\"auto\","
+                                + "\"status\":\"executed\"," + deal44
+                                + "\"requestSummary\":\"Add an existing tag\","
+                                + "\"outcomeSummary\":\"Tag added\",\"change\":null,"
+                                + priority + "\"createdRecord\":null,"
+                                + "\"messageId\":null,\"turnId\":17," + offered + TIMES + "}",
+                        "{\"id\":54,\"toolName\":\"add_tag\",\"tier\":\"auto\","
+                                + "\"status\":\"executed\"," + person31
+                                + "\"requestSummary\":\"Add an existing tag\","
+                                + "\"outcomeSummary\":\"Tag was already present\","
+                                + "\"change\":null,\"outcomeValues\":[],\"createdRecord\":null,"
+                                + "\"messageId\":null,\"turnId\":17," + offered + TIMES + "}",
+                        "{\"id\":55,\"toolName\":\"add_tag\",\"tier\":\"auto\","
+                                + "\"status\":\"executed\"," + person31
+                                + "\"requestSummary\":\"Add an existing tag\","
+                                + "\"outcomeSummary\":\"Tag added\",\"change\":null,"
+                                + priority + "\"createdRecord\":null,"
+                                + "\"messageId\":null,\"turnId\":17," + offered + TIMES + "}",
+                        "{\"id\":56,\"toolName\":\"add_tag\",\"tier\":\"auto\","
+                                + "\"status\":\"executed\"," + person31
+                                + "\"requestSummary\":\"Add an existing tag\","
+                                + "\"outcomeSummary\":\"Request completed\",\"change\":null,"
+                                + "\"outcomeValues\":[],\"createdRecord\":null,"
+                                + "\"messageId\":null,\"turnId\":17,\"undoExpiresAt\":null,"
+                                + "\"undoAvailable\":false," + TIMES + "}",
+                        "{\"id\":57,\"toolName\":\"add_tag\",\"tier\":\"auto\","
+                                + "\"status\":\"failed\"," + person31
+                                + "\"requestSummary\":\"Add an existing tag\","
+                                + "\"outcomeSummary\":\"Request failed\",\"change\":null,"
+                                + "\"outcomeValues\":[],\"createdRecord\":null,"
+                                + "\"messageId\":null,\"turnId\":17,\"undoExpiresAt\":null,"
+                                + "\"undoAvailable\":false," + TIMES + "}")) + "]",
+                objectMapper.writeValueAsString(readService.list(TURN.sessionId(), false)));
+    }
+
     private static final String TIMES = "\"createdAt\":\"2026-03-06 14:59:00.000000\","
             + "\"updatedAt\":\"2026-03-06 15:00:00.000000\","
             + "\"executedAt\":\"2026-03-06 15:00:00.000000\"";
@@ -1005,6 +1236,27 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         stage.setName(name);
         stage.setPipeline(pipeline);
         return stage;
+    }
+
+    private static String tagArguments(String kind, int id) {
+        return "{\"tool\":\"add_tag\",\"tier\":\"auto\",\"restrictionEpoch\":23,"
+                + "\"target\":{\"kind\":\"" + kind + "\",\"id\":" + id + "},"
+                + "\"request\":{\"handle\":\"r1\",\"tag\":\"priority \"}}";
+    }
+
+    private static String tagResult(String kind, int id, boolean changed) {
+        return "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\","
+                + "\"recordType\":\"" + kind + "\",\"tag\":\"Priority\",\"changed\":" + changed
+                + "},\"undo\":{\"status\":\"unavailable\","
+                + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"tag\","
+                + "\"entityId\":" + id + ",\"fingerprint\":\"present:9\",\"tagId\":9}}";
+    }
+
+    private static Tag tag(int id, String name) {
+        Tag tag = new Tag();
+        tag.setId(id);
+        tag.setName(name);
+        return tag;
     }
 
     private static AiChatToolCall card(
