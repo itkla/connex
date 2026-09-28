@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.mappers;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -8,10 +9,13 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
+import org.apache.ibatis.mapping.BoundSql;
 import org.apache.ibatis.mapping.MappedStatement;
+import org.apache.ibatis.mapping.SqlCommandType;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.Test;
 
@@ -78,9 +82,19 @@ class GoalMapperXmlTest {
 
     private static void assertScoped(Configuration configuration, String statement, Object parameters) {
         MappedStatement mapped = configuration.getMappedStatement(GoalMapper.class.getName() + "." + statement);
-        String sql = mapped.getBoundSql(parameters).getSql();
-        assertNotNull(sql);
-        assertTrue(sql.contains("workspace_id"));
-        assertTrue(sql.contains("?"));
+        BoundSql bound = mapped.getBoundSql(parameters);
+        String sql = bound.getSql().replaceAll("\\s+", " ").trim().toLowerCase(Locale.ROOT);
+        if (mapped.getSqlCommandType() == SqlCommandType.INSERT) {
+            assertTrue(sql.startsWith("insert into report_goal (workspace_id,"), statement);
+            assertTrue(sql.contains("values (?"), statement);
+            assertEquals("workspaceId", bound.getParameterMappings().getFirst().getProperty(), statement);
+        } else {
+            String predicate = "where workspace_id = ?";
+            int predicateStart = sql.indexOf(predicate);
+            assertTrue(predicateStart >= 0, statement + " must predicate on workspace_id");
+            int bindingIndex = (int) sql.substring(0, predicateStart).chars()
+                .filter(character -> character == '?').count();
+            assertEquals("workspaceId", bound.getParameterMappings().get(bindingIndex).getProperty(), statement);
+        }
     }
 }

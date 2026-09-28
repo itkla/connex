@@ -1,5 +1,7 @@
 package ooo.klae.connex.backend.services;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -8,11 +10,18 @@ import static org.mockito.Mockito.when;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.HashSet;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -21,6 +30,7 @@ import ooo.klae.connex.backend.config.AuditIntegrityProperties;
 import ooo.klae.connex.backend.dto.ClientErrorSupportRowDto;
 import ooo.klae.connex.backend.observability.ClientAssertedCorrelationPseudonymizer;
 import ooo.klae.connex.backend.services.SupportBundleService.SupportBundleRequest;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -99,5 +109,34 @@ class SupportBundleArchiveDumpTest {
         }
 
         assertTrue(Files.size(archive) > 0);
+        Map<String, byte[]> entries = new LinkedHashMap<>();
+        try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(archive))) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                assertTrue(!entries.containsKey(entry.getName()), "Duplicate entry: " + entry.getName());
+                entries.put(entry.getName(), zip.readAllBytes());
+            }
+        }
+        assertEquals(Set.of("manifest.json", "readiness.json", "config.json", "migrations.json",
+            "audit-slice.csv", "client-errors.json"), entries.keySet());
+        assertEquals("manifest.json", entries.keySet().stream().toList().getLast());
+        JsonNode manifest = new ObjectMapper().readTree(entries.get("manifest.json"));
+        assertNotNull(manifest);
+        assertEquals(3, manifest.path("schemaVersion").asInt());
+        assertEquals("test", manifest.path("productVersion").asString());
+        assertEquals("job_run_not_available", manifest.path("omissions").path("job-runs.json").asString());
+        assertEquals(5, manifest.path("files").size());
+        Set<String> inventoried = new HashSet<>();
+        for (JsonNode file : manifest.path("files")) {
+            String path = file.path("path").asString();
+            assertTrue(inventoried.add(path), "Duplicate inventory path: " + path);
+            byte[] content = entries.get(path);
+            assertNotNull(content, path);
+            assertEquals(content.length, file.path("byteLength").asInt(), path);
+            assertEquals(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content)),
+                file.path("sha256").asString(), path);
+        }
+        assertEquals(Set.of("readiness.json", "config.json", "migrations.json", "audit-slice.csv",
+            "client-errors.json"), inventoried);
     }
 }

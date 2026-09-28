@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.architecture;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -18,11 +19,15 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -282,6 +287,32 @@ class ArchiveVisibilityArchTest {
             "Workflow list reads must choose active or archived rows explicitly");
     }
 
+    @ParameterizedTest
+    @MethodSource("wildcardProjections")
+    void wildcardProjectionsRequireArchivePredicates(String sql, Set<String> expectedAliases) {
+        assertEquals(expectedAliases, unguardedProjections(new Statement("fixture", "wildcard", sql)));
+    }
+
+    private static Stream<Arguments> wildcardProjections() {
+        return Stream.of(
+            Arguments.of("SELECT p.* FROM person p WHERE p.workspace_id = #{workspaceId}", Set.of("p")),
+            Arguments.of("SELECT * FROM person WHERE workspace_id = #{workspaceId}", Set.of("person")),
+            Arguments.of("SELECT DISTINCT * FROM company c WHERE c.workspace_id = #{workspaceId}", Set.of("c")),
+            Arguments.of("SELECT c.id, p.* FROM company c JOIN person p ON p.company_id = c.id", Set.of("p")),
+            Arguments.of("SELECT * FROM company c JOIN person p ON p.company_id = c.id", Set.of("c", "p")),
+            Arguments.of("SELECT p.* FROM person p WHERE p.archived_at IS NULL", Set.of()),
+            Arguments.of("SELECT * FROM person WHERE archived_at IS NULL", Set.of()),
+            Arguments.of("SELECT c.* FROM company c WHERE c.archived_at IS NULL", Set.of()),
+            Arguments.of("SELECT COUNT(*) FROM person p", Set.of()),
+            Arguments.of("SELECT p.id * 2 FROM person p", Set.of()),
+            Arguments.of("SELECT (p.id) * (2) FROM person p", Set.of()),
+            Arguments.of("SELECT 'SELECT * FROM person p' FROM deal d", Set.of()),
+            Arguments.of("SELECT * FROM person p UNION ALL SELECT * FROM company c", Set.of("p", "c")),
+            Arguments.of("SELECT d.* FROM deal d JOIN person p ON p.id = d.person_id", Set.of()),
+            Arguments.of("SELECT * FROM deal d WHERE EXISTS (SELECT p.id FROM person p)", Set.of()),
+            Arguments.of("SELECT d.id FROM deal d WHERE EXISTS (SELECT * FROM person p)", Set.of("p")));
+    }
+
     private String reasonFailure(StatementExemption exemption, Statement statement) {
         return switch (exemption.reason()) {
             case RECORD_LIFECYCLE_LOCK -> LOCKS_ROW.matcher(statement.sql()).find()
@@ -380,6 +411,9 @@ class ArchiveVisibilityArchTest {
             ? PERSON_IDENTIFYING_COLUMNS : COMPANY_IDENTIFYING_COLUMNS;
         boolean unaliasedAndAlone = alias.equals(table) && aliases.size() == 1;
         Set<String> read = new LinkedHashSet<>();
+        if (wildcardAliases(statement.sql()).contains(alias)) {
+            read.addAll(columns);
+        }
         for (String column : columns) {
             if (Pattern.compile("\\b" + Pattern.quote(alias) + "\\." + column + "\\b",
                     Pattern.CASE_INSENSITIVE).matcher(statement.sql()).find()) {
@@ -391,6 +425,75 @@ class ArchiveVisibilityArchTest {
             }
         }
         return read;
+    }
+
+    private Set<String> wildcardAliases(String sql) {
+        Set<String> reads = new LinkedHashSet<>();
+        Matcher selects = Pattern.compile("'(?:''|[^'])*'|\\bSELECT\\b", Pattern.CASE_INSENSITIVE).matcher(sql);
+        while (selects.find()) {
+            if (!selects.group().equalsIgnoreCase("SELECT")) {
+                continue;
+            }
+            String scope = selectScope(sql.substring(selects.end()));
+            Matcher from = Pattern.compile("\\bFROM\\b", Pattern.CASE_INSENSITIVE).matcher(scope);
+            if (!from.find()) {
+                continue;
+            }
+            String projection = scope.substring(0, from.start())
+                .replaceFirst("(?i)^\\s*(?:DISTINCT|ALL)\\s+", "");
+            Map<String, String> aliases = recordAliases(scope.substring(from.start()));
+            for (String item : projection.split(",")) {
+                String column = item.trim();
+                if (column.equals("*")) {
+                    reads.addAll(aliases.keySet());
+                } else {
+                    for (String alias : aliases.keySet()) {
+                        if (column.matches("(?i)[`\"]?" + Pattern.quote(alias) + "[`\"]?\\s*\\.\\s*\\*")) {
+                            reads.add(alias);
+                        }
+                    }
+                }
+            }
+        }
+        return reads;
+    }
+
+    /** Keeps a SELECT's own projection and tables without borrowing aliases from nested queries. */
+    private String selectScope(String sql) {
+        Matcher tokens = Pattern.compile("'(?:''|[^'])*'|[()]|\\bUNION\\b", Pattern.CASE_INSENSITIVE)
+            .matcher(sql);
+        StringBuilder scope = new StringBuilder();
+        int depth = 0;
+        int cursor = 0;
+        while (tokens.find()) {
+            if (depth == 0) {
+                scope.append(sql, cursor, tokens.start());
+            }
+            String token = tokens.group();
+            if (token.equals("(")) {
+                if (depth == 0) {
+                    scope.append('(');
+                }
+                depth++;
+            } else if (token.equals(")")) {
+                if (depth == 0) {
+                    return scope.toString();
+                }
+                depth--;
+                if (depth == 0) {
+                    scope.append(')');
+                }
+            } else if (token.equalsIgnoreCase("UNION") && depth == 0) {
+                return scope.toString();
+            } else if (depth == 0) {
+                scope.append("''");
+            }
+            cursor = tokens.end();
+        }
+        if (depth == 0) {
+            scope.append(sql, cursor, sql.length());
+        }
+        return scope.toString();
     }
 
     /** Maps each alias bound in a FROM/JOIN position to the record table it stands for. */
