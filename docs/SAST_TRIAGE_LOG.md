@@ -1009,9 +1009,24 @@ verbatim by `DealMapperXmlTest.collaboratorLookupReadsOnlyTenantRelationshipIds`
 `DealCollaboratorControlAccess.loadProfiles` is `new ArrayList` / `addAll` / `sort` / `stream`, and
 `TenantWorkScope.unrouted` is a `ThreadLocal` override around `work.get()`. Independently checked
 and clean: no aspects; the `@RequirePermission` pointcut does not match this unannotated read;
-`TenantScopeInterceptor` is throw-or-proceed; `ControlCatalogRoutingInterceptor` only switches the
-connection catalog; no `ResponseBodyAdvice`; no mapper cache; no persisted counter, `last_*`
-timestamp or lazily created row. The tenant journal is an SLF4J emission, not a database write.
+`TenantScopeInterceptor` (a MyBatis `Interceptor`, not the Spring one) is throw-or-proceed;
+`ControlCatalogRoutingInterceptor` only switches the connection catalog; no `ResponseBodyAdvice`; no
+mapper cache; no persisted counter, `last_*` timestamp or lazily created row **on the handler,
+service and mapper path**. The tenant journal is an SLF4J emission, not a database write.
+
+**Scope correction (2026-09-28).** The sentence above originally read "no persisted counter, `last_*`
+timestamp or lazily created row" without qualification, and cited `TenantScopeInterceptor` as though
+it were the Spring `HandlerInterceptor`. It is not: the only `HandlerInterceptor` is
+`TenantResolutionInterceptor`, and it writes `app_user.last_active_workspace_id` on GET **by
+design** (`TenantResolutionInterceptor:184`, and `:216` sets it NULL; `WORKSPACE_RECOVERY_METHODS`
+admits GET/HEAD/OPTIONS per #1108). Two further writes reach any non-allowlisted `/api/**` GET:
+`PrivilegedMfaEnforcementFilter:93` inserts an `audit_log` row plus a lazily created
+`audit_log_integrity_head` row for a privileged passkey-less caller, and Spring Session JDBC updates
+`SPRING_SESSION.LAST_ACCESS_TIME` on every authenticated request. None is attacker-controlled beyond
+the trigger and all are route- and method-independent, so none differentiates an alert of this class
+— but the unqualified phrasing was wrong for the request path and is corrected here and in the
+alert's dismissal comment. Every dismissal of this class must be scoped to the handler, service and
+mapper path.
 
 **Why CodeQL fired.** The sink is `Supplier.get()` at `TenantWorkScope.java:233`. CodeQL resolves
 that functional-interface call context-insensitively to every `Supplier` lambda reaching
@@ -1041,3 +1056,42 @@ truth. Cite methods plus a commit sha rather than bare line numbers: #67's recor
 Owner role ([#1230](https://github.com/itkla/connex/issues/1230)); expiry **2027-02-14**, re-review
 **2027-01-14**. Re-evaluation triggers: any write added to the `getCollaborators` path,
 `DealCollaboratorControlAccess` gaining a mutating statement, or a material update to the query.
+
+### `java/csrf-unprotected-request-type` — #189: share listing, false positive (third of the class)
+
+Raised on the merge ref of PR [#1844](https://github.com/itkla/connex/pull/1844) (#811, share
+control-plane hydration) at `ShareController.java:35` (`GET /api/shares/{type}/{id}`), blocking that
+pull request. Third instance of the structural shape recorded for #67 and #186.
+
+**Runtime trace.** `ShareService.listShares` reaches six statements, every one a `<select>`:
+`getUserById`; the permission reads (`getMemberRoleId`, then `findPermissions` or `getRole`); one of
+`ownsCompany` / `ownsPerson` / `ownsPipeline` (`SELECT EXISTS`); one of the three `listXShares`
+(flat three-column result, no nested selects); and `findOrganizationWorkspacesForShare`. No
+`<insert>`, `<update>` or `<delete>` exists in controller → service → mapper. Permission denial is a
+pure static factory returning `ForbiddenException`. The empty-listing short circuit returns before
+the snapshot query. `ShareWorkspaceControlAccess`'s three `IllegalStateException` guards throw from
+already-materialised locals with no transaction pending, so a failing anchor check writes nothing.
+
+**Why CodeQL fired.** Analysis `1849401074` (ref `refs/pull/1844/merge`, commit `dfb4272e0`, 72
+results) carries exactly one result on `ShareController`, with four code flows sharing a twelve-step
+prefix that ends at `TenantWorkScope.java:233` (`return work.get();`) and then fans out to four
+confirmed writes in `AiBudgetControlOperations` — `ensureUsage`, `insertReservation`,
+`markReservationDispatched`, `deleteSettledReservationsBefore`. The supplier actually constructed on
+this path is `() -> snapshot(workspaceId)`, which reaches one `<select>`. The alert is introduced by
+the helper call rather than by any write: `ShareWorkspaceControlAccess` does not exist on `main`, and
+`main`'s `listShares` returns the mapper result directly.
+
+**Scope of the rationale.** As corrected above for #186, the claim is that the **handler, service and
+mapper path** performs no write. Three route-independent writes reach any non-allowlisted `/api/**`
+GET in the filter and interceptor layer (workspace-pin heal, the privileged-MFA denial audit insert,
+and the Spring Session last-access update); none is attacker-controlled beyond the trigger and none
+differentiates this alert.
+
+**Disposition: false positive.** Recorded on
+[#1815](https://github.com/itkla/connex/issues/1815), which now carries the inventory record for this
+alert class rather than a third bespoke issue; owner Hunter Nakagawa; approver Security Owner role
+([#1230](https://github.com/itkla/connex/issues/1230)); expiry **2027-02-14**, re-review
+**2027-01-14**. Re-evaluation triggers: any write added to the `listShares` path,
+`ShareWorkspaceControlAccess` gaining a mutating statement, a structural split of
+`TenantWorkScope.unrouted` that separates read and write suppliers, or a material update to the
+query.
