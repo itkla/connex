@@ -380,7 +380,7 @@ public class AiAssistantWriteToolService {
                             integer(undo, "entityId"),
                             text(undo, "fingerprint"),
                             true,
-                            Map.of()));
+                            storedExtra(undo)));
         } else {
             undo(write, undo);
         }
@@ -1248,6 +1248,44 @@ public class AiAssistantWriteToolService {
             throw new IllegalStateException("Assistant tool metadata is invalid");
         }
         return value.asLong();
+    }
+
+    /**
+     * Rebuilds the extra keys a declared tool recorded on its inverse from the stored undo record.
+     *
+     * <p>A key the framework owns is never offered to the tool. Each value is read back into the
+     * shape {@link Inverse} admitted it as — a string, an {@code int}, a boolean or an object of
+     * them — so the tool receives a map equal to the one it recorded. A stored value outside
+     * those shapes is metadata the framework never wrote, and is refused before the tool runs.
+     */
+    private static Map<String, Object> storedExtra(ObjectNode undo) {
+        Map<String, Object> extra = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonNode> property : undo.properties()) {
+            if (!Inverse.FRAMEWORK_KEYS.contains(property.getKey())) {
+                extra.put(property.getKey(), storedExtraValue(property.getValue()));
+            }
+        }
+        return extra;
+    }
+
+    private static Object storedExtraValue(JsonNode value) {
+        if (value.isString()) {
+            return value.asString();
+        }
+        if (value.isInt()) {
+            return value.intValue();
+        }
+        if (value.isBoolean()) {
+            return value.booleanValue();
+        }
+        if (value instanceof ObjectNode object) {
+            Map<String, Object> nested = new LinkedHashMap<>();
+            for (Map.Entry<String, JsonNode> property : object.properties()) {
+                nested.put(property.getKey(), storedExtraValue(property.getValue()));
+            }
+            return nested;
+        }
+        throw new IllegalStateException("Assistant tool metadata is invalid");
     }
 
     private static void requireStatus(AiChatToolCall toolCall, String status) {

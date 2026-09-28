@@ -357,6 +357,14 @@ public interface AiAssistantWriteTool {
      * {@code entityKind}, {@code entityId}, {@code fingerprint} and any {@code extra} keys in order.
      * An {@code extra} key may not name one of those framework keys, nor {@code undoneAt}, so a
      * tool can neither move the undo window nor retarget the inverse.
+     *
+     * <p>{@link AiAssistantWriteTool#undo} receives an {@code extra} equal to the one
+     * {@link AiAssistantWriteTool#apply} recorded, rebuilt from the stored undo record. So that the
+     * round trip is exact, an {@code extra} value must be a {@link String}, an {@link Integer}, a
+     * {@link Boolean}, or a {@link Map} with string keys whose values are themselves one of these;
+     * anything else — {@code null}, a list, or any other number type, which the stored JSON would
+     * hand back as a different type or value — is refused when the inverse is built. Equality is
+     * what survives, not key order.
      */
     record Inverse(
             String entityKind,
@@ -370,13 +378,37 @@ public interface AiAssistantWriteTool {
                 "status", "expiresAt", "entityKind", "entityId", "fingerprint", "undoneAt");
 
         public Inverse {
-            extra = Collections.unmodifiableMap(new LinkedHashMap<>(extra));
+            extra = durableCopy(extra, "");
             for (String key : extra.keySet()) {
                 if (FRAMEWORK_KEYS.contains(key)) {
                     throw new IllegalStateException(
                             "An assistant inverse may not set the framework's undo key " + key);
                 }
             }
+        }
+
+        private static Map<String, Object> durableCopy(Map<?, ?> values, String prefix) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : values.entrySet()) {
+                if (!(entry.getKey() instanceof String key)) {
+                    throw new IllegalStateException("An assistant inverse key must be a string: "
+                            + prefix + entry.getKey());
+                }
+                copy.put(key, durableValue(entry.getValue(), prefix + key));
+            }
+            return Collections.unmodifiableMap(copy);
+        }
+
+        private static Object durableValue(Object value, String path) {
+            if (value instanceof String || value instanceof Integer || value instanceof Boolean) {
+                return value;
+            }
+            if (value instanceof Map<?, ?> nested) {
+                return durableCopy(nested, path + ".");
+            }
+            throw new IllegalStateException(
+                    "An assistant inverse value must be a string, an integer, a boolean or a map"
+                            + " of them: " + path);
         }
     }
 
