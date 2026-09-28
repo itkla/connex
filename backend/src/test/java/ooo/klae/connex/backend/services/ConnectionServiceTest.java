@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -55,7 +56,8 @@ class ConnectionServiceTest extends AbstractServiceTest {
         Company foreignCompany = companyIn(sibling, "Sibling Company");
         Person shared = personIn(sibling, foreignCompany, "Shared Connection");
         assertEquals(1, shareMapper.sharePerson(
-            shared.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false));
+            shared.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, sibling.getId())));
 
         connectionService.addConnection(source.getId(), shared.getId(), "friend", 3, "Trusted");
 
@@ -75,7 +77,8 @@ class ConnectionServiceTest extends AbstractServiceTest {
         assertTrue(connectionService.getTopConnections(source.getId(), 5).isEmpty());
 
         assertEquals(1, shareMapper.shareCompany(
-            foreignCompany.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false));
+            foreignCompany.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, sibling.getId())));
         personMapper.updateProcessingRestrictions(sibling.getId(), shared.getId(), false, false);
         connection = connectionService.getConnections(source.getId()).getFirst();
         assertEquals(foreignCompany.getId(), connection.getCompanyId());
@@ -108,7 +111,8 @@ class ConnectionServiceTest extends AbstractServiceTest {
         Workspace sibling = workspaceInOrg(orgId(workspace));
         Person hub = personIn(sibling, null, "Shared Hub");
         assertEquals(1, shareMapper.sharePerson(
-            hub.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false));
+            hub.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, sibling.getId())));
         connect(source, hub);
         connect(hub, target);
 
@@ -172,7 +176,8 @@ class ConnectionServiceTest extends AbstractServiceTest {
             () -> connectionService.getTopConnections(focal.getId(), 5));
 
         assertEquals(1, shareMapper.sharePerson(
-            focal.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false));
+            focal.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, sibling.getId())));
         assertEquals(owned.getId(),
             connectionService.getTopConnections(focal.getId(), 5).getFirst().getPersonId());
 
@@ -204,7 +209,8 @@ class ConnectionServiceTest extends AbstractServiceTest {
         assertNull(redacted.getCompanyName());
 
         assertEquals(1, shareMapper.shareCompany(
-            foreignCompany.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false));
+            foreignCompany.getId(), sibling.getId(), workspace.getId(), currentUser.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, sibling.getId())));
         IntroCandidatePerson shared = candidate(candidate);
         assertEquals(foreignCompany.getId(), shared.getCompanyId());
         assertEquals(foreignCompany.getName(), shared.getCompanyName());

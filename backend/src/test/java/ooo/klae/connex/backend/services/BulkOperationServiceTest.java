@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.services;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -90,7 +91,8 @@ class BulkOperationServiceTest extends AbstractServiceTest {
     void archivePersons_skipsRecordsMerelySharedIntoTheWorkspace() {
         Workspace other = newOtherWorkspace();
         Person foreign = personInWorkspace(other);
-        shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(), currentUser.getId(), true);
+        shareMapper.sharePerson(foreign.getId(), other.getId(), workspace.getId(), currentUser.getId(), true,
+            orgWorkspaceIdsJson(workspaceMapper, other.getId()));
 
         assertTrue(personMapper.exists(workspace.getId(), foreign.getId()),
             "a shared-in record is read-visible");

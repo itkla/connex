@@ -1,5 +1,6 @@
 package ooo.klae.connex.backend.integration;
 
+import static ooo.klae.connex.backend.support.OrganizationShareScopes.orgWorkspaceIdsJson;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -287,7 +288,8 @@ class DuplicateReviewIntegrationTest {
         sharedEmployer.setWorkspaceId(sibling.getId());
         companyMapper.insert(sharedEmployer);
         assertEquals(1, shareMapper.shareCompany(
-            sharedEmployer.getId(), sibling.getId(), workspace.getId(), member.getId(), false));
+            sharedEmployer.getId(), sibling.getId(), workspace.getId(), member.getId(), false,
+                orgWorkspaceIdsJson(workspaceMapper, sibling.getId())));
         clearDirectAuthentication();
 
         authenticate(member);
