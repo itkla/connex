@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import ooo.klae.connex.backend.beans.Activity;
 import ooo.klae.connex.backend.beans.Note;
 import ooo.klae.connex.backend.beans.Task;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.exceptions.ResourceNotFoundException;
 import ooo.klae.connex.backend.services.DealService;
 
@@ -168,7 +169,8 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
             }
         };
         AiAssistantWriteToolService service = framework(List.of(
-                createTaskTool(), stageTool(), probing, createNoteTool(), addTagTool()));
+                createTaskTool(), stageTool(), probing, createNoteTool(), addTagTool(),
+                assignOwnerTool()));
         propose(service, "create_activity",
                 "{\"handle\":\"r1\",\"type\":\"call\",\"subject\":\"Renewal\","
                         + "\"start\":\"9:00am next Thursday\"}",
@@ -184,5 +186,28 @@ class AiAssistantWriteTargetScopeTest extends AbstractAiAssistantWriteToolTest {
         verify(activityService, never()).getActivitiesByPersonIdInWindow(
                 anyInt(), any(), any(), anyInt());
         verify(activityService, never()).create(any(Activity.class));
+    }
+
+    @Test
+    void anApprovedOwnerAssignmentOnADealOutsideTheActorsScopeIsNeverApplied() throws Exception {
+        User owner = new User();
+        owner.setId(21);
+        owner.setDisplayName("Grace Hopper");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(owner));
+        when(dealService.getDealById(44))
+                .thenThrow(new ResourceNotFoundException("Deal not found"));
+        AiAssistantWriteToolService service = service();
+        propose(service, "assign_owner", "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "deal", 44);
+
+        ResourceNotFoundException refused = assertThrows(
+                ResourceNotFoundException.class,
+                () -> service.approve(TURN.sessionId(), TOOL_CALL_ID));
+
+        assertEquals("Deal not found", refused.getMessage());
+        verify(dealService).lockDealForUpdate(44);
+        verify(dealService, never()).updateOwner(anyInt(), any());
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
     }
 }

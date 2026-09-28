@@ -29,13 +29,13 @@ import ooo.klae.connex.backend.tenant.Permission;
 @Component
 public class AiAssistantWriteToolRegistry {
     /**
-     * Write tools still served by the framework's own per-tool arms while they move onto the SPI.
+     * Write tools served by the framework's own per-tool arms instead of a bean.
      *
-     * <p>It only ever shrinks: a tool that gains a bean must leave it in the same change, which
-     * construction enforces, and {@code AiAssistantWriteToolSpiArchTest} refuses any name added to
-     * it.
+     * <p>It is empty: every catalog write tool is a declared bean. Construction refuses a bean whose
+     * name is on it, and {@code AiAssistantWriteToolSpiArchTest} refuses any name added to it, so
+     * the bijection between catalog write tools and beans stays total.
      */
-    static final Set<String> LEGACY_TOOLS = Set.of("assign_owner");
+    static final Set<String> LEGACY_TOOLS = Set.of();
 
     private static final Set<String> RECORD_KINDS = Set.of("person", "company", "deal");
     private static final Pattern FIELD_KEY = Pattern.compile("[a-z][A-Za-z]*\\.[a-z][A-Za-z]*");

@@ -158,6 +158,26 @@ public interface AiAssistantWriteTool {
     }
 
     /**
+     * What kind of write the stored request asked for, as named booleans that {@link
+     * #requestSummary} and {@link #outcomeSummary} may read even for a viewer who may not read the
+     * details.
+     *
+     * <p>Such a viewer's review holds none of the request, so a summary that has always said which
+     * kind of write was asked for — {@code assign_owner} says whether it removed or assigned an
+     * owner — reads it from these flags instead. The framework hands that viewer's review only these
+     * flags as its request, so no request value, workspace string or identifier can reach them
+     * through one. A flag must describe only the kind of write asked for, never a value the request
+     * names or a property of the record. Each tool's flags are pinned by a reviewed ledger in
+     * {@code AiAssistantWriteToolRegistryTest}.
+     *
+     * @param request the stored request object
+     * @return the flags, none by default
+     */
+    default Map<String, Boolean> sharedRequestFlags(JsonNode request) {
+        return Map.of();
+    }
+
+    /**
      * The workspace data this tool's card projection reads besides its own target and request.
      *
      * <p>The read service batches each input once per page of cards, only for cards whose viewer
@@ -181,7 +201,8 @@ public interface AiAssistantWriteTool {
      * The member-visible request summary.
      *
      * <p>For a viewer who may not read the proposal's details the framework passes a review with
-     * no target, request, members or stages, and an outcome holding at most the boolean
+     * no target, members or stages, a request holding at most the boolean
+     * {@link #sharedRequestFlags}, and an outcome holding at most the boolean
      * {@link #sharedOutcomeFlags()}, so the summary can say no more than those flags. A detailed
      * summary is screened for special-care text and replaced by the generic one when the screen
      * excludes it.
@@ -491,13 +512,15 @@ public interface AiAssistantWriteTool {
      * The batched, viewer-authorized read state one card is projected from.
      *
      * <p>When the viewer may not read the details, the framework withholds every record value:
-     * {@code target} and {@code request} are {@code null}, {@code outcome} holds at most the
-     * tool's boolean {@link AiAssistantWriteTool#sharedOutcomeFlags()} of an executed call, and
+     * {@code target} is {@code null}, {@code request} holds at most the tool's boolean
+     * {@link AiAssistantWriteTool#sharedRequestFlags}, {@code outcome} holds at most the tool's
+     * boolean {@link AiAssistantWriteTool#sharedOutcomeFlags()} of an executed call, and
      * {@code members} and {@code stages} are empty.
      *
      * @param detailsReadable whether the viewer requested the proposal and can read its target
      * @param target the visible target, or {@code null} when the viewer may not read it
-     * @param request the stored request object, or {@code null} when the viewer may not read it
+     * @param request the stored request object, only its shared request flags when the viewer may
+     *     not read it, or {@code null} when it has none
      * @param outcome the stored outcome of an executed call, only its shared flags when the viewer
      *     may not read it, or {@code null}
      * @param members the workspace's members when the tool declared {@link ReviewInput#MEMBERS}

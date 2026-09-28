@@ -114,7 +114,8 @@ class AiAssistantToolCallReadServiceTest {
                         mock(AiAssistantDateResolver.class),
                         JsonMapper.builder().build()),
                 stageTool(),
-                tagTool()));
+                tagTool(),
+                ownerTool()));
     }
 
     private AiAssistantToolCallReadService service(List<AiAssistantWriteTool> tools) {
@@ -154,6 +155,11 @@ class AiAssistantToolCallReadServiceTest {
                 mock(PersonService.class),
                 mock(CompanyService.class),
                 mock(DealService.class));
+    }
+
+    private static AiAssistantAssignOwnerWriteTool ownerTool() {
+        return new AiAssistantAssignOwnerWriteTool(
+                mock(PersonService.class), mock(CompanyService.class), mock(DealService.class));
     }
 
     private static AiAssistantChangeDealStageWriteTool stageTool() {
@@ -1193,7 +1199,8 @@ class AiAssistantToolCallReadServiceTest {
                     public String outcomeSummary(Review review) {
                         return String.valueOf(review.outcome());
                     }
-                }));
+                },
+                ownerTool()));
         stubVisibleDeal();
         String flagged = "{\"tier\":\"auto\",\"outcome\":{\"status\":\"executed\","
                 + "\"recordType\":\"deal\",\"tag\":\"Secret\",\"changed\":false,"
@@ -1214,6 +1221,80 @@ class AiAssistantToolCallReadServiceTest {
                 "{\"status\":\"executed\",\"recordType\":\"deal\",\"tag\":\"Secret\","
                         + "\"changed\":false,\"archived\":true}",
                 cards.get(2).outcomeSummary());
+    }
+
+    @Test
+    void aViewerWhoMayNotReadTheDetailsIsHandedOnlyTheRequestFlagsTheToolShares() {
+        AiAssistantToolCallReadService flagging = service(List.of(
+                activityTool(),
+                noteTool(),
+                new AiAssistantCreateTaskWriteTool(
+                        mock(TaskService.class),
+                        mock(AiAssistantDateResolver.class),
+                        JsonMapper.builder().build()),
+                stageTool(),
+                tagTool(),
+                new AiAssistantAssignOwnerWriteTool(
+                        mock(PersonService.class),
+                        mock(CompanyService.class),
+                        mock(DealService.class)) {
+                    @Override
+                    public String requestSummary(Review review) {
+                        return String.valueOf(review.request());
+                    }
+
+                    @Override
+                    public String outcomeSummary(Review review) {
+                        return String.valueOf(review.request());
+                    }
+                }));
+        stubVisibleDeal();
+        String removed = "{\"tier\":\"confirm\",\"outcome\":{\"status\":\"executed\","
+                + "\"recordType\":\"deal\",\"owner\":\"unassigned\"}}";
+        AiChatToolCall removal = toolCall(
+                75, 99, "assign_owner", "confirm", "executed", "deal", 41, 75, removed);
+        removal.setArgumentsJson(removal.getArgumentsJson().replace(" Ada Owner ", "Unassigned"));
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(
+                        removal,
+                        toolCall(76, 99, "assign_owner", "confirm", "proposed", "deal", 41, 76,
+                                null),
+                        toolCall(77, USER_ID, "assign_owner", "confirm", "proposed", "deal", 41,
+                                77, null)));
+
+        List<AiAssistantToolCallReadDto> cards = flagging.list(SESSION_ID, false);
+
+        assertEquals("{\"removesOwner\":true}", cards.get(0).requestSummary());
+        assertEquals("{\"removesOwner\":true}", cards.get(0).outcomeSummary());
+        assertEquals("{\"removesOwner\":false}", cards.get(1).requestSummary());
+        assertEquals(
+                "{\"handle\":\"r1\",\"owner\":\" Ada Owner \"}", cards.get(2).requestSummary());
+    }
+
+    @Test
+    void aParticipantStillReadsWhetherTheOwnerWasRemovedButNeverWhoWasNamed() {
+        stubVisibleDeal();
+        String removed = "{\"tier\":\"confirm\",\"outcome\":{\"status\":\"executed\","
+                + "\"recordType\":\"deal\",\"owner\":\"unassigned\"}}";
+        String assigned = "{\"tier\":\"confirm\",\"outcome\":{\"status\":\"executed\","
+                + "\"recordType\":\"deal\",\"owner\":\"Ada Owner\"}}";
+        AiChatToolCall removal = toolCall(
+                78, 99, "assign_owner", "confirm", "executed", "deal", 41, 78, removed);
+        removal.setArgumentsJson(removal.getArgumentsJson().replace(" Ada Owner ", "Unassigned"));
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(
+                        removal,
+                        toolCall(79, 99, "assign_owner", "confirm", "executed", "deal", 41, 79,
+                                assigned)));
+
+        List<AiAssistantToolCallReadDto> cards = service.list(SESSION_ID, false);
+
+        assertEquals("Assign an owner", cards.get(0).requestSummary());
+        assertEquals("Owner removed", cards.get(0).outcomeSummary());
+        assertEquals("Assign an owner", cards.get(1).requestSummary());
+        assertEquals("Owner assigned", cards.get(1).outcomeSummary());
+        assertEquals(List.of(), cards.get(1).outcomeValues());
+        verify(workspaceService, never()).getMembers(WORKSPACE_ID);
     }
 
     @Test
@@ -1266,7 +1347,8 @@ class AiAssistantToolCallReadServiceTest {
                         return Set.of(Permission.DEAL_UPDATE, Permission.DEAL_DELETE);
                     }
                 },
-                tagTool()));
+                tagTool(),
+                ownerTool()));
         stubVisibleDeal();
         when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
                 stage(9, 3, "Negotiation"), stage(10, 3, "Won")));
@@ -1297,7 +1379,8 @@ class AiAssistantToolCallReadServiceTest {
                         return Set.of();
                     }
                 },
-                tagTool()));
+                tagTool(),
+                ownerTool()));
         stubVisibleDeal();
         when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
                 stage(9, 3, "Negotiation"), stage(10, 3, "Won")));
@@ -1345,7 +1428,7 @@ class AiAssistantToolCallReadServiceTest {
                 card.setArgumentsJson("{\"tool\":\"" + tool.name() + "\",\"tier\":\"" + tier
                         + "\",\"restrictionEpoch\":1,\"target\":{\"kind\":\"deal\",\"id\":41},"
                         + "\"request\":{\"handle\":\"r1\",\"stage\":\"secret request\","
-                        + "\"description\":\"secret request\"}}");
+                        + "\"description\":\"secret request\",\"owner\":\"secret request\"}}");
                 cards.add(card);
                 id++;
             }

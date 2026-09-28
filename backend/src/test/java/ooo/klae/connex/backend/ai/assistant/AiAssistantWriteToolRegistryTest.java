@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import java.lang.reflect.RecordComponent;
 import java.util.List;
@@ -22,6 +23,7 @@ import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.Lock;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.MemberDirectory;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteTool.TargetLock;
 import ooo.klae.connex.backend.ai.assistant.AiAssistantWriteToolRequest.CreateTask;
+import ooo.klae.connex.backend.beans.User;
 import ooo.klae.connex.backend.tenant.Permission;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -36,7 +38,8 @@ import tools.jackson.databind.node.ObjectNode;
  * so a tool added later is held to them without editing this class: principal resolution touches
  * none of the tool's dependencies, the model's view of an outcome carries no identifier and no
  * undo, approval or verification metadata, and a tool shares with a viewer who may not read its
- * details only the outcome flags {@link #SHARED_OUTCOME_FLAGS} has reviewed.
+ * details only the outcome flags {@link #SHARED_OUTCOME_FLAGS} and the request flags
+ * {@link #SHARED_REQUEST_FLAGS} have reviewed.
  */
 class AiAssistantWriteToolRegistryTest {
     private static final ObjectMapper JSON = JsonMapper.builder().build();
@@ -53,6 +56,17 @@ class AiAssistantWriteToolRegistryTest {
      */
     private static final Map<String, Set<String>> SHARED_OUTCOME_FLAGS =
             Map.of("add_tag", Set.of("changed"));
+
+    /**
+     * The reviewed request flags each tool may share with a viewer who may not read its details.
+     *
+     * <p>A request flag passes the same gate an outcome flag does, so it may say only what kind of
+     * write was asked for — {@code assign_owner}'s {@code removesOwner}, which a completed card has
+     * always told every participant as "Owner removed" or "Owner assigned" — and never a value the
+     * request names. Adding a flag, or a tool with one, is a reviewed edit here.
+     */
+    private static final Map<String, Set<String>> SHARED_REQUEST_FLAGS =
+            Map.of("assign_owner", Set.of("removesOwner"));
     private final AiAssistantToolCatalog catalog = new AiAssistantToolCatalog();
 
     @Test
@@ -61,15 +75,17 @@ class AiAssistantWriteToolRegistryTest {
                 tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal")),
                 tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
                 tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
+                tool("assign_owner", ToolTier.CONFIRM, Set.of("person", "company", "deal")),
                 tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
                 tool("create_activity", ToolTier.AUTO, Set.of("person", "deal"))));
 
         assertEquals(
                 List.of("create_activity", "create_task", "create_note", "add_tag",
-                        "change_deal_stage"),
+                        "change_deal_stage", "assign_owner"),
                 registry.tools().stream().map(AiAssistantWriteTool::name).toList());
         assertTrue(registry.find("create_task").isPresent());
-        assertTrue(registry.find("assign_owner").isEmpty());
+        assertTrue(registry.find("assign_owner").isPresent());
+        assertTrue(registry.find("search_records").isEmpty());
         assertTrue(registry.find(null).isEmpty());
     }
 
@@ -80,9 +96,10 @@ class AiAssistantWriteToolRegistryTest {
                 new AiAssistantChangeDealStageWriteTool(null, null),
                 new AiAssistantCreateActivityWriteTool(null, null, null),
                 new AiAssistantCreateNoteWriteTool(null, null),
-                new AiAssistantAddTagWriteTool(null, null, null, null)));
+                new AiAssistantAddTagWriteTool(null, null, null, null),
+                new AiAssistantAssignOwnerWriteTool(null, null, null)));
 
-        assertEquals(5, registry.tools().size());
+        assertEquals(6, registry.tools().size());
     }
 
     @Test
@@ -156,16 +173,16 @@ class AiAssistantWriteToolRegistryTest {
     }
 
     @Test
-    void refusesALegacyLedgerEntryForAToolThatNowHasABean() {
-        assertRefused("assign_owner has a write-tool bean and must leave the legacy ledger",
+    void theLegacyLedgerIsEmptySoEveryCatalogWriteToolNeedsItsBean() {
+        assertEquals(Set.of(), AiAssistantWriteToolRegistry.LEGACY_TOOLS);
+        assertRefused(
+                "assign_owner is declared in the catalog but has no write-tool bean",
                 List.of(
                         tool("create_activity", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("create_task", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("create_note", ToolTier.AUTO, Set.of("person", "deal")),
                         tool("add_tag", ToolTier.AUTO, Set.of("person", "company", "deal")),
-                        tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal")),
-                        tool("assign_owner", ToolTier.CONFIRM,
-                                Set.of("person", "company", "deal"))));
+                        tool("change_deal_stage", ToolTier.CONFIRM, Set.of("deal"))));
     }
 
     @Test
@@ -201,7 +218,6 @@ class AiAssistantWriteToolRegistryTest {
     @Test
     void everyDeclaredToolIsCoveredByTheRegistryWideChecksBelow() {
         Set<String> expected = new TreeSet<>(AiAssistantToolCatalog.writeToolNames());
-        expected.removeAll(AiAssistantWriteToolRegistry.LEGACY_TOOLS);
         Set<String> discovered = new TreeSet<>();
         for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
             discovered.add(tool.name());
@@ -214,6 +230,10 @@ class AiAssistantWriteToolRegistryTest {
         for (Discovered discovered : AiAssistantDeclaredWriteTools.discover()) {
             AiAssistantWriteTool tool = discovered.tool();
             MemberDirectory directory = mock(MemberDirectory.class);
+            User member = new User();
+            member.setId(21);
+            member.setDisplayName("Grace Hopper");
+            when(directory.members()).thenReturn(List.of(member));
 
             tool.principals(sampleRequest(tool.requestType()), directory);
 
@@ -263,6 +283,19 @@ class AiAssistantWriteToolRegistryTest {
                     SHARED_OUTCOME_FLAGS.getOrDefault(tool.name(), Set.of()),
                     tool.sharedOutcomeFlags(),
                     tool.name() + " shares outcome flags nobody reviewed with a viewer who may"
+                            + " not read its details");
+        }
+    }
+
+    @Test
+    void everyDeclaredToolSharesOnlyItsReviewedRequestFlags() throws Exception {
+        for (AiAssistantWriteTool tool : AiAssistantDeclaredWriteTools.tools()) {
+            ObjectNode request = JSON.valueToTree(sampleRequest(tool.requestType()));
+
+            assertEquals(
+                    SHARED_REQUEST_FLAGS.getOrDefault(tool.name(), Set.of()),
+                    tool.sharedRequestFlags(request).keySet(),
+                    tool.name() + " shares request flags nobody reviewed with a viewer who may"
                             + " not read its details");
         }
     }
