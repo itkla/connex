@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -93,6 +94,16 @@ import tools.jackson.databind.json.JsonMapper;
  * undo responses, the model's own view of the outcome, and the transcript cards. A key that
  * drifts, a value that is re-derived differently, or a new sibling such as a divergence record
  * appearing on an ordinary write turns this red where no behavioural test would notice.
+ *
+ * <p>One change is deliberate and additive. Since issue 1865, a confirm-tier proposal is stored
+ * with two siblings after its request: {@code resolution}, the stage id {@code change_deal_stage}
+ * resolved, and {@code principals}, the member ids {@code assign_owner} resolved, empty for a stage
+ * change or an owner removal. Every other byte of the stored proposal is unchanged, and so is every
+ * response, model view and result envelope. The transcript cards are still projected from the
+ * envelopes stored before pinning, {@code STAGE_ARGUMENTS} and {@code ownerArguments}, which is
+ * what proves a proposal stored before this change still renders exactly as it did. Preparing a
+ * confirm proposal now resolves its stage or its owner once, so the stage fixtures are armed
+ * before a proposal is prepared, and an assignment reads the member directory once more.
  */
 class AiAssistantWriteEnvelopeEquivalenceTest {
     private static final ValidatorFactory VALIDATORS =
@@ -112,6 +123,8 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
             + "\"tier\":\"confirm\",\"restrictionEpoch\":23,"
             + "\"target\":{\"kind\":\"deal\",\"id\":44},"
             + "\"request\":{\"handle\":\"r1\",\"stage\":\"proposal \"}}";
+    private static final String STAGE_PINS =
+            ",\"resolution\":{\"field\":\"stage\",\"id\":6},\"principals\":[]";
     private static final String MEETING_ARGUMENTS = "{\"tool\":\"create_activity\","
             + "\"tier\":\"auto\",\"restrictionEpoch\":23,"
             + "\"target\":{\"kind\":\"person\",\"id\":31},"
@@ -365,7 +378,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 "deal",
                 44);
 
-        assertEquals(STAGE_ARGUMENTS, write.argumentsJson());
+        assertEquals(pinned(STAGE_ARGUMENTS, STAGE_PINS), write.argumentsJson());
         stored(write);
         assertEquals(
                 "{\"toolCallId\":29,\"tool\":\"change_deal_stage\",\"tier\":\"confirm\","
@@ -401,6 +414,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
 
     @Test
     void aRejectedStageChangeKeepsItsResponseAndStoredEnvelope() throws Exception {
+        stubStage();
         AiAssistantPreparedWrite write = prepared(
                 "change_deal_stage",
                 "{\"handle\":\"r1\",\"stage\":\"proposal \"}",
@@ -1238,7 +1252,12 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
         AiAssistantPreparedWrite write = prepared(
                 "assign_owner", "{\"handle\":\"r1\",\"owner\":\"" + owner + "\"}", kind, id);
 
-        assertEquals(ownerArguments(kind, id, owner), write.argumentsJson());
+        assertEquals(
+                pinned(
+                        ownerArguments(kind, id, owner),
+                        ",\"principals\":[" + (assignedOwnerId == null ? "" : assignedOwnerId)
+                                + "]"),
+                write.argumentsJson());
         stored(write);
         assertEquals(
                 "{\"toolCallId\":29,\"tool\":\"assign_owner\",\"tier\":\"confirm\","
@@ -1274,7 +1293,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                         : Map.of(
                                 TURN.userId(), Set.of(Permission.AI_USE),
                                 assignedOwnerId, Set.of()));
-        verify(workspaceService, times(assignedOwnerId == null ? 0 : 1))
+        verify(workspaceService, times(assignedOwnerId == null ? 0 : 2))
                 .getMembers(TURN.workspaceId());
         verify(personService, times("person".equals(kind) ? 1 : 0))
                 .updateOwner(anyInt(), any());
@@ -1297,8 +1316,10 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
 
     @Test
     void aRejectedOwnerAssignmentKeepsItsResponseAndStoredEnvelope() throws Exception {
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(members());
         stored(prepared(
                 "assign_owner", "{\"handle\":\"r1\",\"owner\":\"grace hopper \"}", "company", 52));
+        clearInvocations(workspaceService);
 
         assertEquals(
                 "{\"id\":29,\"tool\":\"assign_owner\",\"tier\":\"confirm\","
@@ -1319,6 +1340,7 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
 
     @Test
     void anUnresolvableOrOffboardedOwnerRefusesWithItsMessageAndWritesNothing() throws Exception {
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(members());
         stored(prepared(
                 "assign_owner", "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}", "company", 52));
         when(workspaceService.getMembers(TURN.workspaceId()))
@@ -1657,6 +1679,15 @@ class AiAssistantWriteEnvelopeEquivalenceTest {
                 + "},\"undo\":{\"status\":\"unavailable\","
                 + "\"expiresAt\":\"2026-03-06T15:10:00Z\",\"entityKind\":\"tag\","
                 + "\"entityId\":" + id + ",\"fingerprint\":\"present:9\",\"tagId\":9}}";
+    }
+
+    /**
+     * @param stored a stored proposal as it was written before pinning
+     * @param pins the pin siblings a proposal prepared now carries after its request
+     * @return the stored proposal a confirm tool prepares now
+     */
+    private static String pinned(String stored, String pins) {
+        return stored.substring(0, stored.length() - 1) + pins + "}";
     }
 
     private static String ownerArguments(String kind, int id, String owner) {

@@ -35,7 +35,10 @@ import tools.jackson.databind.JsonNode;
  * member or whose account deletion is reserved — and hands the same principal to {@link #apply},
  * which writes exactly that principal's id. {@link Execution} carries no member lookup, so the
  * member written can never be one the framework did not resolve and lock; a request whose
- * principals disagree with it is refused rather than resolved again.
+ * principals disagree with it is refused rather than resolved again. The member resolved when the
+ * proposal was prepared is pinned, so an approval whose name now resolves to anyone else — the
+ * reviewed member offboarded and another renamed into the same name — is refused rather than
+ * handing the record to a member the approver never saw.
  *
  * <p>The write is read back by owner id off the record the service returns, compared with the
  * principal's id — {@code null} on both sides for a removal — while the stored {@code owner} stays
@@ -179,7 +182,9 @@ public class AiAssistantAssignOwnerWriteTool implements AiAssistantWriteTool {
      * <p>A record owned by someone who has left cannot be named, and comparing that absent name
      * with a removal's absent name would call a real removal a no-op, so whether the change would
      * do anything is decided on the id the record stores. A proposed owner that no longer resolves
-     * to exactly one nameable member is reported as unresolved rather than echoed back.
+     * to exactly one nameable member is reported as unresolved rather than echoed back. A pinned
+     * proposal names only its pinned member, and is unresolved once the requested name resolves to
+     * any other member, which its approval refuses.
      */
     @Override
     public Diff diff(Review review) {
@@ -192,7 +197,7 @@ public class AiAssistantAssignOwnerWriteTool implements AiAssistantWriteTool {
                     OWNER_FIELD, current, currentUnresolved, null,
                     target.ownerId() == null ? DiffState.UNCHANGED : DiffState.CHANGED);
         }
-        User proposed = requestedOwner(requested, review.members());
+        User proposed = reviewedOwner(review, requested);
         String proposedName = proposed == null ? null : memberName(proposed);
         if (proposedName == null) {
             return new Diff(OWNER_FIELD, current, currentUnresolved, null, DiffState.UNRESOLVED);
@@ -214,7 +219,7 @@ public class AiAssistantAssignOwnerWriteTool implements AiAssistantWriteTool {
             if (requested != null && removesOwner(requested)) {
                 return "Remove the current owner";
             }
-            User matched = requestedOwner(requested, review.members());
+            User matched = reviewedOwner(review, requested);
             String name = matched == null ? null : memberName(matched);
             if (name != null) {
                 return "Assign owner: " + name;
@@ -302,6 +307,18 @@ public class AiAssistantAssignOwnerWriteTool implements AiAssistantWriteTool {
         }
         List<User> matches = matching(requested, members);
         return matches.size() == 1 ? matches.getFirst() : null;
+    }
+
+    /**
+     * The member the requested owner resolves to, and for a pinned proposal only while that is the
+     * pinned member.
+     */
+    private static User reviewedOwner(Review review, String requested) {
+        User matched = requestedOwner(requested, review.members());
+        List<Integer> pinned = review.pinnedPrincipalIds();
+        return matched == null || pinned == null || pinned.equals(List.of(matched.getId()))
+                ? matched
+                : null;
     }
 
     private static String principalLabel(User member) {

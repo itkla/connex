@@ -92,6 +92,11 @@ public interface AiAssistantWriteTool {
      * user id, and passes these same objects to {@link #apply} through {@link Execution}. Only an
      * approval resolves principals; an immediate-tier tool that names one is refused.
      *
+     * <p>A confirm-tier tool's principals are also resolved when the proposal is prepared, and
+     * their ids are pinned beside the stored request: the member reviews exactly those members, so
+     * an approval whose own resolution names any other member is refused rather than written. A
+     * {@code ResourceNotFoundException} at that point refuses the proposal before it is stored.
+     *
      * <p>Resolution runs before any lock, so it must be a pure function of the request and the
      * directory the framework supplies: a permission read here would fill the transaction's
      * first-level cache with a pre-lock answer every later permission check would be served, and a
@@ -112,6 +117,11 @@ public interface AiAssistantWriteTool {
      * <p>A tool whose lock needs that value — a stage change locks the board rows of the stage it
      * moves the deal to — resolves it here; the framework locks with it and passes the same object
      * to {@link #apply}. The same resolution labels the pending-proposal review.
+     *
+     * <p>A confirm-tier tool's resolution also runs when the proposal is prepared, and its field
+     * and id are pinned beside the stored request: an approval whose own resolution differs from
+     * the pin is refused rather than written, and the review labels only the pinned row. A {@code
+     * ResourceNotFoundException} at that point refuses the proposal before it is stored.
      *
      * @param target the resolved target
      * @param request the validated typed request
@@ -592,6 +602,14 @@ public interface AiAssistantWriteTool {
      * boolean {@link AiAssistantWriteTool#sharedOutcomeFlags()} of an executed call, and
      * {@code members} and {@code stages} are empty.
      *
+     * <p>A proposal prepared since resolutions were pinned carries the id {@link
+     * AiAssistantWriteTool#resolve} and the member ids {@link AiAssistantWriteTool#principals}
+     * returned when it was proposed; a proposal stored before then carries neither and is reviewed
+     * by name exactly as it always was. A tool that reviews a pinned proposal names only the pinned
+     * row, and reports the value unresolved when the request no longer resolves to it, because
+     * the approval refuses exactly that. Neither pin is handed to a viewer who may not read the
+     * details.
+     *
      * @param detailsReadable whether the viewer requested the proposal and can read its target
      * @param target the visible target, or {@code null} when the viewer may not read it
      * @param request the stored request object, only its shared request flags when the viewer may
@@ -600,6 +618,10 @@ public interface AiAssistantWriteTool {
      *     may not read it, or {@code null}
      * @param members the workspace's members when the tool declared {@link ReviewInput#MEMBERS}
      * @param stages the workspace's pipeline stages when the tool declared {@link ReviewInput#STAGES}
+     * @param pinnedResolutionId the resolved id pinned at proposal time, or {@code null} when none
+     *     was pinned
+     * @param pinnedPrincipalIds the principal ids pinned at proposal time in ascending order, or
+     *     {@code null} for a proposal stored before principals were pinned
      */
     record Review(
             String targetKind,
@@ -610,7 +632,13 @@ public interface AiAssistantWriteTool {
             JsonNode outcome,
             List<User> members,
             List<Stage> stages,
-            Set<Permission> viewerPermissions) {
+            Set<Permission> viewerPermissions,
+            Integer pinnedResolutionId,
+            List<Integer> pinnedPrincipalIds) {
+
+        public Review {
+            pinnedPrincipalIds = pinnedPrincipalIds == null ? null : List.copyOf(pinnedPrincipalIds);
+        }
 
         /**
          * @param field a stored request field

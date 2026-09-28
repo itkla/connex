@@ -25,7 +25,9 @@ import tools.jackson.databind.JsonNode;
  *
  * <p>The stage is resolved once, before the lock, against the deal's own pipeline; the framework
  * locks the board rows that move toward that stage and refuses the approval if the deal was written
- * after the proposal. The write is read back by stage id, while the stored {@code stage} label stays
+ * after the proposal. The stage id resolved when the proposal was prepared is pinned, so an
+ * approval whose name now resolves to another stage — one stage renamed away and another renamed
+ * in — is refused rather than moving the deal somewhere its card never named. The write is read back by stage id, while the stored {@code stage} label stays
  * the name resolved before the lock. A stage change records no inverse.
  */
 @Component
@@ -140,15 +142,15 @@ public class AiAssistantChangeDealStageWriteTool implements AiAssistantWriteTool
      *
      * <p>A proposed stage that no longer resolves in the deal's own pipeline is reported as
      * unresolved rather than echoed back, because the value the model chose is never shown as a
-     * stage the workspace has.
+     * stage the workspace has. A pinned proposal names only its pinned stage, and is unresolved
+     * once the requested name resolves to any other stage, which its approval refuses.
      */
     @Override
     public Diff diff(Review review) {
         RecordSnapshot target = review.target();
         String current = currentStageName(review.stages(), target.stageId());
         boolean currentUnresolved = target.stageId() != null && current == null;
-        Stage proposed = requestedStage(
-                review.requestText(STAGE_FIELD), target.pipelineId(), review.stages());
+        Stage proposed = reviewedStage(review);
         if (proposed == null) {
             return new Diff(STAGE_FIELD, current, currentUnresolved, null, DiffState.UNRESOLVED);
         }
@@ -165,8 +167,7 @@ public class AiAssistantChangeDealStageWriteTool implements AiAssistantWriteTool
     @Override
     public String requestSummary(Review review) {
         if (review.detailsReadable()) {
-            Stage matched = requestedStage(
-                    review.requestText(STAGE_FIELD), review.target().pipelineId(), review.stages());
+            Stage matched = reviewedStage(review);
             if (matched != null && matched.getName() != null) {
                 return "Change deal stage to: " + matched.getName();
             }
@@ -190,6 +191,17 @@ public class AiAssistantChangeDealStageWriteTool implements AiAssistantWriteTool
     @Override
     public List<String> memberOutcomeFields() {
         return List.of(STAGE_FIELD);
+    }
+
+    /**
+     * The stage the requested name resolves to in the deal's own pipeline, and for a pinned
+     * proposal only while that is the pinned stage.
+     */
+    private static Stage reviewedStage(Review review) {
+        Stage matched = requestedStage(
+                review.requestText(STAGE_FIELD), review.target().pipelineId(), review.stages());
+        Integer pinned = review.pinnedResolutionId();
+        return matched == null || pinned == null || matched.getId() == pinned ? matched : null;
     }
 
     private static Stage requestedStage(

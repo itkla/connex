@@ -213,6 +213,11 @@ class AiAssistantWriteToolServiceTest {
                 eq("executed"), any(), eq(TURN.userId()))).thenReturn(1);
         when(chatMapper.updateExecutedToolResult(
                 eq(TURN.workspaceId()), eq(29), any(), eq(TURN.userId()))).thenReturn(1);
+        Deal proposalDeal = new Deal();
+        proposalDeal.setId(44);
+        proposalDeal.setPipelineId(5);
+        when(dealService.getDealById(44)).thenReturn(proposalDeal);
+        when(pipelineService.getAllStages()).thenReturn(List.of(pipelineStage(6, "Proposal")));
     }
 
     @Test
@@ -854,6 +859,7 @@ class AiAssistantWriteToolServiceTest {
         renamedInto.setDisplayName("Grace Hopper");
         when(workspaceService.getMembers(TURN.workspaceId()))
                 .thenReturn(List.of(owner))
+                .thenReturn(List.of(owner))
                 .thenReturn(List.of(renamedInto));
         AiAssistantPreparedWrite write = prepared(
                 "assign_owner",
@@ -868,7 +874,7 @@ class AiAssistantWriteToolServiceTest {
 
         assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
 
-        verify(workspaceService, times(1)).getMembers(TURN.workspaceId());
+        verify(workspaceService, times(2)).getMembers(TURN.workspaceId());
         InOrder order = inOrder(workspaceService, companyService);
         order.verify(workspaceService).getMembers(TURN.workspaceId());
         order.verify(workspaceService).lockAndRequirePermissionsSnapshot(
@@ -1121,6 +1127,233 @@ class AiAssistantWriteToolServiceTest {
         verify(personService, never()).getPersonById(anyInt());
     }
 
+    /**
+     * A confirm-tier proposal stores the stage and the members its card is reviewed against as two
+     * siblings after its request, which a reader predating them never looks at; an immediate
+     * proposal is executed in its own turn and stores neither.
+     */
+    @Test
+    void aConfirmProposalPinsWhatItResolvedAndAnImmediateOneDoesNot() throws Exception {
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(21, "Grace Hopper"), member(11, "Ada Owner")));
+
+        assertEquals(
+                "{\"tool\":\"change_deal_stage\",\"tier\":\"confirm\",\"restrictionEpoch\":23,"
+                        + "\"target\":{\"kind\":\"deal\",\"id\":44},"
+                        + "\"request\":{\"handle\":\"r1\",\"stage\":\" proposal\"},"
+                        + "\"resolution\":{\"field\":\"stage\",\"id\":6},\"principals\":[]}",
+                prepared(
+                        "change_deal_stage", "{\"handle\":\"r1\",\"stage\":\" proposal\"}",
+                        "deal", 44).argumentsJson());
+        assertEquals(
+                "{\"tool\":\"assign_owner\",\"tier\":\"confirm\",\"restrictionEpoch\":23,"
+                        + "\"target\":{\"kind\":\"company\",\"id\":52},"
+                        + "\"request\":{\"handle\":\"r1\",\"owner\":\"grace hopper\"},"
+                        + "\"principals\":[21]}",
+                prepared(
+                        "assign_owner", "{\"handle\":\"r1\",\"owner\":\"grace hopper\"}",
+                        "company", 52).argumentsJson());
+        assertEquals(
+                "{\"tool\":\"assign_owner\",\"tier\":\"confirm\",\"restrictionEpoch\":23,"
+                        + "\"target\":{\"kind\":\"deal\",\"id\":44},"
+                        + "\"request\":{\"handle\":\"r1\",\"owner\":\"Unassigned\"},"
+                        + "\"principals\":[]}",
+                prepared(
+                        "assign_owner", "{\"handle\":\"r1\",\"owner\":\"Unassigned\"}",
+                        "deal", 44).argumentsJson());
+        String immediate = prepared(
+                "create_task", "{\"handle\":\"r1\",\"description\":\"Agenda\"}", "person", 31)
+                .argumentsJson();
+        assertFalse(immediate.contains("principals"), immediate);
+        assertFalse(immediate.contains("resolution"), immediate);
+    }
+
+    /**
+     * A name that resolves to no single row is refused before any proposal exists, recoverably and
+     * with a reason that names no row, so the member is never shown a card its approval could only
+     * refuse.
+     */
+    @Test
+    void aNameThatResolvesToNoSingleRowIsRefusedRecoverablyBeforeAnythingIsStored() {
+        User grace = member(21, "Grace Hopper");
+        User admiral = member(22, "Admiral");
+        admiral.setUsername("grace hopper");
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(grace, admiral));
+
+        AiAssistantLoopException unknownStage = assertThrows(
+                AiAssistantLoopException.class,
+                () -> prepared(
+                        "change_deal_stage", "{\"handle\":\"r1\",\"stage\":\"Closed won\"}",
+                        "deal", 44));
+        AiAssistantLoopException ambiguousOwner = assertThrows(
+                AiAssistantLoopException.class,
+                () -> prepared(
+                        "assign_owner", "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                        "company", 52));
+        when(workspaceService.getMembers(TURN.workspaceId())).thenReturn(List.of(admiral));
+        AiAssistantLoopException unknownOwner = assertThrows(
+                AiAssistantLoopException.class,
+                () -> prepared(
+                        "assign_owner", "{\"handle\":\"r1\",\"owner\":\"Ada Owner\"}",
+                        "company", 52));
+
+        for (AiAssistantLoopException refusal
+                : List.of(unknownStage, ambiguousOwner, unknownOwner)) {
+            assertTrue(refusal.recoverable());
+            assertEquals("unresolved_reference", refusal.detailReason());
+            assertEquals("malformed_output", refusal.terminalReason());
+        }
+        verify(dealService, never()).lockStageChangeRowsForUpdate(anyInt(), anyInt());
+        verify(workspaceService, never()).lockAndRequirePermissionsSnapshot(anyInt(), any());
+    }
+
+    /**
+     * A stage renamed away and another renamed into the reviewed name after the proposal: the name
+     * now resolves to a stage the card never named, so the approval is refused before any board
+     * row is locked, and nothing is written.
+     */
+    @Test
+    void anApprovalWhoseStageNameNowResolvesToAnotherStageIsRefusedBeforeAnyLock()
+            throws Exception {
+        stored(prepared(
+                "change_deal_stage", "{\"handle\":\"r1\",\"stage\":\"Proposal\"}", "deal", 44),
+                29);
+        when(pipelineService.getAllStages()).thenReturn(List.of(
+                pipelineStage(6, "Negotiation"), pipelineStage(7, "Proposal")));
+
+        ConflictException refused = assertThrows(
+                ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        assertEquals("Assistant proposal target changed", refused.getMessage());
+        verify(dealService, never()).lockStageChangeRowsForUpdate(anyInt(), anyInt());
+        verify(dealService, never()).changeStage(any(DealService.LockedStageChange.class));
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    /**
+     * Issue 1865: the card reviewed member 21 as the owner; member 21 is offboarded and member 22
+     * takes the same display name. The name now resolves uniquely to an active member and the
+     * record is unchanged, so only the pin stands between the approval and a write to a member the
+     * approver never saw.
+     */
+    @Test
+    void anApprovalWhoseOwnerNameNowNamesAnotherMemberIsRefusedAndWritesNothing()
+            throws Exception {
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(21, "Grace Hopper"), member(11, "Ada Owner")));
+        stored(prepared(
+                "assign_owner", "{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}",
+                "company", 52), 29);
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(22, "Grace Hopper"), member(11, "Ada Owner")));
+        Company unchanged = new Company();
+        unchanged.setId(52);
+        unchanged.setUpdatedAt("2026-03-06 14:00:00.000000");
+        when(companyService.lockOwnedCompanyForUpdate(52)).thenReturn(unchanged);
+        Company handedOver = new Company();
+        handedOver.setId(52);
+        handedOver.setOwnerId(22);
+        when(companyService.updateOwner(52, 22)).thenReturn(handedOver);
+
+        ConflictException refused = assertThrows(
+                ConflictException.class, () -> service.approve(TURN.sessionId(), 29));
+
+        assertEquals("Assistant proposal target changed", refused.getMessage());
+        verify(companyService, never()).lockOwnedCompanyForUpdate(anyInt());
+        verify(companyService, never()).updateOwner(anyInt(), any());
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
+    /**
+     * A proposal stored before pinning carries neither pin and is approved exactly as it always
+     * was: its names are resolved again before the lock and whatever they resolve to is written.
+     */
+    @Test
+    void aProposalStoredBeforePinningIsApprovedByNameExactlyAsBefore() throws Exception {
+        when(workspaceService.getMembers(TURN.workspaceId()))
+                .thenReturn(List.of(member(22, "Grace Hopper")));
+        storedToolCall.setId(29);
+        storedToolCall.setToolName("assign_owner");
+        storedToolCall.setArgumentsJson(
+                "{\"tool\":\"assign_owner\",\"tier\":\"confirm\",\"restrictionEpoch\":23,"
+                        + "\"target\":{\"kind\":\"company\",\"id\":52},"
+                        + "\"request\":{\"handle\":\"r1\",\"owner\":\"Grace Hopper\"}}");
+        Company owned = new Company();
+        owned.setId(52);
+        owned.setOwnerId(22);
+        when(companyService.updateOwner(52, 22)).thenReturn(owned);
+
+        assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
+
+        verify(companyService).updateOwner(52, 22);
+        verify(workspaceService).lockAndRequirePermissionsSnapshot(
+                TURN.workspaceId(),
+                Map.of(TURN.userId(), Set.of(Permission.AI_USE), 22, Set.of()));
+    }
+
+    /** A stage proposal stored before pinning moves the deal to whatever its name resolves to. */
+    @Test
+    void aStageProposalStoredBeforePinningIsApprovedByNameExactlyAsBefore() throws Exception {
+        when(pipelineService.getAllStages()).thenReturn(List.of(
+                pipelineStage(6, "Negotiation"), pipelineStage(7, "Proposal")));
+        storedToolCall.setId(29);
+        storedToolCall.setToolName("change_deal_stage");
+        storedToolCall.setArgumentsJson(
+                "{\"tool\":\"change_deal_stage\",\"tier\":\"confirm\",\"restrictionEpoch\":23,"
+                        + "\"target\":{\"kind\":\"deal\",\"id\":44},"
+                        + "\"request\":{\"handle\":\"r1\",\"stage\":\"Proposal\"}}");
+        DealService.LockedStageChange locked = mock(DealService.LockedStageChange.class);
+        when(dealService.lockStageChangeRowsForUpdate(44, 7)).thenReturn(locked);
+        Deal moved = new Deal();
+        moved.setId(44);
+        moved.setStageId(7);
+        when(dealService.changeStage(locked)).thenReturn(moved);
+
+        assertEquals("executed", service.approve(TURN.sessionId(), 29).status());
+
+        verify(dealService).changeStage(locked);
+    }
+
+    /**
+     * Only the framework writes pins, so a stored proposal whose pins do not parse is metadata it
+     * never wrote: an approval refuses it before any authority lock, and a rejection before it
+     * writes a status.
+     */
+    @Test
+    void aProposalWithMalformedPinsIsRefusedByEveryDecision() {
+        String legacy = "{\"tool\":\"change_deal_stage\",\"tier\":\"confirm\","
+                + "\"restrictionEpoch\":23,\"target\":{\"kind\":\"deal\",\"id\":44},"
+                + "\"request\":{\"handle\":\"r1\",\"stage\":\"Proposal\"}";
+        storedToolCall.setId(29);
+        storedToolCall.setToolName("change_deal_stage");
+        for (String pins : List.of(
+                ",\"resolution\":{\"field\":\"stage\",\"id\":6}}",
+                ",\"principals\":{}}",
+                ",\"principals\":[\"21\"]}",
+                ",\"principals\":[22,21]}",
+                ",\"principals\":[21,21]}",
+                ",\"principals\":[0]}",
+                ",\"resolution\":{\"field\":\"stage\"},\"principals\":[]}",
+                ",\"resolution\":{\"field\":\"\",\"id\":6},\"principals\":[]}",
+                ",\"resolution\":{\"field\":\"stage\",\"id\":6,\"label\":\"x\"},"
+                        + "\"principals\":[]}")) {
+            storedToolCall.setArgumentsJson(legacy + pins);
+
+            assertThrows(
+                    IllegalStateException.class, () -> service.approve(TURN.sessionId(), 29),
+                    pins);
+            assertThrows(
+                    IllegalStateException.class, () -> service.reject(TURN.sessionId(), 29),
+                    pins);
+        }
+        verify(dealService, never()).lockStageChangeRowsForUpdate(anyInt(), anyInt());
+        verify(dealService, never()).changeStage(any(DealService.LockedStageChange.class));
+        verify(chatMapper, never()).updateToolCall(
+                anyInt(), anyInt(), anyInt(), any(), any(), anyInt());
+    }
+
     private void grantAllExcept(Permission... revoked) {
         EnumSet<Permission> granted = EnumSet.allOf(Permission.class);
         granted.removeAll(List.of(revoked));
@@ -1149,6 +1382,24 @@ class AiAssistantWriteToolServiceTest {
                 eq(TURN.workspaceId()), eq(TURN.userMessageId()), eq(29),
                 eq("executed"), result.capture(), eq(TURN.userId()));
         return result.getValue();
+    }
+
+    private static Stage pipelineStage(int id, String name) {
+        ooo.klae.connex.backend.beans.Pipeline pipeline =
+                new ooo.klae.connex.backend.beans.Pipeline();
+        pipeline.setId(5);
+        Stage stage = new Stage();
+        stage.setId(id);
+        stage.setName(name);
+        stage.setPipeline(pipeline);
+        return stage;
+    }
+
+    private static User member(int id, String displayName) {
+        User member = new User();
+        member.setId(id);
+        member.setDisplayName(displayName);
+        return member;
     }
 
     private static Person person(int id) {

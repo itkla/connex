@@ -279,7 +279,8 @@ public class AiAssistantToolCallReadService {
                 return null;
             }
             return new StoredToolCall(
-                    toolCall, tool, tier, targetKind, targetId, turnId, root.get("request"));
+                    toolCall, tool, tier, targetKind, targetId, turnId, root.get("request"),
+                    AiAssistantProposalPins.read(root));
         } catch (JacksonException | IllegalArgumentException exception) {
             return null;
         }
@@ -489,8 +490,10 @@ public class AiAssistantToolCallReadService {
      * members or stages and no request or outcome value beyond the tool's boolean shared flags, so
      * no summary a tool writes can carry a record value to them.
      * Otherwise the target snapshot is present while the viewer can currently see it, the stored
-     * outcome only for an executed call, and the members and stages only when the tool declared
-     * them; the tool never reads anything this service did not already load for the page of cards.
+     * outcome only for an executed call, the members and stages only when the tool declared them,
+     * and the resolution and principals pinned when the proposal was prepared, which a proposal
+     * stored before pinning does not carry; the tool never reads anything this service did not
+     * already load for the page of cards.
      */
     private Review review(
             AiAssistantWriteTool tool,
@@ -514,7 +517,9 @@ public class AiAssistantToolCallReadService {
                 EXECUTED.equals(status) ? storedOutcome(call.toolCall()) : null,
                 inputs.contains(ReviewInput.MEMBERS) ? assignableOwners : List.of(),
                 inputs.contains(ReviewInput.STAGES) ? stages : List.of(),
-                withheld.viewerPermissions());
+                withheld.viewerPermissions(),
+                call.pins() == null ? null : call.pins().resolutionId(),
+                call.pins() == null ? null : call.pins().principalIds());
     }
 
     /**
@@ -526,7 +531,7 @@ public class AiAssistantToolCallReadService {
      * its outcome, for an executed call only, carries just the tool's declared
      * {@link AiAssistantWriteTool#sharedOutcomeFlags()} that hold a boolean and is {@code null}
      * when none does, so a summary can say what kind of write was asked for and whether it changed
-     * anything but never a workspace string or an identifier.
+     * anything but never a workspace string or an identifier. It carries neither pin.
      */
     private Review withheld(
             AiAssistantWriteTool tool,
@@ -539,7 +544,7 @@ public class AiAssistantToolCallReadService {
                 EXECUTED.equals(status)
                         ? sharedFlags(tool, storedOutcome(call.toolCall()))
                         : null,
-                List.of(), List.of(), viewerPermissions);
+                List.of(), List.of(), viewerPermissions, null, null);
     }
 
     private JsonNode sharedRequestFlags(AiAssistantWriteTool tool, JsonNode request) {
@@ -917,7 +922,8 @@ public class AiAssistantToolCallReadService {
             String targetKind,
             int targetId,
             int turnId,
-            JsonNode request) {
+            JsonNode request,
+            AiAssistantProposalPins pins) {
     }
 
     private record RecordKey(String kind, int id) {

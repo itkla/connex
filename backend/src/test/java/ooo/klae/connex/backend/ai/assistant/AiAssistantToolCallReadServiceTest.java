@@ -1257,6 +1257,8 @@ class AiAssistantToolCallReadServiceTest {
             assertNull(review.outcome());
             assertTrue(review.members().isEmpty());
             assertTrue(review.stages().isEmpty());
+            assertNull(review.pinnedResolutionId());
+            assertNull(review.pinnedPrincipalIds());
         }
         verify(pipelineMapper, never()).getAllStages(WORKSPACE_ID);
     }
@@ -1398,6 +1400,92 @@ class AiAssistantToolCallReadServiceTest {
             assertTrue(card.requestSummary().contains("Acme renewal"), card.toolName());
             assertTrue(card.requestSummary().contains("secret request"), card.toolName());
         }
+        assertFalse(seen.isEmpty());
+        for (Review review : seen) {
+            assertTrue(review.detailsReadable());
+            assertEquals(Integer.valueOf(9), review.pinnedResolutionId());
+            assertEquals(List.of(55), review.pinnedPrincipalIds());
+        }
+    }
+
+    /**
+     * A pinned stage proposal names the stage it was reviewed against, and once that stage is
+     * renamed away and the deal's own stage renamed into the same name it is unresolved and says no
+     * stage, exactly as its approval would refuse, where an unpinned card would call it a no-op.
+     */
+    @Test
+    void aPinnedStageProposalNamesOnlyThePinnedStage() {
+        AiChatToolCall reviewed = pinned(
+                toolCall(81, USER_ID, "change_deal_stage", "confirm", "proposed", "deal", 41, 81,
+                        null),
+                ",\"resolution\":{\"field\":\"stage\",\"id\":10},\"principals\":[]");
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(reviewed));
+        when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
+                stage(9, 3, "Negotiation"), stage(10, 3, "Won")));
+
+        AiAssistantToolCallReadDto ready = service.list(SESSION_ID, false).getFirst();
+
+        when(pipelineMapper.getAllStages(WORKSPACE_ID)).thenReturn(List.of(
+                stage(9, 3, "Won"), stage(10, 3, "Closed")));
+        AiAssistantToolCallReadDto drifted = service.list(SESSION_ID, false).getFirst();
+
+        assertEquals("Change deal stage to: Won", ready.requestSummary());
+        assertEquals("Won", ready.change().proposedValue());
+        assertEquals("ready", ready.change().state());
+        assertEquals("Change the deal stage", drifted.requestSummary());
+        assertNull(drifted.change().proposedValue());
+        assertEquals("unresolved", drifted.change().state());
+        assertEquals("Won", drifted.change().currentValue());
+    }
+
+    /**
+     * Issue 1865 on the card: the pinned member was offboarded and another member took the same
+     * display name. The card says no member rather than naming one the approver never reviewed.
+     */
+    @Test
+    void aPinnedOwnerProposalNamesOnlyThePinnedMember() {
+        when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(
+                user(USER_ID, "Ada Owner", "ada-owner"),
+                user(55, "Grace Hopper", "grace-hopper")));
+        AiChatToolCall reviewed = pinned(
+                ownerProposal(82, 31, "Grace Hopper"), ",\"principals\":[55]");
+        Person owned = person(31, "Ada Lovelace");
+        owned.setOwnerId(USER_ID);
+        owned.setUpdatedAt("2026-08-12 11:00:00.000000");
+        stubPending(reviewed, 31, List.of(owned));
+
+        AiAssistantToolCallReadDto ready = service.list(SESSION_ID, false).getFirst();
+
+        when(workspaceService.getMembers(WORKSPACE_ID)).thenReturn(List.of(
+                user(USER_ID, "Ada Owner", "ada-owner"),
+                user(56, "Grace Hopper", "grace-hopper-2")));
+        AiAssistantToolCallReadDto drifted = service.list(SESSION_ID, false).getFirst();
+
+        assertEquals("Assign owner: Grace Hopper", ready.requestSummary());
+        assertEquals("Grace Hopper", ready.change().proposedValue());
+        assertEquals("ready", ready.change().state());
+        assertEquals("Assign an owner", drifted.requestSummary());
+        assertNull(drifted.change().proposedValue());
+        assertEquals("unresolved", drifted.change().state());
+        assertEquals("Ada Owner", drifted.change().currentValue());
+    }
+
+    /** Pins only the framework writes that do not parse leave no card at all. */
+    @Test
+    void aProposalWhosePinsDoNotParseLeavesNoCard() {
+        stubVisibleDeal();
+        when(chatMapper.listToolCallsBySession(WORKSPACE_ID, SESSION_ID, false, 100))
+                .thenReturn(List.of(
+                        pinned(toolCall(83, USER_ID, "change_deal_stage", "confirm", "proposed",
+                                "deal", 41, 83, null),
+                                ",\"resolution\":{\"field\":\"stage\",\"id\":10}"),
+                        pinned(toolCall(84, USER_ID, "assign_owner", "confirm", "proposed",
+                                "deal", 41, 84, null),
+                                ",\"principals\":[\"55\"]")));
+
+        assertEquals(List.of(), service.list(SESSION_ID, false));
     }
 
     @Test
@@ -1592,7 +1680,8 @@ class AiAssistantToolCallReadServiceTest {
                 card.setArgumentsJson("{\"tool\":\"" + tool.name() + "\",\"tier\":\"" + tier
                         + "\",\"restrictionEpoch\":1,\"target\":{\"kind\":\"deal\",\"id\":41},"
                         + "\"request\":{\"handle\":\"r1\",\"stage\":\"secret request\","
-                        + "\"description\":\"secret request\",\"owner\":\"secret request\"}}");
+                        + "\"description\":\"secret request\",\"owner\":\"secret request\"},"
+                        + "\"resolution\":{\"field\":\"stage\",\"id\":9},\"principals\":[55]}");
                 cards.add(card);
                 id++;
             }
@@ -1715,6 +1804,17 @@ class AiAssistantToolCallReadServiceTest {
         when(chatMapper.listAssistantMessagesBySessionAndTurnIds(
                 WORKSPACE_ID, SESSION_ID, List.of(toolCall.getId()), 100)).thenReturn(List.of());
         when(personMapper.getByIds(WORKSPACE_ID, List.of(personId))).thenReturn(people);
+    }
+
+    /**
+     * @param toolCall a stored proposal as it was written before pinning
+     * @param pins the pin siblings a proposal prepared now carries after its request
+     * @return the same proposal carrying those pins
+     */
+    private static AiChatToolCall pinned(AiChatToolCall toolCall, String pins) {
+        String stored = toolCall.getArgumentsJson();
+        toolCall.setArgumentsJson(stored.substring(0, stored.length() - 1) + pins + "}");
+        return toolCall;
     }
 
     private static AiChatToolCall ownerProposal(int id, int personId, String owner) {

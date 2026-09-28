@@ -69,11 +69,11 @@ import tools.jackson.databind.node.ObjectNode;
  * tools. Everything a write must never get wrong is performed here, in one order, for every tool:
  * the entry gate of the decision, the principals resolved once before any lock, the locked
  * authorization roots, the session, tool-call and (immediate tier) turn rows, the stored proposal
- * revalidated against the catalog and the registry, the tool's permissions asserted from the locked
- * snapshot, the task board and target locks the tool declares, the restriction fence, proposal
- * freshness for every confirm-tier tool, the permissions re-asserted after the record lock, the
- * owner-scope target gate, the write, the identifier read back off its result, and the fail-closed
- * status write.
+ * revalidated against the catalog, the registry and the resolution and principals pinned when a
+ * confirm-tier proposal was prepared, the tool's permissions asserted from the locked snapshot, the
+ * task board and target locks the tool declares, the restriction fence, proposal freshness for
+ * every confirm-tier tool, the permissions re-asserted after the record lock, the owner-scope target
+ * gate, the write, the identifier read back off its result, and the fail-closed status write.
  */
 @Service
 @RequiredArgsConstructor
@@ -85,6 +85,8 @@ public class AiAssistantWriteToolService {
     private static final String REJECTED = "rejected";
     private static final String SHARED = "shared";
     private static final Duration UNDO_WINDOW = Duration.ofMinutes(10);
+    private static final String UNRESOLVED_REFERENCE = "unresolved_reference";
+    private static final String PROPOSAL_CHANGED = "Assistant proposal target changed";
 
     private final AiAssistantToolCatalog toolCatalog;
     private final AiAssistantWriteToolRegistry writeToolRegistry;
@@ -115,6 +117,9 @@ public class AiAssistantWriteToolService {
                 .orElseThrow(() -> AiAssistantLoopException.malformed("unknown_write_tool"));
         AiAssistantWriteToolRequest request = readRequest(tool, args);
         ResourceRef target = resources.resolve(request.handle(), tool.acceptedTargetKinds());
+        AiAssistantProposalPins pins = toolCatalog.tier(name) == ToolTier.CONFIRM
+                ? pins(tool, new Target(target.kind(), target.id()), request)
+                : null;
         ObjectNode storedRequest = objectMapper.valueToTree(request);
         storedRequest.put("handle", "r1");
         Map<String, Object> targetData = new LinkedHashMap<>();
@@ -126,12 +131,38 @@ public class AiAssistantWriteToolService {
         durable.put("restrictionEpoch", expectedRestrictionEpoch);
         durable.put("target", targetData);
         durable.put("request", storedRequest);
+        if (pins != null) {
+            pins.writeTo(durable);
+        }
         return new AiAssistantPreparedWrite(
                 name,
                 toolCatalog.tier(name),
                 target.kind(),
                 target.id(),
                 serialize(durable));
+    }
+
+    /**
+     * Resolves, once, what a confirm-tier proposal will be reviewed against, and pins it.
+     *
+     * <p>The member reviews the card this resolution labels, so the approval later refuses any
+     * other resolution of the same request. A request that resolves to nothing, or to more than
+     * one row, is refused recoverably before any proposal is stored, with a reason that names no
+     * row: the model may correct the name, and no card is ever shown for a value approval could
+     * only refuse. The member directory read here is a plain member list, and this runs in the
+     * turn, never inside an approval, so it leaves nothing any approval's first-level cache could
+     * answer a later permission check with.
+     */
+    private AiAssistantProposalPins pins(
+            AiAssistantWriteTool tool, Target target, AiAssistantWriteToolRequest request) {
+        try {
+            return AiAssistantProposalPins.of(
+                    tool.resolve(target, request),
+                    tool.principals(
+                            request, memberDirectory(workspaceService.getCurrentWorkspaceId())));
+        } catch (ResourceNotFoundException exception) {
+            throw AiAssistantLoopException.refusedArguments(UNRESOLVED_REFERENCE);
+        }
     }
 
     /** Builds the model-visible replay or approval-required result for a durable proposal. */
@@ -233,6 +264,7 @@ public class AiAssistantWriteToolService {
         if (write.tier() != ToolTier.CONFIRM) {
             throw new ConflictException("Assistant tool does not require approval");
         }
+        requirePinnedPrincipals(write, principals);
         requirePermissions(authorized.authority(), actor.userId(), write);
         PreparedMutation mutation = lockMutationTarget(write);
         if (!restrictionEpoch.retainReadFenceUntilTransactionCompletionIfCurrent(
@@ -537,6 +569,22 @@ public class AiAssistantWriteToolService {
     }
 
     /**
+     * Refuses an approval whose principals are not the members its proposal was reviewed against.
+     *
+     * <p>The principals were resolved again before any lock, by the same name the model wrote. A
+     * member renamed or offboarded since the proposal can make that name resolve to someone the
+     * approver never saw on the card, and the record would be handed to them, so a proposal pinned
+     * when it was prepared refuses every other resolution. A proposal stored before pinning is
+     * approved exactly as it always was.
+     */
+    private static void requirePinnedPrincipals(
+            StoredWrite write, PreliminaryPrincipals principals) {
+        if (write.pins() != null && !write.pins().pins(principals.principals())) {
+            throw new ConflictException(PROPOSAL_CHANGED);
+        }
+    }
+
+    /**
      * The only member lookup a tool is handed: the workspace's member list, read on demand.
      *
      * <p>It is a plain membership read, not a permission read, so resolving principals through it
@@ -551,14 +599,19 @@ public class AiAssistantWriteToolService {
      * Takes the tool's aggregate locks in the framework's fixed order.
      *
      * <p>The target value is resolved first, by non-locking reads, because a stage change locks the
-     * rows of the stage it resolves. Then the task board root when the tool declares it — the board
-     * is always taken before any person, as the task-board lock order requires — and then the target
-     * row. A tool never takes a lock of its own.
+     * rows of the stage it resolves; a proposal pinned when it was prepared refuses, before any of
+     * these locks, a resolution other than the one its card was reviewed against. Then the task
+     * board root when the tool declares it — the board is always taken before any person, as the
+     * task-board lock order requires — and then the target row. A tool never takes a lock of its
+     * own.
      */
     private PreparedMutation lockMutationTarget(StoredWrite write) {
         Lock lock = write.tool().lock(write.targetKind());
         Resolution resolution = write.tool().resolve(
                 new Target(write.targetKind(), write.targetId()), write.typedRequest());
+        if (write.pins() != null && !write.pins().pins(resolution)) {
+            throw new ConflictException(PROPOSAL_CHANGED);
+        }
         if (lock.taskBoard()) {
             taskService.lockBoardForCreation();
         }
@@ -625,7 +678,7 @@ public class AiAssistantWriteToolService {
             AiChatToolCall toolCall, PreparedMutation mutation) {
         if (AiAssistantProposalFreshness.changedSince(
                 mutation.targetUpdatedAt(), toolCall.getCreatedAt())) {
-            throw new ConflictException("Assistant proposal target changed");
+            throw new ConflictException(PROPOSAL_CHANGED);
         }
     }
 
@@ -675,7 +728,8 @@ public class AiAssistantWriteToolService {
             }
             AiAssistantWriteToolRequest typedRequest = readRequest(tool, request);
             return new StoredWrite(
-                    tool, tier, targetKind, targetId, expectedRestrictionEpoch, typedRequest);
+                    tool, tier, targetKind, targetId, expectedRestrictionEpoch, typedRequest,
+                    AiAssistantProposalPins.read(root));
         } catch (JacksonException | IllegalArgumentException exception) {
             throw new IllegalStateException("Assistant tool proposal could not be read", exception);
         }
@@ -915,7 +969,8 @@ public class AiAssistantWriteToolService {
             String targetKind,
             int targetId,
             long restrictionEpoch,
-            AiAssistantWriteToolRequest typedRequest) {
+            AiAssistantWriteToolRequest typedRequest,
+            AiAssistantProposalPins pins) {
     }
 
     private record PreparedMutation(
