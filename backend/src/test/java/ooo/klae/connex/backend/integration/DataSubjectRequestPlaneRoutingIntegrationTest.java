@@ -1,7 +1,10 @@
 package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.Mockito.mock;
 
@@ -13,6 +16,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
+import java.util.UUID;
 
 import org.apache.ibatis.builder.xml.XMLMapperBuilder;
 import org.apache.ibatis.mapping.Environment;
@@ -41,7 +45,7 @@ import ooo.klae.connex.backend.tenant.TenantWorkScope;
 
 /** Proves DSR control and disclosure mappers execute on opposite catalogs through one routed pool. */
 class DataSubjectRequestPlaneRoutingIntegrationTest {
-    private static final String SCRATCH_CATALOG = "connexdb_routing_dsr_it";
+    private static final ScratchCatalog SCRATCH_CATALOG = new ScratchCatalog();
 
     private static String url;
     private static String username;
@@ -69,20 +73,19 @@ class DataSubjectRequestPlaneRoutingIntegrationTest {
 
         try (Connection connection = DriverManager.getConnection(url, username, password);
                 Statement statement = connection.createStatement()) {
-            assumeTrue(tableExists(connection, "data_subject_request"),
+            assumeTrue(tableExists(connection, defaultCatalog, "data_subject_request"),
                 "Default catalog is not migrated; skipping DSR plane-routing integration test");
-            statement.execute("CREATE DATABASE IF NOT EXISTS " + SCRATCH_CATALOG);
-            statement.execute("DROP TABLE IF EXISTS " + SCRATCH_CATALOG + ".person");
-            statement.execute("DROP TABLE IF EXISTS " + SCRATCH_CATALOG + ".company");
-            statement.execute("DROP TABLE IF EXISTS " + SCRATCH_CATALOG + ".disqualification_reason");
-            statement.execute("CREATE TABLE " + SCRATCH_CATALOG + ".company LIKE " + defaultCatalog + ".company");
-            statement.execute("CREATE TABLE " + SCRATCH_CATALOG + ".person LIKE " + defaultCatalog + ".person");
-            statement.execute("CREATE TABLE " + SCRATCH_CATALOG + ".disqualification_reason LIKE "
+            try {
+                SCRATCH_CATALOG.create(statement);
+            } catch (SQLException exception) {
+                assumeTrue(false, "Cannot create scratch catalog " + SCRATCH_CATALOG.name + " ("
+                    + exception.getMessage() + ")");
+            }
+            statement.execute("CREATE TABLE " + SCRATCH_CATALOG.name + ".company LIKE " + defaultCatalog + ".company");
+            statement.execute("CREATE TABLE " + SCRATCH_CATALOG.name + ".person LIKE " + defaultCatalog + ".person");
+            statement.execute("CREATE TABLE " + SCRATCH_CATALOG.name + ".disqualification_reason LIKE "
                 + defaultCatalog + ".disqualification_reason");
             insertFixtures(connection);
-        } catch (SQLException exception) {
-            assumeTrue(false, "Cannot prepare scratch catalog " + SCRATCH_CATALOG + " ("
-                + exception.getMessage() + ")");
         }
 
         tenantContext = new TenantContext();
@@ -123,13 +126,13 @@ class DataSubjectRequestPlaneRoutingIntegrationTest {
             if (orgId != 0) {
                 statement.executeUpdate("DELETE FROM organization WHERE id = " + orgId);
             }
-            statement.execute("DROP DATABASE IF EXISTS " + SCRATCH_CATALOG);
+            SCRATCH_CATALOG.drop(statement);
         }
     }
 
     @Test
-    void controlRequestAndTenantPersonComeFromTheirOwnCatalogs() {
-        tenantContext.set(workspaceId, orgId, 1, "org_admin", SCRATCH_CATALOG);
+    void controlRequestAndTenantPersonComeFromTheirOwnCatalogs() throws SQLException {
+        tenantContext.set(workspaceId, orgId, 1, "org_admin", SCRATCH_CATALOG.name);
 
         DataSubjectRequest request = tenantWorkScope.unrouted(() -> withSession(session ->
             session.getMapper(DataSubjectRequestMapper.class).findById(orgId, requestId)));
@@ -142,6 +145,25 @@ class DataSubjectRequestPlaneRoutingIntegrationTest {
         assertNull(person.getCompanyId());
         tenantContext.clear();
         assertEquals(defaultCatalog, withSession(DataSubjectRequestPlaneRoutingIntegrationTest::currentCatalog));
+        assertScratchCatalogOwnership();
+    }
+
+    private static void assertScratchCatalogOwnership() throws SQLException {
+        ScratchCatalog concurrentCatalog = new ScratchCatalog();
+        try (Connection connection = DriverManager.getConnection(url, username, password);
+                Statement statement = connection.createStatement()) {
+            try {
+                concurrentCatalog.create(statement);
+                statement.execute("CREATE TABLE " + concurrentCatalog.name + ".sentinel (id INT PRIMARY KEY)");
+                ScratchCatalog unownedCatalog = new ScratchCatalog(concurrentCatalog.name);
+                assertThrows(SQLException.class, () -> unownedCatalog.create(statement));
+                unownedCatalog.drop(statement);
+                assertTrue(tableExists(connection, concurrentCatalog.name, "sentinel"));
+            } finally {
+                concurrentCatalog.drop(statement);
+            }
+            assertTrue(tableExists(connection, SCRATCH_CATALOG.name, "person"));
+        }
     }
 
     private static void insertFixtures(Connection connection) throws SQLException {
@@ -154,7 +176,7 @@ class DataSubjectRequestPlaneRoutingIntegrationTest {
             "INSERT INTO person (workspace_id, name, email) VALUES (" + workspaceId
                 + ", 'Default Subject', 'default-subject@example.com')");
         try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO " + SCRATCH_CATALOG
+                "INSERT INTO " + SCRATCH_CATALOG.name
                     + ".person (id, workspace_id, name, email) VALUES (?, ?, ?, ?)")) {
             statement.setInt(1, personId);
             statement.setInt(2, workspaceId);
@@ -184,8 +206,8 @@ class DataSubjectRequestPlaneRoutingIntegrationTest {
         }
     }
 
-    private static boolean tableExists(Connection connection, String table) throws SQLException {
-        try (ResultSet tables = connection.getMetaData().getTables(defaultCatalog, null, table, null)) {
+    private static boolean tableExists(Connection connection, String catalog, String table) throws SQLException {
+        try (ResultSet tables = connection.getMetaData().getTables(catalog, null, table, null)) {
             return tables.next();
         }
     }
@@ -199,7 +221,7 @@ class DataSubjectRequestPlaneRoutingIntegrationTest {
                 "mappers/DataSubjectRequestMapper.xml", "mappers/DataSubjectDisclosureMapper.xml")) {
             try (InputStream input = DataSubjectRequestPlaneRoutingIntegrationTest.class
                     .getClassLoader().getResourceAsStream(resource)) {
-                assumeTrue(input != null, "Missing mapper resource " + resource);
+                assertNotNull(input, "Missing mapper resource " + resource);
                 new XMLMapperBuilder(input, configuration, resource, configuration.getSqlFragments()).parse();
             }
         }
@@ -209,6 +231,31 @@ class DataSubjectRequestPlaneRoutingIntegrationTest {
     private static <T> T withSession(java.util.function.Function<SqlSession, T> work) {
         try (SqlSession session = sqlSessionFactory.openSession(true)) {
             return work.apply(session);
+        }
+    }
+
+    private static final class ScratchCatalog {
+        private final String name;
+        private boolean created;
+
+        private ScratchCatalog() {
+            this("connexdb_routing_dsr_it_" + UUID.randomUUID().toString().replace("-", ""));
+        }
+
+        private ScratchCatalog(String name) {
+            this.name = name;
+        }
+
+        private void create(Statement statement) throws SQLException {
+            statement.execute("CREATE DATABASE " + name);
+            created = true;
+        }
+
+        private void drop(Statement statement) throws SQLException {
+            if (created) {
+                statement.execute("DROP DATABASE " + name);
+                created = false;
+            }
         }
     }
 

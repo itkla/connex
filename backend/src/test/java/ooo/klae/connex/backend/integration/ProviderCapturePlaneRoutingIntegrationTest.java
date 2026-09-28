@@ -2,6 +2,7 @@ package ooo.klae.connex.backend.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.InputStream;
@@ -79,7 +80,12 @@ class ProviderCapturePlaneRoutingIntegrationTest {
                     defaultCatalog,
                     "provider_capture_user_policy"),
                 "Default catalog is not migrated");
-            statement.execute("CREATE DATABASE " + scratchCatalog);
+            try {
+                statement.execute("CREATE DATABASE " + scratchCatalog);
+            } catch (SQLException exception) {
+                assumeTrue(false, "Cannot create scratch catalog " + scratchCatalog + " ("
+                    + exception.getMessage() + ")");
+            }
             scratchCatalogCreated = true;
             createScratchTables(statement);
             insertScratchRows(statement);
@@ -89,11 +95,6 @@ class ProviderCapturePlaneRoutingIntegrationTest {
                     + "excluded_people_json, excluded_conversations_json) VALUES ("
                     + WORKSPACE_ID + ", " + USER_ID
                     + ", 'google', TRUE, JSON_ARRAY(), JSON_ARRAY())");
-        } catch (SQLException exception) {
-            assumeTrue(
-                false,
-                "Cannot prepare capture routing catalog: "
-                    + exception.getMessage());
         }
 
         tenantContext = new TenantContext();
@@ -316,7 +317,7 @@ class ProviderCapturePlaneRoutingIntegrationTest {
                 ProviderCapturePlaneRoutingIntegrationTest.class
                     .getClassLoader()
                     .getResourceAsStream(resource)) {
-            assumeTrue(input != null, "Missing mapper " + resource);
+            assertNotNull(input, "Missing mapper " + resource);
             new XMLMapperBuilder(
                 input,
                 configuration,
