@@ -404,8 +404,17 @@ permission-read and lifecycle-mutator names in tool source; a new dependency is 
 that allowlist. Before any lock, an approval resolves the principals the write will name
 (`AiAssistantWriteTool.principals`, against the member directory the framework hands it — today
 only `assign_owner`'s owner), and those same objects reach the write: `Execution` carries no member
-lookup, so `assign_owner` writes exactly the owner id locked at step 1. The framework acquires its
-locks in exactly this order:
+lookup, so `assign_owner` writes exactly the owner id locked at step 1. A confirm-tier proposal
+also pins, when it is prepared in the turn, what its principals and its value resolved to: the
+`principals` ids and the `resolution` field and id are stored as additive siblings of the stored
+arguments, and a name that resolves to no single row is refused before any proposal is stored. The
+approval compares its own pre-lock resolution with the pins — the principals once step 3 has read
+the locked proposal, the value just before step 5, before any board or target lock — and refuses
+any difference with `Assistant proposal target changed`, so a rename or an offboarding between the
+proposal and the approval can never hand a record to a member, or move a deal to a stage, that the
+card did not name. The comparison reads no row and takes no lock. A proposal stored before pinning
+carries neither sibling and is approved exactly as before. The framework acquires its locks in
+exactly this order:
 
 1. **Locked authorization roots**, through one `WorkspaceService.lockAndRequirePermissionsSnapshot`
    covering the actor, who must hold `AI_USE`, and, on an approval whose write names principals
