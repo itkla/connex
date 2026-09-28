@@ -540,13 +540,43 @@ public class AiAssistantPromptAssembler {
             MaskingContext context,
             AiAssistantPromptBudget budget,
             AiStructuredRepair repair) {
+        return nativeReplay(toolTurns, nativeCalls, context, budget, repair, 1);
+    }
+
+    /**
+     * Builds bounded native call/result pairs for a request that permits up to the given number
+     * of calls in its step.
+     *
+     * <p>The bound only words a native tool-call repair. A request that permits one call is told,
+     * byte for byte, to return exactly one; a request that permits a batch is told it may return
+     * up to that many, so a repair of a batch envelope does not steer the model back to one call
+     * per step on the very request that invites a batch.
+     *
+     * @param toolTurns the turn's replayed tool turns, in order
+     * @param nativeCalls the provider call each replayed turn answers
+     * @param context the request-local masking context
+     * @param budget the turn's prompt budget
+     * @param repair the repair the request carries, or null
+     * @param maxParallelCalls the calls the request permits in one step, from 1
+     * @return the bounded exchanges, the repair message and the replay's budget audit
+     */
+    public NativeReplay nativeReplay(
+            List<ToolTurn> toolTurns,
+            Map<AiAssistantToolCallRef, AiToolCall> nativeCalls,
+            MaskingContext context,
+            AiAssistantPromptBudget budget,
+            AiStructuredRepair repair,
+            int maxParallelCalls) {
+        if (maxParallelCalls < 1) {
+            throw new IllegalArgumentException("Assistant native call bound must be positive");
+        }
         for (ToolTurn turn : toolTurns) {
             seedIdentifiers(turn.result().identifiers(), context);
         }
         String repairContent = repair == null
                 ? null
                 : repair.schemaRule().startsWith("native_")
-                        ? nativeToolRepairRequest(repair.schemaRule())
+                        ? nativeToolRepairRequest(repair.schemaRule(), maxParallelCalls)
                         : nativeFinalRepairRequest(repair, context);
         if (repairContent != null && !budget.fits(
                 repairContent, budget.repairEnvelopeBytes())) {
@@ -1537,7 +1567,7 @@ public class AiAssistantPromptAssembler {
                         + "Return one corrected JSON final answer matching the final-answer schema only.\n");
     }
 
-    private static String nativeToolRepairRequest(String schemaRule) {
+    private static String nativeToolRepairRequest(String schemaRule, int maxParallelCalls) {
         String rule = switch (schemaRule) {
             case "native_multiple_calls" -> "multiple-calls";
             case "native_call_content" -> "tool-call-with-content";
@@ -1547,8 +1577,11 @@ public class AiAssistantPromptAssembler {
             case "native_invalid_arguments" -> "invalid-arguments";
             default -> "native-tool-call";
         };
+        String calls = maxParallelCalls == 1
+                ? "exactly one valid native tool call"
+                : "up to " + maxParallelCalls + " valid native tool calls";
         return "Your previous native tool call violated the " + rule
-                + " rule. Return exactly one valid native tool call or one valid JSON final answer.";
+                + " rule. Return " + calls + " or one valid JSON final answer.";
     }
 
     private String repairRequest(

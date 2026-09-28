@@ -1,7 +1,7 @@
 {
   "id": "parallel_calls_refused",
   "selector": "connex_script_parallel_calls_refused",
-  "capabilityClass": "scripted-native-parallel",
+  "capabilityClass": "scripted-native",
   "steps": [
     {
       "afterToolCalls": 0,

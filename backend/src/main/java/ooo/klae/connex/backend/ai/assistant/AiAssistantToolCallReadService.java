@@ -65,10 +65,12 @@ public class AiAssistantToolCallReadService {
      *
      * <p>Anchored and still strict: a malformed key is rejected exactly as before, the step number
      * stays bounded by the loop's own backstop and the ordinal by the per-step call ceiling, so a
-     * key claiming a position no step could have produced is refused rather than read. The optional
-     * suffix group is forward-looking only — a write is always the sole call of its step, so no row
-     * this service reads today carries one — and it exists so a suffixed row parses instead of
-     * being dropped silently.
+     * key claiming a position no step could have produced is refused rather than read. An executed
+     * or proposed write is always the sole call of its step and never carries the suffix. A write
+     * refused whole with its batch does — its failed row is keyed by its ordinal — but it holds the
+     * model's raw arguments rather than a prepared write's tool, tier and target, so the stored-row
+     * checks drop it however its key parses. The suffix group exists so a suffixed row parses
+     * instead of being dropped silently for its key alone.
      */
     private static final Pattern TURN_STEP_KEY = Pattern.compile(
             "^turn-([1-9][0-9]*)-step-([1-9][0-9]*)(?:-call-([1-9][0-9]*))?$");

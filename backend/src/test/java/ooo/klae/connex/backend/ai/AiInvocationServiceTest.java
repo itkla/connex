@@ -853,6 +853,104 @@ class AiInvocationServiceTest {
                                         "call_2", "not_a_tool", "{\"query\":\"x\"}"))));
     }
 
+    /**
+     * A guard-rejected sibling cannot hide a placeholder another call of the batch invented.
+     *
+     * <p>The guard refusal is repairable and an invented placeholder is not. Before the batch is
+     * refused for its rejected call, every object-shaped call is demasked, so the refusal carries
+     * the count and the loop ends the turn exactly as it would have for the inventing call alone —
+     * whichever side of the rejected call the invented placeholder sits on.
+     */
+    @Test
+    void aGuardRejectedSiblingCannotHideAPlaceholderAnotherCallOfTheBatchInvented() {
+        AiNativeToolCompletion.Malformed<?> after = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
+                completeNativeTools(
+                        4,
+                        List.of(
+                                searchCall("call_1", "{{P1}}"),
+                                new AiToolCall("call_2", "search_records", "{\"query\":7}"),
+                                searchCall("call_3", "{{P99}}"))));
+        assertEquals("native_invalid_arguments", after.repairRule());
+        assertEquals(1, after.demaskWarnings());
+        assertEquals(1, auditMetadata().get(1).get("demaskWarnings"));
+
+        AiNativeToolCompletion.Malformed<?> before = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
+                completeNativeTools(
+                        4,
+                        List.of(
+                                searchCall("call_1", "{{P99}}"),
+                                new AiToolCall(
+                                        "call_2", "not_a_tool", "{\"query\":\"x\"}"))));
+        assertEquals("native_unknown_tool", before.repairRule());
+        assertEquals(1, before.demaskWarnings());
+    }
+
+    /**
+     * Every envelope refusal of a batch carries the batch's warnings, not only the guard's.
+     *
+     * <p>A shared identifier, unparsable sibling arguments and reasoning text beside the calls are
+     * repairable too, so each of them must also leave an invented placeholder elsewhere in the
+     * response turn-ending.
+     */
+    @Test
+    void everyEnvelopeRefusalOfABatchCarriesItsInventedPlaceholders() {
+        AiNativeToolCompletion.Malformed<?> sharedId = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
+                completeNativeTools(
+                        4,
+                        List.of(
+                                searchCall("call_1", "{{P99}}"),
+                                searchCall("call_1", "Bellweather"))));
+        assertEquals("native_duplicate_call_id", sharedId.repairRule());
+        assertEquals(1, sharedId.demaskWarnings());
+
+        AiNativeToolCompletion.Malformed<?> unparsable = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
+                completeNativeTools(
+                        4,
+                        List.of(
+                                new AiToolCall("call_1", "search_records", "not json"),
+                                searchCall("call_2", "{{P99}}"))));
+        assertEquals("native_arguments_not_object", unparsable.repairRule());
+        assertEquals(1, unparsable.demaskWarnings());
+
+        when(aiProvider.parallelToolCallLimit(resolved.target())).thenReturn(4);
+        AiNativeToolCompletion.Malformed<?> content = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
+                invokeNativeTools(
+                        4,
+                        "Looking both up now </think>",
+                        List.of(
+                                searchCall("call_1", "Bellweather"),
+                                searchCall("call_2", "{{P99}}"))));
+        assertEquals("native_call_content", content.repairRule());
+        assertEquals(1, content.demaskWarnings());
+    }
+
+    /**
+     * A single call keeps the order it always had: its own guard rejection is its refusal.
+     *
+     * <p>The batch rule exists because a sibling's rejection must not hide another call's
+     * invented placeholder. One call has no sibling, so the response every undeclared endpoint can
+     * produce is refused and repaired exactly as before, with no demask count on the refusal.
+     */
+    @Test
+    void aSingleCallTheGuardRejectsStaysRepairableWhateverPlaceholderItNames() {
+        AiNativeToolCompletion.Malformed<?> malformed = assertInstanceOf(
+                AiNativeToolCompletion.Malformed.class,
+                completeNativeTools(
+                        1,
+                        List.of(new AiToolCall(
+                                "call_1", "search_records",
+                                "{\"query\":\"{{P99}}\",\"kinds\":[\"planet\"]}"))));
+
+        assertEquals("native_invalid_arguments", malformed.repairRule());
+        assertEquals(0, malformed.demaskWarnings());
+        assertFalse(auditMetadata().get(1).containsKey("demaskWarnings"));
+    }
+
     private static AiToolCall searchCall(String id, String query) {
         return new AiToolCall(
                 id, "search_records",
@@ -884,6 +982,19 @@ class AiInvocationServiceTest {
      */
     private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> invokeNativeTools(
             int maxParallelCalls, List<AiToolCall> calls) {
+        return invokeNativeTools(maxParallelCalls, "", calls);
+    }
+
+    /**
+     * Runs one native completion whose response carries the given text beside its calls.
+     *
+     * @param maxParallelCalls the per-step call bound the request declares
+     * @param text the assistant text the provider returns with the calls
+     * @param calls the calls the provider returns
+     * @return the parsed completion
+     */
+    private AiNativeToolCompletion<AiAssistantStep.FinalAnswer> invokeNativeTools(
+            int maxParallelCalls, String text, List<AiToolCall> calls) {
         when(aiProvider.toolCallingCapability(resolved.target()))
                 .thenReturn(AiToolCallingMode.NATIVE_FUNCTIONS);
         when(aiProvider.contextWindowTokens(resolved.target())).thenReturn(32_768);
@@ -891,7 +1002,7 @@ class AiInvocationServiceTest {
         AiAssistantStepGuard guard = new AiAssistantStepGuard(catalog);
         AiAssistantStepSchema schema = new AiAssistantStepSchema(new ObjectMapper(), catalog);
         providerReturns(new AiCompletionResult(
-                "",
+                text,
                 12,
                 7,
                 "tool_calls",
