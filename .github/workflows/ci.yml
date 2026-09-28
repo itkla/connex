@@ -222,6 +222,19 @@ jobs:
             echo "::error title=MySQL connection capacity exhausted::MySQL refused ${capacity_errors} connection attempt(s) because max_connections was reached. Treat cascading Spring context failures as CI infrastructure failures."
             exit 1
           fi
+      # Gradle's console prints only an assertion's first line, so a failure message that carries
+      # the diagnosis - the throwable a streamed body raised, a context-load cause - dies with the
+      # runner. #1761 went four main failures without a diagnosis for exactly this reason.
+      - name: Upload backend test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: backend-test-reports
+          path: |
+            backend/build/reports/tests
+            backend/build/test-results
+          retention-days: 7
+          if-no-files-found: ignore
 
   frontend:
     name: Frontend — typecheck & lint
